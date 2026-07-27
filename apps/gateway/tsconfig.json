@@ -1,0 +1,16 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "./src",
+    "outDir": "./dist",
+    "tsBuildInfoFile": "./dist/.tsbuildinfo",
+    "lib": ["ES2023"],
+    "types": ["@cloudflare/workers-types"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "noEmit": false
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["src/**/*.test.ts"],
+  "references": [{ "path": "../../packages/shared" }]
+}

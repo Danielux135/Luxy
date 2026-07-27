@@ -1,0 +1,21 @@
+{
+  "name": "@luxy/agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "bin": {
+    "luxy": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "start": "node dist/index.js",
+    "dev": "tsc -b && node dist/index.js",
+    "setup": "tsc -b && node dist/setup/wizard.js",
+    "demo": "tsc -b && node dist/demo/simulate.js"
+  },
+  "dependencies": {
+    "@luxy/shared": "*",
+    "zod": "^3.24.1"
+  }
+}

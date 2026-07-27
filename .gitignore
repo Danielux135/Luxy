@@ -1,0 +1,21 @@
+node_modules/
+dist/
+*.tsbuildinfo
+coverage/
+.wrangler/
+
+# secretos y configuracion local: nunca versionar
+.env
+.env.*
+!.env.example
+!.env.providers.example
+wrangler.toml
+config.json
+config.local.json
+.dev.vars
+.claude/settings.local.json
+
+# artefactos locales de luxy
+logs/
+*.log
+.luxy-state/

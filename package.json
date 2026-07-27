@@ -1,0 +1,38 @@
+{
+  "name": "luxy",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Luxy - agente personal de IA controlado desde Telegram",
+  "engines": {
+    "node": ">=20.10.0"
+  },
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "typecheck": "tsc -b tsconfig.build.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "build": "npm run build --workspaces --if-present",
+    "start": "npm run start --workspace @luxy/agent",
+    "setup:machine": "npm run setup --workspace @luxy/agent",
+    "demo": "npm run demo --workspace @luxy/agent",
+    "check": "npm run lint && npm run typecheck && npm run test && npm run build"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.17.0",
+    "@types/node": "^22.10.2",
+    "eslint": "^9.17.0",
+    "eslint-config-prettier": "^9.1.0",
+    "prettier": "^3.4.2",
+    "typescript": "^5.7.2",
+    "typescript-eslint": "^8.18.1",
+    "vitest": "^2.1.8"
+  }
+}

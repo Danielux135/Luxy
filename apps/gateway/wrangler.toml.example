@@ -1,0 +1,55 @@
+# -----------------------------------------------------------------------------
+# Luxy gateway - plantilla de configuracion de Cloudflare Workers
+#
+# Copia este archivo a wrangler.toml (que esta en .gitignore) y ajusta el nombre.
+# NUNCA escribas secretos aqui: se cargan con `wrangler secret put`.
+# -----------------------------------------------------------------------------
+
+name = "luxy-gateway"
+main = "src/index.ts"
+compatibility_date = "2024-12-30"
+compatibility_flags = ["nodejs_compat"]
+
+# no se sube codigo fuente innecesario al worker
+[build]
+command = ""
+
+# -----------------------------------------------------------------------------
+# Variables NO secretas. Se pueden versionar sin riesgo.
+# -----------------------------------------------------------------------------
+[vars]
+# username del bot sin arroba, para reconocer /comando@LuxyBot en grupos
+TELEGRAM_BOT_USERNAME = "LuxyBot"
+
+# segundos sin heartbeat tras los que una maquina se considera desconectada
+MACHINE_OFFLINE_SECONDS = "45"
+
+# segundos de duracion del lease de un trabajo reclamado
+JOB_LEASE_SECONDS = "120"
+
+# peticiones por minuto y usuario aceptadas en el webhook
+RATE_LIMIT_PER_MINUTE = "30"
+
+# nivel de log: debug | info | warn | error
+LOG_LEVEL = "info"
+
+# -----------------------------------------------------------------------------
+# Secretos. NO van en este archivo. Se cargan uno a uno con:
+#
+#   wrangler secret put TELEGRAM_BOT_TOKEN
+#   wrangler secret put TELEGRAM_WEBHOOK_SECRET
+#   wrangler secret put TELEGRAM_ADMIN_USER_ID
+#   wrangler secret put TELEGRAM_ALLOWED_CHAT_IDS
+#   wrangler secret put SUPABASE_URL
+#   wrangler secret put SUPABASE_SERVICE_ROLE_KEY
+#   wrangler secret put MACHINE_REGISTRATION_SECRET
+#
+# SUPABASE_SERVICE_ROLE_KEY solo debe existir aqui, nunca en los ordenadores.
+# -----------------------------------------------------------------------------
+
+# -----------------------------------------------------------------------------
+# Barrido periodico de leases caducados (opcional pero recomendado).
+# Marca como interrumpidos los trabajos cuya maquina dejo de responder.
+# -----------------------------------------------------------------------------
+[triggers]
+crons = ["*/1 * * * *"]
