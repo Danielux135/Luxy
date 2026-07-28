@@ -7,6 +7,7 @@ import {
   APPROVAL_ACTIONS,
   MAX_PROMPT_LENGTH,
 } from './constants.js';
+import { connectionProfileSchema } from './models/types.js';
 
 export const jobStatusSchema = z.enum(JOB_STATUSES);
 export const providerIdSchema = z.enum(PROVIDER_IDS);
@@ -43,7 +44,7 @@ export const machineCapabilitiesSchema = z.object({
   claude: toolPresenceSchema,
   codex: toolPresenceSchema,
   flutter: toolPresenceSchema,
-  httpProviders: z.array(z.string().max(32)).max(16),
+  httpProviders: z.array(z.string().max(32)).max(64),
 });
 
 // -----------------------------------------------------------------------------
@@ -82,7 +83,9 @@ export const heartbeatResponseSchema = z.object({
 
 export const claimRequestSchema = z.object({
   // proveedores que esta maquina puede ejecutar ahora mismo
-  supportedProviders: z.array(providerIdSchema).max(16),
+  // el tope de 16 se quedaba corto con un catalogo de modelos configurable:
+  // una maquina puede anunciar muchas familias a la vez
+  supportedProviders: z.array(providerIdSchema).max(64),
   // alias de proyecto configurados en esta maquina
   projects: z.array(projectAliasSchema).max(64),
   leaseSeconds: z.number().int().min(30).max(3600).optional(),
@@ -177,6 +180,33 @@ export const approvalResolveRequestSchema = z.object({
   decision: z.enum(['approved', 'rejected']),
 });
 
+/**
+ * aprobacion pendiente que el agente debe ejecutar.
+ *
+ * el gateway solo devuelve las de trabajos reclamados por esa maquina, y el
+ * agente vuelve a comprobar las politicas del proyecto antes de hacer nada:
+ * que el gateway la envie no significa que se pueda ejecutar.
+ */
+export const pendingApprovalSchema = z.object({
+  approvalId: z.string(),
+  jobId: z.string(),
+  shortId: z.string(),
+  action: approvalActionSchema,
+  projectAlias: projectAliasSchema,
+  worktreePath: z.string().max(1024),
+  branch: z.string().max(256),
+  message: z.string().max(500).nullable().default(null),
+  /** el usuario confirmo dos veces; imprescindible para el push */
+  confirmedTwice: z.boolean().default(false),
+  requestedBy: z.string().max(64).default(''),
+});
+
+export const pendingApprovalsResponseSchema = z.object({
+  approvals: z.array(pendingApprovalSchema).max(20),
+});
+
+export type PendingApproval = z.infer<typeof pendingApprovalSchema>;
+
 // -----------------------------------------------------------------------------
 // configuracion local de la maquina (%APPDATA%\Luxy\config.json)
 // -----------------------------------------------------------------------------
@@ -217,6 +247,8 @@ export const httpProviderConfigSchema = z.object({
 export const agentConfigSchema = z.object({
   machineName: machineNameSchema,
   gatewayUrl: z.string().url(),
+  // el token que necesita el agente en ejecucion. en el archivo de disco es
+  // opcional (ver storedAgentConfigSchema): Luxy Desktop lo guarda cifrado.
   machineToken: z.string().min(16),
   machineId: z.string().uuid().optional(),
   pollIntervalMs: z.number().int().min(500).max(60_000).default(2000),
@@ -225,6 +257,8 @@ export const agentConfigSchema = z.object({
   jobTimeoutMs: z.number().int().min(60_000).max(21_600_000).default(3_600_000),
   leaseSeconds: z.number().int().min(30).max(3600).default(120),
   projects: z.record(projectAliasSchema, projectConfigSchema).default({}),
+  /** perfiles de conexion de API; las claves viven aparte, cifradas */
+  connections: z.array(connectionProfileSchema).max(16).default([]),
   providers: z
     .object({
       claude: z
@@ -253,6 +287,33 @@ export const agentConfigSchema = z.object({
 });
 
 export type AgentConfig = z.infer<typeof agentConfigSchema>;
+
+/**
+ * la configuracion tal y como vive en config.json.
+ *
+ * el machineToken es OPCIONAL aqui a proposito: Luxy Desktop lo guarda cifrado
+ * en secrets.enc y lo borra del archivo en claro. agentConfigSchema sigue
+ * exigiendolo porque el agente en ejecucion no puede funcionar sin el; la pieza
+ * que une ambos mundos es resolveStoredConfig().
+ *
+ * config.json NO debe contener ninguna otra clave, nunca.
+ */
+export const storedAgentConfigSchema = agentConfigSchema.extend({
+  machineToken: z.string().min(16).optional(),
+});
+
+export type StoredAgentConfig = z.infer<typeof storedAgentConfigSchema>;
+
+/** une la configuracion del disco con el token recuperado del almacen cifrado */
+export function resolveStoredConfig(
+  stored: StoredAgentConfig,
+  machineToken: string | undefined,
+): AgentConfig | null {
+  const token = stored.machineToken ?? machineToken;
+  if (token === undefined || token.length < 16) return null;
+  return agentConfigSchema.parse({ ...stored, machineToken: token });
+}
+
 export type ProjectConfig = z.infer<typeof projectConfigSchema>;
 export type TestCommand = z.infer<typeof testCommandSchema>;
 export type MachineRegisterRequest = z.infer<typeof machineRegisterRequestSchema>;

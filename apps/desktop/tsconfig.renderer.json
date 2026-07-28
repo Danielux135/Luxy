@@ -1,0 +1,18 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src/renderer",
+    "outDir": ".tsbuild/renderer",
+    "tsBuildInfoFile": ".tsbuild/renderer.tsbuildinfo",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
+    "types": ["vite/client"]
+  },
+  "include": ["src/renderer/**/*.ts", "src/renderer/**/*.tsx"],
+  "references": [
+    { "path": "../../packages/shared" },
+    { "path": "./tsconfig.shared.json" }
+  ]
+}

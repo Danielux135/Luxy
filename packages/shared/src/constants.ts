@@ -49,13 +49,37 @@ export const TERMINAL_JOB_STATUSES = [
 ] as const;
 
 // proveedores conocidos por luxy
-export const PROVIDER_IDS = ['claude', 'codex', 'deepseek', 'glm', 'qwen'] as const;
+// un "proveedor" es una FAMILIA de modelos, no un modelo concreto.
+//
+// el modelo exacto vive en el catalogo (packages/shared/src/models) y viaja en
+// la metadata del trabajo. Esta lista solo sirve para decidir que maquina puede
+// ejecutar que, y para el enum del contrato con el gateway.
+export const PROVIDER_IDS = [
+  'claude',
+  'codex',
+  'deepseek',
+  'glm',
+  'qwen',
+  // familias añadidas con el catalogo verificado contra la conexion
+  'kimi',
+  'kat',
+  'minimax',
+  'step',
+] as const;
 
 // proveedores que se ejecutan mediante un cli local con sesion autenticada
 export const LOCAL_CLI_PROVIDERS = ['claude', 'codex'] as const;
 
 // proveedores que se consumen por http con clave propia
-export const HTTP_API_PROVIDERS = ['deepseek', 'glm', 'qwen'] as const;
+export const HTTP_API_PROVIDERS = [
+  'deepseek',
+  'glm',
+  'qwen',
+  'kimi',
+  'kat',
+  'minimax',
+  'step',
+] as const;
 
 // tipos de evento que el agente envia al gateway
 export const JOB_EVENT_TYPES = [

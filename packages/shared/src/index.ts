@@ -9,5 +9,8 @@ export * from './paths.js';
 export * from './budget.js';
 export * from './router.js';
 export * from './machines.js';
+export * from './agent-events.js';
+export * from './models/index.js';
+export * from './host-protocol.js';
 export * from './telegram/commands.js';
 export * from './telegram/format.js';

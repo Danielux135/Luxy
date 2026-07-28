@@ -3,6 +3,7 @@
 // se interpretan instrucciones que cambien las politicas de luxy.
 import { MAX_PROMPT_LENGTH, PROVIDER_IDS } from '../constants.js';
 import type { ProviderId } from '../types.js';
+import { MODEL_TASK_COMMANDS, resolveModelAlias } from '../models/aliases.js';
 
 // comandos que no llevan proveedor asociado
 export const CONTROL_COMMANDS = [
@@ -21,8 +22,15 @@ export const CONTROL_COMMANDS = [
 export type ControlCommand = (typeof CONTROL_COMMANDS)[number];
 
 // comandos que lanzan un trabajo: los proveedores mas "auto"
-export const TASK_COMMANDS = [...PROVIDER_IDS, 'auto'] as const;
-export type TaskCommand = (typeof TASK_COMMANDS)[number];
+// los comandos de tarea son las familias, /auto y TODOS los alias por modelo
+// del catalogo. Antes solo salian de PROVIDER_IDS, asi que /qwen_36 o /kat_v25
+// se rechazaban aunque el catalogo los definiera.
+export const TASK_COMMANDS: readonly string[] = [
+  ...PROVIDER_IDS,
+  'auto',
+  ...MODEL_TASK_COMMANDS.filter((alias) => !(PROVIDER_IDS as readonly string[]).includes(alias)),
+];
+export type TaskCommand = string;
 
 export type ParsedCommand =
   | { kind: 'control'; command: ControlCommand; argument: string | null }
@@ -30,6 +38,8 @@ export type ParsedCommand =
       kind: 'task';
       command: TaskCommand;
       provider: ProviderId | null; // null significa modo automatico
+      /** apiModel EXACTO cuando el comando apunta a un modelo concreto */
+      model: string | null;
       projectAlias: string;
       prompt: string;
     }
@@ -141,7 +151,7 @@ export function parseCommand(text: string, options: ParseOptions = {}): ParsedCo
     return {
       kind: 'task',
       command: parts.command,
-      provider: parts.command === 'auto' ? null : (parts.command as ProviderId),
+      ...resolveTaskTarget(parts.command),
       projectAlias: alias,
       prompt,
     };
@@ -170,12 +180,44 @@ const PROVIDER_ALIASES: Record<ProviderId, string[]> = {
   deepseek: ['deepseek', 'deep seek'],
   glm: ['glm', 'zhipu'],
   qwen: ['qwen', 'tongyi'],
+  kimi: ['kimi', 'moonshot'],
+  kat: ['kat', 'kat coder'],
+  minimax: ['minimax', 'mini max'],
+  step: ['step', 'stepfun'],
 };
 
 /**
  * detecta si el bot fue mencionado y limpia el texto.
  * en grupos, un mensaje sin mencion y sin respuesta al bot se ignora entero.
  */
+/**
+ * traduce un comando de tarea a familia + modelo concreto.
+ *
+ * un alias de modelo (/kimi_k26) fija el apiModel exacto. Un alias de familia
+ * (/kimi) deja el modelo en null y lo resuelve el router con el predeterminado,
+ * que es lo que permite cambiar el predeterminado sin cambiar el comando.
+ */
+export function resolveTaskTarget(command: string): {
+  provider: ProviderId | null;
+  model: string | null;
+} {
+  if (command === 'auto') return { provider: null, model: null };
+
+  const alias = resolveModelAlias(command);
+  if (alias !== null) {
+    return {
+      provider: alias.provider,
+      // el alias sin version no fija modelo: manda el predeterminado
+      model: alias.isFamilyDefault && alias.alias === alias.family ? null : alias.apiModel,
+    };
+  }
+
+  if ((PROVIDER_IDS as readonly string[]).includes(command)) {
+    return { provider: command as ProviderId, model: null };
+  }
+  return { provider: null, model: null };
+}
+
 export function extractMention(
   text: string,
   options: { botUsername?: string; isReplyToBot?: boolean; isPrivateChat?: boolean } = {},

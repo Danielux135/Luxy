@@ -12,6 +12,8 @@ import type {
   ToolPresence,
   BudgetState,
   ProviderId,
+  AgenticContext,
+  AgentToolName,
 } from '@luxy/shared';
 import {
   retryWithBackoff,
@@ -21,6 +23,8 @@ import {
   secretRegistry,
   redact,
 } from '@luxy/shared';
+import { runAgenticLoop, type LoopMessage, type LoopTurnResult } from './agentic-loop.js';
+import { parseNativeToolCalls } from './tool-protocol.js';
 
 export class BudgetExceededError extends Error {
   constructor(message: string) {
@@ -142,6 +146,12 @@ export class HttpApiProvider implements ProviderExecution {
       return this.failure(check.reason ?? 'presupuesto diario agotado');
     }
 
+    // con contexto agentic esto deja de ser una consulta y pasa a ser un bucle
+    // de herramientas: el modelo pide, Luxy ejecuta en local y devuelve
+    if (request.agentic !== undefined) {
+      return this.runAgentic(request, request.agentic);
+    }
+
     const messages: ChatMessage[] = [
       { role: 'system', content: SYSTEM_PROMPT },
       { role: 'user', content: request.prompt },
@@ -207,6 +217,149 @@ export class HttpApiProvider implements ProviderExecution {
   }
 
   /** una llamada completa, con streaming si el proveedor lo soporta */
+  /**
+   * ejecuta el bucle de herramientas.
+   *
+   * el proveedor solo pone el transporte: quien decide que se puede hacer es el
+   * ejecutor, que confina rutas y aplica las politicas del proyecto.
+   */
+  private async runAgentic(
+    request: ProviderRunRequest,
+    agentic: AgenticContext,
+  ): Promise<ProviderRunResult> {
+    request.onEvent({ type: 'phase', message: `${this.displayName} trabajando con herramientas` });
+
+    try {
+      const result = await runAgenticLoop(request.prompt, {
+        executor: agentic.runner as never,
+        limits: agentic.limits,
+        allowedTools: agentic.allowedTools as AgentToolName[],
+        useNativeTools: agentic.useNativeTools,
+        signal: request.signal,
+        callModel: (messages: LoopMessage[], tools: unknown[] | null) =>
+          this.callTurn(messages, tools, request),
+        onEvent: (event: { type: 'phase' | 'tool' | 'text' | 'warning'; message: string }) =>
+          request.onEvent({ type: event.type, message: event.message }),
+      });
+
+      const usage: ProviderUsage = {
+        provider: this.config.id,
+        model: this.modelFor(request),
+        jobId: null,
+        inputTokens: result.inputTokens,
+        outputTokens: result.outputTokens,
+        estimatedCost: estimateCost(
+          result.inputTokens,
+          result.outputTokens,
+          this.pricing.input,
+          this.pricing.output,
+        ),
+      };
+      this.budget.write(recordUsage(this.budget.read(), usage));
+
+      if (result.stopReason === 'cancelled') {
+        return {
+          ok: false,
+          finalText: result.finalText,
+          sessionId: null,
+          exitCode: null,
+          timedOut: false,
+          cancelled: true,
+          errorMessage: 'trabajo cancelado',
+          usage,
+        };
+      }
+
+      // un limite alcanzado no es un fallo: hay trabajo hecho que conservar,
+      // pero el usuario tiene que saber que se corto y por que
+      const summary =
+        result.limitMessage === null
+          ? result.finalText
+          : `${result.finalText}\n\n[${result.limitMessage}]`;
+
+      return {
+        ok: true,
+        finalText: summary,
+        sessionId: null,
+        exitCode: 0,
+        timedOut: false,
+        cancelled: false,
+        errorMessage: null,
+        usage,
+      };
+    } catch (error) {
+      if (request.signal.aborted) {
+        return { ...this.failure('trabajo cancelado'), cancelled: true };
+      }
+      return this.failure(redact(describeHttpError(error, this.displayName)));
+    }
+  }
+
+  /** una vuelta de conversacion, sin streaming, con o sin herramientas */
+  private async callTurn(
+    messages: LoopMessage[],
+    tools: unknown[] | null,
+    request: ProviderRunRequest,
+  ): Promise<LoopTurnResult> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), request.timeoutMs);
+    const onAbort = (): void => controller.abort();
+    request.signal.addEventListener('abort', onAbort, { once: true });
+
+    try {
+      const response = await fetch(`${this.config.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+        method: 'POST',
+        signal: controller.signal,
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${this.apiKey}`,
+        },
+        body: JSON.stringify({
+          model: this.modelFor(request),
+          messages,
+          max_tokens: this.config.maxOutputTokens,
+          ...(tools === null ? {} : { tools, tool_choice: 'auto' }),
+        }),
+      });
+
+      if (!response.ok) {
+        const body = await response.text();
+        const error = new Error(`${response.status}: ${body.slice(0, 300)}`);
+        (error as { status?: number }).status = response.status;
+        throw error;
+      }
+
+      const body = (await response.json()) as {
+        choices?: { message?: { content?: unknown } }[];
+        usage?: { prompt_tokens?: number; completion_tokens?: number };
+      };
+      const message = body.choices?.[0]?.message ?? {};
+
+      return {
+        text: typeof message.content === 'string' ? message.content : '',
+        toolCalls: parseNativeToolCalls(message),
+        inputTokens: body.usage?.prompt_tokens ?? 0,
+        outputTokens: body.usage?.completion_tokens ?? 0,
+      };
+    } finally {
+      clearTimeout(timer);
+      request.signal.removeEventListener('abort', onAbort);
+    }
+  }
+
+  /**
+   * modelo con el que hacer la peticion.
+   *
+   * request.model existia en el contrato desde el principio pero este proveedor
+   * lo ignoraba, asi que todos los trabajos usaban el modelo de la
+   * configuracion. El valor se manda EXACTO, sin normalizar.
+   */
+  private modelFor(request: ProviderRunRequest): string {
+    return request.model !== undefined && request.model.length > 0
+      ? request.model
+      : this.config.model;
+  }
+
   private async callApi(
     messages: ChatMessage[],
     request: ProviderRunRequest,
@@ -225,7 +378,9 @@ export class HttpApiProvider implements ProviderExecution {
           Authorization: `Bearer ${this.apiKey}`,
         },
         body: JSON.stringify({
-          model: this.config.model,
+          // el modelo del trabajo manda sobre el de la configuracion: es lo que
+          // permite que una sola conexion sirva todo el catalogo
+          model: this.modelFor(request),
           messages,
           max_tokens: this.config.maxOutputTokens,
           stream: this.config.supportsStreaming,

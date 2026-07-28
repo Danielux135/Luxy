@@ -4,6 +4,11 @@ dist/
 coverage/
 .wrangler/
 
+# artefactos de luxy desktop
+out/
+release/
+.tsbuild/
+
 # secretos y configuracion local: nunca versionar
 .env
 .env.*

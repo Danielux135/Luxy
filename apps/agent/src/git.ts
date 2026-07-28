@@ -196,8 +196,20 @@ export async function commitWorktree(
   if (add.exitCode !== 0) return { ok: false, output: add.stderr };
 
   const commit = await git(
-    // se desactiva la firma para que no bloquee esperando una passphrase
-    ['-c', 'commit.gpgsign=false', 'commit', '-m', message],
+    [
+      // se desactiva la firma para que no bloquee esperando una passphrase
+      '-c',
+      'commit.gpgsign=false',
+      // y se anulan los hooks: viven en .git/hooks del worktree, que es
+      // territorio que el modelo puede haber tocado. Un pre-commit escrito por
+      // el modelo seria ejecucion de codigo justo aqui.
+      '-c',
+      'core.hooksPath=',
+      'commit',
+      '--no-verify',
+      '-m',
+      message,
+    ],
     worktreePath,
   );
   return { ok: commit.exitCode === 0, output: `${commit.stdout}\n${commit.stderr}`.trim() };
@@ -234,4 +246,36 @@ export function assertInsideWorktree(candidate: string, worktreePath: string): v
     if (error instanceof GitError) throw error;
     // si realpath falla, se mantiene el resultado de la comparacion textual
   }
+}
+
+/**
+ * empuja la rama del worktree a su remoto.
+ *
+ * es la unica funcion de todo Luxy que puede publicar algo, y por eso:
+ *   - el remoto y la rama se pasan explicitos, nunca salen de un modelo
+ *   - se prohiben las opciones que convierten un push en otra cosa
+ *   - sin hooks, por la misma razon que en el commit
+ *
+ * quien la llama DEBE haber comprobado antes allowPush y la doble confirmacion.
+ * Esta funcion no sabe de politicas: solo ejecuta.
+ */
+export async function pushWorktree(
+  worktreePath: string,
+  branch: string,
+  remote = 'origin',
+): Promise<{ ok: boolean; output: string }> {
+  if (!/^[a-zA-Z0-9._/-]{1,200}$/.test(branch) || branch.startsWith('-')) {
+    throw new GitError(`nombre de rama no valido: ${branch}`);
+  }
+  if (!/^[a-zA-Z0-9._-]{1,100}$/.test(remote) || remote.startsWith('-')) {
+    throw new GitError(`nombre de remoto no valido: ${remote}`);
+  }
+
+  const result = await git(
+    ['-c', 'core.hooksPath=', 'push', '--no-verify', remote, `${branch}:${branch}`],
+    worktreePath,
+    300_000,
+  );
+  return { ok: result.exitCode === 0, output: `${result.stdout}
+${result.stderr}`.trim() };
 }

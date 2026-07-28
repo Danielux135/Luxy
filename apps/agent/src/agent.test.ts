@@ -7,7 +7,7 @@ import { EventQueue } from './event-queue.js';
 import { parseCmdShim, assertSafeForCmd, UnsafeArgumentError, resolveFromCandidates, clearResolutionCache } from './resolve-executable.js';
 import { parseModifiedFiles, assertInsideWorktree, GitError, isGitRepository, createWorktree, collectDiff } from './git.js';
 import { loadConfig, saveConfig, loadProviderKeys, ConfigError, resolveEnabledHttpProviders } from './config.js';
-import { buildProviderPrompt } from './job-runner.js';
+import { buildProviderPrompt, resolveJobModel } from './job-runner.js';
 import { agentConfigSchema } from '@luxy/shared';
 import type { JobEventInput, TestRunResult, ClaimedJob } from '@luxy/shared';
 import { runProcess, BASE_ENV_ALLOWLIST } from './process.js';
@@ -593,4 +593,59 @@ describe('cancelacion de procesos', () => {
     });
     expect(result.stdout).not.toContain('abcdefghijklmnopqrstuvwxyz');
   }, 60_000);
+});
+
+// -----------------------------------------------------------------------------
+// modelo por trabajo
+// -----------------------------------------------------------------------------
+describe('resolveJobModel', () => {
+  const config = agentConfigSchema.parse({
+    machineName: 'maquina',
+    gatewayUrl: 'https://gateway.example',
+    machineToken: 'token-de-maquina-suficientemente-largo',
+    providers: {
+      claude: { enabled: true, model: 'opus' },
+      codex: { enabled: true, model: 'gpt-5-codex' },
+      http: [
+        {
+          id: 'deepseek',
+          displayName: 'DeepSeek',
+          baseUrl: 'https://api.example/v1',
+          model: 'DeepSeek-V4-Flash',
+          apiKeyEnv: 'DEEPSEEK_API_KEY',
+          enabled: true,
+        },
+      ],
+    },
+  });
+
+  const job = (provider: string, metadata: Record<string, unknown> = {}) =>
+    ({ id: 'x', shortId: 'LUX-1', provider, projectAlias: 'p', prompt: 't', metadata }) as any;
+
+  it('el modelo que eligio el router manda sobre la configuracion', () => {
+    expect(resolveJobModel(job('deepseek', { model: 'DeepSeek-V4-Pro' }), config)).toBe(
+      'DeepSeek-V4-Pro',
+    );
+  });
+
+  it('conserva el apiModel EXACTO, sin normalizar', () => {
+    for (const exacto of ['Qwen3.5-397B-A17B', 'kat-coder-pro-v2.5', 'Kimi-K2.6', 'MiniMax-M3']) {
+      expect(resolveJobModel(job('qwen', { model: exacto }), config)).toBe(exacto);
+    }
+  });
+
+  it('sin modelo en el trabajo usa el configurado para esa familia', () => {
+    expect(resolveJobModel(job('claude'), config)).toBe('opus');
+    // antes solo claude recibia modelo: codex y las apis http se quedaban sin el
+    expect(resolveJobModel(job('codex'), config)).toBe('gpt-5-codex');
+    expect(resolveJobModel(job('deepseek'), config)).toBe('DeepSeek-V4-Flash');
+  });
+
+  it('un proveedor desconocido no rompe', () => {
+    expect(resolveJobModel(job('inventado'), config)).toBeUndefined();
+  });
+
+  it('ignora un modelo vacio y cae al configurado', () => {
+    expect(resolveJobModel(job('claude', { model: '' }), config)).toBe('opus');
+  });
 });

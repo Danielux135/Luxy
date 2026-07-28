@@ -11,8 +11,8 @@
 // Asi no interviene ningun interprete de comandos en ningun momento.
 import { existsSync, readFileSync } from 'node:fs';
 import { join, dirname, extname, basename } from 'node:path';
-import { execPath } from 'node:process';
 import { isWindows } from './paths.js';
+import { nodeExecutable } from './node-executable.js';
 
 export interface ResolvedExecutable {
   /** ejecutable real que se pasa a spawn */
@@ -88,7 +88,7 @@ export function parseCmdShim(content: string, shimDirectory: string): ResolvedEx
     if (extname(raw).toLowerCase() !== '.js') continue;
     const expanded = expand(raw);
     if (existsSync(expanded)) {
-      return { command: execPath, prefixArgs: [expanded], source: shimDirectory };
+      return { command: nodeExecutable(), prefixArgs: [expanded], source: shimDirectory };
     }
   }
 
@@ -105,7 +105,7 @@ function resolveNpmFamily(name: string, shimPath: string): ResolvedExecutable | 
   ];
   for (const candidate of candidates) {
     if (existsSync(candidate)) {
-      return { command: execPath, prefixArgs: [candidate], source: shimPath };
+      return { command: nodeExecutable(), prefixArgs: [candidate], source: shimPath };
     }
   }
   return null;

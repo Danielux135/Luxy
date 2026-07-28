@@ -170,3 +170,52 @@ Telegram te dice qué archivos quedaron modificados y dónde están.
 
 Es un proyecto personal. Si encuentras un fallo de seguridad, revísalo contra
 `docs/SECURITY.md` y añade una prueba en la suite antes de corregirlo.
+
+---
+
+## Anexo: el ejecutor de herramientas y la aplicación de escritorio
+
+Añadido cuando los modelos pasaron de responder a **editar archivos**. Ver
+[AGENT_TOOLS.md](AGENT_TOOLS.md) y [DESKTOP.md](DESKTOP.md) para el detalle.
+
+### Actores no confiables
+
+1. **El modelo remoto.** Decide qué herramientas pide y con qué argumentos.
+2. **El contenido de tus archivos.** Inyección indirecta de prompt.
+3. **Los mensajes de Telegram.**
+4. **El renderer de Electron.** Se asume comprometible.
+
+### Barreras
+
+| Riesgo | Barrera |
+|---|---|
+| salir del worktree | `confinePath`: realpath del antepasado existente, falla cerrado |
+| enlaces y junctions | rechazados, también al recorrer directorios |
+| leer credenciales | `.env*`, `*.pem`, `id_rsa`, `.npmrc`, `secrets.enc` y `.git/` bloqueados por nombre |
+| ejecutar comandos arbitrarios | el modelo manda un **índice**, no una cadena |
+| RCE vía `package.json` | huella SHA-256 de los manifiestos antes de trabajar |
+| commit o push sin permiso | puertas comprobadas **en el agente**, no en la interfaz |
+| reutilizar una aprobación | se consume al usarla |
+| secretos hacia React | el renderer solo recibe nombre → booleano |
+| exfiltración desde el renderer | la URL de prueba sale de la configuración, no del renderer |
+
+### Revisión de seguridad
+
+La revisión de estos cambios encontró **cuatro vulnerabilidades reales**, todas
+corregidas y con tests que las fijan:
+
+1. `job-runner` ejecutaba las pruebas sin consultar el guardián de manifiestos, así
+   que el vector `npm run` seguía abierto por el camino paralelo.
+2. Los recorridos de directorio seguían enlaces sin pasar por el confinamiento.
+3. `migration:import` aceptaba cualquier ruta del disco desde el renderer.
+4. `connection:test` mandaba la clave descifrada a la URL que dijera el renderer.
+
+El patrón común: **la barrera estaba puesta en un sitio y el camino paralelo sin
+cubrir.** Al añadir una barrera nueva, busca el otro camino.
+
+### Lo que sigue sin cubrirse
+
+- **La CLI no puede leer `secrets.enc`.** Es Node puro, sin `safeStorage`.
+- **Sin firma de código.** Windows mostrará el aviso de SmartScreen.
+- **Los worktrees no se borran solos.**
+- **`/transcribe` no está verificado.**

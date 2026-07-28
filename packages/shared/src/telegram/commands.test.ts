@@ -38,6 +38,7 @@ describe('parseCommand - comandos de tarea', () => {
     expect(parsed).toEqual({
       kind: 'task',
       command: 'claude',
+      model: null,
       provider: 'claude',
       projectAlias: 'errorlux',
       prompt: 'Corrige el Quick Pick y ejecuta las pruebas',
@@ -182,5 +183,64 @@ describe('parseNaturalMention', () => {
   it('devuelve null cuando ningun alias aparece', () => {
     const result = parseNaturalMention('arregla lo de ayer', alias);
     expect(result.projectAlias).toBeNull();
+  });
+});
+
+// -----------------------------------------------------------------------------
+// alias por modelo del catalogo
+// -----------------------------------------------------------------------------
+describe('alias de modelo en telegram', () => {
+  const task = (text: string) => {
+    const parsed = parseCommand(text);
+    if (parsed.kind !== 'task') throw new Error(`no es una tarea: ${parsed.kind}`);
+    return parsed;
+  };
+
+  it('/kimi ya se acepta como comando de tarea', () => {
+    // antes el parser solo conocia los cinco PROVIDER_IDS originales
+    expect(task('/kimi proyecto arregla el bug').provider).toBe('kimi');
+  });
+
+  it('un alias explicito fija el apiModel EXACTO', () => {
+    expect(task('/kimi_k26 proyecto tarea').model).toBe('Kimi-K2.6');
+    expect(task('/qwen_36 proyecto tarea').model).toBe('Qwen3.6-35B-A3B');
+    expect(task('/kat_v25 proyecto tarea').model).toBe('kat-coder-pro-v2.5');
+    expect(task('/step_35_2603 proyecto tarea').model).toBe('step-3.5-flash-2603');
+    expect(task('/deepseek_flash proyecto tarea').model).toBe('DeepSeek-V4-Flash');
+  });
+
+  it('un alias sin version NO fija modelo: lo elige el predeterminado', () => {
+    // esto es lo que permite cambiar el predeterminado sin cambiar el comando
+    expect(task('/deepseek proyecto tarea').model).toBeNull();
+    expect(task('/qwen proyecto tarea').model).toBeNull();
+    expect(task('/step proyecto tarea').model).toBeNull();
+  });
+
+  it('cada alias lleva a su familia correcta', () => {
+    expect(task('/glm_51 proyecto tarea').provider).toBe('glm');
+    expect(task('/minimax_m3 proyecto tarea').provider).toBe('minimax');
+    expect(task('/step_37 proyecto tarea').provider).toBe('step');
+  });
+
+  it('/auto no fija ni proveedor ni modelo', () => {
+    const parsed = task('/auto proyecto tarea');
+    expect(parsed.provider).toBeNull();
+    expect(parsed.model).toBeNull();
+  });
+
+  it('los alias retirados siguen sin existir', () => {
+    for (const retirado of ['/kat_v2', '/minimax_m27', '/sensenova', '/sensenova_flash']) {
+      expect(parseCommand(`${retirado} proyecto tarea`).kind).toBe('unknown');
+    }
+  });
+
+  it('los modelos de audio e imagen tienen comando propio', () => {
+    expect(task('/transcribe proyecto tarea').model).toBe('stepaudio-2.5-asr');
+    expect(task('/speak proyecto tarea').model).toBe('stepaudio-2.5-tts');
+    expect(task('/image_edit proyecto tarea').model).toBe('step-image-edit-2');
+  });
+
+  it('los routers no son comandos de tarea', () => {
+    expect(parseCommand('/step_router_v1 proyecto tarea').kind).toBe('unknown');
   });
 });

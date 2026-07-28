@@ -1,0 +1,64 @@
+# empaquetado de Luxy para Windows.
+#
+# dos salidas a proposito:
+#   nsis     -> instalador con asistente, crea acceso directo en el Menu Inicio
+#   portable -> un solo .exe para probar sin instalar nada
+#
+# el acceso directo del Menu Inicio NO es cosmetico: Windows solo entrega
+# notificaciones toast a aplicaciones que tienen uno con su AppUserModelID, asi
+# que sin instalador las notificaciones de "trabajo terminado" no aparecen.
+# electron-builder necesita la version EXACTA para descargar los binarios de
+# esa release. Se fija aqui y no en dependencies para que npm pueda seguir
+# aplicando parches de seguridad dentro del rango.
+electronVersion: 43.2.0
+
+appId: com.luxy.desktop
+productName: Luxy
+copyright: Luxy
+
+directories:
+  output: release
+  buildResources: build
+
+files:
+  - out/**/*
+  - package.json
+
+# el agente corre en un utilityProcess, que necesita un archivo REAL en disco:
+# dentro del asar no se puede forkear. Por eso su dist va como recurso aparte.
+extraResources:
+  - from: ../agent/dist
+    to: agent
+    filter:
+      - '**/*.js'
+      - '!**/*.map'
+
+asar: true
+
+# no hay ninguna dependencia nativa (todo el arbol es JS puro), asi que
+# reconstruir no aporta nada y alarga el empaquetado
+npmRebuild: false
+
+win:
+  icon: build/icon.ico
+  target:
+    - target: nsis
+      arch: [x64]
+    - target: portable
+      arch: [x64]
+
+nsis:
+  # instalador con asistente, no de un solo clic: el usuario elige la carpeta
+  oneClick: false
+  # por usuario, sin UAC. Luxy no necesita privilegios de administrador.
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Luxy
+  # al desinstalar NO se borra %APPDATA%\Luxy: ahi viven la configuracion y los
+  # secretos cifrados, y perderlos por una reinstalacion seria inaceptable
+  deleteAppDataOnUninstall: false
+
+portable:
+  artifactName: Luxy-portable-${version}.exe

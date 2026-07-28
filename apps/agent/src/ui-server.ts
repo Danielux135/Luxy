@@ -3,14 +3,22 @@
 // escucha SOLO en 127.0.0.1: no es accesible desde la red local.
 // el agente funciona completamente sin abrirla.
 import { createServer, type Server } from 'node:http';
-import type { LuxyAgent } from './agent.js';
+import type { AgentStatus } from '@luxy/shared';
 import type { AgentLogger } from './logger.js';
 import { formatDuration } from '@luxy/shared';
+
+/**
+ * lo unico que necesita la interfaz local. depender de la clase concreta
+ * impedia reutilizar este servidor desde el host, y no aportaba nada.
+ */
+export interface StatusSource {
+  getStatus(): AgentStatus | null;
+}
 
 export interface UiServerOptions {
   host: '127.0.0.1';
   port: number;
-  agent: LuxyAgent;
+  agent: StatusSource;
   logger: AgentLogger;
   /** se invoca cuando se pulsa el boton de detener */
   onStopRequested: () => void;
@@ -122,6 +130,11 @@ export function startUiServer(options: UiServerOptions): Server | null {
 
     if (url === '/api/status') {
       const status = options.agent.getStatus();
+      if (status === null) {
+        response.writeHead(503, { 'Content-Type': 'application/json' });
+        response.end(JSON.stringify({ error: 'el agente no esta arrancado' }));
+        return;
+      }
       const lastHeartbeatAgo = status.lastHeartbeatAt
         ? `hace ${formatDuration(Date.now() - Date.parse(status.lastHeartbeatAt))}`
         : null;

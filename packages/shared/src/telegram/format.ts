@@ -10,6 +10,10 @@ export const PROVIDER_LABELS: Record<ProviderId, string> = {
   deepseek: 'DeepSeek',
   glm: 'GLM',
   qwen: 'Qwen',
+  kimi: 'Kimi',
+  kat: 'KAT',
+  minimax: 'MiniMax',
+  step: 'Step',
 };
 
 /** texto legible de cada estado */

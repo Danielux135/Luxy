@@ -1,4 +1,5 @@
 // tipos derivados de las constantes y modelos de dominio
+import type { ModelLimits } from './models/types.js';
 import type {
   JOB_STATUSES,
   PROVIDER_IDS,
@@ -169,6 +170,30 @@ export interface ProviderExecution {
   run(request: ProviderRunRequest): Promise<ProviderRunResult>;
 }
 
+/**
+ * ejecutor de herramientas visto desde el proveedor.
+ *
+ * la implementacion real vive en apps/agent (necesita disco y procesos); aqui
+ * solo esta la forma, para que shared siga sin depender de node.
+ */
+export interface ToolRunner {
+  execute(name: string, args: unknown): Promise<{ ok: boolean; content: string }>;
+}
+
+/**
+ * contexto que convierte una llamada de chat en un bucle de agente.
+ *
+ * si viene presente, el proveedor ejecuta el bucle de herramientas en vez de
+ * una sola llamada. Si no, se comporta como siempre.
+ */
+export interface AgenticContext {
+  runner: ToolRunner;
+  allowedTools: readonly string[];
+  limits: ModelLimits;
+  /** false obliga al protocolo JSON de reserva */
+  useNativeTools: boolean;
+}
+
 export interface ProviderRunRequest {
   prompt: string;
   workingDirectory: string;
@@ -178,6 +203,8 @@ export interface ProviderRunRequest {
   onEvent: (event: ProviderStreamEvent) => void;
   /** identificador de modelo opcional que sobrescribe el de la configuracion */
   model?: string;
+  /** si viene, el proveedor ejecuta el bucle de herramientas */
+  agentic?: AgenticContext;
 }
 
 export interface ProviderStreamEvent {

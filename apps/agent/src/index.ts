@@ -1,9 +1,13 @@
 #!/usr/bin/env node
-// punto de entrada del agente local de Luxy
+// punto de entrada del agente local de Luxy.
+//
+// esta es la herramienta avanzada y de recuperacion. el flujo normal es Luxy
+// Desktop, que usa exactamente el mismo AgentHost: lo que cambia es quien lo
+// controla, no como arranca.
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Server } from 'node:http';
-import { LuxyAgent } from './agent.js';
+import { AgentHost } from './runtime/host.js';
 import { AgentLogger, describeError } from './logger.js';
 import { loadConfig, loadProviderKeys, ConfigError } from './config.js';
 import { configFilePath, logsDir } from './paths.js';
@@ -45,7 +49,7 @@ async function main(): Promise<void> {
     logger.info(`claves de API cargadas: ${Object.keys(providerKeys).join(', ')}`);
   }
 
-  const agent = new LuxyAgent(config, logger, providerKeys);
+  const host = new AgentHost({ logger, config, providerKeys });
 
   // interfaz local opcional, solo si esta habilitada en la configuracion
   let uiServer: Server | null = null;
@@ -53,7 +57,7 @@ async function main(): Promise<void> {
     uiServer = startUiServer({
       host: config.ui.host,
       port: config.ui.port,
-      agent,
+      agent: { getStatus: () => host.getStatus().agent },
       logger,
       onStopRequested: () => {
         logger.info('parada solicitada desde la interfaz local');
@@ -69,7 +73,7 @@ async function main(): Promise<void> {
     shuttingDown = true;
     console.log(`\n  deteniendo Luxy (${reason})...`);
     try {
-      await agent.stop();
+      await host.stop(reason);
       uiServer?.close();
     } catch (error) {
       logger.error('error durante el apagado', describeError(error));
@@ -100,7 +104,9 @@ async function main(): Promise<void> {
   console.log('  Pulsa Ctrl+C para detener Luxy.');
   console.log('');
 
-  await agent.start();
+  await host.start();
+  // start() ya devuelve el control; la CLI se queda esperando aqui
+  await host.waitUntilStopped();
 }
 
 main().catch((error) => {

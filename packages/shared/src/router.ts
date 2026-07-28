@@ -87,7 +87,7 @@ function countHints(text: string, hints: string[]): number {
 }
 
 /** normaliza el prompt para comparar sin tildes ni mayusculas */
-function normalize(text: string): string {
+export function normalize(text: string): string {
   return text
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/gu, '')

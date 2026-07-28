@@ -435,6 +435,54 @@ export class Repository {
     return row;
   }
 
+  /**
+   * aprobaciones pendientes de los trabajos reclamados por una maquina.
+   *
+   * el filtro por maquina se hace aqui, no en el handler: asi ninguna ruta
+   * puede olvidarse de aplicarlo.
+   */
+  async listPendingApprovalsForMachine(
+    machineId: string,
+  ): Promise<{ id: string; job_id: string; action: string; metadata: Record<string, unknown> }[]> {
+    const rows = await this.db.select<{
+      id: string;
+      job_id: string;
+      action: string;
+      metadata: Record<string, unknown> | null;
+    }>('approvals', {
+      columns: 'id,job_id,action,metadata',
+      filters: { status: eq('approved') },
+      order: 'created_at.asc',
+      limit: 20,
+    });
+
+    const pending: { id: string; job_id: string; action: string; metadata: Record<string, unknown> }[] = [];
+    for (const row of rows) {
+      const job = await this.getJobById(row.job_id);
+      // solo las de trabajos de ESTA maquina
+      if (!job || job.claimedBy !== machineId) continue;
+      pending.push({ ...row, metadata: row.metadata ?? {} });
+    }
+    return pending;
+  }
+
+  /** lee una aprobacion sin resolverla, para comprobar a quien pertenece */
+  async getApproval(
+    approvalId: string,
+  ): Promise<{ id: string; job_id: string; action: string; status: string } | null> {
+    const rows = await this.db.select<{
+      id: string;
+      job_id: string;
+      action: string;
+      status: string;
+    }>('approvals', {
+      columns: 'id,job_id,action,status',
+      filters: { id: eq(approvalId) },
+      limit: 1,
+    });
+    return rows[0] ?? null;
+  }
+
   async resolveApproval(
     approvalId: string,
     decision: 'approved' | 'rejected',

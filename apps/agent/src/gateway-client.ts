@@ -1,5 +1,6 @@
 // cliente http del gateway. solo conexiones salientes https.
 import {
+  pendingApprovalsResponseSchema,
   retryWithBackoff,
   machineRegisterResponseSchema,
   claimResponseSchema,
@@ -7,6 +8,7 @@ import {
   heartbeatResponseSchema,
 } from '@luxy/shared';
 import type {
+  PendingApproval,
   ClaimedJob,
   JobControl,
   MachineCapabilities,
@@ -172,6 +174,19 @@ export class GatewayClient {
   }
 
   /** consulta si se pidio cancelar el trabajo */
+  /** aprobaciones que esta maquina debe ejecutar */
+  async listPendingApprovals(): Promise<PendingApproval[]> {
+    const raw = await this.request('GET', '/api/approvals/pending');
+    return pendingApprovalsResponseSchema.parse(raw).approvals;
+  }
+
+  /** informa del resultado de ejecutar una aprobacion */
+  async resolveApproval(approvalId: string, decision: 'approved' | 'rejected'): Promise<void> {
+    await this.request('POST', `/api/approvals/${encodeURIComponent(approvalId)}/resolve`, {
+      decision,
+    });
+  }
+
   async getJobControl(jobId: string): Promise<JobControl> {
     const raw = await this.request('GET', `/api/jobs/${encodeURIComponent(jobId)}/control`);
     const parsed = jobControlResponseSchema.parse(raw);

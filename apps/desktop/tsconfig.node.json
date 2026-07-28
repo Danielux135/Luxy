@@ -1,0 +1,16 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": ".tsbuild/node",
+    "tsBuildInfoFile": ".tsbuild/node.tsbuildinfo",
+    "lib": ["ES2023", "DOM"],
+    "types": ["node"]
+  },
+  "include": ["src/main/**/*.ts", "src/preload/**/*.ts"],
+  "references": [
+    { "path": "../../packages/shared" },
+    { "path": "../agent" },
+    { "path": "./tsconfig.shared.json" }
+  ]
+}

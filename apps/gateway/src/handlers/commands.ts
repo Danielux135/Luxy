@@ -58,18 +58,31 @@ const HELP_TEXT = [
   '/projects - alias de proyecto disponibles',
   '/providers - proveedores disponibles por maquina',
   '',
-  'Lanzar tareas:',
+  'Sesion local (sin claves de API):',
   '/claude <proyecto> <tarea>',
   '/codex <proyecto> <tarea>',
-  '/deepseek <proyecto> <tarea>',
-  '/glm <proyecto> <tarea>',
-  '/qwen <proyecto> <tarea>',
-  '/auto <proyecto> <tarea> - Luxy elige el proveedor',
+  '',
+  'Modelos de codigo. El alias sin version usa el predeterminado de su familia,',
+  'asi que puedes cambiar el predeterminado sin cambiar el comando que escribes:',
+  '/deepseek | /deepseek_pro | /deepseek_flash',
+  '/glm | /glm_52 | /glm_51',
+  '/kimi | /kimi_k26',
+  '/qwen | /qwen_397b | /qwen_35b',
+  '/minimax | /minimax_m3',
+  '/step | /step_37 | /step_35 | /step_35_2603',
+  '/kat | /kat_v25',
+  '/auto <proyecto> <tarea> - Luxy elige el modelo',
+  '',
+  'Audio e imagen:',
+  '/audio_chat, /speak, /transcribe, /voice, /image_edit',
   '',
   'Control:',
   '/cancel [ID] - cancela el trabajo activo o el indicado',
   '/job <ID> - detalle de un trabajo',
   '/logs <ID> - ultimos eventos de un trabajo',
+  '',
+  'Tras un trabajo puedes pedir commit o descartar con los botones.',
+  'El push exige que el proyecto lo permita Y una segunda confirmacion.',
   '',
   'En grupos tambien puedes mencionar al bot en lenguaje natural.',
 ].join('\n');
@@ -131,6 +144,8 @@ async function dispatchParsedCommand(
     case 'task':
       return createJobFromRequest(context, {
         provider: parsed.provider,
+        // apiModel exacto cuando el comando apunta a un modelo concreto
+        model: parsed.model,
         projectAlias: parsed.projectAlias,
         prompt: parsed.prompt,
         explicit: parsed.provider !== null,
@@ -329,6 +344,11 @@ async function handleUse(context: CommandContext, argument: string | null): Prom
 
 export interface JobRequest {
   provider: ProviderId | null;
+  /**
+   * apiModel EXACTO, o null para dejar que el agente use el predeterminado de
+   * la familia. Nunca se normaliza aqui: viaja tal cual hasta el proveedor.
+   */
+  model?: string | null;
   projectAlias: string;
   prompt: string;
   explicit: boolean;
@@ -421,7 +441,7 @@ async function createJobFromRequest(
       prompt: request.prompt,
       // no entra en la cola hasta que el usuario elija maquina
       status: 'waiting_for_machine',
-      metadata: buildMetadata(context, routerReason, request.explicit),
+      metadata: buildMetadata(context, routerReason, request.explicit, request.model ?? null),
     });
     return {
       text: [
@@ -449,7 +469,7 @@ async function createJobFromRequest(
     projectAlias: request.projectAlias,
     prompt: request.prompt,
     status: 'queued',
-    metadata: buildMetadata(context, routerReason, request.explicit),
+    metadata: buildMetadata(context, routerReason, request.explicit, request.model ?? null),
   });
 
   const text = renderJobCreated({
@@ -470,8 +490,11 @@ function buildMetadata(
   context: CommandContext,
   routerReason: string | null,
   explicit: boolean,
+  model: string | null,
 ): Record<string, unknown> {
   const metadata: Record<string, unknown> = { providerExplicit: explicit };
+  // el agente lee metadata.model para saber que modelo concreto ejecutar
+  if (model !== null) metadata.model = model;
   if (routerReason) metadata.routerReason = routerReason;
   // el texto citado se guarda marcado, para que el agente lo trate como dato
   if (context.quotedText) metadata.quotedText = context.quotedText.slice(0, 4000);

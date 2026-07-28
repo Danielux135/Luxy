@@ -247,3 +247,38 @@ Comprueba que el id del grupo está en `TELEGRAM_ALLOWED_CHAT_IDS` y que hiciste
 **"No estás autorizado"**
 
 Tu `TELEGRAM_ADMIN_USER_ID` no coincide. Vuelve a consultarlo con @userinfobot.
+
+---
+
+## Comandos por modelo
+
+Los alias canónicos usan minúsculas y guion bajo. Un alias **sin versión** apunta
+al predeterminado de su familia, así que puedes cambiar el predeterminado sin
+cambiar el comando que escribes.
+
+| Familia | Sin versión | Explícitos |
+|---|---|---|
+| DeepSeek | `/deepseek` | `/deepseek_pro` `/deepseek_flash` |
+| GLM | `/glm` | `/glm_52` `/glm_51` |
+| Kimi | `/kimi` | `/kimi_k26` |
+| MiniMax | `/minimax` | `/minimax_m3` |
+| Qwen | `/qwen` | `/qwen_397b` `/qwen_35b` `/qwen_36` |
+| Step | `/step` | `/step_37` `/step_35` `/step_35_2603` |
+| KAT | `/kat` | `/kat_v25` |
+
+Audio e imagen: `/audio_chat`, `/speak`, `/transcribe`, `/voice`, `/image_edit`.
+
+Sesión local, sin claves: `/claude`, `/codex`.
+
+`/auto` deja que Luxy elija. Si pides un modelo que no está disponible, Luxy usa
+otro **y te dice cuál pediste y por qué no pudo ser**.
+
+Ver [MODELS.md](MODELS.md) para qué funciona de verdad hoy.
+
+## Aprobaciones
+
+Al terminar un trabajo aparecen botones. Descartar no necesita permisos; el commit
+exige `allowCommit`; el **push exige `allowPush` y una segunda confirmación**.
+
+Las puertas se comprueban en el agente, no aquí: pulsar el botón no garantiza que
+se haga. Todo queda auditado en `approvals.log`.

@@ -5,8 +5,16 @@ import type {
   ProviderExecution,
   JobCompleteRequest,
   ProviderId,
+  ProjectConfig,
+  AgenticContext,
 } from '@luxy/shared';
-import { redact } from '@luxy/shared';
+import { redact, ModelRegistry, buildDefaultCatalog } from '@luxy/shared';
+import { ToolExecutor } from './tools/executor.js';
+import {
+  snapshotManifests,
+  detectManifestChanges,
+  describeManifestChanges,
+} from './tools/manifest-guard.js';
 import { createWorktree, collectDiff, isGitRepository, type Worktree } from './git.js';
 import { runProjectTests, summarizeTests } from './test-runner.js';
 import type { AgentLogger } from './logger.js';
@@ -33,6 +41,76 @@ export type JobOutcome =
  * el texto del usuario y el citado se envuelven marcados como DATOS, para
  * reducir el riesgo de prompt injection desde un mensaje o un archivo.
  */
+/**
+ * modelo concreto con el que ejecutar el trabajo.
+ *
+ * prioridad: lo que decidio el router (metadata.model) y, si no hay nada, el
+ * modelo por defecto configurado para esa familia. Devolver undefined deja que
+ * el proveedor use el suyo.
+ */
+export function resolveJobModel(job: ClaimedJob, config: AgentConfig): string | undefined {
+  const requested = job.metadata['model'];
+  // el apiModel se usa TAL CUAL: no se normaliza ni se cambia de mayusculas
+  if (typeof requested === 'string' && requested.length > 0) return requested;
+
+  if (job.provider === 'claude') return config.providers.claude.model;
+  if (job.provider === 'codex') return config.providers.codex.model;
+
+  const http = config.providers.http.find((entry) => entry.id === job.provider);
+  return http?.model;
+}
+
+/**
+ * contexto de herramientas para un trabajo, si procede.
+ *
+ * devuelve undefined cuando el modelo no es agentic, cuando no hay worktree
+ * (sin worktree no hay nada que confinar) o cuando el proyecto no permite
+ * edicion. En esos casos el proveedor se comporta como antes: una consulta.
+ */
+export function buildAgenticContext(
+  job: ClaimedJob,
+  deps: JobRunnerDeps,
+  workingDirectory: string,
+  project: ProjectConfig,
+  signal: AbortSignal,
+): AgenticContext | undefined {
+  const apiModel = resolveJobModel(job, deps.config);
+  if (apiModel === undefined) return undefined;
+
+  const registry = new ModelRegistry({
+    connections: deps.config.connections,
+    models: deps.config.connections.flatMap((connection) => buildDefaultCatalog(connection.id)),
+  });
+  const definition = registry.list().find((model) => model.apiModel === apiModel);
+
+  if (definition === undefined || !definition.agentic || definition.category !== 'text') {
+    return undefined;
+  }
+
+  const executor = new ToolExecutor({
+    root: workingDirectory,
+    project,
+    limits: definition.limits,
+    allowedTools: definition.allowedTools,
+    signal,
+    onInvocation: (invocation) => {
+      deps.emit(
+        invocation.ok ? 'phase' : 'warning',
+        `herramienta ${invocation.tool}: ${invocation.ok ? 'ok' : 'fallo'} (${invocation.durationMs} ms)`,
+      );
+    },
+  });
+
+  return {
+    runner: executor,
+    allowedTools: definition.allowedTools,
+    limits: definition.limits,
+    // null significa "sin comprobar": se usa el protocolo de reserva, que
+    // funciona en ambos casos
+    useNativeTools: definition.supportsNativeTools === true,
+  };
+}
+
 export function buildProviderPrompt(job: ClaimedJob): string {
   const parts: string[] = [];
 
@@ -139,6 +217,13 @@ export async function runJob(
       return await buildCancelledOutcome(worktree, elapsed());
     }
 
+    // huella de los archivos que definen QUE se ejecuta al lanzar las pruebas.
+    // se toma antes de que el proveedor trabaje: si cambian, las pruebas dejan
+    // de ejecutarse solas, porque `npm test` correria codigo escrito por el
+    // modelo. El ejecutor de herramientas hace lo mismo por su cuenta; esta
+    // comprobacion cubre la ejecucion automatica del paso 6.
+    const manifestsBefore = snapshotManifests(workingDirectory);
+
     // 5. ejecutar el proveedor
     deps.emit('phase', `ejecutando ${provider.displayName}`);
     const providerResult = await provider.run({
@@ -146,7 +231,13 @@ export async function runJob(
       workingDirectory,
       timeoutMs: deps.config.jobTimeoutMs,
       signal,
-      model: job.provider === 'claude' ? deps.config.providers.claude.model : undefined,
+      // el modelo concreto lo elige el router y viaja en la metadata del
+      // trabajo. Antes solo se le pasaba a claude, asi que codex y las APIs
+      // http usaban siempre su modelo por defecto y el catalogo no servia
+      // de nada.
+      model: resolveJobModel(job, deps.config),
+      // si el modelo es agentic y hay worktree, se le dan herramientas locales
+      agentic: buildAgenticContext(job, deps, workingDirectory, project, signal),
       onEvent: (event) => {
         if (event.type === 'phase') deps.emit('phase', event.message);
         else if (event.type === 'warning' || event.type === 'error') {
@@ -175,7 +266,12 @@ export async function runJob(
     let testsFailed = 0;
     let testLogs: JobCompleteRequest['testLogs'] = [];
 
-    if (project.testCommands.length > 0 && !signal.aborted) {
+    const manifestChanges = detectManifestChanges(workingDirectory, manifestsBefore);
+
+    if (manifestChanges.length > 0) {
+      // el modelo cambio algo que decide que se ejecuta: no se lanza nada
+      deps.emit('warning', describeManifestChanges(manifestChanges));
+    } else if (project.testCommands.length > 0 && !signal.aborted) {
       deps.emit('phase', 'ejecutando las pruebas del proyecto');
       testLogs = await runProjectTests({
         workingDirectory,

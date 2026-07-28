@@ -1,21 +1,51 @@
 # Luxy
 
-Agente personal de IA controlado desde Telegram. Escribes a un bot desde el
-móvil y Luxy ejecuta la tarea en el ordenador que tengas encendido, usando
-**Claude Code**, **Codex CLI** o **APIs configurables** (DeepSeek, GLM, Qwen).
+Aplicación de escritorio para Windows que trabaja sobre tus proyectos, controlable
+en remoto desde Telegram. Escribes a un bot desde el móvil y Luxy ejecuta la tarea
+en el ordenador que tengas encendido, usando **Claude Code**, **Codex CLI** o
+**modelos configurables** que pueden leer, editar y comprobar tu código.
+
+```
+móvil (Telegram) ──► gateway ──► tu ordenador ──► worktree aislado ──► diff
+```
 
 ---
 
 ## 1. Qué es Luxy
 
-Luxy tiene tres piezas:
+Cuatro piezas:
 
+- **Luxy Desktop**: la aplicación de Windows. Es el flujo normal: la abres, se
+  queda en la bandeja y trabaja. Ver [docs/DESKTOP.md](docs/DESKTOP.md).
 - **Gateway** (Cloudflare Worker): recibe los mensajes de Telegram y hace de cola.
 - **Supabase**: guarda el estado compartido, los trabajos y la auditoría.
-- **Agente local**: se ejecuta en tu PC o tu portátil y hace el trabajo de verdad.
+- **Agente local**: hace el trabajo de verdad, en su propio proceso.
+
+La CLI sigue existiendo como herramienta avanzada y de recuperación, pero ya no es
+el flujo normal.
 
 El ordenador **solo hace conexiones salientes HTTPS**. No abre puertos, no
 necesita IP pública y no expone nada a Internet.
+
+### Instalación rápida
+
+Ejecuta `Luxy Setup 0.1.0.exe` y sigue el asistente de seis pasos: máquina,
+herramientas, conexión de API, modelos, proyectos y resumen. No hace falta
+PowerShell. Ver [docs/INSTALLATION.md](docs/INSTALLATION.md).
+
+Las claves se guardan **cifradas** con tu cuenta de Windows y no vuelven a pedirse.
+
+### Documentación
+
+| Documento | De qué trata |
+|---|---|
+| [DESKTOP.md](docs/DESKTOP.md) | la aplicación, su arquitectura y su seguridad |
+| [INSTALLATION.md](docs/INSTALLATION.md) | instalar y configurar |
+| [MODELS.md](docs/MODELS.md) | catálogo, alias y qué funciona de verdad |
+| [AGENT_TOOLS.md](docs/AGENT_TOOLS.md) | las herramientas, el confinamiento y las aprobaciones |
+| [SECURITY.md](docs/SECURITY.md) | modelo de amenazas |
+| [TELEGRAM.md](docs/TELEGRAM.md) | comandos |
+| [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | qué hacer cuando algo falla |
 
 ## 2. Qué puede hacer
 

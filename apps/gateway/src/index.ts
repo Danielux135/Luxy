@@ -16,6 +16,7 @@ import {
   handleJobFail,
   handleJobCancelled,
   handleApprovalResolve,
+  handleApprovalsPending,
   json,
   errorResponse,
   type ApiDeps,
@@ -38,6 +39,7 @@ const router = new Router<Deps>()
   .post('/api/jobs/:jobId/cancelled', (request, deps, params) =>
     handleJobCancelled(request, deps, params),
   )
+  .get('/api/approvals/pending', (request, deps) => handleApprovalsPending(request, deps, {}))
   .post('/api/approvals/:approvalId/resolve', (request, deps, params) =>
     handleApprovalResolve(request, deps, params),
   );

@@ -456,12 +456,50 @@ export const handleJobCancelled = withMachineAuth(async (request, deps, machine,
 // -----------------------------------------------------------------------------
 // POST /api/approvals/:approvalId/resolve
 // -----------------------------------------------------------------------------
-export const handleApprovalResolve = withMachineAuth(async (request, deps, _machine, params) => {
+/** aprobaciones que esta maquina debe ejecutar */
+export const handleApprovalsPending = withMachineAuth(async (_request, deps, machine) => {
+  const rows = await deps.repo.listPendingApprovalsForMachine(machine.id);
+
+  const approvals = [];
+  for (const row of rows) {
+    const job = await deps.repo.getJobById(row.job_id);
+    if (!job) continue;
+    const metadata = job.metadata as Record<string, unknown>;
+    approvals.push({
+      approvalId: row.id,
+      jobId: row.job_id,
+      shortId: job.shortId,
+      action: row.action,
+      projectAlias: job.projectAlias,
+      worktreePath: typeof metadata['worktreePath'] === 'string' ? metadata['worktreePath'] : '',
+      branch: typeof metadata['branch'] === 'string' ? metadata['branch'] : '',
+      message: typeof row.metadata['message'] === 'string' ? row.metadata['message'] : null,
+      // solo el flujo de doble confirmacion pone esta marca
+      confirmedTwice: row.metadata['confirmedTwice'] === true,
+      requestedBy: String(row.metadata['requestedBy'] ?? ''),
+    });
+  }
+
+  return json({ approvals });
+});
+
+export const handleApprovalResolve = withMachineAuth(async (request, deps, machine, params) => {
   const approvalId = params.approvalId;
   if (!approvalId) return errorResponse('falta el identificador de la aprobacion', 400);
 
   const body = await readBody(request, approvalResolveRequestSchema);
   if (!body.ok) return body.response;
+
+  // una maquina solo puede resolver aprobaciones de SUS trabajos. Sin esta
+  // comprobacion, cualquier maquina registrada podia resolver las de otra,
+  // igual que ya se comprueba en los demas endpoints de trabajo.
+  const approval = await deps.repo.getApproval(approvalId);
+  if (!approval) return errorResponse('la aprobacion no existe', 404);
+
+  const job = await deps.repo.getJobById(approval.job_id);
+  if (!job || job.claimedBy !== machine.id) {
+    return errorResponse('esa aprobacion no pertenece a un trabajo de esta maquina', 403);
+  }
 
   const resolved = await deps.repo.resolveApproval(approvalId, body.data.decision, 0);
   if (!resolved) return errorResponse('la aprobacion no existe o ya estaba resuelta', 409);

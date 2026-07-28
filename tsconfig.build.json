@@ -3,6 +3,9 @@
   "references": [
     { "path": "./packages/shared" },
     { "path": "./apps/gateway" },
-    { "path": "./apps/agent" }
+    { "path": "./apps/agent" },
+    { "path": "./apps/desktop/tsconfig.shared.json" },
+    { "path": "./apps/desktop/tsconfig.node.json" },
+    { "path": "./apps/desktop/tsconfig.renderer.json" }
   ]
 }
