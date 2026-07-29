@@ -17,8 +17,10 @@ import {
   splitAsCodeBlocks,
   machineSupportsProvider,
   MAX_PROMPT_LENGTH,
+  categoryOfApiModel,
+  commandForAttachment,
 } from '@luxy/shared';
-import type { Job, Machine, ProviderId } from '@luxy/shared';
+import type { Job, Machine, ProviderId, JobAttachment } from '@luxy/shared';
 import type { GatewayConfig } from '../env.js';
 import type { Repository } from '../repository.js';
 import type { Logger } from '../logger.js';
@@ -41,6 +43,8 @@ export interface CommandContext {
   isReplyToBot: boolean;
   /** texto citado por el usuario, tratado siempre como dato no confiable */
   quotedText: string | null;
+  /** adjunto que acompaña al mensaje, si lo hay */
+  attachment?: JobAttachment | null;
 }
 
 /** respuesta que el manejador quiere enviar */
@@ -355,10 +359,42 @@ export interface JobRequest {
   explicit: boolean;
 }
 
+/**
+ * comprueba que el modelo elegido sabe tratar el adjunto.
+ * devuelve el mensaje de error, o null si la combinacion es valida.
+ */
+function wrongModelForAttachment(
+  attachment: JobAttachment | null,
+  model: string | null,
+): string | null {
+  if (attachment === null) return null;
+  // los documentos no tienen carril propio: se dejan pasar como contexto
+  if (attachment.kind === 'document') return null;
+
+  // sin modelo explicito manda el router, que solo conoce modelos de texto
+  const category = model === null ? 'text' : categoryOfApiModel(model);
+  const esperada = attachment.kind === 'photo' ? 'image' : 'audio';
+  if (category === esperada) return null;
+
+  const sugerido = commandForAttachment(attachment.kind);
+  const que = attachment.kind === 'photo' ? 'una imagen' : 'un audio';
+  return renderError(
+    `enviaste ${que}, pero ese comando usa un modelo de texto`,
+    sugerido === null
+      ? 'no hay ningun modelo configurado para este tipo de archivo'
+      : `usa ${sugerido} <proyecto> <instruccion> respondiendo al archivo`,
+  );
+}
+
 async function createJobFromRequest(
   context: CommandContext,
   request: JobRequest,
 ): Promise<CommandReply> {
+  // una foto o una nota de voz no puede acabar en un modelo de codigo: gastaria
+  // el turno y devolveria una respuesta absurda. Se dice que comando si sirve.
+  const desvio = wrongModelForAttachment(context.attachment ?? null, request.model ?? null);
+  if (desvio !== null) return { text: desvio };
+
   const machines = await context.repo.listMachines();
   if (machines.length === 0) {
     return {
@@ -513,6 +549,9 @@ function buildMetadata(
   model: string | null,
 ): Record<string, unknown> {
   const metadata: Record<string, unknown> = { providerExplicit: explicit };
+  // el adjunto viaja por id: los bytes los sirve el gateway cuando el agente
+  // los pida, porque el agente no habla con Telegram
+  if (context.attachment) metadata.attachment = context.attachment;
   // el agente lee metadata.model para saber que modelo concreto ejecutar
   if (model !== null) metadata.model = model;
   if (routerReason) metadata.routerReason = routerReason;

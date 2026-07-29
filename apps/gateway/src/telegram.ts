@@ -29,9 +29,12 @@ export class TelegramError extends Error {
 
 export class TelegramClient {
   private readonly apiUrl: string;
+  /** hace falta para las descargas de archivos, que usan otra ruta base */
+  private readonly fileUrl: string;
 
   constructor(botToken: string) {
     this.apiUrl = `https://api.telegram.org/bot${botToken}`;
+    this.fileUrl = `https://api.telegram.org/file/bot${botToken}`;
   }
 
   private async call<T>(method: string, payload: Record<string, unknown>): Promise<T> {
@@ -109,6 +112,66 @@ export class TelegramClient {
       if (index === 0) firstMessageId = result.message_id;
     }
     return firstMessageId;
+  }
+
+  /**
+   * descarga un archivo de Telegram por su file_id.
+   *
+   * el agente NUNCA habla con Telegram: no tiene el token del bot y no debe
+   * tenerlo. Por eso el gateway hace de intermediario y le sirve los bytes.
+   */
+  async downloadFile(fileId: string): Promise<{ bytes: ArrayBuffer; mimeType: string }> {
+    const file = await this.call<{ file_path?: string }>('getFile', { file_id: fileId });
+    if (typeof file.file_path !== 'string' || file.file_path.length === 0) {
+      throw new Error('Telegram no devolvio la ruta del archivo');
+    }
+
+    const response = await fetch(
+      `${this.fileUrl}/${file.file_path}`,
+    );
+    if (!response.ok) {
+      throw new Error(`no se pudo descargar el adjunto (${response.status})`);
+    }
+    return {
+      bytes: await response.arrayBuffer(),
+      mimeType: response.headers.get('content-type') ?? 'application/octet-stream',
+    };
+  }
+
+  /** envia una foto, un audio o un documento al chat */
+  async sendMedia(
+    chatId: number,
+    media: { kind: 'photo' | 'audio' | 'document'; url?: string; base64?: string; fileName?: string; caption?: string },
+  ): Promise<void> {
+    const metodo = media.kind === 'photo' ? 'sendPhoto' : media.kind === 'audio' ? 'sendAudio' : 'sendDocument';
+    const campo = media.kind === 'photo' ? 'photo' : media.kind === 'audio' ? 'audio' : 'document';
+
+    // por URL es una llamada JSON normal: Telegram la descarga por su cuenta
+    if (typeof media.url === 'string') {
+      await this.call(metodo, {
+        chat_id: chatId,
+        [campo]: media.url,
+        ...(media.caption ? { caption: media.caption.slice(0, 1000) } : {}),
+      });
+      return;
+    }
+
+    if (typeof media.base64 !== 'string') throw new Error('el medio no trae ni url ni contenido');
+
+    // por bytes hace falta multipart
+    const binario = Uint8Array.from(atob(media.base64), (c) => c.charCodeAt(0));
+    const form = new FormData();
+    form.append('chat_id', String(chatId));
+    form.append(campo, new Blob([binario]), media.fileName ?? `luxy.${media.kind === 'audio' ? 'mp3' : 'bin'}`);
+    if (media.caption) form.append('caption', media.caption.slice(0, 1000));
+
+    const response = await fetch(`${this.apiUrl}/${metodo}`, {
+      method: 'POST',
+      body: form,
+    });
+    if (!response.ok) {
+      throw new Error(`Telegram rechazo el medio (${response.status})`);
+    }
   }
 
   /**

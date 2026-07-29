@@ -1,5 +1,6 @@
 // webhook de telegram: autenticacion, autorizacion, idempotencia y despacho
-import { telegramUpdateSchema, renderError } from '@luxy/shared';
+import {
+  extractAttachment, telegramUpdateSchema, renderError } from '@luxy/shared';
 import type { GatewayConfig } from '../env.js';
 import type { Repository } from '../repository.js';
 import type { Logger } from '../logger.js';
@@ -143,9 +144,16 @@ async function dispatchUpdate(
     isReplyToBot,
     // el texto citado se pasa como dato, nunca como instruccion
     quotedText: message.reply_to_message?.text ?? null,
+    // adjunto del propio mensaje o, si no, del mensaje al que responde: asi
+    // puedes mandar la foto y luego pedirle algo respondiendo a ella
+    attachment:
+      extractAttachment(message) ??
+      (message.reply_to_message ? extractAttachment(message.reply_to_message) : null),
   };
 
-  const reply = await handleTextMessage(context, message.text);
+  // con una foto la instruccion viene en el pie, no en el texto
+  const texto = message.text ?? message.caption ?? '';
+  const reply = await handleTextMessage(context, texto);
   if (!reply) return;
 
   const messageId = await telegram.sendMessage(chatId, reply.text, {

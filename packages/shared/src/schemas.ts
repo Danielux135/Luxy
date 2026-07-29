@@ -31,6 +31,22 @@ export const machineNameSchema = z
 
 export const promptSchema = z.string().min(1).max(MAX_PROMPT_LENGTH);
 
+/**
+ * adjunto ya normalizado, tal y como viaja en la metadata del trabajo.
+ *
+ * NO lleva los bytes: solo el identificador. El agente los pide al gateway,
+ * que es el unico que habla con Telegram.
+ */
+export const jobAttachmentSchema = z.object({
+  fileId: z.string().min(1).max(200),
+  kind: z.enum(['photo', 'audio', 'voice', 'document']),
+  mimeType: z.string().max(100).nullable().default(null),
+  fileName: z.string().max(200).nullable().default(null),
+  size: z.number().int().min(0).nullable().default(null),
+});
+
+export type JobAttachment = z.infer<typeof jobAttachmentSchema>;
+
 export const toolPresenceSchema = z.object({
   available: z.boolean(),
   version: z.string().nullable(),
@@ -100,6 +116,8 @@ export const claimedJobSchema = z.object({
   telegramChatId: z.number().int(),
   telegramUserId: z.number().int(),
   leaseExpiresAt: z.string(),
+  /** adjunto que acompaña a la tarea, si lo hay */
+  attachment: jobAttachmentSchema.nullable().default(null),
   metadata: z.record(z.unknown()).default({}),
 });
 
@@ -144,6 +162,21 @@ export const jobCompleteRequestSchema = z.object({
   worktreePath: z.string().max(1024).nullable(),
   sessionId: z.string().max(128).nullable(),
   testLogs: z.array(testRunResultSchema).max(20).default([]),
+  /**
+   * medio producido por el trabajo: una imagen editada, un audio sintetizado.
+   *
+   * o una URL que devuelve el proveedor, o los bytes en base64 cuando el
+   * adaptador los genera. El gateway se encarga de enviarlo a Telegram.
+   */
+  resultMedia: z
+    .object({
+      kind: z.enum(['photo', 'audio', 'document']),
+      url: z.string().url().max(2000).optional(),
+      base64: z.string().max(12_000_000).optional(),
+      fileName: z.string().max(200).optional(),
+      caption: z.string().max(1000).optional(),
+    })
+    .optional(),
   usage: z
     .object({
       provider: z.string(),
@@ -348,18 +381,45 @@ export const telegramMessageEntitySchema = z.object({
   length: z.number().int().min(0),
 });
 
+/** foto de Telegram: llega en varios tamaños y se elige el mayor */
+export const telegramPhotoSizeSchema = z.object({
+  file_id: z.string(),
+  file_unique_id: z.string().optional(),
+  width: z.number().int().optional(),
+  height: z.number().int().optional(),
+  file_size: z.number().int().optional(),
+});
+
+export const telegramFileSchema = z.object({
+  file_id: z.string(),
+  file_name: z.string().optional(),
+  mime_type: z.string().optional(),
+  file_size: z.number().int().optional(),
+});
+
 export const telegramMessageSchema = z.object({
   message_id: z.number().int(),
   from: telegramUserSchema.optional(),
   chat: telegramChatSchema,
   date: z.number().int().optional(),
   text: z.string().optional(),
+  // pie de foto: cuando se manda una imagen, la instruccion viene aqui
+  caption: z.string().optional(),
+  photo: z.array(telegramPhotoSizeSchema).optional(),
+  document: telegramFileSchema.optional(),
+  voice: telegramFileSchema.optional(),
+  audio: telegramFileSchema.optional(),
   entities: z.array(telegramMessageEntitySchema).optional(),
   reply_to_message: z
     .object({
       message_id: z.number().int(),
       from: telegramUserSchema.optional(),
       text: z.string().optional(),
+      caption: z.string().optional(),
+      photo: z.array(telegramPhotoSizeSchema).optional(),
+      document: telegramFileSchema.optional(),
+      voice: telegramFileSchema.optional(),
+      audio: telegramFileSchema.optional(),
     })
     .optional(),
 });

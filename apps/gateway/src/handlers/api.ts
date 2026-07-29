@@ -1,5 +1,6 @@
 // api privada que consume el agente local. solo acepta conexiones autenticadas.
 import {
+  jobAttachmentSchema,
   machineRegisterRequestSchema,
   heartbeatRequestSchema,
   claimRequestSchema,
@@ -356,6 +357,22 @@ export const handleJobComplete = withMachineAuth(async (request, deps, machine, 
     keyboard: buildResultKeyboard(job.shortId, result.filesChanged > 0),
   });
 
+  // si el trabajo produjo una imagen o un audio, se envia despues del resumen
+  if (result.resultMedia) {
+    try {
+      await deps.telegram.sendMedia(job.telegramChatId, result.resultMedia);
+    } catch (error) {
+      deps.logger.warn('no se pudo enviar el medio del trabajo', {
+        jobId,
+        error: String(error),
+      });
+      await deps.telegram.sendMessage(
+        job.telegramChatId,
+        'El trabajo genero un archivo pero no se pudo enviar por Telegram.',
+      );
+    }
+  }
+
   lastEditAt.delete(jobId);
   return json({ ok: true });
 });
@@ -456,6 +473,42 @@ export const handleJobCancelled = withMachineAuth(async (request, deps, machine,
 // -----------------------------------------------------------------------------
 // POST /api/approvals/:approvalId/resolve
 // -----------------------------------------------------------------------------
+/**
+ * sirve el adjunto de un trabajo al agente.
+ *
+ * el agente no tiene el token del bot ni debe tenerlo, asi que el gateway hace
+ * de intermediario. Se comprueba que el trabajo sea de ESA maquina, igual que
+ * en el resto de endpoints.
+ */
+export const handleJobAttachment = withMachineAuth(async (_request, deps, machine, params) => {
+  const jobId = params.jobId;
+  if (!jobId) return errorResponse('falta el identificador del trabajo', 400);
+
+  const job = await deps.repo.getJobById(jobId);
+  if (!job) return errorResponse('el trabajo no existe', 404);
+  if (job.claimedBy !== machine.id) {
+    return errorResponse('ese trabajo no es de esta maquina', 403);
+  }
+
+  const metadata = job.metadata as Record<string, unknown>;
+  const parsed = jobAttachmentSchema.safeParse(metadata['attachment']);
+  if (!parsed.success) return errorResponse('el trabajo no tiene ningun adjunto', 404);
+
+  try {
+    const file = await deps.telegram.downloadFile(parsed.data.fileId);
+    return new Response(file.bytes, {
+      status: 200,
+      headers: {
+        'Content-Type': parsed.data.mimeType ?? file.mimeType,
+        'Content-Disposition': `attachment; filename="${parsed.data.fileName ?? 'adjunto'}"`,
+      },
+    });
+  } catch (error) {
+    deps.logger.warn('no se pudo servir el adjunto', { jobId, error: String(error) });
+    return errorResponse('no se pudo descargar el adjunto de Telegram', 502);
+  }
+});
+
 /** aprobaciones que esta maquina debe ejecutar */
 export const handleApprovalsPending = withMachineAuth(async (_request, deps, machine) => {
   const rows = await deps.repo.listPendingApprovalsForMachine(machine.id);

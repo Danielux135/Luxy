@@ -3,6 +3,7 @@
 // se interpretan instrucciones que cambien las politicas de luxy.
 import { MAX_PROMPT_LENGTH, PROVIDER_IDS } from '../constants.js';
 import type { ProviderId } from '../types.js';
+import type { JobAttachment } from '../schemas.js';
 import { MODEL_TASK_COMMANDS, resolveModelAlias } from '../models/aliases.js';
 
 // comandos que no llevan proveedor asociado
@@ -216,6 +217,58 @@ export function resolveTaskTarget(command: string): {
     return { provider: command as ProviderId, model: null };
   }
   return { provider: null, model: null };
+}
+
+/**
+ * saca el adjunto de un mensaje de Telegram, si lo hay.
+ *
+ * de las fotos se coge el tamaño MAYOR: Telegram manda varias miniaturas y la
+ * ultima del array es la de mas resolucion.
+ */
+export function extractAttachment(message: {
+  photo?: { file_id: string; file_size?: number }[];
+  document?: { file_id: string; file_name?: string; mime_type?: string; file_size?: number };
+  voice?: { file_id: string; mime_type?: string; file_size?: number };
+  audio?: { file_id: string; file_name?: string; mime_type?: string; file_size?: number };
+}): JobAttachment | null {
+  if (Array.isArray(message.photo) && message.photo.length > 0) {
+    const mayor = message.photo[message.photo.length - 1]!;
+    return {
+      fileId: mayor.file_id,
+      kind: 'photo',
+      mimeType: 'image/jpeg',
+      fileName: 'foto.jpg',
+      size: mayor.file_size ?? null,
+    };
+  }
+  if (message.voice) {
+    return {
+      fileId: message.voice.file_id,
+      kind: 'voice',
+      mimeType: message.voice.mime_type ?? 'audio/ogg',
+      fileName: 'nota.ogg',
+      size: message.voice.file_size ?? null,
+    };
+  }
+  if (message.audio) {
+    return {
+      fileId: message.audio.file_id,
+      kind: 'audio',
+      mimeType: message.audio.mime_type ?? 'audio/mpeg',
+      fileName: message.audio.file_name ?? 'audio.mp3',
+      size: message.audio.file_size ?? null,
+    };
+  }
+  if (message.document) {
+    return {
+      fileId: message.document.file_id,
+      kind: 'document',
+      mimeType: message.document.mime_type ?? null,
+      fileName: message.document.file_name ?? 'adjunto',
+      size: message.document.file_size ?? null,
+    };
+  }
+  return null;
 }
 
 export function extractMention(

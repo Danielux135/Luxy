@@ -8,7 +8,7 @@
 // este modulo es la unica fuente de esa correspondencia, y es dato puro: lo
 // consumen el gateway (para parsear) y el escritorio (para mostrar la ayuda).
 import { buildDefaultCatalog } from './catalog.js';
-import type { ModelDefinition, ModelFamily } from './types.js';
+import type { ModelCategory, ModelDefinition, ModelFamily } from './types.js';
 import type { ProviderId } from '../types.js';
 import { PROVIDER_IDS } from '../constants.js';
 
@@ -57,10 +57,33 @@ export const DEFAULT_MODEL_ALIASES: ReadonlyMap<string, ModelAlias> = buildAlias
   buildDefaultCatalog(),
 );
 
+/** catalogo por defecto, sin conexion asociada: solo para consultar metadatos */
+const DEFAULT_CATALOG = buildDefaultCatalog();
+
 /** comandos de tarea que aportan los modelos del catalogo */
 export const MODEL_TASK_COMMANDS: readonly string[] = [...DEFAULT_MODEL_ALIASES.keys()].sort();
 
 /** resuelve un comando a un modelo concreto, o null si no es un alias */
 export function resolveModelAlias(command: string): ModelAlias | null {
   return DEFAULT_MODEL_ALIASES.get(command.toLowerCase()) ?? null;
+}
+
+/**
+ * categoria del catalogo a la que apunta un apiModel, o null si no se conoce.
+ *
+ * el gateway la necesita para no mandar una foto a un modelo de codigo: eso
+ * gastaba el turno del usuario y devolvia una respuesta absurda.
+ */
+export function categoryOfApiModel(apiModel: string): ModelCategory | null {
+  for (const model of DEFAULT_CATALOG) {
+    if (model.apiModel === apiModel) return model.category;
+  }
+  return null;
+}
+
+/** comando que si sabe tratar este tipo de adjunto */
+export function commandForAttachment(kind: 'photo' | 'voice' | 'audio' | 'document'): string | null {
+  if (kind === 'photo') return '/image_edit';
+  if (kind === 'voice' || kind === 'audio') return '/transcribe';
+  return null;
 }

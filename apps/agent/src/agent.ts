@@ -562,6 +562,8 @@ export class LuxyAgent {
           this.emitJobProgress(job, type, message);
         },
         worktreesDirectory: this.worktreesDirectory,
+        downloadAttachment: () => this.client.downloadAttachment(job.id),
+        apiKeyFor: (connectionId) => this.providerKeys[`connection:${connectionId}`],
       });
 
       // se vacia la cola antes de cerrar, para que el orden sea correcto

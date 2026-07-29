@@ -131,7 +131,8 @@ async function main(): Promise<void> {
       telegramChatId: 0,
       telegramUserId: 0,
       leaseExpiresAt: new Date(Date.now() + 120_000).toISOString(),
-      metadata: {},
+      attachment: null,
+    metadata: {},
     };
 
     console.log('  [3/5] ejecutando el trabajo completo');
@@ -150,6 +151,8 @@ async function main(): Promise<void> {
         console.log(`      ${type.padEnd(16)} ${message}`);
       },
       worktreesDirectory: worktreesPath,
+      downloadAttachment: () => Promise.reject(new Error('la simulacion no descarga adjuntos')),
+      apiKeyFor: () => undefined,
     });
 
     console.log('');

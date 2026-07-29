@@ -10,6 +10,7 @@ import type {
 } from '@luxy/shared';
 import { redact, ModelRegistry, buildDefaultCatalog } from '@luxy/shared';
 import { ToolExecutor } from './tools/executor.js';
+import { findMediaModel, runMediaJob } from './media-runner.js';
 import {
   snapshotManifests,
   detectManifestChanges,
@@ -29,6 +30,10 @@ export interface JobRunnerDeps {
   emit: (type: 'phase' | 'log' | 'provider_output' | 'test_result' | 'warning', message: string) => void;
   /** carpeta base donde se crean los worktrees */
   worktreesDirectory: string;
+  /** descarga el adjunto del trabajo; lo sirve el gateway */
+  downloadAttachment: () => Promise<Buffer>;
+  /** clave de una conexion de API, desde el almacen cifrado */
+  apiKeyFor: (connectionId: string) => string | undefined;
 }
 
 export type JobOutcome =
@@ -163,6 +168,52 @@ export function buildProviderPrompt(job: ClaimedJob): string {
   return parts.join('\n');
 }
 
+/** envuelve un trabajo de medios en el JobOutcome que espera el agente */
+async function runMediaOutcome(
+  job: ClaimedJob,
+  mediaModel: NonNullable<ReturnType<typeof findMediaModel>>,
+  deps: JobRunnerDeps,
+  signal: AbortSignal,
+  elapsed: () => number,
+): Promise<JobOutcome> {
+  deps.emit('phase', `${mediaModel.definition.displayName}: preparando`);
+
+  const result = await runMediaJob(job, mediaModel, {
+    config: deps.config,
+    downloadAttachment: deps.downloadAttachment,
+    apiKeyFor: deps.apiKeyFor,
+    signal,
+    emit: (message) => deps.emit('phase', message),
+  });
+
+  if (!result.ok) {
+    return {
+      kind: 'failed',
+      errorMessage: result.summary,
+      hasLocalChanges: false,
+      worktreePath: null,
+      durationMs: elapsed(),
+    };
+  }
+
+  return {
+    kind: 'completed',
+    result: {
+      summary: redact(result.summary).slice(0, 4000),
+      filesChanged: 0,
+      testsPassed: 0,
+      testsFailed: 0,
+      durationMs: elapsed(),
+      diffStat: null,
+      branch: null,
+      worktreePath: null,
+      sessionId: null,
+      testLogs: [],
+      ...(result.media ? { resultMedia: result.media } : {}),
+    },
+  };
+}
+
 /**
  * ejecuta un trabajo de principio a fin.
  * nunca lanza: cualquier fallo se traduce a un JobOutcome.
@@ -188,6 +239,13 @@ export async function runJob(
         worktreePath: null,
         durationMs: elapsed(),
       };
+    }
+
+    // 1b. audio e imagen no pasan por worktree ni por el bucle de herramientas
+    const apiModel = resolveJobModel(job, deps.config);
+    const mediaModel = apiModel === undefined ? null : findMediaModel(apiModel, deps.config);
+    if (mediaModel !== null) {
+      return await runMediaOutcome(job, mediaModel, deps, signal, elapsed);
     }
 
     // 2. obtener el proveedor

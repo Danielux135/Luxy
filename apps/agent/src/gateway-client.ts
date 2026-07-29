@@ -174,6 +174,27 @@ export class GatewayClient {
   }
 
   /** consulta si se pidio cancelar el trabajo */
+  /**
+   * descarga el adjunto de un trabajo.
+   *
+   * el agente no habla con Telegram: se lo pide al gateway, que hace de
+   * intermediario y es el unico que tiene el token del bot.
+   */
+  async downloadAttachment(jobId: string): Promise<Buffer> {
+    const response = await fetch(
+      `${this.baseUrl}/api/jobs/${encodeURIComponent(jobId)}/attachment`,
+      { headers: { Authorization: `Bearer ${this.options.machineToken}` } },
+    );
+    if (!response.ok) {
+      throw new GatewayError(
+        `no se pudo descargar el adjunto (${response.status})`,
+        response.status,
+        response.status >= 500,
+      );
+    }
+    return Buffer.from(await response.arrayBuffer());
+  }
+
   /** aprobaciones que esta maquina debe ejecutar */
   async listPendingApprovals(): Promise<PendingApproval[]> {
     const raw = await this.request('GET', '/api/approvals/pending');
