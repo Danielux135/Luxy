@@ -102,7 +102,14 @@ async function dispatchUpdate(
 
   // los mensajes editados se ignoran a proposito: reejecutarlos seria peligroso
   const message = update.message;
-  if (!message?.text) return;
+  if (!message) return;
+
+  // la instruccion puede venir en el texto O en el pie de una foto. Esta puerta
+  // exigia `text` y descartaba el mensaje entero: al enviar una foto con el
+  // comando en el pie, Luxy no hacia absolutamente nada.
+  const texto = message.text ?? message.caption ?? '';
+  // un archivo sin ninguna instruccion no es una orden: no hay nada que hacer
+  if (texto.trim().length === 0) return;
 
   const userId = message.from?.id;
   const chatId = message.chat.id;
@@ -151,8 +158,6 @@ async function dispatchUpdate(
       (message.reply_to_message ? extractAttachment(message.reply_to_message) : null),
   };
 
-  // con una foto la instruccion viene en el pie, no en el texto
-  const texto = message.text ?? message.caption ?? '';
   const reply = await handleTextMessage(context, texto);
   if (!reply) return;
 
