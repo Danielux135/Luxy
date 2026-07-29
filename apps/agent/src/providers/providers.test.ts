@@ -154,10 +154,13 @@ describe('buildClaudeArgs', () => {
     expect(texto).toContain('git push');
   });
 
-  it('el prompt es siempre el ultimo argumento, sin concatenar', () => {
+  it('el prompt NUNCA aparece en los argumentos', () => {
+    // antes iba como ultimo posicional, y --disallowedTools -que es variadico-
+    // se tragaba sus palabras como reglas de herramienta. Ahora va por stdin.
     const prompt = 'texto --con --pinta --de --flags';
     const args = buildClaudeArgs({ prompt, capabilities: caps });
-    expect(args[args.length - 1]).toBe(prompt);
+    expect(args).not.toContain(prompt);
+    expect(args.join(' ')).not.toContain('pinta');
   });
 
   it('se adapta a una version sin --output-format', () => {
@@ -175,7 +178,8 @@ describe('buildClaudeArgs', () => {
     const args = buildClaudeArgs({ prompt: 'algo', model: 'opus', capabilities: antigua });
     expect(args).not.toContain('--output-format');
     expect(args).not.toContain('--permission-mode');
-    expect(args).toEqual(['--print', '--model', 'opus', 'algo']);
+    // sin prompt: viaja por stdin
+    expect(args).toEqual(['--print', '--model', 'opus']);
   });
 });
 
@@ -442,5 +446,51 @@ describe('configuracion de ejemplo de los proveedores http', () => {
     for (const provider of EXAMPLE_HTTP_PROVIDERS) {
       expect(provider.apiKeyEnv).toMatch(/^[A-Z]+_API_KEY$/);
     }
+  });
+});
+
+// -----------------------------------------------------------------------------
+// regresion: /deepseek acababa en Claude Code con los argumentos rotos
+// -----------------------------------------------------------------------------
+describe('claude: el prompt no puede ir en argv', () => {
+  const caps = parseClaudeCapabilities(CLAUDE_HELP);
+
+  it('buildClaudeArgs NO incluye el prompt', () => {
+    // --disallowedTools es variadico: un prompt detras se convertia en reglas
+    // de herramienta y Claude se quedaba sin entrada
+    const args = buildClaudeArgs({
+      prompt: 'No modifiques credenciales. Haz un poema.',
+      capabilities: caps,
+      model: 'opus',
+    });
+    expect(args.join(' ')).not.toContain('poema');
+    expect(args.join(' ')).not.toContain('credenciales');
+    expect(args.join(' ')).not.toContain('modifiques');
+  });
+
+  it('lo ultimo que aparece son las reglas de herramienta, no texto libre', () => {
+    const args = buildClaudeArgs({
+      prompt: 'texto que no debe aparecer',
+      capabilities: caps,
+      model: 'opus',
+    });
+    const indice = args.indexOf('--disallowedTools');
+    expect(indice).toBeGreaterThanOrEqual(0);
+    // todo lo que sigue a --disallowedTools tiene forma de herramienta
+    for (const valor of args.slice(indice + 1)) {
+      expect(valor).toMatch(/^(Bash\(|WebFetch|Write|Edit|Read|Task|Glob|Grep)/);
+    }
+  });
+
+  it('las reglas son una lista fija, nunca derivada del prompt', () => {
+    const uno = buildClaudeArgs({ prompt: 'aaa bbb', capabilities: caps, model: 'opus' });
+    const dos = buildClaudeArgs({ prompt: 'ccc ddd', capabilities: caps, model: 'opus' });
+    // el mismo comando para dos prompts distintos
+    expect(uno).toEqual(dos);
+  });
+
+  it('sigue usando --print', () => {
+    const args = buildClaudeArgs({ prompt: 'x', capabilities: caps, model: 'opus' });
+    expect(args).toContain('--print');
   });
 });

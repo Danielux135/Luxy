@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { routeProvider } from './router.js';
 import {
   selectMachine,
   isMachineOnline,
@@ -241,5 +242,78 @@ describe('canReassignJob', () => {
   it('NO reasigna si el lease sigue vivo', () => {
     const vivo = new Date(Date.now() + 60_000).toISOString();
     expect(canReassignJob({ status: 'claimed', leaseExpiresAt: vivo, startedAt: null })).toBe(false);
+  });
+});
+
+// -----------------------------------------------------------------------------
+// regresion: /deepseek acababa en Claude porque el gateway no sabia que la
+// maquina tenia esa conexion configurada
+// -----------------------------------------------------------------------------
+describe('capacidades anunciadas y enrutado explicito', () => {
+  const maquina = (httpProviders: string[]): Machine =>
+    ({
+      id: 'm1',
+      name: 'portatil-clase',
+      hostname: 'pc',
+      platform: 'win32',
+      platformVersion: '10',
+      agentVersion: '0.1.0',
+      lastSeenAt: new Date().toISOString(),
+      enabled: true,
+      projects: ['test'],
+      capabilities: {
+        git: { available: true, version: null, path: null },
+        node: { available: true, version: null, path: null },
+        npm: { available: true, version: null, path: null },
+        claude: { available: true, version: null, path: null },
+        codex: { available: true, version: null, path: null },
+        flutter: { available: false, version: null, path: null },
+        httpProviders,
+      },
+    }) as Machine;
+
+  it('sin capacidades anunciadas, deepseek NO figura como disponible', () => {
+    // este era el estado real: registro antiguo, conexion configurada despues
+    expect(machineSupportsProvider(maquina([]), 'deepseek')).toBe(false);
+  });
+
+  it('anunciando la conexion, deepseek SI figura', () => {
+    expect(machineSupportsProvider(maquina(['deepseek']), 'deepseek')).toBe(true);
+  });
+
+  it('reconoce tambien las familias nuevas', () => {
+    const m = maquina(['deepseek', 'kimi', 'kat', 'minimax', 'step']);
+    for (const familia of ['kimi', 'kat', 'minimax', 'step'] as const) {
+      expect(machineSupportsProvider(m, familia)).toBe(true);
+    }
+  });
+
+  it('claude y codex no dependen de httpProviders', () => {
+    expect(machineSupportsProvider(maquina([]), 'claude')).toBe(true);
+    expect(machineSupportsProvider(maquina([]), 'codex')).toBe(true);
+  });
+});
+
+describe('sustitucion de un proveedor pedido explicitamente', () => {
+  it('si esta disponible, se respeta', () => {
+    const d = routeProvider({
+      prompt: 'haz un poema',
+      availableProviders: ['claude', 'deepseek'],
+      explicitProvider: 'deepseek',
+    });
+    expect(d.provider).toBe('deepseek');
+  });
+
+  it('si NO esta disponible, sustituye pero lo marca como no disponible', () => {
+    // esto es lo que pasaba con /deepseek: caia en claude
+    const d = routeProvider({
+      prompt: 'haz un poema',
+      availableProviders: ['claude', 'codex'],
+      explicitProvider: 'deepseek',
+    });
+    expect(d.provider).not.toBe('deepseek');
+    // la sustitucion tiene que ser detectable por quien llama
+    expect(d.unavailable).toContain('deepseek');
+    expect(d.reason).toContain('deepseek');
   });
 });

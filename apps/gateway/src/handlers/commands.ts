@@ -7,6 +7,7 @@ import {
   selectMachine,
   isMachineOnline,
   routeProvider,
+  PROVIDER_IDS,
   normalizeShortId,
   renderJobCreated,
   renderError,
@@ -402,6 +403,7 @@ async function createJobFromRequest(
   // decision del proveedor: explicita o mediante el router determinista
   let provider: ProviderId;
   let routerReason: string | null = null;
+  let substitution: { requested: ProviderId; chosen: ProviderId } | null = null;
   if (request.provider && request.explicit) {
     const decision = routeProvider({
       prompt: request.prompt,
@@ -411,6 +413,11 @@ async function createJobFromRequest(
     provider = decision.provider;
     // solo se explica el motivo si luxy tuvo que cambiar de proveedor
     routerReason = decision.provider === request.provider ? null : decision.reason;
+    // pediste un modelo concreto: si no se usa ese, hay que decirlo antes de
+    // ejecutar nada, no esconderlo en el motivo del router
+    if (decision.provider !== request.provider) {
+      substitution = { requested: request.provider, chosen: decision.provider };
+    }
   } else {
     const decision = routeProvider({ prompt: request.prompt, availableProviders });
     provider = decision.provider;
@@ -481,9 +488,22 @@ async function createJobFromRequest(
     routerReason,
   });
 
-  return {
-    text: selection.kind === 'queued' ? `${text}\n\n${selection.reason}` : text,
-  };
+  // pediste un modelo concreto y se va a usar otro: se dice ANTES del resto,
+  // no escondido en el motivo del router
+  const aviso =
+    substitution === null
+      ? ''
+      : [
+          `Pediste ${PROVIDER_LABELS[substitution.requested]}, pero ninguna maquina conectada lo ofrece.`,
+          `Luxy usara ${PROVIDER_LABELS[substitution.chosen]} en su lugar.`,
+          'Si esa maquina tiene la conexion configurada, comprueba que su agente este arrancado:',
+          'las capacidades se anuncian en cada latido.',
+          '',
+          '',
+        ].join('\n');
+
+  const base = selection.kind === 'queued' ? `${text}\n\n${selection.reason}` : text;
+  return { text: aviso + base };
 }
 
 function buildMetadata(
@@ -503,8 +523,9 @@ function buildMetadata(
 
 /** union de los proveedores disponibles en un conjunto de maquinas */
 function collectProviders(machines: Machine[]): ProviderId[] {
-  const all: ProviderId[] = ['claude', 'codex', 'deepseek', 'glm', 'qwen'];
-  return all.filter((provider) =>
+  // la lista sale de PROVIDER_IDS, no escrita a mano: con cinco valores fijos,
+  // las familias nuevas (kimi, kat, minimax, step) no se ofrecian nunca
+  return PROVIDER_IDS.filter((provider) =>
     machines.some((machine) => machineSupportsProvider(machine, provider)),
   );
 }

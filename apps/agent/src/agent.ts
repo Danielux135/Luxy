@@ -9,12 +9,14 @@ import type {
   ClaimedJob,
   ProviderExecution,
   ProviderId,
+  MachineCapabilities,
 } from '@luxy/shared';
 import {
   defaultSleep,
   computeBackoffDelay,
   isMachineOnline,
   redact,
+  LOCAL_CLI_PROVIDERS,
   buildDefaultCatalog,
   ModelRegistry,
   PROVIDER_IDS,
@@ -89,6 +91,15 @@ export class LuxyAgent {
   private activeJobStartedAt: string | null = null;
   private activeAbort: AbortController | null = null;
   private availableProviders: ProviderId[] = [];
+  /**
+   * capacidades detectadas al arrancar.
+   *
+   * se reanuncian en cada latido: antes solo se enviaban al REGISTRAR la
+   * maquina, asi que el gateway seguia creyendo lo que era cierto ese dia. Si
+   * despues configurabas una conexion de API, el gateway no se enteraba nunca y
+   * rechazaba /deepseek por "no disponible", sustituyendolo por claude.
+   */
+  private capabilities: MachineCapabilities | null = null;
   /** promesa de los tres bucles; permite esperar el apagado de verdad */
   private loops: Promise<void> | null = null;
   /** promesa del trabajo en curso; stop() la espera en vez de dormir a ciegas */
@@ -187,6 +198,7 @@ export class LuxyAgent {
     );
 
     const detection = await detectEnvironment(enabledHttp.map((provider) => provider.id));
+    this.capabilities = detection.capabilities;
     for (const line of describeCapabilities(detection.capabilities)) {
       this.logger.info(line);
     }
@@ -230,6 +242,17 @@ export class LuxyAgent {
       else this.logger.warn(`el proveedor "${id}" no quedo disponible`);
     }
     this.availableProviders = confirmed;
+
+    // lo que se anuncia es lo que de verdad respondio a la deteccion, no lo que
+    // habia escrito en la configuracion
+    if (this.capabilities !== null) {
+      this.capabilities = {
+        ...this.capabilities,
+        httpProviders: confirmed.filter(
+          (id) => !LOCAL_CLI_PROVIDERS.includes(id as (typeof LOCAL_CLI_PROVIDERS)[number]),
+        ),
+      };
+    }
 
     this.logger.info(
       `proveedores disponibles: ${confirmed.length > 0 ? confirmed.join(', ') : 'ninguno'}`,
@@ -324,6 +347,9 @@ export class LuxyAgent {
           activeJobId: this.activeJob?.id ?? null,
           agentVersion: AGENT_VERSION,
           projects: Object.keys(this.config.projects),
+          // sin esto el gateway se queda con las capacidades del registro y
+          // nunca se entera de las conexiones que configures despues
+          ...(this.capabilities === null ? {} : { capabilities: this.capabilities }),
         });
         this.lastHeartbeatAt = new Date().toISOString();
         if (!this.gatewayConnected) {

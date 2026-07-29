@@ -225,7 +225,17 @@ export async function runJob(
     const manifestsBefore = snapshotManifests(workingDirectory);
 
     // 5. ejecutar el proveedor
-    deps.emit('phase', `ejecutando ${provider.displayName}`);
+    //
+    // se deja constancia de QUE se va a ejecutar antes de hacerlo: cuando
+    // /deepseek acababa en Claude Code no habia forma de verlo hasta que
+    // fallaba con un error de Claude.
+    const modeloElegido = resolveJobModel(job, deps.config);
+    deps.emit(
+      'phase',
+      `ejecutando ${provider.displayName}` +
+        (modeloElegido === undefined ? '' : ` con el modelo ${modeloElegido}`) +
+        (job.provider === provider.id ? '' : ` (pediste ${job.provider})`),
+    );
     const providerResult = await provider.run({
       prompt: buildProviderPrompt(job),
       workingDirectory,

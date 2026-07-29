@@ -55,7 +55,7 @@ const DISALLOWED_TOOLS = ['Bash(git push:*)', 'Bash(rm -rf:*)', 'WebFetch'];
 
 /**
  * construye los argumentos segun lo que la version instalada soporta.
- * el prompt va SIEMPRE como argumento separado, nunca concatenado.
+ * el prompt NUNCA va aqui: viaja por stdin, igual que en codex.
  */
 export function buildClaudeArgs(options: ClaudeArgsOptions): string[] {
   const { capabilities } = options;
@@ -82,11 +82,15 @@ export function buildClaudeArgs(options: ClaudeArgsOptions): string[] {
   }
 
   if (capabilities.disallowedTools) {
+    // --disallowedTools es VARIADICO: si el prompt fuera detras, la CLI se
+    // tragaria sus palabras como reglas de herramienta. Eso producia errores
+    // del tipo 'Permission deny rule "credenciales" matches no known tool' y
+    // dejaba a Claude sin prompt. Por eso el prompt va por stdin.
     args.push('--disallowedTools', ...DISALLOWED_TOOLS);
   }
 
-  // el prompt es el ultimo argumento posicional
-  args.push(options.prompt);
+  // el prompt NO va como argumento: se envia por stdin (ver run()). Añadirlo
+  // aqui volveria a romper el parseo de --disallowedTools.
   return args;
 }
 
@@ -226,6 +230,8 @@ export class ClaudeCodeProvider implements ProviderExecution {
       cwd: request.workingDirectory,
       timeoutMs: request.timeoutMs,
       signal: request.signal,
+      // el prompt por stdin: como argumento lo absorbia --disallowedTools
+      stdin: request.prompt,
       // el entorno se restringe: Claude usa su sesion local, no variables
       envAllowList: BASE_ENV_ALLOWLIST,
       onStdout: (chunk) => {
