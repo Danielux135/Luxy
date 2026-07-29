@@ -84,6 +84,10 @@ export const agentEventSchema = z.discriminatedUnion('type', [
     testsPassed: z.number().int().nonnegative(),
     testsFailed: z.number().int().nonnegative(),
     durationMs: z.number().int().nonnegative(),
+    /** hacen falta para poder aprobar el commit o el push desde el escritorio */
+    worktreePath: z.string().nullable(),
+    branch: z.string().nullable(),
+    projectAlias: z.string(),
   }),
   z.object({
     type: z.literal('job.failed'),
@@ -125,6 +129,13 @@ export const agentEventSchema = z.discriminatedUnion('type', [
     action: z.enum(['commit', 'discard', 'push']),
   }),
 
+  z.object({
+    type: z.literal('approval.resolved'),
+    ...jobBase,
+    action: z.enum(['commit', 'discard', 'push']),
+    ok: z.boolean(),
+    message: z.string(),
+  }),
   z.object({
     type: z.literal('log.appended'),
     ...base,

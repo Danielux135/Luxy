@@ -20,6 +20,7 @@ import {
   migrationDeleteFileArgsSchema,
   migrationImportArgsSchema,
   connectionTestArgsSchema,
+  approvalResolveArgsSchema,
   gatewayCheckArgsSchema,
   machineRegisterArgsSchema,
   pickFolderArgsSchema,
@@ -316,6 +317,16 @@ export function registerIpcHandlers(context: HandlerContext): void {
     await context.reconfigureAgent();
 
     return { registered: true, machineId: response.machineId ?? null };
+  });
+
+  handle(IPC_INVOKE.approvalResolve, approvalResolveArgsSchema, async (args) => {
+    context.log('aprobacion solicitada desde la interfaz', {
+      action: args.action,
+      shortId: args.shortId,
+    });
+    // el resultado real lo decide el agente: puede denegarla por politica
+    await context.controller.executeApproval(args);
+    return { ok: true, message: 'peticion enviada al agente' };
   });
 
   handle(IPC_INVOKE.connectionTest, connectionTestArgsSchema, async (args) => {

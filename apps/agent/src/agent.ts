@@ -530,6 +530,9 @@ export class LuxyAgent {
             testsPassed: outcome.result.testsPassed,
             testsFailed: outcome.result.testsFailed,
             durationMs: outcome.result.durationMs,
+            worktreePath: outcome.result.worktreePath,
+            branch: outcome.result.branch,
+            projectAlias: job.projectAlias,
           });
           break;
         case 'failed':

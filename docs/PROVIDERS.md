@@ -183,3 +183,46 @@ Sube `dailyBudget` o ponlo a `0` para quitar el límite.
 **El proveedor no aparece en `/providers`**
 Está deshabilitado, le falta la clave, o el CLI no se detectó. Arranca Luxy y
 mira las líneas de detección del arranque.
+
+---
+
+## Actualización: conexiones y catálogo de modelos
+
+Lo de arriba describe el esquema `providers.http`, que sigue funcionando. Pero el
+modelo de datos ha cambiado: ahora se separan **conexión**, **modelo** y **alias**.
+
+### Conexiones
+
+Una conexión es un endpoint con su clave, su dialecto y su timeout. Sirve **muchos**
+modelos. Se configura desde la vista de Conexiones de Luxy Desktop.
+
+**La clave no está en la conexión.** Vive cifrada en `secrets.enc` bajo
+`connection:<id>`, y el renderer solo llega a saber si está configurada o no. Para
+cambiarla se introduce una nueva; nunca se muestra la guardada.
+
+### Claude y Codex
+
+No son conexiones y no llevan clave: usan **tu sesión local** del CLI. Luxy nunca
+usa `ANTHROPIC_API_KEY` ni `OPENAI_API_KEY`, y `BASE_ENV_ALLOWLIST` las bloquea
+explícitamente en el entorno de los procesos hijo.
+
+### Migración desde `.env.providers`
+
+Si Luxy encuentra claves en texto plano de una instalación anterior, el asistente
+ofrece importarlas, cifrarlas y borrar el original. **No borra nada hasta
+confirmar que la clave quedó guardada**: perder una clave por una decisión
+automática sería irreversible.
+
+### Modelos
+
+El catálogo ya no es un modelo por proveedor. Ver [MODELS.md](MODELS.md) para el
+catálogo verificado, los alias de Telegram y qué funciona de verdad hoy.
+
+### Añadir una conexión
+
+Desde la vista de Conexiones. El botón *Probar conexión* consulta `/v1/models` y
+marca qué modelos sirve realmente — que no tiene por qué coincidir con el catálogo.
+
+La URL que se prueba sale de la configuración guardada, **no de lo que mande la
+interfaz**: si el renderer pudiera elegir el destino, podría mandar la clave
+descifrada a donde quisiera.

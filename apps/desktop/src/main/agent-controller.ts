@@ -218,6 +218,32 @@ export class AgentController {
     return this.getStatus();
   }
 
+  /**
+   * pide al agente que ejecute una aprobacion.
+   *
+   * el proceso principal NO comprueba las politicas: eso lo hace el agente, que
+   * es quien tiene la configuracion del proyecto y el worktree. Aqui solo se
+   * transporta la peticion.
+   */
+  async executeApproval(approval: {
+    jobId: string;
+    shortId: string;
+    action: 'commit' | 'discard' | 'push';
+    projectAlias: string;
+    worktreePath: string;
+    branch: string;
+    message: string | null;
+    confirmedTwice: boolean;
+  }): Promise<AgentHostStatus> {
+    if (this.child === null) {
+      throw new AgentControllerError(
+        'el agente no esta arrancado',
+        'arranca el agente antes de aprobar cambios.',
+      );
+    }
+    return this.request({ type: 'approval', requestId: randomUUID(), approval });
+  }
+
   /** apagado definitivo: para el agente y termina el proceso hijo */
   async shutdown(): Promise<void> {
     const child = this.child;

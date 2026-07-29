@@ -18,6 +18,19 @@ export interface ActivityLine {
   text: string;
 }
 
+/** trabajo terminado que todavia tiene cambios pendientes de decidir */
+export interface PendingJob {
+  jobId: string;
+  shortId: string;
+  projectAlias: string;
+  worktreePath: string;
+  branch: string;
+  summary: string;
+  filesChanged: number;
+  testsFailed: number;
+  at: string;
+}
+
 function describe(event: AgentEvent): string | null {
   switch (event.type) {
     case 'agent.started':
@@ -49,6 +62,8 @@ function describe(event: AgentEvent): string | null {
       return `${event.shortId}: ${event.tool} ${event.ok ? 'ok' : 'fallo'} en ${event.durationMs} ms`;
     case 'approval.pending':
       return `${event.shortId} espera aprobacion (${event.action})`;
+    case 'approval.resolved':
+      return `${event.shortId}: ${event.action} ${event.ok ? 'hecho' : 'denegado'} - ${event.message}`;
     default:
       // heartbeat y status.updated no ensucian la actividad
       return null;
@@ -58,6 +73,13 @@ function describe(event: AgentEvent): string | null {
 export function useAgent(): {
   status: AgentHostStatus;
   activity: ActivityLine[];
+  /** trabajos terminados con cambios pendientes de decidir */
+  pending: PendingJob[];
+  approve: (
+    job: PendingJob,
+    action: 'commit' | 'discard' | 'push',
+    confirmedTwice?: boolean,
+  ) => Promise<void>;
   busy: boolean;
   error: string | null;
   start: () => Promise<void>;
@@ -66,6 +88,7 @@ export function useAgent(): {
 } {
   const [status, setStatus] = useState<AgentHostStatus>(INITIAL);
   const [activity, setActivity] = useState<ActivityLine[]>([]);
+  const [pending, setPending] = useState<PendingJob[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const nextId = useRef(0);
@@ -82,6 +105,28 @@ export function useAgent(): {
     const unsubscribe = window.luxy.onAgentEvent((event) => {
       if (!active) return;
       if (event.type === 'status.updated') setStatus(event.status);
+
+      // un trabajo terminado con worktree deja cambios que hay que decidir
+      if (event.type === 'job.completed' && event.worktreePath !== null && event.branch !== null) {
+        setPending((previous) => [
+          ...previous.filter((job) => job.jobId !== event.jobId),
+          {
+            jobId: event.jobId,
+            shortId: event.shortId,
+            projectAlias: event.projectAlias,
+            worktreePath: event.worktreePath!,
+            branch: event.branch!,
+            summary: event.summary,
+            filesChanged: event.filesChanged,
+            testsFailed: event.testsFailed,
+            at: event.at,
+          },
+        ]);
+      }
+      // resuelto: commit hecho o cambios descartados, ya no hay nada que decidir
+      if (event.type === 'approval.resolved' && event.ok && event.action !== 'commit') {
+        setPending((previous) => previous.filter((job) => job.jobId !== event.jobId));
+      }
 
       const text = describe(event);
       if (text === null) return;
@@ -113,9 +158,34 @@ export function useAgent(): {
     [],
   );
 
+  const approve = useCallback(
+    async (job: PendingJob, action: 'commit' | 'discard' | 'push', confirmedTwice = false) => {
+      setBusy(true);
+      setError(null);
+      try {
+        const result = await window.luxy.resolveApproval({
+          jobId: job.jobId,
+          shortId: job.shortId,
+          action,
+          projectAlias: job.projectAlias,
+          worktreePath: job.worktreePath,
+          branch: job.branch,
+          message: null,
+          confirmedTwice,
+        });
+        if (!result.ok) setError(result.error);
+      } finally {
+        setBusy(false);
+      }
+    },
+    [],
+  );
+
   return {
     status,
     activity,
+    pending,
+    approve,
     busy,
     error,
     start: () => run(() => window.luxy.startAgent()),

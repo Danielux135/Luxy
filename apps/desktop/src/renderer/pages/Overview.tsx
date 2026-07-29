@@ -1,9 +1,9 @@
 // Inicio y Trabajos.
-import type { JSX } from 'react';
+import { useState, type JSX } from 'react';
 import type { AgentHostStatus } from '@luxy/shared';
 import { Empty, Notice, Panel, Readout, Tag } from '../ui/primitives.js';
 import { RUN_STATE_LABEL } from '../ui/StatusRail.js';
-import type { ActivityLine } from '../useAgent.js';
+import type { ActivityLine, PendingJob } from '../useAgent.js';
 
 function hora(iso: string): string {
   const date = new Date(iso);
@@ -38,9 +38,13 @@ export function HomePage({
   onStop,
   onRestart,
   configured,
+  pending,
+  onApprove,
 }: {
   status: AgentHostStatus;
   activity: ActivityLine[];
+  pending: PendingJob[];
+  onApprove: (job: PendingJob, action: 'commit' | 'discard' | 'push', confirmedTwice?: boolean) => void;
   busy: boolean;
   error: string | null;
   onStart: () => void;
@@ -117,6 +121,8 @@ export function HomePage({
         />
       </Panel>
 
+      <PendingApprovals pending={pending} busy={busy} onApprove={onApprove} />
+
       <Panel title="Trabajo activo">
         {agent?.activeJob == null ? (
           <Empty title="Nada en curso">
@@ -155,6 +161,91 @@ export function HomePage({
         )}
       </Panel>
     </>
+  );
+}
+
+/**
+ * cambios pendientes de decidir.
+ *
+ * el push pide confirmacion DOS veces, igual que en Telegram. Y el agente la
+ * vuelve a exigir: pulsar aqui no garantiza que se haga.
+ */
+export function PendingApprovals({
+  pending,
+  busy,
+  onApprove,
+}: {
+  pending: PendingJob[];
+  busy: boolean;
+  onApprove: (job: PendingJob, action: 'commit' | 'discard' | 'push', confirmedTwice?: boolean) => void;
+}): JSX.Element | null {
+  const [confirmingPush, setConfirmingPush] = useState<string | null>(null);
+
+  if (pending.length === 0) return null;
+
+  return (
+    <Panel title={`Cambios pendientes de decidir (${pending.length})`} flush>
+      <ul className="list">
+        {pending.map((job) => (
+          <li key={job.jobId}>
+            <div className="list__main">
+              <div className="list__name">
+                {job.shortId} · {job.projectAlias}
+              </div>
+              <div className="list__meta">
+                {job.filesChanged} archivos
+                {job.testsFailed > 0 ? ` · ${job.testsFailed} pruebas fallidas` : ' · pruebas en verde'}
+              </div>
+              <div className="list__meta mono scroller">{job.branch}</div>
+            </div>
+
+            {confirmingPush === job.jobId ? (
+              <>
+                <Tag tone="fault">¿seguro?</Tag>
+                <button
+                  className="btn btn--danger"
+                  disabled={busy}
+                  onClick={() => {
+                    // segunda confirmacion: es la que el agente exige de verdad
+                    onApprove(job, 'push', true);
+                    setConfirmingPush(null);
+                  }}
+                >
+                  Sí, publicar
+                </button>
+                <button className="btn btn--quiet" onClick={() => setConfirmingPush(null)}>
+                  Cancelar
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  className="btn btn--primary"
+                  disabled={busy}
+                  onClick={() => onApprove(job, 'commit')}
+                >
+                  Confirmar
+                </button>
+                <button
+                  className="btn btn--danger btn--quiet"
+                  disabled={busy}
+                  onClick={() => onApprove(job, 'discard')}
+                >
+                  Descartar
+                </button>
+                <button
+                  className="btn"
+                  disabled={busy}
+                  onClick={() => setConfirmingPush(job.jobId)}
+                >
+                  Publicar
+                </button>
+              </>
+            )}
+          </li>
+        ))}
+      </ul>
+    </Panel>
   );
 }
 

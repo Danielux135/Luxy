@@ -182,6 +182,23 @@ export const connectionTestResultSchema = z.object({
   error: z.string().nullable(),
 });
 
+export const approvalResolveArgsSchema = z.object({
+  jobId: z.string().min(1).max(64),
+  shortId: z.string().min(1).max(32),
+  action: z.enum(['commit', 'discard', 'push']),
+  projectAlias: z.string().min(1).max(64),
+  worktreePath: z.string().min(1).max(1024),
+  branch: z.string().min(1).max(256),
+  message: z.string().max(500).nullable().default(null),
+  /** el push exige que la interfaz pida confirmacion DOS veces */
+  confirmedTwice: z.boolean().default(false),
+});
+
+export const approvalResolveResultSchema = z.object({
+  ok: z.boolean(),
+  message: z.string(),
+});
+
 // -----------------------------------------------------------------------------
 // API que el preload expone en window.luxy
 // -----------------------------------------------------------------------------
@@ -217,6 +234,9 @@ export interface LuxyBridge {
     connectionId: string,
     baseUrl: string,
   ): Promise<IpcResult<z.infer<typeof connectionTestResultSchema>>>;
+  resolveApproval(
+    args: z.infer<typeof approvalResolveArgsSchema>,
+  ): Promise<IpcResult<z.infer<typeof approvalResolveResultSchema>>>;
   /** devuelve la funcion de baja; sin ella se acumulan listeners al navegar */
   onAgentEvent(listener: (event: z.infer<typeof agentEventSchema>) => void): () => void;
 }

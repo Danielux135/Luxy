@@ -84,6 +84,23 @@ export function startHostEntry(port: ParentPort): void {
         ack(request.requestId, true, null);
         break;
       }
+      case 'approval': {
+        const outcome = await host.executeApproval(request.approval);
+        send({
+          type: 'event',
+          event: {
+            type: 'approval.resolved',
+            at: new Date().toISOString(),
+            jobId: request.approval.jobId,
+            shortId: request.approval.shortId,
+            action: request.approval.action,
+            ok: outcome.ok,
+            message: outcome.message,
+          },
+        });
+        ack(request.requestId, outcome.ok, outcome.ok ? null : outcome.message);
+        break;
+      }
       case 'shutdown':
         await host.stop('cierre de Luxy');
         ack(request.requestId, true, null);

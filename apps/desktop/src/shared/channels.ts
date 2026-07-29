@@ -29,6 +29,7 @@ export const IPC_INVOKE = {
   gatewayCheck: 'luxy:gateway:check',
   machineRegister: 'luxy:machine:register',
   connectionTest: 'luxy:connection:test',
+  approvalResolve: 'luxy:approval:resolve',
 } as const;
 
 /** canales de notificacion (main -> renderer) */

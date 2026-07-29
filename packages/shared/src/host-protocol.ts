@@ -27,6 +27,27 @@ export const hostRequestSchema = z.discriminatedUnion('type', [
      */
     providerKeys: z.record(z.string().max(64), z.string().max(512)).default({}),
   }),
+  z.object({
+    type: z.literal('approval'),
+    requestId: z.string(),
+    /**
+     * aprobacion pedida desde la interfaz de escritorio.
+     *
+     * el agente NO se fia de esto: vuelve a comprobar allowCommit, allowPush y
+     * la doble confirmacion, y confina la ruta del worktree. Que la interfaz lo
+     * pida no significa que se pueda hacer.
+     */
+    approval: z.object({
+      jobId: z.string().max(64),
+      shortId: z.string().max(32),
+      action: z.enum(['commit', 'discard', 'push']),
+      projectAlias: z.string().max(64),
+      worktreePath: z.string().max(1024),
+      branch: z.string().max(256),
+      message: z.string().max(500).nullable().default(null),
+      confirmedTwice: z.boolean().default(false),
+    }),
+  }),
   z.object({ type: z.literal('shutdown'), requestId: z.string() }),
 ]);
 

@@ -37,6 +37,7 @@ const bridge: LuxyBridge = {
   registerMachine: (args: unknown) => ipcRenderer.invoke(IPC_INVOKE.machineRegister, args),
   testConnection: (connectionId: string, baseUrl: string) =>
     ipcRenderer.invoke(IPC_INVOKE.connectionTest, { connectionId, baseUrl }),
+  resolveApproval: (args: unknown) => ipcRenderer.invoke(IPC_INVOKE.approvalResolve, args),
 
   onAgentEvent: (listener) => {
     // el listener del renderer nunca ve el objeto IpcRendererEvent: solo el dato

@@ -5,7 +5,10 @@
 // implementaciones del arranque que puedan divergir.
 import type { AgentConfig, AgentEvent, AgentEventSink, AgentHostStatus, AgentRunState } from '@luxy/shared';
 import { redact } from '@luxy/shared';
+import { randomUUID } from 'node:crypto';
 import { LuxyAgent } from '../agent.js';
+import { executeApproval, auditFilePath } from '../approvals.js';
+import { worktreesDir, logsDir } from '../paths.js';
 import { type AgentLogger, describeError } from '../logger.js';
 
 export interface AgentHostOptions {
@@ -144,6 +147,55 @@ export class AgentHost {
   async restart(): Promise<void> {
     await this.stop('reinicio');
     await this.start();
+  }
+
+  /**
+   * ejecuta una aprobacion pedida desde la interfaz de escritorio.
+   *
+   * mismo camino que las que llegan de Telegram: las mismas puertas, el mismo
+   * confinamiento y la misma auditoria. Lo unico que cambia es el origen que se
+   * registra, para poder distinguirlos despues.
+   */
+  async executeApproval(request: {
+    jobId: string;
+    shortId: string;
+    action: 'commit' | 'discard' | 'push';
+    projectAlias: string;
+    worktreePath: string;
+    branch: string;
+    message: string | null;
+    confirmedTwice: boolean;
+  }): Promise<{ ok: boolean; message: string }> {
+    if (this.config === null) {
+      return { ok: false, message: 'Luxy no esta configurado en esta maquina' };
+    }
+
+    const outcome = await executeApproval(
+      {
+        // sin gateway de por medio no hay id: se genera uno para la auditoria
+        approvalId: `desktop-${randomUUID()}`,
+        ...request,
+        message: request.message ?? undefined,
+        source: 'desktop',
+        requestedBy: 'interfaz de escritorio',
+      },
+      {
+        config: this.config,
+        worktreesDirectory: this.options.worktreesDirectory ?? worktreesDir(),
+        auditFile: auditFilePath(logsDir()),
+      },
+    );
+
+    this.publish({
+      type: 'approval.resolved',
+      at: new Date().toISOString(),
+      jobId: request.jobId,
+      shortId: request.shortId,
+      action: request.action,
+      ok: outcome.ok,
+      message: outcome.message,
+    });
+    return { ok: outcome.ok, message: outcome.message };
   }
 
   /** espera hasta que el agente se detenga. lo usa la CLI */

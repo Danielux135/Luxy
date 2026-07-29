@@ -12,6 +12,7 @@ import {
   logsTailArgsSchema,
   pickFolderArgsSchema,
   stopAgentArgsSchema,
+  approvalResolveArgsSchema,
 } from './ipc.js';
 
 describe('canales IPC', () => {
@@ -142,5 +143,119 @@ describe('protocolo con el proceso del agente', () => {
     const evento = { type: 'gateway.connected', at: new Date().toISOString() };
     expect(agentEventSchema.safeParse(evento).success).toBe(true);
     expect(hostResponseSchema.safeParse({ type: 'event', event: evento }).success).toBe(true);
+  });
+});
+
+describe('aprobaciones desde el escritorio', () => {
+  it('acepta una peticion bien formada', () => {
+    const parsed = approvalResolveArgsSchema.safeParse({
+      jobId: 'job-1',
+      shortId: 'LUX-A1B2',
+      action: 'commit',
+      projectAlias: 'demo',
+      worktreePath: 'C:/datos/worktrees/lux-a1b2',
+      branch: 'luxy/lux-a1b2-x',
+    });
+    expect(parsed.success).toBe(true);
+    // por defecto NO hay doble confirmacion: el push tendra que pedirla
+    expect(parsed.data?.confirmedTwice).toBe(false);
+  });
+
+  it('rechaza una accion que no existe', () => {
+    expect(
+      approvalResolveArgsSchema.safeParse({
+        jobId: 'j',
+        shortId: 's',
+        action: 'force_push',
+        projectAlias: 'demo',
+        worktreePath: 'C:/x',
+        branch: 'b',
+      }).success,
+    ).toBe(false);
+  });
+
+  it('acota las rutas y los textos que llegan del renderer', () => {
+    const base = {
+      jobId: 'j',
+      shortId: 's',
+      action: 'commit' as const,
+      projectAlias: 'demo',
+      branch: 'b',
+    };
+    expect(
+      approvalResolveArgsSchema.safeParse({ ...base, worktreePath: 'x'.repeat(2000) }).success,
+    ).toBe(false);
+    expect(
+      approvalResolveArgsSchema.safeParse({
+        ...base,
+        worktreePath: 'C:/x',
+        message: 'y'.repeat(1000),
+      }).success,
+    ).toBe(false);
+  });
+});
+
+describe('protocolo de aprobacion con el agente', () => {
+  it('el mensaje de aprobacion cumple el contrato del host', () => {
+    expect(
+      hostRequestSchema.safeParse({
+        type: 'approval',
+        requestId: 'r1',
+        approval: {
+          jobId: 'j',
+          shortId: 'LUX-1',
+          action: 'push',
+          projectAlias: 'demo',
+          worktreePath: 'C:/wt',
+          branch: 'luxy/x',
+          confirmedTwice: true,
+        },
+      }).success,
+    ).toBe(true);
+  });
+
+  it('rechaza una aprobacion sin worktree', () => {
+    expect(
+      hostRequestSchema.safeParse({
+        type: 'approval',
+        requestId: 'r1',
+        approval: { jobId: 'j', shortId: 's', action: 'commit', projectAlias: 'demo', branch: 'b' },
+      }).success,
+    ).toBe(false);
+  });
+
+  it('el evento de aprobacion resuelta cumple el contrato', () => {
+    expect(
+      agentEventSchema.safeParse({
+        type: 'approval.resolved',
+        at: new Date().toISOString(),
+        jobId: 'j',
+        shortId: 'LUX-1',
+        action: 'commit',
+        ok: true,
+        message: 'commit creado',
+      }).success,
+    ).toBe(true);
+  });
+
+  it('job.completed lleva worktree y rama para poder aprobar', () => {
+    // sin ellos, el escritorio no sabria sobre que actuar
+    const evento = {
+      type: 'job.completed',
+      at: new Date().toISOString(),
+      jobId: 'j',
+      shortId: 'LUX-1',
+      summary: 'hecho',
+      filesChanged: 2,
+      testsPassed: 3,
+      testsFailed: 0,
+      durationMs: 100,
+      worktreePath: 'C:/wt',
+      branch: 'luxy/x',
+      projectAlias: 'demo',
+    };
+    expect(agentEventSchema.safeParse(evento).success).toBe(true);
+    const { worktreePath: _sin, ...incompleto } = evento;
+    expect(agentEventSchema.safeParse(incompleto).success).toBe(false);
   });
 });
