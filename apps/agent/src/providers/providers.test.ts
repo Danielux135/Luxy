@@ -494,3 +494,22 @@ describe('claude: el prompt no puede ir en argv', () => {
     expect(args).toContain('--print');
   });
 });
+
+// -----------------------------------------------------------------------------
+// regresion: el error culpaba a un modelo que no se habia usado
+// -----------------------------------------------------------------------------
+describe('mensajes de error del proveedor http', () => {
+  it('un timeout del proxy no se llama "error interno"', () => {
+    const err = Object.assign(new Error('524'), { status: 524 });
+    const texto = describeHttpError(err, 'DeepSeek (DeepSeek-V4-Flash)');
+    expect(texto).toContain('tardo demasiado');
+    expect(texto).not.toContain('error interno');
+    // y se nombra el modelo que se uso de verdad
+    expect(texto).toContain('DeepSeek-V4-Flash');
+  });
+
+  it('un 500 de verdad sigue siendo un error interno', () => {
+    const err = Object.assign(new Error('500'), { status: 500 });
+    expect(describeHttpError(err, 'X')).toContain('error interno');
+  });
+});

@@ -172,7 +172,7 @@ export class HttpApiProvider implements ProviderExecution {
       { role: 'user', content: request.prompt },
     ];
 
-    request.onEvent({ type: 'phase', message: `consultando ${this.displayName}` });
+    request.onEvent({ type: 'phase', message: `consultando ${this.label(request)}` });
 
     try {
       const result = await retryWithBackoff(
@@ -189,6 +189,9 @@ export class HttpApiProvider implements ProviderExecution {
             if (error instanceof Error && error.name === 'AbortError') return false;
             if (request.signal.aborted) return false;
             const status = (error as { status?: number }).status;
+            // un 524/504 es un timeout del proxy: repetir la misma peticion
+            // lenta vuelve a colgarse igual, solo que tres veces
+            if (status === 524 || status === 504) return false;
             return status === undefined || status >= 500 || status === 429;
           },
         },
@@ -224,7 +227,7 @@ export class HttpApiProvider implements ProviderExecution {
       // se sugiere que hacer, en vez de "fallo tras 3 intentos"
       if (!request.signal.aborted && esTimeout(error)) {
         return this.failure(
-          `${this.displayName} no respondio en ${Math.round(this.requestTimeout(request) / 1000)} s. ` +
+          `${this.label(request)} no respondio en ${Math.round(this.requestTimeout(request) / 1000)} s. ` +
             `El modelo "${this.modelFor(request)}" puede estar saturado o caido en tu proveedor. ` +
             'Prueba otro modelo de la misma familia o vuelve a intentarlo mas tarde.',
         );
@@ -241,7 +244,7 @@ export class HttpApiProvider implements ProviderExecution {
           errorMessage: 'la ejecucion se cancelo desde Telegram',
         };
       }
-      return this.failure(redact(describeHttpError(error, this.displayName)));
+      return this.failure(redact(describeHttpError(error, this.label(request))));
     }
   }
 
@@ -256,7 +259,7 @@ export class HttpApiProvider implements ProviderExecution {
     request: ProviderRunRequest,
     agentic: AgenticContext,
   ): Promise<ProviderRunResult> {
-    request.onEvent({ type: 'phase', message: `${this.displayName} trabajando con herramientas` });
+    request.onEvent({ type: 'phase', message: `${this.label(request)} trabajando con herramientas` });
 
     try {
       const result = await runAgenticLoop(request.prompt, {
@@ -320,7 +323,7 @@ export class HttpApiProvider implements ProviderExecution {
       if (request.signal.aborted) {
         return { ...this.failure('trabajo cancelado'), cancelled: true };
       }
-      return this.failure(redact(describeHttpError(error, this.displayName)));
+      return this.failure(redact(describeHttpError(error, this.label(request))));
     }
   }
 
@@ -374,6 +377,18 @@ export class HttpApiProvider implements ProviderExecution {
       clearTimeout(timer);
       request.signal.removeEventListener('abort', onAbort);
     }
+  }
+
+  /**
+   * como se nombra el proveedor en los mensajes.
+   *
+   * displayName es el del PREDETERMINADO de la familia, asi que pedir
+   * /deepseek_flash y fallar producia "DeepSeek V4 Pro fallo": se culpaba a un
+   * modelo que no se habia usado. Aqui se nombra el que se uso de verdad.
+   */
+  private label(request: ProviderRunRequest): string {
+    const modelo = this.modelFor(request);
+    return modelo === this.config.model ? this.displayName : `${this.displayName} (${modelo})`;
   }
 
   /**
@@ -527,6 +542,15 @@ export function describeHttpError(error: unknown, displayName: string): string {
   }
   if (status === 429) {
     return `${displayName} esta limitando las peticiones. Intentalo mas tarde.`;
+  }
+  // 524 y 504 son timeouts del borde de Cloudflare delante del proveedor: el
+  // modelo tardo mas de lo que aguanta el proxy. No es un error interno y
+  // reintentar el mismo modelo lento no suele arreglarlo.
+  if (status === 524 || status === 504) {
+    return (
+      `${displayName} tardo demasiado y la conexion corto la peticion (${status}). ` +
+      'Es un modelo lento: prueba con uno mas rapido de la misma familia o repite mas tarde.'
+    );
   }
   if (status !== undefined && status >= 500) {
     return `${displayName} tuvo un error interno (${status}). Intentalo mas tarde.`;
