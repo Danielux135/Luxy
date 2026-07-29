@@ -56,8 +56,36 @@ export function resolveJobModel(job: ClaimedJob, config: AgentConfig): string | 
   if (job.provider === 'claude') return config.providers.claude.model;
   if (job.provider === 'codex') return config.providers.codex.model;
 
-  const http = config.providers.http.find((entry) => entry.id === job.provider);
+  // predeterminado de la familia segun el CATALOGO, que es la fuente de verdad
+  const familyDefault = resolveFamilyDefault(job.provider, config);
+  if (familyDefault !== undefined) return familyDefault;
+
+  // ultimo recurso: la configuracion heredada providers.http. Solo si esta
+  // habilitada y no es un valor de ejemplo; si no, se pedia a la API un modelo
+  // llamado literalmente "PENDIENTE_MODELO_DEEPSEEK" y fallaba tras reintentar.
+  const http = config.providers.http.find(
+    (entry) => entry.id === job.provider && entry.enabled && !/^PENDIENTE/i.test(entry.model),
+  );
   return http?.model;
+}
+
+/** apiModel predeterminado de una familia, segun el catalogo de las conexiones */
+export function resolveFamilyDefault(
+  family: string,
+  config: AgentConfig,
+): string | undefined {
+  for (const connection of config.connections) {
+    if (!connection.enabled) continue;
+    const registry = new ModelRegistry({
+      connections: [connection],
+      models: buildDefaultCatalog(connection.id),
+    });
+    const preferred = registry
+      .listByFamily(family as never)
+      .find((model) => model.defaultForFamily && model.enabled);
+    if (preferred !== undefined) return preferred.apiModel;
+  }
+  return undefined;
 }
 
 /**

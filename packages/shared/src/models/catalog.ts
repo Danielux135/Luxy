@@ -72,7 +72,10 @@ const RAW_CATALOG = [
   {
     id: 'deepseek-v4-pro',
     supportsNativeTools: true,
-    metadata: TOOLS_OK,
+    // medido el 2026-07-29: ~206 s para una respuesta trivial. No esta caido,
+    // es lento. Si prefieres rapidez, marca DeepSeek-V4-Flash como
+    // predeterminado de la familia y /deepseek lo usara sin cambiar el comando.
+    metadata: { ...TOOLS_OK_SLOW, observedLatencyMs: 206_000 },
     apiModel: 'DeepSeek-V4-Pro',
     displayName: 'DeepSeek V4 Pro',
     family: 'deepseek',

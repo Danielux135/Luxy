@@ -649,3 +649,70 @@ describe('resolveJobModel', () => {
     expect(resolveJobModel(job('claude', { model: '' }), config)).toBe('opus');
   });
 });
+
+// -----------------------------------------------------------------------------
+// regresion: /deepseek pedia a la API un modelo llamado PENDIENTE_MODELO_DEEPSEEK
+// -----------------------------------------------------------------------------
+describe('resolveJobModel con el catalogo', () => {
+  const conConexion = (httpModel: string, enabled: boolean) =>
+    agentConfigSchema.parse({
+      machineName: 'maquina',
+      gatewayUrl: 'https://gateway.example',
+      machineToken: 'token-de-maquina-suficientemente-largo',
+      connections: [
+        {
+          id: 'hcnsec',
+          displayName: 'API China',
+          baseUrl: 'https://api.example/v1',
+          protocol: 'openai',
+        },
+      ],
+      providers: {
+        claude: { enabled: true, model: 'opus' },
+        codex: { enabled: true },
+        http: [
+          {
+            id: 'deepseek',
+            displayName: 'DeepSeek',
+            baseUrl: 'https://api.example/v1',
+            model: httpModel,
+            apiKeyEnv: 'DEEPSEEK_API_KEY',
+            enabled,
+          },
+        ],
+      },
+    });
+
+  const trabajo = (provider: string) =>
+    ({ id: 'x', shortId: 'LUX-1', provider, projectAlias: 'p', prompt: 't', metadata: {} }) as any;
+
+  it('usa el predeterminado del catalogo, NO el providers.http de ejemplo', () => {
+    // esto es lo que fallaba: se enviaba "PENDIENTE_MODELO_DEEPSEEK" a la API
+    const config = conConexion('PENDIENTE_MODELO_DEEPSEEK', false);
+    expect(resolveJobModel(trabajo('deepseek'), config)).toBe('DeepSeek-V4-Pro');
+  });
+
+  it('ignora un providers.http desactivado aunque tenga un modelo real', () => {
+    const config = conConexion('modelo-viejo', false);
+    expect(resolveJobModel(trabajo('deepseek'), config)).toBe('DeepSeek-V4-Pro');
+  });
+
+  it('nunca devuelve un valor de ejemplo', () => {
+    for (const familia of ['deepseek', 'glm', 'qwen', 'kimi', 'step', 'minimax']) {
+      const modelo = resolveJobModel(trabajo(familia), conConexion('PENDIENTE_X', true));
+      expect(modelo ?? '').not.toMatch(/^PENDIENTE/i);
+    }
+  });
+
+  it('resuelve el predeterminado de cada familia', () => {
+    const config = conConexion('PENDIENTE_X', false);
+    expect(resolveJobModel(trabajo('kimi'), config)).toBe('Kimi-K2.6');
+    expect(resolveJobModel(trabajo('qwen'), config)).toBe('Qwen3.5-397B-A17B');
+    expect(resolveJobModel(trabajo('step'), config)).toBe('step-3.7-flash');
+  });
+
+  it('un modelo explicito sigue mandando sobre el predeterminado', () => {
+    const job = { ...trabajo('deepseek'), metadata: { model: 'DeepSeek-V4-Flash' } };
+    expect(resolveJobModel(job, conConexion('PENDIENTE_X', false))).toBe('DeepSeek-V4-Flash');
+  });
+});

@@ -341,7 +341,7 @@ describe('disponibilidad', () => {
 
   it('los modelos lentos quedan marcados como lentos, no como caidos', () => {
     // una primera medida con 45 s los dio por muertos: responden, pero tardan
-    for (const apiModel of ['glm-5.2', 'MiniMax-M3']) {
+    for (const apiModel of ['glm-5.2', 'MiniMax-M3', 'DeepSeek-V4-Pro']) {
       const model = CATALOG.find((entry) => entry.apiModel === apiModel);
       expect(model?.supportsNativeTools).toBe(true);
       expect(model?.metadata['slowResponse']).toBe(true);

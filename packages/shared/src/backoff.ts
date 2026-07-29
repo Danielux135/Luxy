@@ -81,8 +81,14 @@ export async function retryWithBackoff<T>(
     }
   }
 
+  // el motivo real del ultimo intento va en el mensaje: sin el, "fallo tras 3
+  // intentos" obliga a mirar los logs para saber que dijo la API
+  const detalle =
+    lastError instanceof Error && lastError.message.length > 0
+      ? `: ${lastError.message.slice(0, 300)}`
+      : '';
   throw new RetryError(
-    `la operacion fallo tras ${config.maxAttempts} intentos`,
+    `la operacion fallo tras ${config.maxAttempts} intentos${detalle}`,
     config.maxAttempts,
     lastError,
   );

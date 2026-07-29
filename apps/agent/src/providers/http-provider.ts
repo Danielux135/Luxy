@@ -26,6 +26,21 @@ import {
 import { runAgenticLoop, type LoopMessage, type LoopTurnResult } from './agentic-loop.js';
 import { parseNativeToolCalls } from './tool-protocol.js';
 
+/**
+ * techo de una peticion suelta.
+ *
+ * cinco minutos cubren de sobra a los modelos lentos medidos (glm-5.2 ~120 s,
+ * MiniMax-M3 ~240 s) sin dejar que uno colgado se coma la hora del trabajo.
+ */
+const MAX_REQUEST_TIMEOUT_MS = 300_000;
+
+/** true si el fallo fue por agotarse el tiempo, no por un rechazo de la API */
+function esTimeout(error: unknown): boolean {
+  if (error instanceof Error && error.name === 'AbortError') return true;
+  const causa = (error as { lastError?: unknown }).lastError;
+  return causa instanceof Error && causa.name === 'AbortError';
+}
+
 export class BudgetExceededError extends Error {
   constructor(message: string) {
     super(message);
@@ -169,6 +184,10 @@ export class HttpApiProvider implements ProviderExecution {
           signal: request.signal,
           // no se reintenta si la clave es invalida o la peticion es incorrecta
           shouldRetry: (error) => {
+            // un timeout o una cancelacion NO se reintentan: esperar tres veces
+            // lo mismo solo triplica el tiempo antes de decir que fallo
+            if (error instanceof Error && error.name === 'AbortError') return false;
+            if (request.signal.aborted) return false;
             const status = (error as { status?: number }).status;
             return status === undefined || status >= 500 || status === 429;
           },
@@ -201,6 +220,16 @@ export class HttpApiProvider implements ProviderExecution {
         usage,
       };
     } catch (error) {
+      // un timeout de la API no es un fallo de Luxy: se dice que modelo fue y
+      // se sugiere que hacer, en vez de "fallo tras 3 intentos"
+      if (!request.signal.aborted && esTimeout(error)) {
+        return this.failure(
+          `${this.displayName} no respondio en ${Math.round(this.requestTimeout(request) / 1000)} s. ` +
+            `El modelo "${this.modelFor(request)}" puede estar saturado o caido en tu proveedor. ` +
+            'Prueba otro modelo de la misma familia o vuelve a intentarlo mas tarde.',
+        );
+      }
+
       if (request.signal.aborted) {
         return {
           ok: false,
@@ -348,6 +377,17 @@ export class HttpApiProvider implements ProviderExecution {
   }
 
   /**
+   * techo de una sola peticion.
+   *
+   * request.timeoutMs es el del TRABAJO (por defecto una hora). Usarlo tal cual
+   * en cada llamada significa que un modelo colgado bloquea el trabajo entero
+   * sin decir nada. Se acota, dejando margen a los modelos lentos conocidos.
+   */
+  private requestTimeout(request: ProviderRunRequest): number {
+    return Math.min(request.timeoutMs, MAX_REQUEST_TIMEOUT_MS);
+  }
+
+  /**
    * modelo con el que hacer la peticion.
    *
    * request.model existia en el contrato desde el principio pero este proveedor
@@ -366,7 +406,7 @@ export class HttpApiProvider implements ProviderExecution {
   ): Promise<{ text: string; inputTokens: number; outputTokens: number }> {
     // timeout propio combinado con la cancelacion del trabajo
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), request.timeoutMs);
+    const timer = setTimeout(() => controller.abort(), this.requestTimeout(request));
     const onAbort = (): void => controller.abort();
     request.signal.addEventListener('abort', onAbort, { once: true });
 
