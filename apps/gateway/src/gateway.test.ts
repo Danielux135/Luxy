@@ -1,3 +1,4 @@
+import { TelegramClient } from './telegram.js';
 import { describe, it, expect, beforeEach } from 'vitest';
 import { SlidingWindowRateLimiter } from './ratelimit.js';
 import { Router } from './router.js';
@@ -257,5 +258,65 @@ describe('loadConfig', () => {
 
   it('rechaza una lista de chats sin ningun id valido', () => {
     expect(() => loadConfig({ ...BASE, TELEGRAM_ALLOWED_CHAT_IDS: 'abc,def' })).toThrow(EnvError);
+  });
+});
+
+// -----------------------------------------------------------------------------
+// regresion: los mensajes se veian con **asteriscos** literales
+// -----------------------------------------------------------------------------
+describe('formato de los mensajes de Telegram', () => {
+  /** cliente con un fetch falso que registra lo que se enviaria */
+  function clienteFalso(fallarConFormato = false) {
+    const enviados: Record<string, unknown>[] = [];
+    const original = globalThis.fetch;
+    globalThis.fetch = (async (_url: unknown, init: RequestInit) => {
+      const payload = JSON.parse(String(init.body)) as Record<string, unknown>;
+      enviados.push(payload);
+      // Telegram devuelve 400 cuando el marcado es invalido
+      if (fallarConFormato && payload.parse_mode !== undefined) {
+        return new Response(JSON.stringify({ ok: false, description: 'can\'t parse entities' }), {
+          status: 400,
+        });
+      }
+      return new Response(JSON.stringify({ ok: true, result: { message_id: 1 } }), { status: 200 });
+    }) as typeof fetch;
+    return { enviados, restaurar: () => { globalThis.fetch = original; } };
+  }
+
+  it('envia con parse_mode HTML y convierte la negrita', async () => {
+    const { enviados, restaurar } = clienteFalso();
+    try {
+      const cliente = new TelegramClient('token-de-prueba');
+      await cliente.sendMessage(1, 'defendiendo a **Luxy**');
+      expect(enviados[0]?.parse_mode).toBe('HTML');
+      expect(enviados[0]?.text).toContain('<b>Luxy</b>');
+      expect(String(enviados[0]?.text)).not.toContain('**');
+    } finally {
+      restaurar();
+    }
+  });
+
+  it('si Telegram rechaza el formato, reenvia en texto plano', async () => {
+    // el resultado de un trabajo no puede perderse por un asterisco
+    const { enviados, restaurar } = clienteFalso(true);
+    try {
+      const cliente = new TelegramClient('token-de-prueba');
+      const id = await cliente.sendMessage(1, 'algo con **formato**');
+      expect(id).toBe(1);
+      expect(enviados).toHaveLength(2);
+      expect(enviados[1]?.parse_mode).toBeUndefined();
+    } finally {
+      restaurar();
+    }
+  });
+
+  it('un texto sin formato se envia igual', async () => {
+    const { enviados, restaurar } = clienteFalso();
+    try {
+      await new TelegramClient('t').sendMessage(1, 'texto normal sin marcado');
+      expect(enviados[0]?.text).toBe('texto normal sin marcado');
+    } finally {
+      restaurar();
+    }
   });
 });

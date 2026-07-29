@@ -1,5 +1,7 @@
 // cliente de la bot api de telegram. solo salida: el worker nunca hace polling.
-import { splitMessage, redact, TELEGRAM_MAX_MESSAGE_LENGTH } from '@luxy/shared';
+import {
+  markdownToTelegramHtml,
+  hasBalancedTags, splitMessage, redact, TELEGRAM_MAX_MESSAGE_LENGTH } from '@luxy/shared';
 
 export interface InlineButton {
   text: string;
@@ -71,11 +73,21 @@ export class TelegramClient {
     let firstMessageId: number | null = null;
     for (let index = 0; index < chunks.length; index += 1) {
       const isLast = index === chunks.length - 1;
+      // el texto lo escribe un modelo: se convierte su markdown a HTML, que es
+      // el modo mas tolerante de Telegram. Si el resultado quedara con
+      // etiquetas sin cerrar -por ejemplo porque el troceado partio una-, se
+      // envia sin formato: perder el resultado de un trabajo por un asterisco
+      // seria mucho peor que verlo en texto plano.
+      const crudo = chunks[index] ?? '';
+      const html = markdownToTelegramHtml(crudo);
+      const usaHtml = hasBalancedTags(html);
+
       const payload: Record<string, unknown> = {
         chat_id: chatId,
-        text: chunks[index],
+        text: usaHtml ? html : crudo,
         disable_notification: options.disableNotification ?? false,
       };
+      if (usaHtml) payload.parse_mode = 'HTML';
       // los botones solo se adjuntan al ultimo fragmento
       if (isLast && options.replyMarkup) {
         payload.reply_markup = { inline_keyboard: options.replyMarkup };
@@ -83,7 +95,17 @@ export class TelegramClient {
       if (index === 0 && options.replyToMessageId) {
         payload.reply_to_message_id = options.replyToMessageId;
       }
-      const result = await this.call<{ message_id: number }>('sendMessage', payload);
+      let result: { message_id: number };
+      try {
+        result = await this.call<{ message_id: number }>('sendMessage', payload);
+      } catch (error) {
+        // ultimo recurso: reenviar sin formato. Un 400 por marcado invalido no
+        // puede costarle al usuario el resultado de su trabajo.
+        if (!usaHtml) throw error;
+        delete payload.parse_mode;
+        payload.text = crudo;
+        result = await this.call<{ message_id: number }>('sendMessage', payload);
+      }
       if (index === 0) firstMessageId = result.message_id;
     }
     return firstMessageId;
