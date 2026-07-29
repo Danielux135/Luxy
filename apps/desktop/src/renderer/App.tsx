@@ -21,7 +21,7 @@ const SECCIONES = [
 type SeccionId = (typeof SECCIONES)[number]['id'];
 
 export function App(): JSX.Element {
-  const { status, activity, pending, approve, busy, error, start, stop, restart } = useAgent();
+  const { status, activity, pending, approve, busy, error, hint, start, stop, restart } = useAgent();
   const { summary, loading, save, setSecret, deleteSecret, reload } = useConfig();
   const [seccion, setSeccion] = useState<SeccionId>('inicio');
   // el onboarding se abre solo la primera vez, y a mano desde Ajustes
@@ -49,7 +49,7 @@ export function App(): JSX.Element {
 
   return (
     <div className="app">
-      <StatusRail status={status} />
+      <StatusRail status={status} configuredMachine={summary.config?.machineName ?? null} />
 
       <nav className="nav" aria-label="Secciones">
         {SECCIONES.map((entrada) => (
@@ -84,6 +84,7 @@ export function App(): JSX.Element {
             configured={summary.configured}
             pending={pending}
             onApprove={(job, action, confirmedTwice) => void approve(job, action, confirmedTwice)}
+            agentHint={hint}
           />
         )}
         {seccion === 'trabajos' && <JobsPage activity={activity} />}

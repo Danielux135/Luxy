@@ -71,9 +71,18 @@ const RUN_STATE_LAMP: Record<string, 'true' | 'false' | 'busy' | 'fault'> = {
   stopped: 'false',
 };
 
-export function StatusRail({ status }: { status: AgentHostStatus }): JSX.Element {
+export function StatusRail({
+  status,
+  configuredMachine,
+}: {
+  status: AgentHostStatus;
+  /** nombre de config.json: se conoce aunque el agente este caido */
+  configuredMachine: string | null;
+}): JSX.Element {
   const connected = status.agent?.gatewayConnected ?? false;
-  const machine = status.agent?.machineName ?? 'sin configurar';
+  // decir "sin configurar" con un config.json valido delante era engañoso: el
+  // problema era el agente, no la configuracion
+  const machine = status.agent?.machineName ?? configuredMachine ?? 'sin configurar';
 
   return (
     <header className="status">

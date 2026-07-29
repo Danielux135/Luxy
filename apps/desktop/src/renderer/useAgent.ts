@@ -82,6 +82,8 @@ export function useAgent(): {
   ) => Promise<void>;
   busy: boolean;
   error: string | null;
+  /** que puede hacer el usuario cuando el agente no arranca */
+  hint: string | null;
   start: () => Promise<void>;
   stop: () => Promise<void>;
   restart: () => Promise<void>;
@@ -91,6 +93,7 @@ export function useAgent(): {
   const [pending, setPending] = useState<PendingJob[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [hint, setHint] = useState<string | null>(null);
   const nextId = useRef(0);
 
   useEffect(() => {
@@ -144,13 +147,23 @@ export function useAgent(): {
   }, []);
 
   const run = useCallback(
-    async (action: () => Promise<{ ok: true; value: AgentHostStatus } | { ok: false; error: string }>) => {
+    async (
+      action: () => Promise<
+        { ok: true; value: AgentHostStatus } | { ok: false; error: string; hint: string | null }
+      >,
+    ) => {
       setBusy(true);
       setError(null);
       try {
         const result = await action();
-        if (result.ok) setStatus(result.value);
-        else setError(result.error);
+        if (result.ok) {
+          setStatus(result.value);
+          setError(null);
+          setHint(null);
+        } else {
+          setError(result.error);
+          setHint(result.hint ?? null);
+        }
       } finally {
         setBusy(false);
       }
@@ -188,6 +201,7 @@ export function useAgent(): {
     approve,
     busy,
     error,
+    hint,
     start: () => run(() => window.luxy.startAgent()),
     stop: () => run(() => window.luxy.stopAgent()),
     restart: () => run(() => window.luxy.restartAgent()),

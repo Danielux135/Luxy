@@ -121,6 +121,22 @@ export function startHostEntry(port: ParentPort): void {
     });
   });
 
+  // un fallo no capturado mataba el proceso con codigo 1 sin decir nada. Ahora
+  // se avisa al proceso principal ANTES de morir, para que pueda explicarlo.
+  const reportFatal = (kind: string, error: unknown): void => {
+    const described = describeError(error);
+    logger.error(`${kind} en el proceso del agente`, described);
+    send({
+      type: 'event',
+      event: { type: 'agent.error', at: new Date().toISOString(), message: `${kind}: ${described.message}` },
+    });
+    // se le da un instante al mensaje antes de que el proceso termine
+    setTimeout(() => process.exit(1), 200);
+  };
+
+  process.on('uncaughtException', (error) => reportFatal('excepcion no capturada', error));
+  process.on('unhandledRejection', (reason) => reportFatal('promesa rechazada', reason));
+
   port.start?.();
   send({ type: 'ready' });
 }

@@ -40,6 +40,7 @@ export function HomePage({
   configured,
   pending,
   onApprove,
+  agentHint,
 }: {
   status: AgentHostStatus;
   activity: ActivityLine[];
@@ -51,6 +52,8 @@ export function HomePage({
   onStop: () => void;
   onRestart: () => void;
   configured: boolean;
+  /** pista accionable cuando el agente no arranca */
+  agentHint: string | null;
 }): JSX.Element {
   const agent = status.agent;
   const running = status.runState === 'running';
@@ -67,6 +70,7 @@ export function HomePage({
 
       {error !== null && <Notice tone="fault">{error}</Notice>}
       {status.lastError !== null && <Notice tone="fault">{status.lastError}</Notice>}
+      {agentHint !== null && <Notice tone="warn">{agentHint}</Notice>}
       {!configured && (
         <Notice tone="warn">
           Esta maquina todavia no esta registrada. Ve a Ajustes para completar la configuracion.

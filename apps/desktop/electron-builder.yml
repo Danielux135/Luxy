@@ -25,13 +25,17 @@ files:
   - package.json
 
 # el agente corre en un utilityProcess, que necesita un archivo REAL en disco:
-# dentro del asar no se puede forkear. Por eso su dist va como recurso aparte.
+# dentro del asar no se puede forkear.
+#
+# se copia el BUNDLE (out/agent/host-entry.js), no el dist de tsc. El dist trae
+# imports de @luxy/shared y zod sin resolver, y en la carpeta de instalacion no
+# hay ningun node_modules donde encontrarlos: el proceso moria con
+# ERR_MODULE_NOT_FOUND y codigo 1, sin escribir nada en el log.
 extraResources:
-  - from: ../agent/dist
+  - from: out/agent
     to: agent
     filter:
-      - '**/*.js'
-      - '!**/*.map'
+      - 'host-entry.js'
 
 asar: true
 

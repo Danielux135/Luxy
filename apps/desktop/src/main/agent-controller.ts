@@ -48,6 +48,28 @@ export class AgentController {
   private providerKeys: Record<string, string> = {};
   /** evita que dos ordenes simultaneas dejen dos procesos vivos */
   private spawning: Promise<void> | null = null;
+  /** ultimas lineas de la salida del hijo, para poder explicar un fallo */
+  private stderrTail: string[] = [];
+
+  /** guarda la salida del hijo, redactada y acotada */
+  private rememberStderr(text: string): void {
+    for (const line of text.split(/\r?\n/)) {
+      const clean = redact(line.trim());
+      if (clean.length === 0) continue;
+      this.stderrTail.push(clean);
+    }
+    if (this.stderrTail.length > 40) this.stderrTail = this.stderrTail.slice(-40);
+  }
+
+  /** causa concreta del fallo, para enseñarsela al usuario en vez de "codigo 1" */
+  private describeFailure(code: number | undefined): string {
+    const tail = this.stderrTail.filter((line) => /error|Error|ERR_|throw/.test(line));
+    const relevant = (tail.length > 0 ? tail : this.stderrTail).slice(-3).join(' | ');
+    if (relevant.length === 0) {
+      return `el proceso del agente termino con codigo ${code ?? 'desconocido'}`;
+    }
+    return `el proceso del agente termino con codigo ${code ?? 'desconocido'}: ${relevant.slice(0, 400)}`;
+  }
 
   constructor(private readonly options: AgentControllerOptions) {}
 
@@ -88,6 +110,8 @@ export class AgentController {
       );
     }
 
+    this.stderrTail = [];
+
     return new Promise((resolve, reject) => {
       const env: Record<string, string> = {};
       // se le pasa node.exe explicitamente: dentro de Electron process.execPath
@@ -96,9 +120,14 @@ export class AgentController {
 
       const child = utilityProcess.fork(this.options.entryPath, [], {
         serviceName: 'luxy-agent',
-        stdio: 'ignore',
+        // 'ignore' tiraba la salida del hijo, y con ella la causa de cualquier
+        // fallo de arranque: el usuario solo veia "codigo 1". Ahora se captura.
+        stdio: 'pipe',
         env: { ...process.env, ...env },
       });
+
+      child.stderr?.on('data', (chunk: Buffer) => this.rememberStderr(chunk.toString('utf8')));
+      child.stdout?.on('data', (chunk: Buffer) => this.rememberStderr(chunk.toString('utf8')));
 
       let settled = false;
       const readyTimer = setTimeout(() => {
@@ -149,21 +178,28 @@ export class AgentController {
       });
 
       child.on('exit', (code) => {
+        // si ya hay otro hijo vivo, este exit es de una instancia anterior y no
+        // debe tocar el estado actual
+        if (this.child !== null && this.child !== child) {
+          this.options.onLog('exit de una instancia anterior del agente, ignorado', { code });
+          return;
+        }
         this.child = null;
         this.lastStatus = STOPPED_STATUS;
         // nadie va a responder ya a lo que estuviera en vuelo
+        const cause = this.describeFailure(code ?? undefined);
         for (const [, waiting] of this.pending) {
           clearTimeout(waiting.timer);
-          waiting.reject(new AgentControllerError('el proceso del agente termino'));
+          waiting.reject(new AgentControllerError(cause, hintForFailure(this.stderrTail)));
         }
         this.pending.clear();
 
         if (!settled) {
           settled = true;
           clearTimeout(readyTimer);
-          reject(new AgentControllerError(`el proceso del agente termino con codigo ${code}`));
+          reject(new AgentControllerError(this.describeFailure(code ?? undefined), hintForFailure(this.stderrTail)));
         } else {
-          this.options.onLog('el proceso del agente termino', { code });
+          this.options.onLog('el proceso del agente termino', { code, causa: this.describeFailure(code ?? undefined) });
         }
       });
     });
@@ -261,6 +297,21 @@ export class AgentController {
   }
 }
 
+/** traduce los fallos conocidos a algo que el usuario pueda hacer */
+function hintForFailure(stderr: readonly string[]): string | null {
+  const text = stderr.join('\n');
+  if (text.includes('ERR_MODULE_NOT_FOUND')) {
+    return 'la instalacion de Luxy esta incompleta: falta el paquete del agente. Reinstala la aplicacion.';
+  }
+  if (text.includes('EADDRINUSE')) {
+    return 'el puerto de la interfaz local ya esta ocupado. Cierra la otra instancia de Luxy o desactiva la interfaz local en Ajustes.';
+  }
+  if (text.includes('ERR_UNHANDLED_REJECTION')) {
+    return 'revisa los registros de Luxy para ver el detalle.';
+  }
+  return null;
+}
+
 /** localiza el host-entry compilado del agente, en desarrollo y empaquetado */
 export function resolveAgentEntry(options: {
   isPackaged: boolean;
@@ -270,8 +321,9 @@ export function resolveAgentEntry(options: {
   if (options.isPackaged) {
     // se copia como extraResources para que no quede dentro del asar: el
     // utilityProcess necesita un archivo real en disco
-    return join(options.resourcesPath, 'agent', 'runtime', 'host-entry.js');
+    return join(options.resourcesPath, 'agent', 'host-entry.js');
   }
-  // en desarrollo appPath es apps/desktop, asi que el agente es su hermano
-  return join(options.appPath, '..', 'agent', 'dist', 'runtime', 'host-entry.js');
+  // en desarrollo se usa el mismo bundle que en produccion, para que lo que se
+  // prueba sea lo que se instala
+  return join(options.appPath, 'out', 'agent', 'host-entry.js');
 }

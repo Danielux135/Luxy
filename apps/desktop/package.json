@@ -7,9 +7,9 @@
   "main": "out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",
-    "build": "electron-vite build",
+    "build": "electron-vite build && vite build --config vite.agent.config.ts",
     "preview": "electron-vite preview",
-    "package": "electron-vite build && electron-builder --win --config electron-builder.yml"
+    "package": "npm run build && electron-builder --win --config electron-builder.yml"
   },
   "dependencies": {
     "@luxy/agent": "*",

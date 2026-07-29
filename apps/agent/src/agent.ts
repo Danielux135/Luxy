@@ -337,6 +337,19 @@ export class LuxyAgent {
         const wasConnected = this.gatewayConnected;
         this.gatewayConnected = false;
         failures += 1;
+
+        // un 401 no es un corte de red: el token no vale, y reintentar en bucle
+        // solo esconde el problema. Se dice lo que hay que hacer.
+        const status = (error as { status?: number }).status;
+        if (status === 401 || status === 403) {
+          const message =
+            'El token de la maquina no es valido o no se ha cargado. Vuelve a registrar la maquina.';
+          this.logger.error(message, { status });
+          this.emit({ type: 'agent.error', at: this.now(), message });
+          this.stopping = true;
+          break;
+        }
+
         // solo se avisa las primeras veces, para no llenar el log en un corte largo
         if (failures <= 3) this.logger.warn('fallo el heartbeat', describeError(error));
         if (wasConnected) {
@@ -391,7 +404,22 @@ export class LuxyAgent {
         }
       } catch (error) {
         failures += 1;
-        if (failures <= 3) this.logger.warn('fallo consultando trabajos', describeError(error));
+
+        // un 422 al reclamar no es un corte de red: el gateway no entiende lo
+        // que le mandamos, casi siempre porque esta desplegada una version
+        // anterior que no conoce las familias de modelos nuevas. Reintentar en
+        // bucle cada pocos segundos solo esconde el problema.
+        const status = (error as { status?: number }).status;
+        if (status === 422 && failures === 1) {
+          const message =
+            'El gateway rechaza la peticion del agente. Suele significar que el gateway ' +
+            'desplegado es de una version anterior y no reconoce alguna familia de modelos. ' +
+            'Vuelve a desplegar el gateway y aplica las migraciones pendientes.';
+          this.logger.error(message, { status, providers: this.availableProviders.join(', ') });
+          this.emit({ type: 'agent.error', at: this.now(), message });
+        } else if (failures <= 3) {
+          this.logger.warn('fallo consultando trabajos', describeError(error));
+        }
         await this.sleep(
           computeBackoffDelay(failures - 1, {
             baseDelayMs: this.config.pollIntervalMs,
