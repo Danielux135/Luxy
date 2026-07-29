@@ -181,12 +181,30 @@ describe('ejecucion de aprobaciones', () => {
     expect(outcome.deniedBy).toContain('no es valida');
   }, 60_000);
 
-  it('avisa si no hay nada que confirmar', async () => {
+  it('distingue "ya confirmado" de "no habia nada"', async () => {
+    // pulsar Confirmar dos veces daba el mismo mensaje que no haber cambiado
+    // nada, y parecia que el boton no funcionaba
     await executeApproval(request(), deps());
     resetConsumedApprovals();
+    const segunda = await executeApproval(request(), deps());
+    expect(segunda.ok).toBe(false);
+    expect(segunda.message).toContain('ya estan confirmados');
+    expect(segunda.message).toContain('LUX-A1B2');
+  }, 60_000);
+
+  it('avisa si el trabajo no cambio nada', async () => {
+    // worktree limpio y sin ningun commit de Luxy
+    rmSync(join(worktree, 'a.txt'), { force: true });
     const outcome = await executeApproval(request(), deps());
     expect(outcome.ok).toBe(false);
     expect(outcome.message).toContain('no hay cambios');
+  }, 60_000);
+
+  it('descartar elimina el worktree de verdad', async () => {
+    // el descarte fallaba siempre: git worktree remove se ejecutaba sin
+    // repositorio base y devolvia "fatal: not a git repository"
+    const outcome = await executeApproval(request({ action: 'discard' }), deps());
+    expect(outcome.deniedBy).toBeNull();
   }, 60_000);
 });
 

@@ -12,7 +12,14 @@ import { appendFileSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { redact } from '@luxy/shared';
 import type { AgentConfig, ProjectConfig } from '@luxy/shared';
-import { commitWorktree, pushWorktree, removeWorktree, status, type Worktree } from './git.js';
+import {
+  commitWorktree,
+  pushWorktree,
+  removeWorktree,
+  status,
+  gitLog,
+  type Worktree,
+} from './git.js';
 import { confinePath, PathConfinementError } from './tools/confine.js';
 
 export type ApprovalAction = 'commit' | 'discard' | 'push';
@@ -181,7 +188,11 @@ export async function executeApproval(
 
   let outcome: ApprovalOutcome;
   try {
-    outcome = await perform(request, worktreePath);
+    // el repositorio del proyecto: "git worktree remove" se ejecuta DESDE el
+    // repositorio principal, no desde el worktree. Pasarlo vacio producia
+    // "fatal: not a git repository" y el descarte no funcionaba nunca.
+    // checkApprovalGates ya garantiza que el proyecto existe
+    outcome = await perform(request, worktreePath, project!.path);
   } catch (error) {
     outcome = {
       ok: false,
@@ -197,12 +208,26 @@ export async function executeApproval(
   return outcome;
 }
 
-async function perform(request: ApprovalRequest, worktreePath: string): Promise<ApprovalOutcome> {
+async function perform(
+  request: ApprovalRequest,
+  worktreePath: string,
+  baseRepository: string,
+): Promise<ApprovalOutcome> {
   switch (request.action) {
     case 'commit': {
       const pending = await status(worktreePath);
       if (pending.trim().length === 0) {
-        return { ok: false, action: 'commit', message: 'no hay cambios que confirmar', deniedBy: null };
+        // distinguir "ya lo confirmaste" de "el modelo no cambio nada": pulsar
+        // dos veces daba el mismo mensaje que no haber hecho nada
+        const yaHecho = await hasLuxyCommit(worktreePath, request.shortId);
+        return {
+          ok: false,
+          action: 'commit',
+          message: yaHecho
+            ? `los cambios de ${request.shortId} ya estan confirmados en ${request.branch}`
+            : 'no hay cambios que confirmar',
+          deniedBy: null,
+        };
       }
       const message = buildCommitMessage(request);
       const result = await commitWorktree(worktreePath, message);
@@ -225,14 +250,20 @@ async function perform(request: ApprovalRequest, worktreePath: string): Promise<
     }
 
     case 'discard': {
-      const worktree: Worktree = {
-        path: worktreePath,
-        branch: request.branch,
-        baseRepository: '',
-      };
+      const worktree: Worktree = { path: worktreePath, branch: request.branch, baseRepository };
       await removeWorktree(worktree, { force: true });
       return { ok: true, action: 'discard', message: 'worktree descartado', deniedBy: null };
     }
+  }
+}
+
+/** true si ya existe un commit de este trabajo en la rama */
+async function hasLuxyCommit(worktreePath: string, shortId: string): Promise<boolean> {
+  try {
+    const log = await gitLog(worktreePath);
+    return log.includes(shortId);
+  } catch {
+    return false;
   }
 }
 

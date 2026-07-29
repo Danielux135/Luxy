@@ -201,6 +201,12 @@ export function PendingApprovals({
                 {job.testsFailed > 0 ? ` · ${job.testsFailed} pruebas fallidas` : ' · pruebas en verde'}
               </div>
               <div className="list__meta mono scroller">{job.branch}</div>
+              {job.lastAction !== null && (
+                <div className="list__meta" data-tone={job.lastAction.ok ? 'ok' : 'fault'}>
+                  <Tag tone={job.lastAction.ok ? 'ok' : 'fault'}>{job.lastAction.action}</Tag>{' '}
+                  {job.lastAction.message}
+                </div>
+              )}
             </div>
 
             {confirmingPush === job.jobId ? (
@@ -225,10 +231,10 @@ export function PendingApprovals({
               <>
                 <button
                   className="btn btn--primary"
-                  disabled={busy}
+                  disabled={busy || job.committed}
                   onClick={() => onApprove(job, 'commit')}
                 >
-                  Confirmar
+                  {job.committed ? 'Confirmado' : 'Confirmar'}
                 </button>
                 <button
                   className="btn btn--danger btn--quiet"

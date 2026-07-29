@@ -159,6 +159,12 @@ export interface DiffSummary {
  * recoge el estado del worktree tras ejecutar el proveedor.
  * el diff completo se recorta: telegram no puede con diffs enormes.
  */
+/** ultimos mensajes de commit de la rama del worktree */
+export async function gitLog(worktreePath: string, count = 5): Promise<string> {
+  const result = await git(['log', `-${count}`, '--oneline'], worktreePath);
+  return result.stdout;
+}
+
 export async function collectDiff(worktreePath: string, maxDiffBytes = 60_000): Promise<DiffSummary> {
   // se incluyen los archivos nuevos para que aparezcan en el diff
   await git(['add', '-A', '--intent-to-add'], worktreePath).catch(() => undefined);

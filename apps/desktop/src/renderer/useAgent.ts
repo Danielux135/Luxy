@@ -29,6 +29,10 @@ export interface PendingJob {
   filesChanged: number;
   testsFailed: number;
   at: string;
+  /** resultado de la ultima accion pedida sobre este trabajo */
+  lastAction: { action: 'commit' | 'discard' | 'push'; ok: boolean; message: string } | null;
+  /** true una vez confirmado: no tiene sentido volver a confirmar */
+  committed: boolean;
 }
 
 function describe(event: AgentEvent): string | null {
@@ -123,12 +127,30 @@ export function useAgent(): {
             filesChanged: event.filesChanged,
             testsFailed: event.testsFailed,
             at: event.at,
+            lastAction: null,
+            committed: false,
           },
         ]);
       }
-      // resuelto: commit hecho o cambios descartados, ya no hay nada que decidir
-      if (event.type === 'approval.resolved' && event.ok && event.action !== 'commit') {
-        setPending((previous) => previous.filter((job) => job.jobId !== event.jobId));
+      // el resultado se PINTA siempre. Antes no se mostraba nada al confirmar,
+      // asi que parecia que el boton no hacia nada y se pulsaba una y otra vez.
+      if (event.type === 'approval.resolved') {
+        if (event.ok && event.action !== 'commit') {
+          // descartado o publicado: ya no hay nada que decidir
+          setPending((previous) => previous.filter((job) => job.jobId !== event.jobId));
+        } else {
+          setPending((previous) =>
+            previous.map((job) =>
+              job.jobId === event.jobId
+                ? {
+                    ...job,
+                    lastAction: { action: event.action, ok: event.ok, message: event.message },
+                    committed: job.committed || (event.ok && event.action === 'commit'),
+                  }
+                : job,
+            ),
+          );
+        }
       }
 
       const text = describe(event);
