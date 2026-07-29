@@ -55,6 +55,8 @@ export const appInfoSchema = z.object({
   logsDirectory: z.string(),
   /** true si safeStorage puede cifrar en este equipo */
   encryptionAvailable: z.boolean(),
+  /** huella del bundle del agente en marcha; null si no ha arrancado */
+  agentBuild: z.string().nullable(),
 });
 
 export type AppInfo = z.infer<typeof appInfoSchema>;

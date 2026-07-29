@@ -236,6 +236,9 @@ export function SettingsPage({
                 <div className="list__meta mono">
                   Electron {info.electronVersion} · Node {info.nodeVersion} · {info.platform}
                 </div>
+                <div className="list__meta mono scroller">
+                  agente: {info.agentBuild ?? 'sin arrancar'}
+                </div>
               </div>
               <Tag tone={info.encryptionAvailable ? 'ok' : 'fault'}>
                 {info.encryptionAvailable ? 'cifrado disponible' : 'sin cifrado'}

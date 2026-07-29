@@ -50,6 +50,13 @@ export class AgentController {
   private spawning: Promise<void> | null = null;
   /** ultimas lineas de la salida del hijo, para poder explicar un fallo */
   private stderrTail: string[] = [];
+  /** huella del bundle del agente que se esta ejecutando de verdad */
+  private agentBuild: string | null = null;
+
+  /** identifica el build del agente en marcha, para detectar una instalacion vieja */
+  getAgentBuild(): string | null {
+    return this.agentBuild;
+  }
 
   /** guarda la salida del hijo, redactada y acotada */
   private rememberStderr(text: string): void {
@@ -151,6 +158,8 @@ export class AgentController {
 
         switch (parsed.data.type) {
           case 'ready':
+            this.agentBuild = parsed.data.build ?? null;
+            this.options.onLog('agente listo', { build: this.agentBuild });
             if (!settled) {
               settled = true;
               clearTimeout(readyTimer);

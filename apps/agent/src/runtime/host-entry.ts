@@ -6,6 +6,9 @@
 //
 // se comunica por process.parentPort (utilityProcess de Electron). si no hay
 // parentPort, el modulo no hace nada: asi importarlo desde un test es inocuo.
+import { createHash } from 'node:crypto';
+import { readFileSync, statSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { agentConfigSchema, hostRequestSchema } from '@luxy/shared';
 import type { AgentConfig, HostRequest, HostResponse } from '@luxy/shared';
 import { AgentHost } from './host.js';
@@ -28,6 +31,18 @@ function getParentPort(): ParentPort | null {
   if (candidate === undefined || candidate === null) return null;
   const port = candidate as ParentPort;
   return typeof port.postMessage === 'function' && typeof port.on === 'function' ? port : null;
+}
+
+/** huella corta del propio bundle: identifica que build se esta ejecutando */
+function buildFingerprint(): string {
+  try {
+    const file = fileURLToPath(import.meta.url);
+    const stats = statSync(file);
+    const hash = createHash('sha256').update(readFileSync(file)).digest('hex').slice(0, 12);
+    return `${hash}@${stats.mtime.toISOString().slice(0, 16)}`;
+  } catch {
+    return 'desconocido';
+  }
 }
 
 export function startHostEntry(port: ParentPort): void {
@@ -138,7 +153,7 @@ export function startHostEntry(port: ParentPort): void {
   process.on('unhandledRejection', (reason) => reportFatal('promesa rechazada', reason));
 
   port.start?.();
-  send({ type: 'ready' });
+  send({ type: 'ready', build: buildFingerprint() });
 }
 
 const parentPort = getParentPort();

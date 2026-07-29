@@ -84,8 +84,27 @@ describe('informacion de la aplicacion', () => {
       platform: 'win32',
       logsDirectory: 'C:\\datos\\logs',
       encryptionAvailable: true,
+      agentBuild: 'a1b2c3d4e5f6@2026-07-29T11:00',
     });
     expect(typeof info.encryptionAvailable).toBe('boolean');
+    // la huella identifica que build del agente corre, no es un secreto
+    expect(info.agentBuild).not.toMatch(/sk-|token/i);
+  });
+
+  it('expone la huella del agente para detectar una instalacion vieja', () => {
+    // se añadio despues de regenerar el instalador sin reinstalarlo: la
+    // aplicacion seguia con el agente antiguo y el fallo "arreglado" volvia
+    expect(Object.keys(appInfoSchema.shape)).toContain('agentBuild');
+    const sinArrancar = appInfoSchema.parse({
+      appVersion: '0.1.0',
+      electronVersion: '43.2.0',
+      nodeVersion: '22.0.0',
+      platform: 'win32',
+      logsDirectory: 'C:/datos/logs',
+      encryptionAvailable: true,
+      agentBuild: null,
+    });
+    expect(sinArrancar.agentBuild).toBeNull();
   });
 });
 

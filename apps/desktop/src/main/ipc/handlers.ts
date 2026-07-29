@@ -127,6 +127,7 @@ export function registerIpcHandlers(context: HandlerContext): void {
     platform: process.platform,
     logsDirectory: context.logsDirectory,
     encryptionAvailable: safeStorage.isEncryptionAvailable(),
+    agentBuild: context.controller.getAgentBuild(),
   }));
 
   handle(IPC_INVOKE.agentStatus, emptyArgsSchema, () => context.controller.getStatus());

@@ -55,7 +55,17 @@ export type HostRequest = z.infer<typeof hostRequestSchema>;
 
 /** mensajes del agente hacia el proceso principal */
 export const hostResponseSchema = z.discriminatedUnion('type', [
-  z.object({ type: z.literal('ready') }),
+  z.object({
+    type: z.literal('ready'),
+    /**
+     * huella del bundle del agente.
+     *
+     * existe porque una vez se regenero el instalador y no se reinstalo: la
+     * aplicacion seguia ejecutando el agente antiguo y el fallo "arreglado"
+     * reaparecia identico. Con esto se ve de un vistazo que build corre.
+     */
+    build: z.string().max(64).optional(),
+  }),
   z.object({
     type: z.literal('ack'),
     requestId: z.string(),
