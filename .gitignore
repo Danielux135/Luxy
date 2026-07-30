@@ -24,3 +24,6 @@ config.local.json
 logs/
 *.log
 .luxy-state/
+
+# scripts de medicion contra la API real: se ejecutan a mano, no se versionan
+*.test-manual.mts
