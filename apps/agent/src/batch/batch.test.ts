@@ -327,6 +327,43 @@ describe('runBatchJob', () => {
     expect(JSON.parse(salida[9]!)).toMatchObject({ __row: 9, nombre: 'PRODUCTO 9' });
   });
 
+  it('el __row lo pone el CODIGO: un modelo que devuelve indices falsos no manda', async () => {
+    // PASO DE VERDAD. Se escribia `{ __row: calculado, ...fila }`, asi que el
+    // spread sobrescribia el indice con la copia del modelo. Como el prompt
+    // numeraba mal, los cuatro lotes salieron con los indices 0-4: veinte
+    // registros escritos y solo cinco indices distintos. La salida no se podia
+    // conciliar con la entrada, que es el unico motivo de tener un indice.
+    const mentiroso: BatchModel = {
+      // devuelve SIEMPRE __row 0..n, ignorando en que lote va
+      process: async (rows) =>
+        JSON.stringify({
+          results: rows.map((fila, posicion) => ({ __row: posicion, id: fila.id })),
+        }),
+    };
+
+    await runBatchJob(opciones(entrada(20), 5), mentiroso, hooks());
+
+    const salida = readFileSync(join(raiz, 'out.jsonl'), 'utf8')
+      .trim()
+      .split('\n')
+      .map((linea) => JSON.parse(linea) as { __row: number });
+
+    expect(salida).toHaveLength(20);
+    // 20 indices distintos, 0..19, aunque el modelo dijera otra cosa
+    expect(new Set(salida.map((fila) => fila.__row)).size).toBe(20);
+    expect(salida.map((fila) => fila.__row)).toEqual([...Array(20).keys()]);
+  });
+
+  it('le dice al modelo desde que indice va el lote', async () => {
+    // sin esto el prompt numeraba todos los lotes desde 0
+    const model = modeloBueno();
+    await runBatchJob(opciones(entrada(10), 5), model, hooks());
+
+    const llamadas = (model.process as ReturnType<typeof vi.fn>).mock.calls;
+    expect(llamadas[0]![2]).toBe(0);
+    expect(llamadas[1]![2]).toBe(5);
+  });
+
   it('REANUDA por donde toca: la segunda vez no vuelve a llamar al modelo', async () => {
     const path = entrada(10);
     const primera = modeloBueno();

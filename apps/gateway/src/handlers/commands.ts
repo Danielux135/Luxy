@@ -18,6 +18,7 @@ import {
   machineSupportsProvider,
   MAX_PROMPT_LENGTH,
   categoryOfApiModel,
+  splitBatchPrompt,
   commandForAttachment,
 } from '@luxy/shared';
 import type { Job, Machine, ProviderId, JobAttachment } from '@luxy/shared';
@@ -77,6 +78,7 @@ const HELP_TEXT = [
   '/step | /step_37 | /step_35 | /step_35_2603',
   '/kat | /kat_v25',
   '/auto <proyecto> <tarea> - Luxy elige el modelo',
+  '/batch <proyecto> <archivo> <tarea> - procesa un archivo de datos por lotes',
   '',
   'Audio e imagen:',
   '/audio_chat, /speak, /transcribe, /voice, /image_edit',
@@ -146,15 +148,20 @@ async function dispatchParsedCommand(
       };
     case 'control':
       return handleControlCommand(context, parsed.command, parsed.argument);
-    case 'task':
+    case 'task': {
+      // /batch lleva la ruta del archivo delante de la instruccion
+      const lotes = parsed.command === 'batch' ? splitBatchPrompt(parsed.prompt) : null;
+
       return createJobFromRequest(context, {
         provider: parsed.provider,
         // apiModel exacto cuando el comando apunta a un modelo concreto
         model: parsed.model,
         projectAlias: parsed.projectAlias,
-        prompt: parsed.prompt,
+        prompt: lotes === null ? parsed.prompt : lotes.instruction,
         explicit: parsed.provider !== null,
+        ...(lotes === null ? {} : { batch: { file: lotes.file } }),
       });
+    }
     default:
       return null;
   }
@@ -357,6 +364,14 @@ export interface JobRequest {
   projectAlias: string;
   prompt: string;
   explicit: boolean;
+  /**
+   * trabajo por lotes: recorre un archivo de datos del proyecto.
+   *
+   * la ruta viaja SIN validar a proposito. Quien decide si es aceptable es
+   * confinePath en la maquina, contra la carpeta del proyecto: el gateway no
+   * sabe que hay en ese disco, asi que no puede ser el que autorice.
+   */
+  batch?: { file: string };
 }
 
 /**
@@ -484,7 +499,7 @@ async function createJobFromRequest(
       prompt: request.prompt,
       // no entra en la cola hasta que el usuario elija maquina
       status: 'waiting_for_machine',
-      metadata: buildMetadata(context, routerReason, request.explicit, request.model ?? null),
+      metadata: buildMetadata(context, routerReason, request.explicit, request.model ?? null, request.batch),
     });
     return {
       text: [
@@ -512,7 +527,7 @@ async function createJobFromRequest(
     projectAlias: request.projectAlias,
     prompt: request.prompt,
     status: 'queued',
-    metadata: buildMetadata(context, routerReason, request.explicit, request.model ?? null),
+    metadata: buildMetadata(context, routerReason, request.explicit, request.model ?? null, request.batch),
   });
 
   const text = renderJobCreated({
@@ -547,8 +562,11 @@ function buildMetadata(
   routerReason: string | null,
   explicit: boolean,
   model: string | null,
+  batch?: { file: string },
 ): Record<string, unknown> {
   const metadata: Record<string, unknown> = { providerExplicit: explicit };
+  // el agente lee metadata.batch para saber que esto es un trabajo por lotes
+  if (batch !== undefined) metadata.batch = batch;
   // el adjunto viaja por id: los bytes los sirve el gateway cuando el agente
   // los pida, porque el agente no habla con Telegram
   if (context.attachment) metadata.attachment = context.attachment;

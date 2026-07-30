@@ -11,6 +11,14 @@ import type {
 import { redact, ModelRegistry, buildDefaultCatalog } from '@luxy/shared';
 import { ToolExecutor } from './tools/executor.js';
 import { findMediaModel, runMediaJob } from './media-runner.js';
+import { runBatchJob } from './batch/runner.js';
+import { providerBatchModel } from './batch/model.js';
+import {
+  readBatchRequest,
+  resolveBatchPaths,
+  renderBatchSummary,
+  BatchSetupError,
+} from './batch/job.js';
 import {
   snapshotManifests,
   detectManifestChanges,
@@ -207,6 +215,122 @@ function startProgressTicker(
   };
 }
 
+/**
+ * ejecuta un trabajo por lotes.
+ *
+ * no crea worktree ni ejecuta pruebas: no toca el proyecto, solo lee un archivo
+ * de datos y escribe los resultados en la carpeta de Luxy.
+ */
+async function runBatchOutcome(
+  job: ClaimedJob,
+  request: NonNullable<ReturnType<typeof readBatchRequest>>,
+  provider: ProviderExecution,
+  deps: JobRunnerDeps,
+  signal: AbortSignal,
+  elapsed: () => number,
+): Promise<JobOutcome> {
+  const project = deps.config.projects[job.projectAlias];
+  if (project === undefined) {
+    return {
+      kind: 'failed',
+      errorMessage: `el proyecto "${job.projectAlias}" no esta configurado en esta maquina`,
+      hasLocalChanges: false,
+      worktreePath: null,
+      durationMs: elapsed(),
+    };
+  }
+
+  let paths;
+  try {
+    paths = resolveBatchPaths(request, {
+      projectPath: project.path,
+      shortId: job.shortId,
+    });
+  } catch (error) {
+    if (error instanceof BatchSetupError) {
+      return {
+        kind: 'failed',
+        errorMessage: error.message,
+        hasLocalChanges: false,
+        worktreePath: null,
+        durationMs: elapsed(),
+      };
+    }
+    throw error;
+  }
+
+  const megas = (paths.inputBytes / 1024 / 1024).toFixed(1);
+  deps.emit(
+    'phase',
+    `leyendo ${request.file} (${megas} MB) de ${paths.batchSize} en ${paths.batchSize}`,
+  );
+  deps.emit('log', `resultados en ${paths.outputPath}`);
+
+  const outcome = await runBatchJob(
+    {
+      inputPath: paths.inputPath,
+      format: paths.format,
+      outputPath: paths.outputPath,
+      checkpointPath: paths.checkpointPath,
+      batchSize: paths.batchSize,
+      instruction: job.prompt,
+      ...(request.maxRows === undefined ? {} : { maxRows: request.maxRows }),
+    },
+    providerBatchModel(provider, {
+      workingDirectory: project.path,
+      timeoutMs: deps.config.jobTimeoutMs,
+      signal,
+      ...(resolveJobModel(job, deps.config) === undefined
+        ? {}
+        : { model: resolveJobModel(job, deps.config)! }),
+    }),
+    {
+      signal,
+      onProgress: (progress) => {
+        if (progress.status === 'failed') {
+          deps.emit('warning', `lote ${progress.batch} fallo: ${progress.error ?? 'sin detalle'}`);
+          return;
+        }
+        if (progress.status === 'skipped') return;
+        deps.emit(
+          'phase',
+          `lote ${progress.batch + 1}: registros ${progress.from}-${progress.to} hechos`,
+        );
+      },
+    },
+  );
+
+  if (signal.aborted) return await buildCancelledOutcome(null, elapsed());
+
+  // un trabajo con TODOS los lotes fallidos no se presenta como terminado
+  if (outcome.done === 0 && outcome.failed > 0) {
+    return {
+      kind: 'failed',
+      errorMessage: renderBatchSummary(outcome, paths),
+      hasLocalChanges: false,
+      worktreePath: null,
+      durationMs: elapsed(),
+    };
+  }
+
+  return {
+    kind: 'completed',
+    result: {
+      summary: renderBatchSummary(outcome, paths),
+      filesChanged: 0,
+      // los lotes no ejecutan pruebas del proyecto
+      testsPassed: 0,
+      testsFailed: outcome.failed,
+      durationMs: elapsed(),
+      diffStat: null,
+      branch: null,
+      worktreePath: null,
+      sessionId: null,
+      testLogs: [],
+    },
+  };
+}
+
 /** envuelve un trabajo de medios en el JobOutcome que espera el agente */
 async function runMediaOutcome(
   job: ClaimedJob,
@@ -287,6 +411,9 @@ export async function runJob(
       return await runMediaOutcome(job, mediaModel, deps, signal, elapsed);
     }
 
+    // 1c. trabajo por lotes: recorre un archivo de datos, no edita el proyecto
+    const batchRequest = readBatchRequest(job.metadata);
+
     // 2. obtener el proveedor
     const provider = deps.getProvider(job.provider);
     if (!provider) {
@@ -354,6 +481,10 @@ export async function runJob(
     // se deja constancia de QUE se va a ejecutar antes de hacerlo: cuando
     // /deepseek acababa en Claude Code no habia forma de verlo hasta que
     // fallaba con un error de Claude.
+    if (batchRequest !== null) {
+      return await runBatchOutcome(job, batchRequest, provider, deps, signal, elapsed);
+    }
+
     const modeloElegido = resolveJobModel(job, deps.config);
     deps.emit(
       'phase',

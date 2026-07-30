@@ -29,6 +29,8 @@ export type ControlCommand = (typeof CONTROL_COMMANDS)[number];
 export const TASK_COMMANDS: readonly string[] = [
   ...PROVIDER_IDS,
   'auto',
+  // recorre un archivo de datos por lotes en vez de tocar el proyecto
+  'batch',
   ...MODEL_TASK_COMMANDS.filter((alias) => !(PROVIDER_IDS as readonly string[]).includes(alias)),
 ];
 export type TaskCommand = string;
@@ -330,4 +332,47 @@ export function parseNaturalMention(
     projectAlias: found[0] ?? null,
     prompt: text.trim(),
   };
+}
+
+// -----------------------------------------------------------------------------
+// trabajos por lotes
+// -----------------------------------------------------------------------------
+
+/**
+ * separa "<archivo> <instruccion>" del prompt de /batch.
+ *
+ * la ruta la escribe el usuario y es dato NO confiable: aqui solo se separa y se
+ * rechaza lo evidente. Quien decide si la ruta es aceptable es confinePath en el
+ * agente, contra la carpeta del proyecto. Esta funcion NO es la barrera.
+ */
+export function splitBatchPrompt(prompt: string): { file: string; instruction: string } {
+  const texto = prompt.trim();
+  const separador = texto.search(/\s/);
+  if (separador === -1) {
+    throw new CommandParseError(
+      'falta la instruccion',
+      'formato: /batch <proyecto> <archivo> <que hacer con cada registro>',
+    );
+  }
+
+  const file = texto.slice(0, separador);
+  const instruction = texto.slice(separador).trim();
+
+  if (instruction.length === 0) {
+    throw new CommandParseError(
+      'falta la instruccion',
+      'formato: /batch <proyecto> <archivo> <que hacer con cada registro>',
+    );
+  }
+  // una ruta absoluta o un esquema de red no se separa ni se intenta: el usuario
+  // se ha equivocado de idea, y decirlo aqui es mas claro que un error de
+  // confinamiento despues
+  if (/^[a-zA-Z]:[\\/]|^[\\/]{2}|^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(file)) {
+    throw new CommandParseError(
+      'la ruta debe ser relativa al proyecto',
+      'ejemplo: /batch test datos/productos.csv ordena la descripcion',
+    );
+  }
+
+  return { file, instruction };
 }

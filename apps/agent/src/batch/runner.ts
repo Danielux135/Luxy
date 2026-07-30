@@ -49,8 +49,13 @@ export const batchAnswerSchema = z.object({
 });
 
 export interface BatchModel {
-  /** procesa un lote. debe devolver un registro por cada registro de entrada */
-  process(rows: Record<string, unknown>[], instruction: string): Promise<string>;
+  /**
+   * procesa un lote. debe devolver un registro por cada registro de entrada.
+   *
+   * `from` es el indice del primer registro. Hace falta para que el prompt
+   * numere bien: sin el, todos los lotes se numeraban desde 0.
+   */
+  process(rows: Record<string, unknown>[], instruction: string, from: number): Promise<string>;
 }
 
 export interface BatchOutcome {
@@ -117,7 +122,7 @@ export async function runBatchJob(
 
     const inicio = Date.now();
     try {
-      const respuesta = await model.process(recordset.rows, options.instruction);
+      const respuesta = await model.process(recordset.rows, options.instruction, recordset.from);
       const resultados = parseBatchAnswer(respuesta, recordset.rows.length);
 
       // los resultados se escriben ANTES de apuntar el lote como hecho: si el
@@ -251,8 +256,15 @@ function extractJson(respuesta: string): string | null {
 /**
  * escribe los resultados anadiendo al final, en JSONL.
  *
- * se anade el indice del registro de origen para poder conciliar la salida con
- * la entrada despues, que con dos giga de datos no es opcional.
+ * EL ORDEN DE LAS CLAVES NO ES COSMETICO: `__row` va DESPUES del spread, asi que
+ * el indice que calcula el codigo gana al que devuelve el modelo.
+ *
+ * Al reves (`{ __row: calculado, ...fila }`) el modelo sobrescribia el indice
+ * con su propia copia, y como el prompt numeraba mal, los cuatro lotes salieron
+ * con los indices 0-4. Veinte registros escritos y solo cinco indices
+ * distintos: la salida era imposible de conciliar con la entrada. Es el mismo
+ * error contra el que existe el checkpoint, fiarse de la contabilidad del
+ * modelo, cometido aqui dentro.
  */
 function appendResults(
   path: string,
@@ -260,7 +272,7 @@ function appendResults(
   resultados: Record<string, unknown>[],
 ): void {
   const lineas = resultados
-    .map((fila, posicion) => JSON.stringify({ __row: desde + posicion, ...fila }))
+    .map((fila, posicion) => JSON.stringify({ ...fila, __row: desde + posicion }))
     .join('\n');
   appendFileSync(path, `${lineas}\n`, 'utf8');
 }
