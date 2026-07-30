@@ -215,6 +215,16 @@ export interface ProviderRunRequest {
    * 25 registros salia cortado unas veces y entero otras.
    */
   maxOutputTokens?: number;
+  /**
+   * tope de tiempo de ESTA peticion, por encima del tope general.
+   *
+   * el tope general son 300 s, pensado para que un modelo colgado no bloquee un
+   * trabajo entero. Para los lotes ese mismo tope es lo que limita cuantos
+   * registros caben en una llamada: medido, Kimi K2.6 hace 200 registros en
+   * 117 s y 400 no caben en 300 s. Con facturacion por llamada, cada registro
+   * que no entra en esta llamada se paga en la siguiente.
+   */
+  requestTimeoutMs?: number;
 }
 
 export interface ProviderStreamEvent {

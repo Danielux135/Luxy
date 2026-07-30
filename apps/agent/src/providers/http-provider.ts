@@ -376,7 +376,11 @@ export class HttpApiProvider implements ProviderExecution {
    * sin decir nada. Se acota, dejando margen a los modelos lentos conocidos.
    */
   private requestTimeout(request: ProviderRunRequest): number {
-    return Math.min(request.timeoutMs, MAX_REQUEST_TIMEOUT_MS);
+    // quien llama puede pedir mas margen que el tope general. Los lotes lo
+    // hacen: ahi el tope no protege de nada, solo limita cuantos registros
+    // caben en una llamada, y con facturacion por llamada eso cuesta dinero.
+    const tope = request.requestTimeoutMs ?? MAX_REQUEST_TIMEOUT_MS;
+    return Math.min(request.timeoutMs, tope);
   }
 
   /**

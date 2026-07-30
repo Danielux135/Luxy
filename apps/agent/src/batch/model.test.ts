@@ -16,6 +16,7 @@ import {
   BatchTooLargeError,
   MAX_BATCH_CHARS,
   BATCH_MAX_OUTPUT_TOKENS,
+  BATCH_REQUEST_TIMEOUT_MS,
 } from './model.js';
 
 const filas = [
@@ -138,6 +139,18 @@ describe('providerBatchModel', () => {
     const request = run.mock.calls[0]![0] as unknown as ProviderRunRequest;
     expect(request.maxOutputTokens).toBe(BATCH_MAX_OUTPUT_TOKENS);
     expect(request.maxOutputTokens).toBeGreaterThan(8192);
+  });
+
+  it('pide mas margen de reloj que el tope general', async () => {
+    // el tope de 300 s no protege de nada en un lote (el bucle ya tiene su
+    // cancelacion) y en cambio limita cuantos registros caben en una llamada.
+    // Medido: 200 registros en 117 s, 400 no entran en 300 s.
+    const { provider, run } = proveedor({});
+    await providerBatchModel(provider, opciones()).process(filas, 'x', 0);
+
+    const request = run.mock.calls[0]![0] as unknown as ProviderRunRequest;
+    expect(request.requestTimeoutMs).toBe(BATCH_REQUEST_TIMEOUT_MS);
+    expect(request.requestTimeoutMs).toBeGreaterThan(300_000);
   });
 
   it('una respuesta CORTADA no se presenta como problema de formato', async () => {

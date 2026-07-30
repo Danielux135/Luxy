@@ -41,6 +41,19 @@ export const BATCH_MAX_OUTPUT_TOKENS = 65_536;
  */
 export const BATCH_SIZE_SLOW_WARNING = 250;
 
+/**
+ * tope de tiempo de una llamada por lotes.
+ *
+ * el tope general de 300 s existe para que un modelo colgado no bloquee un
+ * trabajo. En un lote no protege de nada -el bucle ya lleva su propia
+ * cancelacion- y en cambio limita cuantos registros caben en una llamada:
+ * medido, Kimi K2.6 hace 200 registros en 117 s, y 400 no entran en 300 s.
+ *
+ * Con facturacion por llamada, cada registro que no cabe aqui se paga en la
+ * llamada siguiente. Por eso se le da margen: diez minutos.
+ */
+export const BATCH_REQUEST_TIMEOUT_MS = 600_000;
+
 export class BatchTooLargeError extends Error {
   constructor(caracteres: number) {
     super(
@@ -125,6 +138,7 @@ export function providerBatchModel(
         // el progreso del lote lo informa el bucle, no cada token
         onEvent: () => undefined,
         maxOutputTokens: BATCH_MAX_OUTPUT_TOKENS,
+        requestTimeoutMs: BATCH_REQUEST_TIMEOUT_MS,
         ...(options.model === undefined ? {} : { model: options.model }),
         // SIN contexto agentico a proposito: un trabajo de datos no toca
         // archivos del proyecto, asi que no recibe herramientas
