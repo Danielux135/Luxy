@@ -19,6 +19,7 @@ import {
   MAX_PROMPT_LENGTH,
   categoryOfApiModel,
   splitBatchPrompt,
+  isBatchCommand,
   commandForAttachment,
 } from '@luxy/shared';
 import type { Job, Machine, ProviderId, JobAttachment } from '@luxy/shared';
@@ -79,6 +80,7 @@ const HELP_TEXT = [
   '/kat | /kat_v25',
   '/auto <proyecto> <tarea> - Luxy elige el modelo',
   '/batch <proyecto> <archivo> <tarea> - procesa un archivo de datos por lotes',
+  '/batch_kimi, /batch_deepseek... - lo mismo fijando el modelo',
   '',
   'Audio e imagen:',
   '/audio_chat, /speak, /transcribe, /voice, /image_edit',
@@ -150,7 +152,7 @@ async function dispatchParsedCommand(
       return handleControlCommand(context, parsed.command, parsed.argument);
     case 'task': {
       // /batch lleva la ruta del archivo delante de la instruccion
-      const lotes = parsed.command === 'batch' ? splitBatchPrompt(parsed.prompt) : null;
+      const lotes = isBatchCommand(parsed.command) ? splitBatchPrompt(parsed.prompt) : null;
 
       return createJobFromRequest(context, {
         provider: parsed.provider,

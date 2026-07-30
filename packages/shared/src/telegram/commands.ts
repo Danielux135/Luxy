@@ -22,18 +22,31 @@ export const CONTROL_COMMANDS = [
 
 export type ControlCommand = (typeof CONTROL_COMMANDS)[number];
 
-// comandos que lanzan un trabajo: los proveedores mas "auto"
-// los comandos de tarea son las familias, /auto y TODOS los alias por modelo
-// del catalogo. Antes solo salian de PROVIDER_IDS, asi que /qwen_36 o /kat_v25
-// se rechazaban aunque el catalogo los definiera.
+/** prefijo de los comandos por lotes que fijan modelo: /batch_kimi */
+export const BATCH_PREFIX = 'batch_';
+
+// comandos que lanzan un trabajo: las familias, /auto y TODOS los alias por
+// modelo del catalogo. Antes solo salian de PROVIDER_IDS, asi que /qwen_36 o
+// /kat_v25 se rechazaban aunque el catalogo los definiera.
 export const TASK_COMMANDS: readonly string[] = [
   ...PROVIDER_IDS,
   'auto',
-  // recorre un archivo de datos por lotes en vez de tocar el proyecto
+  // recorre un archivo de datos por lotes en vez de tocar el proyecto.
+  // sin sufijo elige el router; /batch_kimi fija el modelo, con los MISMOS
+  // alias que ya existen para las tareas normales, para no inventar un
+  // segundo vocabulario que haya que recordar aparte
   'batch',
+  ...MODEL_TASK_COMMANDS.map((alias) => `${BATCH_PREFIX}${alias}`),
+  ...PROVIDER_IDS.map((id) => `${BATCH_PREFIX}${id}`),
   ...MODEL_TASK_COMMANDS.filter((alias) => !(PROVIDER_IDS as readonly string[]).includes(alias)),
 ];
+
 export type TaskCommand = string;
+
+/** true si el comando lanza un trabajo por lotes */
+export function isBatchCommand(command: string): boolean {
+  return command === 'batch' || command.startsWith(BATCH_PREFIX);
+}
 
 export type ParsedCommand =
   | { kind: 'control'; command: ControlCommand; argument: string | null }
@@ -206,6 +219,13 @@ export function resolveTaskTarget(command: string): {
 } {
   if (command === 'auto') return { provider: null, model: null };
 
+  // /batch sin sufijo deja elegir al router; /batch_kimi apunta a un modelo y se
+  // resuelve con el mismo mecanismo que /kimi, sin duplicar la tabla de alias
+  if (command === 'batch') return { provider: null, model: null };
+  if (command.startsWith(BATCH_PREFIX)) {
+    return resolveTaskTarget(command.slice(BATCH_PREFIX.length));
+  }
+
   const alias = resolveModelAlias(command);
   if (alias !== null) {
     return {
@@ -338,6 +358,10 @@ export function parseNaturalMention(
 // trabajos por lotes
 // -----------------------------------------------------------------------------
 
+const FORMATO_BATCH =
+  'formato: /batch <proyecto> <archivo> <que hacer con cada registro>. ' +
+  'Para fijar el modelo: /batch_kimi, /batch_deepseek...';
+
 /**
  * separa "<archivo> <instruccion>" del prompt de /batch.
  *
@@ -351,7 +375,7 @@ export function splitBatchPrompt(prompt: string): { file: string; instruction: s
   if (separador === -1) {
     throw new CommandParseError(
       'falta la instruccion',
-      'formato: /batch <proyecto> <archivo> <que hacer con cada registro>',
+      FORMATO_BATCH,
     );
   }
 
@@ -359,9 +383,17 @@ export function splitBatchPrompt(prompt: string): { file: string; instruction: s
   const instruction = texto.slice(separador).trim();
 
   if (instruction.length === 0) {
+    throw new CommandParseError('falta la instruccion', FORMATO_BATCH);
+  }
+
+  // el error mas frecuente: escribir la instruccion directamente y que la
+  // primera palabra se tome como nombre de archivo. Antes se llegaba hasta la
+  // maquina y volvia un 'el archivo "haz" no existe', que no explica nada.
+  if (!/[./\\]/.test(file) && !/\.[a-z0-9]{2,5}$/i.test(file)) {
     throw new CommandParseError(
-      'falta la instruccion',
-      'formato: /batch <proyecto> <archivo> <que hacer con cada registro>',
+      `"${file}" no parece un nombre de archivo`,
+      `${FORMATO_BATCH}. Si lo que quieres es que el modelo trabaje sobre el ` +
+        'proyecto en vez de sobre un archivo de datos, usa /kimi o /auto',
     );
   }
   // una ruta absoluta o un esquema de red no se separa ni se intenta: el usuario
