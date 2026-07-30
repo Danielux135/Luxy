@@ -24,6 +24,7 @@ import {
   redact,
 } from '@luxy/shared';
 import { runAgenticLoop, type LoopMessage, type LoopTurnResult } from './agentic-loop.js';
+import { sseData, TurnAssembler, type AssembledTurn } from './sse.js';
 import { parseNativeToolCalls } from './tool-protocol.js';
 
 /**
@@ -68,45 +69,6 @@ export class MemoryBudgetStore implements BudgetStore {
 interface ChatMessage {
   role: 'system' | 'user' | 'assistant';
   content: string;
-}
-
-/** parsea una linea de sse y devuelve el fragmento de texto y el usage */
-export function parseSseLine(line: string): {
-  done: boolean;
-  text: string | null;
-  usage: { input: number; output: number } | null;
-} | null {
-  const trimmed = line.trim();
-  if (!trimmed.startsWith('data:')) return null;
-
-  const payload = trimmed.slice(5).trim();
-  if (payload === '[DONE]') return { done: true, text: null, usage: null };
-
-  let parsed: Record<string, unknown>;
-  try {
-    parsed = JSON.parse(payload) as Record<string, unknown>;
-  } catch {
-    return null;
-  }
-
-  const choices = Array.isArray(parsed.choices) ? parsed.choices : [];
-  const first = choices[0] as { delta?: { content?: unknown } } | undefined;
-  const content = first?.delta?.content;
-
-  const usageRaw = parsed.usage as
-    | { prompt_tokens?: number; completion_tokens?: number }
-    | undefined;
-
-  return {
-    done: false,
-    text: typeof content === 'string' ? content : null,
-    usage: usageRaw
-      ? {
-          input: usageRaw.prompt_tokens ?? 0,
-          output: usageRaw.completion_tokens ?? 0,
-        }
-      : null,
-  };
 }
 
 /**
@@ -327,16 +289,27 @@ export class HttpApiProvider implements ProviderExecution {
     }
   }
 
-  /** una vuelta de conversacion, sin streaming, con o sin herramientas */
+  /**
+   * una vuelta de conversacion, con o sin herramientas.
+   *
+   * transmite si la conexion lo soporta. El motivo principal NO es la estetica:
+   * una peticion que pasa minutos sin enviar un byte se la carga el edge del
+   * proveedor con un 524, y eso ya paso. Transmitiendo, los bytes fluyen desde
+   * el primer token y no queda conexion inactiva que cortar.
+   */
   private async callTurn(
     messages: LoopMessage[],
     tools: unknown[] | null,
     request: ProviderRunRequest,
   ): Promise<LoopTurnResult> {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), request.timeoutMs);
+    // el tope es el de UNA peticion, no el del trabajo entero: con
+    // request.timeoutMs una vuelta colgada bloqueaba el trabajo una hora
+    const timer = setTimeout(() => controller.abort(), this.requestTimeout(request));
     const onAbort = (): void => controller.abort();
     request.signal.addEventListener('abort', onAbort, { once: true });
+
+    const transmitir = this.config.supportsStreaming;
 
     try {
       const response = await fetch(`${this.config.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
@@ -351,6 +324,7 @@ export class HttpApiProvider implements ProviderExecution {
           messages,
           max_tokens: this.config.maxOutputTokens,
           ...(tools === null ? {} : { tools, tool_choice: 'auto' }),
+          ...(transmitir ? { stream: true, stream_options: { include_usage: true } } : {}),
         }),
       });
 
@@ -360,6 +334,8 @@ export class HttpApiProvider implements ProviderExecution {
         (error as { status?: number }).status = response.status;
         throw error;
       }
+
+      if (transmitir && response.body) return await this.readStreamingTurn(response.body, request);
 
       const body = (await response.json()) as {
         choices?: { message?: { content?: unknown } }[];
@@ -475,50 +451,58 @@ export class HttpApiProvider implements ProviderExecution {
     }
   }
 
+  /**
+   * lee una vuelta transmitida, con herramientas incluidas.
+   *
+   * el progreso se emite cada 400 caracteres, no en cada delta: editar el
+   * mensaje de Telegram en cada token pasaria de los limites de la API.
+   */
+  private async readStreamingTurn(
+    body: ReadableStream<Uint8Array>,
+    request: ProviderRunRequest,
+  ): Promise<LoopTurnResult> {
+    const turno = await this.consumeStream(body, request);
+    return {
+      text: turno.text,
+      toolCalls: turno.toolCalls,
+      inputTokens: turno.inputTokens,
+      outputTokens: turno.outputTokens,
+    };
+  }
+
   /** lee el flujo sse acumulando el texto y el consumo */
   private async readStream(
     body: ReadableStream<Uint8Array>,
     request: ProviderRunRequest,
   ): Promise<{ text: string; inputTokens: number; outputTokens: number }> {
-    const reader = body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-    let text = '';
-    let inputTokens = 0;
-    let outputTokens = 0;
-    let emittedLength = 0;
+    const turno = await this.consumeStream(body, request);
+    return {
+      text: turno.text,
+      inputTokens: turno.inputTokens,
+      outputTokens: turno.outputTokens,
+    };
+  }
 
-    try {
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
+  /** acumula un flujo entero informando del progreso */
+  private async consumeStream(
+    body: ReadableStream<Uint8Array>,
+    request: ProviderRunRequest,
+  ): Promise<AssembledTurn> {
+    const assembler = new TurnAssembler();
+    let emitido = 0;
+    let acumulado = '';
 
-        const lines = buffer.split(/\r?\n/);
-        buffer = lines.pop() ?? '';
-
-        for (const line of lines) {
-          const parsed = parseSseLine(line);
-          if (!parsed) continue;
-          if (parsed.usage) {
-            inputTokens = parsed.usage.input;
-            outputTokens = parsed.usage.output;
-          }
-          if (parsed.text) {
-            text += parsed.text;
-            // se reporta progreso cada 400 caracteres, no en cada token
-            if (text.length - emittedLength >= 400) {
-              emittedLength = text.length;
-              request.onEvent({ type: 'text', message: text.slice(-300) });
-            }
-          }
-        }
+    for await (const payload of sseData(body)) {
+      const nuevo = assembler.push(payload);
+      if (nuevo === null) continue;
+      acumulado += nuevo;
+      if (acumulado.length - emitido >= 400) {
+        emitido = acumulado.length;
+        request.onEvent({ type: 'text', message: acumulado.slice(-300) });
       }
-    } finally {
-      reader.releaseLock();
     }
 
-    return { text, inputTokens, outputTokens };
+    return assembler.result();
   }
 
   private failure(message: string): ProviderRunResult {

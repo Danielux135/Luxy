@@ -14,7 +14,6 @@ import {
   type CodexCapabilities,
 } from './codex.js';
 import {
-  parseSseLine,
   describeHttpError,
   HttpApiProvider,
   MemoryBudgetStore,
@@ -325,33 +324,6 @@ describe('buildCodexError', () => {
 // -----------------------------------------------------------------------------
 // proveedores http
 // -----------------------------------------------------------------------------
-describe('parseSseLine', () => {
-  it('extrae el fragmento de texto', () => {
-    const parsed = parseSseLine('data: {"choices":[{"delta":{"content":"hola"}}]}');
-    expect(parsed?.text).toBe('hola');
-    expect(parsed?.done).toBe(false);
-  });
-
-  it('reconoce el fin del flujo', () => {
-    expect(parseSseLine('data: [DONE]')?.done).toBe(true);
-  });
-
-  it('extrae el consumo de tokens', () => {
-    const parsed = parseSseLine(
-      'data: {"choices":[],"usage":{"prompt_tokens":10,"completion_tokens":20}}',
-    );
-    expect(parsed?.usage).toEqual({ input: 10, output: 20 });
-  });
-
-  it('ignora lineas que no son data', () => {
-    expect(parseSseLine(': keep-alive')).toBeNull();
-    expect(parseSseLine('')).toBeNull();
-  });
-
-  it('ignora un data con json roto', () => {
-    expect(parseSseLine('data: {roto')).toBeNull();
-  });
-});
 
 describe('describeHttpError', () => {
   it('explica una clave rechazada', () => {
