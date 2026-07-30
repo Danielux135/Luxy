@@ -161,7 +161,14 @@ async function dispatchParsedCommand(
         projectAlias: parsed.projectAlias,
         prompt: lotes === null ? parsed.prompt : lotes.instruction,
         explicit: parsed.provider !== null,
-        ...(lotes === null ? {} : { batch: { file: lotes.file } }),
+        ...(lotes === null
+          ? {}
+          : {
+              batch: {
+                file: lotes.file,
+                ...(lotes.batchSize === undefined ? {} : { batchSize: lotes.batchSize }),
+              },
+            }),
       });
     }
     default:
@@ -373,7 +380,7 @@ export interface JobRequest {
    * confinePath en la maquina, contra la carpeta del proyecto: el gateway no
    * sabe que hay en ese disco, asi que no puede ser el que autorice.
    */
-  batch?: { file: string };
+  batch?: { file: string; batchSize?: number };
 }
 
 /**
@@ -564,7 +571,7 @@ function buildMetadata(
   routerReason: string | null,
   explicit: boolean,
   model: string | null,
-  batch?: { file: string },
+  batch?: { file: string; batchSize?: number },
 ): Record<string, unknown> {
   const metadata: Record<string, unknown> = { providerExplicit: explicit };
   // el agente lee metadata.batch para saber que esto es un trabajo por lotes

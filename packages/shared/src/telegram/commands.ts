@@ -360,7 +360,8 @@ export function parseNaturalMention(
 
 const FORMATO_BATCH =
   'formato: /batch <proyecto> <archivo> <que hacer con cada registro>. ' +
-  'Para fijar el modelo: /batch_kimi, /batch_deepseek...';
+  'Para fijar el modelo: /batch_kimi, /batch_deepseek... ' +
+  'Para cambiar los registros por llamada: --lote=200 en cualquier parte de la instruccion.';
 
 /**
  * separa "<archivo> <instruccion>" del prompt de /batch.
@@ -369,7 +370,11 @@ const FORMATO_BATCH =
  * rechaza lo evidente. Quien decide si la ruta es aceptable es confinePath en el
  * agente, contra la carpeta del proyecto. Esta funcion NO es la barrera.
  */
-export function splitBatchPrompt(prompt: string): { file: string; instruction: string } {
+export function splitBatchPrompt(prompt: string): {
+  file: string;
+  instruction: string;
+  batchSize?: number;
+} {
   const texto = prompt.trim();
   const separador = texto.search(/\s/);
   if (separador === -1) {
@@ -406,5 +411,27 @@ export function splitBatchPrompt(prompt: string): { file: string; instruction: s
     );
   }
 
-  return { file, instruction };
+  // --lote=N ajusta cuantos registros van en cada llamada.
+  //
+  // Se expone porque con facturacion por llamada es EL mando del coste: medido,
+  // 25 registros gastan ~470 tokens de salida cada uno y 100 solo 90, porque el
+  // razonamiento del modelo es coste fijo. Lote grande, menos llamadas, menos
+  // dinero. El techo esta en el reloj, no en los tokens.
+  const lote = /(?:^|\s)--lote=(\d{1,4})(?=\s|$)/.exec(instruction);
+  if (lote === null) return { file, instruction };
+
+  const batchSize = Number(lote[1]);
+  if (batchSize < 1 || batchSize > 1000) {
+    throw new CommandParseError(
+      `--lote=${lote[1]} esta fuera de rango`,
+      'tiene que estar entre 1 y 1000',
+    );
+  }
+
+  const limpia = instruction.replace(lote[0], ' ').replace(/\s+/g, ' ').trim();
+  if (limpia.length === 0) {
+    throw new CommandParseError('falta la instruccion', FORMATO_BATCH);
+  }
+
+  return { file, instruction: limpia, batchSize };
 }

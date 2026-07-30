@@ -77,6 +77,56 @@ describe('elegir el modelo', () => {
   });
 });
 
+describe('--lote=N, el mando del coste', () => {
+  // MEDIDO contra la API: 25 registros gastan ~470 tokens de salida cada uno y
+  // 100 solo 90, porque el razonamiento del modelo es coste FIJO y no crece con
+  // los registros. Con facturacion por llamada, el tamano de lote es la unica
+  // palanca que mueve la factura de verdad.
+  it('saca el tamano de lote de la instruccion', () => {
+    expect(splitBatchPrompt('datos.csv --lote=200 limpia la descripcion')).toEqual({
+      file: 'datos.csv',
+      instruction: 'limpia la descripcion',
+      batchSize: 200,
+    });
+  });
+
+  it('lo encuentra al final de la instruccion', () => {
+    const { instruction, batchSize } = splitBatchPrompt('datos.csv limpia esto --lote=50');
+    expect(instruction).toBe('limpia esto');
+    expect(batchSize).toBe(50);
+  });
+
+  it('lo encuentra en medio y no deja doble espacio', () => {
+    const { instruction } = splitBatchPrompt('datos.csv limpia --lote=10 la descripcion');
+    expect(instruction).toBe('limpia la descripcion');
+  });
+
+  it('sin la bandera no fija tamano: manda el de por defecto', () => {
+    expect(splitBatchPrompt('datos.csv limpia esto').batchSize).toBeUndefined();
+  });
+
+  it('un valor fuera de rango se rechaza en el momento', () => {
+    expect(() => splitBatchPrompt('datos.csv --lote=0 limpia')).toThrow(/fuera de rango/);
+    expect(() => splitBatchPrompt('datos.csv --lote=5000 limpia')).toThrow(/fuera de rango/);
+  });
+
+  it('la bandera sola, sin instruccion, se rechaza', () => {
+    expect(() => splitBatchPrompt('datos.csv --lote=100')).toThrow(/falta la instruccion/);
+  });
+
+  it('no confunde un guion cualquiera de la instruccion', () => {
+    const { instruction, batchSize } = splitBatchPrompt(
+      'datos.csv pon guiones alto-medio y quita --lote de la descripcion',
+    );
+    expect(batchSize).toBeUndefined();
+    expect(instruction).toContain('--lote de la descripcion');
+  });
+
+  it('no se traga un numero pegado a otra palabra', () => {
+    expect(splitBatchPrompt('datos.csv usa el x--lote=50 formato').batchSize).toBeUndefined();
+  });
+});
+
 describe('el error que confundio de verdad', () => {
   it('una instruccion sin archivo se explica en el momento, no en la maquina', () => {
     // paso tal cual: "/batch test haz 5 archivos locales..." tomo "haz" como

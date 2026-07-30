@@ -13,14 +13,33 @@ export const MAX_BATCH_CHARS = 120_000;
 /**
  * techo de tokens de salida de una llamada por lotes.
  *
- * MEDIDO, no elegido a ojo. Kimi K2.6 razona antes de responder y ese
- * razonamiento sale del MISMO presupuesto que la respuesta: en un lote de 25
- * productos gasto 10.110 caracteres pensando y 4.947 respondiendo. Con el techo
- * de 8192 del catalogo, la misma llamada se cortaba unas veces y cabia otras
- * (8192 exactos con finish_reason: length en una prueba, 8000 en la siguiente).
- * Con 16384 completo las dos veces, y con 32768 gasto 11.660.
+ * MEDIDO contra la API, no elegido a ojo:
+ *
+ *   * el catalogo trae 8192, y con eso un lote de 25 registros se cortaba unas
+ *     veces y cabia otras (8192 exactos con finish_reason: length en una
+ *     prueba, 8000 en la siguiente). Justo en el filo.
+ *   * 65536 lo acepta la API.
+ *
+ * Kimi K2.6 razona antes de responder y ese razonamiento sale del MISMO
+ * presupuesto que la respuesta. Lo importante que se midio: el razonamiento es
+ * coste FIJO, no crece con los registros. 25 registros gastaron 10.110
+ * caracteres pensando; 100 registros solo 6.019. Por eso el coste por registro
+ * baja de ~470 tokens a 90 al agrandar el lote, y con facturacion por llamada
+ * eso es dinero directo.
+ *
+ * Subirlo no cuesta nada: max_tokens es un techo, no una reserva.
  */
-export const BATCH_MAX_OUTPUT_TOKENS = 32_768;
+export const BATCH_MAX_OUTPUT_TOKENS = 65_536;
+
+/**
+ * registros por lote a partir de los cuales una sola llamada se acerca al tope
+ * de tiempo por peticion.
+ *
+ * MEDIDO: 100 registros ricos tardaron 95 s. El tope por peticion son 300 s, asi
+ * que por encima de ~250 el riesgo no es de tokens sino de reloj, y un lote que
+ * expira es una llamada pagada y perdida.
+ */
+export const BATCH_SIZE_SLOW_WARNING = 250;
 
 export class BatchTooLargeError extends Error {
   constructor(caracteres: number) {
