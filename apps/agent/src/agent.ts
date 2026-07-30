@@ -668,8 +668,12 @@ export class LuxyAgent {
   }
 
   /**
-   * consulta periodicamente si se pidio cancelar y renueva el lease.
-   * si el gateway dice que el trabajo ya no es nuestro, se aborta.
+   * consulta periodicamente si se pidio cancelar Y renueva el lease.
+   *
+   * la renovacion tiene que estar aqui, no en la cola de eventos: la cola no
+   * envia nada cuando no hay eventos pendientes, asi que un modelo que tarda
+   * minutos sin decir nada dejaba caducar el lease y el barrido del gateway
+   * marcaba el trabajo como interrumpido mientras seguia vivo.
    */
   private watchForCancellation(job: ClaimedJob, abort: AbortController): { stop: () => void } {
     let stopped = false;
@@ -680,7 +684,7 @@ export class LuxyAgent {
         if (stopped) return;
 
         try {
-          const control = await this.client.getJobControl(job.id);
+          const control = await this.client.getJobControl(job.id, this.config.leaseSeconds);
           if (control.cancelRequested) {
             this.logger.info(`cancelacion recibida para ${job.shortId}`);
             // esto propaga el AbortSignal y mata el arbol de procesos

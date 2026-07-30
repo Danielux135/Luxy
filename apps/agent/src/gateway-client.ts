@@ -173,7 +173,6 @@ export class GatewayClient {
     return claimResponseSchema.parse(raw).job;
   }
 
-  /** consulta si se pidio cancelar el trabajo */
   /**
    * descarga el adjunto de un trabajo.
    *
@@ -208,8 +207,21 @@ export class GatewayClient {
     });
   }
 
-  async getJobControl(jobId: string): Promise<JobControl> {
-    const raw = await this.request('GET', `/api/jobs/${encodeURIComponent(jobId)}/control`);
+  /**
+   * consulta si se pidio cancelar el trabajo y, de paso, renueva el lease.
+   *
+   * la renovacion va aqui porque esta consulta ocurre cada pocos segundos
+   * mientras el trabajo vive. Cuando solo viajaba con los eventos, un modelo
+   * lento y callado dejaba caducar el lease y el barrido daba el trabajo por
+   * interrumpido mientras seguia ejecutandose.
+   */
+  async getJobControl(jobId: string, renewLeaseSeconds?: number): Promise<JobControl> {
+    const query =
+      renewLeaseSeconds === undefined ? '' : `?renewLease=${encodeURIComponent(renewLeaseSeconds)}`;
+    const raw = await this.request(
+      'GET',
+      `/api/jobs/${encodeURIComponent(jobId)}/control${query}`,
+    );
     const parsed = jobControlResponseSchema.parse(raw);
     return {
       status: parsed.status,

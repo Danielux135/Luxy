@@ -230,7 +230,7 @@ function attachmentOf(metadata: unknown): JobAttachment | null {
 // GET /api/jobs/:jobId/control
 // el agente consulta esto para detectar cancelaciones
 // -----------------------------------------------------------------------------
-export const handleJobControl = withMachineAuth(async (_request, deps, machine, params) => {
+export const handleJobControl = withMachineAuth(async (request, deps, machine, params) => {
   const jobId = params.jobId;
   if (!jobId) return errorResponse('falta el identificador del trabajo', 400);
 
@@ -239,10 +239,34 @@ export const handleJobControl = withMachineAuth(async (_request, deps, machine, 
   // una maquina solo puede consultar sus propios trabajos
   if (job.claimedBy !== machine.id) return errorResponse('ese trabajo no es de esta maquina', 403);
 
+  // renovacion del lease.
+  //
+  // Antes esto SOLO viajaba con los eventos, y la cola no envia nada cuando no
+  // hay eventos pendientes. Un modelo que tarda cuatro minutos sin emitir nada
+  // dejaba caducar el lease a los dos, y el barrido marcaba el trabajo como
+  // interrumpido mientras seguia ejecutandose de verdad.
+  //
+  // El agente ya consulta este endpoint cada pocos segundos para ver si le han
+  // pedido cancelar: que la renovacion viaje aqui la hace independiente de que
+  // el modelo tenga algo que contar.
+  let leaseExpiresAt = job.leaseExpiresAt;
+  const solicitado = new URL(request.url).searchParams.get('renewLease');
+  if (solicitado !== null) {
+    const seconds = Number(solicitado);
+    if (!Number.isInteger(seconds) || seconds < 30 || seconds > 3600) {
+      return errorResponse('renewLease debe ser un entero entre 30 y 3600', 400);
+    }
+    // un trabajo ya terminado no revive: renovar su lease solo lo dejaria
+    // colgado en la cola de barrido
+    if (job.status === 'claimed' || job.status === 'running') {
+      leaseExpiresAt = await deps.repo.renewLease(jobId, machine.id, seconds);
+    }
+  }
+
   return json({
     status: job.status,
     cancelRequested: job.cancelRequestedAt !== null,
-    leaseExpiresAt: job.leaseExpiresAt,
+    leaseExpiresAt,
   });
 });
 

@@ -168,6 +168,45 @@ export function buildProviderPrompt(job: ClaimedJob): string {
   return parts.join('\n');
 }
 
+/** cada cuanto se refresca el mensaje mientras se espera al modelo */
+const PROGRESS_TICK_MS = 30_000;
+
+/**
+ * refresca la fase cada treinta segundos mientras el proveedor trabaja.
+ *
+ * el mensaje de Telegram solo se reedita cuando llega un evento. Un modelo que
+ * tarda minutos sin emitir nada dejaba la fase y la duracion congeladas, y no
+ * habia forma de distinguirlo de un cuelgue.
+ */
+function startProgressTicker(
+  deps: JobRunnerDeps,
+  displayName: string,
+  elapsed: () => number,
+): { stop: () => void; postpone: () => void } {
+  let last = Date.now();
+
+  const timer = setInterval(() => {
+    // si el modelo acaba de hablar, su mensaje es mejor que el nuestro
+    if (Date.now() - last < PROGRESS_TICK_MS) return;
+    const minutos = Math.floor(elapsed() / 60_000);
+    const segundos = Math.floor((elapsed() % 60_000) / 1000);
+    deps.emit(
+      'phase',
+      `esperando a ${displayName} (${minutos}m ${String(segundos).padStart(2, '0')}s)`,
+    );
+  }, PROGRESS_TICK_MS);
+
+  // un temporizador no debe impedir que el proceso termine
+  timer.unref?.();
+
+  return {
+    stop: () => clearInterval(timer),
+    postpone: () => {
+      last = Date.now();
+    },
+  };
+}
+
 /** envuelve un trabajo de medios en el JobOutcome que espera el agente */
 async function runMediaOutcome(
   job: ClaimedJob,
@@ -322,7 +361,14 @@ export async function runJob(
         (modeloElegido === undefined ? '' : ` con el modelo ${modeloElegido}`) +
         (job.provider === provider.id ? '' : ` (pediste ${job.provider})`),
     );
-    const providerResult = await provider.run({
+    // latido mientras el modelo piensa.
+    //
+    // Sin esto el mensaje de Telegram se queda con la ultima fase y la duracion
+    // congelada: un modelo de cuatro minutos era indistinguible de uno colgado.
+    const latido = startProgressTicker(deps, provider.displayName, elapsed);
+    let providerResult;
+    try {
+      providerResult = await provider.run({
       prompt: buildProviderPrompt(job),
       workingDirectory,
       timeoutMs: deps.config.jobTimeoutMs,
@@ -335,12 +381,17 @@ export async function runJob(
       // si el modelo es agentic y hay worktree, se le dan herramientas locales
       agentic: buildAgenticContext(job, deps, workingDirectory, project, signal),
       onEvent: (event) => {
-        if (event.type === 'phase') deps.emit('phase', event.message);
-        else if (event.type === 'warning' || event.type === 'error') {
-          deps.emit('warning', event.message);
-        } else deps.emit('provider_output', event.message);
-      },
-    });
+          // el modelo ha dicho algo: el latido deja de hacer falta un rato
+          latido.postpone();
+          if (event.type === 'phase') deps.emit('phase', event.message);
+          else if (event.type === 'warning' || event.type === 'error') {
+            deps.emit('warning', event.message);
+          } else deps.emit('provider_output', event.message);
+        },
+      });
+    } finally {
+      latido.stop();
+    }
 
     if (providerResult.cancelled || signal.aborted) {
       return await buildCancelledOutcome(worktree, elapsed());
