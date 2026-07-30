@@ -12,7 +12,7 @@ import { redact, ModelRegistry, buildDefaultCatalog } from '@luxy/shared';
 import { ToolExecutor } from './tools/executor.js';
 import { findMediaModel, runMediaJob } from './media-runner.js';
 import { runBatchJob } from './batch/runner.js';
-import { providerBatchModel } from './batch/model.js';
+import { providerBatchModel, BATCH_SIZE_SLOW_WARNING } from './batch/model.js';
 import {
   readBatchRequest,
   resolveBatchPaths,
@@ -265,6 +265,17 @@ async function runBatchOutcome(
     `leyendo ${request.file} (${megas} MB) de ${paths.batchSize} en ${paths.batchSize}`,
   );
   deps.emit('log', `resultados en ${paths.outputPath}`);
+
+  // el limite de un lote grande no son los tokens, es el reloj: medido, 200
+  // registros tardaron 117 s y el tope por peticion son 300 s. Un lote que
+  // expira es una llamada pagada y perdida, asi que se avisa ANTES de gastarla.
+  if (paths.batchSize > BATCH_SIZE_SLOW_WARNING) {
+    deps.emit(
+      'warning',
+      `${paths.batchSize} registros por llamada puede pasarse del tope de tiempo. ` +
+        'Si un lote expira, la llamada se cobra igual. Baja con --lote=200',
+    );
+  }
 
   const outcome = await runBatchJob(
     {
