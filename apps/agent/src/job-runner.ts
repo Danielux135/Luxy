@@ -426,6 +426,16 @@ export async function runJob(
       };
     }
 
+    // 2b. los lotes salen aqui, ANTES del worktree.
+    //
+    // Un trabajo por lotes NO modifica el proyecto: lee un archivo de datos y
+    // escribe los resultados en la carpeta de Luxy. Crear un worktree para el
+    // seria trabajo perdido, y ademas quedaba abandonado sin limpiar, porque
+    // esta rama devuelve worktreePath: null y nadie lo borraba despues.
+    if (batchRequest !== null) {
+      return await runBatchOutcome(job, batchRequest, provider, deps, signal, elapsed);
+    }
+
     // 3. decidir si la tarea puede modificar archivos
     const isRepository = await isGitRepository(project.path);
     const canEdit = project.allowEdits && isRepository;
@@ -481,10 +491,6 @@ export async function runJob(
     // se deja constancia de QUE se va a ejecutar antes de hacerlo: cuando
     // /deepseek acababa en Claude Code no habia forma de verlo hasta que
     // fallaba con un error de Claude.
-    if (batchRequest !== null) {
-      return await runBatchOutcome(job, batchRequest, provider, deps, signal, elapsed);
-    }
-
     const modeloElegido = resolveJobModel(job, deps.config);
     deps.emit(
       'phase',

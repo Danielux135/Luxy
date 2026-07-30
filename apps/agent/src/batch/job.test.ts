@@ -133,6 +133,19 @@ describe('resolveBatchPaths: salida', () => {
   });
 });
 
+describe('el archivo se lee del proyecto REAL, no de un worktree', () => {
+  it('la ruta resuelta esta dentro de la carpeta del proyecto', () => {
+    // esto es lo que hace que puedas dejar el archivo ahi con el explorador y
+    // que siga estando cuando lances el comando. Un worktree se crea al
+    // ejecutar y se borra al aprobar o descartar: un archivo de datos metido
+    // ahi no sobreviviria, y ademas no existiria cuando escribes el comando.
+    const paths = resolveBatchPaths({ file: 'datos/productos.csv' }, contexto());
+    expect(paths.inputPath).toBe(datos);
+    expect(paths.inputPath.startsWith(proyecto)).toBe(true);
+    expect(paths.inputPath).not.toContain('worktree');
+  });
+});
+
 describe('formato', () => {
   it('se deduce de la extension', () => {
     expect(guessFormat('a.jsonl')).toBe('jsonl');
