@@ -13,7 +13,7 @@ import {
   renderJobProgress,
   MIN_PROGRESS_EDIT_INTERVAL_MS,
 } from '@luxy/shared';
-import type { ProviderId } from '@luxy/shared';
+import type { JobAttachment, ProviderId } from '@luxy/shared';
 import type { GatewayConfig } from '../env.js';
 import type { Repository } from '../repository.js';
 import type { Logger } from '../logger.js';
@@ -211,9 +211,20 @@ export const handleClaim = withMachineAuth(async (request, deps, machine) => {
       telegramUserId: claimed.telegram_user_id,
       leaseExpiresAt: claimed.lease_expires_at,
       metadata: claimed.metadata ?? {},
+      // el adjunto vive en la metadata, pero el agente lo espera como campo
+      // propio: sin esto llegaba siempre null y /image_edit pedia una foto que
+      // el usuario ya habia enviado
+      attachment: attachmentOf(claimed.metadata),
     },
   });
 });
+
+/** saca el adjunto de la metadata de un trabajo, o null si no hay o no es valido */
+function attachmentOf(metadata: unknown): JobAttachment | null {
+  if (typeof metadata !== 'object' || metadata === null) return null;
+  const parsed = jobAttachmentSchema.safeParse((metadata as Record<string, unknown>)['attachment']);
+  return parsed.success ? parsed.data : null;
+}
 
 // -----------------------------------------------------------------------------
 // GET /api/jobs/:jobId/control
@@ -490,17 +501,16 @@ export const handleJobAttachment = withMachineAuth(async (_request, deps, machin
     return errorResponse('ese trabajo no es de esta maquina', 403);
   }
 
-  const metadata = job.metadata as Record<string, unknown>;
-  const parsed = jobAttachmentSchema.safeParse(metadata['attachment']);
-  if (!parsed.success) return errorResponse('el trabajo no tiene ningun adjunto', 404);
+  const attachment = attachmentOf(job.metadata);
+  if (attachment === null) return errorResponse('el trabajo no tiene ningun adjunto', 404);
 
   try {
-    const file = await deps.telegram.downloadFile(parsed.data.fileId);
+    const file = await deps.telegram.downloadFile(attachment.fileId);
     return new Response(file.bytes, {
       status: 200,
       headers: {
-        'Content-Type': parsed.data.mimeType ?? file.mimeType,
-        'Content-Disposition': `attachment; filename="${parsed.data.fileName ?? 'adjunto'}"`,
+        'Content-Type': attachment.mimeType ?? file.mimeType,
+        'Content-Disposition': `attachment; filename="${attachment.fileName ?? 'adjunto'}"`,
       },
     });
   } catch (error) {
