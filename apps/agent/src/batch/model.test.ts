@@ -10,7 +10,13 @@
 //    la llamada, que es justo lo que cuesta dinero.
 import { describe, it, expect, vi } from 'vitest';
 import type { ProviderExecution, ProviderRunRequest } from '@luxy/shared';
-import { buildBatchPrompt, providerBatchModel, BatchTooLargeError, MAX_BATCH_CHARS } from './model.js';
+import {
+  buildBatchPrompt,
+  providerBatchModel,
+  BatchTooLargeError,
+  MAX_BATCH_CHARS,
+  BATCH_MAX_OUTPUT_TOKENS,
+} from './model.js';
 
 const filas = [
   { id: '1', nombre: 'Martillo' },
@@ -96,12 +102,12 @@ describe('providerBatchModel', () => {
     const { provider } = proveedor({ finalText: '{"results":[{"a":1}]}' });
     const model = providerBatchModel(provider, opciones());
 
-    expect(await model.process(filas, 'x')).toBe('{"results":[{"a":1}]}');
+    expect(await model.process(filas, 'x', 0)).toBe('{"results":[{"a":1}]}');
   });
 
   it('NO le da herramientas al modelo: un trabajo de datos no toca archivos', async () => {
     const { provider, run } = proveedor({});
-    await providerBatchModel(provider, opciones()).process(filas, 'x');
+    await providerBatchModel(provider, opciones()).process(filas, 'x', 0);
 
     const request = run.mock.calls[0]![0] as unknown as ProviderRunRequest;
     expect(request.agentic).toBeUndefined();
@@ -109,7 +115,7 @@ describe('providerBatchModel', () => {
 
   it('manda el apiModel exacto, sin normalizar', async () => {
     const { provider, run } = proveedor({});
-    await providerBatchModel(provider, opciones()).process(filas, 'x');
+    await providerBatchModel(provider, opciones()).process(filas, 'x', 0);
 
     const request = run.mock.calls[0]![0] as unknown as ProviderRunRequest;
     expect(request.model).toBe('Kimi-K2.6');
@@ -117,14 +123,56 @@ describe('providerBatchModel', () => {
 
   it('un fallo del proveedor se convierte en excepcion, para que el lote quede como fallido', async () => {
     const { provider } = proveedor({ ok: false, errorMessage: 'la API respondio 500' });
-    await expect(providerBatchModel(provider, opciones()).process(filas, 'x')).rejects.toThrow(
+    await expect(providerBatchModel(provider, opciones()).process(filas, 'x', 0)).rejects.toThrow(
       'la API respondio 500',
     );
   });
 
+  it('pide un techo de tokens mayor que el del catalogo', async () => {
+    // los modelos que razonan gastan el presupuesto pensando ANTES de
+    // responder: con el techo de 8192 del catalogo, un lote de 25 registros se
+    // cortaba unas veces y cabia otras
+    const { provider, run } = proveedor({});
+    await providerBatchModel(provider, opciones()).process(filas, 'x', 0);
+
+    const request = run.mock.calls[0]![0] as unknown as ProviderRunRequest;
+    expect(request.maxOutputTokens).toBe(BATCH_MAX_OUTPUT_TOKENS);
+    expect(request.maxOutputTokens).toBeGreaterThan(8192);
+  });
+
+  it('una respuesta CORTADA no se presenta como problema de formato', async () => {
+    // paso de verdad: llegaba como "el JSON del modelo no se puede parsear",
+    // que manda a buscar el fallo donde no esta. La accion es otra: menos
+    // registros por lote.
+    const { provider } = proveedor({ ok: true, truncated: true, finalText: '{"results":[{"a"' });
+
+    await expect(providerBatchModel(provider, opciones()).process(filas, 'x', 0)).rejects.toThrow(
+      /se corto al llegar al tope/,
+    );
+  });
+
+  it('el mensaje del corte dice cuantos registros habia y que hacer', async () => {
+    const { provider } = proveedor({ ok: true, truncated: true, finalText: 'cortado' });
+    try {
+      await providerBatchModel(provider, opciones()).process(filas, 'x', 0);
+      expect.unreachable();
+    } catch (error) {
+      const mensaje = (error as Error).message;
+      expect(mensaje).toContain('2 registros por lote');
+      expect(mensaje).toContain('menos registros por lote');
+    }
+  });
+
+  it('una respuesta completa no se marca como cortada', async () => {
+    const { provider } = proveedor({ ok: true, truncated: false, finalText: '{"results":[]}' });
+    await expect(
+      providerBatchModel(provider, opciones()).process(filas, 'x', 0),
+    ).resolves.toBe('{"results":[]}');
+  });
+
   it('un fallo sin mensaje no se traga en silencio', async () => {
     const { provider } = proveedor({ ok: false, errorMessage: null });
-    await expect(providerBatchModel(provider, opciones()).process(filas, 'x')).rejects.toThrow(
+    await expect(providerBatchModel(provider, opciones()).process(filas, 'x', 0)).rejects.toThrow(
       /sin mensaje/,
     );
   });

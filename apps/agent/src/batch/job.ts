@@ -126,21 +126,32 @@ export function guessFormat(file: string): BatchFormat {
  * un trabajo terminado bien, aunque el resto haya ido.
  */
 export function renderBatchSummary(
-  outcome: { batches: number; done: number; skipped: number; failed: number; items: number; reason: string | null },
+  outcome: {
+    batches: number;
+    done: number;
+    skipped: number;
+    failed: number;
+    items: number;
+    reason: string | null;
+    lastError?: string | null;
+  },
   paths: { outputPath: string; checkpointPath: string },
 ): string {
   const lineas = [
     `Lotes: ${outcome.batches} (${outcome.done} procesados, ${outcome.skipped} ya estaban hechos, ${outcome.failed} fallidos)`,
     `Registros escritos: ${miles(outcome.items)}`,
-    `Resultados: ${paths.outputPath}`,
   ];
 
+  // la ruta de la salida solo sirve si hay algo escrito
+  if (outcome.items > 0) lineas.push(`Resultados: ${paths.outputPath}`);
+
   if (outcome.failed > 0) {
-    lineas.push(
-      '',
-      `ATENCION: ${outcome.failed} lotes fallaron y sus registros NO estan en la salida.`,
-      'Vuelve a lanzar el mismo comando: reanuda y reintenta solo lo que falta.',
-    );
+    lineas.push('', `${outcome.failed} lotes fallaron. Sus registros NO estan en la salida.`);
+    // LA CAUSA, no solo el hecho: sin esto habia que abrir avance.jsonl a mano
+    if (outcome.lastError !== undefined && outcome.lastError !== null) {
+      lineas.push('', `Causa: ${outcome.lastError}`);
+    }
+    lineas.push('', 'Vuelve a lanzar el mismo comando: reanuda y reintenta solo lo que falta.');
   }
   if (outcome.reason !== null) lineas.push('', `Se paro antes de acabar: ${outcome.reason}`);
 

@@ -24,7 +24,7 @@ import {
   redact,
 } from '@luxy/shared';
 import { runAgenticLoop, type LoopMessage, type LoopTurnResult } from './agentic-loop.js';
-import { sseData, TurnAssembler, type AssembledTurn } from './sse.js';
+import { sseData, TurnAssembler, wasTruncated, type AssembledTurn } from './sse.js';
 import { parseNativeToolCalls } from './tool-protocol.js';
 
 /**
@@ -177,6 +177,7 @@ export class HttpApiProvider implements ProviderExecution {
       return {
         ok: true,
         finalText: result.text,
+        truncated: result.truncated,
         sessionId: null,
         exitCode: 0,
         timedOut: false,
@@ -322,7 +323,7 @@ export class HttpApiProvider implements ProviderExecution {
         body: JSON.stringify({
           model: this.modelFor(request),
           messages,
-          max_tokens: this.config.maxOutputTokens,
+          max_tokens: this.maxTokensFor(request),
           ...(tools === null ? {} : { tools, tool_choice: 'auto' }),
           ...(transmitir ? { stream: true, stream_options: { include_usage: true } } : {}),
         }),
@@ -385,6 +386,17 @@ export class HttpApiProvider implements ProviderExecution {
    * lo ignoraba, asi que todos los trabajos usaban el modelo de la
    * configuracion. El valor se manda EXACTO, sin normalizar.
    */
+  /**
+   * techo de tokens de salida.
+   *
+   * lo que pida la peticion manda sobre el catalogo: un trabajo por lotes
+   * necesita mas sitio porque el razonamiento del modelo gasta del mismo
+   * presupuesto que la respuesta.
+   */
+  private maxTokensFor(request: ProviderRunRequest): number {
+    return request.maxOutputTokens ?? this.config.maxOutputTokens;
+  }
+
   private modelFor(request: ProviderRunRequest): string {
     return request.model !== undefined && request.model.length > 0
       ? request.model
@@ -394,7 +406,12 @@ export class HttpApiProvider implements ProviderExecution {
   private async callApi(
     messages: ChatMessage[],
     request: ProviderRunRequest,
-  ): Promise<{ text: string; inputTokens: number; outputTokens: number }> {
+  ): Promise<{
+    text: string;
+    inputTokens: number;
+    outputTokens: number;
+    truncated: boolean;
+  }> {
     // timeout propio combinado con la cancelacion del trabajo
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.requestTimeout(request));
@@ -413,7 +430,7 @@ export class HttpApiProvider implements ProviderExecution {
           // permite que una sola conexion sirva todo el catalogo
           model: this.modelFor(request),
           messages,
-          max_tokens: this.config.maxOutputTokens,
+          max_tokens: this.maxTokensFor(request),
           stream: this.config.supportsStreaming,
           // algunos proveedores solo devuelven usage si se pide explicitamente
           ...(this.config.supportsStreaming
@@ -432,7 +449,7 @@ export class HttpApiProvider implements ProviderExecution {
 
       if (!this.config.supportsStreaming || !response.body) {
         const payload = (await response.json()) as {
-          choices?: Array<{ message?: { content?: string } }>;
+          choices?: Array<{ message?: { content?: string }; finish_reason?: string }>;
           usage?: { prompt_tokens?: number; completion_tokens?: number };
         };
         const text = payload.choices?.[0]?.message?.content ?? '';
@@ -441,6 +458,7 @@ export class HttpApiProvider implements ProviderExecution {
           text,
           inputTokens: payload.usage?.prompt_tokens ?? 0,
           outputTokens: payload.usage?.completion_tokens ?? 0,
+          truncated: payload.choices?.[0]?.finish_reason === 'length',
         };
       }
 
@@ -474,12 +492,18 @@ export class HttpApiProvider implements ProviderExecution {
   private async readStream(
     body: ReadableStream<Uint8Array>,
     request: ProviderRunRequest,
-  ): Promise<{ text: string; inputTokens: number; outputTokens: number }> {
+  ): Promise<{
+    text: string;
+    inputTokens: number;
+    outputTokens: number;
+    truncated: boolean;
+  }> {
     const turno = await this.consumeStream(body, request);
     return {
       text: turno.text,
       inputTokens: turno.inputTokens,
       outputTokens: turno.outputTokens,
+      truncated: wasTruncated(turno),
     };
   }
 
@@ -502,7 +526,17 @@ export class HttpApiProvider implements ProviderExecution {
       }
     }
 
-    return assembler.result();
+    const turno = assembler.result();
+
+    // un error dentro del flujo con HTTP 200 no puede pasar por respuesta vacia
+    if (turno.streamError !== null) {
+      const error = new Error(turno.streamError);
+      // el proveedor ya dijo que fue cosa suya: se reintenta como un 5xx
+      (error as { status?: number }).status = 502;
+      throw error;
+    }
+
+    return turno;
   }
 
   private failure(message: string): ProviderRunResult {

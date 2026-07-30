@@ -176,12 +176,39 @@ describe('renderBatchSummary', () => {
     expect(texto).not.toContain('ATENCION');
   });
 
+  it('dice LA CAUSA del fallo, no solo que fallo', () => {
+    // paso de verdad: el mensaje decia "1 lotes fallaron" y se quedaba ahi.
+    // Para saber por que habia que abrir avance.jsonl a mano en la maquina.
+    const texto = renderBatchSummary(
+      {
+        batches: 1,
+        done: 0,
+        skipped: 0,
+        failed: 1,
+        items: 0,
+        reason: null,
+        lastError: 'la respuesta se corto al llegar al tope de 32768 tokens',
+      },
+      paths,
+    );
+    expect(texto).toContain('Causa:');
+    expect(texto).toContain('se corto al llegar al tope');
+  });
+
+  it('sin nada escrito no se apunta a un archivo de resultados que no existe', () => {
+    const texto = renderBatchSummary(
+      { batches: 1, done: 0, skipped: 0, failed: 1, items: 0, reason: null, lastError: 'x' },
+      paths,
+    );
+    expect(texto).not.toContain('resultados.jsonl');
+  });
+
   it('un trabajo con lotes fallidos NO se presenta como limpio', () => {
     const texto = renderBatchSummary(
       { batches: 10, done: 8, skipped: 0, failed: 2, items: 800, reason: null },
       paths,
     );
-    expect(texto).toContain('ATENCION');
+    expect(texto).toContain('2 lotes fallaron');
     expect(texto).toContain('NO estan en la salida');
     // y se dice como recuperarlos
     expect(texto).toContain('reanuda');

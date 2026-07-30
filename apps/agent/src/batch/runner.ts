@@ -66,6 +66,15 @@ export interface BatchOutcome {
   items: number;
   stoppedEarly: boolean;
   reason: string | null;
+  /**
+   * causa del ultimo lote fallido.
+   *
+   * el resumen decia "1 lotes fallaron" y se quedaba ahi: para saber POR QUE
+   * habia que abrir avance.jsonl a mano en la maquina. Un mensaje que dice que
+   * algo fallo sin decir la causa obliga a un viaje de ida y vuelta que se
+   * puede ahorrar aqui.
+   */
+  lastError: string | null;
 }
 
 const DEFAULT_MAX_CONSECUTIVE_FAILURES = 3;
@@ -92,6 +101,7 @@ export async function runBatchJob(
   let items = 0;
   let fallosSeguidos = 0;
   let reason: string | null = null;
+  let lastError: string | null = null;
 
   for await (const recordset of readBatches(options.inputPath, {
     format: options.format,
@@ -169,6 +179,7 @@ export async function runBatchJob(
 
       failed += 1;
       fallosSeguidos += 1;
+      lastError = mensaje;
       hooks.onProgress({
         batch: lote,
         from: recordset.from,
@@ -195,6 +206,7 @@ export async function runBatchJob(
     items,
     stoppedEarly: reason !== null,
     reason,
+    lastError,
   };
 }
 

@@ -10,6 +10,18 @@ import type { BatchModel } from './runner.js';
 /** tope de caracteres del lote serializado, para no pasarse del contexto */
 export const MAX_BATCH_CHARS = 120_000;
 
+/**
+ * techo de tokens de salida de una llamada por lotes.
+ *
+ * MEDIDO, no elegido a ojo. Kimi K2.6 razona antes de responder y ese
+ * razonamiento sale del MISMO presupuesto que la respuesta: en un lote de 25
+ * productos gasto 10.110 caracteres pensando y 4.947 respondiendo. Con el techo
+ * de 8192 del catalogo, la misma llamada se cortaba unas veces y cabia otras
+ * (8192 exactos con finish_reason: length en una prueba, 8000 en la siguiente).
+ * Con 16384 completo las dos veces, y con 32768 gasto 11.660.
+ */
+export const BATCH_MAX_OUTPUT_TOKENS = 32_768;
+
 export class BatchTooLargeError extends Error {
   constructor(caracteres: number) {
     super(
@@ -93,6 +105,7 @@ export function providerBatchModel(
         signal: options.signal,
         // el progreso del lote lo informa el bucle, no cada token
         onEvent: () => undefined,
+        maxOutputTokens: BATCH_MAX_OUTPUT_TOKENS,
         ...(options.model === undefined ? {} : { model: options.model }),
         // SIN contexto agentico a proposito: un trabajo de datos no toca
         // archivos del proyecto, asi que no recibe herramientas
@@ -100,6 +113,18 @@ export function providerBatchModel(
 
       if (!result.ok) {
         throw new Error(result.errorMessage ?? 'la llamada al modelo fallo sin mensaje');
+      }
+
+      // una respuesta cortada NO es un problema de formato, y decir "el JSON no
+      // se puede parsear" manda a buscar el fallo donde no esta. La accion es
+      // concreta: menos registros por lote.
+      if (result.truncated === true) {
+        throw new Error(
+          `la respuesta se corto al llegar al tope de ${BATCH_MAX_OUTPUT_TOKENS} tokens de ` +
+            `salida con ${rows.length} registros por lote. Este modelo razona antes de ` +
+            'responder y ese razonamiento gasta del mismo presupuesto. Repite el comando ' +
+            'con menos registros por lote',
+        );
       }
       return result.finalText;
     },

@@ -58,6 +58,21 @@ export interface AssembledTurn {
   inputTokens: number;
   outputTokens: number;
   finishReason: string | null;
+  /**
+   * error que el proveedor mando DENTRO del flujo, con HTTP 200.
+   *
+   * paso de verdad: la respuesta llego con estado 200 y el primer evento era
+   * {"error":{"message":"Internal server error","code":500}}. Sin mirar esto, se
+   * devolvia texto vacio como si todo hubiera ido bien, y el fallo aparecia
+   * mucho despues como "el JSON del modelo no se puede parsear": se culpaba al
+   * formato de una respuesta que nunca existio.
+   */
+  streamError: string | null;
+}
+
+/** true si la respuesta se corto por llegar al tope de tokens */
+export function wasTruncated(turn: AssembledTurn): boolean {
+  return turn.finishReason === 'length';
 }
 
 interface PartialCall {
@@ -80,6 +95,8 @@ export class TurnAssembler {
   private inputTokens = 0;
   private outputTokens = 0;
   private finishReason: string | null = null;
+  private streamError: string | null = null;
+  private reasoningChars = 0;
 
   /**
    * consume un payload `data:`.
@@ -91,6 +108,15 @@ export class TurnAssembler {
       parsed = JSON.parse(payload) as Record<string, unknown>;
     } catch {
       // un trozo ilegible no debe tumbar la vuelta entera
+      return null;
+    }
+
+    // un error dentro del flujo NO es una respuesta vacia
+    const error = parsed.error as { message?: unknown; code?: unknown } | undefined;
+    if (error !== undefined && error !== null) {
+      const mensaje = typeof error.message === 'string' ? error.message : 'error sin mensaje';
+      const codigo = error.code === undefined ? '' : ` (codigo ${String(error.code)})`;
+      this.streamError = `el proveedor devolvio un error en el flujo: ${mensaje}${codigo}`;
       return null;
     }
 
@@ -106,10 +132,10 @@ export class TurnAssembler {
     const choices = Array.isArray(parsed.choices) ? parsed.choices : [];
     const first = choices[0] as
       | {
-          delta?: { content?: unknown; tool_calls?: unknown };
+          delta?: { content?: unknown; tool_calls?: unknown; reasoning_content?: unknown };
           finish_reason?: unknown;
           // algunos proveedores mandan el mensaje completo en el ultimo evento
-          message?: { content?: unknown; tool_calls?: unknown };
+          message?: { content?: unknown; tool_calls?: unknown; reasoning_content?: unknown };
         }
       | undefined;
     if (!first) return null;
@@ -118,6 +144,14 @@ export class TurnAssembler {
 
     const delta = first.delta ?? first.message;
     if (!delta) return null;
+
+    // el razonamiento se cuenta pero NO se acumula en el texto: no es la
+    // respuesta, y colarlo dentro romperia el JSON que se le pidio al modelo.
+    // Se cuenta porque gasta presupuesto de tokens, y saberlo es lo que explica
+    // que una respuesta se corte antes de empezar.
+    if (typeof delta.reasoning_content === 'string') {
+      this.reasoningChars += delta.reasoning_content.length;
+    }
 
     let nuevo: string | null = null;
     if (typeof delta.content === 'string' && delta.content.length > 0) {
@@ -177,6 +211,12 @@ export class TurnAssembler {
       inputTokens: this.inputTokens,
       outputTokens: this.outputTokens,
       finishReason: this.finishReason,
+      streamError: this.streamError,
     };
+  }
+
+  /** cuantos caracteres de razonamiento gasto el modelo antes de responder */
+  reasoningLength(): number {
+    return this.reasoningChars;
   }
 }

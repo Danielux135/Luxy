@@ -205,6 +205,16 @@ export interface ProviderRunRequest {
   model?: string;
   /** si viene, el proveedor ejecuta el bucle de herramientas */
   agentic?: AgenticContext;
+  /**
+   * techo de tokens de salida para ESTA peticion, por encima del de la
+   * configuracion.
+   *
+   * hace falta porque los modelos que razonan gastan el presupuesto pensando
+   * ANTES de responder: medido en Kimi K2.6, 10.110 caracteres de razonamiento
+   * frente a 4.947 de respuesta. Con el techo de 8192 del catalogo, un lote de
+   * 25 registros salia cortado unas veces y entero otras.
+   */
+  maxOutputTokens?: number;
 }
 
 export interface ProviderStreamEvent {
@@ -216,6 +226,16 @@ export interface ProviderStreamEvent {
 export interface ProviderRunResult {
   ok: boolean;
   finalText: string;
+  /**
+   * true si el modelo se quedo sin presupuesto de tokens a mitad de la
+   * respuesta (finish_reason: length).
+   *
+   * se distingue de un fallo cualquiera porque la accion es distinta y
+   * concreta: reducir el tamano del lote o subir el techo. Sin esto, una
+   * respuesta cortada llegaba como "el JSON no se puede parsear", que manda a
+   * buscar el problema donde no esta.
+   */
+  truncated?: boolean;
   sessionId: string | null;
   exitCode: number | null;
   timedOut: boolean;

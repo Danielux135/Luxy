@@ -9,7 +9,7 @@
 // suelto no es JSON valido. Si eso se ensambla mal, el modelo parece pedir una
 // herramienta con argumentos corruptos y el fallo es dificil de leer.
 import { describe, it, expect } from 'vitest';
-import { sseData, TurnAssembler } from './sse.js';
+import { sseData, TurnAssembler, wasTruncated } from './sse.js';
 
 /** convierte lineas en un ReadableStream, troceado como se pida */
 function flujo(texto: string, tamanoChunk = 1024): ReadableStream<Uint8Array> {
@@ -97,6 +97,63 @@ describe('TurnAssembler: texto', () => {
     const a = new TurnAssembler();
     a.push('{"choices":[{"message":{"content":"entero"}}]}');
     expect(a.result().text).toBe('entero');
+  });
+});
+
+describe('un error dentro del flujo NO es una respuesta vacia', () => {
+  it('detecta el error que llega con HTTP 200', () => {
+    // PASO DE VERDAD: la respuesta venia con estado 200 y el primer evento era
+    // este. Sin mirarlo, se devolvia texto vacio como si todo hubiera ido bien,
+    // y el fallo aparecia mucho despues como "el JSON no se puede parsear": se
+    // culpaba al formato de una respuesta que nunca existio.
+    const a = new TurnAssembler();
+    a.push('{"error":{"message":"Internal server error","type":"internal_server_error","code":500}}');
+
+    expect(a.result().streamError).toContain('Internal server error');
+    expect(a.result().streamError).toContain('500');
+  });
+
+  it('un error sin mensaje tampoco pasa desapercibido', () => {
+    const a = new TurnAssembler();
+    a.push('{"error":{}}');
+    expect(a.result().streamError).not.toBeNull();
+  });
+
+  it('una respuesta normal no inventa error', () => {
+    const a = new TurnAssembler();
+    a.push('{"choices":[{"delta":{"content":"hola"}}]}');
+    expect(a.result().streamError).toBeNull();
+  });
+});
+
+describe('truncamiento y razonamiento', () => {
+  it('finish_reason length se reconoce como corte', () => {
+    const a = new TurnAssembler();
+    a.push('{"choices":[{"delta":{"content":"a medi"},"finish_reason":"length"}]}');
+    expect(wasTruncated(a.result())).toBe(true);
+  });
+
+  it('finish_reason stop no es un corte', () => {
+    const a = new TurnAssembler();
+    a.push('{"choices":[{"delta":{"content":"entero"},"finish_reason":"stop"}]}');
+    expect(wasTruncated(a.result())).toBe(false);
+  });
+
+  it('el razonamiento se cuenta pero NO entra en el texto', () => {
+    // si se colara dentro, romperia el JSON que se le pidio al modelo.
+    // Medido en Kimi K2.6: 10.110 caracteres razonando y 4.947 respondiendo,
+    // los dos del mismo presupuesto de tokens
+    const a = new TurnAssembler();
+    a.push('{"choices":[{"delta":{"reasoning_content":"a ver, el usuario quiere..."}}]}');
+    a.push('{"choices":[{"delta":{"content":"{\\"results\\":[]}"}}]}');
+
+    expect(a.result().text).toBe('{"results":[]}');
+    expect(a.reasoningLength()).toBe('a ver, el usuario quiere...'.length);
+  });
+
+  it('un delta de solo razonamiento no cuenta como texto nuevo', () => {
+    const a = new TurnAssembler();
+    expect(a.push('{"choices":[{"delta":{"reasoning_content":"pensando"}}]}')).toBeNull();
   });
 });
 
