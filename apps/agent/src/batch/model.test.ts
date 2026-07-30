@@ -153,6 +153,29 @@ describe('providerBatchModel', () => {
     expect(request.requestTimeoutMs).toBeGreaterThan(300_000);
   });
 
+  it('una respuesta VACIA no se presenta como problema de formato', async () => {
+    // MEDIDO: 400 registros devolvieron 0 caracteres tras 302 s, sin error en
+    // el flujo y sin marca de corte. El proveedor cierra la conexion sobre los
+    // 300 s y deja el flujo terminado en limpio pero sin nada dentro. Antes
+    // llegaba como "el JSON no se puede parsear".
+    const { provider } = proveedor({ ok: true, finalText: '' });
+
+    await expect(providerBatchModel(provider, opciones()).process(filas, 'x', 0)).rejects.toThrow(
+      /no devolvio nada/,
+    );
+  });
+
+  it('el aviso de respuesta vacia apunta al tiempo, no al formato', async () => {
+    const { provider } = proveedor({ ok: true, finalText: '   \n  ' });
+    try {
+      await providerBatchModel(provider, opciones()).process(filas, 'x', 0);
+      expect.unreachable();
+    } catch (error) {
+      expect((error as Error).message).toContain('300 s');
+      expect((error as Error).message).toContain('menos registros por lote');
+    }
+  });
+
   it('una respuesta CORTADA no se presenta como problema de formato', async () => {
     // paso de verdad: llegaba como "el JSON del modelo no se puede parsear",
     // que manda a buscar el fallo donde no esta. La accion es otra: menos

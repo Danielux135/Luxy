@@ -35,22 +35,26 @@ export const BATCH_MAX_OUTPUT_TOKENS = 65_536;
  * registros por lote a partir de los cuales una sola llamada se acerca al tope
  * de tiempo por peticion.
  *
- * MEDIDO: 100 registros ricos tardaron 95 s. El tope por peticion son 300 s, asi
- * que por encima de ~250 el riesgo no es de tokens sino de reloj, y un lote que
- * expira es una llamada pagada y perdida.
+ * MEDIDO: 100 registros en 95 s, 200 en 117 s, y 400 devolvieron NADA a los
+ * 302 s porque el proveedor cierra la conexion sobre los 300 s. Por encima de
+ * ~220 el riesgo no es de tokens sino de reloj, y un lote que expira es una
+ * llamada pagada y perdida.
  */
-export const BATCH_SIZE_SLOW_WARNING = 250;
+export const BATCH_SIZE_SLOW_WARNING = 220;
 
 /**
  * tope de tiempo de una llamada por lotes.
  *
  * el tope general de 300 s existe para que un modelo colgado no bloquee un
  * trabajo. En un lote no protege de nada -el bucle ya lleva su propia
- * cancelacion- y en cambio limita cuantos registros caben en una llamada:
- * medido, Kimi K2.6 hace 200 registros en 117 s, y 400 no entran en 300 s.
+ * cancelacion- asi que se le da margen.
  *
- * Con facturacion por llamada, cada registro que no cabe aqui se paga en la
- * llamada siguiente. Por eso se le da margen: diez minutos.
+ * OJO, ESTO NO AGRANDA EL LOTE. Se subio pensando que el tope de Luxy era lo
+ * que limitaba cuantos registros caben en una llamada, y la medicion lo
+ * desmintio: con 600 s concedidos, 400 registros devolvieron 0 caracteres a los
+ * 302 s. El muro de los ~300 s es del PROVEEDOR, que cierra la conexion. Subir
+ * esto solo evita que Luxy corte antes que el; el techo real sigue estando en
+ * torno a 200 registros para Kimi K2.6, medidos en 117 s.
  */
 export const BATCH_REQUEST_TIMEOUT_MS = 600_000;
 
@@ -146,6 +150,21 @@ export function providerBatchModel(
 
       if (!result.ok) {
         throw new Error(result.errorMessage ?? 'la llamada al modelo fallo sin mensaje');
+      }
+
+      // una respuesta VACIA tampoco es un problema de formato.
+      //
+      // MEDIDO: un lote de 400 registros devolvio 0 caracteres tras 302 s, sin
+      // error en el flujo y sin marca de corte. Ese ~300 s no es el tope de
+      // Luxy -se le habian dado 600- sino el del proveedor, que cierra la
+      // conexion y deja el flujo terminado en limpio pero sin nada dentro.
+      // Sin este aviso llegaba como "el JSON no se puede parsear".
+      if (result.finalText.trim().length === 0) {
+        throw new Error(
+          `el modelo no devolvio nada con ${rows.length} registros por lote. ` +
+            'Suele ser el proveedor cerrando la conexion por tiempo, sobre los ' +
+            '300 s. Repite con menos registros por lote',
+        );
       }
 
       // una respuesta cortada NO es un problema de formato, y decir "el JSON no
