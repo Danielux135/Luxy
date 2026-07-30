@@ -10,9 +10,10 @@ import * as adapters from './providers/media-adapters.js';
 
 const connection = {
   id: 'newapi',
-  label: 'NewAPI',
+  displayName: 'NewAPI',
   baseUrl: 'https://api.ejemplo.test',
-  dialect: 'openai' as const,
+  protocol: 'openai' as const,
+  headers: {},
   apiKeyEnv: 'connection:newapi',
   enabled: true,
   timeoutMs: 120_000,
@@ -153,6 +154,27 @@ describe('transcripcion', () => {
     expect(result.ok).toBe(false);
     expect(result.summary).toContain('404');
     expect(result.summary).toContain('limitacion conocida');
+  });
+});
+
+describe('clave rechazada', () => {
+  it('un 401 dice donde se corrige, en vez de dejar el codigo suelto', async () => {
+    // paso de verdad: la clave guardada dejo de valer y el mensaje solo
+    // mostraba el JSON del proveedor, que no dice que hacer
+    vi.spyOn(adapters, 'editImage').mockRejectedValue(
+      new adapters.MediaAdapterError('la API respondio 401: Invalid token', 401),
+    );
+
+    const model = findMediaModel('step-image-edit-2', config)!;
+    const conFoto = job({
+      attachment: { fileId: 'FID', kind: 'photo', mimeType: 'image/jpeg', fileName: 'f.jpg', size: 1 },
+    });
+
+    const result = await runMediaJob(conFoto, model, deps());
+
+    expect(result.ok).toBe(false);
+    expect(result.summary).toContain('Ajustes -> Conexiones');
+    expect(result.summary).toContain('NewAPI');
   });
 });
 

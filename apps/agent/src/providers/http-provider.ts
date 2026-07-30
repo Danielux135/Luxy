@@ -538,7 +538,13 @@ export class HttpApiProvider implements ProviderExecution {
 export function describeHttpError(error: unknown, displayName: string): string {
   const status = (error as { status?: number }).status;
   if (status === 401 || status === 403) {
-    return `${displayName} rechazo la clave de API. Revisa tu clave en .env.providers.`;
+    // el consejo del .env era de la epoca de la CLI: en el escritorio las
+    // claves viven en el almacen cifrado, y ahi es donde hay que corregirlas
+    return (
+      `${displayName} rechazo la clave de API.\n\n` +
+      'Abre Luxy en el escritorio, ve a Ajustes -> Conexiones y pulsa "Probar". ' +
+      'Si tambien falla ahi, la clave ya no sirve: genera otra en tu proveedor y pegala.'
+    );
   }
   if (status === 429) {
     return `${displayName} esta limitando las peticiones. Intentalo mas tarde.`;

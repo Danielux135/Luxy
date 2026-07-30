@@ -177,6 +177,19 @@ export async function runMediaJob(
     const causa =
       error instanceof MediaAdapterError ? error.message : redact(String(error)).slice(0, 300);
 
+    // una clave rechazada no es un problema del modelo ni del archivo enviado:
+    // sin decir donde se corrige, el usuario se queda mirando un 401
+    const status = error instanceof MediaAdapterError ? error.status : null;
+    if (status === 401 || status === 403) {
+      return {
+        ok: false,
+        summary:
+          `La conexion "${connection.displayName}" rechazo la clave de API (${status}).\n\n` +
+          'Abre Luxy en el escritorio, ve a Ajustes -> Conexiones y pulsa "Probar". ' +
+          'Si tambien falla ahi, la clave ya no sirve: genera otra en tu proveedor y pegala.',
+      };
+    }
+
     return {
       ok: false,
       summary: sinVerificar
