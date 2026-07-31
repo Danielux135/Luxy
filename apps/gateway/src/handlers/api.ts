@@ -16,6 +16,7 @@ import {
 import type { JobAttachment, ProviderId } from '@luxy/shared';
 import type { GatewayConfig } from '../env.js';
 import type { Repository } from '../repository.js';
+import type { RemoteRepository } from '../remote-repository.js';
 import type { Logger } from '../logger.js';
 import { describeError } from '../logger.js';
 import { type TelegramClient, buildResultKeyboard } from '../telegram.js';
@@ -33,6 +34,8 @@ import type { SupabaseClient } from '../supabase.js';
 export interface ApiDeps {
   config: GatewayConfig;
   repo: Repository;
+  /** tablas de control remoto; separadas de repo por ciclo de vida propio */
+  remote: RemoteRepository;
   db: SupabaseClient;
   telegram: TelegramClient;
   logger: Logger;

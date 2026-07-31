@@ -74,6 +74,11 @@ create table if not exists public.remote_pairing_codes (
   claimant_name       text,
   claimant_kind       text check (claimant_kind in ('desktop','android')),
 
+  -- confirmaciones. HACEN FALTA LAS DOS: con una sola, un gateway que hubiera
+  -- sustituido una clave solo necesitaria enganar a un lado.
+  host_confirmed      boolean not null default false,
+  claimant_confirmed  boolean not null default false,
+
   expires_at      timestamptz not null,
   created_at      timestamptz not null default now(),
   claimed_at      timestamptz,
@@ -117,6 +122,47 @@ create index if not exists remote_sessions_host_idx
 
 create index if not exists remote_sessions_active_idx
   on public.remote_sessions (state) where state = 'active';
+
+-- -----------------------------------------------------------------------------
+-- remote_auth_nonces
+--
+-- Cada peticion firmada lleva un nonce. Registrarlo AQUI, con el nonce como
+-- clave primaria, hace que comprobar y registrar sean la MISMA operacion
+-- atomica: dos peticiones identicas simultaneas no pueden pasar las dos.
+--
+-- Leer primero y escribir despues dejaria una ventana entre ambas en la que las
+-- dos verian el nonce como nuevo, que es justo el replay que se quiere impedir.
+--
+-- Las filas caducan: solo hace falta recordar un nonce mientras su marca de
+-- tiempo siga dentro de la ventana de validez.
+-- -----------------------------------------------------------------------------
+create table if not exists public.remote_auth_nonces (
+  nonce       text primary key,
+  device_id   uuid not null references public.remote_devices (id) on delete cascade,
+  expires_at  timestamptz not null,
+  created_at  timestamptz not null default now()
+);
+
+create index if not exists remote_auth_nonces_expiry_idx
+  on public.remote_auth_nonces (expires_at);
+
+-- limpieza de nonces caducados; se llama desde el cron que ya existe
+create or replace function public.luxy_purge_auth_nonces()
+returns integer
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_borrados integer := 0;
+begin
+  with borrados as (
+    delete from public.remote_auth_nonces where expires_at < now() returning 1
+  )
+  select count(*)::integer into v_borrados from borrados;
+  return v_borrados;
+end;
+$$;
 
 -- -----------------------------------------------------------------------------
 -- remote_audit
@@ -174,5 +220,7 @@ alter table public.remote_devices       enable row level security;
 alter table public.remote_pairing_codes enable row level security;
 alter table public.remote_sessions      enable row level security;
 alter table public.remote_audit         enable row level security;
+alter table public.remote_auth_nonces   enable row level security;
 
 revoke all on function public.luxy_expire_pairing_codes() from anon, authenticated;
+revoke all on function public.luxy_purge_auth_nonces() from anon, authenticated;

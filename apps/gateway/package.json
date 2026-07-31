@@ -11,7 +11,9 @@
   },
   "dependencies": {
     "@luxy/shared": "*",
-    "zod": "^3.24.1"
+    "zod": "^3.24.1",
+    "@luxy/remote-crypto": "*",
+    "@luxy/remote-protocol": "*"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20241230.0",

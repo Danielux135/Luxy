@@ -7,6 +7,15 @@ import { TelegramClient } from './telegram.js';
 import { Router } from './router.js';
 import { handleWebhook, type WebhookDeps } from './handlers/webhook.js';
 import {
+  handlePairStart,
+  handlePairClaim,
+  handlePairConfirm,
+  handleListDevices,
+  handleUpdateAccess,
+  handleRevokeDevice,
+} from './handlers/remote.js';
+import { RemoteRepository } from './remote-repository.js';
+import {
   handleRegister,
   handleHeartbeat,
   handleClaim,
@@ -43,6 +52,24 @@ const router = new Router<Deps>()
   .get('/api/jobs/:jobId/attachment', (request, deps, params) =>
     handleJobAttachment(request, deps, params),
   )
+  // -------------------------------------------------------------------------
+  // control remoto
+  //
+  // pair/start y pair/claim NO llevan autenticacion de dispositivo: son los
+  // pasos en los que todavia no hay emparejamiento. Su proteccion es el codigo,
+  // que caduca en tres minutos, es de un solo uso y hay que firmar para
+  // reclamarlo.
+  // -------------------------------------------------------------------------
+  .post('/api/remote/pair/start', (request, deps) => handlePairStart(request, deps))
+  .post('/api/remote/pair/claim', (request, deps) => handlePairClaim(request, deps))
+  .post('/api/remote/pair/confirm', (request, deps) => handlePairConfirm(request, deps))
+  .get('/api/remote/devices', (request, deps, params) => handleListDevices(request, deps, params))
+  .post('/api/remote/devices/:deviceId/access', (request, deps, params) =>
+    handleUpdateAccess(request, deps, params),
+  )
+  .post('/api/remote/devices/:deviceId/revoke', (request, deps, params) =>
+    handleRevokeDevice(request, deps, params),
+  )
   .get('/api/approvals/pending', (request, deps) => handleApprovalsPending(request, deps, {}))
   .post('/api/approvals/:approvalId/resolve', (request, deps, params) =>
     handleApprovalResolve(request, deps, params),
@@ -57,6 +84,7 @@ function buildDeps(env: Env, requestId: string): Deps {
     config,
     db,
     repo: new Repository(db),
+    remote: new RemoteRepository(db),
     telegram: new TelegramClient(config.TELEGRAM_BOT_TOKEN),
     logger,
   };

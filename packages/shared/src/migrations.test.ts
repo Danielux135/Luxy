@@ -201,7 +201,15 @@ describe('migraciones - reclamacion atomica y leases', () => {
   });
 
   it('la cancelacion no borra nada: solo marca la peticion', () => {
-    const funcion = allSql.slice(allSql.indexOf('luxy_request_cancel'));
+    // se acota al CUERPO de la funcion, hasta su $$ de cierre. Cortando hasta el
+    // final de todo el SQL, cualquier migracion posterior que borre algo
+    // legitimo (por ejemplo purgar nonces caducados) haria fallar esta prueba
+    // sin que la cancelacion hubiera cambiado.
+    const inicio = allSql.indexOf('luxy_request_cancel');
+    const cierre = allSql.indexOf('$$;', inicio);
+    expect(cierre).toBeGreaterThan(inicio);
+
+    const funcion = allSql.slice(inicio, cierre);
     expect(funcion).toMatch(/cancel_requested_at = coalesce/i);
     expect(funcion).not.toMatch(/delete from/i);
   });
