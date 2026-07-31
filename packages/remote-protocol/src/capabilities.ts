@@ -6,7 +6,9 @@
 // en cada mensaje. Ver docs/adr/0002-modelo-de-capacidades.md
 import { z } from 'zod';
 
-export const DEVICE_KINDS = ['desktop', 'android', 'ios'] as const;
+// iOS queda FUERA DEL ALCANCE por decision del proyecto (uso personal,
+// sideload, sin App Store). Ver docs/adr/0006-alcance-android-windows.md
+export const DEVICE_KINDS = ['desktop', 'android'] as const;
 export type DeviceKind = (typeof DEVICE_KINDS)[number];
 
 /**
@@ -103,9 +105,6 @@ export const PLATFORM_HOST_LIMITS: Record<DeviceKind, readonly Capability[]> = {
   // el control existe pero solo por sideload (Shizuku/ADB); en Google Play la
   // build no lo lleva. La captura para al bloquear pantalla desde Android 15 QPR1
   android: ['view', 'clipboard_read', 'clipboard_write', 'file_send', 'file_receive'],
-  // iOS NO tiene API publica para inyectar entrada. Ver ADR 0002.
-  // Ademas el usuario debe iniciar cada emision a mano (no hay inicio programatico)
-  ios: ['view', 'clipboard_write', 'file_send', 'file_receive'],
 } as const;
 
 /** motivo por el que una plataforma no puede ofrecer una capacidad */
@@ -115,16 +114,6 @@ export function explainMissing(kind: DeviceKind, capability: Capability): Capabi
     return { capability, available: true, reason: null, detail: '' };
   }
 
-  if (kind === 'ios' && capability === 'control') {
-    return {
-      capability,
-      available: false,
-      reason: 'platform_forbids',
-      detail:
-        'iOS no ofrece ninguna API publica para inyectar toques o teclas. No es una ' +
-        'limitacion de Luxy: lo impide el sandbox del sistema.',
-    };
-  }
   if (kind === 'android' && capability === 'control') {
     return {
       capability,
@@ -133,14 +122,6 @@ export function explainMissing(kind: DeviceKind, capability: Capability): Capabi
       detail:
         'controlar Android necesita Shizuku o ADB, que no se pueden usar en la version ' +
         'de Google Play. Disponible en la version instalada manualmente.',
-    };
-  }
-  if (kind === 'ios' && capability === 'clipboard_read') {
-    return {
-      capability,
-      available: false,
-      reason: 'platform_forbids',
-      detail: 'iOS no permite leer el portapapeles en segundo plano.',
     };
   }
   if (kind === 'android' && capability === 'audio') {

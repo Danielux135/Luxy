@@ -3,6 +3,7 @@
   "references": [
     { "path": "./packages/shared" },
     { "path": "./packages/remote-protocol" },
+    { "path": "./packages/remote-crypto" },
     { "path": "./apps/gateway" },
     { "path": "./apps/agent" },
     { "path": "./apps/desktop/tsconfig.shared.json" },
