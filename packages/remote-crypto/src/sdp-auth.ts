@@ -113,15 +113,6 @@ export function verifySdp(mensaje: SignedSdp, options: VerifySdpOptions): SdpVer
     return { ok: false, code: 'wrong_session', detail: 'el SDP es de otra sesion' };
   }
 
-  const huellas = extractFingerprints(mensaje.sdp);
-  if (huellas.length === 0) {
-    return {
-      ok: false,
-      code: 'no_fingerprint',
-      detail: 'el SDP no trae huella DTLS: no se puede autenticar el cifrado',
-    };
-  }
-
   if (options.pinnedPublicKey === null || !isValidPublicKey(options.pinnedPublicKey)) {
     return {
       ok: false,
@@ -146,6 +137,18 @@ export function verifySdp(mensaje: SignedSdp, options: VerifySdpOptions): SdpVer
   );
   if (!valida) {
     return { ok: false, code: 'bad_signature', detail: 'la firma no es valida' };
+  }
+
+  // la huella se mira DESPUES de autenticar. Antes se extraia primero, y eso es
+  // trabajar sobre contenido no autenticado: exactamente lo que no se debe
+  // hacer con datos que vienen de fuera.
+  const huellas = extractFingerprints(mensaje.sdp);
+  if (huellas.length === 0) {
+    return {
+      ok: false,
+      code: 'no_fingerprint',
+      detail: 'el SDP no trae huella DTLS: no se puede autenticar el cifrado',
+    };
   }
 
   return { ok: true, sdp: mensaje.sdp, fingerprints: huellas };
