@@ -39,6 +39,23 @@ salen del equipo hacia el gateway.
 
 ### 2. Atacante con acceso al gateway ← **el escenario que define el diseño**
 
+> **Actualización tras la revisión de seguridad del 2026-07-31.** Este escenario
+> tenía dos agujeros reales, ya cerrados, que conviene dejar por escrito porque
+> ilustran cómo una propiedad puede estar *declarada* y no *implementada*:
+>
+> 1. **El emparejamiento se podía completar sin ningún humano.** `pair/start` y
+>    `pair/confirm` no estaban autenticados y el bando lo elegía el cliente, así
+>    que quien fotografiara el QR podía emparejar su propio dispositivo enviando
+>    las dos confirmaciones. Las palabras no llegaban a intervenir.
+> 2. **El gateway dictaba las palabras de confirmación.** Es decir: el ancla
+>    contra la sustitución de claves la proporcionaba justo la parte que este
+>    modelo considera no confiable. Ahora cada lado las calcula en local.
+>
+> Y una tercera, de diseño más que de código: mientras el escritorio no anclara
+> localmente las claves de sus pares, la única fuente sobre *con quién estoy
+> emparejado* era el gateway. Se ancla al confirmar, y su lista se contrasta
+> contra la local en cada consulta.
+
 Es el más importante porque el gateway es infraestructura de terceros
 (Cloudflare + Supabase) y hay que asumir que puede caer.
 
