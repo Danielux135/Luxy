@@ -6,4 +6,5 @@
 export * from './identity.js';
 export * from './pairing.js';
 export * from './request-auth.js';
+export * from './sdp-auth.js';
 export * from './pairing-flow.js';
