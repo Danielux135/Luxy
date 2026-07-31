@@ -2,6 +2,7 @@
   "files": [],
   "references": [
     { "path": "./packages/shared" },
+    { "path": "./packages/remote-protocol" },
     { "path": "./apps/gateway" },
     { "path": "./apps/agent" },
     { "path": "./apps/desktop/tsconfig.shared.json" },
