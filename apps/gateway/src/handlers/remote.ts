@@ -5,18 +5,22 @@
 // repartieran por cada handler, tarde o temprano uno se saltaria alguna.
 import { z } from 'zod';
 import {
+  AUTH_WINDOW_MS as VENTANA,
   verifySignedRequest,
   hashBody,
   fromBase64Url,
+  canonicalPublicKey,
+  fingerprint,
+  verify,
+  pairStartParts,
+  pairConfirmParts,
   generatePairingCode,
   startPairing,
   claimPairing,
   confirmPairing,
-  sessionWords,
   isPaired,
   pairedDeviceFrom,
   PAIRING_CODE_TTL_MS,
-  AUTH_WINDOW_MS,
   type PairingSession,
 } from '@luxy/remote-crypto';
 import { CAPABILITIES, validateCapabilitySet, type Capability } from '@luxy/remote-protocol';
@@ -43,15 +47,26 @@ function fail(code: string, detail: string, status: number): Response {
   return json({ error: { code, detail } }, status);
 }
 
-/** codigos http por tipo de rechazo, para que el cliente sepa si reintentar */
-const AUTH_STATUS: Record<string, number> = {
-  malformed: 400,
-  stale: 401,
-  replayed: 401,
-  unknown_device: 401,
-  revoked: 403,
-  bad_signature: 401,
-};
+/**
+ * respuesta unica para cualquier fallo de autenticacion.
+ *
+ * NO se distingue "el dispositivo no existe" de "la firma no vale" de "esta
+ * revocado". Devolver el codigo real convertia el endpoint en un oraculo: con un
+ * deviceId conocido se podia averiguar si existe y si sigue activo. El detalle
+ * queda en el log del servidor, que es donde sirve.
+ *
+ * `malformed` y `stale` SI se distinguen porque no revelan nada del dispositivo
+ * y un cliente legitimo con el reloj desajustado necesita saberlo para
+ * corregirlo.
+ */
+function rechazoAuth(code: string, detail: string): Response {
+  if (code === 'malformed') return fail('malformed', detail, 400);
+  if (code === 'stale') return fail('stale', detail, 401);
+  return fail('unauthorized', 'no autorizado', 401);
+}
+
+/** UUID v4 de verdad: "------..." tiene 36 caracteres y no es un UUID */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 // -----------------------------------------------------------------------------
 // la puerta
@@ -98,19 +113,17 @@ export function withDeviceAuth(handler: DeviceHandler) {
 
     // se busca el dispositivo antes: hace falta su clave para verificar
     const row =
-      /^[0-9a-f-]{36}$/i.test(headers.deviceId) === true
+      UUID_RE.test(headers.deviceId)
         ? await deps.remote.getDeviceById(headers.deviceId)
         : null;
 
-    let nonceNuevo = true;
-    if (row !== null) {
-      nonceNuevo = await deps.remote.registerNonce(
-        row.id,
-        headers.nonce,
-        new Date(Date.now() + AUTH_WINDOW_MS * 2).toISOString(),
-      );
-    }
-
+    // PRIMERO la firma, DESPUES el nonce.
+    //
+    // Estaba al reves con el argumento de la atomicidad, y el argumento era
+    // flojo: `insertIfAbsent` sigue siendo atomico ejecutandolo despues, y solo
+    // lo alcanzan peticiones que ya demostraron ser autenticas. Al reves, se
+    // podia escribir en remote_auth_nonces SIN NINGUNA FIRMA VALIDA con solo
+    // conocer un deviceId, que no es secreto.
     const veredicto = verifySignedRequest({
       headers,
       method: request.method,
@@ -118,18 +131,28 @@ export function withDeviceAuth(handler: DeviceHandler) {
       bodyHash: await hashBody(body),
       publicKey: row === null ? null : fromBase64Url(row.public_key),
       revoked: row?.revoked_at !== null && row?.revoked_at !== undefined,
-      nonceSeen: !nonceNuevo,
+      // el replay se comprueba aparte, justo debajo
+      nonceSeen: false,
     });
 
     if (!veredicto.ok) {
-      // NO se dice cual de las comprobaciones fallo mas alla del codigo: un
-      // atacante no necesita saber si el dispositivo existe pero la firma falla,
-      // o si el dispositivo no existe
       deps.logger.warn('peticion remota rechazada', { code: veredicto.code });
-      return fail(veredicto.code, veredicto.detail, AUTH_STATUS[veredicto.code] ?? 401);
+      return rechazoAuth(veredicto.code, veredicto.detail);
     }
 
-    if (row === null) return fail('unknown_device', 'dispositivo desconocido', 401);
+    if (row === null) return rechazoAuth('unknown_device', 'dispositivo desconocido');
+
+    // consumir el nonce ES la comprobacion de replay: `insertIfAbsent` devuelve
+    // false si ya existia, y eso ocurre en una sola operacion atomica
+    const nonceNuevo = await deps.remote.registerNonce(
+      row.id,
+      headers.nonce,
+      new Date(Date.now() + VENTANA * 2).toISOString(),
+    );
+    if (!nonceNuevo) {
+      deps.logger.warn('peticion remota rechazada', { code: 'replayed' });
+      return rechazoAuth('replayed', 'esta peticion ya se proceso');
+    }
 
     return handler(request, deps, { row, body }, params);
   };
@@ -144,30 +167,57 @@ export function withDeviceAuth(handler: DeviceHandler) {
 // para reclamarlo.
 // -----------------------------------------------------------------------------
 
+const CLAVE_RE = /^[A-Za-z0-9_-]{86,88}$/;
+
 const startSchema = z.object({
-  hostPublicKey: z.string().min(80).max(100),
+  hostPublicKey: z.string().regex(CLAVE_RE),
   hostName: z.string().min(1).max(64),
+  /** prueba de posesion: sin esto cualquiera pedia codigos en nombre de otro PC */
+  timestamp: z.number().int().positive(),
+  signature: z.string().regex(/^[A-Za-z0-9_-]{80,100}$/),
 });
 
 export async function handlePairStart(request: Request, deps: RemoteDeps): Promise<Response> {
   const parsed = startSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return fail('malformed', 'faltan datos del ordenador', 400);
 
-  let hostKey: Uint8Array;
-  try {
-    hostKey = fromBase64Url(parsed.data.hostPublicKey);
-  } catch {
-    return fail('bad_key', 'la clave del ordenador no es valida', 400);
+  // canonicalizar ANTES de tocar la base: cuatro cadenas distintas decodifican a
+  // la misma clave, y guardar el texto recibido permitia cuatro filas por
+  // identidad, con lo que revocar una no revocaba las demas
+  // se EXIGE la forma canonica en vez de normalizar en silencio. Normalizar
+  // funcionaria igual de bien contra el ataque, pero un cliente que mandara una
+  // variante recibiria despues un fallo de firma incomprensible. Asi el error
+  // dice lo que pasa.
+  const canonica = canonicalPublicKey(parsed.data.hostPublicKey);
+  if (canonica === null || canonica !== parsed.data.hostPublicKey) {
+    return fail('bad_key', 'la clave del ordenador no es valida o no esta en forma canonica', 400);
+  }
+  const hostKey = fromBase64Url(canonica);
+
+  // PRUEBA DE POSESION. Sin esto, quien tuviera la clave publica del ordenador
+  // -que va dentro del QR y no es secreta- podia pedir codigos en su nombre.
+  if (Math.abs(Date.now() - parsed.data.timestamp) > VENTANA) {
+    return fail('stale', 'la peticion esta fuera de la ventana de tiempo', 401);
+  }
+  const firmaValida = verify(
+    hostKey,
+    'luxy.pair.start.v1',
+    pairStartParts(canonica, parsed.data.hostName, parsed.data.timestamp),
+    fromBase64Url(parsed.data.signature),
+  );
+  if (!firmaValida) {
+    return fail('unauthorized', 'no autorizado', 401);
   }
 
   // el host se registra como dispositivo la primera vez, o se reutiliza
-  let host = await deps.remote.getDeviceByPublicKey(parsed.data.hostPublicKey);
+  let host = await deps.remote.getDeviceByPublicKey(canonica);
   if (host === null) {
     host = await deps.remote.createDevice({
       name: parsed.data.hostName,
       kind: 'desktop',
-      publicKey: parsed.data.hostPublicKey,
-      fingerprint: '',
+      publicKey: canonica,
+      // la huella se calcula de verdad: iba vacia, y el movil la recibia vacia
+      fingerprint: fingerprint(hostKey),
       peerDeviceId: null,
       permissions: [],
     });
@@ -196,10 +246,10 @@ export async function handlePairStart(request: Request, deps: RemoteDeps): Promi
 
 const claimSchema = z.object({
   code: z.string().regex(/^\d{8}$/),
-  publicKey: z.string().min(80).max(100),
+  publicKey: z.string().regex(CLAVE_RE),
   name: z.string().min(1).max(64),
   kind: z.enum(['android', 'desktop']),
-  signature: z.string().min(80).max(100),
+  signature: z.string().regex(/^[A-Za-z0-9_-]{80,100}$/),
 });
 
 export async function handlePairClaim(request: Request, deps: RemoteDeps): Promise<Response> {
@@ -212,9 +262,14 @@ export async function handlePairClaim(request: Request, deps: RemoteDeps): Promi
     return fail('not_found', 'ese codigo no existe', 404);
   }
 
+  const canonica = canonicalPublicKey(parsed.data.publicKey);
+  if (canonica === null || canonica !== parsed.data.publicKey) {
+    return fail('bad_key', 'la clave del dispositivo no es valida o no esta en forma canonica', 400);
+  }
+
   const resultado = claimPairing({
     session: sessionFromRow(fila, host),
-    claimantPublicKey: parsed.data.publicKey,
+    claimantPublicKey: canonica,
     claimantName: parsed.data.name,
     claimantKind: parsed.data.kind,
     signature: parsed.data.signature,
@@ -224,7 +279,7 @@ export async function handlePairClaim(request: Request, deps: RemoteDeps): Promi
   // la transicion filtra por estado: dos reclamaciones simultaneas no ganan las dos
   const actualizada = await deps.remote.transitionPairingCode(parsed.data.code, 'waiting', {
     state: 'claimed',
-    claimant_public_key: parsed.data.publicKey,
+    claimant_public_key: canonica,
     claimant_name: parsed.data.name,
     claimant_kind: parsed.data.kind,
     claimed_at: new Date().toISOString(),
@@ -235,9 +290,14 @@ export async function handlePairClaim(request: Request, deps: RemoteDeps): Promi
 
   await deps.remote.audit('pair.claim', { deviceId: host.id, detail: { kind: parsed.data.kind } });
 
+  // NO se devuelven las palabras. Si el gateway las dictara, uno comprometido
+  // podria sustituir una clave y enviar a cada lado las que quisiera: la
+  // comparacion del usuario dejaria de detectar nada. Cada lado las calcula con
+  // las dos claves publicas que tiene.
   return json({
-    words: sessionWords(resultado.value),
+    state: 'claimed',
     hostName: host.name,
+    hostPublicKey: host.public_key,
     hostFingerprint: host.fingerprint,
   });
 }
@@ -246,6 +306,16 @@ const confirmSchema = z.object({
   code: z.string().regex(/^\d{8}$/),
   side: z.enum(['host', 'claimant']),
   accepted: z.boolean(),
+  /**
+   * firma del lado que dice ser.
+   *
+   * SIN ESTO el emparejamiento se completaba sin ningun humano: `side` es un
+   * campo del cuerpo, asi que el mismo cliente enviaba las dos confirmaciones y
+   * las palabras no llegaban a intervenir. Ahora cada lado tiene que demostrar
+   * que posee su clave privada, y la firma incluye LAS DOS claves publicas: eso
+   * ata la confirmacion exactamente a lo que el usuario comparo.
+   */
+  signature: z.string().regex(/^[A-Za-z0-9_-]{80,100}$/),
 });
 
 export async function handlePairConfirm(request: Request, deps: RemoteDeps): Promise<Response> {
@@ -257,6 +327,30 @@ export async function handlePairConfirm(request: Request, deps: RemoteDeps): Pro
   if (fila === null || host === null) return fail('not_found', 'ese codigo no existe', 404);
 
   const sesion = sessionFromRow(fila, host);
+
+  if (fila.claimant_public_key === null) {
+    return fail('wrong_state', 'ese codigo todavia no se ha reclamado', 400);
+  }
+
+  // quien firma decide el lado, no el cuerpo de la peticion
+  const claveDelLado =
+    parsed.data.side === 'host' ? host.public_key : fila.claimant_public_key;
+  const canonicaLado = canonicalPublicKey(claveDelLado);
+  if (canonicaLado === null) return fail('bad_key', 'clave no valida', 400);
+
+  const firmaValida = verify(
+    fromBase64Url(canonicaLado),
+    'luxy.pair.confirm.v1',
+    pairConfirmParts(
+      parsed.data.code,
+      host.public_key,
+      fila.claimant_public_key,
+      parsed.data.accepted,
+    ),
+    fromBase64Url(parsed.data.signature),
+  );
+  if (!firmaValida) return fail('unauthorized', 'no autorizado', 401);
+
   const resultado = confirmPairing({
     session: sesion,
     side: parsed.data.side,
@@ -316,6 +410,45 @@ export async function handlePairConfirm(request: Request, deps: RemoteDeps): Pro
   });
 }
 
+/**
+ * estado de un emparejamiento en curso.
+ *
+ * Devuelve la clave publica del reclamante EN CRUDO para que cada lado calcule
+ * sus propias palabras. El gateway no dicta las palabras a nadie: esa es toda la
+ * defensa contra una sustitucion de clave hecha por el propio gateway.
+ *
+ * No lleva autenticacion de dispositivo -todavia no hay emparejamiento- pero el
+ * codigo caduca en tres minutos y no revela nada que no vaya ya en el QR.
+ */
+export async function handlePairState(
+  _request: Request,
+  deps: RemoteDeps,
+  params: Record<string, string>,
+): Promise<Response> {
+  const code = params.code;
+  if (code === undefined || !/^\d{8}$/.test(code)) {
+    return fail('malformed', 'codigo no valido', 400);
+  }
+
+  const fila = await deps.remote.getPairingCode(code);
+  if (fila === null) return fail('not_found', 'ese codigo no existe', 404);
+
+  const caducado = Date.parse(fila.expires_at) <= Date.now();
+  const dispositivo =
+    fila.state === 'confirmed' && fila.claimant_public_key !== null
+      ? await deps.remote.getDeviceByPublicKey(fila.claimant_public_key)
+      : null;
+
+  return json({
+    state: caducado && fila.state === 'waiting' ? 'expired' : fila.state,
+    claimantPublicKey: fila.claimant_public_key,
+    claimantName: fila.claimant_name,
+    hostConfirmed: fila.host_confirmed,
+    claimantConfirmed: fila.claimant_confirmed,
+    deviceId: dispositivo?.id ?? null,
+  });
+}
+
 // -----------------------------------------------------------------------------
 // gestion de dispositivos (autenticada)
 // -----------------------------------------------------------------------------
@@ -345,9 +478,17 @@ const accessSchema = z.object({
  */
 export const handleUpdateAccess = withDeviceAuth(async (_request, deps, device, params) => {
   const objetivo = params.deviceId;
-  if (objetivo === undefined) return fail('malformed', 'falta el dispositivo', 400);
+  if (objetivo === undefined || !UUID_RE.test(objetivo)) {
+    return fail('malformed', 'el dispositivo no es valido', 400);
+  }
 
-  const parsed = accessSchema.safeParse(JSON.parse(device.body || '{}'));
+  let crudo: unknown;
+  try {
+    crudo = JSON.parse(device.body.length > 0 ? device.body : '{}');
+  } catch {
+    return fail('malformed', 'el cuerpo no es JSON valido', 400);
+  }
+  const parsed = accessSchema.safeParse(crudo);
   if (!parsed.success) return fail('malformed', 'datos de acceso invalidos', 400);
 
   const fila = await deps.remote.getDeviceById(objetivo);
@@ -381,7 +522,9 @@ export const handleUpdateAccess = withDeviceAuth(async (_request, deps, device, 
 
 export const handleRevokeDevice = withDeviceAuth(async (_request, deps, device, params) => {
   const objetivo = params.deviceId;
-  if (objetivo === undefined) return fail('malformed', 'falta el dispositivo', 400);
+  if (objetivo === undefined || !UUID_RE.test(objetivo)) {
+    return fail('malformed', 'el dispositivo no es valido', 400);
+  }
 
   const fila = await deps.remote.getDeviceById(objetivo);
   if (fila === null) return fail('not_found', 'ese dispositivo no existe', 404);

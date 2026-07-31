@@ -13,6 +13,9 @@ import {
   toBase64Url,
   hashBody,
   fingerprint,
+  pairStartParts,
+  pairConfirmParts,
+  confirmationWords,
 } from '@luxy/remote-crypto';
 import {
   handlePairStart,
@@ -21,120 +24,11 @@ import {
   handleListDevices,
   handleUpdateAccess,
   handleRevokeDevice,
+  handlePairState,
   type RemoteDeps,
 } from './remote.js';
-import type { RemoteDeviceRow, PairingCodeRow } from '../remote-repository.js';
+import { MemoriaRemota } from './remote-memoria.js';
 
-// -----------------------------------------------------------------------------
-// base de datos en memoria
-// -----------------------------------------------------------------------------
-
-class MemoriaRemota {
-  devices = new Map<string, RemoteDeviceRow>();
-  codes = new Map<string, PairingCodeRow>();
-  nonces = new Set<string>();
-  auditoria: { action: string; deviceId: string | null }[] = [];
-
-  async getDeviceById(id: string) {
-    return this.devices.get(id) ?? null;
-  }
-  async getDeviceByPublicKey(key: string) {
-    return [...this.devices.values()].find((d) => d.public_key === key) ?? null;
-  }
-  async listPeersOf(hostId: string) {
-    return [...this.devices.values()].filter((d) => d.peer_device_id === hostId);
-  }
-  async createDevice(input: {
-    name: string;
-    kind: 'desktop' | 'android';
-    publicKey: string;
-    fingerprint: string;
-    peerDeviceId: string | null;
-    permissions: string[];
-  }) {
-    if ([...this.devices.values()].some((d) => d.public_key === input.publicKey)) {
-      throw new Error('clave publica duplicada');
-    }
-    const row: RemoteDeviceRow = {
-      id: randomUUID(),
-      name: input.name,
-      kind: input.kind,
-      public_key: input.publicKey,
-      fingerprint: input.fingerprint,
-      peer_device_id: input.peerDeviceId,
-      permissions: input.permissions,
-      unattended: false,
-      require_biometrics: false,
-      paired_at: new Date().toISOString(),
-      last_seen_at: null,
-      revoked_at: null,
-    };
-    this.devices.set(row.id, row);
-    return row;
-  }
-  async revokeDevice(id: string) {
-    const row = this.devices.get(id);
-    if (row === undefined || row.revoked_at !== null) return false;
-    row.revoked_at = new Date().toISOString();
-    row.unattended = false;
-    row.permissions = [];
-    return true;
-  }
-  async updateDeviceAccess(
-    id: string,
-    values: { permissions?: string[]; unattended?: boolean; requireBiometrics?: boolean; name?: string },
-  ) {
-    const row = this.devices.get(id);
-    if (row === undefined || row.revoked_at !== null) return null;
-    if (values.permissions !== undefined) row.permissions = values.permissions;
-    if (values.unattended !== undefined) row.unattended = values.unattended;
-    if (values.requireBiometrics !== undefined) row.require_biometrics = values.requireBiometrics;
-    if (values.name !== undefined) row.name = values.name;
-    return row;
-  }
-  async markDeviceSeen(id: string) {
-    const row = this.devices.get(id);
-    if (row !== undefined) row.last_seen_at = new Date().toISOString();
-  }
-  async getPairingCode(code: string) {
-    return this.codes.get(code) ?? null;
-  }
-  async createPairingCode(input: { code: string; hostDeviceId: string; expiresAt: string }) {
-    this.codes.set(input.code, {
-      code: input.code,
-      host_device_id: input.hostDeviceId,
-      state: 'waiting',
-      claimant_public_key: null,
-      claimant_name: null,
-      claimant_kind: null,
-      host_confirmed: false,
-      claimant_confirmed: false,
-      expires_at: input.expiresAt,
-      claimed_at: null,
-      resolved_at: null,
-    });
-  }
-  /** filtra por estado, igual que el UPDATE real: dos a la vez no ganan las dos */
-  async transitionPairingCode(
-    code: string,
-    fromState: PairingCodeRow['state'],
-    values: Partial<PairingCodeRow>,
-  ) {
-    const row = this.codes.get(code);
-    if (row === undefined || row.state !== fromState) return null;
-    Object.assign(row, values);
-    return row;
-  }
-  /** false si ya existia: es la senal de replay */
-  async registerNonce(_deviceId: string, nonce: string) {
-    if (this.nonces.has(nonce)) return false;
-    this.nonces.add(nonce);
-    return true;
-  }
-  async audit(action: string, input: { deviceId?: string | null }) {
-    this.auditoria.push({ action, deviceId: input.deviceId ?? null });
-  }
-}
 
 let memoria: MemoriaRemota;
 let deps: RemoteDeps;
@@ -196,40 +90,91 @@ async function firmada(
   });
 }
 
-/** ejecuta el emparejamiento entero y devuelve los identificadores */
-async function emparejar(): Promise<{ hostId: string; deviceId: string; code: string }> {
+/** cuerpo firmado de pair/start */
+function cuerpoStart(
+  identidad: { privateKey: Uint8Array; publicKey: Uint8Array },
+  nombre = 'PC casa',
+  now = Date.now(),
+): Record<string, unknown> {
+  const clave = toBase64Url(identidad.publicKey);
+  return {
+    hostPublicKey: clave,
+    hostName: nombre,
+    timestamp: now,
+    signature: toBase64Url(
+      sign(identidad.privateKey, 'luxy.pair.start.v1', pairStartParts(clave, nombre, now)),
+    ),
+  };
+}
+
+/** cuerpo firmado de pair/confirm */
+function cuerpoConfirm(
+  identidad: { privateKey: Uint8Array },
+  code: string,
+  side: 'host' | 'claimant',
+  hostKey: string,
+  claimantKey: string,
+  accepted = true,
+): Record<string, unknown> {
+  return {
+    code,
+    side,
+    accepted,
+    signature: toBase64Url(
+      sign(
+        identidad.privateKey,
+        'luxy.pair.confirm.v1',
+        pairConfirmParts(code, hostKey, claimantKey, accepted),
+      ),
+    ),
+  };
+}
+
+async function abrirCodigo(identidad = pc, nombre = 'PC casa'): Promise<string> {
   const inicio = await handlePairStart(
-    peticion('/api/remote/pair/start', {
-      hostPublicKey: toBase64Url(pc.publicKey),
-      hostName: 'PC casa',
-    }),
+    peticion('/api/remote/pair/start', cuerpoStart(identidad, nombre)),
     deps,
   );
-  const { code, hostDeviceId } = (await inicio.json()) as { code: string; hostDeviceId: string };
+  const cuerpo = (await inicio.json()) as { code?: string };
+  if (cuerpo.code === undefined) throw new Error('pair/start fallo');
+  return cuerpo.code;
+}
 
-  const firma = toBase64Url(
-    sign(movil.privateKey, 'luxy.pair.claim.v1', [code, toBase64Url(movil.publicKey)]),
-  );
-  await handlePairClaim(
+async function reclamar(code: string, identidad = movil, nombre = 'Daniel-phone') {
+  return handlePairClaim(
     peticion('/api/remote/pair/claim', {
       code,
-      publicKey: toBase64Url(movil.publicKey),
-      name: 'Daniel-phone',
+      publicKey: toBase64Url(identidad.publicKey),
+      name: nombre,
       kind: 'android',
-      signature: firma,
+      signature: toBase64Url(
+        sign(identidad.privateKey, 'luxy.pair.claim.v1', [code, toBase64Url(identidad.publicKey)]),
+      ),
     }),
     deps,
   );
+}
+
+/** ejecuta el emparejamiento entero y devuelve los identificadores */
+async function emparejar(): Promise<{ hostId: string; deviceId: string; code: string }> {
+  const code = await abrirCodigo();
+  await reclamar(code);
+
+  const hostKey = toBase64Url(pc.publicKey);
+  const movilKey = toBase64Url(movil.publicKey);
 
   await handlePairConfirm(
-    peticion('/api/remote/pair/confirm', { code, side: 'claimant', accepted: true }),
+    peticion('/api/remote/pair/confirm', cuerpoConfirm(movil, code, 'claimant', hostKey, movilKey)),
     deps,
   );
   const fin = await handlePairConfirm(
-    peticion('/api/remote/pair/confirm', { code, side: 'host', accepted: true }),
+    peticion('/api/remote/pair/confirm', cuerpoConfirm(pc, code, 'host', hostKey, movilKey)),
     deps,
   );
-  const { deviceId } = (await fin.json()) as { deviceId: string };
+  const { deviceId, hostDeviceId } = (await fin.json()) as {
+    deviceId: string;
+    hostDeviceId: string;
+  };
 
   return { hostId: hostDeviceId, deviceId, code };
 }
@@ -256,45 +201,31 @@ describe('RECORRIDO COMPLETO por los endpoints', () => {
     expect(dispositivo?.unattended).toBe(false);
   });
 
-  it('las dos pantallas reciben las mismas palabras', async () => {
-    const inicio = await handlePairStart(
-      peticion('/api/remote/pair/start', {
-        hostPublicKey: toBase64Url(pc.publicKey),
-        hostName: 'PC casa',
-      }),
-      deps,
-    );
-    const { code } = (await inicio.json()) as { code: string };
+  it('EL GATEWAY NO DICTA LAS PALABRAS: cada lado las calcula', async () => {
+    // si las dictara, uno comprometido podria sustituir una clave y enviar a
+    // cada lado las que quisiera; la comparacion del usuario no detectaria nada
+    const code = await abrirCodigo();
+    const reclamo = await reclamar(code);
+    const cuerpo = (await reclamo.json()) as Record<string, unknown>;
 
-    const firma = toBase64Url(
-      sign(movil.privateKey, 'luxy.pair.claim.v1', [code, toBase64Url(movil.publicKey)]),
-    );
-    const reclamo = await handlePairClaim(
-      peticion('/api/remote/pair/claim', {
-        code,
-        publicKey: toBase64Url(movil.publicKey),
-        name: 'Daniel-phone',
-        kind: 'android',
-        signature: firma,
-      }),
-      deps,
-    );
+    expect(cuerpo.words).toBeUndefined();
+    expect(cuerpo.hostPublicKey).toBe(toBase64Url(pc.publicKey));
 
-    const { words } = (await reclamo.json()) as { words: string[] };
-    expect(words).toHaveLength(4);
+    // el estado devuelve la clave EN CRUDO, y de ahi salen las palabras
+    const estado = await handlePairState(
+      new Request(`${BASE}/api/remote/pair/${code}/state`),
+      deps,
+      { code },
+    );
+    const datos = (await estado.json()) as { claimantPublicKey: string };
+    expect(confirmationWords(pc.publicKey, movil.publicKey)).toHaveLength(4);
+    expect(datos.claimantPublicKey).toBe(toBase64Url(movil.publicKey));
   });
 });
 
 describe('un solo uso del codigo', () => {
   it('el segundo que reclama recibe 409', async () => {
-    const inicio = await handlePairStart(
-      peticion('/api/remote/pair/start', {
-        hostPublicKey: toBase64Url(pc.publicKey),
-        hostName: 'PC casa',
-      }),
-      deps,
-    );
-    const { code } = (await inicio.json()) as { code: string };
+    const code = await abrirCodigo();
 
     const primera = toBase64Url(
       sign(movil.privateKey, 'luxy.pair.claim.v1', [code, toBase64Url(movil.publicKey)]),
@@ -329,14 +260,7 @@ describe('un solo uso del codigo', () => {
   });
 
   it('reclamar con firma invalida no crea nada', async () => {
-    const inicio = await handlePairStart(
-      peticion('/api/remote/pair/start', {
-        hostPublicKey: toBase64Url(pc.publicKey),
-        hostName: 'PC casa',
-      }),
-      deps,
-    );
-    const { code } = (await inicio.json()) as { code: string };
+    const code = await abrirCodigo();
     const antes = memoria.devices.size;
 
     const atacante = generateIdentity();
@@ -399,8 +323,11 @@ describe('autenticacion de peticiones', () => {
       deps,
     );
     expect(segunda.status).toBe(401);
+    // el codigo va colapsado a "unauthorized" a proposito: distinguir "replay"
+    // de "firma mala" de "no existe" convertia el endpoint en un oraculo con el
+    // que averiguar si un deviceId existe y si sigue activo
     const cuerpo = (await segunda.json()) as { error: { code: string } };
-    expect(cuerpo.error.code).toBe('replayed');
+    expect(cuerpo.error.code).toBe('unauthorized');
   });
 
   it('un dispositivo REVOCADO no puede hacer nada', async () => {
@@ -411,7 +338,9 @@ describe('autenticacion de peticiones', () => {
       await firmada('GET', '/api/remote/devices', movil, deviceId),
       deps,
     );
-    expect(respuesta.status).toBe(403);
+    // 401 generico, no 403: no se confirma al atacante que el dispositivo
+    // existe pero esta revocado
+    expect(respuesta.status).toBe(401);
   });
 
   it('firmar con otra clave no vale', async () => {

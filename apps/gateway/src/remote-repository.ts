@@ -194,15 +194,17 @@ export class RemoteRepository {
    * registra un nonce y dice si era nuevo.
    *
    * Devuelve false si YA existia, que es exactamente la senal de replay. Se
-   * apoya en la clave primaria de la tabla, asi que la comprobacion y el
-   * registro son la misma operacion atomica: dos peticiones identicas
-   * simultaneas no pueden pasar las dos.
+   * apoya en la clave primaria (device_id, nonce), asi que comprobar y
+   * registrar son la misma operacion atomica: dos peticiones identicas
+   * simultaneas no pueden pasar las dos. El espacio de nonces es POR
+   * DISPOSITIVO, no global: si no, otro dispositivo podria pre-registrar los
+   * nonces de una victima que los derive de un contador y bloquearla.
    */
   async registerNonce(deviceId: string, nonce: string, expiresAt: string): Promise<boolean> {
     return this.db.insertIfAbsent(
       'remote_auth_nonces',
       { nonce, device_id: deviceId, expires_at: expiresAt },
-      'nonce',
+      'device_id,nonce',
     );
   }
 

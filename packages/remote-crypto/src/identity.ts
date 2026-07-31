@@ -54,6 +54,36 @@ export function isValidPublicKey(bytes: Uint8Array): boolean {
   }
 }
 
+/**
+ * canonicaliza una clave publica recibida de fuera.
+ *
+ * POR QUE HACE FALTA, y no es teorico: una clave P-256 sin comprimir son 65
+ * bytes, que en base64url son 87 caracteres. 65 no es multiplo de 3, asi que el
+ * ULTIMO caracter lleva 2 bits sobrantes que `atob` ignora. Resultado: CUATRO
+ * cadenas distintas decodifican exactamente a la misma clave.
+ *
+ * Comprobado: para una clave cualquiera existen 3 variantes ademas de la
+ * canonica, todas con los mismos bytes y todas validas en la curva.
+ *
+ * Si el gateway guarda y compara el TEXTO, eso significa cuatro filas posibles
+ * para una sola identidad: el indice unico no salta, revocar una no revoca las
+ * otras, y un dispositivo revocado vuelve a emparejarse mandando una variante
+ * de su propia clave. Devolver aqui la forma canonica cierra las cuatro.
+ *
+ * Devuelve null si no decodifica, si no mide 65 bytes o si NO esta en la curva.
+ */
+export function canonicalPublicKey(text: string): string | null {
+  if (!/^[A-Za-z0-9_-]{86,88}$/.test(text)) return null;
+  let bytes: Uint8Array;
+  try {
+    bytes = fromBase64Url(text);
+  } catch {
+    return null;
+  }
+  if (!isValidPublicKey(bytes)) return null;
+  return toBase64Url(bytes);
+}
+
 /** deriva la clave publica de una privada existente */
 export function publicKeyOf(privateKey: PrivateKey): PublicKey {
   return p256.getPublicKey(privateKey, false);
@@ -73,6 +103,7 @@ export function publicKeyOf(privateKey: PrivateKey): PublicKey {
  * verifica nunca como "sdp".
  */
 export const SIGNING_CONTEXTS = [
+  'luxy.pair.start.v1',
   'luxy.pair.claim.v1',
   'luxy.pair.confirm.v1',
   'luxy.session.request.v1',

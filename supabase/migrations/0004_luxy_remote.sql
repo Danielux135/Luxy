@@ -56,6 +56,12 @@ create unique index if not exists remote_devices_public_key_key
 create index if not exists remote_devices_active_idx
   on public.remote_devices (revoked_at) where revoked_at is null;
 
+-- red de seguridad: la huella se calcula sobre los BYTES, asi que aunque
+-- alguien colara una codificacion distinta de la misma clave, este indice lo
+-- impediria. El gateway ya exige forma canonica; esto es el cinturon.
+create unique index if not exists remote_devices_fingerprint_key
+  on public.remote_devices (fingerprint);
+
 -- -----------------------------------------------------------------------------
 -- remote_pairing_codes
 --
@@ -137,10 +143,15 @@ create index if not exists remote_sessions_active_idx
 -- tiempo siga dentro de la ventana de validez.
 -- -----------------------------------------------------------------------------
 create table if not exists public.remote_auth_nonces (
-  nonce       text primary key,
   device_id   uuid not null references public.remote_devices (id) on delete cascade,
+  nonce       text not null,
   expires_at  timestamptz not null,
-  created_at  timestamptz not null default now()
+  created_at  timestamptz not null default now(),
+
+  -- la clave es (device_id, nonce), NO el nonce a secas. Con un espacio global,
+  -- el dia que un cliente use nonces derivados de contador o de reloj, otro
+  -- dispositivo podria pre-registrarlos y bloquearlo indefinidamente.
+  primary key (device_id, nonce)
 );
 
 create index if not exists remote_auth_nonces_expiry_idx

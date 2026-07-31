@@ -10,6 +10,7 @@ import {
   handlePairStart,
   handlePairClaim,
   handlePairConfirm,
+  handlePairState,
   handleListDevices,
   handleUpdateAccess,
   handleRevokeDevice,
@@ -63,6 +64,9 @@ const router = new Router<Deps>()
   .post('/api/remote/pair/start', (request, deps) => handlePairStart(request, deps))
   .post('/api/remote/pair/claim', (request, deps) => handlePairClaim(request, deps))
   .post('/api/remote/pair/confirm', (request, deps) => handlePairConfirm(request, deps))
+  .get('/api/remote/pair/:code/state', (request, deps, params) =>
+    handlePairState(request, deps, params),
+  )
   .get('/api/remote/devices', (request, deps, params) => handleListDevices(request, deps, params))
   .post('/api/remote/devices/:deviceId/access', (request, deps, params) =>
     handleUpdateAccess(request, deps, params),

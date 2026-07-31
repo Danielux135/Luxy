@@ -12,6 +12,9 @@ import {
   confirmationWords,
   fromBase64Url,
   toBase64Url,
+  sign,
+  pairStartParts,
+  pairConfirmParts,
   type PublicKey,
 } from '@luxy/remote-crypto';
 import type { Capability } from '@luxy/remote-protocol';
@@ -48,6 +51,8 @@ export interface PairingProgress {
   /** palabras que hay que comparar con la pantalla del movil */
   words: string[] | null;
   claimantName: string | null;
+  /** clave del movil en crudo; hace falta para firmar la confirmacion */
+  claimantPublicKey: string | null;
   deviceId: string | null;
 }
 
@@ -76,9 +81,22 @@ export class RemoteClient {
    * es de un solo uso.
    */
   async startPairing(): Promise<PairingInvitation> {
+    // se firma para demostrar que se posee la clave privada del ordenador. Sin
+    // esto, cualquiera con la clave PUBLICA -que va dentro del QR- podia pedir
+    // codigos en nombre de este PC y completar un emparejamiento el solo.
+    const clave = this.options.identity.publicKeyBase64();
+    const timestamp = Date.now();
+    const firma = sign(
+      this.options.identity.privateKey(),
+      'luxy.pair.start.v1',
+      pairStartParts(clave, this.options.machineName, timestamp),
+    );
+
     const respuesta = await this.call('POST', '/api/remote/pair/start', {
-      hostPublicKey: this.options.identity.publicKeyBase64(),
+      hostPublicKey: clave,
       hostName: this.options.machineName,
+      timestamp,
+      signature: toBase64Url(firma),
     });
 
     const datos = respuesta as { code: string; expiresAt: number; hostDeviceId: string };
@@ -129,19 +147,37 @@ export class RemoteClient {
       state: respuesta.state,
       words,
       claimantName: respuesta.claimantName,
+      claimantPublicKey: respuesta.claimantPublicKey,
       deviceId: respuesta.deviceId,
     };
   }
 
-  /** confirma o rechaza desde el lado del ordenador */
-  async confirmPairing(code: string, accepted: boolean): Promise<{ paired: boolean }> {
+  /**
+   * confirma o rechaza desde el lado del ordenador.
+   *
+   * La firma incluye LAS DOS claves publicas: eso ata la confirmacion a las
+   * mismas claves que produjeron las palabras que el usuario acaba de comparar.
+   * Si un gateway sustituyera una despues, la firma dejaria de verificar.
+   */
+  async confirmPairing(
+    code: string,
+    accepted: boolean,
+    claimantPublicKey: string,
+  ): Promise<{ paired: boolean; deviceId: string | null }> {
+    const firma = sign(
+      this.options.identity.privateKey(),
+      'luxy.pair.confirm.v1',
+      pairConfirmParts(code, this.options.identity.publicKeyBase64(), claimantPublicKey, accepted),
+    );
+
     const respuesta = (await this.call('POST', '/api/remote/pair/confirm', {
       code,
       side: 'host',
       accepted,
+      signature: toBase64Url(firma),
     })) as { paired: boolean; deviceId?: string };
 
-    return { paired: respuesta.paired };
+    return { paired: respuesta.paired, deviceId: respuesta.deviceId ?? null };
   }
 
   // ---------------------------------------------------------------------------

@@ -14,6 +14,7 @@ import {
   fingerprint,
   fromBase64Url,
   isValidPublicKey,
+  canonicalPublicKey,
   toBase64Url,
   verify,
   type PublicKey,
@@ -111,7 +112,12 @@ export function claimPairing(options: ClaimOptions): PairingOutcome<PairingSessi
   if (!isValidPublicKey(clave)) return fallo('bad_key', 'la clave del dispositivo no es valida');
 
   // un dispositivo no se empareja consigo mismo: seria una identidad circular
-  if (options.claimantPublicKey === sesion.hostPublicKey) {
+  // se comparan las CANONICAS, no el texto recibido: cuatro cadenas distintas
+  // decodifican a la misma clave, asi que comparar texto dejaba pasar el
+  // auto-emparejamiento mandando una variante
+  const canonicaReclamante = canonicalPublicKey(options.claimantPublicKey);
+  const canonicaHost = canonicalPublicKey(sesion.hostPublicKey);
+  if (canonicaReclamante !== null && canonicaReclamante === canonicaHost) {
     return fallo('same_key', 'ese dispositivo es este mismo ordenador');
   }
 
@@ -216,4 +222,36 @@ export function pairedDeviceFrom(
 
 function fallo(code: PairingError, detail: string): { ok: false; code: PairingError; detail: string } {
   return { ok: false, code, detail };
+}
+
+// -----------------------------------------------------------------------------
+// pruebas de posesion
+//
+// Sin esto, TODO el emparejamiento se podia completar sin ningun humano: quien
+// fotografiara el QR obtenia la clave publica del ordenador (va dentro), pedia
+// un codigo nuevo en su nombre, lo reclamaba con SU clave y enviaba las dos
+// confirmaciones eligiendo el campo `side`. El dispositivo del atacante quedaba
+// emparejado y las palabras no intervenian en ningun punto, porque no habia
+// nadie mirando dos pantallas.
+// -----------------------------------------------------------------------------
+
+/** lo que firma el ordenador para poder pedir un codigo en su propio nombre */
+export function pairStartParts(hostPublicKey: string, hostName: string, timestamp: number): string[] {
+  return [hostPublicKey, hostName, String(timestamp)];
+}
+
+/**
+ * lo que firma cada lado al confirmar.
+ *
+ * LLEVA LAS DOS CLAVES DENTRO a proposito: eso ata la confirmacion exactamente a
+ * las claves que produjeron las palabras que el usuario comparo. Si un gateway
+ * sustituyera una clave despues, la firma dejaria de verificar.
+ */
+export function pairConfirmParts(
+  code: string,
+  hostPublicKey: string,
+  claimantPublicKey: string,
+  accepted: boolean,
+): string[] {
+  return [code, hostPublicKey, claimantPublicKey, accepted ? 'yes' : 'no'];
 }
