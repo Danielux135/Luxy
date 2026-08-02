@@ -87,6 +87,21 @@ describe('LO QUE NO PUEDE QUEDAR PULSADO', () => {
     expect(backend.llamadas).toContain('left up');
   });
 
+  it('releaseAll NO mueve el cursor: suelta sin punto', () => {
+    // soltar a ciegas no sabe donde esta el cursor. Si se pasara {dx:0,dy:0},
+    // cortar la sesion con un boton pulsado teletransportaria el cursor del
+    // usuario a la esquina superior izquierda de su pantalla.
+    const puntos: Array<unknown> = [];
+    const espia = backendFalso();
+    espia.mouseButton = (_b, _a, p) => puntos.push(p);
+    const d = new InputDispatcher(espia, [display()]);
+
+    d.dispatch(mensaje({ type: 'mouse.button', button: 'left', action: 'down', x: 0.5, y: 0.5 }));
+    d.releaseAll();
+
+    expect(puntos[puntos.length - 1]).toBeNull();
+  });
+
   it('releaseAll suelta VARIOS botones', () => {
     for (const boton of ['left', 'right', 'middle'] as const) {
       dispatcher.dispatch(mensaje({ type: 'mouse.button', button: boton, action: 'down', x: 0.5, y: 0.5 }));

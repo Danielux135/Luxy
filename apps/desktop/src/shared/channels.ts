@@ -40,6 +40,24 @@ export const IPC_EVENT = {
 export type IpcInvokeChannel = (typeof IPC_INVOKE)[keyof typeof IPC_INVOKE];
 
 /**
+ * canales del renderer OCULTO de captura.
+ *
+ * Van aparte de los de la interfaz a proposito: son dos ventanas con permisos
+ * muy distintos y cruzar los canales significaria que la interfaz puede mandarle
+ * ordenes al motor de captura.
+ *
+ * Estan aqui, y no en remote-host/capture-ipc.ts, porque los necesita el preload
+ * de la ventana oculta y ese archivo importa zod: ver la cabecera de este
+ * archivo.
+ */
+export const CAPTURE_CHANNEL = {
+  /** main -> renderer oculto */
+  toCapture: 'luxy:capture:to',
+  /** renderer oculto -> main */
+  fromCapture: 'luxy:capture:from',
+} as const;
+
+/**
  * nombres canonicos de los secretos.
  *
  * los usan los tres lados: el almacen cifrado para guardarlos, el main para

@@ -8,5 +8,8 @@
     "types": []
   },
   "include": ["src/shared/**/*.ts"],
-  "references": [{ "path": "../../packages/shared" }]
+  "references": [
+    { "path": "../../packages/shared" },
+    { "path": "../../packages/remote-protocol" }
+  ]
 }

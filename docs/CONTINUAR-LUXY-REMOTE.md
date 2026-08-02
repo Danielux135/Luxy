@@ -1,7 +1,14 @@
 # Continuar Luxy Remote — estado y siguientes pasos
 
-Documento de traspaso. Si estás retomando esto en una conversación nueva, aquí
-está todo lo necesario para seguir **sin volver a investigar nada**.
+Documento de traspaso. Si estás retomando esto en una conversación nueva —da
+igual con qué asistente— aquí está todo lo necesario para seguir **sin volver a
+investigar nada y sin empezar de cero**.
+
+Léelo entero antes de tocar código. Está ordenado para eso: qué es (0), dónde
+está el repositorio (1), qué se decidió y por qué (2), qué existe ya (3), qué se
+rompió una vez y no puede volver a romperse (4), qué falta (5), qué necesita
+permiso de Daniel (6), cómo se ejecuta y se verifica (7) y con qué prompt
+arrancar (8).
 
 ---
 
@@ -48,8 +55,8 @@ Daniel es hispanohablante, en Windows 11. Espera:
 ## 1. Estado exacto del repositorio
 
 - Rama `master`, **todo en local, sin push**.
-- Último commit: `8b2fd6d`
-- **1160 tests en verde**, lint, typecheck y build limpios.
+- Último commit: `3ec8dea` (+ Fase 4c sin commitear todavía)
+- **1242 tests en verde**, lint, typecheck y build limpios.
 
 ### Commits de Luxy Remote, en orden
 
@@ -113,9 +120,12 @@ que releerlas:
 
 ---
 
-## 3. Lo que YA está construido y probado
+## 3. Lo que YA está construido
 
-Todo lo de abajo tiene pruebas y está verificado revirtiendo protecciones.
+Todo lo de abajo tiene pruebas y está verificado revirtiendo protecciones, **salvo
+el apartado marcado explícitamente como "sin prueba automática"**. Esa distinción
+es la que hay que mantener al entregar cualquier fase: lo probado y lo sólo
+escrito no valen lo mismo.
 
 ### `packages/remote-protocol`
 - `version.ts` — versión del protocolo, comprobación de compatibilidad que dice
@@ -164,6 +174,23 @@ Todo lo de abajo tiene pruebas y está verificado revirtiendo protecciones.
   que detecta las cuatro mentiras posibles de un gateway comprometido.
 - `remote-host/monitors.ts` — geometría y conversión de coordenadas.
 - `remote-host/input-dispatcher.ts` — estado de teclas pulsadas, `releaseAll`.
+- `remote-host/keycodes.ts` — scancodes del set 1 y troceo UTF-16 sin partir
+  surrogates.
+- `remote-host/input-plan.ts` — **todas las banderas de `SendInput`**, en código
+  puro y con las pruebas que comprueban los números exactos.
+- `remote-host/display-sources.ts` — correlación `display_id` ↔ `getAllDisplays`.
+- `remote-host/session-indicator.ts` — texto del aviso visible (la ventana no
+  tiene prueba; el texto sí).
+- `src/shared/codec-preferences.ts` — orden AV1→VP9→H.264, `contentHint`,
+  `degradationPreference`, perfiles de calidad.
+- `src/shared/capture-ipc.ts` — contrato con el renderer oculto y los **dos
+  canales de datos**.
+
+### Escrito y verificado a mano, SIN prueba automática
+- `remote-host/input-backend-koffi.ts` — `user32!SendInput` con koffi.
+- `remote-host/capture-window.ts` — renderer oculto, sesión propia,
+  `setDisplayMediaRequestHandler`.
+- `src/renderer/capture/main.ts` + `src/preload/capture.ts` — motor WebRTC.
 
 ### `supabase/migrations/0004_luxy_remote.sql`
 **PREPARADA, NO EJECUTADA.** Tablas: `remote_devices`, `remote_pairing_codes`,
@@ -212,32 +239,169 @@ seguridad. Son las trampas reales de este dominio.
 9. **`SendInput` no reinicia el teclado.** Un corte con Ctrl pulsado lo deja
    hundido. → Estado de pulsados + `releaseAll`, que no se corta si algo falla.
 
+10. **`releaseAll` teletransportaba el cursor.** Soltaba los botones pasando
+    `{dx:0, dy:0}` porque a ciegas no se sabe dónde está el cursor. Con el
+    backend real eso emite `MOUSEEVENTF_MOVE` a la esquina: cortar la sesión con
+    un botón pulsado movía el ratón del usuario a la esquina superior izquierda.
+    → `InputBackend.mouseButton` acepta `point: AbsolutePoint | null`, y con
+    `null` **no se emite ningún movimiento**.
+
+11. **El canal no fiable choca con el anti-replay.** El plan pedía un DataChannel
+    no ordenado para el control, pero `acceptEnvelope` exige secuencia
+    **estrictamente creciente**: si llegan 5, 7 y 6, el 6 se rechaza como
+    `replayed`. Para un movimiento de ratón da igual; para una tecla significa
+    que al usuario **le faltan letras**, de forma intermitente y sólo con mala
+    red. Bajar la exigencia del anti-replay habría debilitado justo la protección
+    contra reinyectar un "clic en Aceptar". → **Dos canales**: `luxy-input`
+    (no ordenado, sin retransmisión) sólo para `mouse.move` y `mouse.scroll`, y
+    `luxy-control` (fiable y ordenado) para todo lo demás. Cada uno lleva su
+    propia `ReplayWindow`, que `guardControlMessage` ya soporta sin cambios.
+    **El cliente móvil de la Fase 5 tiene que abrir los dos y numerarlos por
+    separado.**
+
+12. **`display.label` viene vacía en Windows.** Comprobado en Electron 43: cadena
+    vacía en un portátil. Sin respaldo, el selector de monitor del móvil saldría
+    con botones sin texto. → Cascada label → nombre de la fuente → "Pantalla del
+    portátil" → "Monitor N".
+
+13. **`setCodecPreferences` reemplaza la lista entera.** Filtrar dejando sólo los
+    códecs de vídeo elimina `rtx`, es decir la retransmisión, y cada paquete
+    perdido pasa a ser un bloque congelado hasta el siguiente fotograma clave.
+    Justo en la ruta por TURN desde 4G, que es la habitual. → Se **ordena**, no
+    se filtra: nada se elimina nunca.
+
 ---
 
 ## 5. Lo que FALTA, en orden
 
-### FASE 4 (en curso) — Host de Windows
-Queda lo que **no se puede probar automáticamente**. Hay que separarlo claramente
-de lo probado al entregarlo.
+### FASE 4 (componentes hechos; falta el orquestador) — Host de Windows
 
-- [ ] Renderer oculto dedicado (`BrowserWindow` con `show:false`) para captura y
-      `RTCPeerConnection`. **No usar `utilityProcess`**: no tiene pila de medios.
-- [ ] `setDisplayMediaRequestHandler` + `desktopCapturer.getSources({types:['screen']})`.
-      `thumbnailSize:{width:0,height:0}` cuando no haga falta miniatura.
-- [ ] Correlacionar `display_id` con `screen.getAllDisplays()` para construir
-      `DisplayInfo`.
-- [ ] `RTCPeerConnection` con `contentHint='text'` y
-      `degradationPreference='maintain-resolution'`. Negociar AV1 → VP9 → H.264.
-- [ ] DataChannel **no fiable y no ordenado** para los eventos de control.
-- [ ] Implementar `InputBackend` con **koffi** (MIT, activo) llamando a
-      `user32!SendInput`. Verificar empíricamente que koffi carga en Electron 43.
-- [ ] Indicador visible y persistente mientras haya sesión + botón de cortar.
-- [ ] IPC entre main y renderer oculto.
+- [x] Renderer oculto dedicado (`BrowserWindow` con `show:false`) para captura y
+      `RTCPeerConnection`. Sesión propia (`partition: luxy-capture`) para no
+      relajar los permisos de la interfaz.
+- [x] `setDisplayMediaRequestHandler` + `desktopCapturer.getSources({types:['screen']})`
+      con `thumbnailSize:{width:0,height:0}`.
+- [x] Correlacionar `display_id` con `screen.getAllDisplays()`.
+- [x] `RTCPeerConnection` con `contentHint='text'` y
+      `degradationPreference='maintain-resolution'`. AV1 → VP9 → H.264 → VP8.
+- [x] DataChannel no fiable y no ordenado — **partido en dos canales**, ver el
+      fallo 11.
+- [x] `InputBackend` con **koffi** llamando a `user32!SendInput`.
+- [x] Indicador visible y persistente + botón de cortar.
+- [x] IPC entre main y renderer oculto, con el control cruzando **como texto
+      opaco** para que un renderer comprometido no se salte `guardControlMessage`.
+
+- [ ] **PENDIENTE: el orquestador.** Ver la especificación completa más abajo.
+
+#### Verificado empíricamente en este equipo (Electron 43, Windows 11)
+Sonda ejecutada dentro de Electron, no deducido:
+- koffi 3.1.4 carga en Electron 43. **No hace falta recompilar para el ABI 148**:
+  koffi usa N-API 8, que es ABI estable.
+- `koffi.sizeof(INPUT)` = 40 en x64, que es lo correcto.
+- `SendInput` mueve el cursor de verdad: **0 px de error** contra el objetivo.
+- `desktopCapturer` devuelve `display_id: "116357464"` y
+  `screen.getAllDisplays()[0].id` es `116357464`. La correlación es exacta.
+- `display.label` vino **vacía**.
+- `new BrowserWindow({show:false})` se crea y no es visible.
+
+#### Lo que sigue SIN probar y sólo puede probar Daniel
+- Que el vídeo llegue de verdad y que AV1/VP9 se negocien en su GPU.
+- Multi-monitor: este equipo tiene una sola pantalla, así que la correlación con
+  varios monitores y la geometría con escalas mixtas están sin ejercitar.
+- El bloqueo UIPI contra ventanas elevadas.
+- El indicador flotando sobre una aplicación a pantalla completa.
+- Que koffi sobreviva al empaquetado (`asarUnpack` está puesto, no comprobado).
+
+---
+
+### FASE 4d — El orquestador (LO SIGUIENTE QUE HAY QUE HACER)
+
+Los componentes existen y están probados, pero **nadie los une**: hoy no hay
+ningún camino que vaya de un mensaje del móvil a un clic. Falta un archivo,
+`apps/desktop/src/main/remote-host/session-host.ts`, y engancharlo en
+`main/index.ts`.
+
+**No hay que diseñar nada nuevo.** Todas las piezas existen y sus firmas son
+éstas (comprobadas, no de memoria):
+
+```ts
+// packages/remote-protocol/src/session-state.ts
+class RemoteSession {
+  constructor(sessionId: string, deviceId: string, policy: SessionPolicy)
+  request(requested: readonly Capability[], now: number): RequestOutcome
+  userDecision(accepted: boolean, granted: readonly Capability[], now: number): boolean
+  beginNegotiation(fingerprints: readonly string[], now: number): boolean
+  activate(now: number): boolean
+  touch(now: number): boolean
+  checkExpiry(now: number, deviceStillActive: boolean): SessionEndCause | null
+  end(cause: SessionEndCause, now: number): void
+  activeCapabilities(): readonly Capability[]
+  snapshot(): SessionSnapshot
+}
+
+// packages/remote-protocol/src/guard.ts
+guardControlMessage(raw: string, context: GuardContext): GuardResult
+// GuardContext = { sessionId, granted, window: ReplayWindow, active, now?, maxBytes? }
+
+// packages/remote-protocol/src/envelope.ts
+newReplayWindow(): ReplayWindow
+
+// packages/remote-crypto/src/sdp-auth.ts
+signSdp(...)                 // firma la oferta ANTES de mandarla
+verifySdp(mensaje, options)  // verifica la respuesta ANTES de mirar su contenido
+extractFingerprints(sdp: string): string[]
+fingerprintsUnchanged(antes, ahora): boolean
+
+// packages/remote-protocol/src/signaling.ts
+interface SignalingTransport   // ya implementado por fase 3b
+acceptSignaling(...): SignalingVerdict
+```
+
+**Lo que tiene que hacer `SessionHost`, en orden:**
+
+1. Al llegar `session.request`: crear `RemoteSession`, llamar a `request()`,
+   preguntar al usuario, `userDecision()`.
+2. **Dos `ReplayWindow`, una por canal.** `newReplayWindow()` dos veces, guardadas
+   en un `Record<DataChannelKind, ReplayWindow>`. Ésta es la razón de ser del
+   fallo 11: si se comparte una sola, el canal no ordenado envenena la secuencia
+   del fiable y se caen las teclas.
+3. `CaptureHost.refreshDisplays()` → `InputDispatcher.updateDisplays()` con esos
+   mismos `DisplayInfo`. **La misma lista para los dos**, o el ratón y el vídeo
+   apuntarán a monitores distintos.
+4. `CaptureHost.installDisplayMediaHandler(() => dispatcher.currentMonitorId())`.
+   Así el monitor que se captura y el monitor sobre el que cae el cursor salen
+   del mismo sitio por construcción.
+5. `send({type:'start', ...})` con la fuente resuelta por `resolveSource()`.
+6. Al recibir `{type:'offer'}` del renderer: `signSdp` y mandarlo por la
+   señalización. Al recibir la respuesta: `verifySdp` **antes** de mirarla, y
+   `beginNegotiation(extractFingerprints(sdp))`.
+7. Al recibir `{type:'control', channel, raw}`:
+   - `channelMatches(tipo, channel)` — rechazar si no cuadra;
+   - `guardControlMessage(raw, { ..., window: ventanas[channel] })`;
+   - si pasa: `dispatcher.dispatch(message)` y `session.touch(now)`.
+   - **Nunca al revés.** El guard es la puerta única.
+8. Indicador: `show()` al activar, `update()` cada minuto, `hide()` al terminar.
+   `controlling` = si `activeCapabilities()` incluye `control`.
+9. Al terminar por cualquier vía (usuario, timeout, revocación, fallo de
+   transporte, cierre de Luxy): **`dispatcher.releaseAll()` SIEMPRE**, y después
+   `captureHost.dispose()`. Si no, quedan teclas hundidas en el ordenador.
+10. `checkExpiry()` en un temporizador; también hay que reaccionar a
+    `screen.on('display-added'/'display-removed'/'display-metrics-changed')`
+    llamando a `refreshDisplays()` + `updateDisplays()`.
+
+**Se puede probar entero sin Electron** si `CaptureHost`, `InputBackend` y
+`SessionIndicator` se inyectan como interfaces: es exactamente lo que ya hace
+`negotiation.test.ts` con la pila de señalización. Pruebas que deben existir:
+una sesión de sólo visualización que no mueve el ratón; un mensaje por el canal
+equivocado; una revocación en caliente a mitad de sesión; y que al cortar por
+cada una de las causas se llama a `releaseAll`.
 
 ### FASE 5 — Luxy Mobile Android mínimo
 - [ ] Proyecto React Native + Expo con **development build** (Expo Go no sirve).
 - [ ] `@config-plugins/react-native-webrtc` + `@stream-io/react-native-webrtc`.
 - [ ] Importar `@luxy/remote-protocol` y `@luxy/remote-crypto` tal cual.
+- [ ] **Abrir los DOS DataChannels** (`luxy-input` y `luxy-control`) con su
+      numeración de secuencia independiente. Ver el fallo 11.
 - [ ] Clave P-256 en **Android Keystore** (StrongBox si hay). Requiere módulo
       nativo propio con Expo Modules API.
 - [ ] Escaneo QR (`expo-camera`), almacén seguro (`expo-secure-store`, **no**
@@ -305,6 +469,21 @@ Comprobar antes que no exige activar facturación.
 Daniel puede verificar: que el cursor caiga donde debe, que el vídeo llegue, que
 funcione desde 4G.
 
+**E. Conectar un segundo monitor** cuando se quiera cerrar la Fase 4.
+- Motivo: el equipo de desarrollo tiene **una sola pantalla**. La correlación con
+  varios monitores y toda la geometría con escalas mixtas —que es donde está el
+  fallo 7, el más caro de la lista— están escritas y probadas con datos
+  sintéticos, pero **nunca ejercitadas contra Windows de verdad**.
+- Lo que hay que mirar: que el cursor caiga donde debe en el monitor secundario,
+  y que `monitorWarnings()` avise si las escalas no coinciden.
+
+**F. Empaquetar y probar el instalador** (`cd apps/desktop && npm run package`).
+- Motivo: `asarUnpack` de koffi está configurado pero **no comprobado**. Si está
+  mal, el control de ratón y teclado falla sólo en la versión instalada, no en
+  desarrollo, que es la peor forma posible de descubrirlo.
+- Verificar: que existe `resources/app.asar.unpacked/node_modules/koffi` y que el
+  ratón se mueve desde la aplicación instalada.
+
 ---
 
 ## 7. Comandos del proyecto
@@ -322,18 +501,88 @@ npx vitest run <ruta> --reporter=basic     # cuenta de fallos legible
 cd apps/desktop && npm run package         # instalador Windows
 ```
 
-**Aviso práctico:** los heredocs de bash se rompen a menudo en este entorno con
-contenido que lleva comillas. Para parchear archivos, escribir un script Python
-en el scratchpad y ejecutarlo es más fiable. PowerShell `Set-Content -Encoding
-utf8` mete BOM y rompe JSON.
+### Avisos prácticos del entorno (ya costaron tiempo una vez)
+
+- Los **heredocs de bash** se rompen a menudo con contenido que lleva comillas.
+  Para parchear archivos, escribir un script Python y ejecutarlo es más fiable.
+  PowerShell `Set-Content -Encoding utf8` mete BOM y rompe JSON.
+- **`ELECTRON_RUN_AS_NODE`**: VS Code y otros hosts la exportan. Con esa variable
+  puesta, `electron.exe` se comporta como Node puro y aborta con
+  `Assertion failed: (isolate_data->snapshot_data()) != nullptr`. Para ejecutar
+  Electron de verdad hay que **desactivarla**, no ponerla vacía:
+  `env -u ELECTRON_RUN_AS_NODE npx electron <script>`.
+- **koffi y los install scripts**: npm los bloquea en este repo
+  (`npm warn allow-scripts`). No importa: koffi trae los binarios precompilados
+  en la dependencia opcional `@koromix/koffi-win32-x64`, y carga igualmente.
+- Al capturar salida de procesos desde Python en Windows hay que forzar
+  `encoding='utf-8', errors='replace'`: si no, el color de vitest revienta el
+  decodificador cp1252.
+
+### Cómo se verifica algo que "no se puede probar automáticamente"
+
+No se da por bueno: **se sondea**. En la Fase 4 se escribió un script de Electron
+de treinta líneas que cargaba koffi, llamaba a `SendInput`, leía
+`desktopCapturer` y comparaba `display_id` con `screen.getAllDisplays()`, y se
+ejecutó de verdad. Así se pasó de "debería funcionar" a los datos de la sección
+anterior. **Los ficheros de sonda se borran después**, o el lint los caza.
+
+### El ritual de verificación: revertir protecciones
+
+La costumbre del proyecto es revertir cada protección y comprobar cuántas
+pruebas fallan. En la Fase 4 se automatizó: un script Python con una lista de
+`(nombre, archivo, texto_antes, texto_después, archivo_de_prueba)` que aplica
+cada mutación, ejecuta `npx vitest run <prueba> --reporter=basic`, cuenta los
+fallos con una expresión regular sobre `Tests N failed` y **restaura el archivo
+en un `finally`**. Resultado de la Fase 4: 17 protecciones revertidas, las 17
+rompen pruebas, entre 1 y 6 cada una. Ninguna quedó sin defender.
+
+Merece la pena rehacer ese script en cada fase. Es la diferencia entre tener
+pruebas y tener pruebas que sirven.
 
 ---
 
 ## 8. Cómo empezar la conversación nueva
 
-Prompt sugerido para pegar:
+Este documento está escrito para que quien lo lea **no empiece de cero**. Vale
+igual para Claude Code, para ChatGPT/Codex o para cualquier otro: todo lo que
+hace falta está aquí, y lo que ya se decidió o se comprobó **no se vuelve a
+investigar**.
 
-> Lee `docs/CONTINUAR-LUXY-REMOTE.md` en `C:\Users\daniel\Desktop\Luxy` y
-> continúa desde donde se quedó. No repitas la investigación ni las decisiones ya
-> tomadas. Empieza por la Fase 4, y dime primero en 10 líneas qué vas a tocar y
-> qué no vas a poder probar automáticamente.
+### Prompt para pegar
+
+> Trabajo en `C:\Users\daniel\Desktop\Luxy`, un monorepo TypeScript en Windows 11.
+> Lee `docs/CONTINUAR-LUXY-REMOTE.md` **entero** antes de tocar nada: es un
+> documento de traspaso y contiene el estado exacto, las decisiones ya tomadas y
+> los fallos ya corregidos.
+>
+> Reglas, de la sección 0 del documento: iOS está fuera del alcance; coste
+> obligatorio 0 €; uso personal; **no hagas push, no despliegues y no ejecutes
+> migraciones** sin pedírmelo cada vez; y no des por terminada ninguna función
+> que no hayas probado.
+>
+> No repitas la investigación ni reabras las decisiones de las secciones 2 y 3.
+> No reintroduzcas ninguno de los 13 fallos de la sección 4.
+>
+> Continúa por **la Fase 4d, el orquestador** (`session-host.ts`), que está
+> especificado con las firmas reales en la sección 5. Antes de escribir código,
+> dime en 10 líneas qué vas a tocar y qué no vas a poder probar automáticamente.
+>
+> Al terminar: ejecuta `npm run check`, haz el ritual de revertir protecciones de
+> la sección 7, y dame un resumen breve separando **lo probado** de **lo sólo
+> escrito**.
+
+### Si la fase que toca ya no es la 4d
+
+Cambiar sólo la línea de "Continúa por…" por la fase correspondiente de la
+sección 5. El resto del prompt vale igual.
+
+### Qué NO hay que volver a preguntar ni investigar
+
+- Por qué P-256 y no Ed25519, por qué Supabase Realtime, por qué Cloudflare
+  TURN, por qué React Native, por qué renderer oculto, por qué proceso auxiliar
+  para la entrada → **sección 2**.
+- Si koffi funciona en Electron 43, si hay que recompilar para el ABI 148, si
+  `display_id` correlaciona con `getAllDisplays`, cuánto mide `INPUT` →
+  **sección 5, "Verificado empíricamente"**. Están medidos, no supuestos.
+- Cómo se llama cada cosa que ya existe → **sección 3**.
+- Qué se rompió una vez y no puede volver a romperse → **sección 4**.
