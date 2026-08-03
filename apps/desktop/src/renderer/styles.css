@@ -498,6 +498,28 @@ body {
   border: 1px solid var(--rule);
 }
 
+.studio-decision {
+  margin-top: 18px;
+  padding: 14px;
+  border: 1px solid var(--rule);
+  background: #ffffff04;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.studio-decision p {
+  margin: 4px 0 0;
+}
+
+.studio-decision__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .prewrap {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -512,6 +534,15 @@ body {
 @media (max-width: 680px) {
   .studio-form {
     grid-template-columns: 1fr;
+  }
+
+  .studio-decision {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .studio-decision__actions {
+    justify-content: flex-start;
   }
 }
 

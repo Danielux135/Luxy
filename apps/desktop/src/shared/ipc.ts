@@ -11,6 +11,8 @@ import {
   type agentEventSchema,
   agentHostStatusSchema,
   jobStatusSchema,
+  studioJobActionRequestSchema,
+  studioJobActionResponseSchema,
   studioJobCreateRequestSchema,
   studioJobResponseSchema,
   studioJobsResponseSchema,
@@ -221,10 +223,14 @@ export const studioJobsListArgsSchema = z.object({
   limit: z.number().int().min(1).max(100).default(30),
 });
 export const studioJobIdArgsSchema = z.object({ jobId: z.string().uuid() });
+export const studioJobActionArgsSchema = studioJobActionRequestSchema.extend({
+  jobId: z.string().uuid(),
+});
 
 export const studioOptionsResultSchema = studioOptionsResponseSchema;
 export const studioJobsListResultSchema = studioJobsResponseSchema;
 export const studioJobResultSchema = studioJobResponseSchema;
+export const studioJobActionResultSchema = studioJobActionResponseSchema;
 
 // -----------------------------------------------------------------------------
 // API que el preload expone en window.luxy
@@ -273,6 +279,9 @@ export interface LuxyBridge {
   ): Promise<IpcResult<z.infer<typeof studioJobsListResultSchema>>>;
   getStudioJob(jobId: string): Promise<IpcResult<z.infer<typeof studioJobResultSchema>>>;
   cancelStudioJob(jobId: string): Promise<IpcResult<{ cancelled: boolean }>>;
+  requestStudioJobAction(
+    args: z.infer<typeof studioJobActionArgsSchema>,
+  ): Promise<IpcResult<z.infer<typeof studioJobActionResultSchema>>>;
   /** devuelve la funcion de baja; sin ella se acumulan listeners al navegar */
   onAgentEvent(listener: (event: z.infer<typeof agentEventSchema>) => void): () => void;
 }

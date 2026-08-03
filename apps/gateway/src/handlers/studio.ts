@@ -7,6 +7,7 @@ import {
   isMachineOnline,
   machineHasProject,
   machineSupportsProvider,
+  studioJobActionRequestSchema,
   studioJobCreateRequestSchema,
   studioJobListQuerySchema,
 } from '@luxy/shared';
@@ -145,4 +146,77 @@ export const handleStudioJobCancel = withMachineAuth(async (_request, deps, _mac
   if (status === null) return errorResponse('el trabajo ya habia terminado', 409);
 
   return json({ ok: true, status });
+});
+
+/**
+ * registra una decision explicita sobre los cambios de un trabajo terminado.
+ *
+ * el gateway no toca git: deja una aprobacion persistente para que la ejecute
+ * la maquina que posee el worktree. Asi Studio tambien funciona al controlar
+ * otro ordenador y no depende del proceso local de Electron.
+ */
+export const handleStudioJobAction = withMachineAuth(async (request, deps, creator, params) => {
+  const jobId = params.jobId;
+  if (jobId === undefined) return errorResponse('falta el identificador del trabajo', 400);
+
+  const body = await readBody(request, studioJobActionRequestSchema);
+  if (!body.ok) return body.response;
+
+  const job = await deps.repo.getJobById(jobId);
+  if (job === null) return errorResponse('trabajo no encontrado', 404);
+  if (job.origin !== 'studio' || job.metadata['requestedByMachineId'] !== creator.id) {
+    return errorResponse('ese trabajo no fue creado desde este Studio', 403);
+  }
+  if (job.status !== 'completed') {
+    return errorResponse('el trabajo no esta listo para decidir sus cambios', 409);
+  }
+
+  const worktreePath = job.metadata['worktreePath'];
+  const branch = job.metadata['branch'];
+  if (typeof worktreePath !== 'string' || typeof branch !== 'string') {
+    return errorResponse('el trabajo no conserva un worktree aplicable', 409);
+  }
+
+  const previousDecision = job.metadata['studioDecision'];
+  if (
+    typeof previousDecision === 'object' &&
+    previousDecision !== null &&
+    'state' in previousDecision &&
+    ['pending', 'applied', 'discarded'].includes(String(previousDecision.state))
+  ) {
+    return errorResponse('los cambios de ese trabajo ya tienen una decision', 409);
+  }
+
+  const requestedAt = new Date().toISOString();
+  const approval = await deps.repo.createApproval(job.id, body.data.action, {
+    source: 'studio',
+    requestedBy: creator.id,
+    requestedByMachineName: creator.name,
+    message: body.data.message,
+  });
+
+  // confirmed=true en el contrato representa la pulsacion posterior al dialogo
+  // de confirmacion. La orden queda aprobada para el polling del agente.
+  const approved = await deps.repo.resolveApproval(approval.id, 'approved', 0);
+  if (approved === null) {
+    return errorResponse('no se pudo confirmar la decision sobre el trabajo', 409);
+  }
+
+  const studioDecision = {
+    action: body.data.action,
+    state: 'pending',
+    message: null,
+    requestedAt,
+    completedAt: null,
+  };
+  await deps.repo.mergeJobMetadata(job.id, { studioDecision });
+  const waiting = await deps.repo.updateJob(job.id, { status: 'waiting_for_approval' });
+  if (waiting === null) return errorResponse('no se pudo actualizar el trabajo', 409);
+
+  deps.logger.info('decision de Studio enviada a la maquina', {
+    jobId: job.id,
+    approvalId: approval.id,
+    action: body.data.action,
+  });
+  return json({ approvalId: approval.id, job: toStudioJob(waiting) }, 202);
 });

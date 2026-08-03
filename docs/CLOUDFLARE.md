@@ -128,9 +128,17 @@ Ver [TELEGRAM.md](TELEGRAM.md#5-registrar-el-webhook).
 | `POST` | `/api/jobs/:jobId/fail` |
 | `POST` | `/api/jobs/:jobId/cancelled` |
 | `POST` | `/api/approvals/:approvalId/resolve` |
+| `POST` | `/api/approvals/:approvalId/complete` |
+| `POST` | `/api/studio/jobs/:jobId/action` |
 
 Todos los privados exigen `Authorization: Bearer <token de máquina>`, y una
 máquina **solo** puede tocar sus propios trabajos.
+
+`/api/studio/jobs/:jobId/action` registra `commit` o `discard` tras la
+confirmación de Studio. La máquina propietaria lo recoge por
+`/api/approvals/pending` y cierra la orden con `/complete`. Las aprobaciones
+consumidas pasan a `expired`, de modo que conservan auditoría sin volver a
+ejecutarse.
 
 ## 8. Cron de leases
 

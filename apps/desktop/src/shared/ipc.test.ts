@@ -14,6 +14,7 @@ import {
   stopAgentArgsSchema,
   approvalResolveArgsSchema,
   connectionTestArgsSchema,
+  studioJobActionArgsSchema,
 } from './ipc.js';
 
 describe('canales IPC', () => {
@@ -221,6 +222,25 @@ describe('aprobaciones desde el escritorio', () => {
         worktreePath: 'C:/x',
         message: 'y'.repeat(1000),
       }).success,
+    ).toBe(false);
+  });
+});
+
+describe('decisiones desde Studio', () => {
+  const jobId = '11111111-1111-4111-8111-111111111111';
+
+  it('exige confirmacion explicita para aplicar o descartar', () => {
+    expect(
+      studioJobActionArgsSchema.safeParse({ jobId, action: 'commit', confirmed: true }).success,
+    ).toBe(true);
+    expect(
+      studioJobActionArgsSchema.safeParse({ jobId, action: 'discard', confirmed: false }).success,
+    ).toBe(false);
+  });
+
+  it('no expone push en el contrato de Studio', () => {
+    expect(
+      studioJobActionArgsSchema.safeParse({ jobId, action: 'push', confirmed: true }).success,
     ).toBe(false);
   });
 });

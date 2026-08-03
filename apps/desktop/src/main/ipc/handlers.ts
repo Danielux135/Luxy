@@ -22,6 +22,7 @@ import {
   connectionTestArgsSchema,
   approvalResolveArgsSchema,
   studioJobCreateArgsSchema,
+  studioJobActionArgsSchema,
   studioJobIdArgsSchema,
   studioJobsListArgsSchema,
   gatewayCheckArgsSchema,
@@ -381,6 +382,14 @@ export function registerIpcHandlers(context: HandlerContext): void {
     await studioClient(context).cancelStudioJob(args.jobId);
     return { cancelled: true };
   });
+
+  handle(IPC_INVOKE.studioJobAction, studioJobActionArgsSchema, async (args) =>
+    studioClient(context).requestStudioJobAction(args.jobId, {
+      action: args.action,
+      confirmed: args.confirmed,
+      message: args.message,
+    }),
+  );
 
   handle(IPC_INVOKE.connectionTest, connectionTestArgsSchema, async (args) => {
     // la URL la decide la configuracion guardada, NO el renderer. El contrato

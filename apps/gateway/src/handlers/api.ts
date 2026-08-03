@@ -8,6 +8,7 @@ import {
   jobCompleteRequestSchema,
   jobFailRequestSchema,
   jobCancelledRequestSchema,
+  approvalCompleteRequestSchema,
   approvalResolveRequestSchema,
   renderJobFinished,
   renderJobProgress,
@@ -612,6 +613,7 @@ export const handleApprovalsPending = withMachineAuth(async (_request, deps, mac
       // solo el flujo de doble confirmacion pone esta marca
       confirmedTwice: row.metadata['confirmedTwice'] === true,
       requestedBy: String(row.metadata['requestedBy'] ?? ''),
+      source: row.metadata['source'] === 'studio' ? 'desktop' : 'telegram',
     });
   }
 
@@ -640,6 +642,64 @@ export const handleApprovalResolve = withMachineAuth(async (request, deps, machi
   if (!resolved) return errorResponse('la aprobacion no existe o ya estaba resuelta', 409);
 
   return json({ ok: true, action: resolved.action, jobId: resolved.job_id });
+});
+
+/** resultado de una aprobacion que la maquina ya intento ejecutar */
+export const handleApprovalComplete = withMachineAuth(async (request, deps, machine, params) => {
+  const approvalId = params.approvalId;
+  if (!approvalId) return errorResponse('falta el identificador de la aprobacion', 400);
+
+  const body = await readBody(request, approvalCompleteRequestSchema);
+  if (!body.ok) return body.response;
+
+  const approval = await deps.repo.getApproval(approvalId);
+  if (!approval) return errorResponse('la aprobacion no existe', 404);
+
+  const job = await deps.repo.getJobById(approval.job_id);
+  if (!job || job.claimedBy !== machine.id) {
+    return errorResponse('esa aprobacion no pertenece a un trabajo de esta maquina', 403);
+  }
+
+  // la respuesta puede repetirse si la red se corto despues de persistirla.
+  if (approval.status === 'expired' || approval.status === 'rejected') {
+    return json({ ok: true, duplicate: true });
+  }
+  if (approval.status !== 'approved') {
+    return errorResponse('la aprobacion todavia no esta lista para ejecutarse', 409);
+  }
+
+  if (job.origin === 'studio') {
+    const completedAt = new Date().toISOString();
+    await deps.repo.mergeJobMetadata(job.id, {
+      studioDecision: {
+        action: approval.action,
+        state: body.data.ok ? (approval.action === 'discard' ? 'discarded' : 'applied') : 'failed',
+        message: body.data.message,
+        requestedAt:
+          typeof job.metadata['studioDecision'] === 'object' &&
+          job.metadata['studioDecision'] !== null &&
+          'requestedAt' in job.metadata['studioDecision']
+            ? job.metadata['studioDecision'].requestedAt
+            : null,
+        completedAt,
+      },
+    });
+  }
+
+  // waiting_for_approval describe el transito, no el resultado de la tarea.
+  // Al consumir la orden el trabajo vuelve a su estado terminal original.
+  await deps.repo.updateJob(job.id, { status: 'completed' });
+
+  const completed = await deps.repo.completeApproval(approvalId, body.data.ok);
+  if (completed === null) return json({ ok: true, duplicate: true });
+
+  deps.logger.info('aprobacion ejecutada por la maquina', {
+    approvalId,
+    jobId: job.id,
+    action: approval.action,
+    ok: body.data.ok,
+  });
+  return json({ ok: true, action: approval.action, jobId: job.id });
 });
 
 /**

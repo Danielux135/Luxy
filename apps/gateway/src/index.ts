@@ -25,6 +25,7 @@ import {
   handleJobComplete,
   handleJobFail,
   handleJobCancelled,
+  handleApprovalComplete,
   handleApprovalResolve,
   handleApprovalsPending,
   handleJobAttachment,
@@ -34,6 +35,7 @@ import {
 } from './handlers/api.js';
 import {
   handleStudioJobCancel,
+  handleStudioJobAction,
   handleStudioJobCreate,
   handleStudioJobDetail,
   handleStudioJobs,
@@ -75,6 +77,9 @@ const router = new Router<Deps>()
   .post('/api/studio/jobs/:jobId/cancel', (request, deps, params) =>
     handleStudioJobCancel(request, deps, params),
   )
+  .post('/api/studio/jobs/:jobId/action', (request, deps, params) =>
+    handleStudioJobAction(request, deps, params),
+  )
   // -------------------------------------------------------------------------
   // control remoto
   //
@@ -99,6 +104,9 @@ const router = new Router<Deps>()
   .get('/api/approvals/pending', (request, deps) => handleApprovalsPending(request, deps, {}))
   .post('/api/approvals/:approvalId/resolve', (request, deps, params) =>
     handleApprovalResolve(request, deps, params),
+  )
+  .post('/api/approvals/:approvalId/complete', (request, deps, params) =>
+    handleApprovalComplete(request, deps, params),
   );
 
 /** construye las dependencias de una peticion */

@@ -46,6 +46,7 @@ const bridge: LuxyBridge = {
   listStudioJobs: (args = { limit: 30 }) => ipcRenderer.invoke(IPC_INVOKE.studioJobsList, args),
   getStudioJob: (jobId: string) => ipcRenderer.invoke(IPC_INVOKE.studioJobGet, { jobId }),
   cancelStudioJob: (jobId: string) => ipcRenderer.invoke(IPC_INVOKE.studioJobCancel, { jobId }),
+  requestStudioJobAction: (args: unknown) => ipcRenderer.invoke(IPC_INVOKE.studioJobAction, args),
 
   onAgentEvent: (listener) => {
     // el listener del renderer nunca ve el objeto IpcRendererEvent: solo el dato

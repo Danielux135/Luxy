@@ -106,6 +106,13 @@ export class LuxyAgent {
   private loops: Promise<void> | null = null;
   /** promesa del trabajo en curso; stop() la espera en vez de dormir a ciegas */
   private activeJobPromise: Promise<void> | null = null;
+  /**
+   * resultados de aprobaciones pendientes de confirmar al gateway.
+   *
+   * si la accion local termina pero se corta la red, no se ejecuta otra vez:
+   * se reenvia el mismo resultado hasta que el gateway lo consume.
+   */
+  private readonly approvalOutcomes = new Map<string, { ok: boolean; message: string }>();
 
   constructor(
     private readonly config: AgentConfig,
@@ -484,44 +491,69 @@ export class LuxyAgent {
     while (!this.stopping) {
       try {
         const pending = await this.client.listPendingApprovals();
+        const visible = new Set(pending.map((approval) => approval.approvalId));
+        for (const approvalId of this.approvalOutcomes.keys()) {
+          if (!visible.has(approvalId)) this.approvalOutcomes.delete(approvalId);
+        }
         for (const approval of pending) {
           if (this.stopping) break;
 
-          const outcome = await executeApproval(
-            {
-              approvalId: approval.approvalId,
+          let cached = this.approvalOutcomes.get(approval.approvalId);
+          if (cached === undefined) {
+            const outcome = await executeApproval(
+              {
+                approvalId: approval.approvalId,
+                jobId: approval.jobId,
+                shortId: approval.shortId,
+                action: approval.action,
+                projectAlias: approval.projectAlias,
+                worktreePath: approval.worktreePath,
+                branch: approval.branch,
+                message: approval.message ?? undefined,
+                confirmedTwice: approval.confirmedTwice,
+                source: approval.source,
+                requestedBy: approval.requestedBy,
+              },
+              {
+                config: this.config,
+                worktreesDirectory: this.worktreesDirectory,
+                auditFile: auditFilePath(logsDir()),
+              },
+            );
+
+            cached = {
+              ok: outcome.ok,
+              message: outcome.message,
+            };
+            this.approvalOutcomes.set(approval.approvalId, cached);
+            this.logger.info(`aprobacion ${approval.action} de ${approval.shortId}`, {
+              ok: outcome.ok,
+              deniedBy: outcome.deniedBy,
+            });
+            this.queue.push(
+              approval.jobId,
+              outcome.ok ? 'phase' : 'warning',
+              `${approval.action}: ${outcome.message}`,
+            );
+            void this.queue.flush().catch(() => undefined);
+            this.emit({
+              type: 'approval.resolved',
+              at: this.now(),
               jobId: approval.jobId,
               shortId: approval.shortId,
               action: approval.action,
-              projectAlias: approval.projectAlias,
-              worktreePath: approval.worktreePath,
-              branch: approval.branch,
-              message: approval.message ?? undefined,
-              confirmedTwice: approval.confirmedTwice,
-              source: 'telegram',
-              requestedBy: approval.requestedBy,
-            },
-            {
-              config: this.config,
-              worktreesDirectory: this.worktreesDirectory,
-              auditFile: auditFilePath(logsDir()),
-            },
-          );
+              ok: outcome.ok,
+              message: outcome.message,
+            });
+          }
 
-          this.logger.info(`aprobacion ${approval.action} de ${approval.shortId}`, {
-            ok: outcome.ok,
-            deniedBy: outcome.deniedBy,
-          });
-          this.queue.push(
-            approval.jobId,
-            outcome.ok ? 'phase' : 'warning',
-            `${approval.action}: ${outcome.message}`,
-          );
-          void this.queue.flush().catch(() => undefined);
-
-          await this.client
-            .resolveApproval(approval.approvalId, outcome.ok ? 'approved' : 'rejected')
-            .catch(() => undefined);
+          try {
+            await this.client.completeApproval(approval.approvalId, cached.ok, cached.message);
+            this.approvalOutcomes.delete(approval.approvalId);
+          } catch {
+            // la accion ya ocurrio: el siguiente polling reenvia el resultado,
+            // nunca vuelve a tocar git ni convierte un exito en un rechazo
+          }
         }
       } catch (error) {
         this.logger.debug('no se pudieron consultar las aprobaciones', describeError(error));

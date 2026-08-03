@@ -6,6 +6,7 @@ import {
   claimResponseSchema,
   jobControlResponseSchema,
   heartbeatResponseSchema,
+  studioJobActionResponseSchema,
   studioJobResponseSchema,
   studioJobsResponseSchema,
   studioOptionsResponseSchema,
@@ -20,6 +21,7 @@ import type {
   JobFailRequest,
   JobCancelledRequest,
   StudioJob,
+  StudioJobActionRequest,
   StudioJobCreateRequest,
   StudioJobEvent,
   StudioMachine,
@@ -221,6 +223,19 @@ export class GatewayClient {
     await this.request('POST', `/api/studio/jobs/${encodeURIComponent(jobId)}/cancel`);
   }
 
+  /** aplica o descarta los cambios a traves de la maquina que posee el worktree */
+  async requestStudioJobAction(
+    jobId: string,
+    payload: StudioJobActionRequest,
+  ): Promise<{ approvalId: string; job: StudioJob }> {
+    const raw = await this.request(
+      'POST',
+      `/api/studio/jobs/${encodeURIComponent(jobId)}/action`,
+      payload,
+    );
+    return studioJobActionResponseSchema.parse(raw);
+  }
+
   /**
    * descarga el adjunto de un trabajo.
    *
@@ -248,10 +263,11 @@ export class GatewayClient {
     return pendingApprovalsResponseSchema.parse(raw).approvals;
   }
 
-  /** informa del resultado de ejecutar una aprobacion */
-  async resolveApproval(approvalId: string, decision: 'approved' | 'rejected'): Promise<void> {
-    await this.request('POST', `/api/approvals/${encodeURIComponent(approvalId)}/resolve`, {
-      decision,
+  /** informa del resultado real despues de ejecutar una aprobacion */
+  async completeApproval(approvalId: string, ok: boolean, message: string): Promise<void> {
+    await this.request('POST', `/api/approvals/${encodeURIComponent(approvalId)}/complete`, {
+      ok,
+      message,
     });
   }
 

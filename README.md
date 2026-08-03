@@ -52,7 +52,8 @@ Las claves se guardan **cifradas** con tu cuenta de Windows y no vuelven a pedir
 - Crear y seguir tareas desde Studio en Windows o enviar órdenes rápidas desde Telegram.
 - Aislar cada tarea en un **worktree de git**, sin tocar tu carpeta de trabajo.
 - Ejecutar las pruebas del proyecto solo con permiso explícito `allowHostChecks`.
-- Enseñarte el resumen del diff y dejarte aprobar o descartar los cambios desde Desktop.
+- Enseñarte el resumen del diff y dejarte aplicar o descartar los cambios desde Desktop.
+  Aplicar crea un commit en la rama aislada; no hace `push` ni toca producción.
 - Elegir proveedor automáticamente con `/auto`.
 - Cancelar una tarea a medias **conservando siempre los cambios**.
 
@@ -312,6 +313,11 @@ En grupos Luxy **ignora** los mensajes que no le mencionen y **nunca** ejecuta
 instrucciones de otros miembros. Ver [docs/TELEGRAM.md](docs/TELEGRAM.md).
 
 ## 19. Flujo de aprobaciones
+
+En Studio, un trabajo terminado con cambios ofrece `Aplicar cambios` y
+`Descartar trabajo`. Las dos acciones piden confirmación. La primera crea el
+commit en la rama aislada de Luxy; la segunda elimina el worktree. Studio no
+ofrece `push` en este flujo.
 
 Cuando un trabajo termina con cambios, Telegram te ofrece:
 

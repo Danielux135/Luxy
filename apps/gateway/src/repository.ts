@@ -499,7 +499,7 @@ export class Repository {
     }>('approvals', {
       columns: 'id,job_id,action,metadata',
       filters: { status: eq('approved') },
-      order: 'created_at.asc',
+      order: 'requested_at.asc',
       limit: 20,
     });
 
@@ -547,6 +547,27 @@ export class Repository {
         status: decision,
         resolved_at: new Date().toISOString(),
         resolved_by_telegram_user_id: telegramUserId,
+      },
+    );
+    return rows[0] ?? null;
+  }
+
+  /**
+   * consume una aprobacion despues de ejecutarla en la maquina.
+   *
+   * `expired` significa aqui que la orden aprobada ya se consumio. Mantener la
+   * fila permite auditarla y, a la vez, evita que vuelva a salir en el polling.
+   */
+  async completeApproval(
+    approvalId: string,
+    ok: boolean,
+  ): Promise<{ id: string; job_id: string; action: string } | null> {
+    const rows = await this.db.update<{ id: string; job_id: string; action: string }>(
+      'approvals',
+      { id: eq(approvalId), status: eq('approved') },
+      {
+        status: ok ? 'expired' : 'rejected',
+        resolved_at: new Date().toISOString(),
       },
     );
     return rows[0] ?? null;

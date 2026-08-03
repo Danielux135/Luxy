@@ -220,6 +220,12 @@ export const approvalResolveRequestSchema = z.object({
   decision: z.enum(['approved', 'rejected']),
 });
 
+/** resultado real despues de ejecutar una aprobacion en la maquina */
+export const approvalCompleteRequestSchema = z.object({
+  ok: z.boolean(),
+  message: z.string().min(1).max(500),
+});
+
 // -----------------------------------------------------------------------------
 // contratos de Studio: Desktop -> main -> gateway
 // -----------------------------------------------------------------------------
@@ -243,6 +249,21 @@ export const studioJobListQuerySchema = z.object({
   targetMachineId: z.string().uuid().optional(),
   status: jobStatusSchema.optional(),
   limit: z.coerce.number().int().min(1).max(100).default(30),
+});
+
+/**
+ * decisiones que Studio puede pedir sobre un worktree terminado.
+ *
+ * aplicar se representa como commit porque conserva el aislamiento: los
+ * cambios quedan confirmados en la rama de Luxy sin tocar la rama principal.
+ */
+export const studioJobActionSchema = z.enum(['commit', 'discard']);
+
+export const studioJobActionRequestSchema = z.object({
+  action: studioJobActionSchema,
+  // ambas acciones alteran el worktree; el renderer debe confirmarlas primero
+  confirmed: z.literal(true),
+  message: z.string().max(500).nullable().default(null),
 });
 
 export const studioJobSchema = z.object({
@@ -292,7 +313,14 @@ export const studioJobResponseSchema = z.object({
   events: z.array(studioJobEventSchema).default([]),
 });
 
+export const studioJobActionResponseSchema = z.object({
+  approvalId: z.string().uuid(),
+  job: studioJobSchema,
+});
+
 export type StudioJobCreateRequest = z.infer<typeof studioJobCreateRequestSchema>;
+export type StudioJobAction = z.infer<typeof studioJobActionSchema>;
+export type StudioJobActionRequest = z.infer<typeof studioJobActionRequestSchema>;
 export type StudioJob = z.infer<typeof studioJobSchema>;
 export type StudioJobEvent = z.infer<typeof studioJobEventSchema>;
 export type StudioMachine = z.infer<typeof studioMachineSchema>;
@@ -316,6 +344,7 @@ export const pendingApprovalSchema = z.object({
   /** el usuario confirmo dos veces; imprescindible para el push */
   confirmedTwice: z.boolean().default(false),
   requestedBy: z.string().max(64).default(''),
+  source: z.enum(['telegram', 'desktop']).default('telegram'),
 });
 
 export const pendingApprovalsResponseSchema = z.object({

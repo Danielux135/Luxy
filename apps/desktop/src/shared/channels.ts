@@ -35,6 +35,7 @@ export const IPC_INVOKE = {
   studioJobsList: 'luxy:studio:jobs:list',
   studioJobGet: 'luxy:studio:job:get',
   studioJobCancel: 'luxy:studio:job:cancel',
+  studioJobAction: 'luxy:studio:job:action',
 } as const;
 
 /** canales de notificacion (main -> renderer) */

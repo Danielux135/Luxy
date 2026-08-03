@@ -5,6 +5,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
   StudioJob,
+  StudioJobAction,
   StudioJobCreateRequest,
   StudioJobEvent,
   StudioMachine,
@@ -25,6 +26,7 @@ export function useStudio(): {
   select: (jobId: string) => Promise<void>;
   create: (request: StudioJobCreateRequest) => Promise<boolean>;
   cancel: (jobId: string) => Promise<void>;
+  decide: (jobId: string, action: StudioJobAction) => Promise<boolean>;
   reload: () => Promise<void>;
 } {
   const [machines, setMachines] = useState<StudioMachine[]>([]);
@@ -128,5 +130,29 @@ export function useStudio(): {
     [reload],
   );
 
-  return { machines, jobs, detail, loading, busy, error, select, create, cancel, reload };
+  const decide = useCallback(
+    async (jobId: string, action: StudioJobAction): Promise<boolean> => {
+      setBusy(true);
+      setError(null);
+      try {
+        const result = await window.luxy.requestStudioJobAction({
+          jobId,
+          action,
+          confirmed: true,
+          message: null,
+        });
+        if (!result.ok) {
+          setError(result.error);
+          return false;
+        }
+        await reload();
+        return true;
+      } finally {
+        setBusy(false);
+      }
+    },
+    [reload],
+  );
+
+  return { machines, jobs, detail, loading, busy, error, select, create, cancel, decide, reload };
 }

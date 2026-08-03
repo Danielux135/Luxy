@@ -108,11 +108,27 @@ al navegar entre vistas.
 El historial remoto de Studio se actualiza cada tres segundos y procede del
 gateway, no de memoria temporal del renderer.
 
+## Decidir los cambios
+
+Cuando un trabajo termina con un diff real, su detalle ofrece dos acciones:
+
+- **Aplicar cambios**: tras confirmación, el agente crea un commit en la rama
+  aislada del trabajo. No mezcla la rama principal ni hace `push`.
+- **Descartar trabajo**: tras confirmación, el agente elimina el worktree y su
+  rama. Es destructivo y no se puede deshacer.
+
+La decisión viaja por el gateway y queda persistida en `approvals`; por eso
+funciona aunque Studio controle otra máquina. El agente informa del resultado y
+la interfaz deja reintentar una acción denegada sin ejecutar dos veces una que ya
+terminó.
+
 ## Seguridad de Studio
 
 - El renderer no recibe el `machineToken`; los verbos de Studio pasan por IPC y
   el proceso principal construye el cliente autenticado.
 - Toda entrada se valida con Zod en IPC y otra vez en el gateway.
+- Aplicar y descartar exigen `confirmed: true`; el agente vuelve a comprobar las
+  políticas y confina la ruta antes de tocar git.
 - El gateway comprueba que la máquina tenga el proyecto y el proveedor pedidos;
   nunca sustituye silenciosamente un modelo o proveedor.
 - El utility process del agente recibe un entorno mínimo, no `process.env` completo.

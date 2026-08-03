@@ -39,6 +39,10 @@ Workers. Lo consumen los dos lados. Si una función necesita disco o red, va en
 El agente **nunca** habla con Supabase ni con Telegram directamente. Solo con el
 gateway, y solo saliente.
 
+Las decisiones de Studio también pasan por el gateway: aplicar crea un commit
+en la rama aislada y descartar elimina el worktree. Ambas exigen confirmación;
+ninguna mezcla la rama principal ni hace `push`.
+
 ## Flujo
 
 ```

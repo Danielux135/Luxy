@@ -1,8 +1,9 @@
 // primer corte vertical de Luxy Studio: crear, seguir y cancelar trabajos.
 import { useEffect, useMemo, useState, type JSX } from 'react';
 import { TERMINAL_JOB_STATUSES } from '@luxy/shared';
-import type { JobStatus, ProviderId, StudioJob } from '@luxy/shared';
+import type { JobStatus, ProviderId, StudioJob, StudioJobAction } from '@luxy/shared';
 import { Empty, Field, Notice, Panel, Readout, Tag } from '../ui/primitives.js';
+import { canDecideStudioJob, parseStudioDecision } from '../studio-decision.js';
 import { useStudio } from '../useStudio.js';
 
 const STATUS: Record<JobStatus, string> = {
@@ -73,6 +74,8 @@ export function StudioPage(): JSX.Element {
   const diffStat = typeof metadata['diffStat'] === 'string' ? metadata['diffStat'] : null;
   const testsPassed = typeof metadata['testsPassed'] === 'number' ? metadata['testsPassed'] : 0;
   const testsFailed = typeof metadata['testsFailed'] === 'number' ? metadata['testsFailed'] : 0;
+  const decision = parseStudioDecision(metadata);
+  const canDecide = studio.detail !== null && canDecideStudioJob(studio.detail.job);
 
   const orderedJobs = useMemo(
     () => [...studio.jobs].sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
@@ -90,6 +93,30 @@ export function StudioPage(): JSX.Element {
       priority: 0,
     });
     if (created) setPrompt('');
+  };
+
+  const decide = async (action: StudioJobAction): Promise<void> => {
+    const job = studio.detail?.job;
+    if (job === undefined || !canDecideStudioJob(job)) return;
+
+    const branch = String(job.metadata['branch']);
+    const accepted = window.confirm(
+      action === 'commit'
+        ? [
+            `¿Aplicar los cambios de ${job.shortId}?`,
+            '',
+            `Luxy creara un commit en la rama aislada ${branch}.`,
+            'No hara push ni tocara produccion.',
+          ].join('\n')
+        : [
+            `¿Descartar definitivamente ${job.shortId}?`,
+            '',
+            'Se eliminara el worktree y todos sus cambios sin guardar.',
+            'Esta accion no se puede deshacer.',
+          ].join('\n'),
+    );
+    if (!accepted) return;
+    await studio.decide(job.id, action);
   };
 
   return (
@@ -260,6 +287,52 @@ export function StudioPage(): JSX.Element {
                   <pre className="mono prewrap">{diffStat}</pre>
                 </div>
               )}
+              {decision !== null && (
+                <Notice
+                  tone={
+                    decision.state === 'applied'
+                      ? 'ok'
+                      : decision.state === 'failed'
+                        ? 'fault'
+                        : 'warn'
+                  }
+                >
+                  {decision.state === 'pending' &&
+                    'Decision enviada. La maquina la ejecutara en unos segundos.'}
+                  {decision.state === 'applied' &&
+                    `Cambios aplicados en la rama aislada. ${decision.message ?? 'No se hizo push.'}`}
+                  {decision.state === 'discarded' &&
+                    (decision.message ?? 'El worktree y sus cambios se descartaron.')}
+                  {decision.state === 'failed' &&
+                    `No se pudo completar la accion: ${decision.message ?? 'error desconocido'}`}
+                </Notice>
+              )}
+              {canDecide && (
+                <div className="studio-decision">
+                  <div>
+                    <div className="list__name">Decidir cambios</div>
+                    <p className="list__meta">
+                      Aplicar crea un commit en la rama aislada. Ninguna accion hace push.
+                    </p>
+                  </div>
+                  <div className="studio-decision__actions">
+                    <button
+                      className="btn btn--primary"
+                      disabled={studio.busy}
+                      onClick={() => void decide('commit')}
+                    >
+                      Aplicar cambios
+                    </button>
+                    <button
+                      className="btn btn--danger"
+                      disabled={studio.busy}
+                      onClick={() => void decide('discard')}
+                    >
+                      Descartar trabajo
+                    </button>
+                  </div>
+                </div>
+              )}
               <div className="studio-detail__block">
                 <div className="list__meta">Eventos</div>
                 {studio.detail.events.length === 0 ? (
@@ -275,15 +348,16 @@ export function StudioPage(): JSX.Element {
                   </ul>
                 )}
               </div>
-              {!isTerminal(studio.detail.job) && (
-                <button
-                  className="btn btn--danger"
-                  disabled={studio.busy}
-                  onClick={() => void studio.cancel(studio.detail!.job.id)}
-                >
-                  Cancelar trabajo
-                </button>
-              )}
+              {!isTerminal(studio.detail.job) &&
+                studio.detail.job.status !== 'waiting_for_approval' && (
+                  <button
+                    className="btn btn--danger"
+                    disabled={studio.busy}
+                    onClick={() => void studio.cancel(studio.detail!.job.id)}
+                  >
+                    Cancelar trabajo
+                  </button>
+                )}
             </>
           )}
         </Panel>

@@ -138,6 +138,10 @@ mensajes en nombre del usuario.
 **Commits:** solo tras aprobación explícita del usuario.
 **Push:** dos confirmaciones **y** `allowPush: true` en la máquina (por defecto `false`).
 
+En Studio, **Aplicar cambios** equivale a crear el commit en la rama aislada
+tras confirmación. **Descartar trabajo** elimina el worktree tras confirmación.
+Ninguna de las dos acciones mezcla la rama principal ni hace `push`.
+
 ## Archivos que no debes editar ni publicar
 
 ```
