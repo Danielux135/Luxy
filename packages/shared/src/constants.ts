@@ -41,19 +41,18 @@ export const JOB_STATUSES = [
 ] as const;
 
 // estados en los que un trabajo ya no avanza
-export const TERMINAL_JOB_STATUSES = [
-  'completed',
-  'failed',
-  'cancelled',
-  'interrupted',
-] as const;
+export const TERMINAL_JOB_STATUSES = ['completed', 'failed', 'cancelled', 'interrupted'] as const;
+
+// canal que creo el trabajo. Telegram queda como canal secundario; Studio y
+// Mobile comparten la misma cola sin inventar identificadores de chat.
+export const JOB_ORIGINS = ['telegram', 'studio', 'mobile'] as const;
 
 // proveedores conocidos por luxy
 // un "proveedor" es una FAMILIA de modelos, no un modelo concreto.
 //
-// el modelo exacto vive en el catalogo (packages/shared/src/models) y viaja en
-// la metadata del trabajo. Esta lista solo sirve para decidir que maquina puede
-// ejecutar que, y para el enum del contrato con el gateway.
+// el modelo exacto vive en el catalogo (packages/shared/src/models) y, cuando
+// el usuario lo fija, en jobs.model. Esta lista decide que maquina puede
+// ejecutar cada familia y forma el enum del contrato con el gateway.
 export const PROVIDER_IDS = [
   'claude',
   'codex',

@@ -1,6 +1,6 @@
 // acceso a datos: traduce entre las filas de postgres y los tipos compartidos
 import { generateShortId } from '@luxy/shared';
-import type { Job, JobStatus, Machine, ProviderId } from '@luxy/shared';
+import type { Job, JobOrigin, JobStatus, Machine, ProviderId } from '@luxy/shared';
 import { type SupabaseClient, eq, inList } from './supabase.js';
 
 interface MachineRow {
@@ -19,10 +19,12 @@ interface MachineRow {
 interface JobRow {
   id: string;
   short_id: string;
-  telegram_chat_id: number;
-  telegram_user_id: number;
+  created_via: JobOrigin;
+  telegram_chat_id: number | null;
+  telegram_user_id: number | null;
   target_machine_id: string | null;
   provider: ProviderId;
+  model: string | null;
   project_alias: string;
   prompt: string;
   status: JobStatus;
@@ -58,10 +60,12 @@ function toJob(row: JobRow): Job {
   return {
     id: row.id,
     shortId: row.short_id,
+    origin: row.created_via,
     telegramChatId: row.telegram_chat_id,
     telegramUserId: row.telegram_user_id,
     targetMachineId: row.target_machine_id,
     provider: row.provider,
+    model: row.model,
     projectAlias: row.project_alias,
     prompt: row.prompt,
     status: row.status,
@@ -82,7 +86,7 @@ function toJob(row: JobRow): Job {
 const MACHINE_COLUMNS =
   'id,name,hostname,platform,platform_version,agent_version,capabilities,projects,last_seen_at,enabled';
 const JOB_COLUMNS =
-  'id,short_id,telegram_chat_id,telegram_user_id,target_machine_id,provider,project_alias,' +
+  'id,short_id,created_via,telegram_chat_id,telegram_user_id,target_machine_id,provider,model,project_alias,' +
   'prompt,status,priority,claimed_by,claimed_at,lease_expires_at,cancel_requested_at,' +
   'started_at,completed_at,result_summary,error_message,metadata,created_at';
 
@@ -109,9 +113,7 @@ export class Repository {
     await this.db.update(
       'telegram_updates',
       { update_id: eq(updateId) },
-      error
-        ? { status: 'failed', error_message: error.slice(0, 1000) }
-        : { status: 'processed' },
+      error ? { status: 'failed', error_message: error.slice(0, 1000) } : { status: 'processed' },
     );
   }
 
@@ -120,10 +122,10 @@ export class Repository {
   // ---------------------------------------------------------------------------
 
   async getUserPreference(telegramUserId: number): Promise<string | null> {
-    const row = await this.db.selectOne<{ preferred_machine_id: string | null }>(
-      'telegram_users',
-      { columns: 'preferred_machine_id', filters: { telegram_user_id: eq(telegramUserId) } },
-    );
+    const row = await this.db.selectOne<{ preferred_machine_id: string | null }>('telegram_users', {
+      columns: 'preferred_machine_id',
+      filters: { telegram_user_id: eq(telegramUserId) },
+    });
     return row?.preferred_machine_id ?? null;
   }
 
@@ -235,13 +237,16 @@ export class Repository {
   // ---------------------------------------------------------------------------
 
   async createJob(input: {
-    telegramChatId: number;
-    telegramUserId: number;
+    origin?: JobOrigin;
+    telegramChatId: number | null;
+    telegramUserId: number | null;
     targetMachineId: string | null;
     provider: ProviderId;
+    model?: string | null;
     projectAlias: string;
     prompt: string;
     status: JobStatus;
+    priority?: number;
     metadata: Record<string, unknown>;
   }): Promise<Job> {
     // se reintenta si el identificador corto colisiona, que es improbable
@@ -249,13 +254,16 @@ export class Repository {
       try {
         const rows = await this.db.insert<JobRow>('jobs', {
           short_id: generateShortId(),
+          created_via: input.origin ?? 'telegram',
           telegram_chat_id: input.telegramChatId,
           telegram_user_id: input.telegramUserId,
           target_machine_id: input.targetMachineId,
           provider: input.provider,
+          model: input.model ?? null,
           project_alias: input.projectAlias,
           prompt: input.prompt,
           status: input.status,
+          priority: input.priority ?? 0,
           metadata: input.metadata,
         });
         const row = rows[0];
@@ -288,7 +296,13 @@ export class Repository {
   /** trabajos activos, opcionalmente restringidos a una maquina */
   async listActiveJobs(machineId?: string): Promise<Job[]> {
     const filters: Record<string, string> = {
-      status: inList(['queued', 'waiting_for_machine', 'claimed', 'running', 'waiting_for_approval']),
+      status: inList([
+        'queued',
+        'waiting_for_machine',
+        'claimed',
+        'running',
+        'waiting_for_approval',
+      ]),
     };
     if (machineId) filters.claimed_by = eq(machineId);
     const rows = await this.db.select<JobRow>('jobs', {
@@ -296,6 +310,31 @@ export class Repository {
       filters,
       order: 'created_at.desc',
       limit: 20,
+    });
+    return rows.map(toJob);
+  }
+
+  /** historial de trabajos para Studio, con filtros cerrados de PostgREST */
+  async listJobs(
+    options: {
+      origin?: JobOrigin;
+      targetMachineId?: string;
+      status?: JobStatus;
+      limit?: number;
+    } = {},
+  ): Promise<Job[]> {
+    const filters: Record<string, string> = {};
+    if (options.origin !== undefined) filters.created_via = eq(options.origin);
+    if (options.targetMachineId !== undefined) {
+      filters.target_machine_id = eq(options.targetMachineId);
+    }
+    if (options.status !== undefined) filters.status = eq(options.status);
+
+    const rows = await this.db.select<JobRow>('jobs', {
+      columns: JOB_COLUMNS,
+      filters,
+      order: 'created_at.desc',
+      limit: options.limit ?? 30,
     });
     return rows.map(toJob);
   }
@@ -309,11 +348,7 @@ export class Repository {
   async mergeJobMetadata(jobId: string, patch: Record<string, unknown>): Promise<void> {
     const job = await this.getJobById(jobId);
     if (!job) return;
-    await this.db.update(
-      'jobs',
-      { id: eq(jobId) },
-      { metadata: { ...job.metadata, ...patch } },
-    );
+    await this.db.update('jobs', { id: eq(jobId) }, { metadata: { ...job.metadata, ...patch } });
   }
 
   /** reclamacion atomica delegada en la funcion postgres */
@@ -328,8 +363,10 @@ export class Repository {
     provider: ProviderId;
     project_alias: string;
     prompt: string;
-    telegram_chat_id: number;
-    telegram_user_id: number;
+    telegram_chat_id: number | null;
+    telegram_user_id: number | null;
+    created_via: JobOrigin;
+    model: string | null;
     lease_expires_at: string;
     metadata: Record<string, unknown> | null;
   } | null> {
@@ -340,8 +377,10 @@ export class Repository {
         provider: ProviderId;
         project_alias: string;
         prompt: string;
-        telegram_chat_id: number;
-        telegram_user_id: number;
+        model: string | null;
+        created_via: JobOrigin;
+        telegram_chat_id: number | null;
+        telegram_user_id: number | null;
         lease_expires_at: string;
         metadata: Record<string, unknown> | null;
       }>
@@ -363,9 +402,8 @@ export class Repository {
   }
 
   async expireLeases(): Promise<{ requeued: number; interrupted: number }> {
-    const rows = await this.db.rpc<Array<{ requeued: number; interrupted: number }>>(
-      'luxy_expire_leases',
-    );
+    const rows =
+      await this.db.rpc<Array<{ requeued: number; interrupted: number }>>('luxy_expire_leases');
     return rows?.[0] ?? { requeued: 0, interrupted: 0 };
   }
 
@@ -404,11 +442,20 @@ export class Repository {
     );
   }
 
-  async listEvents(jobId: string, limit = 50): Promise<
-    Array<{ sequence: number; type: string; message: string; created_at: string }>
+  async listEvents(
+    jobId: string,
+    limit = 50,
+  ): Promise<
+    Array<{
+      sequence: number;
+      type: string;
+      message: string;
+      metadata: Record<string, unknown> | null;
+      created_at: string;
+    }>
   > {
     return this.db.select('job_events', {
-      columns: 'sequence,type,message,created_at',
+      columns: 'sequence,type,message,metadata,created_at',
       filters: { job_id: eq(jobId) },
       order: 'sequence.desc',
       limit,
@@ -456,7 +503,12 @@ export class Repository {
       limit: 20,
     });
 
-    const pending: { id: string; job_id: string; action: string; metadata: Record<string, unknown> }[] = [];
+    const pending: {
+      id: string;
+      job_id: string;
+      action: string;
+      metadata: Record<string, unknown>;
+    }[] = [];
     for (const row of rows) {
       const job = await this.getJobById(row.job_id);
       // solo las de trabajos de ESTA maquina

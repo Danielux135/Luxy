@@ -14,14 +14,7 @@ import { connectionSecretName } from '../../shared/ipc.js';
 import { Empty, Field, Notice, Panel, Skeleton, Tag } from '../ui/primitives.js';
 import type { ConfigSummary } from '../useConfig.js';
 
-const PASOS = [
-  'Maquina',
-  'Herramientas',
-  'Conexion',
-  'Modelos',
-  'Proyectos',
-  'Resumen',
-] as const;
+const PASOS = ['Maquina', 'Herramientas', 'Conexion', 'Modelos', 'Proyectos', 'Resumen'] as const;
 
 interface ToolPresence {
   available: boolean;
@@ -49,9 +42,7 @@ export function SetupPage({
   const [gatewayUrl, setGatewayUrl] = useState(summary.config?.gatewayUrl ?? '');
   const [registrationSecret, setRegistrationSecret] = useState('');
   const [gatewayState, setGatewayState] = useState<string | null>(null);
-  const [registered, setRegistered] = useState(
-    summary.secrets.configured['machineToken'] === true,
-  );
+  const [registered, setRegistered] = useState(summary.secrets.configured['machineToken'] === true);
 
   // paso 2
   const [tools, setTools] = useState<Record<string, ToolPresence> | null>(null);
@@ -129,7 +120,7 @@ export function SetupPage({
   const probarConexion = async (): Promise<void> => {
     setBusy(true);
     setConnectionState(null);
-    const result = await window.luxy.testConnection(DEFAULT_CONNECTION_ID, baseUrl);
+    const result = await window.luxy.testConnection(DEFAULT_CONNECTION_ID);
     setBusy(false);
     if (!result.ok) {
       setConnectionState(result.error);
@@ -158,6 +149,7 @@ export function SetupPage({
             type: base?.projects[alias]?.type ?? 'other',
             testCommands: base?.projects[alias]?.testCommands ?? [],
             testTimeoutMs: base?.projects[alias]?.testTimeoutMs ?? 600_000,
+            allowHostChecks: base?.projects[alias]?.allowHostChecks ?? false,
             allowEdits: base?.projects[alias]?.allowEdits ?? true,
             allowCommit: base?.projects[alias]?.allowCommit ?? true,
             allowPush: base?.projects[alias]?.allowPush ?? false,
@@ -186,7 +178,8 @@ export function SetupPage({
     setProjects((previous) => ({ ...previous, [sugerido]: path }));
   };
 
-  const claveGuardada = summary.secrets.configured[connectionSecretName(DEFAULT_CONNECTION_ID)] === true;
+  const claveGuardada =
+    summary.secrets.configured[connectionSecretName(DEFAULT_CONNECTION_ID)] === true;
   const puedeAvanzar = step !== 0 || registered;
 
   return (
@@ -215,10 +208,13 @@ export function SetupPage({
             <>
               <h1 className="page__title">Registra esta maquina</h1>
               <p className="page__lede">
-                Luxy necesita un nombre para esta maquina y la direccion de tu gateway. El secreto de
-                registro se usa una sola vez y no se guarda.
+                Luxy necesita un nombre para esta maquina y la direccion de tu gateway. El secreto
+                de registro se usa una sola vez y no se guarda.
               </p>
-              <Field label="Nombre de maquina" hint="Minusculas, digitos y guion. Por ejemplo: sobremesa">
+              <Field
+                label="Nombre de maquina"
+                hint="Minusculas, digitos y guion. Por ejemplo: sobremesa"
+              >
                 <input
                   type="text"
                   value={machineName}
@@ -331,7 +327,11 @@ export function SetupPage({
               </Field>
               <Field
                 label="Clave de API"
-                hint={claveGuardada ? 'Ya hay una guardada. Introduce otra para sustituirla.' : undefined}
+                hint={
+                  claveGuardada
+                    ? 'Ya hay una guardada. Introduce otra para sustituirla.'
+                    : undefined
+                }
               >
                 <div className="row">
                   <input
@@ -494,7 +494,8 @@ export function SetupPage({
 
           {step === 0 && !registered && (
             <p className="field__hint" style={{ marginTop: 12 }}>
-              Registra la maquina para continuar. Sin token, el agente no puede hablar con el gateway.
+              Registra la maquina para continuar. Sin token, el agente no puede hablar con el
+              gateway.
             </p>
           )}
         </div>

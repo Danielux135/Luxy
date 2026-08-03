@@ -1,12 +1,12 @@
 # Luxy
 
-Aplicación de escritorio para Windows que trabaja sobre tus proyectos, controlable
-en remoto desde Telegram. Escribes a un bot desde el móvil y Luxy ejecuta la tarea
-en el ordenador que tengas encendido, usando **Claude Code**, **Codex CLI** o
-**modelos configurables** que pueden leer, editar y comprobar tu código.
+Aplicación de escritorio para Windows que crea, ejecuta y supervisa tareas sobre
+tus proyectos. **Luxy Studio** es la interfaz principal; Telegram queda como
+canal secundario para órdenes rápidas y avisos. El trabajo se ejecuta en el
+ordenador elegido mediante **Claude Code**, **Codex CLI** o modelos configurables.
 
 ```
-móvil (Telegram) ──► gateway ──► tu ordenador ──► worktree aislado ──► diff
+Studio / Telegram ──► gateway ──► tu ordenador ──► worktree aislado ──► diff
 ```
 
 ---
@@ -15,9 +15,9 @@ móvil (Telegram) ──► gateway ──► tu ordenador ──► worktree ai
 
 Cuatro piezas:
 
-- **Luxy Desktop**: la aplicación de Windows. Es el flujo normal: la abres, se
-  queda en la bandeja y trabaja. Ver [docs/DESKTOP.md](docs/DESKTOP.md).
-- **Gateway** (Cloudflare Worker): recibe los mensajes de Telegram y hace de cola.
+- **Luxy Desktop / Studio**: crea tareas, muestra historial, progreso, resultados,
+  pruebas y resumen del diff; además se queda en la bandeja. Ver [docs/DESKTOP.md](docs/DESKTOP.md).
+- **Gateway** (Cloudflare Worker): autentica Studio y Telegram y mantiene la cola.
 - **Supabase**: guarda el estado compartido, los trabajos y la auditoría.
 - **Agente local**: hace el trabajo de verdad, en su propio proceso.
 
@@ -37,31 +37,31 @@ Las claves se guardan **cifradas** con tu cuenta de Windows y no vuelven a pedir
 
 ### Documentación
 
-| Documento | De qué trata |
-|---|---|
-| [DESKTOP.md](docs/DESKTOP.md) | la aplicación, su arquitectura y su seguridad |
-| [INSTALLATION.md](docs/INSTALLATION.md) | instalar y configurar |
-| [MODELS.md](docs/MODELS.md) | catálogo, alias y qué funciona de verdad |
-| [AGENT_TOOLS.md](docs/AGENT_TOOLS.md) | las herramientas, el confinamiento y las aprobaciones |
-| [SECURITY.md](docs/SECURITY.md) | modelo de amenazas |
-| [TELEGRAM.md](docs/TELEGRAM.md) | comandos |
-| [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | qué hacer cuando algo falla |
+| Documento                                     | De qué trata                                          |
+| --------------------------------------------- | ----------------------------------------------------- |
+| [DESKTOP.md](docs/DESKTOP.md)                 | la aplicación, su arquitectura y su seguridad         |
+| [INSTALLATION.md](docs/INSTALLATION.md)       | instalar y configurar                                 |
+| [MODELS.md](docs/MODELS.md)                   | catálogo, alias y qué funciona de verdad              |
+| [AGENT_TOOLS.md](docs/AGENT_TOOLS.md)         | las herramientas, el confinamiento y las aprobaciones |
+| [SECURITY.md](docs/SECURITY.md)               | modelo de amenazas                                    |
+| [TELEGRAM.md](docs/TELEGRAM.md)               | comandos                                              |
+| [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | qué hacer cuando algo falla                           |
 
 ## 2. Qué puede hacer
 
-- Ejecutar tareas de código en cualquiera de tus ordenadores desde el móvil.
+- Crear y seguir tareas desde Studio en Windows o enviar órdenes rápidas desde Telegram.
 - Aislar cada tarea en un **worktree de git**, sin tocar tu carpeta de trabajo.
-- Ejecutar las pruebas del proyecto y devolverte el resultado real.
-- Enseñarte el diff y dejarte crear el commit desde Telegram.
+- Ejecutar las pruebas del proyecto solo con permiso explícito `allowHostChecks`.
+- Enseñarte el resumen del diff y dejarte aprobar o descartar los cambios desde Desktop.
 - Elegir proveedor automáticamente con `/auto`.
 - Cancelar una tarea a medias **conservando siempre los cambios**.
 
 ## 3. Arquitectura
 
 ```
-Teléfono
-   ↓  Telegram
-Cloudflare Worker  (webhook, comandos, API privada)
+Studio / Telegram
+   ↓  HTTPS
+Cloudflare Worker  (API de Studio, webhook, cola)
    ↓
 Supabase           (cola de trabajos, leases, auditoría)
    ↓  polling saliente
@@ -69,7 +69,7 @@ Agente local       (tu PC o tu portátil)
    ↓
 Claude Code / Codex CLI / APIs HTTP
    ↓
-Resultados de vuelta a Telegram
+Resultados de vuelta a Studio y, cuando proceda, Telegram
 ```
 
 Detalle completo en [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
@@ -78,13 +78,13 @@ Detalle completo en [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 En **cada** ordenador donde quieras usar Luxy:
 
-| Requisito | Obligatorio | Para qué |
-|---|---|---|
-| Node.js 20+ | sí | ejecutar Luxy |
-| Git | sí | worktrees aislados |
-| Claude Code CLI | opcional | proveedor `claude` |
-| Codex CLI | opcional | proveedor `codex` |
-| Flutter | opcional | proyectos Flutter |
+| Requisito       | Obligatorio | Para qué           |
+| --------------- | ----------- | ------------------ |
+| Node.js 20+     | sí          | ejecutar Luxy      |
+| Git             | sí          | worktrees aislados |
+| Claude Code CLI | opcional    | proveedor `claude` |
+| Codex CLI       | opcional    | proveedor `codex`  |
+| Flutter         | opcional    | proyectos Flutter  |
 
 Servicios externos que tienes que crear tú:
 
@@ -95,7 +95,7 @@ Servicios externos que tienes que crear tú:
 ## 5. Instalación
 
 ```powershell
-cd "C:\Users\Daniel\Desktop\proyecto github\Luxy"
+Set-Location "<ruta-del-proyecto>\Luxy"
 npm install
 npm run build
 ```
@@ -129,9 +129,16 @@ Detalle completo en [docs/TELEGRAM.md](docs/TELEGRAM.md).
 2. Abre **SQL Editor** y ejecuta, **en orden**:
    - `supabase/migrations/0001_luxy_initial_schema.sql`
    - `supabase/migrations/0002_luxy_job_claim.sql`
+   - `supabase/migrations/0003_luxy_model_registry.sql`
+   - `supabase/migrations/0005_luxy_studio_jobs.sql`
+
+`0004_luxy_remote.sql` pertenece al módulo Remote pausado y no es requisito de
+Studio. `0005` está preparada en el repositorio, pero no se aplica automáticamente.
+
 3. Copia de **Settings → API**:
-   - `Project URL` → `SUPABASE_URL`
-   - `service_role` → `SUPABASE_SERVICE_ROLE_KEY`
+
+- `Project URL` → `SUPABASE_URL`
+- `service_role` → `SUPABASE_SERVICE_ROLE_KEY`
 
 > La `service_role` **solo** va como secret de Cloudflare. Nunca en tus ordenadores.
 
@@ -179,8 +186,8 @@ gateway, el secreto de registro y los proyectos con sus rutas locales.
 **El mismo alias puede apuntar a rutas distintas en cada ordenador:**
 
 ```
-PC:        errorlux → C:\Users\Daniel\Desktop\proyecto github\Errorlux
-Portátil:  errorlux → C:\Users\Daniel\Documents\GitHub\Errorlux
+PC:        errorlux → D:\Proyectos\Errorlux
+Portátil:  errorlux → C:\Trabajo\Errorlux
 ```
 
 Las rutas se guardan en `%APPDATA%\Luxy\config.json`, **nunca en el repositorio**.
@@ -352,12 +359,12 @@ por orden de número. Si cambió el gateway: `cd apps\gateway; npx wrangler depl
 
 Lo único irreemplazable es:
 
-| Qué | Dónde |
-|---|---|
-| Configuración de la máquina | `%APPDATA%\Luxy\config.json` |
+| Qué                               | Dónde                           |
+| --------------------------------- | ------------------------------- |
+| Configuración de la máquina       | `%APPDATA%\Luxy\config.json`    |
 | Worktrees con cambios sin guardar | `%LOCALAPPDATA%\Luxy\worktrees` |
-| Claves de las APIs | `.env.providers` |
-| Datos de trabajos | Supabase (usa su backup) |
+| Claves de las APIs                | `.env.providers`                |
+| Datos de trabajos                 | Supabase (usa su backup)        |
 
 ```powershell
 Copy-Item "$env:APPDATA\Luxy\config.json" "$env:USERPROFILE\Desktop\luxy-config-backup.json"

@@ -23,6 +23,7 @@ import {
 } from '@luxy/shared';
 import { GatewayClient } from './gateway-client.js';
 import { EventQueue } from './event-queue.js';
+import { OutcomeQueue } from './outcome-queue.js';
 import { type AgentLogger, describeError } from './logger.js';
 import { detectEnvironment, describeCapabilities } from './detect.js';
 import { ClaudeCodeProvider } from './providers/claude.js';
@@ -77,6 +78,7 @@ export interface LuxyAgentOptions {
 export class LuxyAgent {
   private readonly client: GatewayClient;
   private readonly queue: EventQueue;
+  private readonly outcomes: OutcomeQueue;
   private readonly providers = new Map<ProviderId, ProviderExecution>();
   private readonly startedAt = new Date().toISOString();
 
@@ -115,10 +117,16 @@ export class LuxyAgent {
       gatewayUrl: config.gatewayUrl,
       machineToken: config.machineToken,
     });
+    const stateDirectory = options.stateDirectory ?? stateDir();
     this.queue = new EventQueue(this.client, {
-      directory: options.stateDirectory ?? stateDir(),
+      directory: stateDirectory,
       renewLeaseSeconds: config.leaseSeconds,
       onError: (error) => this.logger.debug('no se pudieron enviar eventos', describeError(error)),
+    });
+    this.outcomes = new OutcomeQueue(this.client, {
+      directory: stateDirectory,
+      onError: (error) =>
+        this.logger.debug('no se pudo entregar un resultado final', describeError(error)),
     });
     this.worktreesDirectory = options.worktreesDirectory ?? worktreesDir();
     this.emitEvent = options.onEvent ?? ((): void => undefined);
@@ -163,7 +171,11 @@ export class LuxyAgent {
       await this.verifyGateway();
     } catch (error) {
       this.running = false;
-      this.emit({ type: 'agent.error', at: this.now(), message: redact(describeError(error).message) });
+      this.emit({
+        type: 'agent.error',
+        at: this.now(),
+        message: redact(describeError(error).message),
+      });
       throw error;
     }
 
@@ -173,13 +185,15 @@ export class LuxyAgent {
       this.pollLoop(),
       this.flushLoop(),
       this.approvalLoop(),
-    ]).then(
-      () => undefined,
-    );
+    ]).then(() => undefined);
     // un fallo de un bucle no debe quedar como rechazo sin capturar
     this.loops.catch((error) => {
       this.logger.error('un bucle del agente termino con error', describeError(error));
-      this.emit({ type: 'agent.error', at: this.now(), message: redact(describeError(error).message) });
+      this.emit({
+        type: 'agent.error',
+        at: this.now(),
+        message: redact(describeError(error).message),
+      });
     });
 
     this.emit({ type: 'agent.started', at: this.now() });
@@ -389,7 +403,10 @@ export class LuxyAgent {
 
       const delay =
         failures > 0
-          ? computeBackoffDelay(failures - 1, { baseDelayMs: this.config.heartbeatIntervalMs, maxDelayMs: 60_000 })
+          ? computeBackoffDelay(failures - 1, {
+              baseDelayMs: this.config.heartbeatIntervalMs,
+              maxDelayMs: 60_000,
+            })
           : this.config.heartbeatIntervalMs;
       await this.sleep(delay);
     }
@@ -519,6 +536,9 @@ export class LuxyAgent {
       if (this.queue.size > 0) {
         await this.queue.flush().catch(() => undefined);
       }
+      if (this.outcomes.size > 0) {
+        await this.outcomes.flush().catch(() => undefined);
+      }
       await this.sleep(2000);
     }
   }
@@ -571,7 +591,10 @@ export class LuxyAgent {
 
       switch (outcome.kind) {
         case 'completed':
-          await this.client.completeJob(job.id, outcome.result);
+          // se persiste ANTES de llamar al gateway. Si la red cae o el proceso
+          // termina, flushLoop lo reenvia al volver a arrancar.
+          this.outcomes.pushCompleted(job.id, outcome.result);
+          await this.outcomes.flush();
           this.logger.info(`${job.shortId} terminado`, {
             filesChanged: outcome.result.filesChanged,
             testsFailed: outcome.result.testsFailed,
@@ -591,13 +614,15 @@ export class LuxyAgent {
             projectAlias: job.projectAlias,
           });
           break;
-        case 'failed':
-          await this.client.failJob(job.id, {
+        case 'failed': {
+          const payload = {
             errorMessage: outcome.errorMessage,
             hasLocalChanges: outcome.hasLocalChanges,
             worktreePath: outcome.worktreePath,
             durationMs: outcome.durationMs,
-          });
+          };
+          this.outcomes.pushFailed(job.id, payload);
+          await this.outcomes.flush();
           this.logger.warn(`${job.shortId} fallido`, { error: outcome.errorMessage });
           this.emit({
             type: 'job.failed',
@@ -608,12 +633,15 @@ export class LuxyAgent {
             worktreePath: outcome.worktreePath ?? null,
           });
           break;
-        case 'cancelled':
-          await this.client.reportCancelled(job.id, {
+        }
+        case 'cancelled': {
+          const payload = {
             modifiedFiles: outcome.modifiedFiles,
             worktreePath: outcome.worktreePath,
             durationMs: outcome.durationMs,
-          });
+          };
+          this.outcomes.pushCancelled(job.id, payload);
+          await this.outcomes.flush();
           this.logger.info(`${job.shortId} cancelado`, {
             modifiedFiles: outcome.modifiedFiles.length,
           });
@@ -626,12 +654,14 @@ export class LuxyAgent {
             worktreePath: outcome.worktreePath ?? null,
           });
           break;
+        }
       }
 
+      if (this.outcomes.has(job.id)) {
+        this.logger.warn('el resultado final queda pendiente de reenvio', { jobId: job.id });
+      }
       this.queue.forget(job.id);
     } catch (error) {
-      // el resultado no se pudo entregar pese a los reintentos.
-      // queda persistido en el gateway o se recupera con /job <id>.
       this.logger.error('no se pudo cerrar el trabajo en el gateway', {
         jobId: job.id,
         ...describeError(error),
@@ -725,7 +755,9 @@ export class LuxyAgent {
         : null,
       projects: Object.keys(this.config.projects),
       providers: this.availableProviders,
-      pendingEvents: this.queue.size,
+      // los cierres pendientes tambien son entregas de red; se muestran en el
+      // mismo contador para que nunca queden invisibles en la interfaz.
+      pendingEvents: this.queue.size + this.outcomes.size,
       startedAt: this.startedAt,
     };
   }
@@ -756,9 +788,13 @@ export class LuxyAgent {
     const loopsFinished = await withTimeout(this.loops, STOP_GRACE_MS);
 
     await this.queue.flush().catch(() => undefined);
+    await this.outcomes.flush().catch(() => undefined);
 
-    if (this.queue.size > 0) {
-      this.logger.warn(`quedan ${this.queue.size} eventos sin enviar; se reenviaran al arrancar`);
+    if (this.queue.size > 0 || this.outcomes.size > 0) {
+      this.logger.warn(
+        `quedan ${this.queue.size} eventos y ${this.outcomes.size} resultados sin enviar; ` +
+          'se reenviaran al arrancar',
+      );
     }
 
     this.running = false;

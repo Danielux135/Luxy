@@ -15,7 +15,15 @@
 //   * se escribe anadiendo al final, asi que un corte de luz a mitad pierde
 //     como maximo la ultima linea, no el archivo entero
 //   * una linea corrupta se descarta sola sin invalidar las demas
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
+import {
+  closeSync,
+  existsSync,
+  fsyncSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  writeFileSync,
+} from 'node:fs';
 import { dirname } from 'node:path';
 import { z } from 'zod';
 
@@ -26,12 +34,14 @@ export const batchRecordSchema = z.object({
   /** primer y ultimo registro del lote, ambos incluidos */
   from: z.number().int().nonnegative(),
   to: z.number().int().nonnegative(),
-  status: z.enum(['done', 'failed']),
+  status: z.enum(['writing', 'done', 'failed']),
   /** cuantos registros devolvio el modelo para este lote */
   items: z.number().int().nonnegative().default(0),
   /** huella del contenido de entrada: detecta que el origen cambio */
   inputHash: z.string().min(8).max(64),
   error: z.string().max(500).nullable().default(null),
+  /** tamano exacto de la salida antes de empezar a escribir el lote */
+  outputOffset: z.number().int().nonnegative().nullable().default(null),
   durationMs: z.number().int().nonnegative().default(0),
   at: z.string(),
 });
@@ -97,13 +107,25 @@ export class Checkpoint {
     return [...this.hechos.values()].filter((registro) => registro.status === 'failed');
   }
 
+  /** escritura que quedo a medias y debe deshacerse antes de reintentar */
+  pendingWrite(batch: number): BatchRecord | null {
+    const registro = this.hechos.get(batch);
+    return registro?.status === 'writing' ? registro : null;
+  }
+
   /** apunta el resultado de un lote. escribe al disco en el acto */
-  record(registro: BatchRecord): void {
+  record(registro: z.input<typeof batchRecordSchema>): void {
     const validado = batchRecordSchema.parse(registro);
+    // la linea se fuerza a disco antes de actualizar el estado en memoria. La
+    // marca "writing" debe sobrevivir a un corte antes de tocar la salida.
+    const descriptor = openSync(this.path, 'a');
+    try {
+      writeFileSync(descriptor, `${JSON.stringify(validado)}\n`, 'utf8');
+      fsyncSync(descriptor);
+    } finally {
+      closeSync(descriptor);
+    }
     this.hechos.set(validado.batch, validado);
-    // sincrono y anadiendo: si el proceso muere en la linea siguiente, esto ya
-    // esta en el disco
-    appendFileSync(this.path, `${JSON.stringify(validado)}\n`, 'utf8');
   }
 
   /** resumen para poder decirle al usuario donde va */

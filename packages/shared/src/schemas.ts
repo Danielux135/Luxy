@@ -5,6 +5,7 @@ import {
   PROVIDER_IDS,
   JOB_EVENT_TYPES,
   APPROVAL_ACTIONS,
+  JOB_ORIGINS,
   MAX_PROMPT_LENGTH,
 } from './constants.js';
 import { connectionProfileSchema } from './models/types.js';
@@ -13,6 +14,7 @@ export const jobStatusSchema = z.enum(JOB_STATUSES);
 export const providerIdSchema = z.enum(PROVIDER_IDS);
 export const jobEventTypeSchema = z.enum(JOB_EVENT_TYPES);
 export const approvalActionSchema = z.enum(APPROVAL_ACTIONS);
+export const jobOriginSchema = z.enum(JOB_ORIGINS);
 export const projectTypeSchema = z.enum(['node', 'flutter', 'python', 'other']);
 
 // un alias de proyecto es corto y sin separadores de ruta, para evitar traversal
@@ -20,7 +22,10 @@ export const projectAliasSchema = z
   .string()
   .min(1)
   .max(64)
-  .regex(/^[a-z0-9][a-z0-9._-]*$/, 'el alias solo admite minusculas, digitos, punto, guion y guion bajo');
+  .regex(
+    /^[a-z0-9][a-z0-9._-]*$/,
+    'el alias solo admite minusculas, digitos, punto, guion y guion bajo',
+  );
 
 // nombre de maquina configurable: nunca esta codificado en el repositorio
 export const machineNameSchema = z
@@ -111,10 +116,12 @@ export const claimedJobSchema = z.object({
   id: z.string().uuid(),
   shortId: z.string(),
   provider: providerIdSchema,
+  model: z.string().max(128).nullable().default(null),
   projectAlias: projectAliasSchema,
   prompt: z.string(),
-  telegramChatId: z.number().int(),
-  telegramUserId: z.number().int(),
+  origin: jobOriginSchema.default('telegram'),
+  telegramChatId: z.number().int().nullable(),
+  telegramUserId: z.number().int().nullable(),
   leaseExpiresAt: z.string(),
   /** adjunto que acompaña a la tarea, si lo hay */
   attachment: jobAttachmentSchema.nullable().default(null),
@@ -213,6 +220,83 @@ export const approvalResolveRequestSchema = z.object({
   decision: z.enum(['approved', 'rejected']),
 });
 
+// -----------------------------------------------------------------------------
+// contratos de Studio: Desktop -> main -> gateway
+// -----------------------------------------------------------------------------
+
+export const studioJobCreateRequestSchema = z.object({
+  targetMachineId: z.string().uuid(),
+  provider: providerIdSchema,
+  model: z
+    .string()
+    .min(1)
+    .max(128)
+    .regex(/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/)
+    .nullable()
+    .default(null),
+  projectAlias: projectAliasSchema,
+  prompt: promptSchema,
+  priority: z.number().int().min(-100).max(100).default(0),
+});
+
+export const studioJobListQuerySchema = z.object({
+  targetMachineId: z.string().uuid().optional(),
+  status: jobStatusSchema.optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(30),
+});
+
+export const studioJobSchema = z.object({
+  id: z.string().uuid(),
+  shortId: z.string().min(1).max(32),
+  origin: jobOriginSchema,
+  targetMachineId: z.string().uuid().nullable(),
+  provider: providerIdSchema,
+  model: z.string().max(128).nullable(),
+  projectAlias: projectAliasSchema,
+  prompt: promptSchema,
+  status: jobStatusSchema,
+  priority: z.number().int(),
+  claimedBy: z.string().uuid().nullable(),
+  startedAt: z.string().nullable(),
+  completedAt: z.string().nullable(),
+  resultSummary: z.string().nullable(),
+  errorMessage: z.string().nullable(),
+  metadata: z.record(z.unknown()),
+  createdAt: z.string(),
+});
+
+export const studioJobEventSchema = z.object({
+  sequence: z.number().int().nonnegative(),
+  type: jobEventTypeSchema,
+  message: z.string(),
+  metadata: z.record(z.unknown()).default({}),
+  createdAt: z.string(),
+});
+
+export const studioMachineSchema = z.object({
+  id: z.string().uuid(),
+  name: machineNameSchema,
+  projects: z.array(projectAliasSchema),
+  providers: z.array(providerIdSchema),
+  online: z.boolean(),
+  enabled: z.boolean(),
+});
+
+export const studioOptionsResponseSchema = z.object({
+  machines: z.array(studioMachineSchema),
+});
+
+export const studioJobsResponseSchema = z.object({ jobs: z.array(studioJobSchema) });
+export const studioJobResponseSchema = z.object({
+  job: studioJobSchema,
+  events: z.array(studioJobEventSchema).default([]),
+});
+
+export type StudioJobCreateRequest = z.infer<typeof studioJobCreateRequestSchema>;
+export type StudioJob = z.infer<typeof studioJobSchema>;
+export type StudioJobEvent = z.infer<typeof studioJobEventSchema>;
+export type StudioMachine = z.infer<typeof studioMachineSchema>;
+
 /**
  * aprobacion pendiente que el agente debe ejecutar.
  *
@@ -257,6 +341,10 @@ export const projectConfigSchema = z.object({
   testCommands: z.array(testCommandSchema).max(10).default([]),
   // tiempo maximo por comando de comprobacion
   testTimeoutMs: z.number().int().min(1000).max(3_600_000).default(600_000),
+  // ejecutar comprobaciones en el host es una capacidad peligrosa: un modelo
+  // puede cambiar codigo que esas pruebas importan. Se habilita por proyecto y
+  // nunca por defecto hasta que exista un sandbox de sistema operativo.
+  allowHostChecks: z.boolean().default(false),
   // permitir tareas que modifican archivos (requiere que sea repo git)
   allowEdits: z.boolean().default(true),
   // permitir commit tras aprobacion explicita

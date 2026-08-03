@@ -326,7 +326,9 @@ async function renderProviders(context: CommandContext): Promise<string> {
     const available = (['claude', 'codex', 'deepseek', 'glm', 'qwen'] as ProviderId[]).filter(
       (provider) => machineSupportsProvider(machine, provider),
     );
-    lines.push(`${machine.name}: ${available.map((id) => PROVIDER_LABELS[id]).join(', ') || 'ninguno'}`);
+    lines.push(
+      `${machine.name}: ${available.map((id) => PROVIDER_LABELS[id]).join(', ') || 'ninguno'}`,
+    );
   }
   lines.push('', 'Claude y Codex usan la sesion local de cada ordenador.');
   return lines.join('\n');
@@ -504,11 +506,18 @@ async function createJobFromRequest(
       telegramUserId: context.userId,
       targetMachineId: null,
       provider,
+      model: request.model ?? null,
       projectAlias: request.projectAlias,
       prompt: request.prompt,
       // no entra en la cola hasta que el usuario elija maquina
       status: 'waiting_for_machine',
-      metadata: buildMetadata(context, routerReason, request.explicit, request.model ?? null, request.batch),
+      metadata: buildMetadata(
+        context,
+        routerReason,
+        request.explicit,
+        request.model ?? null,
+        request.batch,
+      ),
     });
     return {
       text: [
@@ -533,10 +542,17 @@ async function createJobFromRequest(
     telegramUserId: context.userId,
     targetMachineId: targetMachine?.id ?? null,
     provider,
+    model: request.model ?? null,
     projectAlias: request.projectAlias,
     prompt: request.prompt,
     status: 'queued',
-    metadata: buildMetadata(context, routerReason, request.explicit, request.model ?? null, request.batch),
+    metadata: buildMetadata(
+      context,
+      routerReason,
+      request.explicit,
+      request.model ?? null,
+      request.batch,
+    ),
   });
 
   const text = renderJobCreated({
@@ -579,7 +595,8 @@ function buildMetadata(
   // el adjunto viaja por id: los bytes los sirve el gateway cuando el agente
   // los pida, porque el agente no habla con Telegram
   if (context.attachment) metadata.attachment = context.attachment;
-  // el agente lee metadata.model para saber que modelo concreto ejecutar
+  // compatibilidad con agentes anteriores a 0005; el valor canonico tambien
+  // se guarda en jobs.model al crear el trabajo.
   if (model !== null) metadata.model = model;
   if (routerReason) metadata.routerReason = routerReason;
   // el texto citado se guarda marcado, para que el agente lo trate como dato
@@ -648,7 +665,9 @@ async function handleCancel(
     const preferredId = await context.repo.getUserPreference(context.userId);
     const active = await context.repo.listActiveJobs();
     const mine = active.filter((item) => item.telegramUserId === context.userId);
-    job = preferredId ? (mine.find((item) => item.claimedBy === preferredId) ?? mine[0] ?? null) : (mine[0] ?? null);
+    job = preferredId
+      ? (mine.find((item) => item.claimedBy === preferredId) ?? mine[0] ?? null)
+      : (mine[0] ?? null);
     if (!job) return { text: 'No hay ningun trabajo activo que cancelar.' };
   }
 
@@ -695,10 +714,7 @@ async function handleJobDetail(
   return { text: lines.join('\n') };
 }
 
-async function handleLogs(
-  context: CommandContext,
-  argument: string | null,
-): Promise<CommandReply> {
+async function handleLogs(context: CommandContext, argument: string | null): Promise<CommandReply> {
   if (!argument) return { text: renderError('falta el id', 'formato: /logs LUX-4F82') };
   const job = await context.repo.getJobByShortId(normalizeShortId(argument));
   if (!job) return { text: renderError(`no encuentro el trabajo ${argument}`) };

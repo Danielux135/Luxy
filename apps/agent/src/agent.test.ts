@@ -2,11 +2,35 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync, existsSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { validateTestCommand, didCommandPass, summarizeTests, ALLOWED_TEST_EXECUTABLES } from './test-runner.js';
+import {
+  validateTestCommand,
+  didCommandPass,
+  summarizeTests,
+  ALLOWED_TEST_EXECUTABLES,
+} from './test-runner.js';
 import { EventQueue } from './event-queue.js';
-import { parseCmdShim, assertSafeForCmd, UnsafeArgumentError, resolveFromCandidates, clearResolutionCache } from './resolve-executable.js';
-import { parseModifiedFiles, assertInsideWorktree, GitError, isGitRepository, createWorktree, collectDiff } from './git.js';
-import { loadConfig, saveConfig, loadProviderKeys, ConfigError, resolveEnabledHttpProviders } from './config.js';
+import {
+  parseCmdShim,
+  assertSafeForCmd,
+  UnsafeArgumentError,
+  resolveFromCandidates,
+  clearResolutionCache,
+} from './resolve-executable.js';
+import {
+  parseModifiedFiles,
+  assertInsideWorktree,
+  GitError,
+  isGitRepository,
+  createWorktree,
+  collectDiff,
+} from './git.js';
+import {
+  loadConfig,
+  saveConfig,
+  loadProviderKeys,
+  ConfigError,
+  resolveEnabledHttpProviders,
+} from './config.js';
 import { buildProviderPrompt, resolveJobModel } from './job-runner.js';
 import { agentConfigSchema } from '@luxy/shared';
 import type { JobEventInput, TestRunResult, ClaimedJob } from '@luxy/shared';
@@ -91,8 +115,26 @@ describe('didCommandPass y summarizeTests', () => {
 
   it('resume el recuento de pruebas', () => {
     const resultados: TestRunResult[] = [
-      { command: 'npm', args: ['test'], exitCode: 0, durationMs: 1000, timedOut: false, stdoutTail: '', stderrTail: '', passed: true },
-      { command: 'npm', args: ['run', 'lint'], exitCode: 1, durationMs: 500, timedOut: false, stdoutTail: '', stderrTail: '', passed: false },
+      {
+        command: 'npm',
+        args: ['test'],
+        exitCode: 0,
+        durationMs: 1000,
+        timedOut: false,
+        stdoutTail: '',
+        stderrTail: '',
+        passed: true,
+      },
+      {
+        command: 'npm',
+        args: ['run', 'lint'],
+        exitCode: 1,
+        durationMs: 500,
+        timedOut: false,
+        stdoutTail: '',
+        stderrTail: '',
+        passed: false,
+      },
     ];
     const resumen = summarizeTests(resultados);
     expect(resumen.passed).toBe(1);
@@ -370,7 +412,11 @@ describe('configuracion de maquina', () => {
     gatewayUrl: 'https://luxy.example.workers.dev',
     machineToken: 'token-de-maquina-suficientemente-largo',
     projects: {
-      demo: { path, type: 'node' as const, testCommands: [['npm', ['test']] as [string, string[]]] },
+      demo: {
+        path,
+        type: 'node' as const,
+        testCommands: [['npm', ['test']] as [string, string[]]],
+      },
     },
   });
 
@@ -444,7 +490,10 @@ describe('configuracion de maquina', () => {
 describe('loadProviderKeys', () => {
   it('lee las claves de un archivo .env.providers', () => {
     const archivo = join(temporal, '.env.providers');
-    writeFileSync(archivo, 'DEEPSEEK_API_KEY=clave-secreta-123456\n# comentario\nGLM_API_KEY="otra-clave-7890"\n');
+    writeFileSync(
+      archivo,
+      'DEEPSEEK_API_KEY=clave-secreta-123456\n# comentario\nGLM_API_KEY="otra-clave-7890"\n',
+    );
     const keys = loadProviderKeys(archivo);
     expect(keys.DEEPSEEK_API_KEY).toBe('clave-secreta-123456');
     expect(keys.GLM_API_KEY).toBe('otra-clave-7890');
@@ -471,9 +520,30 @@ describe('resolveEnabledHttpProviders', () => {
         claude: { enabled: true, model: 'opus' },
         codex: { enabled: true },
         http: [
-          { id: 'deepseek', displayName: 'DeepSeek', baseUrl: 'https://a.example/v1', model: 'm', apiKeyEnv: 'DEEPSEEK_API_KEY', enabled: true },
-          { id: 'glm', displayName: 'GLM', baseUrl: 'https://b.example/v1', model: 'm', apiKeyEnv: 'GLM_API_KEY', enabled: true },
-          { id: 'qwen', displayName: 'Qwen', baseUrl: 'https://c.example/v1', model: 'm', apiKeyEnv: 'QWEN_API_KEY', enabled: false },
+          {
+            id: 'deepseek',
+            displayName: 'DeepSeek',
+            baseUrl: 'https://a.example/v1',
+            model: 'm',
+            apiKeyEnv: 'DEEPSEEK_API_KEY',
+            enabled: true,
+          },
+          {
+            id: 'glm',
+            displayName: 'GLM',
+            baseUrl: 'https://b.example/v1',
+            model: 'm',
+            apiKeyEnv: 'GLM_API_KEY',
+            enabled: true,
+          },
+          {
+            id: 'qwen',
+            displayName: 'Qwen',
+            baseUrl: 'https://c.example/v1',
+            model: 'm',
+            apiKeyEnv: 'QWEN_API_KEY',
+            enabled: false,
+          },
         ],
       },
     });
@@ -521,7 +591,9 @@ describe('entorno de los procesos hijos', () => {
   it('la lista permitida no contiene ninguna variable sensible', () => {
     for (const nombre of BASE_ENV_ALLOWLIST) {
       expect(nombre).not.toMatch(/(_KEY|_TOKEN|_SECRET|_PASSWORD)$/i);
-      expect(nombre).not.toMatch(/^(AWS_|GITHUB_|GH_|SSH_|SUPABASE_|TELEGRAM_|ANTHROPIC_|OPENAI_)/i);
+      expect(nombre).not.toMatch(
+        /^(AWS_|GITHUB_|GH_|SSH_|SUPABASE_|TELEGRAM_|ANTHROPIC_|OPENAI_)/i,
+      );
     }
   });
 
@@ -626,6 +698,15 @@ describe('resolveJobModel', () => {
     expect(resolveJobModel(job('deepseek', { model: 'DeepSeek-V4-Pro' }), config)).toBe(
       'DeepSeek-V4-Pro',
     );
+  });
+
+  it('prefiere la columna model de 0005 y conserva metadata como compatibilidad', () => {
+    expect(
+      resolveJobModel(
+        { ...job('deepseek', { model: 'modelo-antiguo' }), model: 'modelo-studio' },
+        config,
+      ),
+    ).toBe('modelo-studio');
   });
 
   it('conserva el apiModel EXACTO, sin normalizar', () => {

@@ -78,7 +78,9 @@ async function main(): Promise<void> {
 
     if (!detection.capabilities.git.available) {
       console.error('  Git no esta disponible. Luxy lo necesita para los worktrees.');
-      console.error('  Instalalo desde https://git-scm.com/download/win y vuelve a ejecutar esto.\n');
+      console.error(
+        '  Instalalo desde https://git-scm.com/download/win y vuelve a ejecutar esto.\n',
+      );
       process.exitCode = 1;
       return;
     }
@@ -88,8 +90,9 @@ async function main(): Promise<void> {
     // -------------------------------------------------------------------------
     let machineName = '';
     for (;;) {
-      machineName = (await ask('Nombre de esta maquina (casa, portatil, clase...)', 'casa'))
-        .toLowerCase();
+      machineName = (
+        await ask('Nombre de esta maquina (casa, portatil, clase...)', 'casa')
+      ).toLowerCase();
       const parsed = machineNameSchema.safeParse(machineName);
       if (parsed.success) break;
       console.log(`  ${parsed.error.issues[0]?.message ?? 'nombre no valido'}`);
@@ -122,7 +125,9 @@ async function main(): Promise<void> {
     }
     console.log('');
 
-    const registrationSecret = await ask('Secreto temporal de registro (MACHINE_REGISTRATION_SECRET)');
+    const registrationSecret = await ask(
+      'Secreto temporal de registro (MACHINE_REGISTRATION_SECRET)',
+    );
     if (registrationSecret.length < 8) {
       console.error('\n  El secreto de registro es demasiado corto.\n');
       process.exitCode = 1;
@@ -196,8 +201,20 @@ async function main(): Promise<void> {
         }
       }
 
-      const allowEdits = isRepo ? await askYesNo('Permitir que Luxy modifique archivos?', true) : false;
-      const allowCommit = allowEdits ? await askYesNo('Permitir commits tras aprobacion?', true) : false;
+      const allowHostChecks =
+        testCommands.length > 0
+          ? await askYesNo(
+              'Permitir ejecutar estas comprobaciones en Windows tras revisar el riesgo?',
+              false,
+            )
+          : false;
+
+      const allowEdits = isRepo
+        ? await askYesNo('Permitir que Luxy modifique archivos?', true)
+        : false;
+      const allowCommit = allowEdits
+        ? await askYesNo('Permitir commits tras aprobacion?', true)
+        : false;
       // el push esta deshabilitado por defecto, como exige el diseño
       const allowPush = allowCommit
         ? await askYesNo('Permitir push (requiere doble confirmacion)?', false)
@@ -208,6 +225,7 @@ async function main(): Promise<void> {
         type,
         testCommands,
         testTimeoutMs: 600_000,
+        allowHostChecks,
         allowEdits,
         allowCommit,
         allowPush,
@@ -332,6 +350,8 @@ async function main(): Promise<void> {
 }
 
 main().catch((error) => {
-  console.error(`\n  El asistente fallo: ${error instanceof Error ? error.message : String(error)}\n`);
+  console.error(
+    `\n  El asistente fallo: ${error instanceof Error ? error.message : String(error)}\n`,
+  );
   process.exitCode = 1;
 });

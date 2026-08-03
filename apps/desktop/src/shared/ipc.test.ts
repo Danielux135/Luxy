@@ -13,6 +13,7 @@ import {
   pickFolderArgsSchema,
   stopAgentArgsSchema,
   approvalResolveArgsSchema,
+  connectionTestArgsSchema,
 } from './ipc.js';
 
 describe('canales IPC', () => {
@@ -65,6 +66,16 @@ describe('validacion de argumentos', () => {
   it('acota la longitud de los textos que llegan del renderer', () => {
     expect(stopAgentArgsSchema.safeParse({ reason: 'x'.repeat(500) }).success).toBe(false);
     expect(pickFolderArgsSchema.safeParse({ title: 'x'.repeat(500) }).success).toBe(false);
+  });
+
+  it('la prueba de conexion no admite una URL elegida por el renderer', () => {
+    expect(connectionTestArgsSchema.safeParse({ connectionId: 'default' }).success).toBe(true);
+    expect(
+      connectionTestArgsSchema.safeParse({
+        connectionId: 'default',
+        baseUrl: 'https://atacante.example',
+      }).success,
+    ).toBe(false);
   });
 });
 

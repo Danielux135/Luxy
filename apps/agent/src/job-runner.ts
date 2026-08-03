@@ -25,7 +25,7 @@ import {
   describeManifestChanges,
 } from './tools/manifest-guard.js';
 import { createWorktree, collectDiff, isGitRepository, type Worktree } from './git.js';
-import { runProjectTests, summarizeTests } from './test-runner.js';
+import { hostChecksBlockedReason, runProjectTests, summarizeTests } from './test-runner.js';
 import type { AgentLogger } from './logger.js';
 import { describeError } from './logger.js';
 
@@ -35,7 +35,10 @@ export interface JobRunnerDeps {
   /** obtiene el proveedor que debe ejecutar el trabajo */
   getProvider: (id: ProviderId) => ProviderExecution | null;
   /** reporta una fase de progreso al gateway */
-  emit: (type: 'phase' | 'log' | 'provider_output' | 'test_result' | 'warning', message: string) => void;
+  emit: (
+    type: 'phase' | 'log' | 'provider_output' | 'test_result' | 'warning',
+    message: string,
+  ) => void;
   /** carpeta base donde se crean los worktrees */
   worktreesDirectory: string;
   /** descarga el adjunto del trabajo; lo sirve el gateway */
@@ -46,7 +49,13 @@ export interface JobRunnerDeps {
 
 export type JobOutcome =
   | { kind: 'completed'; result: JobCompleteRequest }
-  | { kind: 'failed'; errorMessage: string; hasLocalChanges: boolean; worktreePath: string | null; durationMs: number }
+  | {
+      kind: 'failed';
+      errorMessage: string;
+      hasLocalChanges: boolean;
+      worktreePath: string | null;
+      durationMs: number;
+    }
   | { kind: 'cancelled'; modifiedFiles: string[]; worktreePath: string | null; durationMs: number };
 
 /**
@@ -62,6 +71,10 @@ export type JobOutcome =
  * el proveedor use el suyo.
  */
 export function resolveJobModel(job: ClaimedJob, config: AgentConfig): string | undefined {
+  if (typeof job.model === 'string' && job.model.length > 0) return job.model;
+
+  // compatibilidad con trabajos creados antes de 0005, cuando el modelo solo
+  // se guardaba dentro de metadata.
   const requested = job.metadata['model'];
   // el apiModel se usa TAL CUAL: no se normaliza ni se cambia de mayusculas
   if (typeof requested === 'string' && requested.length > 0) return requested;
@@ -83,10 +96,7 @@ export function resolveJobModel(job: ClaimedJob, config: AgentConfig): string | 
 }
 
 /** apiModel predeterminado de una familia, segun el catalogo de las conexiones */
-export function resolveFamilyDefault(
-  family: string,
-  config: AgentConfig,
-): string | undefined {
+export function resolveFamilyDefault(family: string, config: AgentConfig): string | undefined {
   for (const connection of config.connections) {
     if (!connection.enabled) continue;
     const registry = new ModelRegistry({
@@ -517,18 +527,18 @@ export async function runJob(
     let providerResult;
     try {
       providerResult = await provider.run({
-      prompt: buildProviderPrompt(job),
-      workingDirectory,
-      timeoutMs: deps.config.jobTimeoutMs,
-      signal,
-      // el modelo concreto lo elige el router y viaja en la metadata del
-      // trabajo. Antes solo se le pasaba a claude, asi que codex y las APIs
-      // http usaban siempre su modelo por defecto y el catalogo no servia
-      // de nada.
-      model: resolveJobModel(job, deps.config),
-      // si el modelo es agentic y hay worktree, se le dan herramientas locales
-      agentic: buildAgenticContext(job, deps, workingDirectory, project, signal),
-      onEvent: (event) => {
+        prompt: buildProviderPrompt(job),
+        workingDirectory,
+        timeoutMs: deps.config.jobTimeoutMs,
+        signal,
+        // el modelo concreto lo elige el router y viaja en el trabajo. Antes
+        // solo se le pasaba a claude, asi que codex y las APIs
+        // http usaban siempre su modelo por defecto y el catalogo no servia
+        // de nada.
+        model: resolveJobModel(job, deps.config),
+        // si el modelo es agentic y hay worktree, se le dan herramientas locales
+        agentic: buildAgenticContext(job, deps, workingDirectory, project, signal),
+        onEvent: (event) => {
           // el modelo ha dicho algo: el latido deja de hacer falta un rato
           latido.postpone();
           if (event.type === 'phase') deps.emit('phase', event.message);
@@ -560,12 +570,18 @@ export async function runJob(
     let testsPassed = 0;
     let testsFailed = 0;
     let testLogs: JobCompleteRequest['testLogs'] = [];
+    let testsSkippedReason: string | null = null;
 
     const manifestChanges = detectManifestChanges(workingDirectory, manifestsBefore);
+    const checksBlocked = hostChecksBlockedReason(project);
 
     if (manifestChanges.length > 0) {
       // el modelo cambio algo que decide que se ejecuta: no se lanza nada
-      deps.emit('warning', describeManifestChanges(manifestChanges));
+      testsSkippedReason = describeManifestChanges(manifestChanges);
+      deps.emit('warning', testsSkippedReason);
+    } else if (checksBlocked !== null) {
+      testsSkippedReason = checksBlocked;
+      deps.emit('warning', checksBlocked);
     } else if (project.testCommands.length > 0 && !signal.aborted) {
       deps.emit('phase', 'ejecutando las pruebas del proyecto');
       testLogs = await runProjectTests({
@@ -592,7 +608,12 @@ export async function runJob(
     // el resumen dice exactamente lo que se verifico, sin exagerar
     const summaryLines = [providerResult.finalText.trim() || 'El proveedor no devolvio resumen.'];
     if (testLogs.length === 0) {
-      summaryLines.push('', 'No se ejecutaron pruebas: el proyecto no tiene comandos configurados.');
+      summaryLines.push(
+        '',
+        testsSkippedReason === null
+          ? 'No se ejecutaron pruebas: el proyecto no tiene comandos configurados.'
+          : `No se ejecutaron pruebas: ${testsSkippedReason}`,
+      );
     }
 
     return {
@@ -655,7 +676,9 @@ async function buildCancelledOutcome(
 }
 
 /** recoger el diff nunca debe tumbar el cierre del trabajo */
-async function safeCollectDiff(worktreePath: string): Promise<Awaited<ReturnType<typeof collectDiff>> | null> {
+async function safeCollectDiff(
+  worktreePath: string,
+): Promise<Awaited<ReturnType<typeof collectDiff>> | null> {
   try {
     return await collectDiff(worktreePath);
   } catch {

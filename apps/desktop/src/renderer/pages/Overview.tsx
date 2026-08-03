@@ -7,7 +7,9 @@ import type { ActivityLine, PendingJob } from '../useAgent.js';
 
 function hora(iso: string): string {
   const date = new Date(iso);
-  return Number.isNaN(date.getTime()) ? '--:--' : date.toLocaleTimeString('es-ES', { hour12: false });
+  return Number.isNaN(date.getTime())
+    ? '--:--'
+    : date.toLocaleTimeString('es-ES', { hour12: false });
 }
 
 function desde(iso: string | null): string {
@@ -45,7 +47,11 @@ export function HomePage({
   status: AgentHostStatus;
   activity: ActivityLine[];
   pending: PendingJob[];
-  onApprove: (job: PendingJob, action: 'commit' | 'discard' | 'push', confirmedTwice?: boolean) => void;
+  onApprove: (
+    job: PendingJob,
+    action: 'commit' | 'discard' | 'push',
+    confirmedTwice?: boolean,
+  ) => void;
   busy: boolean;
   error: string | null;
   onStart: () => void;
@@ -64,9 +70,7 @@ export function HomePage({
       <div className="page__head">
         <h1 className="page__title">Inicio</h1>
       </div>
-      <p className="page__lede">
-        Estado de la maquina y de lo que esta haciendo ahora mismo.
-      </p>
+      <p className="page__lede">Estado de la maquina y de lo que esta haciendo ahora mismo.</p>
 
       {error !== null && <Notice tone="fault">{error}</Notice>}
       {status.lastError !== null && <Notice tone="fault">{status.lastError}</Notice>}
@@ -113,7 +117,10 @@ export function HomePage({
             },
             {
               label: 'Proveedores',
-              value: agent === null || agent.providers.length === 0 ? 'ninguno' : agent.providers.join(', '),
+              value:
+                agent === null || agent.providers.length === 0
+                  ? 'ninguno'
+                  : agent.providers.join(', '),
               tone: (agent?.providers.length ?? 0) > 0 ? 'ok' : 'idle',
             },
             {
@@ -130,8 +137,7 @@ export function HomePage({
       <Panel title="Trabajo activo">
         {agent?.activeJob == null ? (
           <Empty title="Nada en curso">
-            Manda un trabajo desde Telegram, por ejemplo{' '}
-            <code className="mono">/deepseek mi-proyecto arregla los tests</code>.
+            Crea una tarea en la seccion Trabajos. Telegram sigue disponible como canal secundario.
           </Empty>
         ) : (
           <Readout
@@ -181,7 +187,11 @@ export function PendingApprovals({
 }: {
   pending: PendingJob[];
   busy: boolean;
-  onApprove: (job: PendingJob, action: 'commit' | 'discard' | 'push', confirmedTwice?: boolean) => void;
+  onApprove: (
+    job: PendingJob,
+    action: 'commit' | 'discard' | 'push',
+    confirmedTwice?: boolean,
+  ) => void;
 }): JSX.Element | null {
   const [confirmingPush, setConfirmingPush] = useState<string | null>(null);
 
@@ -198,7 +208,9 @@ export function PendingApprovals({
               </div>
               <div className="list__meta">
                 {job.filesChanged} archivos
-                {job.testsFailed > 0 ? ` · ${job.testsFailed} pruebas fallidas` : ' · pruebas en verde'}
+                {job.testsFailed > 0
+                  ? ` · ${job.testsFailed} pruebas fallidas`
+                  : ' · pruebas en verde'}
               </div>
               <div className="list__meta mono scroller">{job.branch}</div>
               {job.lastAction !== null && (
@@ -256,51 +268,5 @@ export function PendingApprovals({
         ))}
       </ul>
     </Panel>
-  );
-}
-
-export function JobsPage({ activity }: { activity: ActivityLine[] }): JSX.Element {
-  // los trabajos historicos viven en el gateway; hasta que Desktop los consulte
-  // se muestra lo observado en esta sesion, y se dice claramente que es asi
-  const jobs = new Map<string, ActivityLine[]>();
-  for (const line of activity) {
-    const match = /\b(LUX-[A-Z0-9]+)/.exec(line.text);
-    if (match === null) continue;
-    const key = match[1]!;
-    jobs.set(key, [...(jobs.get(key) ?? []), line]);
-  }
-
-  return (
-    <>
-      <div className="page__head">
-        <h1 className="page__title">Trabajos</h1>
-        <Tag>{jobs.size} en esta sesion</Tag>
-      </div>
-      <p className="page__lede">
-        Trabajos que esta maquina ha ejecutado desde que abriste Luxy. El historial completo, con
-        diff y pruebas, llega cuando Desktop consulte el gateway.
-      </p>
-
-      {jobs.size === 0 ? (
-        <Panel flush>
-          <Empty title="Ningun trabajo todavia">
-            Envia uno desde Telegram y aparecera aqui con sus fases y su resultado.
-          </Empty>
-        </Panel>
-      ) : (
-        [...jobs.entries()].reverse().map(([shortId, lines]) => (
-          <Panel key={shortId} title={shortId} flush>
-            <ul className="stream">
-              {lines.map((line) => (
-                <li key={line.id} data-tone={TONO_EVENTO[line.type]}>
-                  <time>{hora(line.at)}</time>
-                  <span>{line.text}</span>
-                </li>
-              ))}
-            </ul>
-          </Panel>
-        ))
-      )}
-    </>
   );
 }

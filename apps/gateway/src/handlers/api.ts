@@ -12,8 +12,9 @@ import {
   renderJobFinished,
   renderJobProgress,
   MIN_PROGRESS_EDIT_INTERVAL_MS,
+  TERMINAL_JOB_STATUSES,
 } from '@luxy/shared';
-import type { JobAttachment, ProviderId } from '@luxy/shared';
+import type { Job, JobAttachment, JobStatus, ProviderId } from '@luxy/shared';
 import type { GatewayConfig } from '../env.js';
 import type { Repository } from '../repository.js';
 import type { RemoteRepository } from '../remote-repository.js';
@@ -52,8 +53,21 @@ export function errorResponse(message: string, status = 400): Response {
   return json({ error: message }, status);
 }
 
+/** hace idempotentes los reenvios de la cola local de resultados */
+function terminalResponse(job: Job, expected: JobStatus): Response | null {
+  if (job.status === expected) return json({ ok: true, duplicate: true });
+  // interrupted es una conclusion provisional del barrido de leases. Si la
+  // misma maquina propietaria vuelve y entrega el resultado durable, ese dato
+  // real prevalece sobre la inferencia hecha durante el corte de red.
+  if (job.status === 'interrupted') return null;
+  if ((TERMINAL_JOB_STATUSES as readonly JobStatus[]).includes(job.status)) {
+    return errorResponse(`el trabajo ya termino con estado ${job.status}`, 409);
+  }
+  return null;
+}
+
 /** lee y valida el cuerpo con un esquema zod */
-async function readBody<T>(
+export async function readBody<T>(
   request: Request,
   schema: { safeParse: (value: unknown) => { success: boolean; data?: T; error?: unknown } },
 ): Promise<{ ok: true; data: T } | { ok: false; response: Response }> {
@@ -185,7 +199,7 @@ export const handleClaim = withMachineAuth(async (request, deps, machine) => {
   // se avisa por telegram editando el mensaje de progreso ya existente
   const metadata = (claimed.metadata ?? {}) as Record<string, unknown>;
   const progressMessageId = metadata.progressMessageId;
-  if (typeof progressMessageId === 'number') {
+  if (claimed.telegram_chat_id !== null && typeof progressMessageId === 'number') {
     await deps.telegram
       .editMessageText(
         claimed.telegram_chat_id,
@@ -208,8 +222,10 @@ export const handleClaim = withMachineAuth(async (request, deps, machine) => {
       id: claimed.id,
       shortId: claimed.short_id,
       provider: claimed.provider,
+      model: claimed.model,
       projectAlias: claimed.project_alias,
       prompt: claimed.prompt,
+      origin: claimed.created_via,
       telegramChatId: claimed.telegram_chat_id,
       telegramUserId: claimed.telegram_user_id,
       leaseExpiresAt: claimed.lease_expires_at,
@@ -313,6 +329,7 @@ export const handleJobEvents = withMachineAuth(async (request, deps, machine, pa
 
   if (
     phaseEvent &&
+    job.telegramChatId !== null &&
     typeof progressMessageId === 'number' &&
     now - lastEdit >= MIN_PROGRESS_EDIT_INTERVAL_MS
   ) {
@@ -351,12 +368,18 @@ export const handleJobComplete = withMachineAuth(async (request, deps, machine, 
   const job = await deps.repo.getJobById(jobId);
   if (!job) return errorResponse('trabajo no encontrado', 404);
   if (job.claimedBy !== machine.id) return errorResponse('ese trabajo no es de esta maquina', 403);
+  const repeated = terminalResponse(job, 'completed');
+  if (repeated !== null) return repeated;
 
   const result = body.data;
   await deps.repo.updateJob(jobId, {
     status: 'completed',
     completed_at: new Date().toISOString(),
     result_summary: result.summary,
+    error_message: null,
+    model:
+      job.model ??
+      (typeof job.metadata.model === 'string' ? job.metadata.model.slice(0, 128) : null),
     lease_expires_at: null,
     metadata: {
       ...job.metadata,
@@ -391,12 +414,14 @@ export const handleJobComplete = withMachineAuth(async (request, deps, machine, 
   });
 
   // el resultado final NO puede perderse: si falla la edicion, se envia aparte
-  await deliverFinalMessage(deps, job.telegramChatId, job.metadata.progressMessageId, text, {
-    keyboard: buildResultKeyboard(job.shortId, result.filesChanged > 0),
-  });
+  if (job.telegramChatId !== null) {
+    await deliverFinalMessage(deps, job.telegramChatId, job.metadata.progressMessageId, text, {
+      keyboard: buildResultKeyboard(job.shortId, result.filesChanged > 0),
+    });
+  }
 
   // si el trabajo produjo una imagen o un audio, se envia despues del resumen
-  if (result.resultMedia) {
+  if (result.resultMedia && job.telegramChatId !== null) {
     try {
       await deps.telegram.sendMedia(job.telegramChatId, result.resultMedia);
     } catch (error) {
@@ -428,6 +453,8 @@ export const handleJobFail = withMachineAuth(async (request, deps, machine, para
   const job = await deps.repo.getJobById(jobId);
   if (!job) return errorResponse('trabajo no encontrado', 404);
   if (job.claimedBy !== machine.id) return errorResponse('ese trabajo no es de esta maquina', 403);
+  const repeated = terminalResponse(job, 'failed');
+  if (repeated !== null) return repeated;
 
   await deps.repo.updateJob(jobId, {
     status: 'failed',
@@ -455,7 +482,15 @@ export const handleJobFail = withMachineAuth(async (request, deps, machine, para
     lines.push('', 'Hay cambios en el worktree. No se han borrado.');
   }
 
-  await deliverFinalMessage(deps, job.telegramChatId, job.metadata.progressMessageId, lines.join('\n'), {});
+  if (job.telegramChatId !== null) {
+    await deliverFinalMessage(
+      deps,
+      job.telegramChatId,
+      job.metadata.progressMessageId,
+      lines.join('\n'),
+      {},
+    );
+  }
   lastEditAt.delete(jobId);
   return json({ ok: true });
 });
@@ -473,6 +508,8 @@ export const handleJobCancelled = withMachineAuth(async (request, deps, machine,
   const job = await deps.repo.getJobById(jobId);
   if (!job) return errorResponse('trabajo no encontrado', 404);
   if (job.claimedBy !== machine.id) return errorResponse('ese trabajo no es de esta maquina', 403);
+  const repeated = terminalResponse(job, 'cancelled');
+  if (repeated !== null) return repeated;
 
   await deps.repo.updateJob(jobId, {
     status: 'cancelled',
@@ -503,7 +540,15 @@ export const handleJobCancelled = withMachineAuth(async (request, deps, machine,
     lines.push('', 'No quedaron archivos modificados.');
   }
 
-  await deliverFinalMessage(deps, job.telegramChatId, job.metadata.progressMessageId, lines.join('\n'), {});
+  if (job.telegramChatId !== null) {
+    await deliverFinalMessage(
+      deps,
+      job.telegramChatId,
+      job.metadata.progressMessageId,
+      lines.join('\n'),
+      {},
+    );
+  }
   lastEditAt.delete(jobId);
   return json({ ok: true });
 });
@@ -613,7 +658,10 @@ async function deliverFinalMessage(
       await deps.telegram.editMessageText(chatId, progressMessageId, text, options.keyboard);
       return;
     } catch (error) {
-      deps.logger.warn('no se pudo editar el mensaje final, se envia uno nuevo', describeError(error));
+      deps.logger.warn(
+        'no se pudo editar el mensaje final, se envia uno nuevo',
+        describeError(error),
+      );
     }
   }
   try {

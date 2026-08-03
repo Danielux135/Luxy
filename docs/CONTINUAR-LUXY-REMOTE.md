@@ -1,5 +1,10 @@
 # Continuar Luxy Remote — estado y siguientes pasos
 
+> **Documento histórico.** Desde el traspaso canónico del 1 de agosto de 2026,
+> Luxy Remote está pausado y se conserva como módulo experimental. La prioridad
+> activa es Luxy Studio para Windows y, después, Luxy Mobile para Android. No
+> continúes las fases Remote ni apliques `0004_luxy_remote.sql` por este documento.
+
 Documento de traspaso. Si estás retomando esto en una conversación nueva —da
 igual con qué asistente— aquí está todo lo necesario para seguir **sin volver a
 investigar nada y sin empezar de cero**.
@@ -81,14 +86,14 @@ b49e486  anclaje local de las claves de los pares
 Las cinco están documentadas en `docs/adr/`. Resumen de por qué, para no tener
 que releerlas:
 
-| Decisión | Motivo en una línea |
-|---|---|
-| **P-256**, no Ed25519 | Única curva con respaldo hardware en Android StrongBox. Ed25519 dejaría la clave en software. |
-| **Supabase Realtime** para señalización, no Durable Objects | La señalización son ~40 mensajes. DO ya es gratis (desde abr-2025) pero es sobreingeniería. |
-| **Cloudflare TURN** | 0,05 $/GB con **1.000 GB gratis** ≈ 660 h/mes. Twilio cuesta 8× y sin free tier. |
-| **React Native + Expo**, no Flutter | Permite compartir `packages/remote-protocol` (Zod) literalmente. Flutter obligaría a duplicar el protocolo en Dart, y ahí es donde se desincroniza en silencio. Y EAS Build compila iOS desde Windows. |
-| **Renderer oculto** de Electron para captura/WebRTC | `utilityProcess` no tiene pila de medios. La captura y el encoder van en el proceso GPU, no bloquean. |
-| **Proceso auxiliar** para la entrada, no addon | El DPI awareness **no se puede cambiar** una vez creadas las ventanas. Un addon hereda el de Electron y no puede corregirlo. |
+| Decisión                                                    | Motivo en una línea                                                                                                                                                                                    |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **P-256**, no Ed25519                                       | Única curva con respaldo hardware en Android StrongBox. Ed25519 dejaría la clave en software.                                                                                                          |
+| **Supabase Realtime** para señalización, no Durable Objects | La señalización son ~40 mensajes. DO ya es gratis (desde abr-2025) pero es sobreingeniería.                                                                                                            |
+| **Cloudflare TURN**                                         | 0,05 $/GB con **1.000 GB gratis** ≈ 660 h/mes. Twilio cuesta 8× y sin free tier.                                                                                                                       |
+| **React Native + Expo**, no Flutter                         | Permite compartir `packages/remote-protocol` (Zod) literalmente. Flutter obligaría a duplicar el protocolo en Dart, y ahí es donde se desincroniza en silencio. Y EAS Build compila iOS desde Windows. |
+| **Renderer oculto** de Electron para captura/WebRTC         | `utilityProcess` no tiene pila de medios. La captura y el encoder van en el proceso GPU, no bloquean.                                                                                                  |
+| **Proceso auxiliar** para la entrada, no addon              | El DPI awareness **no se puede cambiar** una vez creadas las ventanas. Un addon hereda el de Electron y no puede corregirlo.                                                                           |
 
 ### Datos técnicos verificados que ahorran investigación
 
@@ -128,6 +133,7 @@ es la que hay que mantener al entregar cualquier fase: lo probado y lo sólo
 escrito no valen lo mismo.
 
 ### `packages/remote-protocol`
+
 - `version.ts` — versión del protocolo, comprobación de compatibilidad que dice
   **quién** está desactualizado.
 - `capabilities.ts` — matriz de capacidades por plataforma, con el motivo de
@@ -147,6 +153,7 @@ escrito no valen lo mismo.
   clic con toda la pila.
 
 ### `packages/remote-crypto`
+
 - `identity.ts` — P-256, firma con **separación de dominios** (el contexto va
   dentro de lo firmado), huella, **palabras de confirmación conmutativas**
   (256 palabras exactas), `canonicalPublicKey`.
@@ -158,6 +165,7 @@ escrito no valen lo mismo.
   contenido.
 
 ### `apps/gateway`
+
 - `handlers/remote.ts` — `pair/start`, `pair/claim`, `pair/confirm`,
   `pair/:code/state`, `devices`, `devices/:id/access`, `devices/:id/revoke`.
   `withDeviceAuth` es la puerta única.
@@ -166,6 +174,7 @@ escrito no valen lo mismo.
   atomicidad del nonce y el filtro por estado.
 
 ### `apps/desktop/src/main`
+
 - `remote-identity.ts` — clave privada bajo DPAPI/safeStorage. **Falla si no hay
   cifrado del sistema**, no guarda en claro.
 - `remote-client.ts` — cliente del gateway. Firma peticiones. Las palabras se
@@ -187,12 +196,14 @@ escrito no valen lo mismo.
   canales de datos**.
 
 ### Escrito y verificado a mano, SIN prueba automática
+
 - `remote-host/input-backend-koffi.ts` — `user32!SendInput` con koffi.
 - `remote-host/capture-window.ts` — renderer oculto, sesión propia,
   `setDisplayMediaRequestHandler`.
 - `src/renderer/capture/main.ts` + `src/preload/capture.ts` — motor WebRTC.
 
 ### `supabase/migrations/0004_luxy_remote.sql`
+
 **PREPARADA, NO EJECUTADA.** Tablas: `remote_devices`, `remote_pairing_codes`,
 `remote_sessions`, `remote_auth_nonces` (PK compuesta `(device_id, nonce)`),
 `remote_audit`. RLS habilitada en las cinco, sin políticas: sólo el service role.
@@ -294,7 +305,9 @@ seguridad. Son las trampas reales de este dominio.
 - [ ] **PENDIENTE: el orquestador.** Ver la especificación completa más abajo.
 
 #### Verificado empíricamente en este equipo (Electron 43, Windows 11)
+
 Sonda ejecutada dentro de Electron, no deducido:
+
 - koffi 3.1.4 carga en Electron 43. **No hace falta recompilar para el ABI 148**:
   koffi usa N-API 8, que es ABI estable.
 - `koffi.sizeof(INPUT)` = 40 en x64, que es lo correcto.
@@ -305,6 +318,7 @@ Sonda ejecutada dentro de Electron, no deducido:
 - `new BrowserWindow({show:false})` se crea y no es visible.
 
 #### Lo que sigue SIN probar y sólo puede probar Daniel
+
 - Que el vídeo llegue de verdad y que AV1/VP9 se negocien en su GPU.
 - Multi-monitor: este equipo tiene una sola pantalla, así que la correlación con
   varios monitores y la geometría con escalas mixtas están sin ejercitar.
@@ -397,6 +411,7 @@ equivocado; una revocación en caliente a mitad de sesión; y que al cortar por
 cada una de las causas se llama a `releaseAll`.
 
 ### FASE 5 — Luxy Mobile Android mínimo
+
 - [ ] Proyecto React Native + Expo con **development build** (Expo Go no sirve).
 - [ ] `@config-plugins/react-native-webrtc` + `@stream-io/react-native-webrtc`.
 - [ ] Importar `@luxy/remote-protocol` y `@luxy/remote-crypto` tal cual.
@@ -410,12 +425,14 @@ cada una de las causas se llama a `releaseAll`.
 - [ ] **APK firmado por sideload.** Nada de Play Store.
 
 ### FASE 6 — Control desde el móvil
+
 - [ ] Modo trackpad y modo táctil directo.
 - [ ] Gestos: toque=clic, doble=doble, largo=derecho, dos dedos=scroll, arrastre.
 - [ ] Barra de teclado con Ctrl/Alt/Shift/Tab/Esc/Win.
 - [ ] Cambio de monitor, `release_all` al perder el foco.
 
 ### FASE 7 — Fuera de la LAN
+
 - [ ] Credenciales TURN efímeras generadas por el Worker
       (`POST /v1/turn/keys/$ID/credentials/generate-ice-servers`).
 - [ ] **Límite duro de consumo antes de la cuota facturable.** Requisito del
@@ -424,31 +441,38 @@ cada una de las causas se llama a `releaseAll`.
 - [ ] Reconexión, cambio Wi-Fi↔datos.
 
 ### FASE 8 — Integración con Luxy en el móvil
+
 Reutilizar los contratos existentes. **No duplicar el sistema de trabajos.**
+
 - [ ] Máquinas, proyectos, modelos, formulario de tarea.
 - [ ] Progreso, logs, diff, pruebas, cancelar.
 - [ ] Aprobar commit, **doble confirmación de push**.
 
 ### FASE 9 — Complementarias
+
 Portapapeles, archivos, audio, perfiles de calidad, historial, Wake-on-LAN.
 
 ### FASE 10 — Windows controla Android
+
 Sólo después de lo anterior. MediaProjection + Shizuku/ADB. **No publicable en
 Play**, y Android 17 revoca AccessibilityService en Modo de Protección Avanzada.
 
 ### Interfaz (`/frontend-design`, tres pasadas separadas)
+
 Sólo cuando el recorrido técnico correspondiente funcione:
+
 1. Emparejamiento y dispositivos en Desktop.
 2. Luxy Mobile.
 3. Pantalla de control remoto.
 
 ---
 
-## 6. Acciones que requieren autorización de Daniel
+## 6. Registro histórico de autorizaciones — no ejecutar mientras Remote siga pausado
 
 Pendientes, con lo que hay que decirle:
 
-**A. Ejecutar la migración `0004_luxy_remote.sql` en su Supabase**
+**A. Ejecutar la migración `0004_luxy_remote.sql` en su Supabase — PAUSADA**
+
 - Motivo: sin las tablas, nada del emparejamiento funciona contra el servidor real.
 - Comando: pegar el SQL en el editor de Supabase, o `supabase db push`.
 - Coste: 0 €.
@@ -456,6 +480,7 @@ Pendientes, con lo que hay que decirle:
 - Verificar: `select count(*) from public.remote_devices;` debe devolver 0.
 
 **B. Desplegar el Worker**
+
 - Motivo: los endpoints de control remoto sólo viven en el código local.
 - Comando: `cd apps/gateway && npx.cmd wrangler deploy`
 - Coste: 0 €, dentro del plan gratuito.
@@ -470,6 +495,7 @@ Daniel puede verificar: que el cursor caiga donde debe, que el vídeo llegue, qu
 funcione desde 4G.
 
 **E. Conectar un segundo monitor** cuando se quiera cerrar la Fase 4.
+
 - Motivo: el equipo de desarrollo tiene **una sola pantalla**. La correlación con
   varios monitores y toda la geometría con escalas mixtas —que es donde está el
   fallo 7, el más caro de la lista— están escritas y probadas con datos
@@ -478,6 +504,7 @@ funcione desde 4G.
   y que `monitorWarnings()` avise si las escalas no coinciden.
 
 **F. Empaquetar y probar el instalador** (`cd apps/desktop && npm run package`).
+
 - Motivo: `asarUnpack` de koffi está configurado pero **no comprobado**. Si está
   mal, el control de ratón y teclado falla sólo en la versión instalada, no en
   desarrollo, que es la peor forma posible de descubrirlo.
@@ -550,7 +577,7 @@ investigar**.
 
 ### Prompt para pegar
 
-> Trabajo en `C:\Users\daniel\Desktop\Luxy`, un monorepo TypeScript en Windows 11.
+> Trabajo en el repositorio local de Luxy, un monorepo TypeScript en Windows 11.
 > Lee `docs/CONTINUAR-LUXY-REMOTE.md` **entero** antes de tocar nada: es un
 > documento de traspaso y contiene el estado exacto, las decisiones ya tomadas y
 > los fallos ya corregidos.

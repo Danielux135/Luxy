@@ -100,6 +100,19 @@ export function ProjectsPage({
     await onSave({ ...base, projects });
   };
 
+  const toggleHostChecks = async (clave: string): Promise<void> => {
+    const base = summary.config;
+    const project = base?.projects[clave];
+    if (base === null || project === undefined) return;
+    await onSave({
+      ...base,
+      projects: {
+        ...base.projects,
+        [clave]: { ...project, allowHostChecks: !project.allowHostChecks },
+      },
+    });
+  };
+
   return (
     <>
       <div className="page__head">
@@ -136,6 +149,10 @@ export function ProjectsPage({
       </Panel>
 
       <Panel title="Proyectos configurados" flush>
+        <Notice tone="warn">
+          Las comprobaciones se ejecutan en Windows y pueden cargar codigo modificado por el modelo.
+          Permanecen desactivadas por proyecto hasta que revises y aceptes ese riesgo.
+        </Notice>
         {projects.length === 0 ? (
           <Empty title="Ningun proyecto">
             Añade una carpeta arriba para que Luxy pueda trabajar sobre ella.
@@ -152,6 +169,9 @@ export function ProjectsPage({
                 {proyecto.allowEdits && <Tag tone="busy">edita</Tag>}
                 {proyecto.allowCommit && <Tag tone="warn">commit</Tag>}
                 {proyecto.allowPush ? <Tag tone="fault">push</Tag> : <Tag>sin push</Tag>}
+                <button className="btn btn--quiet" onClick={() => void toggleHostChecks(clave)}>
+                  {proyecto.allowHostChecks ? 'Pruebas: activas' : 'Pruebas: bloqueadas'}
+                </button>
                 <button className="btn btn--danger btn--quiet" onClick={() => void quitar(clave)}>
                   Quitar
                 </button>
@@ -170,6 +190,7 @@ function defaultProject(): NonNullable<StoredAgentConfig['projects']>[string] {
     type: 'other',
     testCommands: [],
     testTimeoutMs: 600_000,
+    allowHostChecks: false,
     allowEdits: true,
     allowCommit: true,
     // el push nunca se activa solo
@@ -269,7 +290,10 @@ export function ConnectionsPage({
                       autoFocus
                       style={{ flex: 1 }}
                     />
-                    <button className="btn btn--primary" onClick={() => void guardar(connection.id)}>
+                    <button
+                      className="btn btn--primary"
+                      onClick={() => void guardar(connection.id)}
+                    >
                       Guardar
                     </button>
                     <button className="btn btn--quiet" onClick={() => setEditing(null)}>
@@ -278,7 +302,12 @@ export function ConnectionsPage({
                   </div>
                 ) : (
                   <div className="row">
-                    <input type="password" value={configured ? '••••••••••••' : ''} readOnly style={{ flex: 1 }} />
+                    <input
+                      type="password"
+                      value={configured ? '••••••••••••' : ''}
+                      readOnly
+                      style={{ flex: 1 }}
+                    />
                     <button
                       className="btn"
                       onClick={() => {
@@ -363,7 +392,11 @@ export function ModelsPage({ summary }: { summary: ConfigSummary }): JSX.Element
                   {definition.agentic && <Tag tone="busy">herramientas</Tag>}
                   <Tag>{definition.category}</Tag>
                   <Tag tone={usable ? 'ok' : servedByConnection === null ? 'warn' : 'fault'}>
-                    {usable ? 'disponible' : servedByConnection === null ? 'sin comprobar' : 'no disponible'}
+                    {usable
+                      ? 'disponible'
+                      : servedByConnection === null
+                        ? 'sin comprobar'
+                        : 'no disponible'}
                   </Tag>
                 </li>
               ))}

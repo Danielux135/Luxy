@@ -32,6 +32,13 @@ import {
   errorResponse,
   type ApiDeps,
 } from './handlers/api.js';
+import {
+  handleStudioJobCancel,
+  handleStudioJobCreate,
+  handleStudioJobDetail,
+  handleStudioJobs,
+  handleStudioOptions,
+} from './handlers/studio.js';
 
 type Deps = ApiDeps & WebhookDeps;
 
@@ -39,10 +46,16 @@ type Deps = ApiDeps & WebhookDeps;
 const router = new Router<Deps>()
   .post('/telegram/webhook', (request, deps) => handleWebhook(request, deps))
   .post('/api/machines/register', (request, deps) => handleRegister(request, deps))
-  .post('/api/machines/heartbeat', (request, deps, params) => handleHeartbeat(request, deps, params))
+  .post('/api/machines/heartbeat', (request, deps, params) =>
+    handleHeartbeat(request, deps, params),
+  )
   .post('/api/jobs/claim', (request, deps, params) => handleClaim(request, deps, params))
-  .get('/api/jobs/:jobId/control', (request, deps, params) => handleJobControl(request, deps, params))
-  .post('/api/jobs/:jobId/events', (request, deps, params) => handleJobEvents(request, deps, params))
+  .get('/api/jobs/:jobId/control', (request, deps, params) =>
+    handleJobControl(request, deps, params),
+  )
+  .post('/api/jobs/:jobId/events', (request, deps, params) =>
+    handleJobEvents(request, deps, params),
+  )
   .post('/api/jobs/:jobId/complete', (request, deps, params) =>
     handleJobComplete(request, deps, params),
   )
@@ -52,6 +65,15 @@ const router = new Router<Deps>()
   )
   .get('/api/jobs/:jobId/attachment', (request, deps, params) =>
     handleJobAttachment(request, deps, params),
+  )
+  .get('/api/studio/options', (request, deps, params) => handleStudioOptions(request, deps, params))
+  .post('/api/studio/jobs', (request, deps, params) => handleStudioJobCreate(request, deps, params))
+  .get('/api/studio/jobs', (request, deps, params) => handleStudioJobs(request, deps, params))
+  .get('/api/studio/jobs/:jobId', (request, deps, params) =>
+    handleStudioJobDetail(request, deps, params),
+  )
+  .post('/api/studio/jobs/:jobId/cancel', (request, deps, params) =>
+    handleStudioJobCancel(request, deps, params),
   )
   // -------------------------------------------------------------------------
   // control remoto

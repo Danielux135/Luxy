@@ -12,6 +12,7 @@ packages/shared/      logica pura compartida: tipos, Zod, parser de comandos,
                       NO importa node:* ni tipos de Cloudflare.
 apps/gateway/         Cloudflare Worker. Unica pieza publica.
 apps/agent/           ejecutor local en Node para Windows.
+apps/desktop/         Luxy Studio en Electron/React; secretos solo en el main.
 supabase/migrations/  SQL acumulativo, numerado.
 scripts/              PowerShell y .cmd para Windows.
 docs/                 documentacion.
@@ -19,17 +20,19 @@ docs/                 documentacion.
 
 Dónde tocar según el cambio:
 
-| Cambio | Archivo |
-|---|---|
-| Comando de Telegram | `packages/shared/src/telegram/commands.ts` + `apps/gateway/src/handlers/commands.ts` |
-| Formato de mensajes | `packages/shared/src/telegram/format.ts` |
-| Router automático | `packages/shared/src/router.ts` |
-| Elección de máquina | `packages/shared/src/machines.ts` |
-| Endpoint privado | `apps/gateway/src/handlers/api.ts` + `apps/gateway/src/index.ts` |
-| Proveedor de IA | `apps/agent/src/providers/` |
-| Worktrees y git | `apps/agent/src/git.ts` |
-| Ejecución de procesos | `apps/agent/src/process.ts` |
-| Esquema de BD | nueva migración en `supabase/migrations/` |
+| Cambio                | Archivo                                                                              |
+| --------------------- | ------------------------------------------------------------------------------------ |
+| Comando de Telegram   | `packages/shared/src/telegram/commands.ts` + `apps/gateway/src/handlers/commands.ts` |
+| Formato de mensajes   | `packages/shared/src/telegram/format.ts`                                             |
+| Router automático     | `packages/shared/src/router.ts`                                                      |
+| Elección de máquina   | `packages/shared/src/machines.ts`                                                    |
+| Endpoint privado      | `apps/gateway/src/handlers/api.ts` + `apps/gateway/src/index.ts`                     |
+| API de Studio         | `apps/gateway/src/handlers/studio.ts` + contratos de `packages/shared`               |
+| Interfaz de trabajos  | `apps/desktop/src/renderer/pages/Studio.tsx`                                         |
+| Proveedor de IA       | `apps/agent/src/providers/`                                                          |
+| Worktrees y git       | `apps/agent/src/git.ts`                                                              |
+| Ejecución de procesos | `apps/agent/src/process.ts`                                                          |
+| Esquema de BD         | nueva migración en `supabase/migrations/`                                            |
 
 ## Comandos principales
 
@@ -49,6 +52,7 @@ lo pida explícitamente.
 ## Límites de seguridad
 
 **Modelos de IA**
+
 - Prohibida la API de Anthropic.
 - Prohibida la API de OpenAI.
 - Prohibidas `ANTHROPIC_API_KEY` y `OPENAI_API_KEY`.
@@ -59,12 +63,14 @@ lo pida explícitamente.
   `--dangerously-bypass-approvals-and-sandbox`.
 
 **Secretos**
+
 - Ningún secreto real en el repositorio. Los `.example` llevan `PENDIENTE_...`.
 - `SUPABASE_SERVICE_ROLE_KEY` solo existe como secret de Cloudflare.
 - Toda salida (logs, eventos, Telegram) pasa por `redact()`.
 - Nunca se hereda el entorno completo en un proceso hijo.
 
 **Sistema de archivos**
+
 - Rutas de proyecto absolutas, sin `..`.
 - Toda escritura dentro del worktree activo.
 - Comprobar enlaces simbólicos con `realpath` antes de aceptar una ruta.
@@ -88,6 +94,8 @@ lo pida explícitamente.
 - Cada comando lleva directorio de trabajo, timeout y lista de variables permitidas.
 - Los comandos de comprobación salen de `config.json` y además deben estar en
   `ALLOWED_TEST_EXECUTABLES`.
+- Las comprobaciones en el host exigen `allowHostChecks: true`; por defecto se
+  bloquean porque pueden cargar codigo modificado por el modelo.
 - Cancelar significa matar el **árbol completo** de procesos
   (`taskkill /T /F` en Windows).
 - No instales dependencias automáticamente si el comando puede ejecutar scripts

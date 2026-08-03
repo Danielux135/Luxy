@@ -47,7 +47,7 @@ npm install -g @openai/codex
 ### 1. Clona el proyecto
 
 ```powershell
-cd "C:\Users\Daniel\Desktop\proyecto github"
+Set-Location "D:\Proyectos"
 cd Luxy
 npm install
 npm run build
@@ -100,19 +100,19 @@ npm run setup:machine
 
 Responde:
 
-| Pregunta | Ejemplo en el PC |
-|---|---|
-| Nombre de esta máquina | `casa` |
-| URL del gateway | `https://luxy-gateway.TU-CUENTA.workers.dev` |
-| Secreto de registro | el valor de `MACHINE_REGISTRATION_SECRET` |
-| Alias del proyecto | `errorlux` |
-| Ruta de `errorlux` | `C:\Users\Daniel\Desktop\proyecto github\Errorlux` |
-| Tipo | `flutter` |
-| Comandos | acepta los sugeridos (`flutter analyze`, `flutter test`) |
-| Alias del proyecto | `portfolio` |
-| Ruta de `portfolio` | `C:\Users\Daniel\Desktop\proyecto github\portfolio` |
-| Tipo | `node` |
-| Permitir push | **no** (recomendado) |
+| Pregunta               | Ejemplo en el PC                                         |
+| ---------------------- | -------------------------------------------------------- |
+| Nombre de esta máquina | `casa`                                                   |
+| URL del gateway        | `https://luxy-gateway.TU-CUENTA.workers.dev`             |
+| Secreto de registro    | el valor de `MACHINE_REGISTRATION_SECRET`                |
+| Alias del proyecto     | `errorlux`                                               |
+| Ruta de `errorlux`     | `D:\Proyectos\Errorlux`                                  |
+| Tipo                   | `flutter`                                                |
+| Comandos               | acepta los sugeridos (`flutter analyze`, `flutter test`) |
+| Alias del proyecto     | `portfolio`                                              |
+| Ruta de `portfolio`    | `D:\Proyectos\portfolio`                                 |
+| Tipo                   | `node`                                                   |
+| Permitir push          | **no** (recomendado)                                     |
 
 Al terminar guarda `%APPDATA%\Luxy\config.json`.
 
@@ -142,7 +142,7 @@ rutas de los proyectos.
 ### 1. Clona el proyecto
 
 ```powershell
-cd "C:\Users\Daniel\Documents\GitHub"
+Set-Location "C:\Trabajo"
 git clone <url-del-repo> Luxy
 cd Luxy
 npm install
@@ -166,13 +166,13 @@ codex
 npm run setup:machine
 ```
 
-| Pregunta | Ejemplo en el portátil |
-|---|---|
-| Nombre de esta máquina | `portatil` |
-| URL del gateway | **la misma** que en el PC |
-| Secreto de registro | **el mismo** que en el PC |
-| Alias del proyecto | `errorlux` (**el mismo alias**) |
-| Ruta de `errorlux` | `C:\Users\Daniel\Documents\GitHub\Errorlux` (**ruta distinta**) |
+| Pregunta               | Ejemplo en el portátil                    |
+| ---------------------- | ----------------------------------------- |
+| Nombre de esta máquina | `portatil`                                |
+| URL del gateway        | **la misma** que en el PC                 |
+| Secreto de registro    | **el mismo** que en el PC                 |
+| Alias del proyecto     | `errorlux` (**el mismo alias**)           |
+| Ruta de `errorlux`     | `C:\Trabajo\Errorlux` (**ruta distinta**) |
 
 El alias es el mismo para que `/claude errorlux ...` funcione desde los dos.
 La ruta es distinta porque cada ordenador tiene el proyecto en otro sitio.
@@ -272,5 +272,5 @@ lo bloquea, la cancelación puede dejar procesos huérfanos.
 
 **Las rutas con espacios**
 
-Funcionan. `C:\Users\Daniel\Desktop\proyecto github\Errorlux` es válida: nunca
+Funcionan. `D:\Proyectos\Errorlux` es válida: nunca
 se construye una línea de comandos concatenando texto.

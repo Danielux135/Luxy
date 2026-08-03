@@ -6,6 +6,9 @@ import {
   claimResponseSchema,
   jobControlResponseSchema,
   heartbeatResponseSchema,
+  studioJobResponseSchema,
+  studioJobsResponseSchema,
+  studioOptionsResponseSchema,
 } from '@luxy/shared';
 import type {
   PendingApproval,
@@ -16,6 +19,10 @@ import type {
   JobCompleteRequest,
   JobFailRequest,
   JobCancelledRequest,
+  StudioJob,
+  StudioJobCreateRequest,
+  StudioJobEvent,
+  StudioMachine,
 } from '@luxy/shared';
 
 export class GatewayError extends Error {
@@ -173,6 +180,47 @@ export class GatewayClient {
     return claimResponseSchema.parse(raw).job;
   }
 
+  /** opciones reales de maquina, proyecto y proveedor para Luxy Studio */
+  async studioOptions(): Promise<StudioMachine[]> {
+    const raw = await this.request('GET', '/api/studio/options');
+    return studioOptionsResponseSchema.parse(raw).machines;
+  }
+
+  /** crea una tarea desde Studio sin depender de Telegram */
+  async createStudioJob(
+    payload: StudioJobCreateRequest,
+  ): Promise<{ job: StudioJob; events: StudioJobEvent[] }> {
+    const raw = await this.request('POST', '/api/studio/jobs', payload);
+    return studioJobResponseSchema.parse(raw);
+  }
+
+  async listStudioJobs(
+    filters: {
+      targetMachineId?: string;
+      status?: string;
+      limit?: number;
+    } = {},
+  ): Promise<StudioJob[]> {
+    const query = new URLSearchParams();
+    if (filters.targetMachineId !== undefined) {
+      query.set('targetMachineId', filters.targetMachineId);
+    }
+    if (filters.status !== undefined) query.set('status', filters.status);
+    if (filters.limit !== undefined) query.set('limit', String(filters.limit));
+    const suffix = query.size === 0 ? '' : `?${query.toString()}`;
+    const raw = await this.request('GET', `/api/studio/jobs${suffix}`);
+    return studioJobsResponseSchema.parse(raw).jobs;
+  }
+
+  async getStudioJob(jobId: string): Promise<{ job: StudioJob; events: StudioJobEvent[] }> {
+    const raw = await this.request('GET', `/api/studio/jobs/${encodeURIComponent(jobId)}`);
+    return studioJobResponseSchema.parse(raw);
+  }
+
+  async cancelStudioJob(jobId: string): Promise<void> {
+    await this.request('POST', `/api/studio/jobs/${encodeURIComponent(jobId)}/cancel`);
+  }
+
   /**
    * descarga el adjunto de un trabajo.
    *
@@ -218,10 +266,7 @@ export class GatewayClient {
   async getJobControl(jobId: string, renewLeaseSeconds?: number): Promise<JobControl> {
     const query =
       renewLeaseSeconds === undefined ? '' : `?renewLease=${encodeURIComponent(renewLeaseSeconds)}`;
-    const raw = await this.request(
-      'GET',
-      `/api/jobs/${encodeURIComponent(jobId)}/control${query}`,
-    );
+    const raw = await this.request('GET', `/api/jobs/${encodeURIComponent(jobId)}/control${query}`);
     const parsed = jobControlResponseSchema.parse(raw);
     return {
       status: parsed.status,

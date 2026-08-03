@@ -27,17 +27,25 @@ const bridge: LuxyBridge = {
   deleteSecret: (name: string) => ipcRenderer.invoke(IPC_INVOKE.secretDelete, { name }),
   scanForSecrets: () => ipcRenderer.invoke(IPC_INVOKE.migrationScan),
   importSecrets: (file: string, names: string[], connectionId?: string | null) =>
-    ipcRenderer.invoke(IPC_INVOKE.migrationImport, { file, names, connectionId: connectionId ?? null }),
+    ipcRenderer.invoke(IPC_INVOKE.migrationImport, {
+      file,
+      names,
+      connectionId: connectionId ?? null,
+    }),
   deleteMigratedFile: (file: string) =>
     ipcRenderer.invoke(IPC_INVOKE.migrationDeleteFile, { file }),
 
   detectTools: () => ipcRenderer.invoke(IPC_INVOKE.toolsDetect),
-  checkGateway: (gatewayUrl: string) =>
-    ipcRenderer.invoke(IPC_INVOKE.gatewayCheck, { gatewayUrl }),
+  checkGateway: (gatewayUrl: string) => ipcRenderer.invoke(IPC_INVOKE.gatewayCheck, { gatewayUrl }),
   registerMachine: (args: unknown) => ipcRenderer.invoke(IPC_INVOKE.machineRegister, args),
-  testConnection: (connectionId: string, baseUrl: string) =>
-    ipcRenderer.invoke(IPC_INVOKE.connectionTest, { connectionId, baseUrl }),
+  testConnection: (connectionId: string) =>
+    ipcRenderer.invoke(IPC_INVOKE.connectionTest, { connectionId }),
   resolveApproval: (args: unknown) => ipcRenderer.invoke(IPC_INVOKE.approvalResolve, args),
+  getStudioOptions: () => ipcRenderer.invoke(IPC_INVOKE.studioOptions),
+  createStudioJob: (args: unknown) => ipcRenderer.invoke(IPC_INVOKE.studioJobCreate, args),
+  listStudioJobs: (args = { limit: 30 }) => ipcRenderer.invoke(IPC_INVOKE.studioJobsList, args),
+  getStudioJob: (jobId: string) => ipcRenderer.invoke(IPC_INVOKE.studioJobGet, { jobId }),
+  cancelStudioJob: (jobId: string) => ipcRenderer.invoke(IPC_INVOKE.studioJobCancel, { jobId }),
 
   onAgentEvent: (listener) => {
     // el listener del renderer nunca ve el objeto IpcRendererEvent: solo el dato

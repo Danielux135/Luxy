@@ -3,7 +3,8 @@ import { useState, type JSX } from 'react';
 import { StatusRail } from './ui/StatusRail.js';
 import { useAgent } from './useAgent.js';
 import { useConfig } from './useConfig.js';
-import { HomePage, JobsPage } from './pages/Overview.js';
+import { HomePage } from './pages/Overview.js';
+import { StudioPage } from './pages/Studio.js';
 import { ConnectionsPage, ModelsPage, ProjectsPage } from './pages/Config.js';
 import { LogsPage, SettingsPage } from './pages/System.js';
 import { SetupPage } from './pages/Setup.js';
@@ -21,7 +22,8 @@ const SECCIONES = [
 type SeccionId = (typeof SECCIONES)[number]['id'];
 
 export function App(): JSX.Element {
-  const { status, activity, pending, approve, busy, error, hint, start, stop, restart } = useAgent();
+  const { status, activity, pending, approve, busy, error, hint, start, stop, restart } =
+    useAgent();
   const { summary, loading, save, setSecret, deleteSecret, reload } = useConfig();
   const [seccion, setSeccion] = useState<SeccionId>('inicio');
   // el onboarding se abre solo la primera vez, y a mano desde Ajustes
@@ -87,10 +89,14 @@ export function App(): JSX.Element {
             agentHint={hint}
           />
         )}
-        {seccion === 'trabajos' && <JobsPage activity={activity} />}
+        {seccion === 'trabajos' && <StudioPage />}
         {seccion === 'proyectos' && <ProjectsPage summary={summary} onSave={save} />}
         {seccion === 'conexiones' && (
-          <ConnectionsPage summary={summary} onSetSecret={setSecret} onDeleteSecret={deleteSecret} />
+          <ConnectionsPage
+            summary={summary}
+            onSetSecret={setSecret}
+            onDeleteSecret={deleteSecret}
+          />
         )}
         {seccion === 'modelos' && <ModelsPage summary={summary} />}
         {seccion === 'registros' && <LogsPage />}

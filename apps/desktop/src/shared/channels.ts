@@ -30,6 +30,11 @@ export const IPC_INVOKE = {
   machineRegister: 'luxy:machine:register',
   connectionTest: 'luxy:connection:test',
   approvalResolve: 'luxy:approval:resolve',
+  studioOptions: 'luxy:studio:options',
+  studioJobCreate: 'luxy:studio:job:create',
+  studioJobsList: 'luxy:studio:jobs:list',
+  studioJobGet: 'luxy:studio:job:get',
+  studioJobCancel: 'luxy:studio:job:cancel',
 } as const;
 
 /** canales de notificacion (main -> renderer) */

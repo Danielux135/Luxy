@@ -9,6 +9,7 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { hostResponseSchema, redact } from '@luxy/shared';
 import type { AgentConfig, AgentEvent, AgentHostStatus, HostRequest } from '@luxy/shared';
+import { buildAgentProcessEnv } from './agent-environment.js';
 
 const STOPPED_STATUS: AgentHostStatus = { runState: 'stopped', agent: null, lastError: null };
 
@@ -120,17 +121,18 @@ export class AgentController {
     this.stderrTail = [];
 
     return new Promise((resolve, reject) => {
-      const env: Record<string, string> = {};
       // se le pasa node.exe explicitamente: dentro de Electron process.execPath
-      // es Luxy.exe, y con el no funcionan los shims de claude ni de codex
-      if (this.options.nodePath !== null) env['LUXY_NODE_PATH'] = this.options.nodePath;
+      // es Luxy.exe, y con el no funcionan los shims de claude ni de codex.
+      // El resto del entorno se filtra: el main puede contener secretos ajenos
+      // al agente y el hijo no necesita heredarlos.
+      const env = buildAgentProcessEnv(process.env, this.options.nodePath);
 
       const child = utilityProcess.fork(this.options.entryPath, [], {
         serviceName: 'luxy-agent',
         // 'ignore' tiraba la salida del hijo, y con ella la causa de cualquier
         // fallo de arranque: el usuario solo veia "codigo 1". Ahora se captura.
         stdio: 'pipe',
-        env: { ...process.env, ...env },
+        env,
       });
 
       child.stderr?.on('data', (chunk: Buffer) => this.rememberStderr(chunk.toString('utf8')));
@@ -206,9 +208,17 @@ export class AgentController {
         if (!settled) {
           settled = true;
           clearTimeout(readyTimer);
-          reject(new AgentControllerError(this.describeFailure(code ?? undefined), hintForFailure(this.stderrTail)));
+          reject(
+            new AgentControllerError(
+              this.describeFailure(code ?? undefined),
+              hintForFailure(this.stderrTail),
+            ),
+          );
         } else {
-          this.options.onLog('el proceso del agente termino', { code, causa: this.describeFailure(code ?? undefined) });
+          this.options.onLog('el proceso del agente termino', {
+            code,
+            causa: this.describeFailure(code ?? undefined),
+          });
         }
       });
     });

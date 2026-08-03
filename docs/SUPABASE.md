@@ -15,6 +15,12 @@ eventos de progreso y la auditoría de aprobaciones.
 
 1. `supabase/migrations/0001_luxy_initial_schema.sql`
 2. `supabase/migrations/0002_luxy_job_claim.sql`
+3. `supabase/migrations/0003_luxy_model_registry.sql`
+4. `supabase/migrations/0005_luxy_studio_jobs.sql`
+
+`0004_luxy_remote.sql` es independiente y pertenece a Luxy Remote, actualmente
+pausado. No hace falta aplicarla para Studio. La aplicación nunca ejecuta estas
+migraciones automáticamente.
 
 > **Antes de aplicarlas a tu proyecto real, pruébalas en uno de pruebas.**
 > No se han ejecutado contra un Postgres real durante el desarrollo (ver
@@ -57,9 +63,9 @@ Todas deben tener `rowsecurity = true`.
 
 **Settings → API**:
 
-| Campo | Variable | Dónde va |
-|---|---|---|
-| Project URL | `SUPABASE_URL` | secret de Cloudflare |
+| Campo          | Variable                    | Dónde va                            |
+| -------------- | --------------------------- | ----------------------------------- |
+| Project URL    | `SUPABASE_URL`              | secret de Cloudflare                |
 | `service_role` | `SUPABASE_SERVICE_ROLE_KEY` | secret de Cloudflare **y solo ahí** |
 
 > La `service_role` omite RLS por completo. **Nunca** debe estar en tus
@@ -71,24 +77,31 @@ La clave `anon` no se usa en absoluto: las migraciones le revocan todo permiso.
 ## 4. Modelo de datos
 
 ### telegram_updates
+
 Idempotencia. `update_id` es clave primaria, así que un reenvío de Telegram no
 puede lanzar el mismo trabajo dos veces.
 
 ### telegram_users
+
 Lista blanca y **máquina preferida** de cada usuario.
 
 ### machines
+
 Una fila por instalación de Luxy. `name` es único y es como te refieres a ella
 (`/use casa`). `capabilities` guarda qué herramientas hay instaladas de verdad;
 `projects` los alias configurados.
 
 ### machine_tokens
+
 **Solo el hash SHA-256.** No hay ninguna columna con el token en claro. Soporta
 caducidad (`expires_at`) y revocación (`revoked_at`). Registrar de nuevo una
 máquina revoca sus tokens anteriores.
 
 ### jobs
-La cola. Estados:
+
+La cola. `created_via` distingue `telegram`, `studio` y `mobile`; los ids de
+Telegram son nulos para Studio/Mobile y siguen siendo obligatorios para trabajos
+de Telegram. Estados:
 
 ```
 queued → claimed → running → completed
@@ -100,14 +113,17 @@ waiting_for_approval  (esperando commit/descarte/push)
 ```
 
 ### job_events
+
 Progreso incremental. `unique (job_id, sequence)` hace idempotente el reenvío
 desde la cola local del agente.
 
 ### approvals
+
 Auditoría. Cada commit, descarte o push queda registrado con quién lo aprobó y
 cuándo.
 
 ### provider_usage
+
 Tokens y coste estimado de las APIs HTTP.
 
 ## 5. La reclamación atómica
@@ -202,11 +218,12 @@ guardar.
 4. Ejecuta `npm test`: `migrations.test.ts` comprueba estas invariantes.
 5. Pruébala en un proyecto de pruebas antes que en el real.
 
-## Limitación conocida
+## Verificación
 
-Las migraciones **no se han ejecutado contra un PostgreSQL real** durante el
-desarrollo: el equipo no tenía `psql`, Docker ni la CLI de Supabase. Lo que sí
-se verifica automáticamente (`packages/shared/src/migrations.test.ts`):
+`0001`, `0002` y `0003` se han contrastado en el Supabase personal conectado.
+`0005` todavía requiere probarse primero en un proyecto de pruebas antes de
+aplicarla al real. La suite estructural (`packages/shared/src/migrations.test.ts`)
+verifica:
 
 - delimitadores `$$` y paréntesis equilibrados,
 - que existan todas las tablas, índices y funciones,

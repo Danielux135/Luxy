@@ -14,13 +14,13 @@ contenido que procesa un modelo.
 
 ## Autenticación y autorización
 
-| Barrera | Dónde | Qué impide |
-|---|---|---|
-| Secret token del webhook | `auth.ts` | que alguien invoque el webhook |
-| Lista blanca de usuarios | `TELEGRAM_ADMIN_USER_ID` | que otro usuario dé órdenes |
-| Lista blanca de chats | `TELEGRAM_ALLOWED_CHAT_IDS` | uso desde chats ajenos |
-| Token de máquina | `Authorization: Bearer` | que un tercero reclame trabajos |
-| Secreto de registro | alta de máquina | registrar máquinas no autorizadas |
+| Barrera                  | Dónde                       | Qué impide                        |
+| ------------------------ | --------------------------- | --------------------------------- |
+| Secret token del webhook | `auth.ts`                   | que alguien invoque el webhook    |
+| Lista blanca de usuarios | `TELEGRAM_ADMIN_USER_ID`    | que otro usuario dé órdenes       |
+| Lista blanca de chats    | `TELEGRAM_ALLOWED_CHAT_IDS` | uso desde chats ajenos            |
+| Token de máquina         | `Authorization: Bearer`     | que un tercero reclame trabajos   |
+| Secreto de registro      | alta de máquina             | registrar máquinas no autorizadas |
 
 Los tokens de máquina se guardan **solo como hash SHA-256**. La tabla no tiene
 ninguna columna con el token en claro; el valor se entrega una única vez.
@@ -38,6 +38,9 @@ nunca lanza dos trabajos.
 
 Los eventos de progreso son idempotentes por `(job_id, sequence)`, así que la
 cola local puede reenviar sin duplicar.
+
+Los resultados finales se guardan en `pending-outcomes.json`; los endpoints
+terminales son idempotentes y no repiten notificaciones al reenviar.
 
 ## Ejecución de procesos
 
@@ -67,9 +70,9 @@ dejaría procesos huérfanos. En POSIX se mata el grupo entero.
 acabe en `_KEY`, `_TOKEN`, `_SECRET`, `_PASSWORD`, o que empiece por `AWS_`,
 `GITHUB_`, `SSH_`, `SUPABASE_`, `TELEGRAM_`, `ANTHROPIC_`, `OPENAI_`.
 
-A ningún modelo se le envía: el entorno completo, cookies, credenciales del
-navegador, claves SSH, tokens de GitHub, el contenido de `%APPDATA%` ni nada
-del gestor de credenciales.
+Luxy no inyecta en el proceso: el entorno completo, cookies, claves SSH, tokens
+de GitHub ni secretos del navegador. La lista mínima de variables evita que una
+credencial ajena viaje por accidente; no sustituye un sandbox de sistema operativo.
 
 ## Rutas y sistema de archivos
 
@@ -79,6 +82,14 @@ del gestor de credenciales.
   como hijo de `C:/wt/lux-1`.
 - `assertInsideWorktree` además resuelve **enlaces simbólicos** con `realpath`,
   porque un symlink dentro del worktree podría apuntar a cualquier sitio.
+
+## Comprobaciones del proyecto
+
+La lista blanca evita inyección de shell, pero una prueba puede importar código
+que el modelo acaba de modificar. Por eso `allowHostChecks` es `false` por
+defecto y Luxy no ejecuta comprobaciones en Windows hasta que el usuario acepta
+el riesgo para ese proyecto. Cambiar `package.json` o cualquier manifiesto las
+bloquea igualmente.
 
 ## Lista blanca de comandos
 
@@ -123,15 +134,17 @@ Y recuerda los límites en cada ejecución (no salir del worktree, no hacer push
 no tocar credenciales). Los proveedores HTTP llevan además un system prompt que
 dice que no siga instrucciones incrustadas en los datos.
 
-Esto **reduce** el riesgo, no lo elimina. La defensa real es que el proveedor
-corre en un worktree aislado, con lista blanca de comandos y sin acceso a
-credenciales.
+Esto **reduce** el riesgo, no lo elimina. El worktree protege la carpeta Git
+principal y las herramientas propias de Luxy confinan sus rutas; por sí solo no
+impide que un proceso externo intente leer otros archivos del mismo usuario.
 
 ## Base de datos
 
 - RLS activo en **todas** las tablas.
 - `anon` y `authenticated` sin **ningún** permiso; también revocados los
   privilegios por defecto.
+- `0005` revoca además `EXECUTE` a `PUBLIC` sobre las funciones **security
+  definer** y lo concede únicamente a `service_role`.
 - El único cliente es el Worker con `service_role`, que omite RLS.
 - **La `service_role` solo existe como secret de Cloudflare.** Nunca en tus
   ordenadores, nunca en el repositorio.
@@ -153,17 +166,21 @@ Telegram te dice qué archivos quedaron modificados y dónde están.
 
 ## Límites conocidos
 
-1. **Rate limiting aproximado.** Vive en memoria del isolate de Cloudflare;
+1. **No hay sandbox de sistema operativo.** El worktree no aísla el resto del
+   disco ni la red. Las comprobaciones del proyecto quedan desactivadas por
+   defecto y el entorno se minimiza, pero los proveedores externos se ejecutan
+   con la cuenta del usuario.
+2. **Rate limiting aproximado.** Vive en memoria del isolate de Cloudflare;
    con varios isolates el límite es por isolate. Frena bucles y abuso
    accidental, no un ataque distribuido. Para un límite exacto haría falta un
    Durable Object.
-2. **Las migraciones no se han ejecutado contra un Postgres real** en este
-   equipo (no hay psql ni docker). Se validan estructuralmente en
-   `migrations.test.ts`. Ejecútalas primero en un proyecto de pruebas.
-3. **`--permission-mode acceptEdits`** deja que Claude edite archivos sin
+3. **La migración `0005` de Studio no se ha aplicado todavía.** Se valida
+   estructuralmente en `migrations.test.ts` y debe probarse en un proyecto de
+   pruebas antes del Supabase real.
+4. **`--permission-mode acceptEdits`** deja que Claude edite archivos sin
    preguntar, que es lo que necesita una ejecución no interactiva. El
    aislamiento lo da el worktree, no el modo de permisos.
-4. La ruta `cmd.exe` para `.bat` no desreferenciables es una excepción
+5. La ruta `cmd.exe` para `.bat` no desreferenciables es una excepción
    controlada, descrita arriba.
 
 ## Reportar un problema
@@ -187,17 +204,17 @@ Añadido cuando los modelos pasaron de responder a **editar archivos**. Ver
 
 ### Barreras
 
-| Riesgo | Barrera |
-|---|---|
-| salir del worktree | `confinePath`: realpath del antepasado existente, falla cerrado |
-| enlaces y junctions | rechazados, también al recorrer directorios |
-| leer credenciales | `.env*`, `*.pem`, `id_rsa`, `.npmrc`, `secrets.enc` y `.git/` bloqueados por nombre |
-| ejecutar comandos arbitrarios | el modelo manda un **índice**, no una cadena |
-| RCE vía `package.json` | huella SHA-256 de los manifiestos antes de trabajar |
-| commit o push sin permiso | puertas comprobadas **en el agente**, no en la interfaz |
-| reutilizar una aprobación | se consume al usarla |
-| secretos hacia React | el renderer solo recibe nombre → booleano |
-| exfiltración desde el renderer | la URL de prueba sale de la configuración, no del renderer |
+| Riesgo                         | Barrera                                                                             |
+| ------------------------------ | ----------------------------------------------------------------------------------- |
+| salir del worktree             | `confinePath`: realpath del antepasado existente, falla cerrado                     |
+| enlaces y junctions            | rechazados, también al recorrer directorios                                         |
+| leer credenciales              | `.env*`, `*.pem`, `id_rsa`, `.npmrc`, `secrets.enc` y `.git/` bloqueados por nombre |
+| ejecutar comandos arbitrarios  | el modelo manda un **índice**, no una cadena                                        |
+| RCE vía `package.json`         | huella SHA-256 de los manifiestos antes de trabajar                                 |
+| commit o push sin permiso      | puertas comprobadas **en el agente**, no en la interfaz                             |
+| reutilizar una aprobación      | se consume al usarla                                                                |
+| secretos hacia React           | el renderer solo recibe nombre → booleano                                           |
+| exfiltración desde el renderer | cambiar el endpoint invalida antes la clave o el token cifrado                      |
 
 ### Revisión de seguridad
 

@@ -401,6 +401,48 @@ describe('runBatchJob', () => {
     expect(resultado).toMatchObject({ skipped: 1, done: 1 });
   });
 
+  it('deshace un append sin confirmar antes de reintentar el lote', async () => {
+    const path = entrada(5);
+    const opts = opciones(path);
+    const [recordset] = await lotes(path, 5);
+
+    // Simula el corte exacto entre appendResults y el checkpoint "done".
+    // La marca writing ya esta en disco y la salida contiene las cinco filas.
+    Checkpoint.open(opts.checkpointPath).checkpoint.record({
+      batch: 0,
+      from: 0,
+      to: 4,
+      status: 'writing',
+      items: 5,
+      inputHash: recordset!.hash,
+      error: null,
+      outputOffset: 0,
+      durationMs: 1,
+      at: new Date().toISOString(),
+    });
+    writeFileSync(
+      opts.outputPath,
+      Array.from({ length: 5 }, (_, index) => JSON.stringify({ id: index, __row: index })).join(
+        '\n',
+      ) + '\n',
+      'utf8',
+    );
+
+    const model = modeloBueno();
+    const resultado = await runBatchJob(opts, model, hooks());
+    const salida = readFileSync(opts.outputPath, 'utf8').trim().split('\n');
+
+    expect(model.process).toHaveBeenCalledTimes(1);
+    expect(resultado).toMatchObject({ done: 1, skipped: 0, items: 5 });
+    expect(salida).toHaveLength(5);
+    expect(salida.map((linea) => JSON.parse(linea) as { __row: number })).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ __row: 0 }),
+        expect.objectContaining({ __row: 4 }),
+      ]),
+    );
+  });
+
   it('un modelo que se come registros deja el lote como fallido, no escribe huecos', async () => {
     const tramposo: BatchModel = {
       // devuelve 3 de 5

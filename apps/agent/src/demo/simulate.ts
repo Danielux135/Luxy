@@ -45,8 +45,7 @@ class MockProvider implements ProviderExecution {
 
     return {
       ok: true,
-      finalText:
-        'Se creo saludo.txt con un mensaje de prueba. No se modifico ningun otro archivo.',
+      finalText: 'Se creo saludo.txt con un mensaje de prueba. No se modifico ningun otro archivo.',
       sessionId: 'sesion-simulada-0001',
       exitCode: 0,
       timedOut: false,
@@ -114,6 +113,7 @@ async function main(): Promise<void> {
           type: 'node',
           testCommands: [['npm', ['test']]],
           testTimeoutMs: 120_000,
+          allowHostChecks: true,
           allowEdits: true,
           allowCommit: true,
           allowPush: false,
@@ -126,13 +126,15 @@ async function main(): Promise<void> {
       id: '00000000-0000-4000-8000-000000000001',
       shortId: 'LUX-DEMO',
       provider: 'claude',
+      model: null,
       projectAlias: 'demo',
       prompt: 'Crea un archivo saludo.txt con un mensaje de prueba.',
+      origin: 'studio',
       telegramChatId: 0,
       telegramUserId: 0,
       leaseExpiresAt: new Date(Date.now() + 120_000).toISOString(),
       attachment: null,
-    metadata: {},
+      metadata: {},
     };
 
     console.log('  [3/5] ejecutando el trabajo completo');
@@ -160,7 +162,9 @@ async function main(): Promise<void> {
     console.log('');
 
     if (outcome.kind !== 'completed') {
-      console.error(`  La demostracion no completo el trabajo: ${JSON.stringify(outcome, null, 2)}`);
+      console.error(
+        `  La demostracion no completo el trabajo: ${JSON.stringify(outcome, null, 2)}`,
+      );
       process.exitCode = 1;
       return;
     }
@@ -225,6 +229,8 @@ async function main(): Promise<void> {
 }
 
 main().catch((error) => {
-  console.error(`\n  La demostracion fallo: ${error instanceof Error ? error.message : String(error)}\n`);
+  console.error(
+    `\n  La demostracion fallo: ${error instanceof Error ? error.message : String(error)}\n`,
+  );
   process.exitCode = 1;
 });

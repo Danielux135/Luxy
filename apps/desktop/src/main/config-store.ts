@@ -10,6 +10,46 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from '
 import { dirname, join } from 'node:path';
 import { storedAgentConfigSchema } from '@luxy/shared';
 import type { StoredAgentConfig } from '@luxy/shared';
+import { MACHINE_TOKEN_SECRET, connectionSecretName } from '../shared/channels.js';
+
+function canonicalEndpoint(value: string): string {
+  const url = new URL(value);
+  url.hash = '';
+  url.search = '';
+  url.pathname = url.pathname.replace(/\/+$/, '');
+  return url.toString();
+}
+
+/**
+ * secretos que dejan de estar vinculados a su destino original.
+ *
+ * El renderer puede proponer configuracion, pero no puede conservar una clave
+ * de API ni el token de maquina al cambiar el servidor que los recibira.
+ */
+export function secretsToInvalidateForConfigChange(
+  previous: StoredAgentConfig | null,
+  next: StoredAgentConfig,
+): string[] {
+  if (previous === null) return [];
+  const nextById = new Map(next.connections.map((connection) => [connection.id, connection]));
+  const invalidated: string[] = [];
+
+  if (canonicalEndpoint(previous.gatewayUrl) !== canonicalEndpoint(next.gatewayUrl)) {
+    invalidated.push(MACHINE_TOKEN_SECRET);
+  }
+
+  for (const connection of previous.connections) {
+    const replacement = nextById.get(connection.id);
+    if (
+      replacement === undefined ||
+      replacement.protocol !== connection.protocol ||
+      canonicalEndpoint(replacement.baseUrl) !== canonicalEndpoint(connection.baseUrl)
+    ) {
+      invalidated.push(connectionSecretName(connection.id));
+    }
+  }
+  return invalidated;
+}
 
 export class ConfigStoreError extends Error {
   constructor(

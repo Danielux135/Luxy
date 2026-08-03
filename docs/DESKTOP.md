@@ -1,7 +1,9 @@
 # Luxy Desktop
 
-Aplicación de escritorio para Windows. Es el flujo normal de uso: abres `Luxy.exe`,
-se queda en la bandeja y Telegram le manda trabajo.
+Aplicación de escritorio para Windows y sede principal de Luxy Studio. Desde la
+vista Trabajos se eligen máquina, proyecto, proveedor y modelo, se crea la tarea
+y se consultan historial, eventos, resultado, pruebas y resumen del diff.
+Telegram permanece como canal secundario.
 
 La CLI (`npm start`) sigue existiendo como herramienta avanzada y de recuperación.
 
@@ -9,9 +11,9 @@ La CLI (`npm start`) sigue existiendo como herramienta avanzada y de recuperaci�
 
 Dos artefactos, generados con `npm run desktop:package`:
 
-| Archivo | Cuándo usarlo |
-|---|---|
-| `Luxy Setup 0.1.0.exe` | instalación normal |
+| Archivo                   | Cuándo usarlo       |
+| ------------------------- | ------------------- |
+| `Luxy Setup 0.1.0.exe`    | instalación normal  |
 | `Luxy-portable-0.1.0.exe` | probar sin instalar |
 
 **Usa el instalador si quieres notificaciones.** Windows solo entrega notificaciones
@@ -66,15 +68,15 @@ agente, abrir carpeta de registros y salir.
 
 ## Seguridad de la ventana
 
-| Ajuste | Valor |
-|---|---|
-| `contextIsolation` | `true` |
-| `nodeIntegration` | `false` |
-| `sandbox` | `true` |
-| CSP `script-src` | `'self'`, sin `unsafe-inline` en producción |
-| `will-navigate` | bloqueado fuera de la propia interfaz |
+| Ajuste                 | Valor                                                 |
+| ---------------------- | ----------------------------------------------------- |
+| `contextIsolation`     | `true`                                                |
+| `nodeIntegration`      | `false`                                               |
+| `sandbox`              | `true`                                                |
+| CSP `script-src`       | `'self'`, sin `unsafe-inline` en producción           |
+| `will-navigate`        | bloqueado fuera de la propia interfaz                 |
 | `setWindowOpenHandler` | `deny`; los enlaces abren en el navegador del sistema |
-| permisos del navegador | denegados en bloque |
+| permisos del navegador | denegados en bloque                                   |
 
 **El preload no expone `ipcRenderer` crudo.** Solo verbos concretos: `getStatus`,
 `startAgent`, `pickFolder`… Nunca algo como `exec(comando)`.
@@ -102,6 +104,18 @@ el flujo de eventos IPC (`agent.started`, `job.claimed`, `job.tool.requested`,
 
 `onAgentEvent` **devuelve la función de baja**. Sin ella se acumularían listeners
 al navegar entre vistas.
+
+El historial remoto de Studio se actualiza cada tres segundos y procede del
+gateway, no de memoria temporal del renderer.
+
+## Seguridad de Studio
+
+- El renderer no recibe el `machineToken`; los verbos de Studio pasan por IPC y
+  el proceso principal construye el cliente autenticado.
+- Toda entrada se valida con Zod en IPC y otra vez en el gateway.
+- El gateway comprueba que la máquina tenga el proyecto y el proveedor pedidos;
+  nunca sustituye silenciosamente un modelo o proveedor.
+- El utility process del agente recibe un entorno mínimo, no `process.env` completo.
 
 ## Desarrollo
 

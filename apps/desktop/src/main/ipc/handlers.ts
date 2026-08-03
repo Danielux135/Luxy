@@ -21,6 +21,9 @@ import {
   migrationImportArgsSchema,
   connectionTestArgsSchema,
   approvalResolveArgsSchema,
+  studioJobCreateArgsSchema,
+  studioJobIdArgsSchema,
+  studioJobsListArgsSchema,
   gatewayCheckArgsSchema,
   machineRegisterArgsSchema,
   pickFolderArgsSchema,
@@ -30,7 +33,7 @@ import {
   type IpcResult,
 } from '../../shared/ipc.js';
 import type { AgentController } from '../agent-controller.js';
-import type { ConfigStore } from '../config-store.js';
+import { secretsToInvalidateForConfigChange, type ConfigStore } from '../config-store.js';
 import type { SecretStore } from '../secure-storage.js';
 import { MACHINE_TOKEN_SECRET, connectionSecretName } from '../../shared/ipc.js';
 import { deleteMigratedFile, inspectEnvFile, readEnvSecrets } from '../migration.js';
@@ -91,7 +94,10 @@ function tailLogFile(directory: string, count: number): string[] {
   const file = join(directory, 'luxy.log');
   if (!existsSync(file)) return [];
   const content = readFileSync(file, 'utf8');
-  return content.split(/\r?\n/).filter((line) => line.length > 0).slice(-count);
+  return content
+    .split(/\r?\n/)
+    .filter((line) => line.length > 0)
+    .slice(-count);
 }
 
 /**
@@ -117,6 +123,18 @@ function sanitizeConfig(config: StoredAgentConfig | null): unknown {
   if (config === null) return null;
   const { machineToken: _oculto, ...resto } = config;
   return resto;
+}
+
+/** cliente autenticado para Studio; el token nunca sale del proceso principal */
+function studioClient(context: HandlerContext): GatewayClient {
+  const stored = context.configStore.load();
+  if (stored === null) throw new Error('Luxy no esta configurado en esta maquina');
+
+  const token = context.secretStore.get(MACHINE_TOKEN_SECRET) ?? stored.machineToken;
+  if (token === undefined) {
+    throw new Error('falta el token de maquina; vuelve a registrar esta instalacion');
+  }
+  return new GatewayClient({ gatewayUrl: stored.gatewayUrl, machineToken: token });
 }
 
 export function registerIpcHandlers(context: HandlerContext): void {
@@ -195,6 +213,15 @@ export function registerIpcHandlers(context: HandlerContext): void {
         .map((issue) => `${issue.path.join('.') || 'raiz'}: ${issue.message}`)
         .join('; ');
       throw new Error(`la configuracion no es valida (${detalle})`);
+    }
+
+    // Una clave queda ligada al endpoint que estaba guardado cuando se
+    // introdujo. Si el renderer cambia el servidor conservando el mismo id, se
+    // elimina ANTES de guardar la configuracion nueva para impedir exfiltrarla.
+    const previous = context.configStore.load();
+    for (const secretName of secretsToInvalidateForConfigChange(previous, parsed.data)) {
+      context.secretStore.delete(secretName);
+      context.log('secreto invalidado por cambio de endpoint', { name: secretName });
     }
 
     // si trae un token (por ejemplo recien registrado), va al almacen cifrado y
@@ -330,11 +357,35 @@ export function registerIpcHandlers(context: HandlerContext): void {
     return { ok: true, message: 'peticion enviada al agente' };
   });
 
+  // ---------------------------------------------------------------------------
+  // Luxy Studio
+  // ---------------------------------------------------------------------------
+
+  handle(IPC_INVOKE.studioOptions, emptyArgsSchema, async () => ({
+    machines: await studioClient(context).studioOptions(),
+  }));
+
+  handle(IPC_INVOKE.studioJobCreate, studioJobCreateArgsSchema, async (args) =>
+    studioClient(context).createStudioJob(args),
+  );
+
+  handle(IPC_INVOKE.studioJobsList, studioJobsListArgsSchema, async (args) => ({
+    jobs: await studioClient(context).listStudioJobs(args),
+  }));
+
+  handle(IPC_INVOKE.studioJobGet, studioJobIdArgsSchema, async (args) =>
+    studioClient(context).getStudioJob(args.jobId),
+  );
+
+  handle(IPC_INVOKE.studioJobCancel, studioJobIdArgsSchema, async (args) => {
+    await studioClient(context).cancelStudioJob(args.jobId);
+    return { cancelled: true };
+  });
+
   handle(IPC_INVOKE.connectionTest, connectionTestArgsSchema, async (args) => {
-    // la URL la decide la configuracion guardada, NO el renderer. Si se usara
-    // args.baseUrl, un renderer comprometido podria mandar la clave descifrada
-    // al servidor que quisiera: la clave no vuelve al renderer, pero el
-    // renderer elegiria a quien se le entrega.
+    // la URL la decide la configuracion guardada, NO el renderer. El contrato
+    // IPC ni siquiera admite una URL: un renderer comprometido no puede elegir
+    // a que servidor entrega main la clave descifrada.
     const stored = context.configStore
       .load()
       ?.connections.find((connection) => connection.id === args.connectionId);

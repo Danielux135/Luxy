@@ -115,7 +115,9 @@ describe('migraciones - seguridad', () => {
 
   it('revoca cualquier acceso a anon y authenticated', () => {
     expect(allSql).toMatch(/revoke all on all tables in schema public from anon, authenticated/i);
-    expect(allSql).toMatch(/revoke all on all functions in schema public from anon, authenticated/i);
+    expect(allSql).toMatch(
+      /revoke all on all functions in schema public from anon, authenticated/i,
+    );
   });
 
   it('no crea ninguna politica que abra el acceso publico', () => {
@@ -215,7 +217,9 @@ describe('migraciones - reclamacion atomica y leases', () => {
   });
 
   it('las funciones no son accesibles para anon ni authenticated', () => {
-    expect(allSql).toMatch(/revoke all on function public\.luxy_claim_job.*from anon, authenticated/i);
+    expect(allSql).toMatch(
+      /revoke all on function public\.luxy_claim_job.*from anon, authenticated/i,
+    );
   });
 });
 
@@ -230,5 +234,44 @@ describe('migraciones - indices', () => {
 
   it('indexa los eventos por trabajo y secuencia', () => {
     expect(allSql).toMatch(/create index if not exists job_events_job_idx/i);
+  });
+});
+
+describe('migracion 0005 - trabajos de Studio', () => {
+  const studio = migrations.find((migration) => migration.name === '0005_luxy_studio_jobs.sql');
+
+  it('desacopla la identidad de Telegram sin perder su integridad', () => {
+    expect(studio).toBeDefined();
+    expect(studio!.sql).toMatch(/telegram_chat_id drop not null/i);
+    expect(studio!.sql).toMatch(/telegram_user_id drop not null/i);
+    expect(studio!.sql).toMatch(/created_via in \('telegram', 'studio', 'mobile'\)/i);
+    expect(studio!.sql).toMatch(/jobs_telegram_identity_check/i);
+  });
+
+  it('recrea la reclamacion atomica con el origen y el modelo', () => {
+    expect(studio).toBeDefined();
+    expect(studio!.sql).toMatch(/drop function if exists public\.luxy_claim_job/i);
+    expect(studio!.sql).toMatch(/created_via\s+text/i);
+    expect(studio!.sql).toMatch(/model\s+text/i);
+    expect(studio!.sql).toMatch(/jobs_model_check/i);
+    expect(studio!.sql).toMatch(/for update skip locked/i);
+  });
+
+  it('no depende de las tablas de Luxy Remote', () => {
+    expect(studio).toBeDefined();
+    expect(studio!.sql).not.toMatch(/remote_(devices|sessions|pairing_codes)/i);
+  });
+
+  it('revoca EXECUTE a PUBLIC, no solo a los roles de Supabase', () => {
+    expect(studio).toBeDefined();
+    expect(studio!.sql).toMatch(
+      /revoke all on function public\.luxy_claim_job[\s\S]*?from public, anon, authenticated/i,
+    );
+    expect(studio!.sql).toMatch(
+      /revoke all on function public\.luxy_request_cancel[\s\S]*?from public, anon, authenticated/i,
+    );
+    expect(studio!.sql).toMatch(
+      /grant execute on function public\.luxy_claim_job[\s\S]*?to service_role/i,
+    );
   });
 });

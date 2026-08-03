@@ -9,7 +9,16 @@
 // por token (dos llamadas de 1007 y 1050 tokens costaron lo mismo). Por eso el
 // tamano de lote se maximiza en vez de minimizarse: el ahorro esta en hacer
 // pocas llamadas grandes, y es de dos ordenes de magnitud.
-import { appendFileSync, mkdirSync } from 'node:fs';
+import {
+  closeSync,
+  existsSync,
+  fsyncSync,
+  mkdirSync,
+  openSync,
+  statSync,
+  truncateSync,
+  writeFileSync,
+} from 'node:fs';
 import { dirname } from 'node:path';
 import { z } from 'zod';
 import { redact } from '@luxy/shared';
@@ -117,6 +126,14 @@ export async function runBatchJob(
     indiceLote += 1;
     const hasta = recordset.from + recordset.rows.length - 1;
 
+    // Si el proceso murio despues de empezar a anadir un lote y antes de
+    // confirmar su checkpoint, se vuelve al byte exacto anterior. Asi el
+    // reintento no duplica filas y tampoco pierde las ya confirmadas.
+    const pendiente = checkpoint.pendingWrite(lote);
+    if (pendiente !== null) {
+      rollbackOutput(options.outputPath, pendiente.outputOffset ?? 0);
+    }
+
     // ya hecho Y con el mismo contenido: se salta sin gastar una llamada
     if (checkpoint.isDone(lote, recordset.hash)) {
       skipped += 1;
@@ -131,13 +148,25 @@ export async function runBatchJob(
     }
 
     const inicio = Date.now();
+    let outputOffset: number | null = null;
     try {
       const respuesta = await model.process(recordset.rows, options.instruction, recordset.from);
       const resultados = parseBatchAnswer(respuesta, recordset.rows.length);
 
-      // los resultados se escriben ANTES de apuntar el lote como hecho: si el
-      // proceso muere entre las dos cosas, el lote se repite y se reescribe.
-      // Al reves se perderian datos, que es el fallo que no se puede permitir.
+      outputOffset = existsSync(options.outputPath) ? statSync(options.outputPath).size : 0;
+      checkpoint.record({
+        batch: lote,
+        from: recordset.from,
+        to: hasta,
+        status: 'writing',
+        items: resultados.length,
+        inputHash: recordset.hash,
+        error: null,
+        outputOffset,
+        durationMs: Date.now() - inicio,
+        at: new Date().toISOString(),
+      });
+
       appendResults(options.outputPath, recordset.from, resultados);
 
       checkpoint.record({
@@ -148,9 +177,11 @@ export async function runBatchJob(
         items: resultados.length,
         inputHash: recordset.hash,
         error: null,
+        outputOffset: null,
         durationMs: Date.now() - inicio,
         at: new Date().toISOString(),
       });
+      outputOffset = null;
 
       done += 1;
       items += resultados.length;
@@ -163,6 +194,20 @@ export async function runBatchJob(
         items: resultados.length,
       });
     } catch (error) {
+      if (outputOffset !== null) {
+        try {
+          rollbackOutput(options.outputPath, outputOffset);
+        } catch (rollbackError) {
+          // No se sustituye la marca "writing" por "failed": conservarla es
+          // lo que permite volver a intentar la recuperacion sin duplicar.
+          throw new Error(
+            `no se pudo recuperar la salida del lote ${lote}: ${
+              rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
+            }`,
+          );
+        }
+      }
+
       const mensaje = redact(error instanceof Error ? error.message : String(error)).slice(0, 400);
 
       checkpoint.record({
@@ -217,10 +262,7 @@ export async function runBatchJob(
  * menos, se ha comido datos, y aceptarlo dejaria huecos silenciosos en la
  * salida. Se rechaza el lote y se apunta como fallido.
  */
-export function parseBatchAnswer(
-  respuesta: string,
-  esperados: number,
-): Record<string, unknown>[] {
+export function parseBatchAnswer(respuesta: string, esperados: number): Record<string, unknown>[] {
   const json = extractJson(respuesta);
   if (json === null) throw new Error('el modelo no devolvio JSON');
 
@@ -278,13 +320,34 @@ function extractJson(respuesta: string): string | null {
  * error contra el que existe el checkpoint, fiarse de la contabilidad del
  * modelo, cometido aqui dentro.
  */
-function appendResults(
-  path: string,
-  desde: number,
-  resultados: Record<string, unknown>[],
-): void {
+function appendResults(path: string, desde: number, resultados: Record<string, unknown>[]): void {
   const lineas = resultados
     .map((fila, posicion) => JSON.stringify({ ...fila, __row: desde + posicion }))
     .join('\n');
-  appendFileSync(path, `${lineas}\n`, 'utf8');
+  const descriptor = openSync(path, 'a');
+  try {
+    writeFileSync(descriptor, `${lineas}\n`, 'utf8');
+    fsyncSync(descriptor);
+  } finally {
+    closeSync(descriptor);
+  }
+}
+
+/** deshace solo la escritura no confirmada; nunca toca bytes anteriores */
+function rollbackOutput(path: string, offset: number): void {
+  if (!existsSync(path)) {
+    if (offset === 0) return;
+    throw new Error('la salida desaparecio mientras habia un lote pendiente');
+  }
+  const size = statSync(path).size;
+  if (size < offset) {
+    throw new Error('la salida es mas corta que el checkpoint; no se modifica automaticamente');
+  }
+  truncateSync(path, offset);
+  const descriptor = openSync(path, 'r+');
+  try {
+    fsyncSync(descriptor);
+  } finally {
+    closeSync(descriptor);
+  }
 }

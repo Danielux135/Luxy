@@ -16,7 +16,7 @@ import { redact, type AgentToolName, type ModelLimits, type ProjectConfig } from
 import { confinePath, isForbiddenName, PathConfinementError } from './confine.js';
 import { TOOL_SCHEMAS, TOOL_DESCRIPTIONS, isToolName } from './definitions.js';
 import { status as gitStatus, collectDiff } from '../git.js';
-import { runProjectTests } from '../test-runner.js';
+import { hostChecksBlockedReason, runProjectTests } from '../test-runner.js';
 import {
   detectManifestChanges,
   describeManifestChanges,
@@ -299,7 +299,10 @@ export class ToolExecutor {
     const absolute = this.resolve(path);
     // glob simple: solo * y ?, nunca una expresion regular del modelo
     const regex = new RegExp(
-      `^${pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.')}$`,
+      `^${pattern
+        .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+        .replace(/\*/g, '.*')
+        .replace(/\?/g, '.')}$`,
       'i',
     );
     const found: string[] = [];
@@ -390,15 +393,10 @@ export class ToolExecutor {
     };
   }
 
-  private applyPatch({
-    path,
-    find,
-    replace,
-  }: {
-    path: string;
-    find: string;
-    replace: string;
-  }): { content: string; detail: string } {
+  private applyPatch({ path, find, replace }: { path: string; find: string; replace: string }): {
+    content: string;
+    detail: string;
+  } {
     const absolute = this.resolve(path);
     const original = readFileSync(absolute, 'utf8');
 
@@ -461,11 +459,14 @@ export class ToolExecutor {
       };
     }
 
+    const blocked = hostChecksBlockedReason(this.context.project);
+    if (blocked !== null) {
+      return { content: `comprobaciones bloqueadas: ${blocked}`, detail: `${name} (bloqueado)` };
+    }
+
     const selected = commandIndex === undefined ? undefined : commands[commandIndex];
     if (commandIndex !== undefined && selected === undefined) {
-      throw new Error(
-        `no existe el comando ${commandIndex}; hay ${commands.length} configurados`,
-      );
+      throw new Error(`no existe el comando ${commandIndex}; hay ${commands.length} configurados`);
     }
 
     // se reutiliza el ejecutor de pruebas tal cual, con su lista blanca y su

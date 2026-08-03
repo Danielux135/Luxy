@@ -7,7 +7,15 @@
 // todo argumento que llega al main se valida con zod antes de tocar logica,
 // igual que la entrada de telegram en el gateway.
 import { z } from 'zod';
-import { type agentEventSchema, agentHostStatusSchema } from '@luxy/shared';
+import {
+  type agentEventSchema,
+  agentHostStatusSchema,
+  jobStatusSchema,
+  studioJobCreateRequestSchema,
+  studioJobResponseSchema,
+  studioJobsResponseSchema,
+  studioOptionsResponseSchema,
+} from '@luxy/shared';
 
 // las constantes de canal y de nombre de secreto viven en channels.ts porque
 // las necesita el preload, que no puede cargar zod
@@ -172,10 +180,11 @@ export const machineRegisterResultSchema = z.object({
   machineId: z.string().nullable(),
 });
 
-export const connectionTestArgsSchema = z.object({
-  connectionId: z.string().min(1).max(32),
-  baseUrl: z.string().url().max(300),
-});
+export const connectionTestArgsSchema = z
+  .object({
+    connectionId: z.string().min(1).max(32),
+  })
+  .strict();
 
 export const connectionTestResultSchema = z.object({
   reachable: z.boolean(),
@@ -202,10 +211,27 @@ export const approvalResolveResultSchema = z.object({
 });
 
 // -----------------------------------------------------------------------------
+// Luxy Studio
+// -----------------------------------------------------------------------------
+
+export const studioJobCreateArgsSchema = studioJobCreateRequestSchema;
+export const studioJobsListArgsSchema = z.object({
+  targetMachineId: z.string().uuid().optional(),
+  status: jobStatusSchema.optional(),
+  limit: z.number().int().min(1).max(100).default(30),
+});
+export const studioJobIdArgsSchema = z.object({ jobId: z.string().uuid() });
+
+export const studioOptionsResultSchema = studioOptionsResponseSchema;
+export const studioJobsListResultSchema = studioJobsResponseSchema;
+export const studioJobResultSchema = studioJobResponseSchema;
+
+// -----------------------------------------------------------------------------
 // API que el preload expone en window.luxy
 // -----------------------------------------------------------------------------
 
-export type IpcResult<T> = { ok: true; value: T } | { ok: false; error: string; hint: string | null };
+export type IpcResult<T> =
+  { ok: true; value: T } | { ok: false; error: string; hint: string | null };
 
 export interface LuxyBridge {
   getAppInfo(): Promise<IpcResult<AppInfo>>;
@@ -234,11 +260,19 @@ export interface LuxyBridge {
   ): Promise<IpcResult<z.infer<typeof machineRegisterResultSchema>>>;
   testConnection(
     connectionId: string,
-    baseUrl: string,
   ): Promise<IpcResult<z.infer<typeof connectionTestResultSchema>>>;
   resolveApproval(
     args: z.infer<typeof approvalResolveArgsSchema>,
   ): Promise<IpcResult<z.infer<typeof approvalResolveResultSchema>>>;
+  getStudioOptions(): Promise<IpcResult<z.infer<typeof studioOptionsResultSchema>>>;
+  createStudioJob(
+    args: z.infer<typeof studioJobCreateArgsSchema>,
+  ): Promise<IpcResult<z.infer<typeof studioJobResultSchema>>>;
+  listStudioJobs(
+    args?: z.infer<typeof studioJobsListArgsSchema>,
+  ): Promise<IpcResult<z.infer<typeof studioJobsListResultSchema>>>;
+  getStudioJob(jobId: string): Promise<IpcResult<z.infer<typeof studioJobResultSchema>>>;
+  cancelStudioJob(jobId: string): Promise<IpcResult<{ cancelled: boolean }>>;
   /** devuelve la funcion de baja; sin ella se acumulan listeners al navegar */
   onAgentEvent(listener: (event: z.infer<typeof agentEventSchema>) => void): () => void;
 }

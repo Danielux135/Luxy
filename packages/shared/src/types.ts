@@ -5,12 +5,14 @@ import type {
   PROVIDER_IDS,
   JOB_EVENT_TYPES,
   APPROVAL_ACTIONS,
+  JOB_ORIGINS,
 } from './constants.js';
 
 export type JobStatus = (typeof JOB_STATUSES)[number];
 export type ProviderId = (typeof PROVIDER_IDS)[number];
 export type JobEventType = (typeof JOB_EVENT_TYPES)[number];
 export type ApprovalAction = (typeof APPROVAL_ACTIONS)[number];
+export type JobOrigin = (typeof JOB_ORIGINS)[number];
 
 // tipo de proyecto: determina los comandos de comprobacion por defecto
 export type ProjectType = 'node' | 'flutter' | 'python' | 'other';
@@ -51,10 +53,12 @@ export interface ToolPresence {
 export interface Job {
   id: string;
   shortId: string;
-  telegramChatId: number;
-  telegramUserId: number;
+  origin: JobOrigin;
+  telegramChatId: number | null;
+  telegramUserId: number | null;
   targetMachineId: string | null;
   provider: ProviderId;
+  model: string | null;
   projectAlias: string;
   prompt: string;
   status: JobStatus;

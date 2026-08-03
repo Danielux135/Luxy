@@ -46,6 +46,15 @@ export interface CommandValidation {
   reason: string | null;
 }
 
+/** motivo por el que las comprobaciones del proyecto no pueden ejecutarse */
+export function hostChecksBlockedReason(project: ProjectConfig): string | null {
+  if (project.testCommands.length === 0 || project.allowHostChecks) return null;
+  return (
+    'las comprobaciones en el sistema anfitrion estan desactivadas para este proyecto; ' +
+    'revisa el diff y habilita allowHostChecks solo si confias en el codigo que se ejecutara'
+  );
+}
+
 /**
  * valida un comando de comprobacion antes de ejecutarlo.
  * comprueba la lista blanca y descarta argumentos peligrosos.
@@ -109,6 +118,11 @@ export interface TestRunnerOptions {
  */
 export async function runProjectTests(options: TestRunnerOptions): Promise<TestRunResult[]> {
   const results: TestRunResult[] = [];
+  const blocked = hostChecksBlockedReason(options.project);
+  if (blocked !== null) {
+    options.onEvent(`comprobaciones bloqueadas: ${blocked}`);
+    return results;
+  }
 
   for (const command of options.project.testCommands) {
     if (options.signal.aborted) break;

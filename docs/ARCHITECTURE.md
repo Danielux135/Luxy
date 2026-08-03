@@ -3,18 +3,14 @@
 ## Visión general
 
 ```
-┌────────────┐
-│  Teléfono  │
-└─────┬──────┘
-      │ mensaje
-┌─────▼──────┐
-│  Telegram  │
-└─────┬──────┘
-      │ webhook HTTPS + secret token
+┌──────────────────────────┐
+│ Luxy Studio / Telegram   │
+└────────────┬─────────────┘
+             │ HTTPS autenticado / webhook
 ┌─────▼─────────────────────┐
 │ Cloudflare Worker         │  pasarela pública
-│  - webhook de Telegram    │
-│  - comandos               │
+│  - API de Studio          │
+│  - webhook y comandos     │
 │  - API privada de máquinas│
 └─────┬─────────────────────┘
       │ PostgREST (service_role)
@@ -65,8 +61,9 @@ máquina y la redacción de secretos viven ahí y se prueban de forma aislada.
 
 ## Ciclo de vida de un trabajo
 
-1. **Creación.** Llega el mensaje, se valida el secret, el usuario y el chat.
-   Se registra `update_id` para que un reenvío de Telegram no lo duplique.
+1. **Creación.** Studio usa el token de máquina y `created_via='studio'`, sin ids
+   ficticios de Telegram. Telegram valida secret, usuario y chat y conserva la
+   idempotencia por `update_id`.
 2. **Elección de proveedor.** Si lo pediste explícitamente, se respeta.
    Si usaste `/auto`, decide el router determinista y te explica el motivo.
 3. **Elección de máquina.**
@@ -78,11 +75,11 @@ máquina y la redacción de secretos viven ahí y se prueban de forma aislada.
    `FOR UPDATE SKIP LOCKED`. **Dos máquinas nunca obtienen el mismo trabajo.**
 5. **Ejecución.** Se crea un worktree, se lanza el proveedor, se ejecutan las
    pruebas, se recoge el diff.
-6. **Progreso.** El agente manda eventos; el gateway **edita** el mensaje
-   existente en Telegram, como mucho cada 1,5 s.
-7. **Cierre.** `complete`, `fail` o `cancelled`. El resultado se persiste en
-   Supabase **antes** de intentar entregarlo a Telegram, así que no se pierde
-   aunque Telegram esté caído.
+6. **Progreso.** El agente manda eventos persistidos; Studio consulta el historial
+   real. Si el origen es Telegram, el gateway también edita su mensaje.
+7. **Cierre.** `complete`, `fail` o `cancelled`. El agente guarda primero el
+   resultado en `pending-outcomes.json` y lo reenvía hasta que el endpoint
+   idempotente confirma que Supabase lo recibió.
 
 ## Leases y heartbeats
 
