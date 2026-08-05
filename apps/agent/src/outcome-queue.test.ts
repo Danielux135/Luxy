@@ -10,14 +10,16 @@ let directory: string;
 class SenderFalso implements OutcomeSender {
   fail = false;
   delivered: string[] = [];
+  completedPayloads: JobCompleteRequest[] = [];
 
   private send(jobId: string): void {
     if (this.fail) throw new Error('sin conexion');
     this.delivered.push(jobId);
   }
 
-  async completeJob(jobId: string, _payload: JobCompleteRequest): Promise<void> {
+  async completeJob(jobId: string, payload: JobCompleteRequest): Promise<void> {
     this.send(jobId);
+    this.completedPayloads.push(payload);
   }
 
   async failJob(jobId: string, _payload: JobFailRequest): Promise<void> {
@@ -87,6 +89,39 @@ describe('OutcomeQueue', () => {
 
     const saved = readFileSync(join(directory, 'pending-outcomes.json'), 'utf8');
     expect(saved).not.toContain('abcdefghijklmnopqrstuvwxyz');
+  });
+
+  it('conserva los contadores de tokens al persistir una conversacion', async () => {
+    const sender = new SenderFalso();
+    const queue = new OutcomeQueue(sender, { directory });
+
+    expect(() =>
+      queue.pushCompleted('job-kimi', {
+        ...completed,
+        conversationMemory: {
+          version: 1,
+          summary: 'Kimi saludo al usuario.',
+          facts: [],
+          decisions: [],
+          plan: [],
+          openQuestions: [],
+          lessons: [],
+        },
+        usage: {
+          provider: 'kimi',
+          model: 'Kimi-K2.6',
+          inputTokens: 287,
+          outputTokens: 476,
+          estimatedCost: 0,
+        },
+      }),
+    ).not.toThrow();
+
+    expect(await queue.flush()).toBe(true);
+    expect(sender.completedPayloads[0]?.usage).toMatchObject({
+      inputTokens: 287,
+      outputTokens: 476,
+    });
   });
 
   it('descarta un archivo corrupto sin ejecutarlo', () => {

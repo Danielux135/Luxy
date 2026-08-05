@@ -4,6 +4,33 @@ Para Codex y cualquier agente compatible con `AGENTS.md`. Comparte los límites
 esenciales con `CLAUDE.md`; si algo parece contradecirse, gana la versión más
 restrictiva y avisa de la discrepancia.
 
+## Lectura obligatoria y continuidad entre IA
+
+Antes de investigar, planificar o editar, lee en este orden:
+
+1. `PROJECT-STATE.md` — estado real, incidencias abiertas y checkpoint actual.
+2. `CURRENT-TASK.md` — único bloque de trabajo activo y su siguiente paso exacto.
+3. `MASTER-PLAN.md` — fases, dependencias y criterios de aceptación.
+4. `DECISIONS.md` — decisiones que no deben reabrirse sin evidencia nueva.
+5. `CHANGELOG-WORK.md`, `TEST-RESULTS.md` y `LOCAL-ACTIONS.md` — trabajo ya hecho,
+   pruebas reales y acciones que aún corresponden a Daniel.
+6. `AI-WORK-PROTOCOL.md` — contrato completo de relevo entre Claude y Codex.
+
+No repitas una auditoría ya documentada. Contrasta únicamente el estado que
+pueda haber cambiado (`git status`, diff, archivos implicados y pruebas del
+área) y registra cualquier discrepancia antes de continuar.
+
+Sólo una IA puede escribir en un mismo worktree a la vez. Antes de cambiar de
+Claude a Codex o viceversa, la IA saliente debe actualizar la documentación de
+continuidad. La IA entrante preserva todos los cambios existentes y nunca usa
+`reset`, `checkout --` ni otra limpieza para «empezar bien».
+
+Cada paso del plan debe tener un identificador y quedar documentado cuando
+cambia de estado. No esperes al final de una sesión para reconstruir lo hecho de
+memoria. Como mínimo, registra en `CHANGELOG-WORK.md`: fecha, IA, ID, archivos,
+comandos, resultado real, decisiones, riesgos y siguiente paso. Sin esa entrada,
+el paso no se considera completado.
+
 ## Estructura del repositorio
 
 ```
@@ -29,6 +56,7 @@ Dónde tocar según el cambio:
 | Endpoint privado      | `apps/gateway/src/handlers/api.ts` + `apps/gateway/src/index.ts`                     |
 | API de Studio         | `apps/gateway/src/handlers/studio.ts` + contratos de `packages/shared`               |
 | Interfaz de trabajos  | `apps/desktop/src/renderer/pages/Studio.tsx`                                         |
+| Conversaciones        | `apps/desktop/src/renderer/pages/Conversations.tsx` + `conversation.ts`              |
 | Proveedor de IA       | `apps/agent/src/providers/`                                                          |
 | Worktrees y git       | `apps/agent/src/git.ts`                                                              |
 | Ejecución de procesos | `apps/agent/src/process.ts`                                                          |
@@ -142,6 +170,29 @@ En Studio, **Aplicar cambios** equivale a crear el commit en la rama aislada
 tras confirmación. **Descartar trabajo** elimina el worktree tras confirmación.
 Ninguna de las dos acciones mezcla la rama principal ni hace `push`.
 
+Las conversaciones usan la misma cola persistente, identificadas en metadata.
+No crean worktree, no ejecutan herramientas ni comprobaciones y siempre invocan
+el proveedor en modo de solo lectura. Una comparación son dos trabajos con el
+mismo identificador de conversación y turno. El proveedor añade un bloque
+`LUXY_MEMORY` validado: el agente lo separa de la respuesta, el gateway lo guarda
+en metadata y Studio lo reenvia en turnos posteriores. El feedback del usuario
+alimenta recomendaciones explicitas; nunca cambia el proveedor silenciosamente.
+
+**Una respuesta tiene seis finales posibles**, no dos: `completed`, `truncated`,
+`interrupted`, `timed_out`, `cancelled` y `failed`. Los decide
+`classifyResponseOutcome` (`packages/shared/src/response-outcome.ts`) a partir
+del diagnóstico del transporte, y viajan en `responseOutcome` dentro del
+resultado y de la metadata del trabajo. El enum de Postgres no cambia: una
+salida parcial se guarda como `completed` con su motivo real al lado, así que
+**ninguna pantalla puede leer `status: completed` como «respuesta entera»**.
+
+Dos reglas que van con eso:
+
+- un corte que ya había producido texto **no se reintenta**: repetirlo tira lo
+  generado y empieza de cero;
+- una respuesta cuyo final no sea `completed` **no escribe memoria**; se
+  conserva la última válida.
+
 ## Archivos que no debes editar ni publicar
 
 ```
@@ -164,6 +215,9 @@ Todo lo siguiente, sin excepciones:
 - [ ] La documentación afectada está actualizada.
 - [ ] No se han introducido secretos ni rutas personales.
 - [ ] Lo que dices haber verificado, lo has ejecutado de verdad.
+- [ ] `CURRENT-TASK.md`, `PROJECT-STATE.md`, `MASTER-PLAN.md`,
+      `CHANGELOG-WORK.md`, `TEST-RESULTS.md` y `LOCAL-ACTIONS.md` reflejan el
+      estado que dejas.
 
 **No afirmes que algo funciona si solo lo has implementado.** Si no lo
 ejecutaste, dilo. Si una prueba falla, muéstrala.
@@ -174,3 +228,6 @@ Actualiza `AGENTS.md` **y** `CLAUDE.md` cuando cambie la arquitectura, los
 comandos principales, la estructura del monorepo, las políticas de seguridad, el
 flujo de despliegue, la configuración de proveedores o el sistema de trabajos y
 permisos. Los dos archivos no deben contradecirse.
+
+Las reglas detalladas de actualización y relevo viven en
+`AI-WORK-PROTOCOL.md`; son obligatorias también cuando el cambio parezca pequeño.

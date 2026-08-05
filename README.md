@@ -15,8 +15,9 @@ Studio / Telegram ──► gateway ──► tu ordenador ──► worktree ai
 
 Cuatro piezas:
 
-- **Luxy Desktop / Studio**: crea tareas, muestra historial, progreso, resultados,
-  pruebas y resumen del diff; además se queda en la bandeja. Ver [docs/DESKTOP.md](docs/DESKTOP.md).
+- **Luxy Desktop / Studio**: crea tareas y conversaciones, compara dos modelos,
+  muestra progreso, resultados, pruebas y resumen del diff; además se queda en
+  la bandeja. Ver [docs/DESKTOP.md](docs/DESKTOP.md).
 - **Gateway** (Cloudflare Worker): autentica Studio y Telegram y mantiene la cola.
 - **Supabase**: guarda el estado compartido, los trabajos y la auditoría.
 - **Agente local**: hace el trabajo de verdad, en su propio proceso.
@@ -39,6 +40,11 @@ Las claves se guardan **cifradas** con tu cuenta de Windows y no vuelven a pedir
 
 | Documento                                     | De qué trata                                          |
 | --------------------------------------------- | ----------------------------------------------------- |
+| [PROJECT-STATE.md](PROJECT-STATE.md)          | estado canónico, incidencias y checkpoint actual      |
+| [CURRENT-TASK.md](CURRENT-TASK.md)            | siguiente bloque de trabajo sin rehacer investigación |
+| [MASTER-PLAN.md](MASTER-PLAN.md)              | fases, prioridades y criterios de aceptación          |
+| [DECISIONS.md](DECISIONS.md)                  | decisiones vinculantes y su motivo                    |
+| [AI-WORK-PROTOCOL.md](AI-WORK-PROTOCOL.md)    | relevo y documentación entre Claude y Codex           |
 | [DESKTOP.md](docs/DESKTOP.md)                 | la aplicación, su arquitectura y su seguridad         |
 | [INSTALLATION.md](docs/INSTALLATION.md)       | instalar y configurar                                 |
 | [MODELS.md](docs/MODELS.md)                   | catálogo, alias y qué funciona de verdad              |
@@ -50,6 +56,8 @@ Las claves se guardan **cifradas** con tu cuenta de Windows y no vuelven a pedir
 ## 2. Qué puede hacer
 
 - Crear y seguir tareas desde Studio en Windows o enviar órdenes rápidas desde Telegram.
+- Conversar con un modelo o comparar dos respuestas, con streaming, tiempos e
+  historial guardado automáticamente.
 - Aislar cada tarea en un **worktree de git**, sin tocar tu carpeta de trabajo.
 - Ejecutar las pruebas del proyecto solo con permiso explícito `allowHostChecks`.
 - Enseñarte el resumen del diff y dejarte aplicar o descartar los cambios desde Desktop.

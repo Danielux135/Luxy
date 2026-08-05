@@ -1,0 +1,85 @@
+{
+  "schemaVersion": 1,
+  "updatedAt": "2026-08-04",
+  "purpose": "Mapa de los archivos canónicos que permiten el relevo entre Claude y Codex.",
+  "canonicalFiles": [
+    {
+      "path": "APPLY.md",
+      "audience": ["daniel", "all-agents"],
+      "role": "Aplicación segura del paquete documental"
+    },
+    {
+      "path": "AGENTS.md",
+      "audience": ["codex", "all-agents"],
+      "role": "Reglas de código, seguridad y lectura obligatoria"
+    },
+    {
+      "path": "CLAUDE.md",
+      "audience": ["claude", "all-agents"],
+      "role": "Contexto técnico y reglas equivalentes para Claude"
+    },
+    {
+      "path": "PROJECT-STATE.md",
+      "audience": ["all-agents", "daniel"],
+      "role": "Estado actual, capacidades e incidencias"
+    },
+    {
+      "path": "CURRENT-TASK.md",
+      "audience": ["all-agents", "daniel"],
+      "role": "Único bloque activo y siguiente paso exacto"
+    },
+    {
+      "path": "MASTER-PLAN.md",
+      "audience": ["all-agents", "daniel"],
+      "role": "Fases, prioridades y criterios de salida"
+    },
+    {
+      "path": "DECISIONS.md",
+      "audience": ["all-agents", "daniel"],
+      "role": "Decisiones vinculantes"
+    },
+    {
+      "path": "AI-WORK-PROTOCOL.md",
+      "audience": ["all-agents"],
+      "role": "Proceso de documentación y relevo"
+    },
+    {
+      "path": "CHANGELOG-WORK.md",
+      "audience": ["all-agents", "daniel"],
+      "role": "Evidencia cronológica append-only"
+    },
+    {
+      "path": "TEST-RESULTS.md",
+      "audience": ["all-agents", "daniel"],
+      "role": "Pruebas históricas y actuales"
+    },
+    {
+      "path": "LOCAL-ACTIONS.md",
+      "audience": ["daniel", "all-agents"],
+      "role": "Acciones manuales y operaciones no autorizadas"
+    },
+    {
+      "path": "ASSET-MANIFEST.md",
+      "audience": ["all-agents", "daniel"],
+      "role": "Procedencia y estado de recursos visuales"
+    }
+  ],
+  "architectureRoots": [
+    "packages/shared",
+    "apps/gateway",
+    "apps/agent",
+    "apps/desktop",
+    "supabase/migrations",
+    "packages/remote-protocol",
+    "packages/remote-crypto",
+    "docs"
+  ],
+  "pausedModules": ["packages/remote-protocol", "packages/remote-crypto"],
+  "forbiddenContent": [
+    "secretos",
+    "tokens",
+    "claves de API",
+    "rutas personales no necesarias",
+    "respuestas privadas completas"
+  ]
+}

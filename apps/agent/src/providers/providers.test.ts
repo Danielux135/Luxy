@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 import {
   parseClaudeCapabilities,
   buildClaudeArgs,
@@ -15,11 +15,22 @@ import {
 } from './codex.js';
 import {
   describeHttpError,
+  parseRetryAfter,
   HttpApiProvider,
   MemoryBudgetStore,
   EXAMPLE_HTTP_PROVIDERS,
 } from './http-provider.js';
+import {
+  httpProviderConfigSchema,
+  RetryError,
+  SOFT_TERMINAL_GRACE_MS,
+  TERMINAL_GRACE_MS,
+} from '@luxy/shared';
 import { helpHasFlag, extractVersion } from '../detect.js';
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 // ayuda real recortada de Claude Code 2.1.183
 const CLAUDE_HELP = `
@@ -151,6 +162,16 @@ describe('buildClaudeArgs', () => {
     const texto = args.join(' ');
     expect(texto).toContain('--disallowedTools');
     expect(texto).toContain('git push');
+  });
+
+  it('en una conversacion bloquea escritura, comandos y red', () => {
+    const args = buildClaudeArgs({ prompt: 'hola', capabilities: caps, readOnly: true });
+    const texto = args.join(' ');
+    expect(args[args.indexOf('--permission-mode') + 1]).toBe('plan');
+    expect(texto).toContain('Bash');
+    expect(texto).toContain('Edit');
+    expect(texto).toContain('Write');
+    expect(texto).toContain('WebFetch');
   });
 
   it('el prompt NUNCA aparece en los argumentos', () => {
@@ -340,6 +361,63 @@ describe('describeHttpError', () => {
     const error = Object.assign(new Error('500'), { status: 500 });
     expect(describeHttpError(error, 'Qwen')).toContain('error interno');
   });
+
+  // POR QUE EXISTE: estos dos errores llegaron de verdad el 2026-08-05 con
+  // KAT Coder Pro v2.5, y al usuario le aparecio el JSON crudo del proveedor,
+  // en chino, precedido de "fallo tras 3 intentos".
+  it('un limite de plan se explica como tal, no como fallo de Luxy', () => {
+    const original = Object.assign(
+      new Error(
+        '400: {"error":{"message":"Request was rejected due to reason: user is not allowed to access, ' +
+          'reason: CustomerId: 0000000000, Action: CodingV1ChatCompletions, Action plan limited.",' +
+          '"type":"BadRequest","param":"","code":"UnaccessibleUser"}}',
+      ),
+      { status: 400 },
+    );
+    const envuelto = new RetryError('la operacion fallo tras 1 intento', 1, original);
+
+    const mensaje = describeHttpError(envuelto, 'KAT Coder Pro v2.5');
+    expect(mensaje).toContain('tu plan no permite usar este modelo');
+    expect(mensaje).toContain('Elige otro modelo');
+    // nada de volcarle el JSON del proveedor
+    expect(mensaje).not.toContain('UnaccessibleUser');
+    expect(mensaje).not.toContain('CustomerId');
+  });
+
+  it('un 429 envuelto sigue reconociendose como limite de frecuencia', () => {
+    // el envoltorio del reintento escondia el status y todo acababa en la rama
+    // generica, que enseña el cuerpo crudo de la respuesta
+    const original = Object.assign(new Error('429: 您的请求频率过高'), { status: 429 });
+    const envuelto = new RetryError('la operacion fallo tras 3 intentos', 3, original);
+
+    const mensaje = describeHttpError(envuelto, 'KAT Coder Pro v2.5');
+    expect(mensaje).toContain('limitando las peticiones por frecuencia');
+    expect(mensaje).not.toContain('您的请求频率过高');
+  });
+});
+
+describe('Retry-After', () => {
+  it('acepta segundos', () => {
+    expect(parseRetryAfter('30')).toBe(30_000);
+  });
+
+  it('acepta una fecha HTTP', () => {
+    const ahora = Date.parse('2026-08-05T12:00:00Z');
+    expect(parseRetryAfter('Wed, 05 Aug 2026 12:00:20 GMT', ahora)).toBe(20_000);
+  });
+
+  it('ignora lo que no sirve y lo ya pasado', () => {
+    const ahora = Date.parse('2026-08-05T12:00:00Z');
+    expect(parseRetryAfter(null)).toBeNull();
+    expect(parseRetryAfter('   ')).toBeNull();
+    expect(parseRetryAfter('pronto')).toBeNull();
+    expect(parseRetryAfter('0')).toBeNull();
+    expect(parseRetryAfter('Wed, 05 Aug 2026 11:59:00 GMT', ahora)).toBeNull();
+  });
+
+  it('no acepta una espera absurda: hay un tope', () => {
+    expect(parseRetryAfter('86400')).toBe(60_000);
+  });
 });
 
 describe('HttpApiProvider', () => {
@@ -397,6 +475,336 @@ describe('HttpApiProvider', () => {
     });
     expect(result.ok).toBe(false);
     expect(result.errorMessage).toContain('presupuesto diario agotado');
+  });
+
+  it('termina por usage, conserva tokens y publica una respuesta corta', async () => {
+    let streamCancelled = false;
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(
+          new TextEncoder().encode(
+            [
+              'data: {"choices":[{"delta":{"content":"Hola, Daniel."}}]}',
+              'data: {"choices":[],"usage":{"prompt_tokens":287,"completion_tokens":476}}',
+            ].join('\n') + '\n',
+          ),
+        );
+        // reproduce el proxy que ya contabilizo la llamada pero no cierra el
+        // cuerpo. Luxy debe usar usage como evidencia final, no un silencio.
+      },
+      cancel() {
+        streamCancelled = true;
+      },
+    });
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(body, { status: 200, headers: { 'Content-Type': 'text/event-stream' } }),
+    );
+
+    const provider = new HttpApiProvider(
+      // el silencio real son 15 s; aqui solo interesa que cierre por si mismo
+      { ...config, enabled: true, supportsStreaming: true, softTerminalGraceMs: 50 },
+      'una-clave',
+    );
+    const events: string[] = [];
+    const result = await provider.run({
+      prompt: 'saludame',
+      workingDirectory: 'C:/wt',
+      timeoutMs: 5000,
+      signal: new AbortController().signal,
+      readOnly: true,
+      onEvent: (event) => events.push(`${event.type}:${event.message}`),
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      finalText: 'Hola, Daniel.',
+      usage: { inputTokens: 287, outputTokens: 476 },
+    });
+    expect(events).toContain('text:Hola, Daniel.');
+    expect(streamCancelled).toBe(true);
+  });
+});
+
+// POR QUE EXISTE: una web generada durante 23 minutos acabo a mitad de una
+// etiqueta y no se pudo demostrar el motivo. Sin estas señales, "se acabaron
+// los tokens", "Luxy corto la conexion" y "el proveedor cerro el socket" son
+// indistinguibles, y cada una lleva a tocar una cosa distinta.
+describe('HttpApiProvider: diagnostico del final de la respuesta', () => {
+  const config = { ...EXAMPLE_HTTP_PROVIDERS[0]!, enabled: true, supportsStreaming: true };
+
+  function peticion(overrides: Record<string, unknown> = {}) {
+    return {
+      prompt: 'genera una web completa',
+      workingDirectory: 'C:/wt',
+      timeoutMs: 60_000,
+      signal: new AbortController().signal,
+      readOnly: true,
+      onEvent: () => undefined,
+      ...overrides,
+    };
+  }
+
+  it('conserva finish_reason length y los limites efectivos de una respuesta truncada', async () => {
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(
+          new TextEncoder().encode(
+            [
+              'data: {"choices":[{"delta":{"content":"<!doctype html><html><bo"}}]}',
+              'data: {"choices":[{"delta":{},"finish_reason":"length"}]}',
+              'data: [DONE]',
+            ].join('\n') + '\n',
+          ),
+        );
+        controller.close();
+      },
+    });
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(body, { status: 200 }));
+
+    const provider = new HttpApiProvider(config, 'una-clave');
+    const result = await provider.run(peticion({ maxOutputTokens: 4096 }));
+
+    expect(result.ok).toBe(true);
+    expect(result.truncated).toBe(true);
+    expect(result.termination).toMatchObject({
+      httpStatus: 200,
+      streamed: true,
+      transportEnd: 'done_marker',
+      finishReason: 'length',
+      abortedBy: null,
+      maxOutputTokens: 4096,
+      effectiveTimeoutMs: 60_000,
+    });
+    // el tamaño se guarda; el contenido no
+    expect(result.termination?.textLength).toBe('<!doctype html><html><bo'.length);
+    expect(JSON.stringify(result.termination)).not.toContain('doctype');
+  });
+
+  it('distingue el cierre local de Luxy de un cierre del proveedor', async () => {
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(
+          new TextEncoder().encode(
+            'data: {"choices":[{"delta":{"content":"listo"},"finish_reason":"stop"}]}\n',
+          ),
+        );
+        // el socket sigue abierto: es Luxy quien decide cerrar
+      },
+      cancel() {
+        /* la cancelacion local es la que termina esto */
+      },
+    });
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(body, { status: 200 }));
+
+    const provider = new HttpApiProvider(config, 'una-clave');
+    const result = await provider.run(peticion());
+
+    expect(result.ok).toBe(true);
+    expect(result.termination).toMatchObject({
+      transportEnd: 'local_end',
+      finishReason: 'stop',
+      abortedBy: 'local_finalization',
+    });
+  });
+
+  it('el diagnostico sobrevive a un socket que revienta a mitad', async () => {
+    // cada intento recibe un cuerpo nuevo: un ReadableStream ya consumido no
+    // vuelve a dar bytes, y entonces el diagnostico del reintento diria que no
+    // llego nada, que es exactamente lo contrario de lo que paso.
+    vi.spyOn(globalThis, 'fetch').mockImplementation(
+      async () =>
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(
+                new TextEncoder().encode('data: {"choices":[{"delta":{"content":"a medias"}}]}\n'),
+              );
+            },
+            pull() {
+              throw new Error('socket cerrado por el proveedor');
+            },
+          }),
+          { status: 200 },
+        ),
+    );
+
+    const provider = new HttpApiProvider(config, 'una-clave');
+    const result = await provider.run(peticion());
+
+    expect(result.ok).toBe(false);
+    expect(result.termination).toMatchObject({
+      transportEnd: 'read_error',
+      finishReason: null,
+      abortedBy: null,
+      textLength: 'a medias'.length,
+    });
+    // hubo texto: no puede tratarse como una respuesta vacia cualquiera
+    expect(result.termination?.bytes).toBeGreaterThan(0);
+  });
+
+  // POR QUE EXISTE: reintentar aqui tiraba lo generado y volvia a empezar de
+  // cero. En una generacion de 23 minutos eso son tres respuestas perdidas en
+  // vez de una parcial que se puede continuar.
+  it('NO reintenta un corte que ya habia producido texto, y lo conserva', async () => {
+    let intentos = 0;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+      intentos += 1;
+      return new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(
+              new TextEncoder().encode(
+                'data: {"choices":[{"delta":{"content":"<!doctype html><html>"}}]}\n',
+              ),
+            );
+          },
+          pull() {
+            throw new Error('socket cerrado por el proveedor');
+          },
+        }),
+        { status: 200 },
+      );
+    });
+
+    const provider = new HttpApiProvider(config, 'una-clave');
+    const result = await provider.run(peticion());
+
+    expect(intentos).toBe(1);
+    expect(result.ok).toBe(false);
+    // lo generado viaja igual: quien decide si se conserva es el ejecutor
+    expect(result.finalText).toBe('<!doctype html><html>');
+  });
+
+  it('un corte SIN texto si se reintenta: no hay nada que perder', async () => {
+    let intentos = 0;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+      intentos += 1;
+      return new Response(
+        new ReadableStream<Uint8Array>({
+          pull() {
+            throw new Error('socket cerrado antes de responder');
+          },
+        }),
+        { status: 200 },
+      );
+    });
+
+    const provider = new HttpApiProvider(config, 'una-clave');
+    const result = await provider.run(peticion());
+
+    expect(intentos).toBe(3);
+    expect(result.ok).toBe(false);
+    expect(result.finalText).toBe('');
+  });
+
+  it('un timeout con texto parcial lo conserva y se marca como agotado', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (_url, init) => {
+      const signal = (init as RequestInit).signal;
+      return new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(
+              new TextEncoder().encode('data: {"choices":[{"delta":{"content":"parte uno"}}]}\n'),
+            );
+            // el tope de Luxy aborta la peticion; undici hace fallar el cuerpo
+            signal?.addEventListener('abort', () => {
+              controller.error(Object.assign(new Error('abortado'), { name: 'AbortError' }));
+            });
+          },
+        }),
+        { status: 200 },
+      );
+    });
+
+    const provider = new HttpApiProvider(config, 'una-clave');
+    const result = await provider.run(
+      peticion({ timeoutMs: 60_000, requestTimeoutMs: 30, readOnly: false }),
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.timedOut).toBe(true);
+    expect(result.finalText).toBe('parte uno');
+    expect(result.termination?.abortedBy).toBe('request_timeout');
+  });
+
+  it('marca al usuario como origen del aborto cuando cancela', async () => {
+    const abort = new AbortController();
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(
+          new TextEncoder().encode('data: {"choices":[{"delta":{"content":"pensando"}}]}\n'),
+        );
+        // nunca cierra solo: es Detener quien lo termina. Al abortar, undici
+        // hace fallar el cuerpo, y el mock tiene que hacer lo mismo o la
+        // lectura se queda esperando bytes para siempre.
+        abort.signal.addEventListener('abort', () => {
+          controller.error(Object.assign(new Error('abortado'), { name: 'AbortError' }));
+        });
+        setTimeout(() => abort.abort(), 20);
+      },
+    });
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(body, { status: 200 }));
+
+    const provider = new HttpApiProvider(config, 'una-clave');
+    const result = await provider.run(peticion({ signal: abort.signal }));
+
+    expect(result.cancelled).toBe(true);
+    expect(result.termination?.abortedBy).toBe('user');
+  });
+
+  it('registra el codigo HTTP tambien cuando el proveedor rechaza la peticion', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response('sin creditos', { status: 402 }),
+    );
+
+    const provider = new HttpApiProvider(config, 'una-clave');
+    const result = await provider.run(peticion());
+
+    expect(result.ok).toBe(false);
+    // un 4xx no se reintenta, asi que no hay flujo que observar; el codigo si
+    expect(result.termination).toBeUndefined();
+    expect(result.errorMessage).toContain('402');
+  });
+
+  it('una respuesta sin streaming tambien deja diagnostico', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          choices: [{ message: { content: 'respuesta corta' }, finish_reason: 'stop' }],
+          usage: { prompt_tokens: 10, completion_tokens: 4 },
+        }),
+        { status: 200 },
+      ),
+    );
+
+    const provider = new HttpApiProvider({ ...config, supportsStreaming: false }, 'una-clave');
+    const result = await provider.run(peticion());
+
+    expect(result.ok).toBe(true);
+    expect(result.termination).toMatchObject({
+      streamed: false,
+      transportEnd: 'no_stream',
+      finishReason: 'stop',
+      finalUsageReceived: true,
+      inputTokens: 10,
+      outputTokens: 4,
+    });
+  });
+});
+
+describe('margen de cierre por defecto', () => {
+  it('una configuracion sin el campo espera 15 s de silencio tras un usage', () => {
+    // POR QUE IMPORTA: con un segundo, un `usage` intermedio cortaba una
+    // pagina web por la mitad. El valor no puede quedarse sin comprobar.
+    const parsed = httpProviderConfigSchema.parse({
+      id: 'kimi',
+      displayName: 'Kimi',
+      baseUrl: 'https://ejemplo.test/v1',
+      model: 'Kimi-K2.6',
+      apiKeyEnv: 'connection:x',
+    });
+    expect(parsed.softTerminalGraceMs).toBe(SOFT_TERMINAL_GRACE_MS);
+    expect(SOFT_TERMINAL_GRACE_MS).toBeGreaterThan(TERMINAL_GRACE_MS * 5);
   });
 });
 

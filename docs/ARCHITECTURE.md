@@ -81,6 +81,32 @@ máquina y la redacción de secretos viven ahí y se prueban de forma aislada.
    resultado en `pending-outcomes.json` y lo reenvía hasta que el endpoint
    idempotente confirma que Supabase lo recibió.
 
+### Variante de conversación
+
+Una conversación recorre la misma cola y conserva los mismos eventos, leases y
+reintentos. `metadata.studioMode='conversation'` cambia únicamente la ejecución:
+el agente usa la carpeta asociada como contexto de trabajo de solo lectura, no
+crea worktree, no entrega herramientas, no lanza pruebas y no recoge diff. Una
+comparación A/B son dos trabajos independientes agrupados por
+`conversationId` y `conversationTurnId`; un fallo no borra la otra respuesta.
+
+Las APIs no necesitan memoria nativa. El prompt obliga al proveedor a devolver
+un bloque `LUXY_MEMORY` con resumen acumulativo, hechos, decisiones, plan,
+preguntas y lecciones. El agente valida ese JSON, lo separa de la respuesta
+visible y lo entrega dentro del resultado idempotente. El gateway lo guarda en
+la metadata del mismo trabajo; en la siguiente llamada Studio combina:
+
+1. la memoria acumulativa de la conversación;
+2. los últimos intercambios verbatim que todavía caben;
+3. hasta dos memorias relevantes de otras conversaciones del mismo proyecto;
+4. el mensaje actual, que nunca se sacrifica por contexto antiguo.
+
+Si un proveedor ignora el protocolo se genera un resumen de reserva y la
+respuesta no se pierde. En comparaciones, la respuesta marcada como útil pasa a
+ser la memoria canónica; sin feedback se usa la columna A. La recomendación de
+modelo pondera tipo de tarea, finalizaciones, fallos, duración y valoraciones,
+pero solo cambia la selección cuando el usuario pulsa **Usar recomendación**.
+
 ## Leases y heartbeats
 
 - **Heartbeat** cada 10 s. Sin heartbeat durante 45 s (configurable), la

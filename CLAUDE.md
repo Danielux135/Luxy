@@ -4,6 +4,31 @@ Instrucciones para agentes que trabajen en este repositorio. Es un complemento
 del `README.md`, no un resumen: aquí solo hay lo que hace falta para **cambiar
 código** sin romper el diseño.
 
+## Lectura obligatoria y relevo con Codex
+
+Antes de investigar, planificar o editar, lee en este orden:
+
+1. `PROJECT-STATE.md`.
+2. `CURRENT-TASK.md`.
+3. `MASTER-PLAN.md`.
+4. `DECISIONS.md`.
+5. `CHANGELOG-WORK.md`, `TEST-RESULTS.md` y `LOCAL-ACTIONS.md`.
+6. `AI-WORK-PROTOCOL.md`.
+
+Estos archivos son la memoria compartida de Claude y Codex. No repitas una
+auditoría ya registrada: verifica sólo lo que pueda haber cambiado en el
+worktree real. Si el repositorio contradice la documentación, detén la edición,
+registra la discrepancia y actualiza primero `PROJECT-STATE.md`.
+
+Sólo una IA escribe en este worktree a la vez. Antes de entregar el turno a
+Codex, actualiza la documentación de continuidad. Al recibirlo, conserva todos
+los cambios existentes; nunca limpies el worktree para ajustarlo al plan.
+
+Todo paso del plan tiene un ID. Cuando un paso empieza, se bloquea, se completa
+o cambia de alcance, actualiza `CURRENT-TASK.md` y añade evidencia a
+`CHANGELOG-WORK.md` en ese momento. Sin archivos, comandos, resultados reales y
+siguiente paso documentados, el trabajo no está terminado.
+
 ## Qué es Luxy
 
 Agente personal con Luxy Studio como interfaz principal en Windows. Studio crea
@@ -34,7 +59,7 @@ Workers. Lo consumen los dos lados. Si una función necesita disco o red, va en
 | `shared`  | parser de comandos, router automático, selección de máquina, redacción, validación de rutas, esquemas Zod | E/S, red, disco                |
 | `gateway` | autorización, cola, API de Studio, webhook y mensajes de Telegram                                         | ejecutar código local          |
 | `agent`   | worktrees, spawn, proveedores, pruebas, cola de eventos                                                   | hablar con Supabase o Telegram |
-| `desktop` | crear/seguir trabajos, configuración, aprobaciones y estado local                                         | exponer tokens al renderer     |
+| `desktop` | trabajos, conversaciones, comparación, configuración, aprobaciones y estado local                         | exponer tokens al renderer     |
 
 El agente **nunca** habla con Supabase ni con Telegram directamente. Solo con el
 gateway, y solo saliente.
@@ -42,6 +67,37 @@ gateway, y solo saliente.
 Las decisiones de Studio también pasan por el gateway: aplicar crea un commit
 en la rama aislada y descartar elimina el worktree. Ambas exigen confirmación;
 ninguna mezcla la rama principal ni hace `push`.
+
+Conversaciones reutiliza los trabajos y eventos persistentes: la metadata agrupa
+conversación, turno y columnas de comparación. Es un modo de solo lectura: no
+crea worktree, no concede herramientas y no ejecuta comprobaciones. Codex exige
+sandbox `read-only`; Claude bloquea herramientas de escritura, comandos y red.
+Cada respuesta produce una memoria estructurada separada del texto visible. El
+gateway la persiste con su trabajo; Studio combina la memoria acumulativa, los
+ultimos turnos y recuerdos relevantes del mismo proyecto. Las recomendaciones
+de proveedor usan resultados y feedback guardados, y siempre se aceptan de forma
+explicita: no hay sustituciones silenciosas.
+
+### Finales de una respuesta
+
+Una respuesta no termina «bien o mal»: termina de una de seis formas —
+`completed`, `truncated`, `interrupted`, `timed_out`, `cancelled` o `failed`.
+Las decide `classifyResponseOutcome` en
+`packages/shared/src/response-outcome.ts`, con la evidencia que recoge el
+transporte (`responseTermination`: última señal, quién abortó, límites
+efectivos, tokens y tamaños; **nunca contenido**).
+
+El detalle viaja en `responseOutcome`, dentro del resultado del trabajo y de su
+metadata. **El enum `luxy_job_status` no cambia**: una salida parcial se guarda
+como `completed` con su motivo real al lado, así que leer `status: completed`
+como «respuesta entera» es un error.
+
+Dos invariantes que dependen de esto:
+
+- un corte que ya había producido texto **no se reintenta**. Repetirlo tira lo
+  generado, vuelve a pagar el prompt y empieza de cero;
+- una respuesta cuyo final no sea `completed` **no escribe memoria**: se
+  conserva la última válida.
 
 ## Flujo
 
@@ -214,6 +270,8 @@ inyección de shell, pero no convierte en seguro el código que la prueba import
 - **No ocultar pruebas que fallan.** Si falla algo, dilo con su salida.
 - **No decir "verificado" cuando solo está "implementado".** Si no lo has
   ejecutado, di que no lo has ejecutado.
+- Sincronizar `CURRENT-TASK.md`, `PROJECT-STATE.md`, `MASTER-PLAN.md`,
+  `CHANGELOG-WORK.md`, `TEST-RESULTS.md` y `LOCAL-ACTIONS.md`.
 
 ## Archivos que nunca se versionan
 
@@ -254,3 +312,6 @@ Actualiza `CLAUDE.md` **y** `AGENTS.md` cuando cambie:
 Los dos archivos **no deben contradecirse**. `docs/README-CHECKS.md` describe la
 comprobación de coherencia; `npm test` verifica que los comandos citados aquí
 existen de verdad en `package.json`.
+
+El contrato completo de documentación y cambio de IA vive en
+`AI-WORK-PROTOCOL.md` y prevalece sobre notas antiguas de una conversación.

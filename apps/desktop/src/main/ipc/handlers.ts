@@ -22,6 +22,7 @@ import {
   connectionTestArgsSchema,
   approvalResolveArgsSchema,
   studioJobCreateArgsSchema,
+  studioJobFeedbackArgsSchema,
   studioJobActionArgsSchema,
   studioJobIdArgsSchema,
   studioJobsListArgsSchema,
@@ -382,6 +383,10 @@ export function registerIpcHandlers(context: HandlerContext): void {
     await studioClient(context).cancelStudioJob(args.jobId);
     return { cancelled: true };
   });
+
+  handle(IPC_INVOKE.studioJobFeedback, studioJobFeedbackArgsSchema, async (args) => ({
+    job: await studioClient(context).rateStudioJob(args.jobId, { rating: args.rating }),
+  }));
 
   handle(IPC_INVOKE.studioJobAction, studioJobActionArgsSchema, async (args) =>
     studioClient(context).requestStudioJobAction(args.jobId, {

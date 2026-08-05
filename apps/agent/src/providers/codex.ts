@@ -31,8 +31,7 @@ export function parseCodexCapabilities(help: string | null): CodexCapabilities {
     cd: helpHasFlag(help, '--cd') || helpHasFlag(help, '-C'),
     sandbox: helpHasFlag(help, '--sandbox') || helpHasFlag(help, '-s'),
     model: helpHasFlag(help, '--model') || helpHasFlag(help, '-m'),
-    outputLastMessage:
-      helpHasFlag(help, '--output-last-message') || helpHasFlag(help, '-o'),
+    outputLastMessage: helpHasFlag(help, '--output-last-message') || helpHasFlag(help, '-o'),
     skipGitRepoCheck: helpHasFlag(help, '--skip-git-repo-check'),
   };
 }
@@ -175,6 +174,19 @@ export class CodexCliProvider implements ProviderExecution {
       };
     }
 
+    if (request.readOnly === true && !this.capabilities.sandbox) {
+      return {
+        ok: false,
+        finalText: '',
+        sessionId: null,
+        exitCode: null,
+        timedOut: false,
+        cancelled: false,
+        errorMessage:
+          'esta version de Codex no ofrece un sandbox de solo lectura; actualizala antes de usar Conversaciones',
+      };
+    }
+
     // archivo temporal donde codex deja su mensaje final
     let temporaryDir: string | null = null;
     let lastMessageFile: string | undefined;
@@ -188,6 +200,7 @@ export class CodexCliProvider implements ProviderExecution {
       model: request.model ?? this.defaultModel,
       capabilities: this.capabilities,
       lastMessageFile,
+      sandboxMode: request.readOnly === true ? 'read-only' : 'workspace-write',
     });
 
     request.onEvent({ type: 'phase', message: 'lanzando Codex CLI' });

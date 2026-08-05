@@ -46,6 +46,7 @@ const bridge: LuxyBridge = {
   listStudioJobs: (args = { limit: 30 }) => ipcRenderer.invoke(IPC_INVOKE.studioJobsList, args),
   getStudioJob: (jobId: string) => ipcRenderer.invoke(IPC_INVOKE.studioJobGet, { jobId }),
   cancelStudioJob: (jobId: string) => ipcRenderer.invoke(IPC_INVOKE.studioJobCancel, { jobId }),
+  rateStudioJob: (args: unknown) => ipcRenderer.invoke(IPC_INVOKE.studioJobFeedback, args),
   requestStudioJobAction: (args: unknown) => ipcRenderer.invoke(IPC_INVOKE.studioJobAction, args),
 
   onAgentEvent: (listener) => {

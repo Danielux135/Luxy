@@ -282,6 +282,59 @@ describe('backoff', () => {
       ),
     ).rejects.toThrow(RetryError);
   });
+
+  // POR QUE EXISTE: un 400 rechazado a la primera llegaba al usuario como
+  // "fallo tras 3 intentos". Eso manda a investigar unos reintentos que no
+  // ocurrieron y esconde lo unico cierto: la API dijo que no.
+  it('cuenta los intentos REALES, no el maximo configurado', async () => {
+    const fallo = await retryWithBackoff(
+      async () => {
+        throw Object.assign(new Error('400: no permitido'), { status: 400 });
+      },
+      { maxAttempts: 3, shouldRetry: () => false, sleep: async () => undefined },
+    ).catch((error: unknown) => error as RetryError);
+
+    expect(fallo.attempts).toBe(1);
+    expect(fallo.message).toContain('tras 1 intento');
+    expect(fallo.message).not.toContain('intentos');
+  });
+
+  it('conserva el codigo HTTP al envolver el error', async () => {
+    // sin esto, quien recibe el error no distingue un 429 de un 401 y acaba
+    // enseñando el JSON crudo del proveedor
+    const fallo = await retryWithBackoff(
+      async () => {
+        throw Object.assign(new Error('429: demasiadas peticiones'), { status: 429 });
+      },
+      { maxAttempts: 2, sleep: async () => undefined },
+    ).catch((error: unknown) => error as RetryError);
+
+    expect(fallo.status).toBe(429);
+    expect(fallo.attempts).toBe(2);
+  });
+
+  it('obedece la espera que pide el error por encima del backoff', async () => {
+    const esperas: number[] = [];
+    await retryWithBackoff(
+      async () => {
+        throw Object.assign(new Error('429'), { status: 429, retryAfterMs: 30_000 });
+      },
+      {
+        maxAttempts: 2,
+        baseDelayMs: 1000,
+        jitter: 0,
+        sleep: async (ms) => {
+          esperas.push(ms);
+        },
+        delayForError: (error, _attempt, calculado) => {
+          const pedido = (error as { retryAfterMs?: number }).retryAfterMs;
+          return typeof pedido === 'number' ? Math.max(pedido, calculado) : null;
+        },
+      },
+    ).catch(() => undefined);
+
+    expect(esperas).toEqual([30_000]);
+  });
 });
 
 // -----------------------------------------------------------------------------

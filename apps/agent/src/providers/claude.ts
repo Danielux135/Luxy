@@ -48,10 +48,20 @@ export interface ClaudeArgsOptions {
   capabilities: ClaudeCapabilities;
   /** modo de permisos; nunca se acepta bypassPermissions */
   permissionMode?: string;
+  /** bloquea todas las herramientas que pueden escribir o ejecutar comandos */
+  readOnly?: boolean;
 }
 
 // herramientas que Luxy no permite a Claude bajo ningun concepto
 const DISALLOWED_TOOLS = ['Bash(git push:*)', 'Bash(rm -rf:*)', 'WebFetch'];
+const READ_ONLY_DISALLOWED_TOOLS = [
+  'Bash',
+  'Edit',
+  'Write',
+  'NotebookEdit',
+  'WebFetch',
+  'WebSearch',
+];
 
 /**
  * construye los argumentos segun lo que la version instalada soporta.
@@ -76,7 +86,7 @@ export function buildClaudeArgs(options: ClaudeArgsOptions): string[] {
   }
 
   if (capabilities.permissionMode) {
-    const mode = options.permissionMode ?? 'acceptEdits';
+    const mode = options.readOnly === true ? 'plan' : (options.permissionMode ?? 'acceptEdits');
     // barrera dura: aunque la configuracion lo pidiera, se rechaza el bypass
     if (mode !== 'bypassPermissions') args.push('--permission-mode', mode);
   }
@@ -86,7 +96,10 @@ export function buildClaudeArgs(options: ClaudeArgsOptions): string[] {
     // tragaria sus palabras como reglas de herramienta. Eso producia errores
     // del tipo 'Permission deny rule "credenciales" matches no known tool' y
     // dejaba a Claude sin prompt. Por eso el prompt va por stdin.
-    args.push('--disallowedTools', ...DISALLOWED_TOOLS);
+    args.push(
+      '--disallowedTools',
+      ...(options.readOnly === true ? READ_ONLY_DISALLOWED_TOOLS : DISALLOWED_TOOLS),
+    );
   }
 
   // el prompt NO va como argumento: se envia por stdin (ver run()). Añadirlo
@@ -131,7 +144,9 @@ export function parseClaudeStreamLine(line: string): ClaudeStreamEvent | null {
     if (Array.isArray(content)) {
       text = content
         .map((block) =>
-          block && typeof block === 'object' && typeof (block as { text?: unknown }).text === 'string'
+          block &&
+          typeof block === 'object' &&
+          typeof (block as { text?: unknown }).text === 'string'
             ? (block as { text: string }).text
             : '',
         )
@@ -190,10 +205,24 @@ export class ClaudeCodeProvider implements ProviderExecution {
       };
     }
 
+    if (request.readOnly === true && !this.capabilities.disallowedTools) {
+      return {
+        ok: false,
+        finalText: '',
+        sessionId: null,
+        exitCode: null,
+        timedOut: false,
+        cancelled: false,
+        errorMessage:
+          'esta version de Claude Code no puede bloquear las herramientas de escritura; actualizala antes de usar Conversaciones',
+      };
+    }
+
     const args = buildClaudeArgs({
       prompt: request.prompt,
       model: request.model ?? this.defaultModel,
       capabilities: this.capabilities,
+      readOnly: request.readOnly === true,
     });
 
     request.onEvent({ type: 'phase', message: 'lanzando Claude Code' });
@@ -243,7 +272,8 @@ export class ClaudeCodeProvider implements ProviderExecution {
       },
       onStderr: (chunk) => {
         const message = chunk.trim();
-        if (message.length > 0) request.onEvent({ type: 'warning', message: message.slice(0, 300) });
+        if (message.length > 0)
+          request.onEvent({ type: 'warning', message: message.slice(0, 300) });
       },
     });
 

@@ -14,8 +14,11 @@ import type {
   ProviderId,
   AgenticContext,
   AgentToolName,
+  ResponseTermination,
 } from '@luxy/shared';
 import {
+  CONVERSATION_MEMORY_CLOSE,
+  TERMINAL_GRACE_MS,
   retryWithBackoff,
   checkBudget,
   recordUsage,
@@ -24,8 +27,69 @@ import {
   redact,
 } from '@luxy/shared';
 import { runAgenticLoop, type LoopMessage, type LoopTurnResult } from './agentic-loop.js';
-import { sseData, TurnAssembler, wasTruncated, type AssembledTurn } from './sse.js';
+import {
+  sseData,
+  TurnAssembler,
+  wasTruncated,
+  type AssembledTurn,
+  type SseTransportReport,
+} from './sse.js';
 import { parseNativeToolCalls } from './tool-protocol.js';
+
+/**
+ * lo que se va sabiendo de una peticion mientras ocurre.
+ *
+ * se rellena aunque la peticion acabe lanzando: cuando una respuesta larga sale
+ * cortada, el motivo tiene que sobrevivir al error, no perderse con el.
+ */
+interface RequestDiagnostics {
+  httpStatus: number | null;
+  streamed: boolean;
+  abortedBy: ResponseTermination['abortedBy'];
+  termination: ResponseTermination | null;
+}
+
+function newDiagnostics(): RequestDiagnostics {
+  return { httpStatus: null, streamed: false, abortedBy: null, termination: null };
+}
+
+/** tope de espera que se acepta de un `Retry-After`: mas alla, no compensa */
+const MAX_RETRY_AFTER_MS = 60_000;
+
+/**
+ * convierte una respuesta HTTP fallida en un error con su codigo y su espera.
+ *
+ * el `Retry-After` de un 429 dice cuanto hay que esperar de verdad. Duplicar un
+ * retardo a ciegas fallaba tres veces seguidas en menos de diez segundos y
+ * acababa en "fallo tras 3 intentos" sin haber esperado lo que pedian.
+ */
+function httpError(response: Response, body: string): Error {
+  const error = new Error(`${response.status}: ${body.slice(0, 300)}`) as Error & {
+    status?: number;
+    retryAfterMs?: number;
+  };
+  error.status = response.status;
+  const retryAfter = parseRetryAfter(response.headers.get('retry-after'));
+  if (retryAfter !== null) error.retryAfterMs = retryAfter;
+  return error;
+}
+
+/** `Retry-After` en segundos o como fecha HTTP; null si no es util */
+export function parseRetryAfter(value: string | null, now: number = Date.now()): number | null {
+  if (value === null) return null;
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return null;
+
+  if (/^\d+$/.test(trimmed)) {
+    const ms = Number(trimmed) * 1000;
+    return ms > 0 ? Math.min(ms, MAX_RETRY_AFTER_MS) : null;
+  }
+
+  const fecha = Date.parse(trimmed);
+  if (Number.isNaN(fecha)) return null;
+  const ms = fecha - now;
+  return ms > 0 ? Math.min(ms, MAX_RETRY_AFTER_MS) : null;
+}
 
 /**
  * techo de una peticion suelta.
@@ -136,9 +200,15 @@ export class HttpApiProvider implements ProviderExecution {
 
     request.onEvent({ type: 'phase', message: `consultando ${this.label(request)}` });
 
+    // el diagnostico es del ULTIMO intento: es el que explica como acabo esto
+    const diagnostics = newDiagnostics();
+    // lo que el modelo alcanzo a escribir antes de cortarse. Se guarda aparte
+    // del diagnostico a proposito: el diagnostico no lleva contenido.
+    const parcial = { text: '' };
+
     try {
       const result = await retryWithBackoff(
-        () => this.callApi(messages, request),
+        () => this.callApi(messages, request, diagnostics, parcial),
         {
           maxAttempts: 3,
           baseDelayMs: 2000,
@@ -150,11 +220,24 @@ export class HttpApiProvider implements ProviderExecution {
             // lo mismo solo triplica el tiempo antes de decir que fallo
             if (error instanceof Error && error.name === 'AbortError') return false;
             if (request.signal.aborted) return false;
+            // el modelo YA habia escrito algo cuando se corto.
+            //
+            // reintentar aqui no recupera nada: tira lo generado, vuelve a
+            // pagar el prompt y empieza de cero. Medido en una web de 23
+            // minutos, eso son tres generaciones perdidas en vez de una
+            // respuesta parcial que se puede continuar. Se conserva y se
+            // clasifica como interrumpida.
+            if (parcial.text.length > 0) return false;
             const status = (error as { status?: number }).status;
             // un 524/504 es un timeout del proxy: repetir la misma peticion
             // lenta vuelve a colgarse igual, solo que tres veces
             if (status === 524 || status === 504) return false;
             return status === undefined || status >= 500 || status === 429;
+          },
+          // si el proveedor dice cuanto esperar, se le obedece
+          delayForError: (error, _attempt, calculado) => {
+            const pedido = (error as { retryAfterMs?: number }).retryAfterMs;
+            return typeof pedido === 'number' ? Math.max(pedido, calculado) : null;
           },
         },
       );
@@ -184,31 +267,62 @@ export class HttpApiProvider implements ProviderExecution {
         cancelled: false,
         errorMessage: null,
         usage,
+        ...this.diagnosed(diagnostics),
       };
     } catch (error) {
       // un timeout de la API no es un fallo de Luxy: se dice que modelo fue y
       // se sugiere que hacer, en vez de "fallo tras 3 intentos"
       if (!request.signal.aborted && esTimeout(error)) {
-        return this.failure(
-          `${this.label(request)} no respondio en ${Math.round(this.requestTimeout(request) / 1000)} s. ` +
-            `El modelo "${this.modelFor(request)}" puede estar saturado o caido en tu proveedor. ` +
-            'Prueba otro modelo de la misma familia o vuelve a intentarlo mas tarde.',
-        );
+        return {
+          ...this.failure(
+            `${this.label(request)} no respondio en ${Math.round(this.requestTimeout(request) / 1000)} s. ` +
+              `El modelo "${this.modelFor(request)}" puede estar saturado o caido en tu proveedor. ` +
+              'Prueba otro modelo de la misma familia o vuelve a intentarlo mas tarde.',
+          ),
+          timedOut: true,
+          ...this.recovered(parcial, diagnostics),
+        };
       }
 
       if (request.signal.aborted) {
         return {
           ok: false,
-          finalText: '',
+          finalText: parcial.text,
           sessionId: null,
           exitCode: null,
           timedOut: false,
           cancelled: true,
-          errorMessage: 'la ejecucion se cancelo desde Telegram',
+          errorMessage: 'la ejecucion se cancelo',
+          ...this.diagnosed(diagnostics),
         };
       }
-      return this.failure(redact(describeHttpError(error, this.label(request))));
+      return {
+        ...this.failure(redact(describeHttpError(error, this.label(request)))),
+        ...this.recovered(parcial, diagnostics),
+      };
     }
+  }
+
+  /** el diagnostico sólo viaja si de verdad hubo peticion que observar */
+  private diagnosed(diagnostics: RequestDiagnostics): { termination?: ResponseTermination } {
+    return diagnostics.termination === null ? {} : { termination: diagnostics.termination };
+  }
+
+  /**
+   * un fallo con contenido delante no es una respuesta vacia.
+   *
+   * lo que el modelo alcanzo a escribir viaja igual, aunque `ok` sea false:
+   * quien decide si se conserva es el ejecutor, con el resultado clasificado.
+   * Perderlo aqui hacia irrecuperable una generacion de veinte minutos.
+   */
+  private recovered(
+    parcial: { text: string },
+    diagnostics: RequestDiagnostics,
+  ): { finalText?: string; termination?: ResponseTermination } {
+    return {
+      ...(parcial.text.length > 0 ? { finalText: parcial.text } : {}),
+      ...this.diagnosed(diagnostics),
+    };
   }
 
   /** una llamada completa, con streaming si el proveedor lo soporta */
@@ -331,12 +445,12 @@ export class HttpApiProvider implements ProviderExecution {
 
       if (!response.ok) {
         const body = await response.text();
-        const error = new Error(`${response.status}: ${body.slice(0, 300)}`);
-        (error as { status?: number }).status = response.status;
-        throw error;
+        throw httpError(response, body);
       }
 
-      if (transmitir && response.body) return await this.readStreamingTurn(response.body, request);
+      if (transmitir && response.body) {
+        return await this.readStreamingTurn(response.body, request, () => controller.abort());
+      }
 
       const body = (await response.json()) as {
         choices?: { message?: { content?: unknown } }[];
@@ -379,7 +493,13 @@ export class HttpApiProvider implements ProviderExecution {
     // quien llama puede pedir mas margen que el tope general. Los lotes lo
     // hacen: ahi el tope no protege de nada, solo limita cuantos registros
     // caben en una llamada, y con facturacion por llamada eso cuesta dinero.
-    const tope = request.requestTimeoutMs ?? MAX_REQUEST_TIMEOUT_MS;
+    // Una conversacion tiene cancelacion manual y latido de lease. No se corta
+    // por el tope fijo de cinco minutos: los modelos de razonamiento pueden
+    // tardar bastante sin estar colgados. Su ultima barrera es el timeout del
+    // trabajo configurado por el usuario (una hora por defecto).
+    const tope =
+      request.requestTimeoutMs ??
+      (request.readOnly === true ? request.timeoutMs : MAX_REQUEST_TIMEOUT_MS);
     return Math.min(request.timeoutMs, tope);
   }
 
@@ -410,16 +530,34 @@ export class HttpApiProvider implements ProviderExecution {
   private async callApi(
     messages: ChatMessage[],
     request: ProviderRunRequest,
+    diagnostics: RequestDiagnostics = newDiagnostics(),
+    parcial: { text: string } = { text: '' },
   ): Promise<{
     text: string;
     inputTokens: number;
     outputTokens: number;
     truncated: boolean;
   }> {
+    // un reintento observa una peticion nueva: lo anterior ya no la explica
+    diagnostics.httpStatus = null;
+    diagnostics.abortedBy = null;
+    diagnostics.termination = null;
+    parcial.text = '';
+    diagnostics.streamed = this.config.supportsStreaming;
+    const startedAt = Date.now();
+
     // timeout propio combinado con la cancelacion del trabajo
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), this.requestTimeout(request));
-    const onAbort = (): void => controller.abort();
+    const timer = setTimeout(() => {
+      // quien aborta importa: un tope de Luxy y una cancelacion del usuario se
+      // ven igual desde fetch, pero piden arreglos opuestos
+      diagnostics.abortedBy ??= 'request_timeout';
+      controller.abort();
+    }, this.requestTimeout(request));
+    const onAbort = (): void => {
+      diagnostics.abortedBy ??= 'user';
+      controller.abort();
+    };
     request.signal.addEventListener('abort', onAbort, { once: true });
 
     try {
@@ -444,11 +582,11 @@ export class HttpApiProvider implements ProviderExecution {
         signal: controller.signal,
       });
 
+      diagnostics.httpStatus = response.status;
+
       if (!response.ok) {
         const body = await response.text().catch(() => '');
-        const error = new Error(`${response.status}: ${body.slice(0, 300)}`);
-        (error as { status?: number }).status = response.status;
-        throw error;
+        throw httpError(response, body);
       }
 
       if (!this.config.supportsStreaming || !response.body) {
@@ -457,16 +595,42 @@ export class HttpApiProvider implements ProviderExecution {
           usage?: { prompt_tokens?: number; completion_tokens?: number };
         };
         const text = payload.choices?.[0]?.message?.content ?? '';
+        const finishReason = payload.choices?.[0]?.finish_reason;
+        const inputTokens = payload.usage?.prompt_tokens ?? 0;
+        const outputTokens = payload.usage?.completion_tokens ?? 0;
+        diagnostics.streamed = false;
+        diagnostics.termination = this.buildTermination(diagnostics, request, {
+          transport: {
+            transportEnd: 'no_stream',
+            chunks: 0,
+            bytes: 0,
+            durationMs: Date.now() - startedAt,
+          },
+          finishReason: typeof finishReason === 'string' ? finishReason : null,
+          finalUsageReceived: payload.usage !== undefined,
+          inputTokens,
+          outputTokens,
+          textLength: text.length,
+        });
         request.onEvent({ type: 'text', message: text.slice(0, 500) });
         return {
           text,
-          inputTokens: payload.usage?.prompt_tokens ?? 0,
-          outputTokens: payload.usage?.completion_tokens ?? 0,
-          truncated: payload.choices?.[0]?.finish_reason === 'length',
+          inputTokens,
+          outputTokens,
+          truncated: finishReason === 'length',
         };
       }
 
-      return await this.readStream(response.body, request);
+      return await this.readStream(
+        response.body,
+        request,
+        () => {
+          diagnostics.abortedBy ??= 'local_finalization';
+          controller.abort();
+        },
+        diagnostics,
+        parcial,
+      );
     } finally {
       clearTimeout(timer);
       request.signal.removeEventListener('abort', onAbort);
@@ -476,14 +640,16 @@ export class HttpApiProvider implements ProviderExecution {
   /**
    * lee una vuelta transmitida, con herramientas incluidas.
    *
-   * el progreso se emite cada 400 caracteres, no en cada delta: editar el
-   * mensaje de Telegram en cada token pasaria de los limites de la API.
+   * el progreso se emite cada 400 caracteres, no en cada delta. Se conserva el
+   * prefijo acumulado para que el agente pueda detectar y ocultar marcadores
+   * privados como LUXY_MEMORY sin huecos entre fragmentos.
    */
   private async readStreamingTurn(
     body: ReadableStream<Uint8Array>,
     request: ProviderRunRequest,
+    abortTransport: () => void,
   ): Promise<LoopTurnResult> {
-    const turno = await this.consumeStream(body, request);
+    const turno = await this.consumeStream(body, request, abortTransport);
     return {
       text: turno.text,
       toolCalls: turno.toolCalls,
@@ -496,13 +662,16 @@ export class HttpApiProvider implements ProviderExecution {
   private async readStream(
     body: ReadableStream<Uint8Array>,
     request: ProviderRunRequest,
+    abortTransport: () => void,
+    diagnostics?: RequestDiagnostics,
+    parcial?: { text: string },
   ): Promise<{
     text: string;
     inputTokens: number;
     outputTokens: number;
     truncated: boolean;
   }> {
-    const turno = await this.consumeStream(body, request);
+    const turno = await this.consumeStream(body, request, abortTransport, diagnostics, parcial);
     return {
       text: turno.text,
       inputTokens: turno.inputTokens,
@@ -511,26 +680,120 @@ export class HttpApiProvider implements ProviderExecution {
     };
   }
 
+  /**
+   * compone el diagnostico final de una peticion.
+   *
+   * no recibe ni un caracter de la respuesta: solo señales, contadores y
+   * tiempos. Es lo que permite decir por que se corto sin guardar lo que decia.
+   */
+  private buildTermination(
+    diagnostics: RequestDiagnostics,
+    request: ProviderRunRequest,
+    observed: {
+      transport: SseTransportReport;
+      finishReason: string | null;
+      finalUsageReceived: boolean;
+      inputTokens: number;
+      outputTokens: number;
+      textLength: number;
+    },
+  ): ResponseTermination {
+    return {
+      httpStatus: diagnostics.httpStatus,
+      streamed: diagnostics.streamed,
+      chunks: observed.transport.chunks,
+      bytes: observed.transport.bytes,
+      durationMs: observed.transport.durationMs,
+      transportEnd: observed.transport.transportEnd,
+      finishReason: observed.finishReason === null ? null : observed.finishReason.slice(0, 64),
+      finalUsageReceived: observed.finalUsageReceived,
+      abortedBy: diagnostics.abortedBy,
+      effectiveTimeoutMs: this.requestTimeout(request),
+      maxOutputTokens: this.maxTokensFor(request),
+      inputTokens: observed.inputTokens,
+      outputTokens: observed.outputTokens,
+      textLength: observed.textLength,
+    };
+  }
+
   /** acumula un flujo entero informando del progreso */
   private async consumeStream(
     body: ReadableStream<Uint8Array>,
     request: ProviderRunRequest,
+    abortTransport: () => void,
+    diagnostics?: RequestDiagnostics,
+    parcial?: { text: string },
   ): Promise<AssembledTurn> {
     const assembler = new TurnAssembler();
     let emitido = 0;
     let acumulado = '';
+    // el reporte llega desde el generador, asi que vive en un objeto: una
+    // variable suelta asignada dentro del callback no se puede estrechar
+    const observado: { transport: SseTransportReport | null } = { transport: null };
 
-    for await (const payload of sseData(body)) {
-      const nuevo = assembler.push(payload);
-      if (nuevo === null) continue;
-      acumulado += nuevo;
-      if (acumulado.length - emitido >= 400) {
-        emitido = acumulado.length;
-        request.onEvent({ type: 'text', message: acumulado.slice(-300) });
+    try {
+      for await (const payload of sseData(body, {
+        // OpenAI termina con `[DONE]`, pero algunos endpoints compatibles de
+        // Kimi dejan el socket abierto despues de `finish_reason`. Eso SI
+        // demuestra que el mensaje acabo: se espera un margen corto por si el
+        // siguiente evento lleva usage y luego se cierra de forma local. En
+        // conversaciones, una memoria completa vale igual, porque el prompt
+        // prohibe escribir nada despues.
+        isTerminal: () =>
+          assembler.result().finishReason !== null ||
+          (request.readOnly === true && acumulado.includes(CONVERSATION_MEMORY_CLOSE)),
+        terminalGraceMs: TERMINAL_GRACE_MS,
+        // el consumo sin `choices` NO demuestra nada por si solo: hay endpoints
+        // que lo mandan a mitad. Se exige un silencio largo antes de cerrar, y
+        // cualquier evento nuevo lo reinicia. Esto es lo que cortaba una web
+        // entera con 3.180 tokens de salida y 8.192 disponibles.
+        isSoftTerminal: () => assembler.result().finalUsageReceived,
+        softTerminalGraceMs: this.config.softTerminalGraceMs,
+        onLocalEnd: abortTransport,
+        onTransportEnd: (report) => {
+          observado.transport = report;
+        },
+      })) {
+        const nuevo = assembler.push(payload);
+        if (nuevo === null) continue;
+        acumulado += nuevo;
+        if (acumulado.length - emitido >= 400) {
+          emitido = acumulado.length;
+          request.onEvent({ type: 'text', message: acumulado.slice(0, 4000) });
+        }
+      }
+    } finally {
+      // lo generado se conserva aunque la lectura acabe lanzando: es
+      // exactamente el caso en el que hay algo que salvar.
+      if (parcial !== undefined) parcial.text = assembler.result().text;
+
+      // el diagnostico se cierra pase lo que pase. Un flujo que revienta a
+      // mitad es justamente el caso que hay que poder explicar despues.
+      if (diagnostics !== undefined) {
+        const observadoTurno = assembler.result();
+        diagnostics.termination = this.buildTermination(diagnostics, request, {
+          transport: observado.transport ?? {
+            transportEnd: 'read_error',
+            chunks: 0,
+            bytes: 0,
+            durationMs: 0,
+          },
+          finishReason: observadoTurno.finishReason,
+          finalUsageReceived: observadoTurno.finalUsageReceived,
+          inputTokens: observadoTurno.inputTokens,
+          outputTokens: observadoTurno.outputTokens,
+          textLength: observadoTurno.text.length,
+        });
       }
     }
 
     const turno = assembler.result();
+
+    // El ultimo fragmento suele ser corto. Si no se publica aqui, una respuesta
+    // de menos de 400 caracteres nunca aparece durante la fase de guardado.
+    if (acumulado.length > emitido) {
+      request.onEvent({ type: 'text', message: acumulado.slice(0, 4000) });
+    }
 
     // un error dentro del flujo con HTTP 200 no puede pasar por respuesta vacia
     if (turno.streamError !== null) {
@@ -538,6 +801,14 @@ export class HttpApiProvider implements ProviderExecution {
       // el proveedor ya dijo que fue cosa suya: se reintenta como un 5xx
       (error as { status?: number }).status = 502;
       throw error;
+    }
+
+    if (turno.text.trim().length === 0 && turno.toolCalls.length === 0) {
+      throw new Error(
+        turno.finalUsageReceived
+          ? 'el proveedor termino y devolvio consumo, pero no envio texto visible en un formato compatible'
+          : 'el proveedor cerro la respuesta sin enviar texto visible',
+      );
     }
 
     return turno;
@@ -556,9 +827,54 @@ export class HttpApiProvider implements ProviderExecution {
   }
 }
 
+/**
+ * codigo HTTP del fallo, mirando tambien dentro de un error envuelto.
+ *
+ * `retryWithBackoff` envuelve el error original, y sin desenvolverlo el status
+ * se perdia: un 429 acababa en la rama generica y al usuario le llegaba el JSON
+ * crudo del proveedor, en chino, en vez de una frase util.
+ */
+function statusOf(error: unknown): number | undefined {
+  const directo = (error as { status?: unknown } | null)?.status;
+  if (typeof directo === 'number') return directo;
+  const interno = (error as { lastError?: unknown } | null)?.lastError;
+  const anidado = (interno as { status?: unknown } | null)?.status;
+  return typeof anidado === 'number' ? anidado : undefined;
+}
+
+/** texto del error y el del que envuelve, para no perder el motivo original */
+function messagesOf(error: unknown): string {
+  const propio = error instanceof Error ? error.message : String(error);
+  const interno = (error as { lastError?: unknown } | null)?.lastError;
+  const anidado = interno instanceof Error ? interno.message : '';
+  return `${propio}\n${anidado}`;
+}
+
+/** true si el proveedor dice que el plan no da acceso a ese modelo ahora */
+function esLimiteDePlan(error: unknown): boolean {
+  const mensaje = messagesOf(error);
+  return (
+    /UnaccessibleUser/i.test(mensaje) ||
+    /not allowed to access/i.test(mensaje) ||
+    /plan limited/i.test(mensaje)
+  );
+}
+
 /** convierte un fallo http en un mensaje claro para telegram */
 export function describeHttpError(error: unknown, displayName: string): string {
-  const status = (error as { status?: number }).status;
+  const status = statusOf(error);
+
+  // el plan del proveedor deja fuera este modelo ahora mismo.
+  //
+  // no es un fallo de Luxy ni un error transitorio: reintentar no lo arregla, y
+  // el modelo puede volver a funcionar mas tarde. Se dice tal cual.
+  if (esLimiteDePlan(error)) {
+    return (
+      `${displayName} rechazo la peticion: tu plan no permite usar este modelo ahora mismo.\n\n` +
+      'No es un fallo de Luxy y reintentarlo no ayuda. Elige otro modelo o vuelve a ' +
+      'intentarlo cuando tu proveedor restablezca la cuota.'
+    );
+  }
   if (status === 401 || status === 403) {
     // el consejo del .env era de la epoca de la CLI: en el escritorio las
     // claves viven en el almacen cifrado, y ahi es donde hay que corregirlas
@@ -569,7 +885,11 @@ export function describeHttpError(error: unknown, displayName: string): string {
     );
   }
   if (status === 429) {
-    return `${displayName} esta limitando las peticiones. Intentalo mas tarde.`;
+    return (
+      `${displayName} esta limitando las peticiones por frecuencia.\n\n` +
+      'Luxy ya espera lo que pide el proveedor antes de reintentar. Si sigue ' +
+      'pasando, espacia las peticiones o usa otro modelo un rato.'
+    );
   }
   // 524 y 504 son timeouts del borde de Cloudflare delante del proveedor: el
   // modelo tardo mas de lo que aguanta el proxy. No es un error interno y

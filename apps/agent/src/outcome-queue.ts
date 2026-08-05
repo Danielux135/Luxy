@@ -11,7 +11,7 @@ import {
   jobCancelledRequestSchema,
   jobCompleteRequestSchema,
   jobFailRequestSchema,
-  redactDeep,
+  redact,
 } from '@luxy/shared';
 import type { JobCancelledRequest, JobCompleteRequest, JobFailRequest } from '@luxy/shared';
 import { stateDir } from './paths.js';
@@ -38,6 +38,27 @@ const queuedOutcomeSchema = z.discriminatedUnion('kind', [
 ]);
 
 type QueuedOutcome = z.infer<typeof queuedOutcomeSchema>;
+
+/**
+ * redacta el contenido de un resultado ya validado sin reinterpretar sus claves.
+ *
+ * `redactDeep` protege objetos arbitrarios mirando tambien el nombre de cada
+ * propiedad. Aqui el esquema ya elimino cualquier campo desconocido, y nombres
+ * legitimos como inputTokens/outputTokens son contadores, no credenciales.
+ */
+function redactOutcomeStrings(value: unknown): unknown {
+  if (typeof value === 'string') return redact(value);
+  if (Array.isArray(value)) return value.map((item) => redactOutcomeStrings(item));
+  if (value !== null && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, item]) => [
+        key,
+        redactOutcomeStrings(item),
+      ]),
+    );
+  }
+  return value;
+}
 
 export interface OutcomeSender {
   completeJob(jobId: string, payload: JobCompleteRequest): Promise<void>;
@@ -97,28 +118,31 @@ export class OutcomeQueue {
   }
 
   pushCompleted(jobId: string, payload: JobCompleteRequest): void {
+    const validated = jobCompleteRequestSchema.parse(payload);
     this.replace({
       jobId,
       kind: 'completed',
-      payload: jobCompleteRequestSchema.parse(redactDeep(payload)),
+      payload: jobCompleteRequestSchema.parse(redactOutcomeStrings(validated)),
       createdAt: new Date().toISOString(),
     });
   }
 
   pushFailed(jobId: string, payload: JobFailRequest): void {
+    const validated = jobFailRequestSchema.parse(payload);
     this.replace({
       jobId,
       kind: 'failed',
-      payload: jobFailRequestSchema.parse(redactDeep(payload)),
+      payload: jobFailRequestSchema.parse(redactOutcomeStrings(validated)),
       createdAt: new Date().toISOString(),
     });
   }
 
   pushCancelled(jobId: string, payload: JobCancelledRequest): void {
+    const validated = jobCancelledRequestSchema.parse(payload);
     this.replace({
       jobId,
       kind: 'cancelled',
-      payload: jobCancelledRequestSchema.parse(redactDeep(payload)),
+      payload: jobCancelledRequestSchema.parse(redactOutcomeStrings(validated)),
       createdAt: new Date().toISOString(),
     });
   }

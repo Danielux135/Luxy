@@ -9,6 +9,7 @@ import {
   machineSupportsProvider,
   studioJobActionRequestSchema,
   studioJobCreateRequestSchema,
+  studioJobFeedbackRequestSchema,
   studioJobListQuerySchema,
 } from '@luxy/shared';
 import type { Job, Machine, ProviderId, StudioJob } from '@luxy/shared';
@@ -87,6 +88,16 @@ export const handleStudioJobCreate = withMachineAuth(async (request, deps, creat
       model: body.data.model,
       requestedByMachineId: creator.id,
       requestedByMachineName: creator.name,
+      ...(body.data.mode === 'conversation'
+        ? {
+            studioMode: 'conversation',
+            conversationId: body.data.conversationId,
+            conversationTurnId: body.data.conversationTurnId,
+            conversationTitle: body.data.conversationTitle,
+            conversationUserMessage: body.data.conversationUserMessage,
+            comparisonIndex: body.data.comparisonIndex ?? 0,
+          }
+        : {}),
     },
   });
 
@@ -99,7 +110,7 @@ export const handleStudioJobCreate = withMachineAuth(async (request, deps, creat
 });
 
 /** historial real de la cola, no solo lo observado por el renderer */
-export const handleStudioJobs = withMachineAuth(async (request, deps) => {
+export const handleStudioJobs = withMachineAuth(async (request, deps, creator) => {
   const url = new URL(request.url);
   const query = studioJobListQuerySchema.safeParse({
     targetMachineId: url.searchParams.get('targetMachineId') ?? undefined,
@@ -109,6 +120,25 @@ export const handleStudioJobs = withMachineAuth(async (request, deps) => {
   if (!query.success) return errorResponse('los filtros del historial no son validos', 422);
 
   const jobs = await deps.repo.listJobs(query.data);
+
+  // Una cancelacion solicitada antes de cerrar Electron podia quedarse en
+  // `running`: el agente anterior ya no existia para entregar su resultado
+  // final. Las conversaciones son de solo lectura y no tienen worktree, por lo
+  // que Studio puede terminar con seguridad esas cancelaciones pendientes.
+  for (const [index, job] of jobs.entries()) {
+    if (
+      job.cancelRequestedAt === null ||
+      job.origin !== 'studio' ||
+      job.metadata['studioMode'] !== 'conversation' ||
+      job.metadata['requestedByMachineId'] !== creator.id ||
+      !['queued', 'waiting_for_machine', 'claimed', 'running'].includes(job.status)
+    ) {
+      continue;
+    }
+    const recovered = await deps.repo.finishConversationCancellation(job.id);
+    if (recovered !== null) jobs[index] = recovered;
+  }
+
   return json({ jobs: jobs.map(toStudioJob) });
 });
 
@@ -136,16 +166,63 @@ export const handleStudioJobDetail = withMachineAuth(async (_request, deps, _mac
 });
 
 /** la cancelacion conserva siempre los cambios del worktree */
-export const handleStudioJobCancel = withMachineAuth(async (_request, deps, _machine, params) => {
+export const handleStudioJobCancel = withMachineAuth(async (_request, deps, creator, params) => {
   const jobId = params.jobId;
   if (jobId === undefined) return errorResponse('falta el identificador del trabajo', 400);
 
   const job = await deps.repo.getJobById(jobId);
   if (job === null) return errorResponse('trabajo no encontrado', 404);
+  if (job.origin !== 'studio' || job.metadata['requestedByMachineId'] !== creator.id) {
+    return errorResponse('ese trabajo no fue creado desde este Studio', 403);
+  }
   const status = await deps.repo.requestCancel(jobId);
   if (status === null) return errorResponse('el trabajo ya habia terminado', 409);
 
+  if (job.metadata['studioMode'] === 'conversation' && status !== 'cancelled') {
+    const cancelled = await deps.repo.finishConversationCancellation(jobId);
+    if (cancelled !== null) return json({ ok: true, status: cancelled.status });
+
+    // La respuesta pudo ganar la carrera entre requestCancel y el update
+    // condicional. Se devuelve el estado real en vez de inventar un cancelado.
+    const current = await deps.repo.getJobById(jobId);
+    return json({ ok: true, status: current?.status ?? status });
+  }
+
   return json({ ok: true, status });
+});
+
+/** guarda calidad explicita para que el selector aprenda de resultados reales */
+export const handleStudioJobFeedback = withMachineAuth(async (request, deps, creator, params) => {
+  const jobId = params.jobId;
+  if (jobId === undefined) return errorResponse('falta el identificador del trabajo', 400);
+
+  const body = await readBody(request, studioJobFeedbackRequestSchema);
+  if (!body.ok) return body.response;
+
+  const job = await deps.repo.getJobById(jobId);
+  if (job === null) return errorResponse('trabajo no encontrado', 404);
+  if (
+    job.origin !== 'studio' ||
+    job.metadata['studioMode'] !== 'conversation' ||
+    job.metadata['requestedByMachineId'] !== creator.id
+  ) {
+    return errorResponse('esa respuesta no pertenece a este Studio', 403);
+  }
+  if (job.status !== 'completed') {
+    return errorResponse('solo se puede valorar una respuesta completada', 409);
+  }
+
+  await deps.repo.mergeJobMetadata(job.id, {
+    studioFeedback: {
+      rating: body.data.rating,
+      ratedAt: new Date().toISOString(),
+      ratedByMachineId: creator.id,
+    },
+  });
+  const updated = await deps.repo.getJobById(job.id);
+  if (updated === null) return errorResponse('no se pudo guardar la valoracion', 409);
+
+  return json({ job: toStudioJob(updated) });
 });
 
 /**

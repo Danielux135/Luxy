@@ -14,6 +14,7 @@ import {
   renderJobProgress,
   MIN_PROGRESS_EDIT_INTERVAL_MS,
   TERMINAL_JOB_STATUSES,
+  MAX_TELEGRAM_SUMMARY_CHARS,
 } from '@luxy/shared';
 import type { Job, JobAttachment, JobStatus, ProviderId } from '@luxy/shared';
 import type { GatewayConfig } from '../env.js';
@@ -57,6 +58,13 @@ export function errorResponse(message: string, status = 400): Response {
 /** hace idempotentes los reenvios de la cola local de resultados */
 function terminalResponse(job: Job, expected: JobStatus): Response | null {
   if (job.status === expected) return json({ ok: true, duplicate: true });
+  // En conversaciones, Studio confirma la cancelacion inmediatamente porque
+  // no existe worktree que preservar. Si el proveedor termina en la pequeña
+  // ventana anterior a recibir el AbortSignal, su cierre tardio se reconoce y
+  // se descarta: devolver 409 haria que el agente lo reintentase para siempre.
+  if (job.status === 'cancelled' && job.cancelRequestedAt !== null) {
+    return json({ ok: true, duplicate: true, ignoredBecause: 'cancelled' });
+  }
   // interrupted es una conclusion provisional del barrido de leases. Si la
   // misma maquina propietaria vuelve y entrega el resultado durable, ese dato
   // real prevalece sobre la inferencia hecha durante el corte de red.
@@ -309,6 +317,13 @@ export const handleJobEvents = withMachineAuth(async (request, deps, machine, pa
   if (!job) return errorResponse('trabajo no encontrado', 404);
   if (job.claimedBy !== machine.id) return errorResponse('ese trabajo no es de esta maquina', 403);
 
+  // Tras una cancelacion inmediata pueden quedar fragmentos ya encolados en
+  // el agente. Se confirman sin guardarlos y, sobre todo, sin volver a cambiar
+  // el estado terminal a `running` por recibir un evento tardio.
+  if ((TERMINAL_JOB_STATUSES as readonly JobStatus[]).includes(job.status)) {
+    return json({ ok: true, leaseExpiresAt: null, ignored: true });
+  }
+
   await deps.repo.appendEvents(jobId, body.data.events);
 
   // el primer evento marca el inicio real de la ejecucion
@@ -392,6 +407,29 @@ export const handleJobComplete = withMachineAuth(async (request, deps, machine, 
       branch: result.branch,
       worktreePath: result.worktreePath,
       sessionId: result.sessionId,
+      // el estado del trabajo sigue siendo `completed`, pero una salida parcial
+      // no puede parecer una respuesta entera: el motivo real viaja aqui
+      ...(result.responseOutcome === undefined
+        ? {}
+        : { responseOutcome: result.responseOutcome }),
+      ...(result.responseTermination === undefined
+        ? {}
+        : { responseTermination: result.responseTermination }),
+      // por que este turno aporto memoria o por que no. Va aunque no haya
+      // memoria: es lo que distingue "conservada" de "nunca hubo".
+      ...(result.conversationMemoryStatus === undefined
+        ? {}
+        : { conversationMemoryStatus: result.conversationMemoryStatus }),
+      ...(result.conversationMemory === undefined
+        ? {}
+        : {
+            conversationMemory: result.conversationMemory,
+            conversationMemorySource: {
+              provider: job.provider,
+              model: job.model,
+              savedAt: new Date().toISOString(),
+            },
+          }),
     },
   });
 
@@ -411,7 +449,13 @@ export const handleJobComplete = withMachineAuth(async (request, deps, machine, 
     filesChanged: result.filesChanged,
     testsPassed: result.testsPassed,
     testsFailed: result.testsFailed,
-    summary: result.summary,
+    // el resultado completo ya esta guardado; la tarjeta solo lleva lo que
+    // cabe. Sin esto, una respuesta de conversacion larga se convertiria en
+    // decenas de mensajes de Telegram.
+    summary:
+      result.summary.length > MAX_TELEGRAM_SUMMARY_CHARS
+        ? `${result.summary.slice(0, MAX_TELEGRAM_SUMMARY_CHARS)}\n[...] respuesta completa en Luxy Studio`
+        : result.summary,
   });
 
   // el resultado final NO puede perderse: si falla la edicion, se envia aparte

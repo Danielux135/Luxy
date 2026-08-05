@@ -130,6 +130,7 @@ Ver [TELEGRAM.md](TELEGRAM.md#5-registrar-el-webhook).
 | `POST` | `/api/approvals/:approvalId/resolve` |
 | `POST` | `/api/approvals/:approvalId/complete` |
 | `POST` | `/api/studio/jobs/:jobId/action` |
+| `POST` | `/api/studio/jobs/:jobId/feedback` |
 
 Todos los privados exigen `Authorization: Bearer <token de máquina>`, y una
 máquina **solo** puede tocar sus propios trabajos.
@@ -139,6 +140,10 @@ confirmación de Studio. La máquina propietaria lo recoge por
 `/api/approvals/pending` y cierra la orden con `/complete`. Las aprobaciones
 consumidas pasan a `expired`, de modo que conservan auditoría sin volver a
 ejecutarse.
+
+`/api/studio/jobs/:jobId/feedback` acepta `helpful` o `not_helpful` solo para
+respuestas completadas creadas por ese mismo Studio. La valoracion queda en la
+metadata del trabajo y alimenta la recomendacion visible de modelos.
 
 ## 8. Cron de leases
 

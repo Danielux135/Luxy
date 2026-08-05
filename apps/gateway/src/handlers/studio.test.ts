@@ -1,6 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
 import { hashToken } from '../auth.js';
-import { handleStudioJobAction, handleStudioJobCreate, handleStudioOptions } from './studio.js';
+import {
+  handleStudioJobAction,
+  handleStudioJobCancel,
+  handleStudioJobCreate,
+  handleStudioJobFeedback,
+  handleStudioJobs,
+  handleStudioOptions,
+} from './studio.js';
 
 const TOKEN = 'token-studio-0123456789abcdefghijkl';
 const CREATOR_ID = '11111111-1111-4111-8111-111111111111';
@@ -94,7 +101,29 @@ async function deps(jobOverrides: Record<string, unknown> = {}) {
   const repo = {
     getMachineById: vi.fn(async () => target),
     listMachines: vi.fn(async () => [machine(CREATOR_ID), target]),
+    listJobs: vi.fn(async () => [currentJob]),
     getJobById: vi.fn(async () => currentJob),
+    requestCancel: vi.fn(async () => {
+      if (['completed', 'failed', 'cancelled', 'interrupted'].includes(String(currentJob.status))) {
+        return null;
+      }
+      currentJob = { ...currentJob, cancelRequestedAt: new Date().toISOString() };
+      return currentJob.status;
+    }),
+    finishConversationCancellation: vi.fn(async () => {
+      if (
+        !['queued', 'waiting_for_machine', 'claimed', 'running'].includes(String(currentJob.status))
+      ) {
+        return null;
+      }
+      currentJob = {
+        ...currentJob,
+        status: 'cancelled',
+        completedAt: new Date().toISOString(),
+        leaseExpiresAt: null,
+      };
+      return currentJob;
+    }),
     createApproval: vi.fn(async () => ({ id: '44444444-4444-4444-8444-444444444444' })),
     resolveApproval: vi.fn(async () => ({
       id: '44444444-4444-4444-8444-444444444444',
@@ -160,6 +189,30 @@ function actionRequest(body: unknown): Request {
   );
 }
 
+function feedbackRequest(body: unknown): Request {
+  return new Request(
+    'https://gateway.test/api/studio/jobs/33333333-3333-4333-8333-333333333333/feedback',
+    {
+      method: 'POST',
+      headers: { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    },
+  );
+}
+
+function cancelRequest(): Request {
+  return new Request(
+    'https://gateway.test/api/studio/jobs/33333333-3333-4333-8333-333333333333/cancel',
+    { method: 'POST', headers: { authorization: `Bearer ${TOKEN}` } },
+  );
+}
+
+function listRequest(): Request {
+  return new Request('https://gateway.test/api/studio/jobs?limit=30', {
+    headers: { authorization: `Bearer ${TOKEN}` },
+  });
+}
+
 describe('Luxy Studio API', () => {
   it('crea un trabajo sin ids ficticios de Telegram', async () => {
     const context = await deps();
@@ -190,6 +243,39 @@ describe('Luxy Studio API', () => {
     expect(body.job.origin).toBe('studio');
   });
 
+  it('guarda la identidad de una conversacion sin una tabla nueva', async () => {
+    const context = await deps();
+    const response = await handleStudioJobCreate(
+      request({
+        targetMachineId: TARGET_ID,
+        provider: 'deepseek',
+        model: 'DeepSeek-V4-Pro',
+        projectAlias: 'luxy',
+        prompt: 'Usuario:\nhola\n\nAsistente:',
+        mode: 'conversation',
+        conversationId: '55555555-5555-4555-8555-555555555555',
+        conversationTurnId: '66666666-6666-4666-8666-666666666666',
+        conversationTitle: 'Hola',
+        conversationUserMessage: 'hola',
+        comparisonIndex: 1,
+      }),
+      context,
+    );
+
+    expect(response.status).toBe(201);
+    expect(context.repo.createJob).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          studioMode: 'conversation',
+          conversationId: '55555555-5555-4555-8555-555555555555',
+          conversationTurnId: '66666666-6666-4666-8666-666666666666',
+          conversationUserMessage: 'hola',
+          comparisonIndex: 1,
+        }),
+      }),
+    );
+  });
+
   it('rechaza el proveedor pedido en vez de sustituirlo', async () => {
     const context = await deps();
     const response = await handleStudioJobCreate(
@@ -218,6 +304,61 @@ describe('Luxy Studio API', () => {
     const body = (await response.json()) as { machines: Array<{ providers: string[] }> };
     expect(response.status).toBe(200);
     expect(body.machines[0]?.providers).toEqual(['deepseek']);
+  });
+
+  it('cancela una conversacion de inmediato aunque el agente siga esperando al proveedor', async () => {
+    const context = await deps({
+      status: 'running',
+      completedAt: null,
+      leaseExpiresAt: new Date(Date.now() + 120_000).toISOString(),
+      metadata: {
+        requestedByMachineId: CREATOR_ID,
+        studioMode: 'conversation',
+      },
+    });
+    const response = await handleStudioJobCancel(cancelRequest(), context, {
+      jobId: '33333333-3333-4333-8333-333333333333',
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ ok: true, status: 'cancelled' });
+    expect(context.repo.requestCancel).toHaveBeenCalledOnce();
+    expect(context.repo.finishConversationCancellation).toHaveBeenCalledOnce();
+  });
+
+  it('recupera al listar una cancelacion de conversacion pendiente tras reiniciar', async () => {
+    const context = await deps({
+      status: 'running',
+      completedAt: null,
+      cancelRequestedAt: new Date().toISOString(),
+      metadata: {
+        requestedByMachineId: CREATOR_ID,
+        studioMode: 'conversation',
+      },
+    });
+    const response = await handleStudioJobs(listRequest(), context);
+    const body = (await response.json()) as { jobs: Array<{ status: string }> };
+
+    expect(response.status).toBe(200);
+    expect(body.jobs[0]?.status).toBe('cancelled');
+    expect(context.repo.finishConversationCancellation).toHaveBeenCalledOnce();
+  });
+
+  it('no deja que otro Studio cancele una conversacion ajena', async () => {
+    const context = await deps({
+      status: 'running',
+      completedAt: null,
+      metadata: {
+        requestedByMachineId: TARGET_ID,
+        studioMode: 'conversation',
+      },
+    });
+    const response = await handleStudioJobCancel(cancelRequest(), context, {
+      jobId: '33333333-3333-4333-8333-333333333333',
+    });
+
+    expect(response.status).toBe(403);
+    expect(context.repo.requestCancel).not.toHaveBeenCalled();
   });
 
   it('registra Aplicar cambios como aprobacion para la maquina del worktree', async () => {
@@ -273,5 +414,49 @@ describe('Luxy Studio API', () => {
 
     expect(response.status).toBe(403);
     expect(context.repo.createApproval).not.toHaveBeenCalled();
+  });
+
+  it('guarda feedback de una respuesta para aprender el modelo preferido', async () => {
+    const context = await deps({
+      metadata: {
+        requestedByMachineId: CREATOR_ID,
+        studioMode: 'conversation',
+        conversationId: '55555555-5555-4555-8555-555555555555',
+        conversationTurnId: '66666666-6666-4666-8666-666666666666',
+        conversationTitle: 'Hola',
+        conversationUserMessage: 'hola',
+        comparisonIndex: 0,
+      },
+    });
+    const response = await handleStudioJobFeedback(
+      feedbackRequest({ rating: 'helpful' }),
+      context,
+      { jobId: '33333333-3333-4333-8333-333333333333' },
+    );
+
+    expect(response.status).toBe(200);
+    expect(context.repo.mergeJobMetadata).toHaveBeenCalledWith(
+      '33333333-3333-4333-8333-333333333333',
+      expect.objectContaining({
+        studioFeedback: expect.objectContaining({ rating: 'helpful' }),
+      }),
+    );
+  });
+
+  it('no permite valorar una respuesta de otro Studio', async () => {
+    const context = await deps({
+      metadata: {
+        requestedByMachineId: TARGET_ID,
+        studioMode: 'conversation',
+      },
+    });
+    const response = await handleStudioJobFeedback(
+      feedbackRequest({ rating: 'not_helpful' }),
+      context,
+      { jobId: '33333333-3333-4333-8333-333333333333' },
+    );
+
+    expect(response.status).toBe(403);
+    expect(context.repo.mergeJobMetadata).not.toHaveBeenCalled();
   });
 });

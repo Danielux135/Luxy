@@ -5,6 +5,20 @@ vista Trabajos se eligen máquina, proyecto, proveedor y modelo, se crea la tare
 y se consultan historial, eventos, resultado, pruebas y resumen del diff.
 Telegram permanece como canal secundario.
 
+La vista **Conversaciones** permite una respuesta individual o una comparación
+de dos proveedores/modelos. Muestra el último fragmento recibido, tiempo hasta
+el primer texto, duración total y resultado final. Cada respuesta queda guardada
+como trabajo de Studio; los identificadores de conversación y turno viven en su
+metadata, por lo que no hace falta una tabla separada.
+
+Cada respuesta guarda además una memoria estructurada que la API no necesita
+conservar por sí misma. Studio muestra su resumen, hechos, decisiones, plan,
+preguntas y lecciones; al enviar el siguiente mensaje recupera esa memoria y
+contexto relevante de otras conversaciones del mismo proyecto. Los botones
+**Útil** y **No me sirvió** hacen que la recomendación de proveedor/modelo se
+adapte a resultados reales. La recomendación siempre se muestra con su motivo y
+solo se aplica al pulsar **Usar recomendación**.
+
 La CLI (`npm start`) sigue existiendo como herramienta avanzada y de recuperación.
 
 ## Instalación
@@ -132,6 +146,27 @@ terminó.
 - El gateway comprueba que la máquina tenga el proyecto y el proveedor pedidos;
   nunca sustituye silenciosamente un modelo o proveedor.
 - El utility process del agente recibe un entorno mínimo, no `process.env` completo.
+
+### Conversaciones de solo lectura
+
+- No crean worktree, no ejecutan herramientas ni lanzan comprobaciones.
+- Codex solo se ejecuta si la CLI ofrece sandbox `read-only`.
+- Claude Code solo se ejecuta si puede bloquear Bash, Edit, Write, NotebookEdit
+  y las herramientas de red; además usa el modo de permisos `plan` cuando está
+  disponible.
+- Los proveedores HTTP reciben una llamada normal sin contexto agentic, así que
+  no disponen de herramientas locales.
+- Comparar crea dos trabajos con el mismo turno. La concurrencia efectiva queda
+  limitada por `maxConcurrentJobs` de la máquina.
+- El bloque `LUXY_MEMORY` se valida y se elimina antes de mostrar la respuesta.
+  El fallback actual puede copiar código de una respuesta larga a la memoria;
+  es la incidencia P0 documentada en `PROJECT-STATE.md` y `CURRENT-TASK.md`.
+  Hasta corregirla, una respuesta truncada no debe considerarse una memoria
+  fiable.
+- Una respuesta A/B marcada como útil se convierte en la fuente canónica del
+  siguiente turno. Sin valoración se usa la columna A de forma determinista.
+- La memoria relacionada se limita al mismo alias de proyecto y entra como
+  datos no confiables, nunca como instrucciones ejecutables.
 
 ## Desarrollo
 

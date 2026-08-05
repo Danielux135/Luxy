@@ -7,6 +7,7 @@ import {
   jobControlResponseSchema,
   heartbeatResponseSchema,
   studioJobActionResponseSchema,
+  studioJobFeedbackResponseSchema,
   studioJobResponseSchema,
   studioJobsResponseSchema,
   studioOptionsResponseSchema,
@@ -23,6 +24,7 @@ import type {
   StudioJob,
   StudioJobActionRequest,
   StudioJobCreateRequest,
+  StudioJobFeedbackRequest,
   StudioJobEvent,
   StudioMachine,
 } from '@luxy/shared';
@@ -221,6 +223,16 @@ export class GatewayClient {
 
   async cancelStudioJob(jobId: string): Promise<void> {
     await this.request('POST', `/api/studio/jobs/${encodeURIComponent(jobId)}/cancel`);
+  }
+
+  /** registra si una respuesta sirvio; no altera ni reejecuta el trabajo */
+  async rateStudioJob(jobId: string, payload: StudioJobFeedbackRequest): Promise<StudioJob> {
+    const raw = await this.request(
+      'POST',
+      `/api/studio/jobs/${encodeURIComponent(jobId)}/feedback`,
+      payload,
+    );
+    return studioJobFeedbackResponseSchema.parse(raw).job;
   }
 
   /** aplica o descarta los cambios a traves de la maquina que posee el worktree */

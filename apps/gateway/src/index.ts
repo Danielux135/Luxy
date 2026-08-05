@@ -38,6 +38,7 @@ import {
   handleStudioJobAction,
   handleStudioJobCreate,
   handleStudioJobDetail,
+  handleStudioJobFeedback,
   handleStudioJobs,
   handleStudioOptions,
 } from './handlers/studio.js';
@@ -76,6 +77,9 @@ const router = new Router<Deps>()
   )
   .post('/api/studio/jobs/:jobId/cancel', (request, deps, params) =>
     handleStudioJobCancel(request, deps, params),
+  )
+  .post('/api/studio/jobs/:jobId/feedback', (request, deps, params) =>
+    handleStudioJobFeedback(request, deps, params),
   )
   .post('/api/studio/jobs/:jobId/action', (request, deps, params) =>
     handleStudioJobAction(request, deps, params),

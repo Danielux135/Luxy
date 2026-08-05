@@ -606,8 +606,8 @@ export class LuxyAgent {
         config: this.config,
         logger: this.logger,
         getProvider: (id) => this.providers.get(id) ?? null,
-        emit: (type, message) => {
-          this.queue.push(job.id, type, message);
+        emit: (type, message, metadata) => {
+          this.queue.push(job.id, type, message, metadata);
           // los eventos se envian en cuanto se puede, sin bloquear la ejecucion
           void this.queue.flush().catch(() => undefined);
           // el mismo evento alimenta la interfaz local sin pasar por la red

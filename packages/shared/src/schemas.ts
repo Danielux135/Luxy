@@ -7,6 +7,12 @@ import {
   APPROVAL_ACTIONS,
   JOB_ORIGINS,
   MAX_PROMPT_LENGTH,
+  STREAM_TRANSPORT_ENDS,
+  RESPONSE_ABORT_SOURCES,
+  RESPONSE_OUTCOMES,
+  SOFT_TERMINAL_GRACE_MS,
+  CONVERSATION_MEMORY_STATUSES,
+  MAX_CONVERSATION_RESULT_CHARS,
 } from './constants.js';
 import { connectionProfileSchema } from './models/types.js';
 
@@ -158,8 +164,261 @@ export const testRunResultSchema = z.object({
   passed: z.boolean(),
 });
 
+export const streamTransportEndSchema = z.enum(STREAM_TRANSPORT_ENDS);
+export const responseAbortSourceSchema = z.enum(RESPONSE_ABORT_SOURCES);
+export const responseOutcomeSchema = z.enum(RESPONSE_OUTCOMES);
+
+/**
+ * por que termino una respuesta, sin una sola letra de su contenido.
+ *
+ * una generacion de 23 minutos acabo a mitad de una etiqueta HTML y no habia
+ * forma de saber si fue el tope de tokens, un timeout, un proxy o un socket
+ * caido. Cada hipotesis pedia un arreglo distinto. Esto es lo minimo para
+ * distinguirlas: señales, tiempos y contadores; nunca texto, cabeceras ni URLs.
+ */
+export const responseTerminationSchema = z.object({
+  /** codigo HTTP de la respuesta; null si la peticion nunca llego a responder */
+  httpStatus: z.number().int().min(0).max(599).nullable(),
+  streamed: z.boolean(),
+  /** trozos de red leidos, no eventos SSE */
+  chunks: z.number().int().min(0),
+  bytes: z.number().int().min(0),
+  durationMs: z.number().int().min(0),
+  transportEnd: streamTransportEndSchema,
+  /** exactamente lo que dijo el proveedor: `stop`, `length`, `tool_calls`... */
+  finishReason: z.string().max(64).nullable(),
+  /** llego el bloque final de consumo, el que va sin `choices` */
+  finalUsageReceived: z.boolean(),
+  abortedBy: responseAbortSourceSchema.nullable(),
+  /** tope de tiempo que se aplico de verdad a esta peticion */
+  effectiveTimeoutMs: z.number().int().min(0),
+  /** `max_tokens` que se envio de verdad */
+  maxOutputTokens: z.number().int().min(0).nullable(),
+  inputTokens: z.number().int().min(0),
+  outputTokens: z.number().int().min(0),
+  /** caracteres de texto visible acumulados: tamaño, no contenido */
+  textLength: z.number().int().min(0),
+});
+
+export type ResponseTermination = z.infer<typeof responseTerminationSchema>;
+
+/** linea de log legible; por construccion no puede llevar contenido */
+export function formatResponseTermination(termination: ResponseTermination): string {
+  const partes = [
+    `final=${termination.transportEnd}`,
+    `http=${termination.httpStatus ?? 'ninguno'}`,
+    `stream=${termination.streamed ? 'si' : 'no'}`,
+    `finishReason=${termination.finishReason ?? 'ninguno'}`,
+    `usageFinal=${termination.finalUsageReceived ? 'si' : 'no'}`,
+    `aborto=${termination.abortedBy ?? 'ninguno'}`,
+    `duracion=${termination.durationMs}ms`,
+    `timeout=${termination.effectiveTimeoutMs}ms`,
+    `maxTokens=${termination.maxOutputTokens ?? 'sin tope'}`,
+    `tokens=${termination.inputTokens}/${termination.outputTokens}`,
+    `bytes=${termination.bytes}`,
+    `chunks=${termination.chunks}`,
+    `caracteres=${termination.textLength}`,
+  ];
+  return `diagnostico de la respuesta: ${partes.join(' ')}`;
+}
+
+const conversationMemoryEntrySchema = z.string().trim().min(1).max(240);
+
+/**
+ * resumen acumulativo que un proveedor devuelve junto a una conversacion.
+ *
+ * no es una "memoria" propia del modelo: Luxy la valida, la persiste con el
+ * trabajo que la origino y la vuelve a enviar en las llamadas posteriores.
+ */
+export const conversationMemorySchema = z.object({
+  version: z.literal(1),
+  summary: z.string().trim().min(1).max(1200),
+  facts: z.array(conversationMemoryEntrySchema).max(12).default([]),
+  decisions: z.array(conversationMemoryEntrySchema).max(12).default([]),
+  plan: z.array(conversationMemoryEntrySchema).max(12).default([]),
+  openQuestions: z.array(conversationMemoryEntrySchema).max(12).default([]),
+  lessons: z.array(conversationMemoryEntrySchema).max(12).default([]),
+});
+
+export type ConversationMemory = z.infer<typeof conversationMemorySchema>;
+
+export const CONVERSATION_MEMORY_OPEN = '<LUXY_MEMORY>';
+export const CONVERSATION_MEMORY_CLOSE = '</LUXY_MEMORY>';
+
+export const CONVERSATION_MEMORY_INSTRUCTION = [
+  'Al final de tu respuesta añade una memoria acumulativa para Luxy.',
+  'Conserva lo valido de la memoria anterior y aplica correcciones del usuario.',
+  'Incluye solo hechos expresos u observados; no conviertas suposiciones en hechos.',
+  'No pongas este bloque dentro de una cerca Markdown ni escribas nada despues.',
+  CONVERSATION_MEMORY_OPEN,
+  '{"version":1,"summary":"resumen acumulativo breve","facts":[],"decisions":[],"plan":[],"openQuestions":[],"lessons":[]}',
+  CONVERSATION_MEMORY_CLOSE,
+].join('\n');
+
+export const conversationMemoryStatusSchema = z.enum(CONVERSATION_MEMORY_STATUSES);
+export type ConversationMemoryStatus = z.infer<typeof conversationMemoryStatusSchema>;
+
+export interface ParsedConversationMemoryResponse {
+  visibleText: string;
+  /**
+   * memoria válida, o null.
+   *
+   * null NO significa «sin memoria en la conversación»: significa que este
+   * turno no aporta ninguna. Quien lo consuma debe conservar la anterior.
+   */
+  memory: ConversationMemory | null;
+  status: ConversationMemoryStatus;
+}
+
+/**
+ * true si esto parece codigo o datos, no un resumen en prosa.
+ *
+ * POR QUE EXISTE: el fallback anterior resumia los primeros 1.200 caracteres de
+ * la respuesta visible. Cuando la respuesta era una web, la memoria acababa
+ * llena de HTML, CSS y JavaScript, ilegible e inutil como contexto. El modelo
+ * tambien puede equivocarse y meter codigo dentro de un bloque bien formado,
+ * asi que esto se comprueba SIEMPRE, no solo en el camino de reserva.
+ */
+export function looksLikeCode(value: string): boolean {
+  const text = value.trim();
+  if (text.length === 0) return false;
+
+  // cercas de Markdown: la señal mas explicita
+  if (/```/.test(text)) return true;
+
+  const patrones = [
+    /<!doctype\s+html/i,
+    /<\/?(?:html|head|body|div|span|script|style|section|header|footer|canvas|meta|link)\b/i,
+    // reglas CSS: selector seguido de declaraciones
+    /[.#]?[\w-]+\s*\{[^}]*:[^}]*[;}]/,
+    /@(?:import|media|keyframes|font-face)\b/i,
+    /\b(?:function|const|let|var|class|return|=>)\b[^\n]*[;{]/,
+    /\b(?:document|window)\.\w+/,
+    /^\s*[{[][\s\S]*[}\]]\s*$/,
+  ];
+  if (patrones.some((patron) => patron.test(text))) return true;
+
+  // ultima defensa: densidad de simbolos tipica de codigo, no de prosa
+  const simbolos = (text.match(/[{}<>;=()[\]]/g) ?? []).length;
+  return text.length >= 120 && simbolos / text.length > 0.06;
+}
+
+function stripOptionalJsonFence(value: string): string {
+  const trimmed = value.trim();
+  const match = /^```(?:json)?\s*([\s\S]*?)\s*```$/i.exec(trimmed);
+  return match?.[1]?.trim() ?? trimmed;
+}
+
+/**
+ * ajusta un bloque a los limites en vez de rechazarlo entero.
+ *
+ * POR QUE EXISTE: en LUX-8B8T el modelo SI devolvio su memoria, pero se paso de
+ * largo y el bloque entero se descarto: Daniel se quedo sin panel de memoria por
+ * un resumen demasiado largo. Un texto largo no esta contaminado, sobra. Lo que
+ * si se rechaza sin contemplaciones es el codigo, y eso se comprueba despues.
+ */
+function normalizeConversationMemory(raw: unknown): unknown {
+  if (typeof raw !== 'object' || raw === null) return raw;
+  const entrada = raw as Record<string, unknown>;
+  const lista = (valor: unknown): string[] =>
+    Array.isArray(valor)
+      ? valor
+          .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+          .map((item) => item.trim().slice(0, 240))
+          .slice(0, 12)
+      : [];
+
+  return {
+    ...entrada,
+    version: 1,
+    summary: typeof entrada.summary === 'string' ? entrada.summary.trim().slice(0, 1200) : '',
+    facts: lista(entrada.facts),
+    decisions: lista(entrada.decisions),
+    plan: lista(entrada.plan),
+    openQuestions: lista(entrada.openQuestions),
+    lessons: lista(entrada.lessons),
+  };
+}
+
+/** una memoria con codigo dentro no es memoria: es la respuesta colada */
+function memoryCarriesCode(memory: ConversationMemory): boolean {
+  const entradas = [
+    memory.summary,
+    ...memory.facts,
+    ...memory.decisions,
+    ...memory.plan,
+    ...memory.openQuestions,
+    ...memory.lessons,
+  ];
+  return entradas.some((entrada) => looksLikeCode(entrada));
+}
+
+/**
+ * separa la respuesta visible del bloque privado y valida todos sus limites.
+ *
+ * NO inventa una memoria de reserva. Un turno sin bloque valido devuelve null y
+ * quien lo consuma conserva la memoria anterior: una respuesta cortada no puede
+ * sustituir un contexto que si era correcto.
+ */
+export function parseConversationMemoryResponse(text: string): ParsedConversationMemoryResponse {
+  const openAt = text.lastIndexOf(CONVERSATION_MEMORY_OPEN);
+  if (openAt < 0) {
+    return { visibleText: text.trim(), memory: null, status: 'absent' };
+  }
+
+  const contentAt = openAt + CONVERSATION_MEMORY_OPEN.length;
+  const closeAt = text.indexOf(CONVERSATION_MEMORY_CLOSE, contentAt);
+  const before = text.slice(0, openAt).trim();
+  // el bloque empezo pero no se cerro: la respuesta se corto dentro de el
+  if (closeAt < 0) return { visibleText: before, memory: null, status: 'truncated_block' };
+
+  const after = text.slice(closeAt + CONVERSATION_MEMORY_CLOSE.length).trim();
+  const visibleText = [before, after].filter((part) => part.length > 0).join('\n\n');
+  try {
+    const raw = JSON.parse(stripOptionalJsonFence(text.slice(contentAt, closeAt))) as unknown;
+    const parsed = conversationMemorySchema.safeParse(normalizeConversationMemory(raw));
+    if (parsed.success) {
+      if (memoryCarriesCode(parsed.data)) {
+        return { visibleText, memory: null, status: 'rejected_code' };
+      }
+      return { visibleText, memory: parsed.data, status: 'structured' };
+    }
+  } catch {
+    // una memoria mal formada no puede romper ni ocultar la respuesta util
+  }
+
+  return { visibleText, memory: null, status: 'invalid' };
+}
+
+/** representacion compacta que vuelve a viajar como DATO en la siguiente llamada */
+export function formatConversationMemory(memory: ConversationMemory): string {
+  const sections: Array<[string, string[]]> = [
+    ['Hechos', memory.facts],
+    ['Decisiones', memory.decisions],
+    ['Plan', memory.plan],
+    ['Preguntas abiertas', memory.openQuestions],
+    ['Lecciones', memory.lessons],
+  ];
+  const lines = [`Resumen: ${memory.summary}`];
+  for (const [title, entries] of sections) {
+    if (entries.length === 0) continue;
+    lines.push(`${title}:`, ...entries.map((entry) => `- ${entry}`));
+  }
+  return lines.join('\n');
+}
+
 export const jobCompleteRequestSchema = z.object({
-  summary: z.string().max(4000),
+  /**
+   * en una tarea es un resumen; en una conversación es LA respuesta.
+   *
+   * el tope era 4.000 para todo, y eso cortaba por la mitad una respuesta que
+   * había llegado entera: 7.691 caracteres recibidos, 4.000 guardados. Quien
+   * decide el tope real es el agente según el tipo de trabajo; aquí sólo está
+   * el límite duro que evita guardar un documento entero por accidente.
+   */
+  summary: z.string().max(MAX_CONVERSATION_RESULT_CHARS),
+  /** true si ni siquiera con el tope de conversación cupo todo */
+  summaryTruncated: z.boolean().optional(),
   filesChanged: z.number().int().min(0),
   testsPassed: z.number().int().min(0),
   testsFailed: z.number().int().min(0),
@@ -169,6 +428,25 @@ export const jobCompleteRequestSchema = z.object({
   worktreePath: z.string().max(1024).nullable(),
   sessionId: z.string().max(128).nullable(),
   testLogs: z.array(testRunResultSchema).max(20).default([]),
+  /**
+   * solo aparece en respuestas de Conversaciones y nunca se muestra en bruto.
+   *
+   * ausente NO es «esta conversación no tiene memoria»: es «este turno no
+   * aporta una válida». Studio conserva entonces la última buena.
+   */
+  conversationMemory: conversationMemorySchema.optional(),
+  /** por qué este turno aportó memoria o por qué no */
+  conversationMemoryStatus: conversationMemoryStatusSchema.optional(),
+  /**
+   * como termino de verdad la respuesta.
+   *
+   * el estado del trabajo en Postgres sigue siendo `completed`: una salida
+   * parcial no se pierde por no caber en el enum. El detalle viaja aqui y
+   * Studio muestra el motivo real. Ausente = contrato anterior.
+   */
+  responseOutcome: responseOutcomeSchema.optional(),
+  /** evidencia del transporte que sostiene ese resultado, sin contenido */
+  responseTermination: responseTerminationSchema.optional(),
   /**
    * medio producido por el trabajo: una imagen editada, un audio sintetizado.
    *
@@ -230,20 +508,45 @@ export const approvalCompleteRequestSchema = z.object({
 // contratos de Studio: Desktop -> main -> gateway
 // -----------------------------------------------------------------------------
 
-export const studioJobCreateRequestSchema = z.object({
-  targetMachineId: z.string().uuid(),
-  provider: providerIdSchema,
-  model: z
-    .string()
-    .min(1)
-    .max(128)
-    .regex(/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/)
-    .nullable()
-    .default(null),
-  projectAlias: projectAliasSchema,
-  prompt: promptSchema,
-  priority: z.number().int().min(-100).max(100).default(0),
-});
+export const studioJobCreateRequestSchema = z
+  .object({
+    targetMachineId: z.string().uuid(),
+    provider: providerIdSchema,
+    model: z
+      .string()
+      .min(1)
+      .max(128)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/)
+      .nullable()
+      .default(null),
+    projectAlias: projectAliasSchema,
+    prompt: promptSchema,
+    priority: z.number().int().min(-100).max(100).default(0),
+    /** ausente conserva el contrato anterior de tareas */
+    mode: z.enum(['task', 'conversation']).optional(),
+    conversationId: z.string().uuid().optional(),
+    conversationTurnId: z.string().uuid().optional(),
+    conversationTitle: z.string().trim().min(1).max(120).optional(),
+    conversationUserMessage: z.string().min(1).max(MAX_PROMPT_LENGTH).optional(),
+    comparisonIndex: z.number().int().min(0).max(1).optional(),
+  })
+  .superRefine((value, context) => {
+    if (value.mode !== 'conversation') return;
+    for (const field of [
+      'conversationId',
+      'conversationTurnId',
+      'conversationTitle',
+      'conversationUserMessage',
+    ] as const) {
+      if (value[field] === undefined) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [field],
+          message: 'es obligatorio en una conversacion',
+        });
+      }
+    }
+  });
 
 export const studioJobListQuerySchema = z.object({
   targetMachineId: z.string().uuid().optional(),
@@ -264,6 +567,11 @@ export const studioJobActionRequestSchema = z.object({
   // ambas acciones alteran el worktree; el renderer debe confirmarlas primero
   confirmed: z.literal(true),
   message: z.string().max(500).nullable().default(null),
+});
+
+/** valoracion explicita que alimenta la recomendacion de modelos */
+export const studioJobFeedbackRequestSchema = z.object({
+  rating: z.enum(['helpful', 'not_helpful']),
 });
 
 export const studioJobSchema = z.object({
@@ -318,9 +626,12 @@ export const studioJobActionResponseSchema = z.object({
   job: studioJobSchema,
 });
 
+export const studioJobFeedbackResponseSchema = z.object({ job: studioJobSchema });
+
 export type StudioJobCreateRequest = z.infer<typeof studioJobCreateRequestSchema>;
 export type StudioJobAction = z.infer<typeof studioJobActionSchema>;
 export type StudioJobActionRequest = z.infer<typeof studioJobActionRequestSchema>;
+export type StudioJobFeedbackRequest = z.infer<typeof studioJobFeedbackRequestSchema>;
 export type StudioJob = z.infer<typeof studioJobSchema>;
 export type StudioJobEvent = z.infer<typeof studioJobEventSchema>;
 export type StudioMachine = z.infer<typeof studioMachineSchema>;
@@ -392,6 +703,20 @@ export const httpProviderConfigSchema = z.object({
   supportsStreaming: z.boolean().default(true),
   maxOutputTokens: z.number().int().min(256).max(200_000).default(8192),
   dailyBudget: z.number().min(0).default(0),
+  /**
+   * silencio que hay que ver tras una señal DEBIL antes de cerrar el flujo.
+   *
+   * un `usage` sin `choices` suele ser el ultimo evento, pero no lo demuestra:
+   * hay endpoints que lo mandan a mitad. Cerrar al segundo corto una pagina web
+   * por la mitad. Con una señal fuerte (`finish_reason` o memoria completa) el
+   * margen sigue siendo corto, porque ahi el mensaje SI termino.
+   */
+  softTerminalGraceMs: z
+    .number()
+    .int()
+    .min(1)
+    .max(120_000)
+    .default(SOFT_TERMINAL_GRACE_MS),
 });
 
 export const agentConfigSchema = z.object({

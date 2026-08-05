@@ -14,6 +14,8 @@ import {
   studioJobActionRequestSchema,
   studioJobActionResponseSchema,
   studioJobCreateRequestSchema,
+  studioJobFeedbackRequestSchema,
+  studioJobFeedbackResponseSchema,
   studioJobResponseSchema,
   studioJobsResponseSchema,
   studioOptionsResponseSchema,
@@ -226,11 +228,15 @@ export const studioJobIdArgsSchema = z.object({ jobId: z.string().uuid() });
 export const studioJobActionArgsSchema = studioJobActionRequestSchema.extend({
   jobId: z.string().uuid(),
 });
+export const studioJobFeedbackArgsSchema = studioJobFeedbackRequestSchema.extend({
+  jobId: z.string().uuid(),
+});
 
 export const studioOptionsResultSchema = studioOptionsResponseSchema;
 export const studioJobsListResultSchema = studioJobsResponseSchema;
 export const studioJobResultSchema = studioJobResponseSchema;
 export const studioJobActionResultSchema = studioJobActionResponseSchema;
+export const studioJobFeedbackResultSchema = studioJobFeedbackResponseSchema;
 
 // -----------------------------------------------------------------------------
 // API que el preload expone en window.luxy
@@ -279,6 +285,9 @@ export interface LuxyBridge {
   ): Promise<IpcResult<z.infer<typeof studioJobsListResultSchema>>>;
   getStudioJob(jobId: string): Promise<IpcResult<z.infer<typeof studioJobResultSchema>>>;
   cancelStudioJob(jobId: string): Promise<IpcResult<{ cancelled: boolean }>>;
+  rateStudioJob(
+    args: z.infer<typeof studioJobFeedbackArgsSchema>,
+  ): Promise<IpcResult<z.infer<typeof studioJobFeedbackResultSchema>>>;
   requestStudioJobAction(
     args: z.infer<typeof studioJobActionArgsSchema>,
   ): Promise<IpcResult<z.infer<typeof studioJobActionResultSchema>>>;

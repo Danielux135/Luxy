@@ -345,6 +345,30 @@ export class Repository {
     return row ? toJob(row) : null;
   }
 
+  /**
+   * cierra una conversacion cancelada sin esperar a un agente que pudo morir.
+   *
+   * el filtro de estado hace que una respuesta que termino en paralelo nunca
+   * sea sobrescrita por la cancelacion. Solo se usa despues de comprobar en el
+   * handler que es una conversacion propia de Studio y, por tanto, sin cambios.
+   */
+  async finishConversationCancellation(jobId: string): Promise<Job | null> {
+    const rows = await this.db.update<JobRow>(
+      'jobs',
+      {
+        id: eq(jobId),
+        status: inList(['queued', 'waiting_for_machine', 'claimed', 'running']),
+      },
+      {
+        status: 'cancelled',
+        completed_at: new Date().toISOString(),
+        lease_expires_at: null,
+      },
+    );
+    const row = rows[0];
+    return row ? toJob(row) : null;
+  }
+
   async mergeJobMetadata(jobId: string, patch: Record<string, unknown>): Promise<void> {
     const job = await this.getJobById(jobId);
     if (!job) return;

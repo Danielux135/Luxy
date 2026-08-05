@@ -4,6 +4,7 @@ import { StatusRail } from './ui/StatusRail.js';
 import { useAgent } from './useAgent.js';
 import { useConfig } from './useConfig.js';
 import { HomePage } from './pages/Overview.js';
+import { ConversationsPage } from './pages/Conversations.js';
 import { StudioPage } from './pages/Studio.js';
 import { ConnectionsPage, ModelsPage, ProjectsPage } from './pages/Config.js';
 import { LogsPage, SettingsPage } from './pages/System.js';
@@ -11,6 +12,7 @@ import { SetupPage } from './pages/Setup.js';
 
 const SECCIONES = [
   { id: 'inicio', label: 'Inicio', short: 'IN' },
+  { id: 'conversaciones', label: 'Conversaciones', short: 'CV' },
   { id: 'trabajos', label: 'Trabajos', short: 'TR' },
   { id: 'proyectos', label: 'Proyectos', short: 'PR' },
   { id: 'conexiones', label: 'Conexiones', short: 'CX' },
@@ -89,6 +91,7 @@ export function App(): JSX.Element {
             agentHint={hint}
           />
         )}
+        {seccion === 'conversaciones' && <ConversationsPage summary={summary} />}
         {seccion === 'trabajos' && <StudioPage />}
         {seccion === 'proyectos' && <ProjectsPage summary={summary} onSave={save} />}
         {seccion === 'conexiones' && (

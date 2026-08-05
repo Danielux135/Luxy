@@ -1,14 +1,21 @@
 // tipos derivados de las constantes y modelos de dominio
 import type { ModelLimits } from './models/types.js';
+import type { ResponseTermination } from './schemas.js';
 import type {
   JOB_STATUSES,
   PROVIDER_IDS,
   JOB_EVENT_TYPES,
   APPROVAL_ACTIONS,
   JOB_ORIGINS,
+  STREAM_TRANSPORT_ENDS,
+  RESPONSE_ABORT_SOURCES,
+  RESPONSE_OUTCOMES,
 } from './constants.js';
 
 export type JobStatus = (typeof JOB_STATUSES)[number];
+export type StreamTransportEnd = (typeof STREAM_TRANSPORT_ENDS)[number];
+export type ResponseOutcome = (typeof RESPONSE_OUTCOMES)[number];
+export type ResponseAbortSource = (typeof RESPONSE_ABORT_SOURCES)[number];
 export type ProviderId = (typeof PROVIDER_IDS)[number];
 export type JobEventType = (typeof JOB_EVENT_TYPES)[number];
 export type ApprovalAction = (typeof APPROVAL_ACTIONS)[number];
@@ -151,6 +158,13 @@ export interface HttpProviderConfig {
   supportsStreaming: boolean;
   maxOutputTokens: number;
   dailyBudget: number;
+  /**
+   * silencio exigido tras una señal terminal debil antes de cerrar el flujo.
+   *
+   * opcional para no romper una configuracion anterior: sin valor se usa
+   * `SOFT_TERMINAL_GRACE_MS`.
+   */
+  softTerminalGraceMs?: number;
 }
 
 // uso de tokens registrado tras una llamada http
@@ -203,6 +217,8 @@ export interface ProviderRunRequest {
   workingDirectory: string;
   timeoutMs: number;
   signal: AbortSignal;
+  /** impide que una conversacion pueda modificar el proyecto asociado */
+  readOnly?: boolean;
   /** callback incremental para reportar progreso al gateway */
   onEvent: (event: ProviderStreamEvent) => void;
   /** identificador de modelo opcional que sobrescribe el de la configuracion */
@@ -222,11 +238,11 @@ export interface ProviderRunRequest {
   /**
    * tope de tiempo de ESTA peticion, por encima del tope general.
    *
-   * el tope general son 300 s, pensado para que un modelo colgado no bloquee un
-   * trabajo entero. Para los lotes ese mismo tope es lo que limita cuantos
-   * registros caben en una llamada: medido, Kimi K2.6 hace 200 registros en
-   * 117 s y 400 no caben en 300 s. Con facturacion por llamada, cada registro
-   * que no entra en esta llamada se paga en la siguiente.
+   * los trabajos con herramientas usan un tope conservador por llamada. Las
+   * conversaciones terminan por señal de protocolo y conservan el timeout
+   * general configurable, porque una pausa larga no demuestra que el modelo se
+   * haya colgado. Para los lotes este campo permite ampliar el margen: medido,
+   * Kimi K2.6 hace 200 registros en 117 s y 400 no caben en 300 s.
    */
   requestTimeoutMs?: number;
 }
@@ -256,4 +272,12 @@ export interface ProviderRunResult {
   cancelled: boolean;
   errorMessage: string | null;
   usage?: ProviderUsage;
+  /**
+   * por que termino de verdad la ultima peticion al proveedor.
+   *
+   * viaja tanto en exito como en fallo: cuando una respuesta sale cortada, el
+   * motivo esta justo aqui y no en el texto. Los proveedores que aun no lo
+   * rellenan lo dejan sin definir.
+   */
+  termination?: ResponseTermination;
 }

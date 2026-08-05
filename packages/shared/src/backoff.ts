@@ -34,6 +34,15 @@ export function computeBackoffDelay(
 }
 
 export class RetryError extends Error {
+  /**
+   * codigo HTTP del ultimo fallo, si lo habia.
+   *
+   * sin esto, envolver el error perdia el `status` y quien lo recibia ya no
+   * podia distinguir un 429 de un 401: todos acababan como "fallo generico" y
+   * al usuario le llegaba el JSON crudo del proveedor en vez de que hacer.
+   */
+  readonly status?: number;
+
   constructor(
     message: string,
     readonly attempts: number,
@@ -41,6 +50,8 @@ export class RetryError extends Error {
   ) {
     super(message);
     this.name = 'RetryError';
+    const status = (lastError as { status?: unknown } | null)?.status;
+    if (typeof status === 'number') this.status = status;
   }
 }
 
@@ -58,6 +69,13 @@ export async function retryWithBackoff<T>(
   options: Partial<BackoffOptions> & {
     shouldRetry?: (error: unknown) => boolean;
     onRetry?: (error: unknown, attempt: number, delayMs: number) => void;
+    /**
+     * espera que pide el propio error, por encima del backoff calculado.
+     *
+     * un 429 suele traer `Retry-After`: obedecerlo acierta mucho mas que
+     * duplicar un retardo a ciegas. Devolver null usa el backoff normal.
+     */
+    delayForError?: (error: unknown, attempt: number, defaultDelayMs: number) => number | null;
     signal?: AbortSignal;
     sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
     random?: () => number;
@@ -67,29 +85,36 @@ export async function retryWithBackoff<T>(
   const sleep = options.sleep ?? defaultSleep;
   const shouldRetry = options.shouldRetry ?? (() => true);
   let lastError: unknown;
+  let attempts = 0;
 
   for (let attempt = 0; attempt < config.maxAttempts; attempt += 1) {
     if (options.signal?.aborted) throw new Error('operacion cancelada');
+    attempts = attempt + 1;
     try {
       return await operation({ attempt, signal: options.signal });
     } catch (error) {
       lastError = error;
       if (!shouldRetry(error) || attempt === config.maxAttempts - 1) break;
-      const delayMs = computeBackoffDelay(attempt, config, options.random);
+      const calculado = computeBackoffDelay(attempt, config, options.random);
+      const delayMs = options.delayForError?.(error, attempt, calculado) ?? calculado;
       options.onRetry?.(error, attempt, delayMs);
       await sleep(delayMs, options.signal);
     }
   }
 
   // el motivo real del ultimo intento va en el mensaje: sin el, "fallo tras 3
-  // intentos" obliga a mirar los logs para saber que dijo la API
+  // intentos" obliga a mirar los logs para saber que dijo la API.
+  //
+  // y el numero es el de intentos REALES. Decir "tras 3 intentos" cuando un 400
+  // se rechazo a la primera manda a investigar un problema de reintentos que no
+  // existe, y esconde el unico dato util: la API dijo que no.
   const detalle =
     lastError instanceof Error && lastError.message.length > 0
       ? `: ${lastError.message.slice(0, 300)}`
       : '';
   throw new RetryError(
-    `la operacion fallo tras ${config.maxAttempts} intentos${detalle}`,
-    config.maxAttempts,
+    `la operacion fallo tras ${attempts} ${attempts === 1 ? 'intento' : 'intentos'}${detalle}`,
+    attempts,
     lastError,
   );
 }

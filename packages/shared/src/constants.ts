@@ -93,3 +93,101 @@ export const JOB_EVENT_TYPES = [
 
 // acciones que requieren aprobacion explicita del usuario
 export const APPROVAL_ACTIONS = ['commit', 'discard', 'push'] as const;
+
+// ultima señal observada en el transporte de una respuesta.
+//
+// una respuesta incompleta no se puede atribuir a tokens, timeout o socket sin
+// evidencia. Estos valores son esa evidencia, y NUNCA llevan contenido.
+export const STREAM_TRANSPORT_ENDS = [
+  // el proveedor mando `data: [DONE]`
+  'done_marker',
+  // el cuerpo HTTP se cerro por su cuenta, sin marcador
+  'body_closed',
+  // Luxy decidio terminar tras una señal terminal (finish_reason o usage final)
+  'local_end',
+  // la lectura del cuerpo lanzo: socket caido, aborto o error de red
+  'read_error',
+  // la respuesta no se transmitio: un solo JSON
+  'no_stream',
+] as const;
+
+// que aporto un turno a la memoria de la conversacion.
+//
+// solo `structured` sustituye la memoria anterior. Todo lo demas la conserva:
+// una respuesta cortada no puede pisar un contexto que si era correcto.
+export const CONVERSATION_MEMORY_STATUSES = [
+  // bloque completo, valido y en prosa
+  'structured',
+  // no habia bloque
+  'absent',
+  // el bloque se abrio y la respuesta se corto dentro de el
+  'truncated_block',
+  // habia bloque, pero no valida
+  'invalid',
+  // validaba, pero llevaba codigo dentro: no es memoria, es la respuesta
+  'rejected_code',
+] as const;
+
+// tope del resumen de una TAREA de agente.
+//
+// es un resumen de verdad: describe lo que se hizo y se manda por Telegram.
+export const MAX_TASK_RESULT_CHARS = 4000;
+
+// tope de la respuesta guardada de una CONVERSACION.
+//
+// no es un resumen: es la respuesta. Con 4.000 caracteres, una pagina web de
+// 7.691 llegaba entera y se guardaba cortada a la mitad, y parecia que el
+// modelo se habia quedado a medias. Medido el 2026-08-05 en LUX-8B8T.
+//
+// no es almacenamiento de documentos: cuando una salida no quepa aqui, la ruta
+// correcta es el artefacto (`D-013`), no subir mas este numero.
+export const MAX_CONVERSATION_RESULT_CHARS = 120_000;
+
+// lo que cabe en una tarjeta de Telegram sin partirla en decenas de mensajes
+export const MAX_TELEGRAM_SUMMARY_CHARS = 3500;
+
+// margen tras una señal terminal FUERTE (`finish_reason`, memoria completa).
+// El mensaje ya termino: solo se espera por si viene el consumo final.
+export const TERMINAL_GRACE_MS = 1000;
+
+// silencio exigido tras una señal terminal DEBIL (`usage` sin `choices`).
+//
+// no demuestra que la respuesta acabara: hay endpoints que lo mandan a mitad.
+// Cerrar al segundo corto una pagina de mas de mil lineas con 3.180 tokens de
+// salida y un tope de 8.192. Un modelo que sigue escribiendo no calla 15 s.
+export const SOFT_TERMINAL_GRACE_MS = 15_000;
+
+// como termino de verdad una respuesta.
+//
+// el estado de un trabajo en Postgres es mas grueso a proposito (no se toca el
+// enum sin migracion). Esto es el detalle que necesita Studio para decir que
+// paso y si queda algo que recuperar.
+export const RESPONSE_OUTCOMES = [
+  // señal terminal valida o cierre normal con respuesta utilizable
+  'completed',
+  // el modelo se quedo sin presupuesto: `finish_reason: length`
+  'truncated',
+  // cierre o error anomalo DESPUES de recibir contenido
+  'interrupted',
+  // se agoto el tope de tiempo efectivo de Luxy
+  'timed_out',
+  // lo paro el usuario
+  'cancelled',
+  // no hay nada utilizable
+  'failed',
+] as const;
+
+// resultados que conservan contenido parcial y admiten continuacion
+export const RECOVERABLE_RESPONSE_OUTCOMES = ['truncated', 'interrupted', 'timed_out'] as const;
+
+// quien pidio el aborto de una peticion, cuando lo hubo
+export const RESPONSE_ABORT_SOURCES = [
+  // cancelacion del usuario o del trabajo entero
+  'user',
+  // se agoto el tope de tiempo de ESTA peticion
+  'request_timeout',
+  // Luxy cerro el transporte tras una señal terminal valida
+  'local_finalization',
+  // el proveedor o la red cortaron
+  'transport',
+] as const;
