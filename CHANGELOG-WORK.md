@@ -445,7 +445,7 @@ parezca correcta; añadir una corrección nueva.
   documentos desactualizados de esta copia en
   `Desktop\luxy-recuperado\docs-de-esta-copia-2026-08-05\`.
 - Comandos ejecutados: `git worktree prune -v`, `git checkout
-  luxy/work-update-001-studio`, `git apply --whitespace=nowarn`, `npm run build`,
+luxy/work-update-001-studio`, `git apply --whitespace=nowarn`, `npm run build`,
   `npm test`, `npm run lint`, `npm run typecheck`, `npx prettier --check .`.
 - Resultado real: parche aplicado limpio. `git worktree prune` eliminó dos
   registros que apuntaban a rutas de la máquina antigua y bloqueaban el
@@ -467,6 +467,45 @@ parezca correcta; añadir una corrección nueva.
 - Siguiente paso exacto: `P0.4`, y `LA-007` (confirmar el tope real de salida por
   modelo). Antes, Daniel decide si se commitea lo recuperado en esta rama
   aislada.
+
+### 2026-08-05 22:22 — Claude Code — P0.4
+
+- Estado anterior: `P0.4` `pending`. Doce de los trece casos ya tenían prueba,
+  repartidos entre cuatro archivos; faltaba el caso 10 y una lectura unificada.
+- Objetivo: dejar la matriz de regresión completa, determinista y legible como
+  tabla, sin red ni tokens.
+- Hipótesis o causa demostrada: no aplica, es cobertura.
+- Archivos leídos: `apps/agent/src/providers/sse.ts`,
+  `apps/agent/src/providers/sse.test.ts`, `apps/agent/src/job-runner.ts`,
+  `apps/agent/src/conversation-job.test.ts`,
+  `packages/shared/src/response-outcome.ts`,
+  `packages/shared/src/schemas.ts`, `packages/shared/src/constants.ts`.
+- Archivos modificados: `apps/agent/src/response-matrix.test.ts` (nuevo, 19
+  pruebas), `CURRENT-TASK.md`, `TEST-RESULTS.md` y este registro. **Ningún
+  archivo de producción tocado**: la matriz no necesitó cambiar código, que es
+  la señal de que `P0.1`–`P0.3c` dejaron el comportamiento donde debía.
+- Comandos ejecutados: `npx vitest run apps/agent/src/response-matrix.test.ts`,
+  `npx prettier --write`, `npm run lint`, `npm run typecheck`, `npm test`.
+- Resultado real: los trece casos cubiertos. 1–9 como tabla `CASOS_TRANSPORTE`
+  que pasa cuerpos reales por `sseData` y `TurnAssembler`; 10 de punta a punta
+  con `runJob` y un `AbortController` que aborta durante el streaming; 11–13
+  sobre `parseConversationMemoryResponse` y `looksLikeCode`. Las terminaciones
+  no se escriben a mano a propósito: inventarlas convertiría la prueba en una
+  comprobación de que el clasificador es coherente consigo mismo.
+- Pruebas: **1.398 pasadas, 9 omitidas, 0 fallos** en 71 archivos. `lint`,
+  `typecheck` y `prettier` limpios. Un único fallo durante el desarrollo:
+  el estado válido de la memoria se llama `structured`, no `valid`.
+- Decisiones: la matriz vive en `apps/agent`, no en `packages/shared`, porque
+  el caso 10 necesita `runJob` y `packages/shared` no puede importar `node:*`.
+- Riesgos o límites: el caso 10 usa un proveedor simulado. Que Studio pinte bien
+  el estado cancelado es `P0.5` y sigue sin comprobarse a mano. `LA-006` y
+  `LA-007` siguen pendientes de Daniel y ahora exigen `npm run setup:machine`.
+- Estado nuevo: `P0.4` `done`. `LUXY-P0-LONG-RESPONSES` en curso, siguiente paso
+  `P0.5`.
+- Siguiente paso exacto: `P0.5`, interfaz de recuperación. Los datos ya existen
+  (`RESPONSE_OUTCOME_LABELS`, `describeResponseOutcome`, `isRecoverableOutcome`);
+  falta llevarlos a Studio y añadir **Continuar generación** sólo para los
+  finales recuperables.
 
 ## Plantilla para próximas entradas
 

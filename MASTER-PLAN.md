@@ -24,7 +24,7 @@ Estado global: `in_progress`
 | F0.2 | Cancelación y recuperación de trabajos huérfanos  | done        | Detener funciona y no reaparece Respondiendo tras reinicio             |
 | F0.3 | Redacción segura de contadores de tokens          | done        | `inputTokens`/`outputTokens` siguen siendo números                     |
 | F0.4 | Feedback al primer clic                           | implemented | prueba automática verde; falta confirmación manual del checkpoint      |
-| F0.5 | Respuestas largas, truncación y memoria segura    | in_progress | `P0.0`–`P0.3` cerrados el 2026-08-05; faltan `P0.4`–`P0.7`             |
+| F0.5 | Respuestas largas, truncación y memoria segura    | in_progress | `P0.0`–`P0.4` cerrados el 2026-08-05; faltan `P0.5`–`P0.7`             |
 | F0.6 | Consolidar parches acumulados                     | planned     | diff entendible, documentación sincronizada, suite completa registrada |
 | F0.7 | Decidir commit local                              | blocked     | sólo Daniel puede autorizarlo                                          |
 | F0.8 | Verificar migraciones 0005/0006                   | blocked     | comprobar estado sin modificar ni aplicar nada                         |

@@ -295,7 +295,8 @@ Electron sin cargar. El detalle exacto está en `TEST-RESULTS.md`.
 **Línea base real de Windows, 2026-08-05:** la suite completa pasa entera.
 Antes de `P0.1`, 68 archivos y 1.316 verdes; tras `P0.1`, 69 y 1.334; tras
 `P0.2`, 70 y 1.356; tras `P0.2b` y `P0.3`, 70 y 1.366; tras `P0.3b`, 70 y
-1.370; tras `P0.3c`, 70 y 1.379. Siempre 9 omitidas y exit 0. Los 9 fallos «ambientales» eran exclusivos de la copia
+1.370; tras `P0.3c`, 70 y 1.379; tras `P0.4`, 71 y 1.398. Siempre 9 omitidas y
+exit 0. Los 9 fallos «ambientales» eran exclusivos de la copia
 Linux y aquí no existen: en esta máquina un fallo es una regresión.
 
 ## 10. Próximo objetivo
@@ -309,6 +310,10 @@ El único objetivo activo es completar `LUXY-P0-LONG-RESPONSES`, descrito en
 3. proteger la memoria anterior;
 4. conservar la salida parcial;
 5. ofrecer continuación y artefacto sólo después de tener estados fiables.
+
+Los puntos 1 a 4 están cerrados (`P0.0`–`P0.3c`) y desde `P0.4` tienen una
+matriz de regresión completa en `apps/agent/src/response-matrix.test.ts`: los
+trece casos, sin red ni tokens. El punto 5 es `P0.5` y es lo siguiente.
 
 No avanzar a nuevas pantallas, Android, Remote o despliegue antes de cerrar este
 bloque y consolidar el checkpoint.

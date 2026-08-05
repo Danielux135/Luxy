@@ -213,13 +213,30 @@ puede cortar una respuesta que continua` devolvía `<html>` en vez de
   worktree antiguo.
 - Evidencia manual adicional: **antes** del build, 9 archivos y 25 pruebas
   fallaban con `TypeError: Cannot read properties of undefined (reading
-  'safeParse')` en `apps/gateway/src/handlers/api.ts:89`. Causa demostrada:
+'safeParse')` en `apps/gateway/src/handlers/api.ts:89`. Causa demostrada:
   `packages/shared/dist` era de un build anterior al parche y no exportaba los
   esquemas nuevos; vitest resuelve `@luxy/shared` por el junction hacia ese
   `dist`. `npm run build` lo resolvió entero. **No era un fallo del parche ni
   del código recuperado.**
 - Entorno: los seis junctions de `node_modules/@luxy/*` estaban ya reparados de
   la sesión anterior; sin ellos la suite no arranca.
+
+### 2026-08-05 22:22 — Windows 11 — P0.4
+
+- Commit/base o diff: `luxy/work-update-001-studio` @ `9012eda` más
+  `apps/agent/src/response-matrix.test.ts`, sin cambios de producción.
+- Comando exacto: `npm run lint`, `npm run typecheck`, `npm test`.
+- Exit code: 0 los tres.
+- Passed / failed / skipped: **1.398 passed, 0 failed, 9 skipped**, 71/71
+  archivos. La matriz aporta 19 pruebas.
+- Duración: ≈ 42 s la suite.
+- Fallos completos: ninguno al final. Durante el desarrollo, uno solo:
+  `expected 'structured' to be 'valid'` — el estado válido de
+  `parseConversationMemoryResponse` se llama `structured`. Error de la prueba,
+  no del código.
+- Clasificación: esperado.
+- Evidencia manual adicional: ninguna. El caso 10 usa un proveedor simulado; la
+  comprobación de que Studio pinta bien el estado cancelado es `P0.5`.
 
 ## Plantilla
 

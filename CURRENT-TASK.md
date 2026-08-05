@@ -238,7 +238,7 @@ Los cuatro corregidos, con prueba de cada uno usando los mensajes reales.
 
 ### P0.4 — matriz de regresión sin APIs reales
 
-Estado: `pending`
+Estado: `done` — 2026-08-05
 
 Mocks obligatorios:
 
@@ -258,6 +258,36 @@ Mocks obligatorios:
 
 Criterio de aceptación: pruebas deterministas, rápidas y sin red real que
 cubran transporte, resultado, gateway, persistencia y renderer.
+
+**Cerrado.** La matriz vive en `apps/agent/src/response-matrix.test.ts`, 19
+pruebas, y se lee como la tabla que es. Reparto:
+
+| Casos | Dónde                    | Cómo                                                                                                                                                          |
+| ----- | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1–9   | `describe` de transporte | tabla `CASOS_TRANSPORTE`; cada fila pasa un cuerpo real por `sseData` y `TurnAssembler`, y de ahí sale el diagnóstico que clasifica `classifyResponseOutcome` |
+| 10    | `describe` propio        | de punta a punta con `runJob`: `AbortController` durante el streaming                                                                                         |
+| 11–13 | `describe` de memoria    | `parseConversationMemoryResponse` y `looksLikeCode`                                                                                                           |
+
+Decisión de diseño: las terminaciones **no** se escriben a mano. Si se
+inventaran, la prueba sólo comprobaría que el clasificador es coherente consigo
+mismo, no que el transporte sigue diciendo lo mismo. Lo único que se inyecta a
+mano es lo que el transporte no puede producir solo: el aborto por timeout del
+caso 8 y el `abortedBy: 'user'` del caso 10.
+
+Lo que la matriz fija además de los trece casos:
+
+- El caso 6 comprueba que el texto **posterior a la pausa** sigue ahí. Es la
+  regresión concreta que cortó una web por la mitad: lo que autoriza a cerrar es
+  el silencio tras la señal débil, nunca el reloj mientras llegan datos.
+- Sólo `truncated`, `interrupted` y `timed_out` ofrecen continuar. Si alguien
+  añade `cancelled` a `RECOVERABLE_RESPONSE_OUTCOMES`, la matriz falla.
+- La cancelación manda sobre cualquier diagnóstico: aunque el transporte diga
+  `length`, si lo paró una persona el final es `cancelled`. No se le atribuye al
+  modelo algo que hizo Daniel.
+- El caso 10 comprueba las cuatro cosas de punta a punta: final `cancelled`, el
+  texto generado antes de parar sí llegó a Studio como evento, el diagnóstico se
+  emite **también** al cancelar, y una conversación cancelada no ejecuta
+  comprobaciones ni deja worktree.
 
 ### P0.5 — interfaz de recuperación
 
@@ -311,9 +341,14 @@ Dos cosas, en este orden:
 1. **Daniel**: repetir la prueba manual de la web con el build nuevo (`LA-006`)
    y confirmar el tope real de salida de Kimi K2.6 (`LA-007`). El diagnóstico
    aparece como evento `log` del trabajo, empezando por
-   `diagnostico de la respuesta:`.
-2. `P0.4`: completar la matriz de mocks. Ya están cubiertos 1, 2, 3, 4, 5, 6, 7,
-   8, 9, 11, 12 y 13 entre `sse.test.ts`, `providers.test.ts`,
-   `conversation-memory.test.ts` y `response-outcome.test.ts`. Falta el caso 10
-   (cancelación manual de punta a punta) y consolidar la matriz en un solo
-   archivo que se lea como tal.
+   `diagnostico de la respuesta:`. Requiere antes `npm run setup:machine` en
+   este ordenador: la configuración de máquina no se migró por contener el
+   token (ver `LA-008`).
+2. `P0.5`: interfaz de recuperación. Es el primer paso que toca lo que Daniel
+   ve, y depende de datos que ya existen: `classifyResponseOutcome` da el final,
+   `RESPONSE_OUTCOME_LABELS` la etiqueta y `describeResponseOutcome` el qué
+   hacer. Falta llevarlo a Studio y añadir **Continuar generación** sólo cuando
+   `isRecoverableOutcome` sea cierto.
+
+`P0.4` quedó cerrado el 2026-08-05: matriz completa en
+`apps/agent/src/response-matrix.test.ts`.
