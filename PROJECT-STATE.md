@@ -78,7 +78,8 @@ Monorepo:
 esta sección describía el checkpoint anterior y ya no es donde vive el trabajo:
 
 - repositorio activo: `C:\Users\daniel\Desktop\Luxy`;
-- rama activa: `feat/luxy-desktop`, HEAD `c6e5094`, **árbol limpio**;
+- rama activa: `feat/luxy-desktop`, HEAD `af095b3` (commit autorizado por
+  Daniel el 2026-08-06 con `P0.6a`–`P0.6d`, `P0.8` y `P0.9`; **sin push**);
 - `P0.0`–`P0.5` están **commiteados** (`9012eda`, `16c6e9a`, `845c3cb`,
   `c6e5094`). El riesgo de las 7.997 líneas sin commit que registraba `LA-008`
   ya no existe;

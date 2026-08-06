@@ -147,7 +147,8 @@ línea en `packages/shared/src/models/catalog.ts`.
 
 ## LA-011 — decidir dónde vive un artefacto largo
 
-Estado: `pending` — abierta el 2026-08-06. **Bloquea `P0.6c`.**
+Estado: **`resuelta` el 2026-08-06.** Daniel eligió **archivo en su disco**, con
+el tope de 2 MB propuesto. Implementado en `P0.6c`; ya no bloquea nada.
 
 `P0.6a` y `P0.6b` ya unen los fragmentos de una respuesta continuada, pero el
 documento sigue viviendo en el `resultSummary` de cada trabajo. `D-013` dice que
@@ -208,10 +209,28 @@ Decisión tuya, si aun así quieres bajarlo: `pollIntervalMs` en
 reclamaciones en ~720/h a cambio de que un trabajo tarde hasta 5 s en arrancar.
 No lo cambio yo: es tu configuración de máquina y no está en el repositorio.
 
+## LA-013 — completar el push
+
+Estado: `pending` — 2026-08-06.
+
+Daniel autorizó commit y push. El commit está hecho: `af095b3` sobre
+`feat/luxy-desktop`, 33 archivos, +2.849/−116. **El push lo rechazó el sistema
+de permisos del entorno**, así que la rama sigue sólo en este disco.
+
+La rama no tiene upstream todavía, por eso hace falta `-u`:
+
+```powershell
+git push -u origin feat/luxy-desktop
+```
+
+Los archivos sin seguimiento se quedaron fuera a propósito y **no deben
+commitearse**: `Claves Luxy Supabase test.txt`, `Luxy claves API.txt`, el
+handoff duplicado y `Web demos/`. Los dos primeros contienen credenciales.
+
 ## Operaciones no autorizadas
 
-- Commit del checkpoint: no autorizado.
-- Push: no autorizado.
+- Commit del checkpoint: **autorizado y hecho** el 2026-08-06 (`af095b3`).
+- Push: autorizado por Daniel; pendiente de ejecutar (`LA-013`).
 - Deploy de Wrangler: no autorizado.
 - Aplicar `0005`, `0006` o cualquier migración: no autorizado.
 - Producción: no autorizada.

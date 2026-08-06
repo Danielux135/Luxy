@@ -24,9 +24,9 @@ Estado global: `in_progress`
 | F0.2 | Cancelación y recuperación de trabajos huérfanos  | done        | Detener funciona y no reaparece Respondiendo tras reinicio             |
 | F0.3 | Redacción segura de contadores de tokens          | done        | `inputTokens`/`outputTokens` siguen siendo números                     |
 | F0.4 | Feedback al primer clic                           | implemented | prueba automática verde; falta confirmación manual del checkpoint      |
-| F0.5 | Respuestas largas, truncación y memoria segura    | in_progress | `P0.0`–`P0.5`, `P0.6a` y `P0.6b` cerrados; faltan `P0.6c` y `P0.7`     |
+| F0.5 | Respuestas largas, truncación y memoria segura    | in_progress | `P0.0`–`P0.6d`, `P0.8` y `P0.9` cerrados; falta `P0.7`                 |
 | F0.6 | Consolidar parches acumulados                     | planned     | diff entendible, documentación sincronizada, suite completa registrada |
-| F0.7 | Decidir commit local                              | blocked     | sólo Daniel puede autorizarlo                                          |
+| F0.7 | Decidir commit local                              | done        | autorizado el 2026-08-06; commit `af095b3`, push aún no completado     |
 | F0.8 | Verificar migraciones 0005/0006                   | blocked     | comprobar estado sin modificar ni aplicar nada                         |
 
 Hasta cerrar F0 no se empieza Android, Remote ni una expansión visual grande.
@@ -73,7 +73,7 @@ Backlog:
 | ----- | ------------------------------------------------ | ----------- |
 | F2.1  | Resolver respuestas largas y memoria contaminada | in_progress |
 | F2.2  | Continuar una respuesta truncada/interrumpida    | implemented |
-| F2.3  | Guardar código/documentos como artefactos        | planned     |
+| F2.3  | Guardar código/documentos como artefactos        | implemented |
 | F2.4  | Renombrar, archivar y buscar conversaciones      | planned     |
 | F2.5  | Regenerar, editar y ramificar turnos             | planned     |
 | F2.6  | Adjuntar archivos, imágenes y fragmentos         | planned     |
