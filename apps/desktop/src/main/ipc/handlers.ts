@@ -14,6 +14,7 @@ import { buildMachineIdentity } from '@luxy/agent/dist/agent.js';
 import type { StoredAgentConfig } from '@luxy/shared';
 import {
   IPC_INVOKE,
+  artifactOpenFolderArgsSchema,
   configSaveArgsSchema,
   emptyArgsSchema,
   logsTailArgsSchema,
@@ -45,6 +46,8 @@ export interface HandlerContext {
   configStore: ConfigStore;
   secretStore: SecretStore;
   logsDirectory: string;
+  /** raiz de los artefactos generados; se abre, nunca se sirve por HTTP */
+  artifactsDirectory: string;
   /** archivos en claro donde pueden quedar secretos de versiones anteriores */
   migrationCandidateFiles: string[];
   getMainWindow: () => BrowserWindow | null;
@@ -175,6 +178,18 @@ export function registerIpcHandlers(context: HandlerContext): void {
     mkdirSync(context.logsDirectory, { recursive: true });
     const error = await shell.openPath(context.logsDirectory);
     if (error.length > 0) throw new Error(`no se pudo abrir la carpeta de registros: ${error}`);
+    return { opened: true };
+  });
+
+  handle(IPC_INVOKE.artifactOpenFolder, artifactOpenFolderArgsSchema, async (args) => {
+    // la raiz la pone el proceso principal y el identificador ya viene validado
+    // por el esquema: el renderer no puede pedir que se abra una ruta suya
+    const directory = join(context.artifactsDirectory, args.jobId);
+    if (!existsSync(directory)) {
+      throw new Error('ese trabajo no dejo ningun archivo en esta maquina');
+    }
+    const error = await shell.openPath(directory);
+    if (error.length > 0) throw new Error(`no se pudo abrir la carpeta: ${error}`);
     return { opened: true };
   });
 

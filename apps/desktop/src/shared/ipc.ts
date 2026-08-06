@@ -35,6 +35,20 @@ export const stopAgentArgsSchema = z.object({
   reason: z.string().min(1).max(200).default('peticion desde la interfaz'),
 });
 
+/**
+ * abrir la carpeta de un artefacto.
+ *
+ * solo viaja el identificador del trabajo, nunca una ruta: la raiz la calcula
+ * el proceso principal y el renderer no puede proponer donde mirar.
+ */
+export const artifactOpenFolderArgsSchema = z.object({
+  jobId: z
+    .string()
+    .min(1)
+    .max(64)
+    .regex(/^[A-Za-z0-9-]+$/, 'identificador de trabajo no valido'),
+});
+
 export const logsTailArgsSchema = z.object({
   count: z.number().int().min(1).max(500).default(120),
 });
@@ -253,6 +267,7 @@ export interface LuxyBridge {
   restartAgent(): Promise<IpcResult<z.infer<typeof agentStatusResultSchema>>>;
   tailLogs(count?: number): Promise<IpcResult<{ lines: string[] }>>;
   openLogsFolder(): Promise<IpcResult<{ opened: boolean }>>;
+  openArtifactFolder(jobId: string): Promise<IpcResult<{ opened: boolean }>>;
   pickFolder(title?: string): Promise<IpcResult<{ canceled: boolean; path: string | null }>>;
   getConfig(): Promise<IpcResult<z.infer<typeof configSummarySchema>>>;
   saveConfig(config: unknown): Promise<IpcResult<z.infer<typeof configSummarySchema>>>;

@@ -96,6 +96,10 @@ export const handleStudioJobCreate = withMachineAuth(async (request, deps, creat
             conversationTitle: body.data.conversationTitle,
             conversationUserMessage: body.data.conversationUserMessage,
             comparisonIndex: body.data.comparisonIndex ?? 0,
+            // solo viaja cuando este turno continua una respuesta cortada
+            ...(body.data.continuesJobId === undefined
+              ? {}
+              : { continuesJobId: body.data.continuesJobId }),
           }
         : {}),
     },

@@ -146,6 +146,24 @@ export const MAX_CONVERSATION_RESULT_CHARS = 120_000;
 // lo que cabe en una tarjeta de Telegram sin partirla en decenas de mensajes
 export const MAX_TELEGRAM_SUMMARY_CHARS = 3500;
 
+// --- artefactos: cuando una salida larga pasa a ser un archivo (`D-013`)
+
+// tope duro de un artefacto en disco.
+//
+// no es una cuota de almacenamiento: es el limite de lo que se acepta escribir
+// de una vez desde texto generado. Una web enorme cabe de sobra; un volcado
+// accidental de megabytes, no.
+export const MAX_ARTIFACT_BYTES = 2_000_000;
+
+// a partir de aqui una salida que ADEMAS parece un documento merece archivo.
+//
+// por debajo sigue siendo una respuesta que se lee en pantalla. Las dos
+// condiciones tienen que darse: larga y documento.
+export const ARTIFACT_MIN_CHARS = 8000;
+
+// tipos de artefacto que Luxy sabe nombrar; el resto acaba en `txt`
+export const ARTIFACT_KINDS = ['html', 'css', 'js', 'json', 'md', 'txt'] as const;
+
 // margen tras una señal terminal FUERTE (`finish_reason`, memoria completa).
 // El mensaje ya termino: solo se espera por si viene el consumo final.
 export const TERMINAL_GRACE_MS = 1000;
@@ -179,6 +197,40 @@ export const RESPONSE_OUTCOMES = [
 
 // resultados que conservan contenido parcial y admiten continuacion
 export const RECOVERABLE_RESPONSE_OUTCOMES = ['truncated', 'interrupted', 'timed_out'] as const;
+
+// --- union de una respuesta cortada con su continuacion (`joinContinuation`)
+
+// cuanto final del parcial se le enseña al modelo para que retome.
+//
+// es contexto, no el documento: compite en el prompt con la memoria
+// acumulativa y con los turnos anteriores.
+export const CONTINUATION_TAIL_CHARS = 1200;
+
+// solapamiento maximo que se busca entre los dos fragmentos.
+//
+// un modelo que repite para coger carrerilla repite un parrafo, no una pagina.
+// Mas alla de esto, una coincidencia es sospechosa de ser codigo repetido
+// legitimo (una etiqueta, un bloque igual mas abajo).
+export const CONTINUATION_MAX_OVERLAP_CHARS = 4000;
+
+// solapamiento minimo que cuenta como prueba de continuidad.
+//
+// por debajo, coincidir es trivial: cualquier respuesta HTML termina en `>` y
+// casi cualquiera en un salto de linea. Descartar texto por eso seria perderlo.
+//
+// 16 sale de medir una linea real de las que repite un modelo al retomar
+// (`      <li>Segundo</li>` son 22). Con 24 se escapaban repeticiones de una
+// linea corta, y equivocarse por aqui solo cuesta 16 caracteres de cierre;
+// equivocarse por el otro lado duplica un parrafo entero.
+export const CONTINUATION_MIN_OVERLAP_CHARS = 16;
+
+// ventana del principio de la continuacion donde se busca el punto de corte
+// cuando el modelo escribe una entradilla antes de retomar
+export const CONTINUATION_RESYNC_WINDOW_CHARS = 2000;
+
+// ancla maxima del final del parcial al resincronizar. Se prueba de mas larga a
+// mas corta: cuanto mas larga case, mas evidencia hay de que es el corte.
+export const CONTINUATION_ANCHOR_CHARS = 120;
 
 // quien pidio el aborto de una peticion, cuando lo hubo
 export const RESPONSE_ABORT_SOURCES = [

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { hashToken } from '../auth.js';
-import { handleJobEvents } from './api.js';
+import { handleJobCancelled, handleJobEvents } from './api.js';
 
 const TOKEN = 'token-cancelled-events-0123456789abcd';
 const MACHINE_ID = '11111111-1111-4111-8111-111111111111';
@@ -66,5 +66,74 @@ describe('eventos tardios despues de cancelar', () => {
     expect(appendEvents).not.toHaveBeenCalled();
     expect(updateJob).not.toHaveBeenCalled();
     expect(renewLease).not.toHaveBeenCalled();
+  });
+});
+
+describe('P0.6d - una cancelacion conserva lo generado', () => {
+  async function cancelDeps(updateJob: ReturnType<typeof vi.fn>): Promise<unknown> {
+    return {
+      db: await fakeDb(),
+      repo: {
+        getJobById: vi.fn(async () => ({
+          id: JOB_ID,
+          shortId: 'LUX-CANC',
+          claimedBy: MACHINE_ID,
+          status: 'running',
+          projectAlias: 'demo',
+          cancelRequestedAt: null,
+          completedAt: null,
+          metadata: { studioMode: 'conversation' },
+          telegramChatId: null,
+        })),
+        updateJob,
+      },
+      logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+      telegram: { editMessageText: vi.fn(async () => undefined) },
+    };
+  }
+
+  function cancelRequest(body: Record<string, unknown>): Request {
+    return new Request(`https://gateway.test/api/jobs/${JOB_ID}/cancelled`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  }
+
+  it('guarda el texto parcial como resultado y marca el final real', async () => {
+    const updateJob = vi.fn(async () => undefined);
+    const deps = (await cancelDeps(updateJob)) as never as Parameters<typeof handleJobCancelled>[1];
+
+    const response = await handleJobCancelled(
+      cancelRequest({
+        modifiedFiles: [],
+        worktreePath: null,
+        durationMs: 1_420_000,
+        partialText: '<html>veintitres minutos de generacion',
+      }),
+      deps,
+      { jobId: JOB_ID },
+    );
+
+    expect(response.status).toBe(200);
+    const [, patch] = updateJob.mock.calls[0] as unknown as [string, Record<string, unknown>];
+    expect(patch['status']).toBe('cancelled');
+    expect(patch['result_summary']).toBe('<html>veintitres minutos de generacion');
+    expect(patch['metadata']).toMatchObject({ responseOutcome: 'cancelled' });
+  });
+
+  it('sin texto parcial no inventa resultado ni final', async () => {
+    const updateJob = vi.fn(async () => undefined);
+    const deps = (await cancelDeps(updateJob)) as never as Parameters<typeof handleJobCancelled>[1];
+
+    await handleJobCancelled(
+      cancelRequest({ modifiedFiles: [], worktreePath: null, durationMs: 500 }),
+      deps,
+      { jobId: JOB_ID },
+    );
+
+    const [, patch] = updateJob.mock.calls[0] as unknown as [string, Record<string, unknown>];
+    expect(patch).not.toHaveProperty('result_summary');
+    expect(patch['metadata']).not.toHaveProperty('responseOutcome');
   });
 });

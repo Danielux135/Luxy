@@ -3,6 +3,8 @@ export * from './constants.js';
 export * from './types.js';
 export * from './schemas.js';
 export * from './response-outcome.js';
+export * from './continuation.js';
+export * from './artifacts.js';
 export * from './ids.js';
 export * from './redact.js';
 export * from './backoff.js';

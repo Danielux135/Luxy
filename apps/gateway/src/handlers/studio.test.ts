@@ -276,6 +276,58 @@ describe('Luxy Studio API', () => {
     );
   });
 
+  it('persiste el enlace con la respuesta que se continua', async () => {
+    const context = await deps();
+    const continuado = '77777777-7777-4777-8777-777777777777';
+    const response = await handleStudioJobCreate(
+      request({
+        targetMachineId: TARGET_ID,
+        provider: 'deepseek',
+        model: 'DeepSeek-V4-Pro',
+        projectAlias: 'luxy',
+        prompt: 'Usuario:\ncontinua\n\nAsistente:',
+        mode: 'conversation',
+        conversationId: '55555555-5555-4555-8555-555555555555',
+        conversationTurnId: '66666666-6666-4666-8666-666666666666',
+        conversationTitle: 'Hola',
+        conversationUserMessage: 'continua',
+        continuesJobId: continuado,
+      }),
+      context,
+    );
+
+    expect(response.status).toBe(201);
+    expect(context.repo.createJob).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({ continuesJobId: continuado }),
+      }),
+    );
+  });
+
+  it('un turno normal no arrastra el enlace de continuacion', async () => {
+    const context = await deps();
+    await handleStudioJobCreate(
+      request({
+        targetMachineId: TARGET_ID,
+        provider: 'deepseek',
+        model: 'DeepSeek-V4-Pro',
+        projectAlias: 'luxy',
+        prompt: 'Usuario:\nhola\n\nAsistente:',
+        mode: 'conversation',
+        conversationId: '55555555-5555-4555-8555-555555555555',
+        conversationTurnId: '66666666-6666-4666-8666-666666666666',
+        conversationTitle: 'Hola',
+        conversationUserMessage: 'hola',
+      }),
+      context,
+    );
+
+    const [{ metadata }] = (
+      context.repo.createJob as unknown as { mock: { calls: [{ metadata: object }][] } }
+    ).mock.calls[0]!;
+    expect(metadata).not.toHaveProperty('continuesJobId');
+  });
+
   it('rechaza el proveedor pedido en vez de sustituirlo', async () => {
     const context = await deps();
     const response = await handleStudioJobCreate(

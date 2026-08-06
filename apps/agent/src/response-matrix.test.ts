@@ -415,6 +415,13 @@ describe('matriz de finales de respuesta — caso 10: cancelacion manual', () =>
       // 4. una conversacion cancelada no ejecuta pruebas ni toca el proyecto
       expect(emitido).not.toContain('npm test');
       if (outcome.kind === 'cancelled') expect(outcome.worktreePath).toBeNull();
+
+      // 5. `P0.6d`: lo generado se conserva en el resultado, no solo en un
+      //    evento. Pulsar Detener no puede costar la generacion entera.
+      if (outcome.kind === 'cancelled') {
+        expect(outcome.partialText).toContain('lo que dio tiempo');
+        expect(outcome.responseTermination?.abortedBy).toBe('user');
+      }
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

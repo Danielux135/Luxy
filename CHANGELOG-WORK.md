@@ -564,6 +564,328 @@ luxy/work-update-001-studio`, `git apply --whitespace=nowarn`, `npm run build`,
   con qué límites, luego la unión con detección de solapamiento en
   `packages/shared`, pasando el parcial como dato no confiable.
 
+### 2026-08-06 08:20 — Claude Code — P0.6a
+
+- Estado anterior: `P0.6` `pending`. Studio ya sabía **pedir** la continuación
+  (`P0.5`), pero nadie unía los fragmentos: el botón sólo rellenaba el
+  compositor.
+- Discrepancia encontrada al abrir, registrada antes de tocar nada: la
+  documentación describe el trabajo como «sin commitear» sobre
+  `luxy/work-update-001-studio` en `C:\Users\Daniel\Desktop\proyecto github\Luxy`
+  (`LA-008`). El worktree real es `C:\Users\daniel\Desktop\Luxy`, rama
+  `feat/luxy-desktop`, **árbol limpio**, y `P0.0`–`P0.5` ya están commiteados
+  (`9012eda`, `16c6e9a`, `845c3cb`, `c6e5094`). El riesgo de las 7.997 líneas sin
+  commit de `LA-008` **ya no existe**. No se limpió ni se movió nada.
+- Objetivo: unir una respuesta cortada con su continuación sin duplicar texto y
+  sin descartar nada sin evidencia.
+- Hipótesis o causa demostrada: no aplica, es una capacidad nueva.
+- Archivos leídos: `packages/shared/src/response-outcome.ts`,
+  `packages/shared/src/constants.ts`, `packages/shared/src/index.ts`,
+  `apps/desktop/src/renderer/conversation.ts`,
+  `apps/desktop/src/renderer/pages/Conversations.tsx`,
+  `apps/desktop/src/renderer/useConversations.ts`.
+- Archivos modificados: `packages/shared/src/continuation.ts` (nuevo),
+  `packages/shared/src/continuation.test.ts` (nuevo, 18 pruebas),
+  `packages/shared/src/constants.ts` (cinco constantes nuevas),
+  `packages/shared/src/index.ts`, `CURRENT-TASK.md`.
+- Comandos ejecutados: `npm run build`, `npm test` (línea base),
+  `npx vitest run packages/shared/src/continuation.test.ts`,
+  `npx prettier --write`, `npm run lint`, `npm run typecheck`, `npm test`.
+- Resultado real: `joinContinuation` decide dónde empieza lo nuevo con cinco
+  estrategias —`overlap`, `resynced`, `restart`, `duplicate`, `appended`— y
+  siempre dice cuál usó. `continuationTail` acota el final que se le enseña al
+  modelo. Línea base antes de tocar nada: **1.408 pasadas**, igual que dejó
+  `P0.5`.
+- Pruebas: 18 nuevas, **1.426 pasadas, 9 omitidas, 0 fallos** en 72 archivos.
+  Tres fallos durante el desarrollo, los tres por umbrales inventados en vez de
+  medidos: el ancla de resincronización exigía 120 caracteres repetidos cuando
+  un modelo repite una línea; el solapamiento mínimo de 24 dejaba fuera
+  `      <li>Segundo</li>` (22 caracteres); y el corte por salto de línea de
+  `continuationTail` usaba un tercio del trozo en vez de la mitad.
+- Decisiones: (a) sin evidencia de continuidad **no se descarta texto**: se pega
+  y se marca `needsReview`. Perder contenido es peor que una costura fea.
+  (b) La resincronización sólo mira una ventana de 2.000 caracteres al principio
+  de la continuación: buscar el ancla en todo el texto encontraría repeticiones
+  legítimas más abajo y borraría contenido bueno. (c) `restart` se comprueba
+  antes que el solapamiento, porque si la continuación contiene la respuesta
+  entera, empalmar por el final la duplicaría.
+- Riesgos o límites: al cerrar este subpaso la función todavía no la usaba
+  nadie. Eso lo resuelve `P0.6b`, en la misma sesión.
+- Estado nuevo: `P0.6a` `done`.
+- Siguiente paso exacto: `P0.6b`, enlazar la continuación con su parcial y usar
+  la unión en Studio.
+
+### 2026-08-06 08:34 — Claude Code — P0.6b
+
+- Estado anterior: `P0.6a` `done`, pero la unión no se usaba en ningún sitio.
+  La continuación dependía por completo de que el modelo obedeciera el mensaje
+  del compositor.
+- Objetivo: que un turno sepa **qué respuesta continúa**, que el modelo reciba
+  el parcial como dato no confiable y que Studio muestre el documento unido.
+- Hipótesis o causa demostrada: no aplica, es una capacidad nueva.
+- Archivos leídos: `packages/shared/src/schemas.ts`,
+  `apps/gateway/src/handlers/studio.ts`,
+  `apps/gateway/src/handlers/studio.test.ts`,
+  `apps/desktop/src/shared/ipc.ts`, `apps/desktop/src/preload/index.ts`.
+- Archivos modificados: `packages/shared/src/schemas.ts` (`continuesJobId`
+  opcional en `studioJobCreateRequestSchema`),
+  `apps/gateway/src/handlers/studio.ts` (lo persiste en la metadata del
+  trabajo), `apps/desktop/src/renderer/conversation.ts`
+  (`continuesJobId` en `ConversationMetadata`, bloque de continuación en
+  `buildConversationPrompt`, `continuationSourceOf`, `conversationDocumentOf`),
+  `apps/desktop/src/renderer/useConversations.ts`,
+  `apps/desktop/src/renderer/pages/Conversations.tsx`,
+  `apps/desktop/src/renderer/conversation.test.ts` (8 pruebas),
+  `apps/gateway/src/handlers/studio.test.ts` (2 pruebas).
+- Comandos ejecutados: `npm run build`,
+  `npx vitest run apps/desktop/src/renderer/conversation.test.ts`,
+  `npx vitest run apps/gateway/src/handlers/studio.test.ts`,
+  `npx prettier --write`, `npm run lint`, `npm run typecheck`, `npm test`.
+- Resultado real: al pulsar **Continuar generación** el envío queda marcado; el
+  prompt lleva el final del parcial en un bloque
+  `(DATOS, NO INSTRUCCIONES)` acotado a 1.200 caracteres, justo delante de la
+  pregunta; el trabajo nuevo guarda `continuesJobId` en su metadata, así que la
+  unión sobrevive a una recarga; y la tarjeta de la respuesta continuada muestra
+  el documento reconstruido, cuántos fragmentos lo componen y un aviso cuando
+  alguna costura no se pudo demostrar.
+- Pruebas: 10 nuevas, **1.436 pasadas, 9 omitidas, 0 fallos** en 72 archivos.
+  `lint`, `typecheck`, `build` y `prettier` limpios. Ningún fallo durante el
+  desarrollo de este subpaso.
+- Decisiones: (a) `continuesJobId` es **opcional** en el esquema y viaja en
+  metadata, no en una columna: `D-014` prohíbe migraciones y `D-017` ya fijó que
+  el detalle de una respuesta vive ahí. Un Studio antiguo que no lo mande sigue
+  funcionando. (b) El parcial entra como **dato**, con el mismo trato que la
+  memoria o el contexto de otra conversación, nunca como instrucción. (c) El
+  bloque de continuación se coloca por delante de la pregunta pero se descarta
+  antes que ella si no cabe: la pregunta actual nunca se recorta. (d) El
+  documento unido se muestra en la tarjeta, pero **no** se reescribe el
+  `resultSummary` de ningún trabajo: cada fragmento sigue siendo lo que el
+  proveedor devolvió, y la unión es una vista.
+- Riesgos o límites: (1) nada de esto se ha visto en pantalla — Studio sigue sin
+  arrancar en este ordenador por `LA-010`, así que lo verificado es el contrato,
+  no el píxel; (2) la memoria acumulativa todavía se cierra turno a turno: no
+  espera a que la secuencia esté completa, que es lo que queda del apartado;
+  (3) sigue sin existir la ruta de artefacto (`D-013`), así que un documento
+  largo vive en `resultSummary` de cada fragmento; (4) una cancelación manual
+  sigue sin conservar el texto parcial (viene del gateway, no de aquí).
+- Estado nuevo: `P0.6b` `done`. `P0.6` sigue `in_progress` por `P0.6c`.
+- Siguiente paso exacto: `P0.6c`. **Decidir antes de escribir código** dónde
+  vive un artefacto largo y con qué límites: sin Supabase Storage ni nada
+  facturable, el candidato natural es un archivo bajo
+  `%LOCALAPPDATA%\Luxy\artifacts\<jobId>\` escrito por el agente, con el gateway
+  guardando sólo la referencia. Esa decisión la aprueba Daniel antes de tocar
+  código.
+
+### 2026-08-06 09:20 — Claude Code — P0.8
+
+- Estado anterior: `P0.6c` era el siguiente paso, pero Daniel arrancó Studio y
+  observó un bucle de peticiones contra el gateway cada menos de 3 segundos.
+  Esto pasa por delante: es gasto real contra Supabase.
+- Objetivo: dejar de sondear lo que no puede haber cambiado.
+- **Causa demostrada**, leyendo la salida de `wrangler` que pegó Daniel y el
+  código del renderer: `useConversations` recargaba cada **1.500 ms** las
+  opciones, la lista de trabajos y el detalle de **cada** respuesta visible,
+  aunque llevara horas guardada. Con seis respuestas en pantalla son 8
+  peticiones cada 1,5 s ≈ **19.200 a la hora**, y coincide con las 29.432 del
+  panel en 60 minutos. `useStudio` hacía lo mismo cada 3 s.
+- Archivos leídos: `apps/desktop/src/renderer/useConversations.ts`,
+  `apps/desktop/src/renderer/useStudio.ts`, `apps/agent/src/agent.ts`,
+  `packages/shared/src/schemas.ts`.
+- Archivos modificados: `apps/desktop/src/renderer/conversation.ts`
+  (`conversationPollDelayMs`, `conversationDetailsToFetch` y sus constantes),
+  `apps/desktop/src/renderer/useConversations.ts`,
+  `apps/desktop/src/renderer/useStudio.ts`,
+  `apps/desktop/src/renderer/conversation.test.ts` (7 pruebas).
+- Comandos ejecutados: `npm run build`,
+  `npx vitest run apps/desktop/src/renderer/conversation.test.ts apps/desktop/src/renderer/useConversations.test.ts`,
+  `npx prettier --write`, `npm run lint`, `npm run typecheck`, `npm test`.
+- Resultado real, tres cambios:
+  1. **el detalle de un trabajo terminado no se vuelve a pedir.** La lista ya
+     trae el trabajo entero en cada vuelta y sirve de testigo: si el estado, el
+     `completedAt` y el `resultSummary` no han cambiado y el trabajo ya había
+     terminado, su detalle tampoco puede haber cambiado. Un trabajo vivo se pide
+     siempre;
+  2. **el ritmo depende de lo que pasa**: 1,5 s con algo corriendo, 10 s sin
+     nada, 60 s con la ventana oculta. Al volver a la ventana se refresca en el
+     acto, y enviar o detener recalcula el ritmo sin esperar al temporizador
+     lento;
+  3. **las opciones caducan a los 30 s** en vez de pedirse en cada vuelta.
+- Cuentas, con una conversación de seis respuestas guardadas y nada corriendo:
+  antes 8 peticiones cada 1,5 s (**≈19.200/h**), ahora 1 lista cada 10 s más las
+  opciones cada 30 s (**≈480/h**). Con la ventana oculta, 60/h. Es una
+  estimación aritmética a partir del código, no una medición: **la medición la
+  tiene que dar el panel de Supabase de Daniel tras reiniciar Studio**
+  (`LA-012`).
+- Pruebas: 7 nuevas, **1.443 pasadas, 9 omitidas, 0 fallos** en 72 archivos.
+  `lint`, `typecheck`, `build` y `prettier` limpios.
+- Decisiones: (a) la cache de detalles vive en un ref y se sincroniza también al
+  valorar y al cancelar; si se quedara atrás, el sondeo dejaría de refrescar ese
+  trabajo, que es peor que la petición de más. (b) La ventana oculta manda sobre
+  «hay algo corriendo»: si nadie mira, el streaming no urge. (c) **No he tocado
+  el sondeo del agente** (`pollIntervalMs`, 2 s por defecto, ≈1.800 reclamaciones
+  a la hora): es la decisión de arquitectura `0001`, vive en la configuración de
+  máquina de Daniel y subirlo retrasa el arranque de los trabajos. Queda
+  anotado en `LA-012` como decisión suya.
+- Riesgos o límites: sin comprobación visual todavía; lo verificado es el
+  contrato de las dos funciones puras, no el número real de peticiones. Si
+  Daniel ve que una respuesta tarda hasta 10 s en aparecer estando la ventana
+  en segundo plano, es esto y es deliberado.
+- Estado nuevo: `P0.8` `done`.
+- Siguiente paso exacto: Daniel reinicia Studio y confirma la caída de
+  peticiones en el panel (`LA-012`). Después, `P0.6c`, que sigue bloqueado por
+  la decisión de `LA-011`.
+
+### 2026-08-06 09:40 — Claude Code — P0.9
+
+- Estado anterior: `P0.8` bajó el sondeo en reposo, pero durante una generación
+  Studio seguía preguntando cada 1,5 s por el texto de una respuesta que estaba
+  produciendo un proceso hijo suyo.
+- Objetivo, pedido por Daniel: reducir drásticamente las llamadas **sin perder
+  funcionalidad**.
+- Hecho observado en el código, no hipótesis: el agente corre en un utility
+  process de Studio y ya publica `job.claimed`, `job.output`, `job.completed`,
+  `job.failed` y `job.cancelled` con `jobId`
+  (`packages/shared/src/agent-events.ts`); el renderer ya se suscribe en
+  `useAgent.ts:112`. En una conversación, cada `provider_output` lleva el texto
+  **acumulado** (`http-provider.ts:760`), que es justo lo que pinta la tarjeta.
+- Archivos leídos: `packages/shared/src/agent-events.ts`,
+  `apps/desktop/src/renderer/useAgent.ts`, `apps/desktop/src/preload/index.ts`,
+  `apps/agent/src/agent.ts`, `apps/agent/src/job-runner.ts`,
+  `apps/agent/src/providers/http-provider.ts`.
+- Archivos modificados: `apps/desktop/src/renderer/conversation.ts`
+  (`reduceLocalJobStream`, `activeJobsAreLocal`, `localFirstTokenMs`,
+  `streamedLocally` en `conversationPollDelayMs`),
+  `apps/desktop/src/renderer/useConversations.ts` (suscripción al bus local y
+  recarga dirigida por evento), `apps/desktop/src/renderer/pages/Conversations.tsx`,
+  `apps/desktop/src/renderer/conversation.test.ts` (8 pruebas).
+- Comandos ejecutados: `npm run build`,
+  `npx vitest run apps/desktop/src/renderer/conversation.test.ts`,
+  `npx prettier --write`, `npm run lint`, `npm run typecheck`, `npm test`.
+- Resultado real: durante una generación en esta máquina el texto se pinta
+  desde el bus local, **sin ninguna petición**; el final de un trabajo dispara
+  **una** recarga dirigida en vez de un sondeo a ciegas; y con todo lo vivo en
+  local el sondeo baja de 1,5 s a 10 s. Una conversación completa pasa de ~40
+  peticiones por minuto de generación a ~7.
+- Pruebas: 8 nuevas, **1.451 pasadas, 9 omitidas, 0 fallos** en 72 archivos.
+  `lint`, `typecheck`, `build` y `prettier` limpios.
+- Decisiones: (a) **los eventos disparan la lectura, no la sustituyen.** Un
+  evento local dice que el agente terminó, no lo que quedó guardado; el final
+  real (`responseOutcome`, memoria, tokens) se sigue leyendo del trabajo
+  persistido. El bus es best-effort y un proceso puede reiniciar. (b) Basta una
+  respuesta viva de **otra** máquina para volver al sondeo de 1,5 s: de esa no
+  llega ningún evento local, y perderla de vista sería perder funcionalidad.
+  (c) Se conserva el contador de «primer texto» midiéndolo con el primer
+  `job.output` local, porque durante el directo ya no se piden los eventos
+  guardados.
+- Riesgos o límites: (1) sin comprobación visual, como todo lo anterior;
+  (2) el texto en vivo sigue recortado a 4.000 caracteres, que es lo que emite
+  el proveedor por evento — comportamiento anterior, no una regresión nueva;
+  (3) no toca el sondeo del agente al gateway.
+- Estado nuevo: `P0.9` `done`.
+- Siguiente paso exacto: `LA-012`, que ahora cubre `P0.8` **y** `P0.9`. Después,
+  `P0.6c`, bloqueado por `LA-011`.
+
+### 2026-08-06 09:55 — Claude Code — P0.6d
+
+- Estado anterior: `P0.6c` bloqueado por `LA-011` (decisión de Daniel). Se coge
+  lo que `P0.2` dejó apuntado como límite y aparcado para `P0.6`: una
+  cancelación manual no conservaba el texto generado. La interfaz ya sabía
+  pintarlo desde `P0.5`; el texto no llegaba.
+- Objetivo: que pulsar **Detener** no cueste lo ya generado.
+- Causa demostrada, leída en el código: `buildCancelledOutcome` sólo devolvía
+  archivos modificados, worktree y duración; `handleJobCancelled` guardaba
+  estado y metadata, sin `result_summary`. El texto recuperado existía en
+  `recoveredText` y se tiraba.
+- Archivos leídos: `apps/agent/src/job-runner.ts`, `apps/agent/src/agent.ts`,
+  `apps/gateway/src/handlers/api.ts`, `apps/gateway/src/handlers/studio.ts`,
+  `packages/shared/src/schemas.ts`.
+- Archivos modificados: `packages/shared/src/schemas.ts` (`partialText` y
+  `responseTermination` opcionales en `jobCancelledRequestSchema`),
+  `apps/agent/src/job-runner.ts`, `apps/agent/src/agent.ts`,
+  `apps/gateway/src/handlers/api.ts`,
+  `apps/agent/src/response-matrix.test.ts` (caso 10 ampliado),
+  `apps/gateway/src/handlers/cancelled-events.test.ts` (2 pruebas).
+- Comandos ejecutados: `npm run build`,
+  `npx vitest run apps/agent/src/response-matrix.test.ts`,
+  `npx vitest run apps/gateway/src/handlers/cancelled-events.test.ts`,
+  `npx prettier --write`, `npm run lint`, `npm run typecheck`, `npm test`.
+- Resultado real: al cancelar, el agente manda lo generado —redactado y con el
+  mismo tope que un resultado normal— junto al diagnóstico; el gateway lo guarda
+  como `result_summary` y marca `responseOutcome: 'cancelled'` en la metadata.
+  Sin texto no se inventa nada: ni resultado ni final.
+- Pruebas: 2 nuevas y una ampliada, **1.453 pasadas, 9 omitidas, 0 fallos** en
+  72 archivos. `lint`, `typecheck`, `build` y `prettier` limpios.
+- Decisiones: (a) `cancelled` **sigue fuera** de `RECOVERABLE_RESPONSE_OUTCOMES`.
+  El texto se conserva y se ve, pero no aparece **Continuar generación**: lo paró
+  una persona y sabe por qué. Cambiar eso es otra decisión, no un efecto
+  colateral. (b) Una cancelación **no escribe memoria**, igual que antes: sólo
+  un final `completed` la sustituye (`D-019`). (c) Los campos nuevos son
+  opcionales: un agente anterior sigue cancelando igual.
+- Riesgos o límites: sin comprobación visual (`LA-010`/`LA-012`). El camino
+  rápido de Studio (`finishConversationCancellation`, cuando el trabajo aún no
+  llegó al agente) sigue cerrando sin resultado, y es correcto: ahí no hay texto
+  que guardar.
+- Estado nuevo: `P0.6d` `done`. `F2.13` del plan maestro pasa a `implemented`.
+- Siguiente paso exacto: `P0.6c`, aún bloqueado por `LA-011`. Si Daniel prefiere
+  abrir el bloque de aprendizaje antes, la evaluación de las diez ideas está en
+  su respuesta y necesita que elija cuáles entran.
+
+### 2026-08-06 13:05 — Claude Code — P0.6c
+
+- Estado anterior: `P0.6c` bloqueado por `LA-011`. Daniel decidió: **archivo en
+  su disco**, opción A.
+- Objetivo: que una salida larga deje de vivir en una columna de texto y pase a
+  ser un archivo que se pueda abrir (`D-013`).
+- Hipótesis o causa demostrada: no aplica, es una capacidad nueva.
+- Archivos leídos: `packages/shared/src/paths.ts`, `apps/agent/src/paths.ts`,
+  `apps/desktop/src/main/ipc/handlers.ts`, `apps/desktop/src/shared/channels.ts`,
+  `apps/desktop/src/shared/ipc.ts`, `apps/desktop/src/main/index.ts`.
+- Archivos modificados: `packages/shared/src/artifacts.ts` (nuevo),
+  `packages/shared/src/artifacts.test.ts` (nuevo, 12 pruebas),
+  `packages/shared/src/constants.ts`, `packages/shared/src/schemas.ts`
+  (`jobArtifactSchema`), `packages/shared/src/index.ts`,
+  `apps/agent/src/artifacts.ts` (nuevo),
+  `apps/agent/src/artifacts.test.ts` (nuevo, 5 pruebas),
+  `apps/agent/src/job-runner.ts`, `apps/gateway/src/handlers/api.ts`,
+  `apps/desktop/src/shared/channels.ts`, `apps/desktop/src/shared/ipc.ts`,
+  `apps/desktop/src/preload/index.ts`,
+  `apps/desktop/src/main/ipc/handlers.ts`, `apps/desktop/src/main/index.ts`,
+  `apps/desktop/src/renderer/conversation.ts`,
+  `apps/desktop/src/renderer/pages/Conversations.tsx`.
+- Comandos ejecutados: `npm run build`,
+  `npx vitest run packages/shared/src/artifacts.test.ts apps/agent/src/artifacts.test.ts`,
+  `npx prettier --write`, `npm run lint`, `npm run typecheck`, `npm test`.
+- Resultado real: cuando una respuesta de conversación es **larga y además un
+  documento**, el agente la escribe en
+  `%LOCALAPPDATA%\Luxyrtifacts\<jobId>\<LUX-XXXX>.<ext>`, el gateway guarda
+  sólo la referencia (nombre, tipo, bytes, sha-256, fecha) en la metadata, y la
+  tarjeta de Studio la muestra con un botón **Abrir carpeta**.
+- Pruebas: 17 nuevas, **1.470 pasadas, 9 omitidas, 0 fallos** en 74 archivos.
+  `lint`, `typecheck`, `build` y `prettier` limpios. Un fallo de lint durante el
+  desarrollo: `ARTIFACT_KINDS` sólo se usa como tipo en `artifacts.ts` y
+  `consistent-type-imports` exige `import type`.
+- Decisiones: (a) **el nombre lo construye Luxy**, nunca el modelo: sale del
+  `shortId` del trabajo filtrado a `[A-Z0-9-]`, y la extensión de un detector de
+  contenido. Dejar que un texto generado elija nombre es dejarle elegir dónde
+  cae. (b) Dos barreras, no una: el nombre se filtra al construirlo **y** la
+  ruta final se comprueba contra la raíz antes de escribir. (c) Hacen falta las
+  **dos** condiciones —largo y documento— para escribir archivo: una explicación
+  de 10.000 caracteres es una respuesta que se lee, no un archivo que se abre.
+  (d) El artefacto **no sustituye** al resultado: `resultSummary` sigue llevando
+  el texto, así que nada cambia para quien sólo mira la tarjeta. (e) Si escribir
+  falla, se avisa y el trabajo sigue: un artefacto es una mejora, no un
+  requisito. (f) El renderer manda sólo el `jobId` por IPC, nunca una ruta: la
+  raíz la calcula el proceso principal.
+- Riesgos o límites: (1) el archivo vive en la máquina que lo generó — desde
+  otra máquina la referencia se ve pero no el contenido, que es la pega conocida
+  de la opción elegida; (2) nadie borra artefactos todavía: no hay caducidad ni
+  cuota total, sólo el tope de 2 MB por archivo; (3) sin comprobación visual
+  (`LA-012`); (4) sigue faltando cerrar la memoria acumulativa sólo cuando la
+  secuencia esté completa, que era la otra mitad de `P0.6c`.
+- Estado nuevo: `P0.6c` `done` en su parte de artefactos. `LA-011` resuelta.
+- Siguiente paso exacto: `P0.7`, validación y cierre del bloque P0 — o el bloque
+  de aprendizaje, si Daniel elige antes las ideas y el presupuesto.
+
 ## Plantilla para próximas entradas
 
 ```markdown

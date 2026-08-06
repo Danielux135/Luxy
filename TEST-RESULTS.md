@@ -269,6 +269,137 @@ puede cortar una respuesta que continua` devolvía `<html>` en vez de
   contrato, no el pixel: qué etiqueta sale, qué contadores se muestran, cuándo
   aparece el botón y qué frase de memoria corresponde a cada estado.
 
+### 2026-08-06 08:17 — Windows 11 — LINEA-BASE
+
+- Commit/base o diff: `feat/luxy-desktop` @ `c6e5094`, **árbol limpio** salvo
+  cuatro elementos sin seguimiento que no son código (`Claves Luxy Supabase
+test.txt`, `Luxy claves API.txt`, un handoff duplicado y `Web demos/`).
+- Comando exacto: `npm run build`, `npm test`.
+- Exit code: 0 los dos.
+- Passed / failed / skipped: **1.408 passed, 0 failed, 9 skipped**, 71/71
+  archivos.
+- Duración: 51,5 s la suite.
+- Fallos completos: ninguno.
+- Clasificación: esperado. Reproduce exactamente lo que dejó `P0.5`, ahora ya
+  commiteado en esta rama.
+- Evidencia manual adicional: la ruta y la rama no son las de `LA-008`. El
+  trabajo que allí figuraba «sin commitear» está en la historia de
+  `feat/luxy-desktop`.
+
+### 2026-08-06 08:34 — Windows 11 — P0.6a y P0.6b
+
+- Commit/base o diff: `feat/luxy-desktop` @ `c6e5094` más
+  `packages/shared/src/continuation.ts`,
+  `packages/shared/src/continuation.test.ts`,
+  `packages/shared/src/constants.ts`, `packages/shared/src/index.ts`,
+  `packages/shared/src/schemas.ts`, `apps/gateway/src/handlers/studio.ts`,
+  `apps/gateway/src/handlers/studio.test.ts`,
+  `apps/desktop/src/renderer/conversation.ts`,
+  `apps/desktop/src/renderer/conversation.test.ts`,
+  `apps/desktop/src/renderer/useConversations.ts` y
+  `apps/desktop/src/renderer/pages/Conversations.tsx`.
+- Comando exacto: `npx prettier --write` sobre los archivos tocados,
+  `npm run lint`, `npm run typecheck`, `npm run build`, `npm test`.
+- Exit code: 0 los cinco.
+- Passed / failed / skipped: **1.436 passed, 0 failed, 9 skipped**, 72/72
+  archivos. `P0.6a` aporta 18 pruebas y `P0.6b` otras 10.
+- Duración: 53,1 s la suite.
+- Fallos completos: ninguno al final. Tres durante `P0.6a`, los tres por elegir
+  un umbral a ojo en vez de medirlo contra un caso real:
+  1. `expected 'appended' to be 'resynced'` — el ancla de resincronización
+     exigía 120 caracteres repetidos; un modelo repite una línea, no un párrafo.
+     Ahora se prueba de la más larga a la más corta.
+  2. `expected 'appended' to be 'overlap'` — `      <li>Segundo</li>` son 22
+     caracteres y el mínimo estaba en 24. Bajado a 16, con el motivo escrito al
+     lado de la constante.
+  3. `expected 'aaaaaaa\nlinea entera' to be 'linea entera'` — el corte por
+     salto de línea de `continuationTail` miraba el primer tercio del trozo; se
+     cambió a la primera mitad.
+- Clasificación: esperado.
+- Evidencia manual adicional: **ninguna, y es un límite real**. Studio no
+  arranca en este ordenador (`LA-010`), así que nadie ha visto en pantalla el
+  documento unido ni el aviso de costura sin demostrar. Lo verificado es el
+  contrato: qué estrategia elige la unión en cada caso, qué llega al prompt, qué
+  guarda el gateway y qué reconstruye el renderer.
+
+### 2026-08-06 09:20 — Windows 11 — P0.8
+
+- Commit/base o diff: `feat/luxy-desktop` @ `c6e5094` más lo de `P0.6a`/`P0.6b`
+  y, de este paso, `apps/desktop/src/renderer/conversation.ts`,
+  `apps/desktop/src/renderer/conversation.test.ts`,
+  `apps/desktop/src/renderer/useConversations.ts` y
+  `apps/desktop/src/renderer/useStudio.ts`.
+- Comando exacto: `npx prettier --write` sobre los cuatro, `npm run lint`,
+  `npm run typecheck`, `npm run build`, `npm test`.
+- Exit code: 0 los cinco.
+- Passed / failed / skipped: **1.443 passed, 0 failed, 9 skipped**, 72/72
+  archivos. `P0.8` aporta 7 pruebas.
+- Duración: 55,4 s la suite.
+- Fallos completos: ninguno.
+- Clasificación: regresión encontrada y corregida. El sondeo pedía el detalle de
+  respuestas terminadas cada 1,5 s.
+- Evidencia manual adicional: la salida de `wrangler` de Daniel, con el patrón
+  repitiéndose cada menos de 3 s, y el panel de Supabase con **29.432 peticiones
+  al API Gateway en 60 minutos**, 100 % de éxito. La medición **posterior** al
+  arreglo está pendiente y es `LA-012`: lo que hay aquí es la aritmética del
+  código (≈19.200/h → ≈480/h en reposo), no una medida.
+
+### 2026-08-06 09:40 — Windows 11 — P0.9
+
+- Commit/base o diff: lo anterior más `apps/desktop/src/renderer/conversation.ts`,
+  `apps/desktop/src/renderer/conversation.test.ts`,
+  `apps/desktop/src/renderer/useConversations.ts` y
+  `apps/desktop/src/renderer/pages/Conversations.tsx`.
+- Comando exacto: `npx prettier --write` sobre los cuatro, `npm run lint`,
+  `npm run typecheck`, `npm run build`, `npm test`.
+- Exit code: 0 los cinco.
+- Passed / failed / skipped: **1.451 passed, 0 failed, 9 skipped**, 72/72
+  archivos. `P0.9` aporta 8 pruebas.
+- Duración: 48,8 s la suite.
+- Fallos completos: ninguno.
+- Clasificación: esperado.
+- Evidencia manual adicional: ninguna todavía. Lo verificado es el contrato del
+  reductor de eventos locales, cuándo se considera que un directo es local y qué
+  ritmo sale de cada combinación. La medición real sigue siendo `LA-012`.
+
+### 2026-08-06 09:55 — Windows 11 — P0.6d
+
+- Commit/base o diff: lo anterior más `packages/shared/src/schemas.ts`,
+  `apps/agent/src/job-runner.ts`, `apps/agent/src/agent.ts`,
+  `apps/gateway/src/handlers/api.ts`,
+  `apps/agent/src/response-matrix.test.ts` y
+  `apps/gateway/src/handlers/cancelled-events.test.ts`.
+- Comando exacto: `npx prettier --write` sobre los seis, `npm run lint`,
+  `npm run typecheck`, `npm run build`, `npm test`.
+- Exit code: 0 los cinco.
+- Passed / failed / skipped: **1.453 passed, 0 failed, 9 skipped**, 72/72
+  archivos. `P0.6d` aporta 2 pruebas nuevas y amplía el caso 10 de la matriz.
+- Duración: 53,5 s la suite.
+- Fallos completos: ninguno.
+- Clasificación: esperado.
+- Evidencia manual adicional: ninguna. La comprobación real es cancelar una
+  generación larga en Studio y ver que el texto sigue ahí; entra en `LA-012`.
+
+### 2026-08-06 13:05 — Windows 11 — P0.6c
+
+- Commit/base o diff: lo anterior más los dos módulos de artefactos
+  (`packages/shared` y `apps/agent`), sus pruebas, `constants.ts`, `schemas.ts`,
+  `index.ts`, `job-runner.ts`, `api.ts` del gateway y cinco archivos de Desktop
+  (canal IPC, superficie, preload, handlers, main y renderer).
+- Comando exacto: `npx prettier --write`, `npm run lint`, `npm run typecheck`,
+  `npm run build`, `npm test`.
+- Exit code: 0 los cinco.
+- Passed / failed / skipped: **1.470 passed, 0 failed, 9 skipped**, 74/74
+  archivos. `P0.6c` aporta 17 pruebas en dos archivos nuevos.
+- Duración: 58,9 s la suite.
+- Fallos completos: ninguno al final. Uno de lint durante el desarrollo:
+  `ARTIFACT_KINDS` sólo se usa como tipo y `consistent-type-imports` exige
+  `import type`.
+- Clasificación: esperado.
+- Evidencia manual adicional: ninguna. Las pruebas del agente escriben archivos
+  de verdad en carpetas temporales, incluidas las dos de traversal; lo que falta
+  es ver el botón **Abrir carpeta** en pantalla (`LA-012`).
+
 ## Plantilla
 
 ```markdown

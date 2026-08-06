@@ -3,6 +3,7 @@
 // el renderer solo usa verbos IPC cerrados. El token de maquina permanece en
 // el proceso principal y nunca cruza window.luxy.
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { TERMINAL_JOB_STATUSES } from '@luxy/shared';
 import type {
   StudioJob,
   StudioJobAction,
@@ -10,6 +11,7 @@ import type {
   StudioJobEvent,
   StudioMachine,
 } from '@luxy/shared';
+import { CONVERSATION_OPTIONS_TTL_MS, conversationPollDelayMs } from './conversation.js';
 
 export interface StudioDetail {
   job: StudioJob;
@@ -36,20 +38,31 @@ export function useStudio(): {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const selectedId = useRef<string | null>(null);
+  const detailRef = useRef<StudioDetail | null>(null);
+  const activeJobsRef = useRef(false);
+  const optionsAtRef = useRef(0);
+  const machinesRef = useRef<StudioMachine[] | null>(null);
 
   const loadDetail = useCallback(async (jobId: string): Promise<void> => {
     selectedId.current = jobId;
     const result = await window.luxy.getStudioJob(jobId);
-    if (result.ok) setDetail(result.value);
-    else setError(result.error);
+    if (result.ok) {
+      detailRef.current = result.value;
+      setDetail(result.value);
+    } else setError(result.error);
   }, []);
 
   const reload = useCallback(async (): Promise<void> => {
+    // las opciones cambian de tarde en tarde; pedirlas cada tres segundos era
+    // una peticion de cada tres sin informacion nueva (`P0.8`)
+    const optionsAreStale =
+      Date.now() - optionsAtRef.current >= CONVERSATION_OPTIONS_TTL_MS ||
+      machinesRef.current === null;
     const [options, history] = await Promise.all([
-      window.luxy.getStudioOptions(),
+      optionsAreStale ? window.luxy.getStudioOptions() : Promise.resolve(null),
       window.luxy.listStudioJobs({ limit: 30 }),
     ]);
-    if (!options.ok) {
+    if (options !== null && !options.ok) {
       setError(options.error);
       return;
     }
@@ -57,27 +70,75 @@ export function useStudio(): {
       setError(history.error);
       return;
     }
+    if (options !== null && options.ok) {
+      optionsAtRef.current = Date.now();
+      machinesRef.current = options.value.machines;
+    }
 
-    setMachines(options.value.machines);
+    if (machinesRef.current !== null) setMachines(machinesRef.current);
     setJobs(history.value.jobs);
     setError(null);
-    if (selectedId.current !== null) {
-      const selected = await window.luxy.getStudioJob(selectedId.current);
-      if (selected.ok) setDetail(selected.value);
+    activeJobsRef.current = history.value.jobs.some(
+      (job) => !(TERMINAL_JOB_STATUSES as readonly string[]).includes(job.status),
+    );
+
+    const current = selectedId.current;
+    if (current === null) return;
+    // un trabajo terminado que no ha cambiado ya no tiene eventos nuevos
+    const listed = history.value.jobs.find((job) => job.id === current) ?? null;
+    const cached = detailRef.current;
+    const unchanged =
+      cached !== null &&
+      cached.job.id === current &&
+      listed !== null &&
+      (TERMINAL_JOB_STATUSES as readonly string[]).includes(listed.status) &&
+      cached.job.status === listed.status &&
+      cached.job.completedAt === listed.completedAt &&
+      cached.job.resultSummary === listed.resultSummary;
+    if (unchanged) return;
+
+    const selected = await window.luxy.getStudioJob(current);
+    if (selected.ok) {
+      detailRef.current = selected.value;
+      setDetail(selected.value);
     }
   }, []);
 
   useEffect(() => {
     let active = true;
-    void reload().finally(() => {
-      if (active) setLoading(false);
-    });
-    const timer = window.setInterval(() => {
-      if (active) void reload();
-    }, 3000);
+    let timer = 0;
+
+    const schedule = (): void => {
+      window.clearTimeout(timer);
+      if (!active) return;
+      timer = window.setTimeout(
+        () => {
+          void reload().finally(schedule);
+        },
+        conversationPollDelayMs({
+          hasActiveJob: activeJobsRef.current,
+          hidden: document.visibilityState === 'hidden',
+        }),
+      );
+    };
+
+    const onVisible = (): void => {
+      if (!active || document.visibilityState !== 'visible') return;
+      window.clearTimeout(timer);
+      void reload().finally(schedule);
+    };
+    document.addEventListener('visibilitychange', onVisible);
+
+    void reload()
+      .finally(() => {
+        if (active) setLoading(false);
+      })
+      .finally(schedule);
+
     return () => {
       active = false;
-      window.clearInterval(timer);
+      window.clearTimeout(timer);
+      document.removeEventListener('visibilitychange', onVisible);
     };
   }, [reload]);
 
@@ -105,7 +166,9 @@ export function useStudio(): {
           return false;
         }
         selectedId.current = result.value.job.id;
+        detailRef.current = result.value;
         setDetail(result.value);
+        activeJobsRef.current = true;
         await reload();
         return true;
       } finally {

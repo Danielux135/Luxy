@@ -1,21 +1,26 @@
 // Conversaciones: chat persistente y comparacion de dos modelos sobre trabajos reales.
 import { useEffect, useMemo, useState, type JSX } from 'react';
-import { buildDefaultCatalog } from '@luxy/shared';
+import { buildDefaultCatalog, describeArtifactSize } from '@luxy/shared';
 import type { JobStatus, ProviderId, StudioJob, StudioMachine } from '@luxy/shared';
 import { Empty, Field, Notice, Panel, Tag } from '../ui/primitives.js';
 import type { ConfigSummary } from '../useConfig.js';
 import {
+  conversationArtifactOf,
+  conversationDocumentOf,
   conversationFeedbackOf,
   conversationOutcomeView,
   conversationTiming,
   continuationMessageFor,
+  type ConversationDocument,
   formatConversationCount,
   formatTurnCount,
   groupConversationTurns,
   isConversationRunning,
   latestConversationMemory,
   liveConversationPreview,
+  localFirstTokenMs,
   recommendConversationTarget,
+  type LocalJobStream,
 } from '../conversation.js';
 import { useConversations } from '../useConversations.js';
 
@@ -94,6 +99,8 @@ function ResponseCard({
   detail,
   busy,
   cancelling,
+  document,
+  stream,
   onCancel,
   onRate,
   onContinue,
@@ -102,18 +109,29 @@ function ResponseCard({
   detail: ReturnType<typeof useConversations>['details'][string] | undefined;
   busy: boolean;
   cancelling: boolean;
+  /** documento reconstruido cuando esta respuesta continua a otra */
+  document: ConversationDocument | null;
+  /** streaming en vivo del agente local, cuando lo genera esta maquina */
+  stream: LocalJobStream | null;
   onCancel: (jobId: string) => void;
   onRate: (jobId: string, rating: 'helpful' | 'not_helpful') => void;
   onContinue: (job: StudioJob) => void;
 }): JSX.Element {
   const events = detail?.events ?? [];
   const timing = conversationTiming(detail?.job ?? job, events);
-  const preview = liveConversationPreview(events);
+  // el texto que publica el agente local llega antes y sin pasar por la red;
+  // el de los eventos guardados es el respaldo y el de otra maquina
+  const preview = stream?.text.trim() || liveConversationPreview(events);
+  const current = detail?.job ?? job;
+  // con una respuesta continuada se muestra el documento unido, no el trozo
+  // suelto: lo que importa es la pagina entera, no el ultimo fragmento
+  const joined = current.resultSummary === null ? null : document;
   const text =
-    (detail?.job ?? job).resultSummary ??
+    joined?.text ??
+    current.resultSummary ??
     preview ??
     (job.status === 'queued' ? 'Esperando a que el agente recoja la respuesta…' : 'Preparando…');
-  const current = detail?.job ?? job;
+  const artifact = conversationArtifactOf(current);
   const feedback = conversationFeedbackOf(current);
   const outcome = conversationOutcomeView(current);
   // el texto parcial se ve SIEMPRE que exista, tambien con error delante:
@@ -130,8 +148,8 @@ function ResponseCard({
             {current.model === null ? '' : ` / ${current.model}`}
           </div>
           <div className="list__meta mono">
-            primer texto {formatDuration(timing.firstTokenMs)} · total{' '}
-            {formatDuration(outcome?.durationMs ?? timing.durationMs)}
+            primer texto {formatDuration(timing.firstTokenMs ?? localFirstTokenMs(current, stream))}{' '}
+            · total {formatDuration(outcome?.durationMs ?? timing.durationMs)}
             {outcome?.tokens != null &&
               ` · tokens ${outcome.tokens.input}/${outcome.tokens.output}`}
           </div>
@@ -142,6 +160,29 @@ function ResponseCard({
       </header>
       {outcome !== null && outcome.outcome !== 'completed' && (
         <Notice tone={outcome.tone === 'fault' ? 'fault' : 'warn'}>{outcome.detail}</Notice>
+      )}
+      {joined !== null && (
+        <p className="list__meta">
+          Documento unido a partir de {joined.fragments} respuestas · {joined.notes.at(-1)}
+        </p>
+      )}
+      {joined?.needsReview === true && (
+        <Notice tone="warn">
+          Alguna costura se pego sin poder demostrar que encajaba: revisa el punto de union antes de
+          dar el documento por bueno.
+        </Notice>
+      )}
+      {artifact !== null && (
+        <p className="list__meta">
+          Guardado como archivo: <span className="mono">{artifact.fileName}</span> ·{' '}
+          {describeArtifactSize(artifact.bytes)}{' '}
+          <button
+            className="btn btn--quiet"
+            onClick={() => void window.luxy.openArtifactFolder(current.id)}
+          >
+            Abrir carpeta
+          </button>
+        </p>
       )}
       {showsText && <p className="prewrap conversation-response__text">{text}</p>}
       {current.errorMessage !== null && <Notice tone="fault">{current.errorMessage}</Notice>}
@@ -201,6 +242,8 @@ export function ConversationsPage({ summary }: { summary: ConfigSummary }): JSX.
   const [modelB, setModelB] = useState('');
   const [compare, setCompare] = useState(false);
   const [message, setMessage] = useState('');
+  // respuesta cortada que el proximo envio continua; se limpia al enviar
+  const [continuesJobId, setContinuesJobId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!providers.includes(providerA as ProviderId)) setProviderA(providers[0] ?? '');
@@ -247,8 +290,12 @@ export function ConversationsPage({ summary }: { summary: ConfigSummary }): JSX.
       projectAlias,
       message: message.trim(),
       targets,
+      continuesJobId,
     });
-    if (sent) setMessage('');
+    if (sent) {
+      setMessage('');
+      setContinuesJobId(null);
+    }
   };
 
   return (
@@ -270,7 +317,13 @@ export function ConversationsPage({ summary }: { summary: ConfigSummary }): JSX.
           title="Historial"
           flush
           actions={
-            <button className="btn btn--primary btn--quiet" onClick={conversations.startNew}>
+            <button
+              className="btn btn--primary btn--quiet"
+              onClick={() => {
+                setContinuesJobId(null);
+                conversations.startNew();
+              }}
+            >
               Nueva
             </button>
           }
@@ -286,7 +339,10 @@ export function ConversationsPage({ summary }: { summary: ConfigSummary }): JSX.
                 >
                   <button
                     className="conversation-list__button"
-                    onClick={() => conversations.select(conversation.id)}
+                    onClick={() => {
+                      setContinuesJobId(null);
+                      conversations.select(conversation.id);
+                    }}
                   >
                     <span className="list__name">{conversation.title}</span>
                     <span className="list__meta">
@@ -324,6 +380,8 @@ export function ConversationsPage({ summary }: { summary: ConfigSummary }): JSX.
                           cancelling={conversations.cancellingIds.has(job.id)}
                           onCancel={(jobId) => void conversations.cancel(jobId)}
                           onRate={(jobId, rating) => void conversations.rate(jobId, rating)}
+                          document={conversationDocumentOf(job, conversations.selected?.jobs ?? [])}
+                          stream={conversations.localStreams[job.id] ?? null}
                           onContinue={(source) => {
                             // se reutiliza el mismo modelo: continuar con otro
                             // distinto es empezar una respuesta nueva
@@ -331,6 +389,7 @@ export function ConversationsPage({ summary }: { summary: ConfigSummary }): JSX.
                             setModelA(source.model ?? '');
                             setCompare(false);
                             setMessage(continuationMessageFor(source));
+                            setContinuesJobId(source.id);
                           }}
                         />
                       ))}
@@ -380,6 +439,15 @@ export function ConversationsPage({ summary }: { summary: ConfigSummary }): JSX.
               </Empty>
             ) : (
               <div className="conversation-composer">
+                {continuesJobId !== null && (
+                  <Notice tone="warn">
+                    Este envio continua una respuesta cortada: al modelo se le pasa su final como
+                    dato y Luxy unira los dos fragmentos.{' '}
+                    <button className="btn btn--quiet" onClick={() => setContinuesJobId(null)}>
+                      Enviar como mensaje normal
+                    </button>
+                  </Notice>
+                )}
                 <div className="conversation-settings">
                   <Field label="Maquina">
                     <select

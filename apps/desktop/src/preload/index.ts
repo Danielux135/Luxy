@@ -18,6 +18,8 @@ const bridge: LuxyBridge = {
   restartAgent: () => ipcRenderer.invoke(IPC_INVOKE.agentRestart),
   tailLogs: (count?: number) => ipcRenderer.invoke(IPC_INVOKE.logsTail, { count }),
   openLogsFolder: () => ipcRenderer.invoke(IPC_INVOKE.logsOpenFolder),
+  openArtifactFolder: (jobId: string) =>
+    ipcRenderer.invoke(IPC_INVOKE.artifactOpenFolder, { jobId }),
   pickFolder: (title?: string) => ipcRenderer.invoke(IPC_INVOKE.pickFolder, { title }),
 
   getConfig: () => ipcRenderer.invoke(IPC_INVOKE.configGet),

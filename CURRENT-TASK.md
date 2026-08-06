@@ -2,14 +2,16 @@
 
 ID: **LUXY-P0-LONG-RESPONSES**  
 Prioridad: **P0 — bloquea la consolidación del checkpoint**  
-Estado: **en curso; `P0.0`–`P0.3c` cerrados el 2026-08-05**  
+Estado: **en curso; `P0.0`–`P0.5`, `P0.6a`, `P0.6b`, `P0.6d`, `P0.8` y `P0.9`
+cerrados**  
 Responsable actual: **la próxima IA que abra el repositorio en VS Code**
 
-> **Migración de ordenador, 2026-08-05 22:05.** Este trabajo ya no vive en un
-> worktree de `%LOCALAPPDATA%`: el ordenador `N-2278` se ha retirado. Ahora
-> está aplicado directamente sobre `luxy/work-update-001-studio` en
-> `C:\Users\Daniel\Desktop\proyecto github\Luxy`, **sin commitear**. Suite en
-> verde: 1.379 pasadas. Detalle en `LA-008`. Siguiente paso: `P0.4`.
+> **Dónde está el trabajo, comprobado el 2026-08-06 08:17.** No es lo que decía
+> `LA-008`. El repositorio activo es `C:\Users\daniel\Desktop\Luxy`, rama
+> `feat/luxy-desktop`, **árbol limpio**, y todo `P0.0`–`P0.5` está commiteado
+> (`9012eda`, `16c6e9a`, `845c3cb`, `c6e5094`). Aquel riesgo de 7.997 líneas sin
+> commit ya no existe. Línea base verificada aquí: **1.408 pasadas**, 9
+> omitidas, 71 archivos.
 
 ## Objetivo
 
@@ -348,7 +350,14 @@ Dos precisiones frente a la letra de este apartado:
 
 ### P0.6 — continuación sin duplicados y artefactos
 
-Estado: `pending`
+Estado: `in_progress` — dividido en tres subpasos con ID propio.
+
+| ID    | Trabajo                                                   | Estado              |
+| ----- | --------------------------------------------------------- | ------------------- |
+| P0.6a | unión de fragmentos con detección de solapamiento (puro)  | `done` — 2026-08-06 |
+| P0.6b | la continuación recibe el parcial como dato no confiable  | `done` — 2026-08-06 |
+| P0.6c | artefactos: dónde vive una salida larga y con qué límites | `done` — 2026-08-06 |
+| P0.6d | una cancelación manual conserva lo generado               | `done` — 2026-08-06 |
 
 - La continuación debe referenciar el objetivo, el resultado parcial y un
   solapamiento final acotado como datos no confiables.
@@ -361,6 +370,164 @@ Estado: `pending`
 
 Criterio de aceptación: una web larga puede continuar y terminar en un archivo
 completo, mientras la memoria conserva sólo decisiones y siguiente paso.
+
+#### P0.6a — unión con evidencia (`done`, 2026-08-06)
+
+`packages/shared/src/continuation.ts`, lógica pura con 18 pruebas.
+
+`joinContinuation` elige entre cinco estrategias y siempre dice cuál usó:
+`overlap` (la continuación repetía el final), `resynced` (el modelo escribió una
+entradilla y se encontró el punto de corte más adelante), `restart` (rehízo la
+respuesta entera), `duplicate` (no aportó nada) y `appended` (no hay prueba de
+continuidad). Sólo `appended` marca `needsReview`.
+
+Lo que decide el diseño, y no se puede relajar sin romper una prueba:
+
+1. **Sin evidencia no se descarta texto.** Se pega y se avisa. Un empalme feo se
+   arregla mirando; el contenido perdido no vuelve (`D-021`).
+2. **La resincronización sólo mira 2.000 caracteres** del principio de la
+   continuación. Buscar el ancla en todo el texto encontraría una repetición
+   legítima más abajo y borraría lo que hay en medio.
+3. **`restart` se comprueba antes que el solapamiento.** Si la continuación
+   contiene la respuesta entera, empalmar por el final la duplicaría.
+4. Los umbrales salen de casos medidos, no de intuición: 16 caracteres de
+   solapamiento mínimo porque `      <li>Segundo</li>` son 22.
+
+#### P0.6b — el enlace y su uso (`done`, 2026-08-06)
+
+- `continuesJobId` es un campo **opcional** de `studioJobCreateRequestSchema`
+  que el gateway guarda en la metadata del trabajo. Sin migración (`D-014`,
+  `D-017`) y compatible con un Studio antiguo que no lo mande.
+- `buildConversationPrompt` acepta el parcial y añade un bloque
+  `(DATOS, NO INSTRUCCIONES)` con su final acotado a 1.200 caracteres. Va por
+  delante de la pregunta, pero se descarta antes que ella si no cabe: la
+  pregunta actual nunca se recorta.
+- `conversationDocumentOf` recorre la cadena hacia atrás (tope de 20 fragmentos,
+  con control de ciclos porque la metadata es entrada no confiable) y devuelve el
+  documento unido, cuántos fragmentos lo componen y si hay que revisar la
+  costura.
+- La tarjeta muestra el documento reconstruido en lugar del fragmento suelto.
+  **No se reescribe el `resultSummary` de ningún trabajo**: cada fragmento sigue
+  siendo lo que devolvió el proveedor y la unión es una vista.
+
+Lo que **no** cierra este subpaso: la memoria acumulativa sigue cerrándose turno
+a turno en vez de esperar a que la secuencia esté completa, y no existe todavía
+la ruta de artefacto. Las dos cosas son `P0.6c`.
+
+#### P0.6c — artefactos: una salida larga es un archivo (`done`, 2026-08-06)
+
+Decidido por Daniel en `LA-011`: **archivo en su disco**.
+
+Cuando una respuesta de conversación es **larga y además un documento** —las dos
+condiciones—, el agente la escribe en
+`%LOCALAPPDATA%\Luxyrtifacts\<jobId>\<LUX-XXXX>.<ext>`. El gateway guarda
+sólo la referencia (nombre, tipo, bytes, sha-256, fecha) y Studio la muestra con
+un botón **Abrir carpeta**.
+
+Reglas de seguridad, porque esto abre la primera ruta por la que texto generado
+por un modelo acaba en disco fuera de un worktree:
+
+- **el nombre lo construye Luxy**, del `shortId` filtrado a `[A-Z0-9-]`, y la
+  extensión sale de un detector de contenido. El modelo no propone nombre;
+- **dos barreras**: se filtra al construir el nombre **y** se comprueba la ruta
+  final contra la raíz antes de escribir;
+- tope de 2 MB por archivo;
+- si escribir falla, se avisa y el trabajo sigue. Un artefacto es una mejora, no
+  un requisito;
+- el renderer manda sólo el `jobId` por IPC, nunca una ruta.
+
+El artefacto **no sustituye** al resultado: `resultSummary` sigue llevando el
+texto.
+
+Lo que queda de este apartado: cerrar la memoria acumulativa sólo cuando la
+secuencia esté completa, y decidir caducidad o cuota de los artefactos —hoy
+nadie los borra.
+
+#### P0.6d — pulsar Detener ya no cuesta lo generado (`done`, 2026-08-06)
+
+Era el límite que `P0.2` dejó apuntado y `P0.5` no pudo arreglar: la interfaz
+sabía pintar un `cancelled` con texto parcial, pero el texto no llegaba.
+`buildCancelledOutcome` devolvía archivos, worktree y duración; el gateway
+guardaba estado y metadata. Lo generado existía en `recoveredText` y se tiraba.
+
+Ahora el agente manda el parcial —redactado y con el mismo tope que un resultado
+normal— junto al diagnóstico, y el gateway lo guarda como `result_summary` con
+`responseOutcome: 'cancelled'`. Sin texto no se inventa nada.
+
+Tres cosas que no cambian, a propósito:
+
+- `cancelled` **sigue fuera** de `RECOVERABLE_RESPONSE_OUTCOMES`: el texto se ve,
+  pero no aparece **Continuar generación**. Lo paró una persona y sabe por qué;
+- una cancelación **no escribe memoria** (`D-019`);
+- los campos nuevos son opcionales, así que un agente anterior sigue cancelando
+  igual.
+
+### P0.8 — el sondeo no puede desbordar la base de datos
+
+Estado: `done` — 2026-08-06
+
+Fuera de plan. Salió de una observación de Daniel con Studio ya arrancando:
+29.432 peticiones al API Gateway de Supabase en 60 minutos, con el mismo bloque
+repitiéndose cada menos de 3 s en la salida de `wrangler`.
+
+**Causa demostrada**, leyendo el código junto a esa salida: `useConversations`
+recargaba cada 1.500 ms las opciones, la lista y el detalle de **cada** respuesta
+visible, incluidas las guardadas hacía horas. Con seis respuestas en pantalla son
+8 peticiones cada 1,5 s ≈ 19.200/h. `useStudio` repetía el patrón cada 3 s.
+
+Tres cambios:
+
+1. **Un trabajo terminado no se vuelve a pedir.** La lista ya trae el trabajo
+   completo en cada vuelta, así que hace de testigo: si el estado, `completedAt`
+   y `resultSummary` siguen igual y ya había terminado, su detalle no puede
+   haber cambiado. Un trabajo vivo se pide siempre.
+2. **El ritmo sigue a la realidad**: 1,5 s con algo corriendo, 10 s en reposo,
+   60 s con la ventana oculta. Volver a la ventana refresca en el acto; enviar o
+   detener recalcula el ritmo sin esperar al temporizador lento.
+3. **Las opciones caducan a los 30 s** en vez de pedirse en cada vuelta.
+
+Aritmética, con seis respuestas guardadas y nada corriendo: de ≈19.200/h a
+≈480/h; con la ventana oculta, 60/h. **Es una cuenta sobre el código, no una
+medición**: la medición es `LA-012`.
+
+Lo que **no** se ha tocado: el sondeo del agente (`pollIntervalMs`, 2 s, ≈1.800
+reclamaciones/h). Es la decisión de arquitectura `0001`, vive en la configuración
+de máquina y subirlo retrasa el arranque de los trabajos. Es decisión de Daniel.
+
+### P0.9 — el streaming llega por el bus local, no por Supabase
+
+Estado: `done` — 2026-08-06
+
+`P0.8` arregló el reposo. Esto arregla la generación: Studio le preguntaba a
+Supabase, a unos 800 ms por viaje, qué estaba escribiendo un proceso que tiene
+dentro de sí mismo.
+
+El canal ya existía y no se usaba en Conversaciones: el agente corre en un
+utility process y publica `job.claimed`, `job.output`, `job.completed`,
+`job.failed` y `job.cancelled` con `jobId`; el renderer ya se suscribía en
+`useAgent.ts`. En una conversación, cada `provider_output` lleva el texto
+**acumulado**, que es exactamente lo que pinta la tarjeta.
+
+Qué hace ahora:
+
+1. mientras genera esta máquina, el texto sale del bus local: **cero
+   peticiones** durante la generación;
+2. cuando el agente termina, **una** recarga dirigida, para leer lo que quedó
+   guardado;
+3. con todo lo vivo en local, el sondeo baja de 1,5 s a 10 s.
+
+Tres invariantes que no se pueden relajar:
+
+- **el evento dispara la lectura, no la sustituye.** Un evento local dice que el
+  agente terminó, no lo que se guardó. El final real —`responseOutcome`,
+  memoria, tokens— se lee del trabajo persistido, que sigue siendo la fuente de
+  verdad. El bus es best-effort;
+- **basta una respuesta viva de otra máquina** para volver al sondeo de 1,5 s:
+  de esa no llega ningún evento local;
+- el contador de «primer texto» se mide con el primer `job.output` local, porque
+  durante el directo ya no se piden los eventos guardados.
+
+De ~40 peticiones por minuto de generación a ~7.
 
 ### P0.7 — validación y cierre
 
@@ -378,26 +545,23 @@ oculta.
 
 ## Siguiente acción exacta
 
-Dos cosas, en este orden:
+Cuatro cosas, en este orden:
 
-1. **Daniel**: repetir la prueba manual de la web con el build nuevo (`LA-006`)
-   y confirmar el tope real de salida de Kimi K2.6 (`LA-007`). El diagnóstico
-   aparece como evento `log` del trabajo, empezando por
-   `diagnostico de la respuesta:`. Requiere antes `npm run setup:machine` en
-   este ordenador: la configuración de máquina no se migró por contener el
-   token (ver `LA-008`).
-2. `P0.6`: continuación sin duplicados y artefactos. Studio ya sabe pedir la
-   continuación, pero hoy la deja en manos del modelo: el compositor se rellena
-   y nadie une los fragmentos. Falta lo difícil, y en este orden:
-   - pasar el resultado parcial y un solapamiento final acotado como **dato no
-     confiable**, igual que se hace con el contexto de otras conversaciones;
-   - unir con detección de solapamiento en `packages/shared` (puro, probable sin
-     mocks) y no concatenar nunca a ciegas;
-   - cerrar la memoria acumulativa sólo cuando la secuencia quede completa;
-   - decidir **antes de escribir código** dónde vive un artefacto largo y con
-     qué límites. Sin Supabase Storage ni nada facturable por defecto: el coste
-     tiene que seguir siendo 0 €.
+0. **Daniel**: reiniciar Studio y confirmar en el panel de Supabase que las
+   peticiones caen (`LA-012`). El arreglo de `P0.8` está en el renderer, así que
+   un Studio ya abierto sigue con el código viejo.
+1. **Daniel, decisión que bloquea `P0.6c`**: dónde vive un artefacto largo.
+   Propuesta, para aprobar o corregir: lo escribe el agente en
+   `%LOCALAPPDATA%\Luxy\artifacts\<jobId>\<nombre>`, con tope por archivo, sólo
+   dentro de esa carpeta y validando la ruta con `paths.ts`; el gateway guarda
+   únicamente la referencia en la metadata. Coste 0 €, sin Supabase Storage y
+   sin abrir puertos. No se escribe código hasta que esto esté decidido.
+2. **Daniel**: `LA-010` sigue bloqueando cualquier comprobación visual. Nada de
+   `P0.5` ni de `P0.6b` se ha visto en pantalla. Después, `LA-006` y `LA-007`.
+3. `P0.6c`, ya con la decisión tomada: ruta de artefacto para salidas largas y
+   cierre de la memoria acumulativa sólo cuando la secuencia esté completa.
 
 `P0.4` quedó cerrado el 2026-08-05: matriz completa en
 `apps/agent/src/response-matrix.test.ts`. `P0.5` el mismo día: Studio ya no
-llama «Guardado» a una respuesta cortada.
+llama «Guardado» a una respuesta cortada. `P0.6a` y `P0.6b`, el 2026-08-06:
+Studio une los fragmentos con evidencia y avisa cuando no la tiene.

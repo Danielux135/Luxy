@@ -7,9 +7,15 @@ import type {
   ProviderId,
   ProjectConfig,
   AgenticContext,
+  ResponseTermination,
+  JobArtifact,
 } from '@luxy/shared';
 import {
   redact,
+  artifactFileName,
+  artifactKindFor,
+  describeArtifactSize,
+  shouldStoreAsArtifact,
   ModelRegistry,
   buildDefaultCatalog,
   CONVERSATION_MEMORY_INSTRUCTION,
@@ -23,6 +29,7 @@ import {
   MAX_CONVERSATION_RESULT_CHARS,
   MAX_TASK_RESULT_CHARS,
 } from '@luxy/shared';
+import { writeJobArtifact } from './artifacts.js';
 import { ToolExecutor } from './tools/executor.js';
 import { findMediaModel, runMediaJob } from './media-runner.js';
 import { runBatchJob } from './batch/runner.js';
@@ -72,7 +79,15 @@ export type JobOutcome =
       worktreePath: string | null;
       durationMs: number;
     }
-  | { kind: 'cancelled'; modifiedFiles: string[]; worktreePath: string | null; durationMs: number };
+  | {
+      kind: 'cancelled';
+      modifiedFiles: string[];
+      worktreePath: string | null;
+      durationMs: number;
+      /** lo que el modelo ya habia escrito cuando se paro */
+      partialText?: string;
+      responseTermination?: ResponseTermination;
+    };
 
 /**
  * construye el prompt que recibe el proveedor.
@@ -626,7 +641,13 @@ export async function runJob(
     }
 
     if (providerResult.cancelled || signal.aborted) {
-      return await buildCancelledOutcome(worktree, elapsed());
+      // pulsar Detener no puede tirar veinte minutos de generacion. Se conserva
+      // lo escrito, recortado con el mismo tope que un resultado normal, y con
+      // el diagnostico al lado. No escribe memoria: solo `completed` lo hace
+      // (`D-019`).
+      const tope = conversation ? MAX_CONVERSATION_RESULT_CHARS : MAX_TASK_RESULT_CHARS;
+      const parcial = redact(recoveredText).slice(0, tope);
+      return await buildCancelledOutcome(worktree, elapsed(), parcial, responseTermination);
     }
 
     // un fallo con respuesta parcial NO es una respuesta perdida.
@@ -725,12 +746,51 @@ export async function runJob(
     const redactado = redact(summaryLines.join('\n'));
     const tope = conversation ? MAX_CONVERSATION_RESULT_CHARS : MAX_TASK_RESULT_CHARS;
     const summary = redactado.slice(0, tope);
+
+    // una salida larga que ademas es un documento se guarda como archivo
+    // (`D-013`). El campo de resultado sigue teniendo el texto: el artefacto es
+    // lo que se puede abrir, no un sustituto de lo que se lee en pantalla.
+    let artifact: JobArtifact | undefined;
+    if (conversation && shouldStoreAsArtifact(redactado)) {
+      const kind = artifactKindFor(redactado);
+      try {
+        const written = await writeJobArtifact({
+          jobId: job.id,
+          fileName: artifactFileName(kind, job.shortId),
+          kind,
+          content: redactado,
+        });
+        artifact = {
+          fileName: written.fileName,
+          kind: written.kind,
+          bytes: written.bytes,
+          sha256: written.sha256,
+          createdAt: written.createdAt,
+        };
+        deps.emit(
+          'phase',
+          `salida guardada como archivo: ${written.fileName} (${describeArtifactSize(written.bytes)})`,
+        );
+      } catch (error) {
+        // un artefacto es una mejora, no un requisito: la respuesta ya esta
+        // guardada y perder el trabajo por no poder escribir un archivo seria
+        // mucho peor que quedarse sin el archivo
+        deps.emit(
+          'warning',
+          `no se pudo guardar la salida como archivo: ${describeError(error).message}`,
+        );
+      }
+    }
+
     if (redactado.length > tope) {
       // no se pierde en silencio nunca mas: se dice, y se dice cuanto
       deps.emit(
         'warning',
-        `la respuesta ocupa ${redactado.length} caracteres y se guardaron ${tope}. ` +
-          'Pidela por partes o guardala como archivo.',
+        artifact === undefined
+          ? `la respuesta ocupa ${redactado.length} caracteres y se guardaron ${tope}. ` +
+              'Pidela por partes o guardala como archivo.'
+          : `la respuesta ocupa ${redactado.length} caracteres y se guardaron ${tope}, ` +
+              `pero el archivo ${artifact.fileName} la tiene entera.`,
       );
     }
 
@@ -739,6 +799,7 @@ export async function runJob(
       result: {
         summary,
         ...(redactado.length > tope ? { summaryTruncated: true } : {}),
+        ...(artifact === undefined ? {} : { artifact }),
         filesChanged: diff?.filesChanged ?? 0,
         testsPassed,
         testsFailed,
@@ -796,6 +857,8 @@ export async function runJob(
 async function buildCancelledOutcome(
   worktree: Worktree | null,
   durationMs: number,
+  partialText = '',
+  responseTermination: ResponseTermination | null = null,
 ): Promise<JobOutcome> {
   const diff = worktree ? await safeCollectDiff(worktree.path) : null;
   return {
@@ -803,6 +866,8 @@ async function buildCancelledOutcome(
     modifiedFiles: diff?.modifiedFiles ?? [],
     worktreePath: worktree?.path ?? null,
     durationMs,
+    ...(partialText.length > 0 ? { partialText } : {}),
+    ...(responseTermination === null ? {} : { responseTermination }),
   };
 }
 

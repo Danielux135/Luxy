@@ -13,6 +13,8 @@ import {
   SOFT_TERMINAL_GRACE_MS,
   CONVERSATION_MEMORY_STATUSES,
   MAX_CONVERSATION_RESULT_CHARS,
+  ARTIFACT_KINDS,
+  MAX_ARTIFACT_BYTES,
 } from './constants.js';
 import { connectionProfileSchema } from './models/types.js';
 
@@ -430,6 +432,28 @@ export function formatConversationMemory(memory: ConversationMemory): string {
   return lines.join('\n');
 }
 
+/**
+ * referencia a un archivo escrito por el agente, nunca su contenido.
+ *
+ * el archivo vive en la máquina que lo generó (`%LOCALAPPDATA%\Luxy\artifacts`)
+ * y aquí sólo viaja lo necesario para encontrarlo y comprobar que es el mismo:
+ * el nombre lo construye Luxy, no el modelo.
+ */
+export const jobArtifactSchema = z.object({
+  fileName: z
+    .string()
+    .min(1)
+    .max(128)
+    .regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/, 'el nombre del artefacto no es seguro'),
+  kind: z.enum(ARTIFACT_KINDS),
+  bytes: z.number().int().min(0).max(MAX_ARTIFACT_BYTES),
+  /** sha-256 del contenido, para saber si el archivo del disco sigue siendo ése */
+  sha256: z.string().regex(/^[a-f0-9]{64}$/),
+  createdAt: z.string(),
+});
+
+export type JobArtifact = z.infer<typeof jobArtifactSchema>;
+
 export const jobCompleteRequestSchema = z.object({
   /**
    * en una tarea es un resumen; en una conversación es LA respuesta.
@@ -442,6 +466,8 @@ export const jobCompleteRequestSchema = z.object({
   summary: z.string().max(MAX_CONVERSATION_RESULT_CHARS),
   /** true si ni siquiera con el tope de conversación cupo todo */
   summaryTruncated: z.boolean().optional(),
+  /** archivo escrito en la máquina que generó la salida (`D-013`) */
+  artifact: jobArtifactSchema.optional(),
   filesChanged: z.number().int().min(0),
   testsPassed: z.number().int().min(0),
   testsFailed: z.number().int().min(0),
@@ -509,6 +535,16 @@ export const jobCancelledRequestSchema = z.object({
   modifiedFiles: z.array(z.string().max(512)).max(200).default([]),
   worktreePath: z.string().max(1024).nullable().default(null),
   durationMs: z.number().int().min(0).default(0),
+  /**
+   * lo que el modelo ya habia escrito cuando se pulso Detener.
+   *
+   * es opcional para no romper a un agente anterior. Pararla no puede costar
+   * veinte minutos de generacion: el texto se conserva igual que en un corte
+   * (`D-017`), con la diferencia de que un `cancelled` no ofrece continuar,
+   * porque lo paro una persona y sabe por que.
+   */
+  partialText: z.string().max(MAX_CONVERSATION_RESULT_CHARS).optional(),
+  responseTermination: responseTerminationSchema.optional(),
 });
 
 export const jobControlResponseSchema = z.object({
@@ -552,6 +588,15 @@ export const studioJobCreateRequestSchema = z
     conversationTitle: z.string().trim().min(1).max(120).optional(),
     conversationUserMessage: z.string().min(1).max(MAX_PROMPT_LENGTH).optional(),
     comparisonIndex: z.number().int().min(0).max(1).optional(),
+    /**
+     * trabajo cuya respuesta parcial continua este turno.
+     *
+     * es opcional a proposito: un turno normal no continua nada, y un agente o
+     * un Studio antiguo que no lo mande sigue funcionando. Sin este enlace la
+     * union de fragmentos no sobrevive a una recarga, porque nadie sabria que
+     * dos respuestas son el mismo documento.
+     */
+    continuesJobId: z.string().uuid().optional(),
   })
   .superRefine((value, context) => {
     if (value.mode !== 'conversation') return;

@@ -145,6 +145,69 @@ No lo subo por mi cuenta: poner un número inventado provocaría errores 400 del
 proveedor o respuestas cortadas de otra forma. Con el dato real, el cambio es una
 línea en `packages/shared/src/models/catalog.ts`.
 
+## LA-011 — decidir dónde vive un artefacto largo
+
+Estado: `pending` — abierta el 2026-08-06. **Bloquea `P0.6c`.**
+
+`P0.6a` y `P0.6b` ya unen los fragmentos de una respuesta continuada, pero el
+documento sigue viviendo en el `resultSummary` de cada trabajo. `D-013` dice que
+eso no puede ser el almacén, y `D-020` insiste: cuando algo no quepa, la ruta es
+el artefacto, no subir el tope.
+
+No escribo código hasta que esto esté decidido, porque el almacenamiento marca
+los límites de seguridad de todo lo demás.
+
+Propuesta, para aprobar o corregir:
+
+- lo escribe **el agente**, en `%LOCALAPPDATA%\Luxy\artifacts\<jobId>\<nombre>`;
+- ruta validada con `paths.ts`, nunca fuera de esa carpeta, sin `..` ni rutas
+  absolutas venidas del modelo;
+- tope por archivo y por trabajo, con aviso explícito al alcanzarlo;
+- el gateway guarda **sólo la referencia** en la metadata: nombre, tamaño, hash
+  y trabajo de origen. Ningún contenido sale de la máquina;
+- Studio abre la carpeta; no sirve el archivo por HTTP.
+
+Coste 0 €, sin Supabase Storage, sin servicios facturables y sin abrir puertos.
+
+Qué necesito de Daniel: sí/no a esa ubicación, y si el tope por archivo debe ser
+algo distinto de 2 MB.
+
+## LA-012 — confirmar que el sondeo ya no desborda Supabase
+
+Estado: `pending` — abierta el 2026-08-06 tras `P0.8`.
+
+Observado por Daniel: **29.432 peticiones al API Gateway en 60 minutos**, 100 %
+de éxito, con el mismo bloque repitiéndose cada menos de 3 s en `wrangler`.
+Causa demostrada y corregida en `P0.8`: Studio pedía el detalle de cada
+respuesta terminada cada 1,5 s.
+
+El arreglo está en el renderer, así que **hace falta reconstruir y reiniciar
+Studio**: uno ya abierto sigue con el código viejo (ver `LA-004`).
+
+Cubre también `P0.9`: durante una generación en esta máquina el texto ya no se
+pide por red, sale del bus de eventos del agente local.
+
+Qué mirar después, con Studio abierto y sin ninguna respuesta corriendo:
+
+- en `wrangler`, el bloque debe pasar a repetirse cada ~10 s, y con la ventana
+  de Studio en segundo plano cada ~60 s;
+- ya **no** deben aparecer varias líneas `GET /api/studio/jobs/<uuid>` seguidas.
+  Tampoco durante una generación: con `P0.9`, mientras el modelo escribe debería
+  verse el texto avanzar en pantalla **sin** peticiones nuevas, y una sola
+  ráfaga corta al terminar;
+- en el panel de Supabase, «Total Requests» de la última hora debería bajar de
+  ~29.000 a unos pocos miles.
+
+Lo que seguirá apareciendo y es correcto: `POST /api/jobs/claim` cada 2 s,
+`POST /api/machines/heartbeat` cada 10 s y `GET /api/approvals/pending`. Es el
+agente, y es la decisión de arquitectura `0001`: sin puertos abiertos, sondea él.
+Suma unas 1.800 reclamaciones a la hora.
+
+Decisión tuya, si aun así quieres bajarlo: `pollIntervalMs` en
+`%APPDATA%\Luxy\config.json` admite hasta 60.000 ms. Subirlo a 5.000 deja las
+reclamaciones en ~720/h a cambio de que un trabajo tarde hasta 5 s en arrancar.
+No lo cambio yo: es tu configuración de máquina y no está en el repositorio.
+
 ## Operaciones no autorizadas
 
 - Commit del checkpoint: no autorizado.

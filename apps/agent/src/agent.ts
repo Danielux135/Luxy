@@ -671,6 +671,11 @@ export class LuxyAgent {
             modifiedFiles: outcome.modifiedFiles,
             worktreePath: outcome.worktreePath,
             durationMs: outcome.durationMs,
+            // lo generado antes de parar viaja con la cancelacion (`P0.6d`)
+            ...(outcome.partialText === undefined ? {} : { partialText: outcome.partialText }),
+            ...(outcome.responseTermination === undefined
+              ? {}
+              : { responseTermination: outcome.responseTermination }),
           };
           this.outcomes.pushCancelled(job.id, payload);
           await this.outcomes.flush();

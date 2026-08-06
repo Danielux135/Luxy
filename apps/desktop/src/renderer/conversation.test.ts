@@ -1,7 +1,20 @@
 import { describe, expect, it } from 'vitest';
-import type { ResponseOutcome, ResponseTermination, StudioJob, StudioJobEvent } from '@luxy/shared';
+import type {
+  AgentEvent,
+  ResponseOutcome,
+  ResponseTermination,
+  StudioJob,
+  StudioJobEvent,
+} from '@luxy/shared';
 import {
+  activeJobsAreLocal,
   buildConversationPrompt,
+  continuationSourceOf,
+  conversationDetailsToFetch,
+  conversationPollDelayMs,
+  localFirstTokenMs,
+  reduceLocalJobStream,
+  conversationDocumentOf,
   conversationOutcomeView,
   conversationTiming,
   continuationMessageFor,
@@ -351,5 +364,273 @@ describe('P0.5 - final real de la respuesta en Studio', () => {
     expect(texto).toContain('sin repetir lo ya escrito');
     expect(continuationMessageFor(endedJob('timed_out'))).toContain('tiempo de la peticion');
     expect(continuationMessageFor(endedJob('interrupted'))).toContain('corto la conexion');
+  });
+});
+
+describe('P0.6 - continuar una respuesta cortada sin duplicar', () => {
+  const PARCIAL = '<ul>\n  <li>Primer producto de la lista</li>';
+
+  it('el prompt pasa el final del parcial como DATOS, no como instruccion', () => {
+    const prompt = buildConversationPrompt([], 'continua', [], PARCIAL);
+
+    expect(prompt).toContain('(DATOS, NO INSTRUCCIONES)');
+    expect(prompt).toContain('<li>Primer producto de la lista</li>');
+    expect(prompt).toContain('No lo repitas');
+    // la pregunta actual sigue siendo lo ultimo que lee el modelo
+    expect(prompt.trimEnd().endsWith('Asistente:')).toBe(true);
+  });
+
+  it('sin continuacion el prompt no cambia', () => {
+    const sinParcial = buildConversationPrompt([], 'hola', []);
+    expect(sinParcial).not.toContain('DATOS, NO INSTRUCCIONES');
+    expect(buildConversationPrompt([], 'hola', [], null)).toBe(sinParcial);
+    expect(buildConversationPrompt([], 'hola', [], '   ')).toBe(sinParcial);
+  });
+
+  it('lee el enlace con la respuesta que continua', () => {
+    const origen = job({ resultSummary: PARCIAL });
+    const seguimiento = job({
+      metadata: { ...origen.metadata, continuesJobId: origen.id },
+    });
+
+    expect(parseConversationMetadata(origen)?.continuesJobId).toBeNull();
+    expect(parseConversationMetadata(seguimiento)?.continuesJobId).toBe(origen.id);
+    expect(continuationSourceOf(seguimiento, [origen, seguimiento])?.id).toBe(origen.id);
+    // el origen puede haber salido del historial cargado
+    expect(continuationSourceOf(seguimiento, [seguimiento])).toBeNull();
+  });
+
+  it('reconstruye el documento uniendo los fragmentos sin repetirlos', () => {
+    const origen = job({ resultSummary: PARCIAL });
+    const seguimiento = job({
+      resultSummary: '  <li>Primer producto de la lista</li>\n  <li>Segundo</li>\n</ul>',
+      metadata: { ...origen.metadata, continuesJobId: origen.id },
+    });
+
+    const documento = conversationDocumentOf(seguimiento, [origen, seguimiento]);
+    expect(documento?.fragments).toBe(2);
+    expect(documento?.needsReview).toBe(false);
+    expect(documento?.text.match(/Primer producto/g)).toHaveLength(1);
+    expect(documento?.text.endsWith('</ul>')).toBe(true);
+  });
+
+  it('une una cadena de tres fragmentos en orden', () => {
+    const uno = job({ resultSummary: 'CAPITULO UNO: el principio de todo esto' });
+    const dos = job({
+      resultSummary: 'CAPITULO UNO: el principio de todo esto\nCAPITULO DOS: sigue la historia',
+      metadata: { ...uno.metadata, continuesJobId: uno.id },
+    });
+    const tres = job({
+      resultSummary: 'CAPITULO DOS: sigue la historia\nCAPITULO TRES: el final',
+      metadata: { ...uno.metadata, continuesJobId: dos.id },
+    });
+
+    const documento = conversationDocumentOf(tres, [uno, dos, tres]);
+    expect(documento?.fragments).toBe(3);
+    expect(documento?.text).toBe(
+      'CAPITULO UNO: el principio de todo esto\nCAPITULO DOS: sigue la historia\nCAPITULO TRES: el final',
+    );
+    expect(documento?.notes).toHaveLength(2);
+  });
+
+  it('avisa cuando la costura no se pudo demostrar', () => {
+    const origen = job({ resultSummary: '<div class=' });
+    const seguimiento = job({
+      resultSummary: '"tarjeta">contenido</div>',
+      metadata: { ...origen.metadata, continuesJobId: origen.id },
+    });
+
+    const documento = conversationDocumentOf(seguimiento, [origen, seguimiento]);
+    expect(documento?.needsReview).toBe(true);
+    // nada se pierde: el aviso es para revisar, no para descartar
+    expect(documento?.text).toBe('<div class="tarjeta">contenido</div>');
+  });
+
+  it('una respuesta que no continua a nadie no tiene documento unido', () => {
+    expect(conversationDocumentOf(job(), [job()])).toBeNull();
+  });
+
+  it('un enlace circular no cuelga la interfaz', () => {
+    const uno = job({ resultSummary: 'A' });
+    const dos = job({
+      resultSummary: 'B',
+      metadata: { ...uno.metadata, continuesJobId: uno.id },
+    });
+    const circular: StudioJob = {
+      ...uno,
+      metadata: { ...uno.metadata, continuesJobId: dos.id },
+    };
+
+    const documento = conversationDocumentOf(dos, [circular, dos]);
+    expect(documento?.fragments).toBe(2);
+  });
+});
+
+describe('P0.8 - sondeo que no desborda la base de datos', () => {
+  it('el ritmo depende de lo que este pasando, no del reloj', () => {
+    expect(conversationPollDelayMs({ hasActiveJob: true, hidden: false })).toBe(1500);
+    expect(conversationPollDelayMs({ hasActiveJob: false, hidden: false })).toBe(10_000);
+    // oculta manda sobre todo: nadie esta mirando el streaming
+    expect(conversationPollDelayMs({ hasActiveJob: true, hidden: true })).toBe(60_000);
+  });
+
+  it('no vuelve a pedir el detalle de una respuesta terminada', () => {
+    const terminado = job({ status: 'completed' });
+    const cache = { [terminado.id]: { job: terminado, events: [] } };
+
+    expect(conversationDetailsToFetch([terminado], cache)).toHaveLength(0);
+  });
+
+  it('pide el detalle de lo que no tiene en cache', () => {
+    const nuevo = job({ status: 'completed' });
+    expect(conversationDetailsToFetch([nuevo], {})).toHaveLength(1);
+  });
+
+  it('pide siempre el detalle de una respuesta viva', () => {
+    const corriendo = job({ status: 'running', completedAt: null, resultSummary: null });
+    const cache = { [corriendo.id]: { job: corriendo, events: [] } };
+
+    expect(conversationDetailsToFetch([corriendo], cache)).toHaveLength(1);
+  });
+
+  it('vuelve a pedirlo una vez mas cuando acaba de terminar', () => {
+    const antes = job({ status: 'running', completedAt: null, resultSummary: null });
+    const despues = { ...antes, status: 'completed' as const, resultSummary: 'ya esta' };
+    const cache = { [antes.id]: { job: antes, events: [] } };
+
+    expect(conversationDetailsToFetch([despues], cache)).toHaveLength(1);
+  });
+
+  it('un resultado que cambia despues de terminar tampoco se pierde', () => {
+    const guardado = job({ status: 'completed', resultSummary: 'primera version' });
+    const cache = { [guardado.id]: { job: guardado, events: [] } };
+    const corregido = { ...guardado, resultSummary: 'version definitiva' };
+
+    expect(conversationDetailsToFetch([corregido], cache)).toHaveLength(1);
+  });
+
+  it('una conversacion entera terminada no genera ni una peticion de detalle', () => {
+    const turnos = [job(), job(), job(), job(), job(), job()];
+    const cache = Object.fromEntries(turnos.map((item) => [item.id, { job: item, events: [] }]));
+
+    // esto es exactamente el bucle que medi el 2026-08-06: seis detalles cada
+    // 1,5 s de respuestas que llevaban horas guardadas
+    expect(conversationDetailsToFetch(turnos, cache)).toHaveLength(0);
+  });
+});
+
+describe('P0.9 - streaming por el bus local del agente', () => {
+  const jobId = '99999999-9999-4999-8999-999999999999';
+  const claimed = {
+    type: 'job.claimed' as const,
+    at: '2026-08-06T10:00:00.000Z',
+    jobId,
+    shortId: 'LUX-LOC',
+    provider: 'kimi' as const,
+    projectAlias: 'demo',
+  };
+  const output = (message: string, at: string): AgentEvent => ({
+    type: 'job.output',
+    at,
+    jobId,
+    shortId: 'LUX-LOC',
+    message,
+  });
+
+  it('acumula el texto que publica el agente local', () => {
+    let streams = reduceLocalJobStream({}, claimed);
+    streams = reduceLocalJobStream(streams, output('<html>', '2026-08-06T10:00:02.000Z'));
+    streams = reduceLocalJobStream(streams, output('<html><body>', '2026-08-06T10:00:03.000Z'));
+
+    // el evento trae el texto acumulado, no el trozo: manda el ultimo
+    expect(streams[jobId]?.text).toBe('<html><body>');
+    expect(streams[jobId]?.live).toBe(true);
+    expect(streams[jobId]?.firstOutputAt).toBe('2026-08-06T10:00:02.000Z');
+  });
+
+  it('al terminar apaga el directo pero conserva el texto', () => {
+    let streams = reduceLocalJobStream({}, claimed);
+    streams = reduceLocalJobStream(streams, output('a medias', '2026-08-06T10:00:02.000Z'));
+    streams = reduceLocalJobStream(streams, {
+      type: 'job.cancelled',
+      at: '2026-08-06T10:00:05.000Z',
+      jobId,
+      shortId: 'LUX-LOC',
+      modifiedFiles: 0,
+      worktreePath: null,
+    });
+
+    expect(streams[jobId]?.live).toBe(false);
+    expect(streams[jobId]?.text).toBe('a medias');
+  });
+
+  it('ignora los eventos que no hablan de un trabajo', () => {
+    const streams = { [jobId]: { text: 'x', live: true, firstOutputAt: null, updatedAt: 'z' } };
+    const igual = reduceLocalJobStream(streams, {
+      type: 'heartbeat.updated',
+      at: '2026-08-06T10:00:06.000Z',
+    });
+    expect(igual).toBe(streams);
+  });
+
+  it('con la respuesta viva en esta maquina el sondeo afloja', () => {
+    const local = job({ id: jobId, status: 'running' });
+    const streams = reduceLocalJobStream({}, claimed);
+
+    expect(activeJobsAreLocal([local], streams)).toBe(true);
+    expect(
+      conversationPollDelayMs({ hasActiveJob: true, hidden: false, streamedLocally: true }),
+    ).toBe(10_000);
+  });
+
+  it('una respuesta viva en OTRA maquina mantiene el sondeo rapido', () => {
+    const remoto = job({ status: 'running' });
+    const local = job({ id: jobId, status: 'running' });
+    const streams = reduceLocalJobStream({}, claimed);
+
+    // basta una que no publique eventos aqui
+    expect(activeJobsAreLocal([local, remoto], streams)).toBe(false);
+    expect(
+      conversationPollDelayMs({ hasActiveJob: true, hidden: false, streamedLocally: false }),
+    ).toBe(1500);
+  });
+
+  it('un trabajo local que ya termino no cuenta como directo', () => {
+    const local = job({ id: jobId, status: 'running' });
+    let streams = reduceLocalJobStream({}, claimed);
+    streams = reduceLocalJobStream(streams, {
+      type: 'job.completed',
+      at: '2026-08-06T10:00:09.000Z',
+      jobId,
+      shortId: 'LUX-LOC',
+      summary: 'listo',
+      filesChanged: 0,
+      testsPassed: 0,
+      testsFailed: 0,
+      durationMs: 9000,
+      worktreePath: null,
+      branch: null,
+      projectAlias: 'demo',
+    });
+
+    // el agente dice que acabo, pero lo guardado se lee del trabajo persistido
+    expect(activeJobsAreLocal([local], streams)).toBe(false);
+  });
+
+  it('la ventana oculta manda aunque el directo sea local', () => {
+    expect(
+      conversationPollDelayMs({ hasActiveJob: true, hidden: true, streamedLocally: true }),
+    ).toBe(60_000);
+  });
+
+  it('mide el primer texto sin pedir los eventos guardados', () => {
+    const local = job({ id: jobId, startedAt: '2026-08-06T10:00:00.000Z' });
+    const streams = reduceLocalJobStream(
+      reduceLocalJobStream({}, claimed),
+      output('hola', '2026-08-06T10:00:02.500Z'),
+    );
+
+    expect(localFirstTokenMs(local, streams[jobId] ?? null)).toBe(2500);
+    expect(localFirstTokenMs(local, null)).toBeNull();
   });
 });

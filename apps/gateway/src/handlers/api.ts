@@ -407,11 +407,12 @@ export const handleJobComplete = withMachineAuth(async (request, deps, machine, 
       branch: result.branch,
       worktreePath: result.worktreePath,
       sessionId: result.sessionId,
+      // referencia al archivo, nunca su contenido: vive en la maquina que lo
+      // genero y aqui solo viaja lo justo para encontrarlo (`D-013`)
+      ...(result.artifact === undefined ? {} : { artifact: result.artifact }),
       // el estado del trabajo sigue siendo `completed`, pero una salida parcial
       // no puede parecer una respuesta entera: el motivo real viaja aqui
-      ...(result.responseOutcome === undefined
-        ? {}
-        : { responseOutcome: result.responseOutcome }),
+      ...(result.responseOutcome === undefined ? {} : { responseOutcome: result.responseOutcome }),
       ...(result.responseTermination === undefined
         ? {}
         : { responseTermination: result.responseTermination }),
@@ -556,15 +557,23 @@ export const handleJobCancelled = withMachineAuth(async (request, deps, machine,
   const repeated = terminalResponse(job, 'cancelled');
   if (repeated !== null) return repeated;
 
+  // pararla no puede costar lo ya generado: si el agente manda el texto
+  // parcial, se guarda como resultado con su final real al lado (`D-017`).
+  const partial = body.data.partialText?.trim() ?? '';
   await deps.repo.updateJob(jobId, {
     status: 'cancelled',
     completed_at: new Date().toISOString(),
     lease_expires_at: null,
+    ...(partial.length > 0 ? { result_summary: partial } : {}),
     metadata: {
       ...job.metadata,
       worktreePath: body.data.worktreePath,
       modifiedFiles: body.data.modifiedFiles,
       durationMs: body.data.durationMs,
+      ...(partial.length > 0 ? { responseOutcome: 'cancelled' } : {}),
+      ...(body.data.responseTermination === undefined
+        ? {}
+        : { responseTermination: body.data.responseTermination }),
     },
   });
 

@@ -8,11 +8,7 @@ import { join } from 'node:path';
 import { resolveStoredConfig } from '@luxy/shared';
 import { AgentController, resolveAgentEntry } from './agent-controller.js';
 import { ConfigStore, configFilePathFor } from './config-store.js';
-import {
-  MACHINE_TOKEN_SECRET,
-  SecretStore,
-  createSafeStorageBackend,
-} from './secure-storage.js';
+import { MACHINE_TOKEN_SECRET, SecretStore, createSafeStorageBackend } from './secure-storage.js';
 import { registerIpcHandlers, unregisterIpcHandlers } from './ipc/handlers.js';
 import { LuxyTray } from './tray.js';
 import { applyContentSecurityPolicy, createMainWindow, revealWindow } from './windows.js';
@@ -51,6 +47,11 @@ function luxyDataDir(): string {
 
 function logsDirectory(): string {
   return join(luxyDataDir(), 'logs');
+}
+
+/** la misma raiz que usa el agente para escribir artefactos */
+function artifactsDirectory(): string {
+  return join(luxyDataDir(), 'artifacts');
 }
 
 /** carpeta de configuracion: la misma que usa la CLI */
@@ -202,6 +203,7 @@ async function bootstrap(): Promise<void> {
     configStore,
     secretStore,
     logsDirectory: logsDirectory(),
+    artifactsDirectory: artifactsDirectory(),
     migrationCandidateFiles: migrationCandidateFiles(),
     getMainWindow: () => mainWindow,
     log,

@@ -235,6 +235,33 @@ como `failed` se perdería entera, que es justo lo que se quiere evitar.
 Consecuencia obligatoria: ninguna pantalla puede leer `status: completed` como
 «respuesta entera». Studio muestra siempre el `responseOutcome`.
 
+## D-021 — unir fragmentos sólo con evidencia, y avisar cuando no la hay
+
+Fecha: 2026-08-06  
+Estado: aceptada, implementada
+
+Una respuesta continuada se une con `joinContinuation`
+(`packages/shared/src/continuation.ts`), que decide dónde empieza lo nuevo y
+declara siempre con qué estrategia lo decidió: `overlap`, `resynced`, `restart`,
+`duplicate` o `appended`.
+
+La regla que gobierna todas: **sin prueba de continuidad no se descarta texto.**
+Se pega, se marca `needsReview` y Studio lo dice. Una costura fea se arregla
+mirándola; el contenido que se tira no vuelve, y estas respuestas cuestan veinte
+minutos de generación.
+
+Consecuencias que van con esto:
+
+- el parcial se le enseña al modelo como **dato no confiable**, en un bloque
+  acotado a 1.200 caracteres, nunca como instrucción;
+- el enlace entre fragmentos es `continuesJobId` en la metadata del trabajo, no
+  una columna: `D-014` prohíbe migraciones y `D-017` ya puso ahí el detalle de
+  una respuesta. Es opcional, así que un Studio antiguo sigue funcionando;
+- la unión es una **vista**. El `resultSummary` de cada fragmento se queda como
+  lo devolvió el proveedor; nadie lo reescribe;
+- esto no sustituye a `D-013`: un documento largo sigue necesitando su ruta de
+  artefacto. Unir fragmentos no convierte `resultSummary` en almacén.
+
 ## D-015 — documentación como memoria compartida
 
 Fecha: 2026-08-04  

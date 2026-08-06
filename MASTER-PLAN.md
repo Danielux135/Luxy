@@ -1,6 +1,6 @@
 # Luxy — plan maestro
 
-Última actualización: **2026-08-05**
+Última actualización: **2026-08-06**
 
 ## Estados
 
@@ -24,7 +24,7 @@ Estado global: `in_progress`
 | F0.2 | Cancelación y recuperación de trabajos huérfanos  | done        | Detener funciona y no reaparece Respondiendo tras reinicio             |
 | F0.3 | Redacción segura de contadores de tokens          | done        | `inputTokens`/`outputTokens` siguen siendo números                     |
 | F0.4 | Feedback al primer clic                           | implemented | prueba automática verde; falta confirmación manual del checkpoint      |
-| F0.5 | Respuestas largas, truncación y memoria segura    | in_progress | `P0.0`–`P0.5` cerrados el 2026-08-05; faltan `P0.6` y `P0.7`           |
+| F0.5 | Respuestas largas, truncación y memoria segura    | in_progress | `P0.0`–`P0.5`, `P0.6a` y `P0.6b` cerrados; faltan `P0.6c` y `P0.7`     |
 | F0.6 | Consolidar parches acumulados                     | planned     | diff entendible, documentación sincronizada, suite completa registrada |
 | F0.7 | Decidir commit local                              | blocked     | sólo Daniel puede autorizarlo                                          |
 | F0.8 | Verificar migraciones 0005/0006                   | blocked     | comprobar estado sin modificar ni aplicar nada                         |
@@ -72,7 +72,7 @@ Backlog:
 | ID    | Trabajo                                          | Estado      |
 | ----- | ------------------------------------------------ | ----------- |
 | F2.1  | Resolver respuestas largas y memoria contaminada | in_progress |
-| F2.2  | Continuar una respuesta truncada/interrumpida    | planned     |
+| F2.2  | Continuar una respuesta truncada/interrumpida    | implemented |
 | F2.3  | Guardar código/documentos como artefactos        | planned     |
 | F2.4  | Renombrar, archivar y buscar conversaciones      | planned     |
 | F2.5  | Regenerar, editar y ramificar turnos             | planned     |
@@ -83,7 +83,7 @@ Backlog:
 | F2.10 | Fusionar respuestas y elegir ganador             | planned     |
 | F2.11 | Explicar la recomendación por tipo de tarea      | planned     |
 | F2.12 | Feedback contextual con motivo opcional          | planned     |
-| F2.13 | Conservar el texto parcial de una cancelación    | planned     |
+| F2.13 | Conservar el texto parcial de una cancelación    | implemented |
 | F2.14 | Verificar el tope real de salida por modelo      | blocked     |
 
 La memoria no debe ser almacenamiento de código ni historial completo. Debe

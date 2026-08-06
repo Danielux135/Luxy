@@ -1,7 +1,8 @@
 # Luxy — estado canónico del proyecto
 
-Última actualización: **2026-08-05**  
-Estado documental: **checkpoint verificado en Windows; `P0.0`–`P0.5` cerrados**
+Última actualización: **2026-08-06**  
+Estado documental: **checkpoint verificado en Windows; `P0.0`–`P0.5`, `P0.6a`,
+`P0.6b`, `P0.6d`, `P0.8` y `P0.9` cerrados**
 
 ## 1. Cómo interpretar este estado
 
@@ -73,6 +74,19 @@ Monorepo:
 
 ## 4. Checkpoint operativo conocido
 
+**Corrección del 2026-08-06, comprobada en este ordenador.** Lo que sigue en
+esta sección describía el checkpoint anterior y ya no es donde vive el trabajo:
+
+- repositorio activo: `C:\Users\daniel\Desktop\Luxy`;
+- rama activa: `feat/luxy-desktop`, HEAD `c6e5094`, **árbol limpio**;
+- `P0.0`–`P0.5` están **commiteados** (`9012eda`, `16c6e9a`, `845c3cb`,
+  `c6e5094`). El riesgo de las 7.997 líneas sin commit que registraba `LA-008`
+  ya no existe;
+- lo único sin seguimiento son cuatro elementos que no son código: dos archivos
+  de claves, un handoff duplicado y una carpeta `Web demos/`. No se han tocado.
+
+Checkpoint anterior, conservado por si hace falta rastrear algo:
+
 - Repositorio: `Danielux135/Luxy`.
 - Worktree de prueba en Windows:
   `%LOCALAPPDATA%\Luxy\worktrees\luxy-work-update-001`.
@@ -103,6 +117,8 @@ necesario.
 | Finales explícitos     | Implementado y verificado | seis resultados; la salida parcial se conserva y no se reintenta a ciegas      |
 | Memoria                | Implementado y verificado | sin fallback: sólo un bloque válido la sustituye; el código se rechaza         |
 | Recomendaciones        | Implementado              | feedback y resultados ajustan una recomendación explícita; nunca cambia solo   |
+| Continuación           | Implementado              | unión con evidencia y aviso cuando no la hay; el parcial viaja como dato       |
+| Cancelación            | Implementado              | conserva lo generado como resultado; no ofrece continuar ni escribe memoria    |
 | Feedback               | Arreglo preparado         | el primer clic usa la respuesta del gateway; falta confirmación manual final   |
 | Proveedores/modelos    | Implementado parcialmente | Claude, Codex y familias HTTP; catálogo real y capacidades desiguales          |
 | Errores de proveedor   | Implementado y verificado | límite de plan y 429 explicados; se obedece `Retry-After`; intentos reales     |
@@ -252,8 +268,51 @@ incidencia: sigue siendo el campo de resultado, no un almacén de documentos, y
 el listado de Studio devuelve esas respuestas completas.
 
 Una web completa no debe depender de ese campo ni de la memoria.
-Falta una ruta explícita para guardar código largo como archivo/artefacto y para
-continuar una generación interrumpida sin duplicar fragmentos.
+
+Avance del 2026-08-06 (`P0.6a` y `P0.6b`, verificado por pruebas): continuar una
+generación interrumpida **ya no duplica fragmentos**. `joinContinuation` decide
+dónde empieza lo nuevo con cinco estrategias, `continuesJobId` guarda el enlace
+en la metadata para que la unión sobreviva a una recarga, y cuando no hay prueba
+de continuidad se pega y se avisa en vez de descartar texto (`D-021`).
+
+Sigue faltando la ruta de artefacto: un documento largo aún vive en el
+`resultSummary` de cada fragmento, y la memoria acumulativa se cierra turno a
+turno en lugar de esperar a que la secuencia esté completa. Es `P0.6c`, y
+empieza por una decisión de Daniel sobre dónde se guarda un artefacto.
+
+### LUXY-P0-004 — sondeo desbordado — **causa demostrada y corregida el 2026-08-06**
+
+Observado por Daniel con Studio ya arrancando: **29.432 peticiones al API
+Gateway de Supabase en 60 minutos**, 100 % de éxito, con el mismo bloque
+repitiéndose cada menos de 3 s.
+
+La causa no era el agente: era el renderer. `useConversations` recargaba cada
+1.500 ms las opciones, la lista y el detalle de **cada** respuesta visible,
+aunque llevara horas guardada. Con seis respuestas en pantalla, 8 peticiones cada
+1,5 s ≈ 19.200/h. `useStudio` repetía el patrón cada 3 s.
+
+Corregido en `P0.8`: un trabajo terminado no se vuelve a pedir, el ritmo baja a
+10 s en reposo y a 60 s con la ventana oculta, y las opciones caducan a los 30 s.
+Aritméticamente, de ≈19.200/h a ≈480/h en reposo.
+
+Corregido en `P0.9` lo que faltaba, la generación: el agente corre dentro de
+Studio y ya publicaba el texto acumulado por el bus local, así que preguntárselo
+a Supabase cada 1,5 s era preguntar por algo que estaba en el propio proceso.
+Ahora el directo se pinta desde ese bus, el final del agente dispara **una**
+recarga dirigida y el sondeo queda de red de seguridad. De ~40 peticiones por
+minuto de generación a ~7.
+
+Regla que sostiene `P0.9` y no se puede relajar: **el evento local dispara la
+lectura, nunca la sustituye.** Dice que el agente terminó, no lo que quedó
+guardado; el final real se lee del trabajo persistido. Y basta una respuesta
+viva de otra máquina para volver al sondeo rápido.
+
+**Falta la medición real** (`LA-012`): los dos arreglos están en el renderer y
+exigen reiniciar Studio.
+
+Lo que sigue sondeando por diseño: el agente, con `pollIntervalMs` de 2 s
+(≈1.800 reclamaciones/h) y heartbeat cada 10 s. Es la decisión `0001` — sin
+puertos abiertos, sondea él — y su ajuste vive en la configuración de máquina.
 
 ## 8. Estado de migraciones: no inferir
 
@@ -296,7 +355,8 @@ Electron sin cargar. El detalle exacto está en `TEST-RESULTS.md`.
 Antes de `P0.1`, 68 archivos y 1.316 verdes; tras `P0.1`, 69 y 1.334; tras
 `P0.2`, 70 y 1.356; tras `P0.2b` y `P0.3`, 70 y 1.366; tras `P0.3b`, 70 y
 1.370; tras `P0.3c`, 70 y 1.379; tras `P0.4`, 71 y 1.398; tras `P0.5`, 71 y
-1.408. Siempre 9 omitidas y
+1.408; tras `P0.6a`, 72 y 1.426; tras `P0.6b`, 72 y 1.436; tras `P0.8`, 72 y
+1.443; tras `P0.9`, 72 y 1.451; tras `P0.6d`, 72 y 1.453. Siempre 9 omitidas y
 exit 0. Los 9 fallos «ambientales» eran exclusivos de la copia
 Linux y aquí no existen: en esta máquina un fallo es una regresión.
 
@@ -311,6 +371,9 @@ El único objetivo activo es completar `LUXY-P0-LONG-RESPONSES`, descrito en
 3. proteger la memoria anterior;
 4. conservar la salida parcial;
 5. ofrecer continuación y artefacto sólo después de tener estados fiables.
+
+Del punto 5, `P0.6a` y `P0.6b` cerraron la continuación el 2026-08-06; queda
+`P0.6c`, el artefacto.
 
 Los puntos 1 a 4 están cerrados (`P0.0`–`P0.3c`) y desde `P0.4` tienen una
 matriz de regresión completa en `apps/agent/src/response-matrix.test.ts`: los
