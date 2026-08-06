@@ -47,6 +47,7 @@ Las claves se guardan **cifradas** con tu cuenta de Windows y no vuelven a pedir
 | [AI-WORK-PROTOCOL.md](AI-WORK-PROTOCOL.md)    | relevo y documentación entre Claude y Codex           |
 | [DESKTOP.md](docs/DESKTOP.md)                 | la aplicación, su arquitectura y su seguridad         |
 | [INSTALLATION.md](docs/INSTALLATION.md)       | instalar y configurar                                 |
+| [ARRANQUE-ORDENADOR-NUEVO.md](docs/ARRANQUE-ORDENADOR-NUEVO.md) | levantar el entorno completo desde un clon limpio |
 | [MODELS.md](docs/MODELS.md)                   | catálogo, alias y qué funciona de verdad              |
 | [AGENT_TOOLS.md](docs/AGENT_TOOLS.md)         | las herramientas, el confinamiento y las aprobaciones |
 | [SECURITY.md](docs/SECURITY.md)               | modelo de amenazas                                    |

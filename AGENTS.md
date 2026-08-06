@@ -16,6 +16,10 @@ Antes de investigar, planificar o editar, lee en este orden:
    pruebas reales y acciones que aún corresponden a Daniel.
 6. `AI-WORK-PROTOCOL.md` — contrato completo de relevo entre Claude y Codex.
 
+Si estás en un ordenador recién clonado y nada arranca,
+`docs/ARRANQUE-ORDENADOR-NUEVO.md` explica qué falta a propósito en el
+repositorio y en qué orden se regenera.
+
 No repitas una auditoría ya documentada. Contrasta únicamente el estado que
 pueda haber cambiado (`git status`, diff, archivos implicados y pruebas del
 área) y registra cualquier discrepancia antes de continuar.

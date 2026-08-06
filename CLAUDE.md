@@ -15,6 +15,10 @@ Antes de investigar, planificar o editar, lee en este orden:
 5. `CHANGELOG-WORK.md`, `TEST-RESULTS.md` y `LOCAL-ACTIONS.md`.
 6. `AI-WORK-PROTOCOL.md`.
 
+Si estás en un ordenador recién clonado y nada arranca, empieza por
+`docs/ARRANQUE-ORDENADOR-NUEVO.md`: explica qué falta a propósito en el
+repositorio y en qué orden se regenera.
+
 Estos archivos son la memoria compartida de Claude y Codex. No repitas una
 auditoría ya registrada: verifica sólo lo que pueda haber cambiado en el
 worktree real. Si el repositorio contradice la documentación, detén la edición,

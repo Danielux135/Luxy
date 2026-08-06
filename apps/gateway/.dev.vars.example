@@ -1,0 +1,38 @@
+# entorno del gateway para `wrangler dev`. copia este archivo a `.dev.vars`
+# y rellena los valores. `.dev.vars` NO se versiona: contiene secretos reales.
+#
+# los siete primeros son obligatorios: `envSchema` (apps/gateway/src/env.ts) los
+# exige TODOS aunque solo quieras usar Studio y no Telegram. si falta uno el
+# worker no arranca, y sin worker no hay registro de maquina.
+
+# --- telegram ---
+# token que da @BotFather al crear el bot
+TELEGRAM_BOT_TOKEN=PENDIENTE_TOKEN_DEL_BOT
+# lo eliges tu: cadena aleatoria, minimo 8 caracteres. se envia a telegram al
+# registrar el webhook y viaja en cada peticion entrante para probar que es suya
+TELEGRAM_WEBHOOK_SECRET=PENDIENTE_SECRETO_ALEATORIO
+# tu id numerico de usuario, no el @nombre. lo da @userinfobot
+TELEGRAM_ADMIN_USER_ID=PENDIENTE_ID_NUMERICO
+# ids de chat autorizados, separados por coma. para un chat privado coincide
+# con el id de usuario
+TELEGRAM_ALLOWED_CHAT_IDS=PENDIENTE_ID_NUMERICO
+
+# --- supabase ---
+# https://<ref-del-proyecto>.supabase.co
+SUPABASE_URL=PENDIENTE_URL_DEL_PROYECTO
+# clave `service_role`. salta RLS entera: existe SOLO aqui, como secreto de
+# cloudflare. nunca en una maquina, nunca en el repositorio, nunca en Studio
+SUPABASE_SERVICE_ROLE_KEY=PENDIENTE_SERVICE_ROLE
+
+# --- registro de maquinas ---
+# lo eliges tu. cada ordenador lo escribe una vez en el asistente y se descarta:
+# a cambio recibe un token propio. generar uno nuevo:
+#   node -e "console.log(require('crypto').randomBytes(24).toString('base64url'))"
+MACHINE_REGISTRATION_SECRET=PENDIENTE_SECRETO_ALEATORIO
+
+# --- opcionales, con valor por defecto ---
+# TELEGRAM_BOT_USERNAME=mi_bot
+# MACHINE_OFFLINE_SECONDS=45
+# JOB_LEASE_SECONDS=120
+# RATE_LIMIT_PER_MINUTE=30
+# LOG_LEVEL=info
