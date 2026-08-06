@@ -124,7 +124,9 @@ Implementado y verificado:
 Límites conocidos:
 
 - una cancelación manual todavía no conserva el texto parcial; el camino
-  `cancelled` del gateway no guarda resultado. Se decide en `P0.5`;
+  `cancelled` del gateway no guarda resultado. `P0.5` no lo arregla: la interfaz
+  ya sabe pintar un `cancelled` con texto parcial, pero ese texto no llega.
+  Pasa a `P0.6`;
 - el camino agentic sigue sin `termination`, así que cae en la rama «sin
   diagnóstico» del clasificador, que no inventa motivos.
 
@@ -178,8 +180,10 @@ Estado: `done` (Claude Code, 2026-08-05 10:52)
   retrocede hasta el último turno con memoria.
 - `conversationMemoryStatus` viaja en el resultado y lo persiste el gateway.
 
-Pendiente de `P0.5`: Studio debe **decir** que la memoria se conservó y de qué
-turno viene, en vez de limitarse a mostrar la última.
+Resuelto en `P0.5`: Studio **dice** qué le pasó a la memoria en este turno, con
+una frase distinta por cada uno de los cinco estados
+(`describeConversationMemoryStatus`). Queda para más adelante decir de qué turno
+concreto viene la memoria que se conservó.
 
 - Pasar al nuevo trabajo una copia estructurada de la última memoria válida,
   separada del prompt visible, usando metadata; no requiere una tabla nueva.
@@ -291,7 +295,7 @@ Lo que la matriz fija además de los trece casos:
 
 ### P0.5 — interfaz de recuperación
 
-Estado: `pending`
+Estado: `done` — 2026-08-05
 
 - Mostrar `Guardado`, `Truncado`, `Conexión interrumpida`, `Tiempo agotado`,
   `Cancelado` o `Falló` según corresponda.
@@ -303,6 +307,44 @@ Estado: `pending`
 
 Criterio de aceptación: Daniel entiende qué ocurrió y puede recuperar el trabajo
 sin pulsar Detener para finalizarlo.
+
+Archivos:
+
+- `packages/shared/src/schemas.ts`: `describeConversationMemoryStatus`, una frase
+  por cada uno de los **cinco** estados de memoria.
+- `apps/desktop/src/renderer/conversation.ts`: `conversationOutcomeView`,
+  `conversationTerminationOf`, `conversationMemoryStatusOf` y
+  `continuationMessageFor`.
+- `apps/desktop/src/renderer/pages/Conversations.tsx`: `ResponseCard` lee el
+  final real y añade el botón; la página rellena el compositor.
+- `apps/desktop/src/renderer/conversation.test.ts`: 10 pruebas nuevas.
+
+Lo que decide el diseño:
+
+1. **La etiqueta sale de `responseOutcome`, no de `status`.** Un trabajo
+   truncado sigue siendo `completed` en la base de datos, así que pintar
+   `STATUS[status]` diría «Guardado» sobre una respuesta cortada. `status` sólo
+   se usa como respaldo cuando el final es genuinamente desconocido: trabajo aún
+   corriendo, o turno anterior al contrato.
+2. **El texto parcial se ve siempre que exista, también con `errorMessage`.** Un
+   aviso rojo no puede tapar veintitrés minutos de generación.
+3. **Los contadores no se inventan.** Sin `responseTermination` no hay tokens; la
+   duración cae a `metadata.durationMs` y, si tampoco está, a la observada.
+4. **La nota de memoria distingue los cinco estados.** Por dentro los cuatro que
+   no son `structured` acaban igual (se conserva la anterior), pero «no había
+   bloque» y «el bloque se cortó» no significan lo mismo, y confundirlos es lo
+   que hace pensar que Luxy ha olvidado algo.
+
+Dos precisiones frente a la letra de este apartado:
+
+- El botón usa `isRecoverableOutcome`, luego aparece también en `timed_out`,
+  no sólo en `truncated` e `interrupted`. Es deliberado: una sola fuente de
+  verdad, y `describeResponseOutcome('timed_out')` ya dice «puedes continuarla».
+  `cancelled` sigue fuera.
+- **Continuar generación sólo rellena el compositor** con el modelo original y
+  un mensaje que nombra el motivo del corte y prohíbe repetir lo escrito. La
+  unión real de los fragmentos, con detección de solapamiento, es `P0.6`. Aquí
+  no se concatena nada.
 
 ### P0.6 — continuación sin duplicados y artefactos
 
@@ -344,11 +386,18 @@ Dos cosas, en este orden:
    `diagnostico de la respuesta:`. Requiere antes `npm run setup:machine` en
    este ordenador: la configuración de máquina no se migró por contener el
    token (ver `LA-008`).
-2. `P0.5`: interfaz de recuperación. Es el primer paso que toca lo que Daniel
-   ve, y depende de datos que ya existen: `classifyResponseOutcome` da el final,
-   `RESPONSE_OUTCOME_LABELS` la etiqueta y `describeResponseOutcome` el qué
-   hacer. Falta llevarlo a Studio y añadir **Continuar generación** sólo cuando
-   `isRecoverableOutcome` sea cierto.
+2. `P0.6`: continuación sin duplicados y artefactos. Studio ya sabe pedir la
+   continuación, pero hoy la deja en manos del modelo: el compositor se rellena
+   y nadie une los fragmentos. Falta lo difícil, y en este orden:
+   - pasar el resultado parcial y un solapamiento final acotado como **dato no
+     confiable**, igual que se hace con el contexto de otras conversaciones;
+   - unir con detección de solapamiento en `packages/shared` (puro, probable sin
+     mocks) y no concatenar nunca a ciegas;
+   - cerrar la memoria acumulativa sólo cuando la secuencia quede completa;
+   - decidir **antes de escribir código** dónde vive un artefacto largo y con
+     qué límites. Sin Supabase Storage ni nada facturable por defecto: el coste
+     tiene que seguir siendo 0 €.
 
 `P0.4` quedó cerrado el 2026-08-05: matriz completa en
-`apps/agent/src/response-matrix.test.ts`.
+`apps/agent/src/response-matrix.test.ts`. `P0.5` el mismo día: Studio ya no
+llama «Guardado» a una respuesta cortada.

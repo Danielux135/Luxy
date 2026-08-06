@@ -6,7 +6,9 @@ import { Empty, Field, Notice, Panel, Tag } from '../ui/primitives.js';
 import type { ConfigSummary } from '../useConfig.js';
 import {
   conversationFeedbackOf,
+  conversationOutcomeView,
   conversationTiming,
+  continuationMessageFor,
   formatConversationCount,
   formatTurnCount,
   groupConversationTurns,
@@ -94,6 +96,7 @@ function ResponseCard({
   cancelling,
   onCancel,
   onRate,
+  onContinue,
 }: {
   job: StudioJob;
   detail: ReturnType<typeof useConversations>['details'][string] | undefined;
@@ -101,6 +104,7 @@ function ResponseCard({
   cancelling: boolean;
   onCancel: (jobId: string) => void;
   onRate: (jobId: string, rating: 'helpful' | 'not_helpful') => void;
+  onContinue: (job: StudioJob) => void;
 }): JSX.Element {
   const events = detail?.events ?? [];
   const timing = conversationTiming(detail?.job ?? job, events);
@@ -111,6 +115,11 @@ function ResponseCard({
     (job.status === 'queued' ? 'Esperando a que el agente recoja la respuesta…' : 'Preparando…');
   const current = detail?.job ?? job;
   const feedback = conversationFeedbackOf(current);
+  const outcome = conversationOutcomeView(current);
+  // el texto parcial se ve SIEMPRE que exista, tambien con error delante:
+  // 23 minutos de generacion no se esconden detras de un aviso rojo
+  const partial = current.resultSummary?.trim() ?? '';
+  const showsText = current.errorMessage === null || partial.length > 0;
 
   return (
     <article className="conversation-response" data-status={current.status}>
@@ -122,15 +131,29 @@ function ResponseCard({
           </div>
           <div className="list__meta mono">
             primer texto {formatDuration(timing.firstTokenMs)} · total{' '}
-            {formatDuration(timing.durationMs)}
+            {formatDuration(outcome?.durationMs ?? timing.durationMs)}
+            {outcome?.tokens != null &&
+              ` · tokens ${outcome.tokens.input}/${outcome.tokens.output}`}
           </div>
         </div>
-        <Tag tone={statusTone(current.status)}>{STATUS[current.status]}</Tag>
+        <Tag tone={outcome === null ? statusTone(current.status) : outcome.tone}>
+          {outcome === null ? STATUS[current.status] : outcome.label}
+        </Tag>
       </header>
-      {current.errorMessage === null ? (
-        <p className="prewrap conversation-response__text">{text}</p>
-      ) : (
-        <Notice tone="fault">{current.errorMessage}</Notice>
+      {outcome !== null && outcome.outcome !== 'completed' && (
+        <Notice tone={outcome.tone === 'fault' ? 'fault' : 'warn'}>{outcome.detail}</Notice>
+      )}
+      {showsText && <p className="prewrap conversation-response__text">{text}</p>}
+      {current.errorMessage !== null && <Notice tone="fault">{current.errorMessage}</Notice>}
+      {outcome?.memoryNote != null && <p className="list__meta">{outcome.memoryNote}</p>}
+      {outcome?.canContinue === true && (
+        <button
+          className="btn btn--primary btn--quiet"
+          disabled={busy}
+          onClick={() => onContinue(current)}
+        >
+          Continuar generacion
+        </button>
       )}
       {isConversationRunning(current) && (
         <button
@@ -194,13 +217,7 @@ export function ConversationsPage({ summary }: { summary: ConfigSummary }): JSX.
     [conversations.selected],
   );
   const recommendation = useMemo(
-    () =>
-      recommendConversationTarget(
-        conversations.history,
-        providers,
-        projectAlias,
-        message,
-      ),
+    () => recommendConversationTarget(conversations.history, providers, projectAlias, message),
     [conversations.history, message, projectAlias, providers],
   );
   const sameTarget =
@@ -307,6 +324,14 @@ export function ConversationsPage({ summary }: { summary: ConfigSummary }): JSX.
                           cancelling={conversations.cancellingIds.has(job.id)}
                           onCancel={(jobId) => void conversations.cancel(jobId)}
                           onRate={(jobId, rating) => void conversations.rate(jobId, rating)}
+                          onContinue={(source) => {
+                            // se reutiliza el mismo modelo: continuar con otro
+                            // distinto es empezar una respuesta nueva
+                            setProviderA(source.provider);
+                            setModelA(source.model ?? '');
+                            setCompare(false);
+                            setMessage(continuationMessageFor(source));
+                          }}
                         />
                       ))}
                     </div>
@@ -317,19 +342,18 @@ export function ConversationsPage({ summary }: { summary: ConfigSummary }): JSX.
           </Panel>
 
           {activeMemory !== null && (
-            <Panel
-              title="Memoria activa"
-              actions={<Tag tone="ok">contexto persistente</Tag>}
-            >
+            <Panel title="Memoria activa" actions={<Tag tone="ok">contexto persistente</Tag>}>
               <p className="conversation-memory__summary">{activeMemory.memory.summary}</p>
               <div className="conversation-memory__grid">
-                {([
-                  ['Hechos', activeMemory.memory.facts],
-                  ['Decisiones', activeMemory.memory.decisions],
-                  ['Plan', activeMemory.memory.plan],
-                  ['Preguntas abiertas', activeMemory.memory.openQuestions],
-                  ['Lecciones', activeMemory.memory.lessons],
-                ] satisfies Array<[string, string[]]>).map(([title, entries]) =>
+                {(
+                  [
+                    ['Hechos', activeMemory.memory.facts],
+                    ['Decisiones', activeMemory.memory.decisions],
+                    ['Plan', activeMemory.memory.plan],
+                    ['Preguntas abiertas', activeMemory.memory.openQuestions],
+                    ['Lecciones', activeMemory.memory.lessons],
+                  ] satisfies Array<[string, string[]]>
+                ).map(([title, entries]) =>
                   entries.length > 0 ? (
                     <section key={String(title)}>
                       <div className="silk">{title}</div>

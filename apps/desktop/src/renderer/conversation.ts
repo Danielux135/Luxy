@@ -1,11 +1,25 @@
 // transformaciones puras de Conversaciones: metadata, historial y streaming.
 import {
   MAX_PROMPT_LENGTH,
+  RESPONSE_OUTCOME_LABELS,
   TERMINAL_JOB_STATUSES,
   conversationMemorySchema,
+  conversationMemoryStatusSchema,
+  describeConversationMemoryStatus,
+  describeResponseOutcome,
   formatConversationMemory,
+  isRecoverableOutcome,
+  responseOutcomeSchema,
+  responseTerminationSchema,
 } from '@luxy/shared';
-import type { ConversationMemory, ProviderId, StudioJob, StudioJobEvent } from '@luxy/shared';
+import type {
+  ConversationMemory,
+  ProviderId,
+  ResponseOutcome,
+  ResponseTermination,
+  StudioJob,
+  StudioJobEvent,
+} from '@luxy/shared';
 
 export interface ConversationMetadata {
   conversationId: string;
@@ -213,7 +227,8 @@ function projectMemorySnapshots(
     .map((conversation) => latestConversationMemory(conversation.jobs))
     .filter((snapshot): snapshot is ConversationMemorySnapshot => snapshot !== null)
     .sort((left, right) => {
-      const relevance = memoryRelevance(right.memory, message) - memoryRelevance(left.memory, message);
+      const relevance =
+        memoryRelevance(right.memory, message) - memoryRelevance(left.memory, message);
       return relevance !== 0 ? relevance : right.job.createdAt.localeCompare(left.job.createdAt);
     })
     .slice(0, 2);
@@ -238,7 +253,9 @@ export function buildConversationPrompt(
     .filter((entry): entry is string => entry !== null);
 
   const current = `Usuario:\n${nextMessage.trim()}\n\nAsistente:`;
-  const currentId = jobs.map(parseConversationMetadata).find((item) => item !== null)?.conversationId;
+  const currentId = jobs
+    .map(parseConversationMetadata)
+    .find((item) => item !== null)?.conversationId;
   const ownMemory = latestConversationMemory(jobs);
   const related = projectMemorySnapshots(
     projectJobs,
@@ -353,7 +370,8 @@ export function recommendConversationTarget(
   }
   const model = [...modelScores.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
   const feedbackSamples = best.helpful + best.notHelpful;
-  const confidence = feedbackSamples >= 2 ? 'learned' : best.samples.length >= 2 ? 'observed' : 'initial';
+  const confidence =
+    feedbackSamples >= 2 ? 'learned' : best.samples.length >= 2 ? 'observed' : 'initial';
   const reason =
     confidence === 'learned'
       ? `${best.helpful} valoraciones utiles de ${feedbackSamples}; ${best.failed} fallos observados.`
@@ -366,6 +384,83 @@ export function recommendConversationTarget(
     confidence,
     samples: best.samples.length,
     reason,
+  };
+}
+
+export interface ConversationOutcomeView {
+  outcome: ResponseOutcome;
+  /** etiqueta de la insignia: sale del enum, no del estado del trabajo */
+  label: string;
+  tone: 'ok' | 'warn' | 'fault';
+  /** que puede hacer Daniel con este final */
+  detail: string;
+  /** null cuando el proveedor no instrumento el transporte */
+  tokens: { input: number; output: number } | null;
+  durationMs: number | null;
+  /** que le paso a la memoria; null si el turno es del contrato anterior */
+  memoryNote: string | null;
+  /** hay texto guardado que merece la pena conservar */
+  hasPartialText: boolean;
+  canContinue: boolean;
+}
+
+const OUTCOME_TONES: Record<ResponseOutcome, 'ok' | 'warn' | 'fault'> = {
+  completed: 'ok',
+  // los tres recuperables avisan, no alarman: hay trabajo intacto detras
+  truncated: 'warn',
+  interrupted: 'warn',
+  timed_out: 'warn',
+  cancelled: 'warn',
+  failed: 'fault',
+};
+
+export function conversationTerminationOf(job: StudioJob): ResponseTermination | null {
+  const parsed = responseTerminationSchema.safeParse(job.metadata['responseTermination']);
+  return parsed.success ? parsed.data : null;
+}
+
+export function conversationMemoryStatusOf(job: StudioJob): string | null {
+  const parsed = conversationMemoryStatusSchema.safeParse(job.metadata['conversationMemoryStatus']);
+  return parsed.success ? describeConversationMemoryStatus(parsed.data) : null;
+}
+
+/**
+ * como termino de verdad esta respuesta.
+ *
+ * devuelve null cuando no hay nada honesto que decir: mientras el trabajo corre,
+ * y cuando el turno viene del contrato anterior y no trae `responseOutcome`.
+ * Inventar «Guardado» en ese hueco es exactamente el bug que cerro P0.2: el
+ * estado del trabajo es `completed` incluso cuando la respuesta se corto.
+ */
+export function conversationOutcomeView(job: StudioJob): ConversationOutcomeView | null {
+  if (isConversationRunning(job)) return null;
+  const parsed = responseOutcomeSchema.safeParse(job.metadata['responseOutcome']);
+  if (!parsed.success) return null;
+  const outcome = parsed.data;
+
+  const termination = conversationTerminationOf(job);
+  const metadataDuration = job.metadata['durationMs'];
+  const hasPartialText =
+    (job.resultSummary?.trim().length ?? 0) > 0 || (termination?.textLength ?? 0) > 0;
+
+  return {
+    outcome,
+    label: RESPONSE_OUTCOME_LABELS[outcome],
+    tone: OUTCOME_TONES[outcome],
+    detail: describeResponseOutcome(outcome),
+    tokens:
+      termination === null
+        ? null
+        : { input: termination.inputTokens, output: termination.outputTokens },
+    durationMs:
+      typeof metadataDuration === 'number' && metadataDuration >= 0
+        ? metadataDuration
+        : (termination?.durationMs ?? null),
+    memoryNote: conversationMemoryStatusOf(job),
+    hasPartialText,
+    // sin texto no hay nada que continuar: seria empezar de cero pagando el
+    // prompt otra vez, que es justo lo que P0.2 prohibio
+    canContinue: isRecoverableOutcome(outcome) && hasPartialText,
   };
 }
 
@@ -390,6 +485,26 @@ export function conversationTiming(
         ? Math.max(0, completed - started)
         : null,
   };
+}
+
+/**
+ * texto con el que se pide continuar una respuesta cortada.
+ *
+ * P0.5 solo rellena el compositor: la union real de los fragmentos, con
+ * deteccion de solapamiento, es P0.6. Aqui NO se concatena nada a ciegas.
+ */
+export function continuationMessageFor(job: StudioJob): string {
+  const view = conversationOutcomeView(job);
+  const motivo =
+    view?.outcome === 'truncated'
+      ? 'se quedo sin presupuesto de tokens'
+      : view?.outcome === 'timed_out'
+        ? 'se agoto el tiempo de la peticion'
+        : 'se corto la conexion';
+  return [
+    `Continua la respuesta anterior desde donde se corto: ${motivo}.`,
+    'Retoma justo en el punto de corte, sin repetir lo ya escrito ni resumirlo.',
+  ].join(' ');
 }
 
 export function isConversationRunning(job: StudioJob): boolean {

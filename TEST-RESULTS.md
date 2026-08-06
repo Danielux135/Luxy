@@ -238,6 +238,37 @@ puede cortar una respuesta que continua` devolvía `<html>` en vez de
 - Evidencia manual adicional: ninguna. El caso 10 usa un proveedor simulado; la
   comprobación de que Studio pinta bien el estado cancelado es `P0.5`.
 
+### 2026-08-05 23:40 — Windows 11 — P0.5
+
+- Commit/base o diff: `luxy/work-update-001-studio` @ `16c6e9a` más cuatro
+  archivos: `packages/shared/src/schemas.ts`,
+  `apps/desktop/src/renderer/conversation.ts`,
+  `apps/desktop/src/renderer/pages/Conversations.tsx` y
+  `apps/desktop/src/renderer/conversation.test.ts`.
+- Comando exacto: `npx prettier --write` sobre los cuatro, `npm run lint`,
+  `npm run typecheck`, `npm test`, `npm run build`.
+- Exit code: 0 los cinco.
+- Passed / failed / skipped: **1.408 passed, 0 failed, 9 skipped**, 71/71
+  archivos. `P0.5` aporta 10 pruebas.
+- Duración: ≈ 43 s la suite.
+- Fallos completos: ninguno al final. Tres durante el desarrollo, los tres por
+  inventar un valor en vez de leer el enum:
+  1. `schemas.ts(269,85): error TS2366: Function lacks ending return statement` —
+     el `switch` cubría cuatro estados de memoria y `CONVERSATION_MEMORY_STATUSES`
+     tiene cinco; faltaba `rejected_code`.
+  2. `expected null to deeply equal { input: 900, output: 4096 }` (2 pruebas) —
+     la terminación de prueba no pasaba `responseTerminationSchema`: llevaba un
+     `lastEvent` que no existe y le faltaba `finalUsageReceived`.
+  3. Las mismas 2 pruebas otra vez: `transportEnd: 'stream_end'` no es miembro
+     de `STREAM_TRANSPORT_ENDS`. El valor correcto es `local_end`.
+- Clasificación: esperado. Los tres fallos son de las pruebas nuevas, ninguno
+  toca código de producción ni pruebas anteriores.
+- Evidencia manual adicional: **ninguna, y es un límite real**. Studio no arranca
+  en este ordenador (falta la configuración de máquina y cuatro secretos, ver
+  `LA-010`), así que nadie ha visto la tarjeta en pantalla. Lo verificado es el
+  contrato, no el pixel: qué etiqueta sale, qué contadores se muestran, cuándo
+  aparece el botón y qué frase de memoria corresponde a cada estado.
+
 ## Plantilla
 
 ```markdown

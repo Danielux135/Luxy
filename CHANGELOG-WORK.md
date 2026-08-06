@@ -507,6 +507,63 @@ luxy/work-update-001-studio`, `git apply --whitespace=nowarn`, `npm run build`,
   falta llevarlos a Studio y añadir **Continuar generación** sólo para los
   finales recuperables.
 
+### 2026-08-05 23:40 — Claude Code — P0.5
+
+- Estado anterior: `P0.5` `pending`. Todo el diagnóstico existía y viajaba en la
+  metadata desde `P0.3c`, pero Studio no lo leía: pintaba `STATUS[status]`, y
+  como una respuesta truncada se guarda con `status: completed`, la interfaz
+  decía **«Guardado»** encima de una respuesta cortada por la mitad.
+- Objetivo: que Daniel entienda qué pasó de verdad y pueda recuperar el trabajo
+  sin pulsar Detener para forzar el final.
+- Hipótesis o causa demostrada: causa demostrada. El fallo no era del transporte
+  sino de la lectura: `status` y `responseOutcome` responden a preguntas
+  distintas y la interfaz usaba el primero para contestar la segunda.
+- Archivos leídos: `packages/shared/src/response-outcome.ts`,
+  `packages/shared/src/constants.ts`, `packages/shared/src/schemas.ts`,
+  `apps/desktop/src/renderer/conversation.ts`,
+  `apps/desktop/src/renderer/pages/Conversations.tsx`,
+  `apps/desktop/src/renderer/ui/primitives.tsx`.
+- Archivos modificados: `packages/shared/src/schemas.ts`
+  (`describeConversationMemoryStatus`), `apps/desktop/src/renderer/conversation.ts`
+  (`conversationOutcomeView`, `conversationTerminationOf`,
+  `conversationMemoryStatusOf`, `continuationMessageFor`),
+  `apps/desktop/src/renderer/pages/Conversations.tsx`,
+  `apps/desktop/src/renderer/conversation.test.ts` (10 pruebas nuevas), más
+  `CURRENT-TASK.md`, `TEST-RESULTS.md`, `MASTER-PLAN.md`, `PROJECT-STATE.md` y
+  este registro.
+- Comandos ejecutados: `npm run build`,
+  `npx vitest run apps/desktop/src/renderer/conversation.test.ts`,
+  `npx prettier --write`, `npm run lint`, `npm run typecheck`, `npm test`.
+- Resultado real: la tarjeta de respuesta muestra la etiqueta del final real,
+  el aviso de qué hacer cuando no es `completed`, tokens y duración aunque la
+  salida sea parcial, el texto parcial **también** cuando hay error, una frase
+  por cada estado de memoria y el botón **Continuar generación** cuando procede.
+- Pruebas: **1.408 pasadas, 9 omitidas, 0 fallos** en 71 archivos (antes 1.398).
+  `lint`, `typecheck`, `build` y `prettier` limpios. Tres fallos durante el
+  desarrollo, todos míos y todos por inventar valores en vez de leer el enum:
+  faltaba el quinto estado de memoria (`rejected_code`) en el `switch`, la
+  terminación de prueba llevaba un campo inexistente y le faltaba
+  `finalUsageReceived`, y `'stream_end'` no es miembro de
+  `STREAM_TRANSPORT_ENDS` (es `local_end`).
+- Decisiones: (a) el botón usa `isRecoverableOutcome`, así que cubre también
+  `timed_out` y no sólo los dos finales que nombra el apartado; una sola fuente
+  de verdad, coherente con `describeResponseOutcome`. `cancelled` sigue fuera.
+  (b) El botón **sólo rellena el compositor**, con el modelo original y un
+  mensaje que nombra el motivo del corte; unir los fragmentos es `P0.6` y aquí
+  no se concatena nada a ciegas. (c) El texto parcial se muestra siempre que
+  exista, aunque haya `errorMessage`: no se esconden veintitrés minutos de
+  generación detrás de un aviso rojo.
+- Riesgos o límites: nada de esto se ha visto en pantalla todavía. Studio no
+  arranca en este ordenador porque falta la configuración de máquina y cuatro
+  secretos (`LA-010`), así que la comprobación es por pruebas, no visual. Sigue
+  sin resolverse que una cancelación manual no guarde el texto parcial: la
+  interfaz ya sabría pintarlo, pero el gateway no lo envía.
+- Estado nuevo: `P0.5` `done`. `LUXY-P0-LONG-RESPONSES` en curso, siguiente paso
+  `P0.6`.
+- Siguiente paso exacto: `P0.6`. Definir primero dónde vive un artefacto largo y
+  con qué límites, luego la unión con detección de solapamiento en
+  `packages/shared`, pasando el parcial como dato no confiable.
+
 ## Plantilla para próximas entradas
 
 ```markdown

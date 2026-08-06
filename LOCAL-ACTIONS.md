@@ -165,12 +165,12 @@ El ordenador `N-2278` ya no se va a usar nunca más. Todo su trabajo está aquí
 
 Respaldos, **fuera** del repositorio, en `C:\Users\Daniel\Desktop\luxy-recuperado\`:
 
-| Carpeta o archivo | Contenido |
-|---|---|
-| `luxy-work-update-001\` | copia íntegra del worktree, 307 archivos |
-| `luxy-work-update-001-COMPLETO.patch` | el mismo delta como parche, aplica limpio sobre `61fb7ee` |
-| `parches\` | los 12 `.patch` históricos y los handoffs |
-| `docs-de-esta-copia-2026-08-05\` | los documentos desactualizados que tenía esta copia antes de la migración |
+| Carpeta o archivo                     | Contenido                                                                 |
+| ------------------------------------- | ------------------------------------------------------------------------- |
+| `luxy-work-update-001\`               | copia íntegra del worktree, 307 archivos                                  |
+| `luxy-work-update-001-COMPLETO.patch` | el mismo delta como parche, aplica limpio sobre `61fb7ee`                 |
+| `parches\`                            | los 12 `.patch` históricos y los handoffs                                 |
+| `docs-de-esta-copia-2026-08-05\`      | los documentos desactualizados que tenía esta copia antes de la migración |
 
 Se ejecutó `git worktree prune`: los metadatos apuntaban a
 `C:\Users\daniel\AppData\Local\Luxy\worktrees\...`, rutas de una máquina que
@@ -192,3 +192,49 @@ Esas 7.997 líneas siguen sin estar en ningún commit. Sobreviven porque hay dos
 copias fuera del repositorio, no porque git las guarde. Es exactamente el
 supuesto de `D-016`, que sigue sin aceptarse.
 
+## LA-010 — dejar este ordenador operativo
+
+Estado: **`parcial` el 2026-08-05**. Falta únicamente información que sólo
+tiene Daniel.
+
+El commit `9012eda` trajo el trabajo, pero **el código no basta para ejecutar**:
+la configuración de máquina y los secretos viven fuera del repositorio a
+propósito, y el ordenador `N-2278` ya no responde por red (se comprobó).
+
+### Hecho
+
+| Qué                             | Dónde                    | Estado                                                                                     |
+| ------------------------------- | ------------------------ | ------------------------------------------------------------------------------------------ |
+| Claves de la API China          | `.env.providers`         | escrito; ignorado por git                                                                  |
+| Secreto de registro de máquina  | `apps/gateway/.dev.vars` | generado aquí, 24 bytes aleatorios                                                         |
+| `service_role` de Supabase      | `apps/gateway/.dev.vars` | puesto                                                                                     |
+| Secreto del webhook de Telegram | `apps/gateway/.dev.vars` | puesto                                                                                     |
+| Herramientas                    | sistema                  | `node`, `npm`, `git`, `claude` y `codex` presentes; `wrangler` sólo como dependencia local |
+
+Las tres variables de `.env.providers` apuntan a la **misma** conexión
+(`https://api.hcnsec.cn/v1`, `DEFAULT_CONNECTIONS` del catálogo): hay una sola
+clave para DeepSeek, GLM, Kimi y el resto.
+
+### Pendiente, y por qué bloquea
+
+`apps/gateway/.dev.vars` tiene cuatro valores `PENDIENTE_`. Sin ellos
+`envSchema` no valida y el gateway no arranca, y sin gateway no hay registro de
+máquina, luego no hay `config.json`, luego no hay agente ni Studio.
+
+- `SUPABASE_URL`: no aparece en ningún archivo. Las claves nuevas
+  (`sb_publishable_`, `sb_secret_`) no la codifican, al contrario que las
+  antiguas en formato JWT.
+- `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ADMIN_USER_ID` y `TELEGRAM_ALLOWED_CHAT_IDS`:
+  `envSchema` los exige aunque sólo se quiera usar Studio.
+
+Además hay una duda de estado real, no de configuración: según
+`PROJECT-STATE.md` las migraciones **nunca se han ejecutado contra un Postgres
+real**. Si ese proyecto de Supabase está vacío, aplicar
+`supabase/migrations/0001`–`0006` es un paso que necesita autorización explícita
+de Daniel.
+
+### Aviso sobre el asistente
+
+`npm run setup:machine` pide una URL de gateway y **rechaza lo que no empiece
+por `https://`**. `wrangler dev` sirve en `http://localhost:8787`. Con el
+gateway en local hay que escribir `config.json` a mano o usar un túnel.

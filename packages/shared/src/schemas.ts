@@ -258,6 +258,29 @@ export const CONVERSATION_MEMORY_INSTRUCTION = [
 export const conversationMemoryStatusSchema = z.enum(CONVERSATION_MEMORY_STATUSES);
 export type ConversationMemoryStatus = z.infer<typeof conversationMemoryStatusSchema>;
 
+/**
+ * que le paso a la memoria en este turno, dicho para una persona.
+ *
+ * los tres estados que no son `structured` acaban igual por dentro (se conserva
+ * la anterior) pero NO significan lo mismo, y confundirlos es justo lo que hace
+ * pensar que Luxy ha olvidado algo: «no habia bloque» es normal, «el bloque se
+ * corto» avisa de que la respuesta se quedo sin sitio.
+ */
+export function describeConversationMemoryStatus(status: ConversationMemoryStatus): string {
+  switch (status) {
+    case 'structured':
+      return 'Memoria actualizada con este turno.';
+    case 'absent':
+      return 'Este turno no aporto memoria nueva. Se conserva la anterior.';
+    case 'truncated_block':
+      return 'La respuesta se corto dentro del bloque de memoria. Se conserva la anterior.';
+    case 'invalid':
+      return 'La memoria de este turno no era valida. Se conserva la anterior.';
+    case 'rejected_code':
+      return 'La memoria de este turno llevaba codigo dentro y se descarto. Se conserva la anterior.';
+  }
+}
+
 export interface ParsedConversationMemoryResponse {
   visibleText: string;
   /**
@@ -711,12 +734,7 @@ export const httpProviderConfigSchema = z.object({
    * por la mitad. Con una señal fuerte (`finish_reason` o memoria completa) el
    * margen sigue siendo corto, porque ahi el mensaje SI termino.
    */
-  softTerminalGraceMs: z
-    .number()
-    .int()
-    .min(1)
-    .max(120_000)
-    .default(SOFT_TERMINAL_GRACE_MS),
+  softTerminalGraceMs: z.number().int().min(1).max(120_000).default(SOFT_TERMINAL_GRACE_MS),
 });
 
 export const agentConfigSchema = z.object({

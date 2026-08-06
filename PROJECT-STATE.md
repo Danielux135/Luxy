@@ -1,7 +1,7 @@
 # Luxy — estado canónico del proyecto
 
 Última actualización: **2026-08-05**  
-Estado documental: **checkpoint verificado en Windows; `P0.0`–`P0.3` cerrados**
+Estado documental: **checkpoint verificado en Windows; `P0.0`–`P0.5` cerrados**
 
 ## 1. Cómo interpretar este estado
 
@@ -295,7 +295,8 @@ Electron sin cargar. El detalle exacto está en `TEST-RESULTS.md`.
 **Línea base real de Windows, 2026-08-05:** la suite completa pasa entera.
 Antes de `P0.1`, 68 archivos y 1.316 verdes; tras `P0.1`, 69 y 1.334; tras
 `P0.2`, 70 y 1.356; tras `P0.2b` y `P0.3`, 70 y 1.366; tras `P0.3b`, 70 y
-1.370; tras `P0.3c`, 70 y 1.379; tras `P0.4`, 71 y 1.398. Siempre 9 omitidas y
+1.370; tras `P0.3c`, 70 y 1.379; tras `P0.4`, 71 y 1.398; tras `P0.5`, 71 y
+1.408. Siempre 9 omitidas y
 exit 0. Los 9 fallos «ambientales» eran exclusivos de la copia
 Linux y aquí no existen: en esta máquina un fallo es una regresión.
 
@@ -313,7 +314,15 @@ El único objetivo activo es completar `LUXY-P0-LONG-RESPONSES`, descrito en
 
 Los puntos 1 a 4 están cerrados (`P0.0`–`P0.3c`) y desde `P0.4` tienen una
 matriz de regresión completa en `apps/agent/src/response-matrix.test.ts`: los
-trece casos, sin red ni tokens. El punto 5 es `P0.5` y es lo siguiente.
+trece casos, sin red ni tokens. Del punto 5, `P0.5` cerró la mitad visible el
+2026-08-05: Studio ya no llama «Guardado» a una respuesta cortada, muestra
+tokens, duración y texto parcial, dice qué le pasó a la memoria y ofrece
+**Continuar generación** cuando el final es recuperable. Falta la mitad difícil,
+que es `P0.6`: unir los fragmentos sin duplicar y guardar las salidas largas
+como artefacto.
+
+Aviso de alcance: nada de `P0.5` se ha visto en pantalla. Studio no arranca en
+este ordenador hasta resolver `LA-010`.
 
 No avanzar a nuevas pantallas, Android, Remote o despliegue antes de cerrar este
 bloque y consolidar el checkpoint.

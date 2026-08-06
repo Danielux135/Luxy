@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import type { StudioJob, StudioJobEvent } from '@luxy/shared';
+import type { ResponseOutcome, ResponseTermination, StudioJob, StudioJobEvent } from '@luxy/shared';
 import {
   buildConversationPrompt,
+  conversationOutcomeView,
   conversationTiming,
+  continuationMessageFor,
   conversationTitleFrom,
   formatConversationCount,
   formatTurnCount,
@@ -178,7 +180,11 @@ describe('contrato local de Conversaciones', () => {
     const bad = job({
       id: crypto.randomUUID(),
       provider: 'codex',
-      metadata: { ...job().metadata, studioFeedback: { rating: 'not_helpful' }, durationMs: 50_000 },
+      metadata: {
+        ...job().metadata,
+        studioFeedback: { rating: 'not_helpful' },
+        durationMs: 50_000,
+      },
     });
     const recommendation = recommendConversationTarget(
       [useful, bad],
@@ -224,5 +230,126 @@ describe('contrato local de Conversaciones', () => {
     ];
     expect(liveConversationPreview(events)).toBe('segundo');
     expect(conversationTiming(job(), events)).toEqual({ firstTokenMs: 1000, durationMs: 3000 });
+  });
+});
+
+// -----------------------------------------------------------------------------
+// P0.5: lo que Studio dice de un final que no fue limpio
+// -----------------------------------------------------------------------------
+
+function termination(overrides: Partial<ResponseTermination> = {}): ResponseTermination {
+  return {
+    httpStatus: 200,
+    streamed: true,
+    chunks: 40,
+    bytes: 8000,
+    finishReason: 'length',
+    finalUsageReceived: true,
+    transportEnd: 'local_end',
+    abortedBy: null,
+    durationMs: 23_000,
+    effectiveTimeoutMs: 600_000,
+    maxOutputTokens: 4096,
+    inputTokens: 900,
+    outputTokens: 4096,
+    textLength: 12_000,
+    ...overrides,
+  };
+}
+
+/** un turno terminado con su diagnostico, como lo persiste el gateway */
+function endedJob(
+  outcome: ResponseOutcome,
+  extra: Record<string, unknown> = {},
+  overrides: Partial<StudioJob> = {},
+): StudioJob {
+  const base = job();
+  return {
+    ...base,
+    metadata: {
+      ...base.metadata,
+      responseOutcome: outcome,
+      responseTermination: termination(),
+      durationMs: 23_400,
+      ...extra,
+    },
+    ...overrides,
+  };
+}
+
+describe('P0.5 - final real de la respuesta en Studio', () => {
+  it('no inventa un final mientras el trabajo corre', () => {
+    expect(conversationOutcomeView(endedJob('truncated', {}, { status: 'running' }))).toBeNull();
+  });
+
+  it('no inventa un final cuando el turno es del contrato anterior', () => {
+    // status `completed` sin `responseOutcome`: la tarjeta cae al estado de
+    // siempre en vez de afirmar que llego entera
+    expect(conversationOutcomeView(job())).toBeNull();
+  });
+
+  it('un truncado no se presenta como Guardado', () => {
+    const view = conversationOutcomeView(endedJob('truncated'));
+    expect(view?.label).toBe('Truncado');
+    expect(view?.tone).toBe('warn');
+    expect(view?.detail).toContain('presupuesto de tokens');
+  });
+
+  it('conserva tokens y duracion aunque la salida sea parcial', () => {
+    const view = conversationOutcomeView(endedJob('interrupted'));
+    expect(view?.tokens).toEqual({ input: 900, output: 4096 });
+    // manda la duracion del trabajo, no la del transporte
+    expect(view?.durationMs).toBe(23_400);
+  });
+
+  it('cae a la duracion del transporte si el trabajo no la trae', () => {
+    const view = conversationOutcomeView(endedJob('truncated', { durationMs: undefined }));
+    expect(view?.durationMs).toBe(23_000);
+  });
+
+  it('sin diagnostico de transporte no inventa contadores', () => {
+    const view = conversationOutcomeView(endedJob('failed', { responseTermination: undefined }));
+    expect(view?.tokens).toBeNull();
+  });
+
+  it('ofrece continuar solo en los finales recuperables con texto', () => {
+    expect(conversationOutcomeView(endedJob('truncated'))?.canContinue).toBe(true);
+    expect(conversationOutcomeView(endedJob('interrupted'))?.canContinue).toBe(true);
+    expect(conversationOutcomeView(endedJob('timed_out'))?.canContinue).toBe(true);
+    // la paro una persona: continuar no es lo que quiso
+    expect(conversationOutcomeView(endedJob('cancelled'))?.canContinue).toBe(false);
+    expect(conversationOutcomeView(endedJob('completed'))?.canContinue).toBe(false);
+    expect(conversationOutcomeView(endedJob('failed'))?.canContinue).toBe(false);
+  });
+
+  it('no ofrece continuar cuando no quedo nada que continuar', () => {
+    const vacio = endedJob(
+      'interrupted',
+      { responseTermination: termination({ textLength: 0 }) },
+      { resultSummary: '   ' },
+    );
+    const view = conversationOutcomeView(vacio);
+    expect(view?.hasPartialText).toBe(false);
+    expect(view?.canContinue).toBe(false);
+  });
+
+  it('distingue los cuatro estados de la memoria', () => {
+    const nota = (status: string): string | null =>
+      conversationOutcomeView(endedJob('truncated', { conversationMemoryStatus: status }))
+        ?.memoryNote ?? null;
+    expect(nota('structured')).toContain('actualizada');
+    expect(nota('absent')).toContain('no aporto memoria nueva');
+    // el caso que importa: el corte se comio el bloque, y hay que decirlo
+    expect(nota('truncated_block')).toContain('dentro del bloque de memoria');
+    expect(nota('invalid')).toContain('no era valida');
+    expect(nota('lo-que-sea')).toBeNull();
+  });
+
+  it('el mensaje de continuacion nombra el motivo y prohibe repetir', () => {
+    const texto = continuationMessageFor(endedJob('truncated'));
+    expect(texto).toContain('presupuesto de tokens');
+    expect(texto).toContain('sin repetir lo ya escrito');
+    expect(continuationMessageFor(endedJob('timed_out'))).toContain('tiempo de la peticion');
+    expect(continuationMessageFor(endedJob('interrupted'))).toContain('corto la conexion');
   });
 });
