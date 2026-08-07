@@ -33,8 +33,16 @@ export default defineConfig({
     },
     // @luxy/agent tambien va dentro: el main usa su deteccion de herramientas y
     // su cliente del gateway, y dentro del asar no habria node_modules que
-    // resolver
-    resolve: { noExternal: ['@luxy/shared', '@luxy/agent', 'zod'] },
+    // resolver.
+    //
+    // koffi NO entra: es un modulo NATIVO. Meter un .node en un bundle de
+    // JavaScript no funciona, asi que se queda como dependencia externa y
+    // electron-builder lo saca del asar (asarUnpack). Se carga con import()
+    // dinamico, ver remote-host/input-backend-koffi.ts.
+    resolve: {
+      noExternal: ['@luxy/shared', '@luxy/agent', '@luxy/remote-protocol', '@luxy/remote-crypto', 'zod'],
+      external: ['koffi'],
+    },
   },
   preload: {
     build: {
@@ -51,8 +59,16 @@ export default defineConfig({
     plugins: [react()],
     build: {
       outDir: 'out/renderer',
-      rollupOptions: { input: resolve(import.meta.dirname, 'src/renderer/index.html') },
+      // DOS paginas, no una. capture.html es el renderer OCULTO: no tiene
+      // interfaz y solo existe porque getDisplayMedia y RTCPeerConnection viven
+      // donde vive Chromium y no en utilityProcess. Ver remote-host/capture-window.ts.
+      rollupOptions: {
+        input: {
+          index: resolve(import.meta.dirname, 'src/renderer/index.html'),
+          capture: resolve(import.meta.dirname, 'src/renderer/capture.html'),
+        },
+      },
     },
-    resolve: { noExternal: ['@luxy/shared', 'zod'] },
+    resolve: { noExternal: ['@luxy/shared', '@luxy/remote-protocol', 'zod'] },
   },
 });

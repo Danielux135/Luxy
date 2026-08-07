@@ -39,8 +39,17 @@ extraResources:
 
 asar: true
 
-# no hay ninguna dependencia nativa (todo el arbol es JS puro), asi que
-# reconstruir no aporta nada y alarga el empaquetado
+# koffi es un modulo NATIVO y su .node no se puede cargar desde dentro del asar:
+# Node necesita un archivo real en disco para dlopen. Sin esto, el control de
+# raton y teclado falla en la version instalada aunque funcione en desarrollo,
+# que es la peor forma posible de descubrirlo.
+asarUnpack:
+  - '**/node_modules/koffi/**'
+  - '**/node_modules/@koromix/**'
+
+# koffi trae binarios precompilados para cada plataforma y usa N-API 8, que es
+# ABI estable: el mismo .node vale para Node y para Electron. Por eso no hay nada
+# que reconstruir.
 npmRebuild: false
 
 win:

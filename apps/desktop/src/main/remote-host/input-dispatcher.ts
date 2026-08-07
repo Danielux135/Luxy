@@ -25,7 +25,13 @@ import {
 /** lo minimo que tiene que saber hacer la capa nativa */
 export interface InputBackend {
   moveTo(point: AbsolutePoint): void;
-  mouseButton(button: MouseButton, action: 'down' | 'up', point: AbsolutePoint): void;
+  /**
+   * point es NULL cuando se suelta a ciegas (releaseAll): ahi no se sabe donde
+   * esta el cursor, y el backend NO debe moverlo. Si en ese caso se pasara un
+   * punto cualquiera, cortar la sesion con un boton pulsado teletransportaria el
+   * cursor del usuario a la esquina de la pantalla.
+   */
+  mouseButton(button: MouseButton, action: 'down' | 'up', point: AbsolutePoint | null): void;
   scroll(point: AbsolutePoint, dx: number, dy: number): void;
   keyDown(key: SpecialKey | Modifier): void;
   keyUp(key: SpecialKey | Modifier): void;
@@ -182,7 +188,8 @@ export class InputDispatcher {
   releaseAll(): void {
     for (const boton of this.botonesPulsados) {
       try {
-        this.backend.mouseButton(boton, 'up', { dx: 0, dy: 0 });
+        // null, no {dx:0,dy:0}: soltar a ciegas no debe mover el cursor
+        this.backend.mouseButton(boton, 'up', null);
       } catch {
         // se sigue con los demas
       }

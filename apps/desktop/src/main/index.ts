@@ -3,7 +3,7 @@
 // orden de arranque: instancia unica -> app lista -> CSP -> agente -> ventana y
 // bandeja. Nada de esto abre una consola: cerrar la ventana deja Luxy en la
 // bandeja y solo "Salir completamente" termina de verdad.
-import { app, BrowserWindow, Notification, safeStorage, shell } from 'electron';
+import { app, BrowserWindow, Notification, ipcMain, safeStorage, screen, shell } from 'electron';
 import { join } from 'node:path';
 import { resolveStoredConfig } from '@luxy/shared';
 import { AgentController, resolveAgentEntry } from './agent-controller.js';
@@ -17,6 +17,8 @@ import { registerIpcHandlers, unregisterIpcHandlers } from './ipc/handlers.js';
 import { LuxyTray } from './tray.js';
 import { applyContentSecurityPolicy, createMainWindow, revealWindow } from './windows.js';
 import { IPC_EVENT } from '../shared/ipc.js';
+import { CaptureHost } from './remote-host/capture-window.js';
+import { SessionHostSlot } from './remote-host/session-host.js';
 import type { AgentEvent, AgentHostStatus } from '@luxy/shared';
 
 const isDev = !app.isPackaged;
@@ -30,8 +32,18 @@ let tray: LuxyTray | null = null;
 let controller: AgentController | null = null;
 let configStore: ConfigStore | null = null;
 let secretStore: SecretStore | null = null;
+let captureHost: CaptureHost | null = null;
+const remoteSessions = new SessionHostSlot();
 /** distingue ocultar la ventana de salir de verdad */
 let quitting = false;
+
+const onDisplaysChanged = (): void => {
+  void remoteSessions.displaysChanged().catch((error: unknown) => {
+    log('no se pudieron actualizar los monitores de la sesion remota', {
+      error: String(error),
+    });
+  });
+};
 
 // una sola instancia: dos agentes de la misma maquina se pisarian los worktrees
 // y competirian por los mismos trabajos
@@ -178,6 +190,19 @@ async function bootstrap(): Promise<void> {
   await app.whenReady();
   applyContentSecurityPolicy(isDev);
 
+  // CaptureHost vive con la aplicacion, pero no crea la ventana ni concede el
+  // permiso hasta que SessionHost acepta una sesion. El transporte real de
+  // Supabase adoptara esa sesion en remoteSessions cuando exista.
+  captureHost = new CaptureHost({
+    onMessage: (message) => void remoteSessions.handleCaptureMessage(message),
+    onLog: log,
+    rendererUrl,
+  });
+  captureHost.attachListener(ipcMain);
+  screen.on('display-added', onDisplaysChanged);
+  screen.on('display-removed', onDisplaysChanged);
+  screen.on('display-metrics-changed', onDisplaysChanged);
+
   // safeStorage solo responde de forma fiable despues de whenReady()
   configStore = new ConfigStore(configFilePathFor(luxyConfigDir()));
   secretStore = new SecretStore(
@@ -267,6 +292,12 @@ async function quitCompletely(): Promise<void> {
   if (quitting) return;
   quitting = true;
   try {
+    screen.off('display-added', onDisplaysChanged);
+    screen.off('display-removed', onDisplaysChanged);
+    screen.off('display-metrics-changed', onDisplaysChanged);
+    await remoteSessions.end('host_shutdown');
+    await captureHost?.dispose('host_shutdown');
+    captureHost = null;
     await controller?.shutdown();
   } finally {
     unregisterIpcHandlers();
