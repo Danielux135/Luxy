@@ -54,6 +54,11 @@ function artifactsDirectory(): string {
   return join(luxyDataDir(), 'artifacts');
 }
 
+/** catalogos reales leidos de cada pasarela, con su fecha */
+function catalogDirectory(): string {
+  return join(luxyDataDir(), 'catalog');
+}
+
 /** carpeta de configuracion: la misma que usa la CLI */
 function luxyConfigDir(): string {
   const appData = process.env['APPDATA'];
@@ -204,6 +209,7 @@ async function bootstrap(): Promise<void> {
     secretStore,
     logsDirectory: logsDirectory(),
     artifactsDirectory: artifactsDirectory(),
+    catalogDirectory: catalogDirectory(),
     migrationCandidateFiles: migrationCandidateFiles(),
     getMainWindow: () => mainWindow,
     log,

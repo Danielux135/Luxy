@@ -7,7 +7,14 @@ import { type BrowserWindow, dialog, ipcMain, safeStorage, shell, app } from 'el
 import { readFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import type { z } from 'zod';
-import { redact, storedAgentConfigSchema, secretRegistry } from '@luxy/shared';
+import {
+  redact,
+  storedAgentConfigSchema,
+  secretRegistry,
+  buildCatalogSnapshot,
+  describePricingProbes,
+} from '@luxy/shared';
+import type { PricingProbe } from '@luxy/shared';
 import { detectEnvironment } from '@luxy/agent/dist/detect.js';
 import { GatewayClient } from '@luxy/agent/dist/gateway-client.js';
 import { buildMachineIdentity } from '@luxy/agent/dist/agent.js';
@@ -15,6 +22,7 @@ import type { StoredAgentConfig } from '@luxy/shared';
 import {
   IPC_INVOKE,
   artifactOpenFolderArgsSchema,
+  catalogRefreshArgsSchema,
   configSaveArgsSchema,
   emptyArgsSchema,
   logsTailArgsSchema,
@@ -40,6 +48,7 @@ import { secretsToInvalidateForConfigChange, type ConfigStore } from '../config-
 import type { SecretStore } from '../secure-storage.js';
 import { MACHINE_TOKEN_SECRET, connectionSecretName } from '../../shared/ipc.js';
 import { deleteMigratedFile, inspectEnvFile, readEnvSecrets } from '../migration.js';
+import { readCatalogSnapshot, writeCatalogSnapshot } from '../catalog-store.js';
 
 export interface HandlerContext {
   controller: AgentController;
@@ -48,6 +57,8 @@ export interface HandlerContext {
   logsDirectory: string;
   /** raiz de los artefactos generados; se abre, nunca se sirve por HTTP */
   artifactsDirectory: string;
+  /** donde se guarda el catalogo real leido de cada pasarela */
+  catalogDirectory: string;
   /** archivos en claro donde pueden quedar secretos de versiones anteriores */
   migrationCandidateFiles: string[];
   getMainWindow: () => BrowserWindow | null;
@@ -410,6 +421,83 @@ export function registerIpcHandlers(context: HandlerContext): void {
       message: args.message,
     }),
   );
+
+  handle(IPC_INVOKE.catalogRead, catalogRefreshArgsSchema, (args) => ({
+    snapshot: readCatalogSnapshot(context.catalogDirectory, args.connectionId),
+  }));
+
+  handle(IPC_INVOKE.catalogRefresh, catalogRefreshArgsSchema, async (args) => {
+    // misma regla que la prueba de conexion: la URL sale de la configuracion
+    // guardada, nunca del renderer, y la clave no cruza el IPC
+    const stored = context.configStore
+      .load()
+      ?.connections.find((connection) => connection.id === args.connectionId);
+    if (stored === undefined) throw new Error('esa conexion no esta configurada');
+
+    const apiKey = context.secretStore.get(connectionSecretName(args.connectionId));
+    if (apiKey === undefined) throw new Error('no hay clave guardada para esta conexion');
+
+    const base = stored.baseUrl.replace(/\/+$/, '');
+    const pedir = async (
+      url: string,
+    ): Promise<{ payload: unknown | null; status: number | null }> => {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 30_000);
+      try {
+        const response = await fetch(url, {
+          headers: { Authorization: `Bearer ${apiKey}` },
+          signal: controller.signal,
+        });
+        if (!response.ok) return { payload: null, status: response.status };
+        return { payload: (await response.json()) as unknown, status: response.status };
+      } catch {
+        // que falle la consulta de precios no puede tumbar el refresco entero
+        return { payload: null, status: null };
+      } finally {
+        clearTimeout(timer);
+      }
+    };
+
+    const models = await pedir(`${base}/models`);
+    if (models.payload === null) throw new Error('la conexion no devolvio la lista de modelos');
+
+    // el panel de la pasarela sirve los precios fuera de /v1. Se prueban las
+    // rutas conocidas y se apunta QUE contesto cada una: la primera lectura
+    // real devolvio 22 modelos y cero precios sin decir por que.
+    const origin = base.replace(/\/v1$/, '');
+    const rutas = [`${origin}/api/pricing`, `${base}/pricing`, `${origin}/api/models`];
+    const probes: PricingProbe[] = [];
+    let pricingPayload: unknown | null = null;
+    for (const url of rutas) {
+      const intento = await pedir(url);
+      const payload = intento.payload;
+      const objeto = typeof payload === 'object' && payload !== null ? payload : null;
+      const lista =
+        objeto !== null && 'data' in objeto ? (objeto as { data?: unknown }).data : null;
+      probes.push({
+        url: url.slice(origin.length) || url,
+        status: intento.status,
+        topLevelKeys: objeto === null ? [] : Object.keys(objeto).slice(0, 8),
+        entryCount: Array.isArray(lista) ? lista.length : 0,
+      });
+      if (Array.isArray(lista) && lista.length > 0) {
+        pricingPayload = payload;
+        break;
+      }
+    }
+
+    const snapshot = buildCatalogSnapshot({
+      connectionId: args.connectionId,
+      fetchedAt: new Date().toISOString(),
+      modelsPayload: models.payload,
+      pricingPayload,
+      notice:
+        pricingPayload === null ? `Sin precios por API. ${describePricingProbes(probes)}` : null,
+      pricingProbes: probes,
+    });
+    writeCatalogSnapshot(context.catalogDirectory, snapshot);
+    return snapshot;
+  });
 
   handle(IPC_INVOKE.connectionTest, connectionTestArgsSchema, async (args) => {
     // la URL la decide la configuracion guardada, NO el renderer. El contrato

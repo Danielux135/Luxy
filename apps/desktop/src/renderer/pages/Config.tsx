@@ -1,8 +1,11 @@
 // Proyectos, Conexiones y Modelos.
-import { useState, type JSX } from 'react';
+import { useEffect, useState, type JSX } from 'react';
 import {
   ModelRegistry,
   buildDefaultCatalog,
+  describeModelBilling,
+  guessModelFamily,
+  type CatalogSnapshot,
   type ConnectionProfile,
   type ModelFamily,
   type ResolvedModel,
@@ -25,8 +28,16 @@ const FAMILIA: Record<ModelFamily, string> = {
   router: 'Enrutado',
 };
 
-/** construye el registro a partir de la configuracion y del estado de secretos */
-function buildRegistry(summary: ConfigSummary): ModelRegistry {
+/**
+ * construye el registro a partir de la configuracion y del estado de secretos.
+ *
+ * `snapshot` es el catalogo REAL leido de la pasarela, cuando existe. Sin el,
+ * la lista de modelos servidos va vacia y el registro lo interpreta como «no se
+ * sabe», que es la verdad: nadie ha preguntado. Antes esa lista vacia se leia
+ * como «no sirve ninguno» y la pantalla declaraba los 19 modelos no
+ * disponibles con la clave puesta y trabajos corriendo contra ellos.
+ */
+function buildRegistry(summary: ConfigSummary, snapshot: CatalogSnapshot | null): ModelRegistry {
   const connections = (summary.config?.connections ?? []) as ConnectionProfile[];
   const models = connections.length === 0 ? [] : buildDefaultCatalog(connections[0]!.id);
   return new ModelRegistry({
@@ -35,13 +46,36 @@ function buildRegistry(summary: ConfigSummary): ModelRegistry {
     statuses: connections.map((connection) => ({
       connectionId: connection.id,
       hasApiKey: summary.secrets.configured[connectionSecretName(connection.id)] === true,
-      reachable: null,
-      checkedAt: null,
-      // sin sincronizar todavia: no se afirma que un modelo este disponible
-      availableModels: [],
+      reachable: snapshot?.connectionId === connection.id ? true : null,
+      checkedAt: snapshot?.connectionId === connection.id ? snapshot.fetchedAt : null,
+      availableModels:
+        snapshot?.connectionId === connection.id
+          ? snapshot.models.map((model) => model.apiModel)
+          : [],
       error: null,
     })),
   });
+}
+
+/** lee el ultimo catalogo guardado de la primera conexion configurada */
+function useCatalogSnapshot(summary: ConfigSummary): {
+  snapshot: CatalogSnapshot | null;
+  setSnapshot: (value: CatalogSnapshot) => void;
+  connectionId: string | null;
+} {
+  const connectionId = summary.config?.connections?.[0]?.id ?? null;
+  const [snapshot, setSnapshot] = useState<CatalogSnapshot | null>(null);
+  const [leido, setLeido] = useState(false);
+
+  useEffect(() => {
+    if (connectionId === null || leido) return;
+    setLeido(true);
+    void window.luxy.readCatalog(connectionId).then((result) => {
+      if (result.ok && result.value.snapshot !== null) setSnapshot(result.value.snapshot);
+    });
+  }, [connectionId, leido]);
+
+  return { snapshot, setSnapshot, connectionId };
 }
 
 // -----------------------------------------------------------------------------
@@ -341,8 +375,103 @@ export function ConnectionsPage({
 // Modelos
 // -----------------------------------------------------------------------------
 
+/**
+ * catalogo REAL leido de la pasarela, frente al que Luxy trae escrito.
+ *
+ * lo de abajo es lo que Luxy cree; esto es lo que la conexion dice servir de
+ * verdad, con su fecha. Cuando no coinciden, manda este.
+ */
+function CatalogoReal({
+  connectionId,
+  snapshot,
+  onSnapshot,
+}: {
+  connectionId: string | null;
+  snapshot: CatalogSnapshot | null;
+  onSnapshot: (value: CatalogSnapshot) => void;
+}): JSX.Element | null {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  if (connectionId === null) return null;
+
+  const refrescar = async (): Promise<void> => {
+    setBusy(true);
+    setError(null);
+    const result = await window.luxy.refreshCatalog(connectionId);
+    setBusy(false);
+    if (result.ok) onSnapshot(result.value);
+    else setError(result.error);
+  };
+
+  const porFamiliaReal = new Map<string, CatalogSnapshot['models']>();
+  for (const model of snapshot?.models ?? []) {
+    const familia = guessModelFamily(model.apiModel);
+    porFamiliaReal.set(familia, [...(porFamiliaReal.get(familia) ?? []), model]);
+  }
+
+  return (
+    <Panel
+      title="Catalogo real de la conexion"
+      actions={
+        <>
+          {snapshot !== null && <Tag tone="ok">{snapshot.models.length} modelos</Tag>}
+          <button
+            className="btn btn--primary btn--quiet"
+            disabled={busy}
+            onClick={() => void refrescar()}
+          >
+            {busy ? 'Consultando…' : 'Consultar a la pasarela'}
+          </button>
+        </>
+      }
+    >
+      {error !== null && <Notice tone="fault">{error}</Notice>}
+      {snapshot === null ? (
+        <Empty title="Sin consultar todavia">
+          Luxy trae un catalogo escrito a mano que nunca se ha verificado. Pulsa para preguntarle a
+          la pasarela que sirve de verdad y a que precio.
+        </Empty>
+      ) : (
+        <>
+          <p className="list__meta">
+            Leido el {new Date(snapshot.fetchedAt).toLocaleString()} ·{' '}
+            {snapshot.pricingAvailable ? 'con precios' : 'sin precios declarados'}
+          </p>
+          {snapshot.notice !== null && <Notice tone="warn">{snapshot.notice}</Notice>}
+          {[...porFamiliaReal.entries()].map(([familia, modelos]) => (
+            <section key={familia}>
+              <div className="silk">
+                {familia} · {modelos.length}
+              </div>
+              <ul className="list">
+                {modelos.map((model) => (
+                  <li key={model.apiModel}>
+                    <div className="list__main">
+                      <div className="list__name mono scroller">{model.apiModel}</div>
+                      <div className="list__meta">{describeModelBilling(model)}</div>
+                    </div>
+                    <Tag tone={model.billing === 'call' ? 'warn' : undefined}>
+                      {model.billing === 'call'
+                        ? 'por llamada'
+                        : model.billing === 'token'
+                          ? 'por tokens'
+                          : 'sin precio'}
+                    </Tag>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ))}
+        </>
+      )}
+    </Panel>
+  );
+}
+
 export function ModelsPage({ summary }: { summary: ConfigSummary }): JSX.Element {
-  const registry = buildRegistry(summary);
+  const { snapshot, setSnapshot, connectionId } = useCatalogSnapshot(summary);
+  const registry = buildRegistry(summary, snapshot);
   const resolved = registry.resolveAll();
 
   const porFamilia = new Map<ModelFamily, ResolvedModel[]>();
@@ -361,6 +490,8 @@ export function ModelsPage({ summary }: { summary: ConfigSummary }): JSX.Element
         Catalogo agrupado por familia. Un modelo declarado no es un modelo disponible: hace falta
         conexion activa, clave guardada y que la conexion confirme que lo sirve.
       </p>
+
+      <CatalogoReal connectionId={connectionId} snapshot={snapshot} onSnapshot={setSnapshot} />
 
       {resolved.length === 0 ? (
         <Panel flush>

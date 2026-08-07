@@ -1,6 +1,6 @@
 # Luxy — estado canónico del proyecto
 
-Última actualización: **2026-08-06**  
+Última actualización: **2026-08-07**  
 Estado documental: **checkpoint verificado en Windows; `P0.0`–`P0.5`, `P0.6a`,
 `P0.6b`, `P0.6d`, `P0.8` y `P0.9` cerrados**
 
@@ -86,6 +86,12 @@ esta sección describía el checkpoint anterior y ya no es donde vive el trabajo
 - lo único sin seguimiento son cuatro elementos que no son código: dos archivos
   de claves, un handoff duplicado y una carpeta `Web demos/`. No se han tocado.
 
+- Commit y push: **autorizados y hechos** el 2026-08-06 (`af095b3`, `9f0ab42`).
+- Despliegue del gateway: **autorizado y hecho** por Daniel el 2026-08-07,
+  versión `096f2623-c6cc-4dcd-94d3-b41a12608ea4`. Sin migración: todo lo nuevo
+  viaja en `metadata` (`D-014`, `D-017`).
+- Migración nueva: sigue sin autorizarse y sin hacer falta.
+
 Checkpoint anterior, conservado por si hace falta rastrear algo:
 
 - Repositorio: `Danielux135/Luxy`.
@@ -96,8 +102,6 @@ Checkpoint anterior, conservado por si hace falta rastrear algo:
   `%LOCALAPPDATA%\Luxy\test-profiles\studio-001`.
 - Gateway local: Wrangler en `apps/gateway`, normalmente
   `http://localhost:8787`.
-- No se ha autorizado commit, push, despliegue ni una migración nueva para este
-  checkpoint.
 
 El estado exacto de Git y de las migraciones debe volver a leerse en Windows al
 abrir la siguiente sesión. No asumir que un parche está aplicado sólo porque sus

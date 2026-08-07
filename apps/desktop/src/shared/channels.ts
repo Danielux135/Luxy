@@ -30,6 +30,8 @@ export const IPC_INVOKE = {
   gatewayCheck: 'luxy:gateway:check',
   machineRegister: 'luxy:machine:register',
   connectionTest: 'luxy:connection:test',
+  catalogRefresh: 'luxy:catalog:refresh',
+  catalogRead: 'luxy:catalog:read',
   approvalResolve: 'luxy:approval:resolve',
   studioOptions: 'luxy:studio:options',
   studioJobCreate: 'luxy:studio:job:create',

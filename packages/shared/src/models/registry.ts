@@ -155,9 +155,17 @@ export class ModelRegistry {
 
     const connectionEnabled = connection !== null && connection.enabled;
     const hasApiKey = status?.hasApiKey ?? false;
-    // sin sincronizar no se sabe: null, que no es lo mismo que false
+    // sin sincronizar no se sabe: null, que no es lo mismo que false.
+    //
+    // una lista VACIA tambien es "no se sabe". Una conexion que funciona sirve
+    // algo, asi que cero modelos significa que nadie ha preguntado todavia.
+    // Tratarlo como false hacia que la pantalla de Modelos declarase que la
+    // conexion no sirve NINGUNO de los 19 del catalogo, con la clave puesta y
+    // trabajos ejecutandose contra ella.
     const servedByConnection =
-      status === null ? null : status.availableModels.includes(definition.apiModel);
+      status === null || status.availableModels.length === 0
+        ? null
+        : status.availableModels.includes(definition.apiModel);
 
     let unavailableReason: string | null = null;
     if (!definition.enabled) {

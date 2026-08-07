@@ -111,6 +111,9 @@ Prioridad: **P2**
 Estado global: `planned`
 
 - F4.1: inventario real de conexiones, proveedores, modelos y capacidades.
+  **`implemented` a medias (2026-08-06)**: Studio consulta `/v1/models` y
+  `/api/pricing` y guarda el catálogo con fecha. Falta llevarlo al catálogo que
+  se usa de verdad y traducir los multiplicadores a coste (`LA-014`).
 - F4.2: disponibilidad, velocidad, estabilidad y errores por modelo.
 - F4.3: pruebas reproducibles: rapidez, código, frontend, español,
   instrucciones, JSON, contexto largo y tool calling.

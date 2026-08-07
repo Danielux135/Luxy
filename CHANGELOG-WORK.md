@@ -886,6 +886,160 @@ luxy/work-update-001-studio`, `git apply --whitespace=nowarn`, `npm run build`,
 - Siguiente paso exacto: `P0.7`, validación y cierre del bloque P0 — o el bloque
   de aprendizaje, si Daniel elige antes las ideas y el presupuesto.
 
+### 2026-08-06 13:55 — Claude Code — F4.1-T1
+
+- Estado anterior: el catálogo de modelos está **escrito a mano** en
+  `models/catalog.ts`, con 8.192 tokens de salida para todos los modelos, un
+  número que nunca se verificó. `LA-007` lleva abierta desde que `LUX-3966`
+  terminó con `finish_reason: length` justo ahí.
+- Objetivo, pedido por Daniel: que Luxy consulte los modelos y los precios
+  reales de la pasarela en vez de creerse una lista estática.
+- Investigación previa, con su resultado real: `https://api.hcnsec.cn/pricing`
+  es una SPA del panel _New API_ y no se puede leer sin JavaScript; `/v1/models`
+  y `/api/pricing` devuelven **401**. Por búsqueda web se confirma que es un
+  relay público y gratuito de 新疆幻城网安 que agrupa 30–40 proveedores en
+  formato OpenAI, con créditos de regalo y **sin SLA**. Conclusión: la lista
+  sólo se puede obtener con la clave, luego la tiene que pedir Luxy.
+- Archivos leídos: `apps/desktop/src/main/ipc/handlers.ts` (prueba de conexión
+  existente), `apps/desktop/src/shared/ipc.ts`,
+  `packages/shared/src/models/catalog.ts`,
+  `apps/desktop/src/renderer/pages/Config.tsx`.
+- Archivos modificados: `packages/shared/src/models/catalog-fetch.ts` (nuevo),
+  `packages/shared/src/models/catalog-fetch.test.ts` (nuevo, 11 pruebas),
+  `packages/shared/src/models/index.ts`,
+  `apps/desktop/src/main/catalog-store.ts` (nuevo),
+  `apps/desktop/src/main/ipc/handlers.ts`, `apps/desktop/src/main/index.ts`,
+  `apps/desktop/src/shared/channels.ts`, `apps/desktop/src/shared/ipc.ts`,
+  `apps/desktop/src/preload/index.ts`,
+  `apps/desktop/src/renderer/pages/Config.tsx`.
+- Comandos ejecutados: `npm run build`,
+  `npx vitest run packages/shared/src/models/catalog-fetch.test.ts`,
+  `npx prettier --write`, `npm run lint`, `npm run typecheck`, `npm test`.
+- Resultado real: en **Modelos** hay un panel «Catálogo real de la conexión» con
+  un botón que consulta `/v1/models` y, después, `/api/pricing`. El resultado se
+  guarda con fecha en `%LOCALAPPDATA%\Luxy\catalog\<conexion>.json` y se pinta
+  agrupado por familia, diciendo de cada modelo si se cobra **por tokens** o
+  **por llamada**.
+- Pruebas: 11 nuevas, **1.481 pasadas, 9 omitidas, 0 fallos** en 75 archivos.
+  `lint`, `typecheck`, `build` y `prettier` limpios.
+- Decisiones: (a) **manda `/v1/models`**: un precio suelto no inventa un modelo,
+  y un modelo servido sin precio se lista igual marcado `unknown`. No saber lo
+  que cuesta no es motivo para esconderlo. (b) El parseo de precios acepta
+  **cualquier forma**: todos los campos son opcionales y hay `passthrough`.
+  Todavía no se ha visto una respuesta real de esta pasarela y exigir campos
+  haría que un cambio menor tirase el catálogo entero. (c) **No se convierten
+  los multiplicadores a dinero.** `model_ratio` se guarda tal cual; traducirlo a
+  yuanes exige saber la unidad de crédito de la pasarela, y un número inventado
+  aquí sería peor que no dar ninguno. Se decide con la respuesta real delante.
+  (d) La clave **no cruza el IPC**: el renderer manda sólo el identificador de
+  conexión, la URL sale de la configuración guardada y la petición la hace el
+  proceso principal, igual que la prueba de conexión existente.
+- Riesgos o límites: (1) nadie ha ejecutado todavía la consulta contra la
+  pasarela real, así que el parseo de precios está probado contra la forma
+  **documentada** de _New API_, no contra su respuesta; (2) el catálogo real es
+  **informativo**: todavía no alimenta `models/catalog.ts` ni el
+  `maxOutputTokens` que se envía, que es lo que cerraría `LA-007`; (3) el
+  archivo guardado no contiene claves, sólo nombres, multiplicadores y grupos.
+- Estado nuevo: `F4.1` `implemented` en su primera mitad.
+- Siguiente paso exacto: Daniel pulsa **Consultar a la pasarela** y me pasa lo
+  que salga (`LA-014`). Con la respuesta real: ajustar el parseo si hace falta,
+  traducir multiplicadores a coste y llevar el `maxOutputTokens` verificado al
+  catálogo, que cierra `LA-007` y `F2.14`.
+
+### 2026-08-06 14:05 — Claude Code — F4.1-T2
+
+- Estado anterior: Daniel abrió **Modelos** y los **19 modelos del catálogo**
+  salían «no disponible», cada uno con `la conexion "API China" no sirve el
+modelo X`. Con la clave puesta y trabajos ejecutándose contra esa misma
+  conexión ese mismo día.
+- **Causa demostrada**, leída en el código: `buildRegistry` en
+  `apps/desktop/src/renderer/pages/Config.tsx` pasaba `availableModels: []` con
+  el comentario «sin sincronizar todavia: no se afirma que un modelo este
+  disponible». Pero `ModelRegistry.resolve` hacía
+  `status.availableModels.includes(apiModel)` sobre una lista vacía, que da
+  `false`, no `null`. O sea: **afirmaba justo lo que el comentario decía que no
+  iba a afirmar**. No era un fallo de la conexión ni del catálogo.
+- Archivos leídos: `packages/shared/src/models/registry.ts`,
+  `packages/shared/src/models/registry.test.ts`,
+  `apps/desktop/src/renderer/pages/Config.tsx`.
+- Archivos modificados: `packages/shared/src/models/registry.ts` (una lista
+  vacía es «no se sabe», no «no sirve ninguno»),
+  `packages/shared/src/models/registry.test.ts` (prueba del caso real),
+  `apps/desktop/src/renderer/pages/Config.tsx` (la pantalla usa el catálogo real
+  guardado cuando existe, y comparte ese estado con el panel de `F4.1-T1`).
+- Comandos ejecutados: `npm run build`,
+  `npx vitest run packages/shared/src/models/registry.test.ts`,
+  `npx prettier --write`, `npm run lint`, `npm run typecheck`, `npm test`.
+- Resultado real: sin catálogo consultado, los modelos salen **«sin comprobar»**
+  en vez de «no disponible». Tras pulsar **Consultar a la pasarela**, la
+  disponibilidad se calcula contra lo que la pasarela dice servir de verdad, con
+  su fecha.
+- Pruebas: 1 nueva, **1.482 pasadas, 9 omitidas, 0 fallos** en 75 archivos.
+  `lint`, `typecheck`, `build` y `prettier` limpios.
+- Decisiones: el arreglo va en `registry.ts`, no en la pantalla. Una conexión que
+  funciona sirve **algo**, así que cero modelos sólo puede significar que nadie
+  ha preguntado. Arreglarlo únicamente en la pantalla dejaría la misma trampa
+  para el siguiente que construya un registro.
+- Riesgos o límites: Daniel está viendo un Studio con el build anterior, así que
+  ni este arreglo ni el panel de `F4.1-T1` aparecen hasta reconstruir y
+  reiniciar (`LA-004`, `LA-012`, `LA-014`).
+- Estado nuevo: corregido.
+- Siguiente paso exacto: `LA-014` — reconstruir, pulsar el botón y devolver el
+  JSON del catálogo.
+
+### 2026-08-07 08:45 — Claude Code + Daniel — F4.1-T3 y despliegue
+
+- Estado anterior: en `portatil-clase`, Conversaciones daba
+  `el gateway respondio 404: ruta no encontrada` y 0 conversaciones.
+- **Causa demostrada**: `gatewayUrl` de esa máquina apunta al Worker desplegado
+  `https://luxy-gateway.dlux135.workers.dev`, y ese despliegue era **anterior a
+  Studio**: tenía `/api/machines/*` y `/api/jobs/*` —por eso agente y gateway
+  salían en verde— pero ninguna ruta `/api/studio/*`. No había nada escuchando
+  en el 8787, así que no era wrangler local.
+- Acción de Daniel, autorizada por él: `npx wrangler deploy` del gateway actual.
+  Versión `096f2623-c6cc-4dcd-94d3-b41a12608ea4`.
+- Verificación hecha desde aquí, sin credenciales: `GET /api/studio/options`
+  devuelve **401**, no 404 ni 500. Los tres datos que da esa única respuesta:
+  la ruta existe (el despliegue llegó), `envSchema` valida (los secretos están
+  puestos en Cloudflare aunque no aparezcan en la lista de bindings), y la
+  autenticación rechaza lo no autenticado.
+- Por qué el despliegue no necesitó migración: todo lo de `P0.1`–`P0.9` viaja en
+  `metadata` por diseño (`D-014`, `D-017`). El enum de Postgres no se tocó.
+- Compatibilidad: la otra máquina sigue con el agente del 30 de julio y no se
+  rompe, porque los campos nuevos del contrato son todos opcionales.
+
+- Datos reales del catálogo, leídos de
+  `%LOCALAPPDATA%\Luxy\catalog\hcnsec.json` el 2026-08-07 06:08 UTC: la
+  pasarela sirve **22 modelos**, no los 19 del catálogo escrito a mano.
+  - Sirve dos que el catálogo da por **no servidos**: `sensenova-6.7-flash-lite`
+    y `sensenova-u1-fast`. Hay una prueba en `registry.test.ts` que afirma lo
+    contrario y ahora es falsa.
+  - Sirve uno que no existía cuando se escribió: `step-explore`.
+  - **Cero precios**: `pricingAvailable: false` y `notice: null`, o sea que la
+    ruta contestó algo que parseó pero sin entradas, y no había forma de saber
+    qué.
+- Archivos modificados: `packages/shared/src/models/catalog-fetch.ts`
+  (`PricingProbe`, `describePricingProbes`, familias step/step-media/minimax/
+  sensenova/router), `packages/shared/src/models/catalog-fetch.test.ts`
+  (4 pruebas más), `apps/desktop/src/main/ipc/handlers.ts` (prueba tres rutas de
+  precios y apunta código HTTP, claves y número de entradas de cada una),
+  `apps/desktop/src/shared/ipc.ts`.
+- Comandos ejecutados: `npm run build`, `npx vitest run packages/shared/src/models/`,
+  `npx prettier --write`, `npm run lint`, `npm run typecheck`, `npm test`.
+- Pruebas: 4 nuevas, **1.486 pasadas, 9 omitidas, 0 fallos** en 75 archivos.
+- Decisiones: el aviso de «sin precios» pasa a decir **qué contestó cada ruta**.
+  Un `sin precios declarados` mudo no se puede depurar; `/api/pricing: 200 con 0
+entradas (success, data)` sí.
+- Riesgos o límites: (1) el catálogo real sigue siendo informativo y no alimenta
+  `models/catalog.ts` ni el `maxOutputTokens` efectivo; (2) la prueba de
+  `registry.test.ts` sobre modelos «no servidos» está desmentida por los datos y
+  hay que corregirla con criterio, no borrarla; (3) nada de `P0.6`–`P0.9` se ha
+  visto funcionar todavía contra el gateway nuevo.
+- Estado nuevo: gateway desplegado con el código actual; `LA-014` cumplida en su
+  primera vuelta.
+- Siguiente paso exacto: en Studio de desarrollo, comprobar Conversaciones ya sin
+  404, y repetir **Consultar a la pasarela** para leer el diagnóstico de precios.
+
 ## Plantilla para próximas entradas
 
 ```markdown

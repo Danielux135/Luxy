@@ -227,6 +227,75 @@ Los archivos sin seguimiento se quedaron fuera a propósito y **no deben
 commitearse**: `Claves Luxy Supabase test.txt`, `Luxy claves API.txt`, el
 handoff duplicado y `Web demos/`. Los dos primeros contienen credenciales.
 
+## LA-014 — leer el catálogo real de la pasarela
+
+Estado: `pending` — abierta el 2026-08-06 tras `F4.1-T1`.
+
+En Studio → **Modelos** hay un panel nuevo, «Catálogo real de la conexión», con
+el botón **Consultar a la pasarela**. Hace dos peticiones con tu clave —
+`/v1/models` y `/api/pricing`— y guarda el resultado con fecha en
+`%LOCALAPPDATA%\Luxy\catalog\hcnsec.json`.
+
+Hace falta reconstruir y reiniciar Studio antes (`LA-004`). **Si no ves el panel,
+es que sigues con el build anterior.**
+
+Va junto con el arreglo de `F4.1-T2`: hasta ahora la pantalla de Modelos decía
+«no disponible» de los 19 modelos porque interpretaba una lista vacía como «no
+sirve ninguno». Tras reconstruir dirá «sin comprobar», y tras pulsar el botón
+dirá la verdad.
+
+Qué necesito de vuelta, y no lleva secretos: ese archivo JSON, o una captura del
+panel. Con eso:
+
+- se ajusta el parseo si la pasarela devuelve otra forma;
+- se traducen los multiplicadores a coste real, que ahora **no** se convierten
+  a propósito: sin saber la unidad de crédito, un número inventado sería peor
+  que ninguno;
+- se lleva el `maxOutputTokens` verificado al catálogo, que es lo que cierra
+  `LA-007` y `F2.14`.
+
+Si el botón da un error, el mensaje es el que devolvió la pasarela: pégalo tal
+cual.
+
+## LA-015 — el Worker apunta al proyecto de Supabase equivocado
+
+Estado: **`resuelta` el 2026-08-07.** Daniel corrigió `SUPABASE_URL` y
+`SUPABASE_SERVICE_ROLE_KEY`, puso un `MACHINE_REGISTRATION_SECRET` nuevo y
+volvió a registrar `portatil-clase`. Studio muestra 30 trabajos y la máquina
+conectada. **Pendiente derivado: el PC también tendrá que re-registrarse**, su
+token vive en el proyecto viejo.
+
+**Demostrado con el log del Worker**, no supuesto:
+
+| Quién                     | Proyecto                                                                     |
+| ------------------------- | ---------------------------------------------------------------------------- |
+| Worker desplegado         | ``swpal…` (el proyecto antiguo)` (esquema antiguo, `jobs` sin `created_via`) |
+| Datos reales y SQL Editor | `ikkni…` — `luxy-studio-test`, 23 columnas                                   |
+
+Hay que apuntar el Worker al segundo. Los valores salen de Supabase →
+`luxy-studio-test` → **Project Settings → API**:
+
+```powershell
+cd C:\Users\daniel\Desktop\Luxy\apps\gateway
+npx.cmd wrangler secret put SUPABASE_URL
+# https://<ref-de-luxy-studio-test>.supabase.co
+npx.cmd wrangler secret put SUPABASE_SERVICE_ROLE_KEY
+# la clave service_role DE ESE proyecto
+```
+
+Comprobación, sin adivinar: `npx.cmd wrangler tail --format pretty` y abrir
+Trabajos. Si sigue fallando, la línea dirá `supabaseHost`; tiene que leer
+`ikkni…`. Si lee el otro, el secreto no se aplicó.
+
+Consecuencia esperada: el token de máquina de `portatil-clase` vive en el
+proyecto viejo. Al cambiar, Luxy puede decir que el token no vale y habrá que
+registrar la máquina otra vez desde Ajustes. No se pierde nada: los trabajos y
+conversaciones están en `luxy-studio-test`.
+
+Conviene además revisar que `apps/gateway/.dev.vars` apunte al mismo proyecto,
+para que local y desplegado no vuelvan a divergir. Ese archivo no lo puede leer
+la IA.
+
 ## Operaciones no autorizadas
 
 - Commit del checkpoint: **autorizado y hecho** el 2026-08-06 (`af095b3`).

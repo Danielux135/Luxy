@@ -211,6 +211,45 @@ export const connectionTestResultSchema = z.object({
   error: z.string().nullable(),
 });
 
+/**
+ * refrescar el catalogo real de una conexion.
+ *
+ * igual que la prueba de conexion, el renderer solo manda el identificador: la
+ * URL sale de la configuracion guardada y la clave nunca cruza el IPC.
+ */
+export const catalogRefreshArgsSchema = z.object({
+  connectionId: z.string().min(1).max(64),
+});
+
+export const catalogModelSchema = z.object({
+  apiModel: z.string(),
+  ownedBy: z.string().nullable(),
+  billing: z.enum(['token', 'call', 'unknown']),
+  modelRatio: z.number().nullable(),
+  completionRatio: z.number().nullable(),
+  perCall: z.number().nullable(),
+  groups: z.array(z.string()),
+});
+
+export const catalogSnapshotSchema = z.object({
+  connectionId: z.string(),
+  fetchedAt: z.string(),
+  models: z.array(catalogModelSchema),
+  pricingAvailable: z.boolean(),
+  notice: z.string().nullable(),
+  /** que contesto cada ruta de precios probada */
+  pricingProbes: z
+    .array(
+      z.object({
+        url: z.string(),
+        status: z.number().nullable(),
+        topLevelKeys: z.array(z.string()),
+        entryCount: z.number(),
+      }),
+    )
+    .optional(),
+});
+
 export const approvalResolveArgsSchema = z.object({
   jobId: z.string().min(1).max(64),
   shortId: z.string().min(1).max(32),
@@ -288,6 +327,10 @@ export interface LuxyBridge {
   testConnection(
     connectionId: string,
   ): Promise<IpcResult<z.infer<typeof connectionTestResultSchema>>>;
+  refreshCatalog(connectionId: string): Promise<IpcResult<z.infer<typeof catalogSnapshotSchema>>>;
+  readCatalog(
+    connectionId: string,
+  ): Promise<IpcResult<{ snapshot: z.infer<typeof catalogSnapshotSchema> | null }>>;
   resolveApproval(
     args: z.infer<typeof approvalResolveArgsSchema>,
   ): Promise<IpcResult<z.infer<typeof approvalResolveResultSchema>>>;

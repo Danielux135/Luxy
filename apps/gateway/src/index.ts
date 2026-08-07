@@ -1,7 +1,7 @@
 // punto de entrada del worker: pasarela publica de Luxy
 import { loadConfig, EnvError, type Env } from './env.js';
 import { Logger, describeError } from './logger.js';
-import { SupabaseClient } from './supabase.js';
+import { SupabaseClient, SupabaseError } from './supabase.js';
 import { Repository } from './repository.js';
 import { TelegramClient } from './telegram.js';
 import { Router } from './router.js';
@@ -42,8 +42,18 @@ import {
   handleStudioJobs,
   handleStudioOptions,
 } from './handlers/studio.js';
+import { redact } from '@luxy/shared';
 
 type Deps = ApiDeps & WebhookDeps;
+
+/** host del proyecto de Supabase, para saber contra cual se hablo de verdad */
+function safeHost(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return 'url invalida';
+  }
+}
 
 // las rutas se declaran una sola vez y se reutilizan entre peticiones
 const router = new Router<Deps>()
@@ -162,7 +172,21 @@ export default {
       return errorResponse('ruta no encontrada', 404);
     } catch (error) {
       const described = describeError(error);
-      deps.logger.error('error no controlado', described);
+      // el detalle de Supabase dice QUE columna o filtro sobra; sin el, un 400
+      // solo decia «supabase respondio 400» y habia que adivinar. Va al log del
+      // Worker, redactado, y NUNCA al cliente.
+      const detalle =
+        error instanceof SupabaseError
+          ? {
+              supabaseStatus: error.status,
+              supabaseDetails: redact(error.details).slice(0, 500),
+              // CONTRA QUE proyecto se hablo. Es el host, no la clave: sin esto
+              // no habia forma de distinguir «la columna no existe» de «no es
+              // la base que yo creia».
+              supabaseHost: safeHost(deps.config.SUPABASE_URL),
+            }
+          : {};
+      deps.logger.error('error no controlado', { ...described, ...detalle });
       // nunca se devuelve la traza al cliente
       return errorResponse('error interno', 500);
     }

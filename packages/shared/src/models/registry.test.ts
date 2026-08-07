@@ -133,7 +133,8 @@ describe('catalogo inicial', () => {
       telegramAliases: ['deepseek'],
     });
     expect(
-      () => new ModelRegistry({ connections: DEFAULT_CONNECTIONS, models: [...CATALOG, duplicado] }),
+      () =>
+        new ModelRegistry({ connections: DEFAULT_CONNECTIONS, models: [...CATALOG, duplicado] }),
     ).toThrow(ModelRegistryError);
   });
 });
@@ -178,7 +179,13 @@ describe('resolucion de alias', () => {
   });
 
   it('los alias de los modelos retirados ya no resuelven', () => {
-    for (const retirado of ['kat_v2', 'minimax_m27', 'sensenova', 'sensenova_fast', 'sensenova_flash']) {
+    for (const retirado of [
+      'kat_v2',
+      'minimax_m27',
+      'sensenova',
+      'sensenova_fast',
+      'sensenova_flash',
+    ]) {
       expect(registry.resolveAlias(retirado)).toBeNull();
     }
   });
@@ -225,6 +232,19 @@ describe('disponibilidad', () => {
     const resuelto = registry.resolve('deepseek-v4-pro');
     // no saber no es lo mismo que saber que no
     expect(resuelto?.servedByConnection).toBeNull();
+  });
+
+  it('una lista de modelos VACIA tampoco es saber que no', () => {
+    // el caso real que vio Daniel el 2026-08-06: la pantalla de Modelos pasaba
+    // una lista vacia porque nadie habia consultado, y el registro lo leia como
+    // «no sirve ninguno». Con la clave puesta y trabajos ejecutandose, los 19
+    // modelos salian «no disponible».
+    const registry = buildRegistry({ availableModels: [] });
+    const resuelto = registry.resolve('deepseek-v4-pro');
+
+    expect(resuelto?.servedByConnection).toBeNull();
+    expect(resuelto?.unavailableReason).toBeNull();
+    expect(resuelto?.usable).toBe(true);
   });
 
   it('sin clave ningun modelo es utilizable, y lo explica', () => {
@@ -287,7 +307,11 @@ describe('disponibilidad', () => {
 
   it('ningun modelo de audio o imagen recibe herramientas de archivos', () => {
     for (const model of CATALOG) {
-      if (model.category === 'audio' || model.category === 'image' || model.category === 'routing') {
+      if (
+        model.category === 'audio' ||
+        model.category === 'image' ||
+        model.category === 'routing'
+      ) {
         expect(model.agentic).toBe(false);
         expect(model.allowedTools).toHaveLength(0);
       }
