@@ -12,12 +12,12 @@ que el repositorio no puede contener.
 Clonar deja el código, la documentación y las migraciones. Deja fuera, **a
 propósito**, cuatro cosas sin las cuales nada arranca:
 
-| Qué falta | Dónde vive | Por qué no está aquí |
-| --- | --- | --- |
-| Claves de las APIs | `.env.providers`, o cifradas en `secrets.enc` | Son secretos |
-| Entorno del gateway | `apps/gateway/.dev.vars` | Contiene el `service_role` de Supabase |
-| Configuración de máquina | `%APPDATA%\Luxy\config.json` | Contiene el token de esta máquina, y las rutas de proyecto cambian en cada ordenador |
-| `wrangler.toml` | `apps/gateway/` | Lleva identificadores de cuenta |
+| Qué falta                | Dónde vive                                    | Por qué no está aquí                                                                 |
+| ------------------------ | --------------------------------------------- | ------------------------------------------------------------------------------------ |
+| Claves de las APIs       | `.env.providers`, o cifradas en `secrets.enc` | Son secretos                                                                         |
+| Entorno del gateway      | `apps/gateway/.dev.vars`                      | Contiene el `service_role` de Supabase                                               |
+| Configuración de máquina | `%APPDATA%\Luxy\config.json`                  | Contiene el token de esta máquina, y las rutas de proyecto cambian en cada ordenador |
+| `wrangler.toml`          | `apps/gateway/`                               | Lleva identificadores de cuenta                                                      |
 
 De los cuatro hay `.example` versionado. **Ninguno se recupera del repositorio:
 o los tienes anotados, o se regeneran.** El token de máquina se regenera solo,
@@ -132,18 +132,70 @@ npm run demo                 # trabajo completo con mocks, sin gastar tokens
 `npm run demo` es la mejor comprobación de que la cadena entera funciona: no
 necesita claves ni gasta nada.
 
+## Lo aprendido el 2026-08-07 retirando el portátil
+
+Esta sección son fallos reales, no hipótesis. Cada uno costó tiempo.
+
+### Lo que hay ya montado y NO hay que rehacer
+
+- **El gateway está desplegado** en Cloudflare (`luxy-gateway`, cuenta de
+  Daniel). Un ordenador nuevo **no** necesita `wrangler dev` ni desplegar nada:
+  apunta ahí y listo.
+- **Los datos viven en Supabase**, proyecto `luxy-studio-test`. Trabajos,
+  conversaciones, memoria y aprobaciones sobreviven al ordenador.
+
+### Lo que el repositorio no puede darte, y hay que traer aparte
+
+| Qué                           | Dónde estaba                 | Se puede regenerar                                                                                                    |
+| ----------------------------- | ---------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| Clave de la API china         | fuera del repositorio        | no: hay que tenerla apuntada                                                                                          |
+| `MACHINE_REGISTRATION_SECRET` | secreto del Worker           | sí: se pone uno nuevo con `wrangler secret put`                                                                       |
+| Token de máquina              | `%APPDATA%\Luxy\config.json` | sí: registrando la máquina otra vez                                                                                   |
+| Secretos cifrados             | `%APPDATA%\Luxy\secrets.enc` | **no son portables**: van cifrados contra la cuenta de Windows de ese equipo. En otro PC se vuelven a escribir a mano |
+| Rutas de los proyectos        | `config.json`                | sí, pero hay que saber dónde está cada proyecto en el equipo nuevo                                                    |
+
+### Trampas concretas
+
+1. **Una Luxy instalada no lee el repositorio.** Si abres el `.exe` de
+   `%LOCALAPPDATA%\Programs\Luxy`, ejecuta el código con el que se empaquetó, no
+   el que acabas de compilar. Para probar cambios: `npm.cmd run desktop:dev`.
+2. **En PowerShell hay que usar `npm.cmd`**, no `npm`: la política de ejecución
+   bloquea `npm.ps1`.
+3. **Dos proyectos de Supabase se parecen mucho.** El Worker apuntaba a uno
+   viejo y el SQL Editor a otro; el síntoma era `column jobs.created_via does
+not exist` con esa columna existiendo. Si algo así vuelve a pasar, el log del
+   Worker trae `supabaseHost`: mira contra cuál habla de verdad.
+4. **Al cambiar de proyecto de Supabase, los tokens de máquina no viajan.**
+   Cada máquina hay que registrarla otra vez.
+5. **Los worktrees de `%LOCALAPPDATA%\Luxy\worktrees` no se clonan.** Antes de
+   retirar un equipo, comprueba si alguno tiene trabajo sin commitear:
+
+   ```powershell
+   Get-ChildItem "$env:LOCALAPPDATA\Luxy\worktrees" -Directory | ForEach-Object {
+       $n = (git -C $_.FullName status --porcelain 2>$null | Measure-Object).Count
+       if ($n -gt 0) { "$($_.Name): $n archivos sin guardar" }
+   }
+   ```
+
+   Así apareció la fase 4d de Luxy Remote, 1.047 líneas que no estaban en ningún
+   commit.
+
+6. **Los artefactos también son locales.** Viven en
+   `%LOCALAPPDATA%\Luxy\artifacts` y no se sincronizan: en la base de datos sólo
+   está la referencia.
+
 ## Comprobar dónde se rompió
 
 La cadena es: **gateway → registro → `config.json` → agente → Studio**. Se rompe
 por delante, y el síntoma aparece por detrás.
 
-| Síntoma | Causa habitual |
-| --- | --- |
-| El worker no arranca | Falta un valor en `.dev.vars`; `envSchema` los exige todos |
-| `setup:machine` falla | El gateway no responde, o la URL no es `https://` |
-| El agente no recoge trabajos | No hay `config.json`, o el token no vale |
-| Studio no ve máquinas | El agente no manda heartbeat: sin él, 45 s y se marca desconectada |
-| Las pruebas fallan al importar | Falta `npm run build` |
+| Síntoma                        | Causa habitual                                                     |
+| ------------------------------ | ------------------------------------------------------------------ |
+| El worker no arranca           | Falta un valor en `.dev.vars`; `envSchema` los exige todos         |
+| `setup:machine` falla          | El gateway no responde, o la URL no es `https://`                  |
+| El agente no recoge trabajos   | No hay `config.json`, o el token no vale                           |
+| Studio no ve máquinas          | El agente no manda heartbeat: sin él, 45 s y se marca desconectada |
+| Las pruebas fallan al importar | Falta `npm run build`                                              |
 
 Más casos en `TROUBLESHOOTING.md`.
 

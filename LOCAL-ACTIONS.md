@@ -296,6 +296,52 @@ Conviene además revisar que `apps/gateway/.dev.vars` apunte al mismo proyecto,
 para que local y desplegado no vuelvan a divergir. Ese archivo no lo puede leer
 la IA.
 
+## LA-016 — retirar el portátil sin perder nada
+
+Estado: `pending` — abierta el 2026-08-07. **Es lo único urgente.**
+
+`portatil-clase` se va a retirar. Lo que está sólo en su disco desaparece.
+
+### Lo que hay que subir, y no está en GitHub
+
+```powershell
+cd C:\Users\daniel\Desktop\Luxy
+git push                                   # 265fd64, catalogo real + diagnostico
+
+cd $env:LOCALAPPDATA\Luxy\worktrees\phase-4d-session-host
+git push -u origin luxy/phase-4d-session-host   # e27aa05, fase 4d de Remote
+```
+
+El segundo se rescató el 2026-08-07: `session-host.ts` (611 líneas) y su prueba
+(436) **no estaban en ningún commit**. El resto de ese worktree ya coincidía con
+el repositorio.
+
+Revisado y descartado: el worktree `luxy-work-update-001` es una foto **anterior**
+a lo ya commiteado (no tiene `continuation.ts` ni `response-matrix.test.ts`), y
+su contenido entró con `9012eda`. No hay nada que rescatar ahí.
+
+### Lo que no puede subirse y hay que llevarse aparte
+
+- la **clave de la API china** (está en tus archivos de claves del escritorio);
+- el **`MACHINE_REGISTRATION_SECRET`** que generaste hoy;
+- saber que **`secrets.enc` no es portable**: va cifrado contra la cuenta de
+  Windows de este equipo. En el nuevo se vuelven a escribir las claves a mano.
+
+Todo lo demás sobrevive solo: el gateway está desplegado y los datos están en
+Supabase.
+
+### Antes de apagarlo por última vez
+
+```powershell
+Get-ChildItem "$env:LOCALAPPDATA\Luxy\worktrees" -Directory | ForEach-Object {
+    $n = (git -C $_.FullName status --porcelain 2>$null | Measure-Object).Count
+    if ($n -gt 0) { "$($_.Name): $n archivos sin guardar" }
+}
+```
+
+Si sale algún nombre, ahí queda trabajo sin commitear. Hay 16 worktrees en este
+equipo y sólo dos tenían cambios.
+
 ## Operaciones no autorizadas
 
 - Commit del checkpoint: **autorizado y hecho** el 2026-08-06 (`af095b3`).
