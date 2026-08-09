@@ -6,6 +6,94 @@ Paso activo: **LA-018 — validar el Laboratorio actualizado**
 
 Estado: **pending — Daniel, 2026-08-09**
 
+Paso cerrado: **F4.4-T2 — orquestación Desktop de dos modelos**
+
+Estado: **done — Codex, 2026-08-09; posterior al checkpoint local**
+
+Resultado: Laboratorio ofrece prueba individual o comparación. En comparación
+exige dos modelos exactos distintos disponibles en la misma máquina, muestra
+ambos en una única confirmación y crea los miembros 0/1 en orden con un UUID
+común. Nunca intenta el segundo si falla el primero ni reintenta automáticamente;
+si sólo se acepta el primero, enseña su ID y el error parcial.
+
+Validación: 40/40 pruebas específicas; suite completa 1.561 pasadas, 9 omitidas,
+0 fallos en 84 archivos; Prettier, lint, typecheck y build verdes. No se llamó a
+proveedores ni precios y no se ejecutó ningún modelo real.
+
+Siguiente acción exacta: `F4.4-T3`, agrupar visualmente por UUID los dos trabajos
+y resultados del par, manteniendo visibles aceptación parcial, cancelación,
+fallo y `not_scored`. Después quedará validación manual y recomendación sólo con
+evidencia suficiente.
+
+Paso cerrado: **F4.4-T1 — contrato Gateway para un par controlado**
+
+Estado: **done — Codex, 2026-08-09; posterior al checkpoint local**
+
+Objetivo: permitir que el siguiente bloque del Desktop solicite exactamente dos
+modelos comparables sin relajar la exclusión de evaluaciones individuales.
+
+Resultado: shared exige UUID de grupo e índice 0/1 juntos. Gateway acepta el
+primer miembro sólo sin evaluaciones activas y el segundo sólo si existe
+exactamente el primero del mismo grupo, prueba/versión, prompt, máquina y
+proyecto, usando otro modelo exacto. La identidad se conserva en metadata. El
+botón de comparación todavía no está conectado.
+
+Validación: 32/32 específicas; lint, typecheck y build verdes; suite completa
+1.557 pasadas, 9 omitidas y 0 fallos. Se corrigió además el estrechamiento de
+errores `IpcResult` en la carga del Laboratorio detectado por typecheck.
+
+Límite conocido: la lectura de activos y la creación no forman una transacción;
+dos POST simultáneos pueden competir. F4.4-T2 debe tratar la aceptación parcial
+como estado explícito, no ocultarla ni reintentar modelos reales automáticamente.
+
+Siguiente acción exacta: mantener `LA-018`/`LA-019` disponibles y desarrollar
+`F4.4-T2`, la orquestación Desktop del par con una sola confirmación, sin precios,
+ranking, sandbox, tool calling ni ejecución automática al abrir la pantalla.
+
+Paso cerrado: **F4.3-T10 — evidencia descriptiva con muestra mínima**
+
+Estado: **done — Codex, 2026-08-09; posterior al checkpoint local**
+
+Objetivo: resumir resultados por prueba, versión y modelo sin convertir una o
+dos ejecuciones en ranking o recomendación.
+
+Resultado: Laboratorio agrupa muestra total, puntuados, válidos, fallidos y sin
+puntuar. Con menos de 3 puntuados muestra **Muestra insuficiente**; a partir de 3
+calcula tasa, mediana de duración y mediana de tokens de salida, excluyendo
+`not_scored`. No ordena modelos ni mezcla pruebas. Específicas 19/19; suite
+completa 1.548 pasadas, 9 omitidas, 0 fallos; lint, tipos y build en verde.
+
+Incidencia resuelta: el primer build encontró que el agregador local se importó
+desde shared. Se corrigió la ruta y se repitieron lint, tipos, suite y build con
+exit 0.
+
+Estimación actual, no compromiso de fecha: Modelos/Laboratorio 90–92%; Studio v1
+de escritorio 65–70%; roadmap completo incluyendo Flujos y Android 40–45%.
+
+Siguiente acción exacta: `LA-018` y `LA-019`. Después faltan comparación
+controlada y recomendación con evidencia suficiente para cerrar Fase 4.
+
+Paso cerrado: **F4.3-T9 — fallos e interrupciones sin puntuación falsa**
+
+Estado: **done — Codex, 2026-08-09; posterior al checkpoint local**
+
+Objetivo: conservar visibles los trabajos de evaluación que fallan o terminan
+sin el contrato de resultado, sin convertir un problema operativo en suspenso.
+
+Resultado: Gateway persiste los fallos nuevos como `not_scored` con
+`responseOutcome: failed`. Los motivos distinguen límite, interrupción, timeout,
+cancelación, fallo y final desconocido. El renderer muestra trabajos terminales
+antiguos o interrumpidos por lease como **Sin resultado validado**, sin fabricar
+`evaluationResult`. Específicas 30/30; suite completa 1.546 pasadas, 9 omitidas,
+0 fallos; lint, tipos y build en verde.
+
+Estado Git: el checkpoint anterior está en el commit local `032f6f4`; `F4.3-T9`
+queda como cambio posterior aún sin commit. Sin push ni deploy.
+
+Siguiente acción exacta: `LA-018`/`LA-019` con todas las piezas actualizadas. El
+siguiente bloque de código puede agrupar evidencia por prueba/modelo, pero no
+debe recomendar ni rankear con una muestra insuficiente.
+
 Checkpoint local: **`feat: incorpora modelos y laboratorio reproducible`**.
 Rama un commit por delante de origen; no se hizo push ni deploy.
 

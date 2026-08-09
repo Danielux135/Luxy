@@ -58,15 +58,27 @@ export type ModelEvaluationDefinition = z.infer<typeof modelEvaluationDefinition
  * catalogo actual conserve para siempre la misma version. `confirmed: true`
  * es deliberadamente literal: preparar o previsualizar una prueba no basta.
  */
-export const modelEvaluationExecutionSchema = z.object({
-  evaluationId: z.string().regex(/^[a-z0-9][a-z0-9-]*$/),
-  evaluationVersion: z.number().int().min(1),
-  promptVersion: z.literal(1),
-  fixtureId: z.string().min(1).max(80).nullable(),
-  validationMode: z.enum(MODEL_EVALUATION_VALIDATION_MODES),
-  scoring: z.enum(MODEL_EVALUATION_SCORING),
-  confirmed: z.literal(true),
-});
+export const modelEvaluationExecutionSchema = z
+  .object({
+    evaluationId: z.string().regex(/^[a-z0-9][a-z0-9-]*$/),
+    evaluationVersion: z.number().int().min(1),
+    promptVersion: z.literal(1),
+    fixtureId: z.string().min(1).max(80).nullable(),
+    validationMode: z.enum(MODEL_EVALUATION_VALIDATION_MODES),
+    scoring: z.enum(MODEL_EVALUATION_SCORING),
+    confirmed: z.literal(true),
+    /** par controlado: ambos campos aparecen juntos o ninguno */
+    comparisonGroupId: z.string().uuid().optional(),
+    comparisonIndex: z.union([z.literal(0), z.literal(1)]).optional(),
+  })
+  .superRefine((value, context) => {
+    if ((value.comparisonGroupId === undefined) === (value.comparisonIndex === undefined)) return;
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['comparisonGroupId'],
+      message: 'grupo e indice de comparacion deben viajar juntos',
+    });
+  });
 
 export type ModelEvaluationExecution = z.infer<typeof modelEvaluationExecutionSchema>;
 

@@ -4,7 +4,8 @@
 
 Estado documental: **checkpoint reconciliado en Windows; `F4.1-T4/T5`,
 `F4.2-T1/T2/T3` y `F4.3-T1`–`F4.3-T8` verificados y commiteados localmente;
-push pendiente**
+`F4.3-T9/T10` y `F4.4-T1/T2` verificados después del commit y pendientes de
+commit; push pendiente**
 
 ## 1. Cómo interpretar este estado
 
@@ -443,6 +444,40 @@ ID, prueba, modelo y estado, y permite solicitar cancelación tras confirmación
 La misma sesión no repite esa solicitud. Cuando el agente confirma el cierre,
 Gateway persiste `evaluationResult.status: not_scored` y
 `responseOutcome: cancelled`, incluso sin texto parcial.
+
+`F4.3-T9` cubre finales operativos restantes. Un fallo informado por el agente
+genera `evaluationResult: not_scored` y `responseOutcome: failed`. Los motivos
+de no puntuación ya distinguen truncamiento, interrupción, timeout, cancelación,
+fallo y ausencia de final declarado. Un trabajo terminal con snapshot válido
+pero sin `evaluationResult` —por ejemplo, un lease expirado o Gateway anterior—
+se muestra como **Sin resultado validado** y no se reescribe.
+
+`F4.3-T10` agrega evidencia por prueba, versión y modelo. No publica tasa hasta
+tener 3 resultados puntuados; `not_scored` cuenta como muestra observada pero se
+excluye de tasa y medianas. No hay ranking ni recomendación.
+
+`F4.4-T1` añade el contrato de comparación controlada sin exponer aún interfaz:
+un UUID enlaza los índices 0 y 1, y Gateway sólo acepta el segundo si coincide
+con el primero en prueba/versión, prompt exacto, máquina y proyecto, usando un
+modelo exacto distinto. La ejecución individual mantiene su exclusión anterior.
+La comprobación lectura-creación no es transaccional; la futura orquestación debe
+mostrar una aceptación parcial y no asumir atomicidad.
+
+`F4.4-T2` conecta esa orquestación en Laboratorio. La persona elige modo, dos
+modelos y confirma una sola vez; Desktop envía miembro 0 y luego 1. Un rechazo
+del primero detiene el par y uno del segundo deja el primero visible como estado
+parcial, sin reintento. La presentación conjunta por UUID queda para `F4.4-T3`.
+
+Estimación de alcance a 2026-08-09, sujeta a validación manual y decisiones de
+producto:
+
+- Modelos/Laboratorio: **93–95%**;
+- Luxy Studio v1 de escritorio, excluyendo Mobile: **67–71%**;
+- roadmap completo actual, incluyendo Proyectos avanzados, Playground, Flujos y
+  Android: **41–46%**.
+
+El porcentaje completo es menor porque las fases 3, 5, 6 y 7 siguen planificadas;
+no invalida que el núcleo de Studio ya sea utilizable.
 
 El bloque de respuestas largas (`P0.0`–`P0.9`, incluido el artefacto de
 `P0.6c`) está implementado y automatizadamente verificado. Su validación manual

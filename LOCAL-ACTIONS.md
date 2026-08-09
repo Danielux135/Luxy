@@ -450,6 +450,22 @@ Comprobaciones concretas:
     repite ni crea trabajos.
 18. si existe una evaluación activa válida, aparece un panel separado con ID,
     prueba, modelo y estado; no cambia solo mientras se observa la pantalla.
+19. un trabajo fallido nuevo aparece `Sin puntuar` con motivo de fallo; un
+    trabajo antiguo/interrumpido sin contrato aparece **Sin resultado validado**,
+    no `No supera los checks`.
+20. con 1 o 2 resultados puntuados del mismo modelo/prueba, **Evidencia
+    descriptiva** dice `Muestra insuficiente`; sólo desde 3 muestra porcentaje;
+21. cancelados y fallos operativos aumentan `sin puntuar`, pero no alteran tasa,
+    mediana de duración ni tokens.
+22. cambiar **Modo de ejecución** a **Comparar dos modelos**: aparece Modelo B,
+    no permite repetir el modelo exacto y avisa si la máquina no ofrece su
+    proveedor;
+23. marcar la confirmación y pulsar el botón sólo hasta ver el diálogo: debe
+    enumerar A, B, máquina, dos ejecuciones y ausencia de precios. Pulsar
+    **Cancelar** no crea trabajos ni consume tokens;
+24. prueba real opcional: aceptar el diálogo crea dos IDs y ambos aparecen en
+    **Evaluación activa** tras Actualizar. Esta acción sí llama a los modelos y
+    puede consumir tokens; no es necesaria para validar la interfaz.
 
 Esta comprobación necesita reconstruir Desktop y tener accesible el Gateway ya
 configurado para leer el historial. No requiere agente activo, clave de

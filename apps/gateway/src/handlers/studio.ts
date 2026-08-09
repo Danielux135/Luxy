@@ -67,6 +67,41 @@ function evaluationContractError(body: StudioJobCreateRequest): string | null {
   return null;
 }
 
+function evaluationConcurrencyError(
+  body: StudioJobCreateRequest,
+  activeEvaluations: readonly Job[],
+): string | null {
+  if (body.mode !== 'evaluation') return null;
+  const snapshot = body.evaluation!;
+  if (snapshot.comparisonGroupId === undefined) {
+    return activeEvaluations.length === 0
+      ? null
+      : `ya hay una evaluacion activa (${activeEvaluations[0]!.shortId})`;
+  }
+  if (snapshot.comparisonIndex === 0) {
+    return activeEvaluations.length === 0
+      ? null
+      : `ya hay una evaluacion activa (${activeEvaluations[0]!.shortId})`;
+  }
+  if (activeEvaluations.length !== 1) {
+    return 'el segundo miembro exige exactamente un primer miembro activo';
+  }
+  const first = activeEvaluations[0]!;
+  if (
+    first.metadata['evaluationComparisonGroupId'] !== snapshot.comparisonGroupId ||
+    first.metadata['evaluationComparisonIndex'] !== 0 ||
+    first.metadata['evaluationId'] !== snapshot.evaluationId ||
+    first.metadata['evaluationVersion'] !== snapshot.evaluationVersion ||
+    first.prompt !== body.prompt ||
+    first.targetMachineId !== body.targetMachineId ||
+    first.projectAlias !== body.projectAlias
+  ) {
+    return 'el segundo miembro no coincide con el primer miembro de la comparacion';
+  }
+  if (first.model === body.model) return 'una comparacion exige dos modelos exactos distintos';
+  return null;
+}
+
 /** maquinas y capacidades reales para construir los selectores de Studio */
 export const handleStudioOptions = withMachineAuth(async (_request, deps) => {
   const machines = await deps.repo.listMachines();
@@ -91,15 +126,14 @@ export const handleStudioJobCreate = withMachineAuth(async (request, deps, creat
   if (evaluationError !== null) return errorResponse(evaluationError, 422);
 
   if (body.data.mode === 'evaluation') {
-    const activeEvaluation = (await deps.repo.listActiveJobs()).find(
+    const activeEvaluations = (await deps.repo.listActiveJobs()).filter(
       (job) =>
         job.origin === 'studio' &&
         job.metadata['studioMode'] === 'evaluation' &&
         job.metadata['requestedByMachineId'] === creator.id,
     );
-    if (activeEvaluation !== undefined) {
-      return errorResponse(`ya hay una evaluacion activa (${activeEvaluation.shortId})`, 409);
-    }
+    const concurrencyError = evaluationConcurrencyError(body.data, activeEvaluations);
+    if (concurrencyError !== null) return errorResponse(concurrencyError, 409);
   }
 
   const target = await deps.repo.getMachineById(body.data.targetMachineId);
@@ -152,6 +186,12 @@ export const handleStudioJobCreate = withMachineAuth(async (request, deps, creat
               evaluationValidationMode: body.data.evaluation!.validationMode,
               evaluationScoring: body.data.evaluation!.scoring,
               evaluationConfirmed: true,
+              ...(body.data.evaluation!.comparisonGroupId === undefined
+                ? {}
+                : {
+                    evaluationComparisonGroupId: body.data.evaluation!.comparisonGroupId,
+                    evaluationComparisonIndex: body.data.evaluation!.comparisonIndex,
+                  }),
             }
           : {}),
     },

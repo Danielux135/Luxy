@@ -305,6 +305,63 @@ describe('resultado final idempotente', () => {
     );
   });
 
+  it('un fallo de evaluacion queda visible pero sin puntuar', async () => {
+    const evaluationJob = {
+      ...job('running'),
+      model: 'DeepSeek-V4-Pro',
+      metadata: {
+        studioMode: 'evaluation',
+        evaluationId: 'speed-exact-v1',
+        evaluationVersion: 1,
+        evaluationPromptVersion: 1,
+        evaluationFixtureId: null,
+        evaluationValidationMode: 'automatic',
+        evaluationScoring: 'timing',
+        evaluationConfirmed: true,
+      },
+    };
+    const repo = {
+      getJobById: vi.fn(async () => evaluationJob),
+      updateJob: vi.fn(async () => job('failed')),
+    };
+    const deps = {
+      db: await fakeDb(),
+      repo,
+      telegram: { editMessageText: vi.fn(async () => undefined) },
+      logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    } as never as Parameters<typeof handleJobFail>[1];
+
+    const response = await handleJobFail(
+      new Request(`https://gateway.test/api/jobs/${JOB_ID}/fail`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' },
+        body: JSON.stringify({
+          errorMessage: 'fallo simulado',
+          hasLocalChanges: false,
+          worktreePath: null,
+          durationMs: 1200,
+          executedModel: 'DeepSeek-V4-Pro',
+        }),
+      }),
+      deps,
+      { jobId: JOB_ID },
+    );
+
+    expect(response.status).toBe(200);
+    expect(repo.updateJob).toHaveBeenCalledWith(
+      JOB_ID,
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          responseOutcome: 'failed',
+          evaluationResult: expect.objectContaining({
+            status: 'not_scored',
+            reason: 'el trabajo fallo antes de producir una respuesta valida',
+          }),
+        }),
+      }),
+    );
+  });
+
   // POR QUE EXISTE: la respuesta completa ya se guarda entera, y eso puede ser
   // una pagina web. La tarjeta de Telegram no puede convertirse en veinte
   // mensajes; el resultado completo se lee en Studio.

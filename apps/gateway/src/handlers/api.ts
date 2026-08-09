@@ -527,6 +527,18 @@ export const handleJobFail = withMachineAuth(async (request, deps, machine, para
   const repeated = terminalResponse(job, 'failed');
   if (repeated !== null) return repeated;
 
+  const effectiveModel =
+    job.model ??
+    body.data.executedModel ??
+    (typeof job.metadata.model === 'string' ? job.metadata.model.slice(0, 128) : null);
+  const evaluationResult = evaluateModelEvaluationCompletion({
+    metadata: job.metadata,
+    output: '',
+    responseOutcome: 'failed',
+    model: effectiveModel,
+    durationMs: body.data.durationMs,
+  });
+
   await deps.repo.updateJob(jobId, {
     status: 'failed',
     completed_at: new Date().toISOString(),
@@ -541,6 +553,13 @@ export const handleJobFail = withMachineAuth(async (request, deps, machine, para
       hasLocalChanges: body.data.hasLocalChanges,
       durationMs: body.data.durationMs,
       ...(body.data.executedModel === undefined ? {} : { executedModel: body.data.executedModel }),
+      ...(evaluationResult === null
+        ? {}
+        : {
+            responseOutcome: 'failed',
+            evaluationResult,
+            evaluationValidatedAt: new Date().toISOString(),
+          }),
     },
   });
 

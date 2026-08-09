@@ -144,8 +144,14 @@ Estado global: `in_progress`
   barreras repetidas en Gateway. Comparaciones y runners manual/sandbox/traza
   siguen deshabilitados. `F4.3-T8` muestra la evaluación activa, permite pedir
   su cancelación y persiste el cierre como `not_scored`, todo bajo actualización
-  manual y sin polling.
-- F4.4: ejecución simultánea controlada para comparar modelos.
+  manual y sin polling. `F4.3-T9` hace lo mismo con fallos nuevos y presenta
+  finales antiguos/interrumpidos sin contrato como evidencia no validada, nunca
+  como suspenso. `F4.3-T10` agrega evidencia homogénea con umbral mínimo de 3
+  resultados puntuados; no rankea ni recomienda.
+- F4.4: ejecución simultánea controlada para comparar modelos. `F4.4-T1` ya
+  define el par de exactamente dos modelos y valida su homogeneidad en Gateway;
+  `F4.4-T2` lo orquesta desde Desktop, conserva aceptación parcial y nunca
+  reintenta automáticamente. Queda presentación conjunta por UUID.
 - F4.5: guardar prompt, parámetros, respuesta, tokens, tiempos y puntuación.
 - F4.6: recomendador por tarea basado en evidencia local y feedback.
 - F4.7: nunca ejecutar benchmarks de pago sin una acción explícita. Cumplido en
@@ -155,6 +161,12 @@ Estado global: `in_progress`
 Checkpoint de esta fase: `F4.1-T4/T5`, `F4.2-T1/T2/T3` y `F4.3-T1`–`F4.3-T8`
 quedaron commiteados localmente el 2026-08-09 con el mensaje
 `feat: incorpora modelos y laboratorio reproducible`. No se hizo push ni deploy.
+
+Estimación orientativa: Fase 4 al 93–95%; Studio v1 de escritorio al 67–71%;
+roadmap completo al 41–46%. Para cerrar Laboratorio y consolidar Studio v1 se
+estiman 3–6 sesiones similares, sin contar bloqueos de deploy/configuración o
+decisiones manuales. Flujos y Android amplían el trabajo a varias decenas de
+sesiones.
 
 No afirmar capacidades por nombre o marketing. Se marcan como verificadas sólo
 con evidencia fechada.

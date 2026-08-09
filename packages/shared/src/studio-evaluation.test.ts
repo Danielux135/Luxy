@@ -54,4 +54,26 @@ describe('studioJobCreateRequestSchema para evaluaciones', () => {
       }).success,
     ).toBe(false);
   });
+
+  it('exige grupo e indice juntos para una comparacion', () => {
+    expect(
+      studioJobCreateRequestSchema.safeParse({
+        ...base,
+        evaluation: {
+          ...execution,
+          comparisonGroupId: '22222222-2222-4222-8222-222222222222',
+        },
+      }).success,
+    ).toBe(false);
+    expect(
+      studioJobCreateRequestSchema.safeParse({
+        ...base,
+        evaluation: {
+          ...execution,
+          comparisonGroupId: '22222222-2222-4222-8222-222222222222',
+          comparisonIndex: 0,
+        },
+      }).success,
+    ).toBe(true);
+  });
 });

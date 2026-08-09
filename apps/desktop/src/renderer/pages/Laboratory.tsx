@@ -8,16 +8,26 @@ import {
   modelDeclaresEvaluationCapabilities,
   type ModelEvaluationDefinition,
   type StoredModelEvaluationResult,
+  type StudioJobCreateRequest,
   type StudioMachine,
 } from '@luxy/shared';
 import { useCallback, useEffect, useState, type JSX } from 'react';
+import { createControlledEvaluationPair } from '../evaluation-comparison.js';
 import {
+  MIN_EVALUATION_EVIDENCE_SAMPLES,
+  aggregateModelEvaluationEvidence,
   collectActiveModelEvaluations,
   collectModelEvaluationHistory,
+  collectUnscoredTerminalEvaluations,
   type ActiveModelEvaluationEntry,
   type ModelEvaluationHistoryEntry,
+  type UnscoredTerminalEvaluationEntry,
 } from '../evaluation-history.js';
-import { evaluationExecutionBlockReason, evaluationProvider } from '../evaluation-run-policy.js';
+import {
+  evaluationComparisonBlockReason,
+  evaluationExecutionBlockReason,
+  evaluationProvider,
+} from '../evaluation-run-policy.js';
 import { Empty, Field, Notice, Panel, Readout, Tag, type Tone } from '../ui/primitives.js';
 import type { ConfigSummary } from '../useConfig.js';
 
@@ -100,6 +110,35 @@ function ResultHistory({
   );
 }
 
+function UnscoredTerminalHistory({
+  entries,
+}: {
+  entries: readonly UnscoredTerminalEvaluationEntry[];
+}): JSX.Element {
+  return (
+    <ul className="list">
+      {entries.slice(0, 12).map((entry) => (
+        <li key={entry.jobId}>
+          <div className="list__main">
+            <span>
+              {MODEL_EVALUATIONS.find((item) => item.id === entry.evaluationId)?.title ??
+                entry.evaluationId}
+            </span>
+            <span className="row">
+              <Tag tone="warn">Sin resultado validado</Tag>
+              <Tag>{entry.model}</Tag>
+            </span>
+          </div>
+          <div className="list__meta">
+            {entry.shortId} · {entry.status} · {when(entry.createdAt)}
+          </div>
+          <div className="list__meta">{entry.reason}</div>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 function EvaluationCard({ evaluation }: { evaluation: ModelEvaluationDefinition }): JSX.Element {
   const fixture =
     evaluation.fixtureId === null ? null : getModelEvaluationFixture(evaluation.fixtureId);
@@ -150,8 +189,11 @@ function EvaluationCard({ evaluation }: { evaluation: ModelEvaluationDefinition 
 export function LaboratoryPage({ summary }: { summary: ConfigSummary }): JSX.Element {
   const [evaluationId, setEvaluationId] = useState(MODEL_EVALUATIONS[0]!.id);
   const [modelId, setModelId] = useState('');
+  const [secondModelId, setSecondModelId] = useState('');
+  const [executionMode, setExecutionMode] = useState<'individual' | 'comparison'>('individual');
   const [confirmed, setConfirmed] = useState(false);
   const [history, setHistory] = useState<ModelEvaluationHistoryEntry[]>([]);
+  const [unscoredTerminal, setUnscoredTerminal] = useState<UnscoredTerminalEvaluationEntry[]>([]);
   const [historyLoading, setHistoryLoading] = useState(true);
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [machines, setMachines] = useState<StudioMachine[]>([]);
@@ -172,13 +214,20 @@ export function LaboratoryPage({ summary }: { summary: ConfigSummary }): JSX.Ele
   );
   const selectedModel =
     compatibleModels.find((model) => model.id === modelId) ?? compatibleModels[0] ?? null;
+  const selectedSecondModel =
+    compatibleModels.find(
+      (model) => model.id === secondModelId && model.id !== selectedModel?.id,
+    ) ??
+    compatibleModels.find((model) => model.id !== selectedModel?.id) ??
+    null;
   const preview = buildModelEvaluationPrompt(evaluation.id)!;
   const machine = machines.find((item) => item.id === machineId) ?? null;
   const provider = evaluationProvider(selectedModel);
+  const evidence = aggregateModelEvaluationEvidence(history);
 
   useEffect(() => {
     setConfirmed(false);
-  }, [evaluation.id, selectedModel?.id]);
+  }, [evaluation.id, executionMode, selectedModel?.id, selectedSecondModel?.id]);
 
   useEffect(() => {
     if (machines.length === 0) {
@@ -203,13 +252,16 @@ export function LaboratoryPage({ summary }: { summary: ConfigSummary }): JSX.Ele
     ]);
     if (historyResult.ok && optionsResult.ok) {
       setHistory(collectModelEvaluationHistory(historyResult.value.jobs));
+      setUnscoredTerminal(collectUnscoredTerminalEvaluations(historyResult.value.jobs));
       setMachines(optionsResult.value.machines);
       const active = collectActiveModelEvaluations(historyResult.value.jobs);
       setActiveEntries(active);
       setActiveEvaluation(active.length > 0);
       setHistoryError(null);
-    } else {
-      setHistoryError(historyResult.ok ? optionsResult.error : historyResult.error);
+    } else if (!historyResult.ok) {
+      setHistoryError(historyResult.error);
+    } else if (!optionsResult.ok) {
+      setHistoryError(optionsResult.error);
     }
     setHistoryLoading(false);
   }, []);
@@ -218,7 +270,7 @@ export function LaboratoryPage({ summary }: { summary: ConfigSummary }): JSX.Ele
     void loadHistory();
   }, [loadHistory]);
 
-  const blockReason = evaluationExecutionBlockReason({
+  const executionPolicy = {
     evaluation,
     model: selectedModel,
     machine,
@@ -226,30 +278,53 @@ export function LaboratoryPage({ summary }: { summary: ConfigSummary }): JSX.Ele
     activeEvaluation,
     confirmed,
     busy: creating,
-  });
+  };
+  const blockReason =
+    executionMode === 'comparison'
+      ? evaluationComparisonBlockReason({
+          ...executionPolicy,
+          secondModel: selectedSecondModel,
+        })
+      : evaluationExecutionBlockReason(executionPolicy);
 
   const execute = async (): Promise<void> => {
-    if (blockReason !== null || selectedModel === null || machine === null || provider === null) {
+    const secondProvider = evaluationProvider(selectedSecondModel);
+    if (
+      blockReason !== null ||
+      selectedModel === null ||
+      machine === null ||
+      provider === null ||
+      (executionMode === 'comparison' && (selectedSecondModel === null || secondProvider === null))
+    ) {
       return;
     }
+    const comparison = executionMode === 'comparison' && selectedSecondModel !== null;
     const accepted = window.confirm(
       [
-        `¿Ejecutar ${evaluation.title}?`,
+        `¿Ejecutar ${comparison ? 'comparacion' : 'prueba'}: ${evaluation.title}?`,
         '',
-        `Modelo exacto: ${selectedModel.apiModel}`,
+        `Modelo exacto A: ${selectedModel.apiModel}`,
+        ...(comparison ? [`Modelo exacto B: ${selectedSecondModel.apiModel}`] : []),
         `Maquina: ${machine.name}`,
         'Esta accion puede consumir tokens. Luxy no consulta ni conoce el precio.',
-        'Solo se creara una evaluacion individual de solo lectura.',
+        comparison
+          ? 'Se crearan dos evaluaciones de solo lectura, en orden y con el mismo prompt.'
+          : 'Solo se creara una evaluacion individual de solo lectura.',
       ].join('\n'),
     );
     if (!accepted) return;
     setCreating(true);
     setCreateError(null);
     setCreatedShortId(null);
-    const result = await window.luxy.createStudioJob({
+    const buildRequest = (
+      model: typeof selectedModel,
+      requestProvider: typeof provider,
+      comparisonGroupId?: string,
+      comparisonIndex?: 0 | 1,
+    ): StudioJobCreateRequest => ({
       targetMachineId: machine.id,
-      provider,
-      model: selectedModel.apiModel,
+      provider: requestProvider,
+      model: model.apiModel,
       projectAlias,
       prompt: preview.text,
       priority: 0,
@@ -262,14 +337,30 @@ export function LaboratoryPage({ summary }: { summary: ConfigSummary }): JSX.Ele
         validationMode: evaluation.validationMode,
         scoring: evaluation.scoring,
         confirmed: true,
+        ...(comparisonGroupId === undefined ? {} : { comparisonGroupId, comparisonIndex }),
       },
     });
-    if (result.ok) {
-      setCreatedShortId(result.value.job.shortId);
-      setConfirmed(false);
-      await loadHistory();
-    } else {
+
+    if (comparison && secondProvider !== null) {
+      const comparisonGroupId = crypto.randomUUID();
+      const result = await createControlledEvaluationPair(
+        (request) => window.luxy.createStudioJob(request),
+        buildRequest(selectedModel, provider, comparisonGroupId, 0),
+        buildRequest(selectedSecondModel, secondProvider, comparisonGroupId, 1),
+      );
+      setCreatedShortId(result.shortIds.length === 0 ? null : result.shortIds.join(' + '));
       setCreateError(result.error);
+      if (result.shortIds.length > 0) await loadHistory();
+      if (result.status === 'complete') setConfirmed(false);
+    } else {
+      const result = await window.luxy.createStudioJob(buildRequest(selectedModel, provider));
+      if (result.ok) {
+        setCreatedShortId(result.value.job.shortId);
+        setConfirmed(false);
+        await loadHistory();
+      } else {
+        setCreateError(result.error);
+      }
     }
     setCreating(false);
   };
@@ -296,8 +387,8 @@ export function LaboratoryPage({ summary }: { summary: ConfigSummary }): JSX.Ele
       </p>
 
       <Notice tone="warn">
-        Ejecucion individual: solo las pruebas automaticas estan habilitadas. Cada envio exige
-        confirmacion y puede consumir tokens; Luxy no consulta precios.
+        Solo las pruebas automaticas estan habilitadas. Cada ejecucion individual o comparacion
+        exige confirmacion y puede consumir tokens; Luxy no consulta precios.
       </Notice>
 
       <Panel title="Preparar una prueba">
@@ -333,8 +424,19 @@ export function LaboratoryPage({ summary }: { summary: ConfigSummary }): JSX.Ele
               ))}
             </select>
           </Field>
+          <Field label="Modo de ejecucion">
+            <select
+              value={executionMode}
+              onChange={(event) =>
+                setExecutionMode(event.target.value as 'individual' | 'comparison')
+              }
+            >
+              <option value="individual">Prueba individual</option>
+              <option value="comparison">Comparar dos modelos</option>
+            </select>
+          </Field>
           <Field
-            label="Modelo compatible"
+            label={executionMode === 'comparison' ? 'Modelo A compatible' : 'Modelo compatible'}
             hint="Filtrado por capacidades declaradas; todavia no demuestra que funcionen."
           >
             <select
@@ -353,13 +455,44 @@ export function LaboratoryPage({ summary }: { summary: ConfigSummary }): JSX.Ele
               )}
             </select>
           </Field>
+          {executionMode === 'comparison' && (
+            <Field
+              label="Modelo B compatible"
+              hint="Debe ser un modelo exacto distinto y estar disponible en la misma maquina."
+            >
+              <select
+                value={selectedSecondModel?.id ?? ''}
+                disabled={compatibleModels.length < 2}
+                onChange={(event) => setSecondModelId(event.target.value)}
+              >
+                {compatibleModels
+                  .filter((model) => model.id !== selectedModel?.id)
+                  .map((model) => (
+                    <option key={model.id} value={model.id}>
+                      {model.displayName} · {model.apiModel}
+                    </option>
+                  ))}
+              </select>
+            </Field>
+          )}
         </div>
         <Notice tone="warn">
           Vista previa local: seleccionar un modelo no confirma capacidades ni envia este prompt.
         </Notice>
         <Readout
           items={[
-            { label: 'Modelo', value: selectedModel?.apiModel ?? 'ninguno compatible' },
+            {
+              label: executionMode === 'comparison' ? 'Modelo A' : 'Modelo',
+              value: selectedModel?.apiModel ?? 'ninguno compatible',
+            },
+            ...(executionMode === 'comparison'
+              ? [
+                  {
+                    label: 'Modelo B',
+                    value: selectedSecondModel?.apiModel ?? 'ninguno compatible',
+                  },
+                ]
+              : []),
             { label: 'Prompt final', value: `${preview.text.length.toLocaleString()} caracteres` },
             { label: 'Fixture', value: preview.fixtureId ?? 'no necesaria' },
           ]}
@@ -369,8 +502,8 @@ export function LaboratoryPage({ summary }: { summary: ConfigSummary }): JSX.Ele
           <pre className="mono prewrap">{preview.text}</pre>
         </details>
         <Field
-          label="Confirmacion futura"
-          hint="Se reinicia al cambiar de prueba o modelo y todavia no envia nada."
+          label="Confirmacion de consumo"
+          hint="Se reinicia al cambiar de prueba, modo o modelo y por si sola no envia nada."
         >
           <label className="row">
             <input
@@ -379,7 +512,7 @@ export function LaboratoryPage({ summary }: { summary: ConfigSummary }): JSX.Ele
               disabled={selectedModel === null || !evaluation.executionEnabled}
               onChange={(event) => setConfirmed(event.target.checked)}
             />
-            Confirmo que esta ejecucion consumiria tokens del modelo seleccionado
+            Confirmo que esta ejecucion puede consumir tokens del modelo o modelos seleccionados
           </label>
         </Field>
         {blockReason !== null && <Notice tone="idle">{blockReason}</Notice>}
@@ -387,7 +520,7 @@ export function LaboratoryPage({ summary }: { summary: ConfigSummary }): JSX.Ele
         {createdShortId !== null && (
           <Notice tone="busy">
             {createdShortId} creado. Puedes seguirlo en Trabajos y actualizar este historial al
-            terminar.
+            terminar. En una comparacion, ambos identificadores comparten prompt y grupo.
           </Notice>
         )}
         <button
@@ -396,7 +529,11 @@ export function LaboratoryPage({ summary }: { summary: ConfigSummary }): JSX.Ele
           disabled={blockReason !== null}
           onClick={() => void execute()}
         >
-          {creating ? 'Creando evaluacion…' : 'Ejecutar prueba individual'}
+          {creating
+            ? 'Creando evaluacion…'
+            : executionMode === 'comparison'
+              ? 'Ejecutar comparacion controlada'
+              : 'Ejecutar prueba individual'}
         </button>
       </Panel>
 
@@ -438,6 +575,45 @@ export function LaboratoryPage({ summary }: { summary: ConfigSummary }): JSX.Ele
         </Panel>
       )}
 
+      {evidence.length > 0 && (
+        <Panel title="Evidencia descriptiva" actions={<Tag>sin ranking</Tag>}>
+          <p className="list__meta">
+            Agrupada por prueba, version y modelo. Luxy necesita al menos{' '}
+            {MIN_EVALUATION_EVIDENCE_SAMPLES} resultados puntuados para mostrar una tasa.
+          </p>
+          <ul className="list">
+            {evidence.map((summary) => (
+              <li key={`${summary.evaluationId}:${summary.evaluationVersion}:${summary.model}`}>
+                <div className="list__main">
+                  <span>
+                    {MODEL_EVALUATIONS.find((item) => item.id === summary.evaluationId)?.title ??
+                      summary.evaluationId}{' '}
+                    · v{summary.evaluationVersion}
+                  </span>
+                  <Tag>{summary.model}</Tag>
+                </div>
+                <div className="list__meta">
+                  {summary.passRate === null
+                    ? `Muestra insuficiente: ${summary.scored}/${MIN_EVALUATION_EVIDENCE_SAMPLES} puntuados`
+                    : `${Math.round(summary.passRate * 100)}% validado · ${summary.passed}/${summary.scored}`}
+                  {` · ${summary.notScored} sin puntuar`}
+                  {summary.medianDurationMs === null
+                    ? ''
+                    : ` · mediana ${summary.medianDurationMs.toLocaleString()} ms`}
+                  {summary.medianOutputTokens === null
+                    ? ''
+                    : ` · ${summary.medianOutputTokens.toLocaleString()} tokens salida`}
+                </div>
+              </li>
+            ))}
+          </ul>
+          <Notice tone="idle">
+            Estos datos describen ejecuciones locales; no recomiendan un modelo ni comparan pruebas
+            distintas.
+          </Notice>
+        </Panel>
+      )}
+
       <Panel
         title="Resultados guardados"
         actions={
@@ -458,13 +634,16 @@ export function LaboratoryPage({ summary }: { summary: ConfigSummary }): JSX.Ele
           <Notice tone="idle">Leyendo historial…</Notice>
         ) : historyError !== null ? (
           <Notice tone="fault">{historyError}</Notice>
-        ) : history.length === 0 ? (
+        ) : history.length === 0 && unscoredTerminal.length === 0 ? (
           <Empty title="Todavia no hay evaluaciones guardadas">
             El Laboratorio sigue en preparacion. No hace falta ejecutar nada para validar esta
             pantalla.
           </Empty>
         ) : (
-          <ResultHistory entries={history} />
+          <>
+            {history.length > 0 && <ResultHistory entries={history} />}
+            {unscoredTerminal.length > 0 && <UnscoredTerminalHistory entries={unscoredTerminal} />}
+          </>
         )}
       </Panel>
 

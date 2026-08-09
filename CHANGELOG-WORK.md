@@ -1468,6 +1468,78 @@ null` no pueden atribuirse; falta confirmación visual.
 - Evidencia previa al commit: 1.543 pasadas, 9 omitidas, 0 fallos; lint, tipos y
   build en verde. `git diff --cached --check` correcto.
 
+### 2026-08-09 — Codex — F4.3-T9
+
+- Estado anterior: completados y cancelados tenían resultado, pero un fallo del
+  agente desaparecía del historial validado y un lease interrumpido no tenía
+  representación en Laboratorio.
+- Objetivo: hacer visibles esos finales sin atribuir calidad inexistente.
+- Resultado real: fallos nuevos persistidos `not_scored`; razones específicas
+  por cada final no completo; fallback visual estricto para terminales con
+  snapshot válido y sin resultado.
+- Pruebas: 30/30 específicas; suite completa 1.546 pasadas, 9 omitidas, 0
+  fallos en 83 archivos. Lint, tipos y build: exit 0.
+- Decisiones: `D-028`; estado operativo y calidad son dimensiones separadas.
+- Git: cambio posterior al checkpoint `032f6f4`, todavía sin commit. Sin push ni
+  deploy.
+- Siguiente paso exacto: validación manual; después, agregación descriptiva con
+  umbral de muestra, nunca ranking prematuro.
+
+### 2026-08-09 — Codex — F4.3-T10
+
+- Estado anterior: cada resultado era trazable, pero no existía resumen por
+  modelo/prueba y una futura agregación podía exagerar muestras mínimas.
+- Objetivo: evidencia descriptiva con umbral explícito, sin ranking.
+- Resultado real: grupos por prueba/versión/modelo; tasa sólo desde 3 puntuados;
+  medianas sólo sobre resultados puntuados; `not_scored` visible y excluido.
+- Pruebas: 19/19 específicas; suite completa 1.548 pasadas, 9 omitidas, 0
+  fallos en 83 archivos. Lint, tipos y build finales: exit 0.
+- Incidencia: primer build falló por importar el agregador renderer desde
+  `@luxy/shared`; ruta corregida y matriz completa repetida en verde.
+- Decisiones: `D-029`; tres muestras permiten describir, no recomendar.
+- Git: T9/T10 posteriores a `032f6f4`, pendientes de commit. Sin push ni deploy.
+- Siguiente paso exacto: validación real y después comparación controlada.
+
+### 2026-08-09 — Codex — F4.4-T1
+
+- Estado anterior: las evaluaciones individuales bloqueaban cualquier segunda
+  ejecución activa y no existía identidad compartida para un par comparable.
+- Objetivo: definir y proteger en shared/Gateway una comparación de exactamente
+  dos modelos, sin habilitar todavía el botón del Desktop.
+- Resultado real: snapshot opcional con UUID de grupo e índice 0/1 inseparables;
+  el segundo miembro exige un primero activo con mismo grupo, prueba, versión,
+  prompt, máquina y proyecto, y un modelo exacto distinto. Las ejecuciones
+  individuales conservan la barrera anterior.
+- Pruebas: 32/32 específicas; suite completa 1.557 pasadas, 9 omitidas, 0
+  fallos en 83 archivos. Prettier, lint, tipos y build: exit 0.
+- Incidencia: typecheck detectó un acceso no estrechado a `IpcResult` en la carga
+  conjunta del Laboratorio; se separaron las ramas de error y quedó validado.
+- Decisión: `D-030`. La comprobación actual no es una transacción de base de
+  datos; reduce estados inválidos, pero no promete exclusión frente a dos POST
+  verdaderamente simultáneos.
+- Git: cambio posterior a `032f6f4`, aún sin commit, push ni deploy.
+- Siguiente paso exacto: F4.4-T2, orquestación Desktop del par con una sola
+  confirmación y recuperación explícita si sólo se acepta uno de los miembros.
+
+### 2026-08-09 — Codex — F4.4-T2
+
+- Estado anterior: shared/Gateway aceptaban un par válido, pero Desktop no podía
+  construirlo ni representar una aceptación parcial.
+- Objetivo: orquestar la comparación desde Laboratorio sin ejecución implícita.
+- Resultado real: selector individual/comparación, segundo modelo compatible,
+  una confirmación que enumera ambos modelos y dos POST ordenados con UUID común.
+  Si falla el primero no se envía el segundo; si falla el segundo se conserva y
+  muestra el identificador del primero, sin reintento automático.
+- Pruebas: 40/40 específicas; suite completa 1.561 pasadas, 9 omitidas, 0
+  fallos en 84 archivos. Prettier, lint, tipos y build: exit 0.
+- Riesgos o límites: cada miembro consume tokens reales sólo tras confirmar; el
+  par todavía se presenta como dos trabajos/resultados separados y conserva el
+  límite no transaccional de `D-030`.
+- Git: T9/T10 y F4.4-T1/T2 siguen posteriores a `032f6f4`, sin commit, push ni
+  deploy.
+- Siguiente paso exacto: F4.4-T3, reconstruir y presentar juntos los dos
+  miembros por UUID, incluidos parcial, cancelación y fallo sin puntuación falsa.
+
 ## Plantilla para próximas entradas
 
 ```markdown

@@ -58,8 +58,25 @@ describe('resultado persistible de una evaluacion', () => {
     ).toMatchObject({
       status: 'not_scored',
       checks: [],
-      reason: 'la respuesta no termino de forma completa',
+      reason: 'la respuesta alcanzo su limite de salida',
     });
+  });
+
+  it('distingue cancelacion y fallo sin puntuarlos', () => {
+    for (const [responseOutcome, reason] of [
+      ['cancelled', 'la evaluacion fue cancelada por la persona'],
+      ['failed', 'el trabajo fallo antes de producir una respuesta valida'],
+    ] as const) {
+      expect(
+        evaluateModelEvaluationCompletion({
+          metadata,
+          output: '',
+          responseOutcome,
+          model: 'gpt-evaluado',
+          durationMs: 500,
+        }),
+      ).toMatchObject({ status: 'not_scored', reason });
+    }
   });
 
   it('deja sin puntuar los modos que necesitan runner o revision', () => {

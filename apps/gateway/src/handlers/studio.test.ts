@@ -12,6 +12,15 @@ import {
 const TOKEN = 'token-studio-0123456789abcdefghijkl';
 const CREATOR_ID = '11111111-1111-4111-8111-111111111111';
 const TARGET_ID = '22222222-2222-4222-8222-222222222222';
+const COMPARISON_GROUP_ID = '88888888-8888-4888-8888-888888888888';
+const EVALUATION_PROMPT = [
+  '[LUXY_EVALUATION]',
+  'id=speed-exact-v1',
+  'version=1',
+  '',
+  '[INSTRUCCIONES]',
+  'Responde unicamente con la palabra LISTO, en mayusculas y sin puntuacion.',
+].join('\n');
 
 function capabilities(httpProviders: string[] = ['deepseek']) {
   const missing = { available: false, version: null, path: null };
@@ -177,6 +186,29 @@ function request(body: unknown): Request {
     headers: { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' },
     body: JSON.stringify(body),
   });
+}
+
+function evaluationRequestBody(overrides: Record<string, unknown> = {}) {
+  const evaluationOverrides = (overrides['evaluation'] ?? {}) as Record<string, unknown>;
+  return {
+    targetMachineId: TARGET_ID,
+    provider: 'deepseek',
+    model: 'DeepSeek-V4-Pro',
+    projectAlias: 'luxy',
+    prompt: EVALUATION_PROMPT,
+    mode: 'evaluation',
+    ...overrides,
+    evaluation: {
+      evaluationId: 'speed-exact-v1',
+      evaluationVersion: 1,
+      promptVersion: 1,
+      fixtureId: null,
+      validationMode: 'automatic',
+      scoring: 'timing',
+      confirmed: true,
+      ...evaluationOverrides,
+    },
+  };
 }
 
 function actionRequest(body: unknown): Request {
@@ -433,6 +465,151 @@ describe('Luxy Studio API', () => {
       context,
     );
     expect(response.status).toBe(409);
+    expect(context.repo.createJob).not.toHaveBeenCalled();
+  });
+
+  it('acepta el primer miembro de una comparacion y conserva su identidad', async () => {
+    const context = await deps();
+    const response = await handleStudioJobCreate(
+      request(
+        evaluationRequestBody({
+          evaluation: { comparisonGroupId: COMPARISON_GROUP_ID, comparisonIndex: 0 },
+        }),
+      ),
+      context,
+    );
+
+    expect(response.status, await response.clone().text()).toBe(201);
+    expect(context.repo.createJob).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          evaluationComparisonGroupId: COMPARISON_GROUP_ID,
+          evaluationComparisonIndex: 0,
+        }),
+      }),
+    );
+  });
+
+  it('acepta el segundo miembro cuando coincide con el primero y usa otro modelo', async () => {
+    const context = await deps();
+    context.repo.listActiveJobs = vi.fn(async () => [
+      completedJob({
+        status: 'running',
+        model: 'DeepSeek-V4-Pro',
+        prompt: EVALUATION_PROMPT,
+        metadata: {
+          studioMode: 'evaluation',
+          requestedByMachineId: CREATOR_ID,
+          evaluationId: 'speed-exact-v1',
+          evaluationVersion: 1,
+          evaluationComparisonGroupId: COMPARISON_GROUP_ID,
+          evaluationComparisonIndex: 0,
+        },
+      }),
+    ]);
+    const response = await handleStudioJobCreate(
+      request(
+        evaluationRequestBody({
+          model: 'deepseek-chat',
+          evaluation: { comparisonGroupId: COMPARISON_GROUP_ID, comparisonIndex: 1 },
+        }),
+      ),
+      context,
+    );
+
+    expect(response.status, await response.clone().text()).toBe(201);
+    expect(context.repo.createJob).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model: 'deepseek-chat',
+        metadata: expect.objectContaining({ evaluationComparisonIndex: 1 }),
+      }),
+    );
+  });
+
+  it('rechaza el segundo miembro si no existe exactamente un primero activo', async () => {
+    const context = await deps();
+    const response = await handleStudioJobCreate(
+      request(
+        evaluationRequestBody({
+          model: 'deepseek-chat',
+          evaluation: { comparisonGroupId: COMPARISON_GROUP_ID, comparisonIndex: 1 },
+        }),
+      ),
+      context,
+    );
+
+    expect(response.status).toBe(409);
+    expect(context.repo.createJob).not.toHaveBeenCalled();
+  });
+
+  it('rechaza comparar dos veces el mismo modelo exacto', async () => {
+    const context = await deps();
+    context.repo.listActiveJobs = vi.fn(async () => [
+      completedJob({
+        status: 'running',
+        model: 'DeepSeek-V4-Pro',
+        prompt: EVALUATION_PROMPT,
+        metadata: {
+          studioMode: 'evaluation',
+          requestedByMachineId: CREATOR_ID,
+          evaluationId: 'speed-exact-v1',
+          evaluationVersion: 1,
+          evaluationComparisonGroupId: COMPARISON_GROUP_ID,
+          evaluationComparisonIndex: 0,
+        },
+      }),
+    ]);
+    const response = await handleStudioJobCreate(
+      request(
+        evaluationRequestBody({
+          evaluation: { comparisonGroupId: COMPARISON_GROUP_ID, comparisonIndex: 1 },
+        }),
+      ),
+      context,
+    );
+
+    expect(response.status).toBe(409);
+    expect(context.repo.createJob).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['grupo', { comparisonGroupId: '99999999-9999-4999-8999-999999999999' }, {}],
+    ['prompt', {}, { prompt: `${EVALUATION_PROMPT}\nalterado` }],
+    ['maquina', {}, { targetMachineId: CREATOR_ID }],
+    ['proyecto', {}, { projectAlias: 'otro' }],
+  ])('rechaza el segundo miembro si cambia el %s', async (_field, evaluation, overrides) => {
+    const context = await deps();
+    context.repo.listActiveJobs = vi.fn(async () => [
+      completedJob({
+        status: 'running',
+        model: 'DeepSeek-V4-Pro',
+        prompt: EVALUATION_PROMPT,
+        metadata: {
+          studioMode: 'evaluation',
+          requestedByMachineId: CREATOR_ID,
+          evaluationId: 'speed-exact-v1',
+          evaluationVersion: 1,
+          evaluationComparisonGroupId: COMPARISON_GROUP_ID,
+          evaluationComparisonIndex: 0,
+        },
+      }),
+    ]);
+    const response = await handleStudioJobCreate(
+      request(
+        evaluationRequestBody({
+          model: 'deepseek-chat',
+          ...overrides,
+          evaluation: {
+            comparisonGroupId: COMPARISON_GROUP_ID,
+            comparisonIndex: 1,
+            ...evaluation,
+          },
+        }),
+      ),
+      context,
+    );
+
+    expect(response.status).toBe(overrides['prompt'] === undefined ? 409 : 422);
     expect(context.repo.createJob).not.toHaveBeenCalled();
   });
 

@@ -96,11 +96,21 @@ export function evaluateModelEvaluationCompletion(
     });
   }
   if (input.responseOutcome !== 'completed') {
+    const reasons = {
+      truncated: 'la respuesta alcanzo su limite de salida',
+      interrupted: 'la respuesta quedo interrumpida',
+      timed_out: 'la evaluacion agoto su tiempo disponible',
+      cancelled: 'la evaluacion fue cancelada por la persona',
+      failed: 'el trabajo fallo antes de producir una respuesta valida',
+    } as const;
     return storedModelEvaluationResultSchema.parse({
       ...base,
       status: 'not_scored',
       checks: [],
-      reason: 'la respuesta no termino de forma completa',
+      reason:
+        input.responseOutcome === null
+          ? 'el trabajo no declaro como termino la respuesta'
+          : reasons[input.responseOutcome],
     });
   }
 

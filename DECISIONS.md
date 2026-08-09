@@ -369,3 +369,53 @@ La regla también se aplica si se canceló antes de recibir texto.
 Laboratorio no sondea el cierre. Muestra la solicitud como enviada y sólo cambia
 el estado cuando la persona pulsa **Actualizar**. Así se conserva `D-025` y no se
 reintroduce tráfico periódico para una operación ocasional.
+
+## D-028 — un fallo operativo tampoco es un suspenso
+
+Fecha: 2026-08-09
+
+Estado: aceptada, implementada
+
+Si proveedor, agente o transporte fallan antes de obtener una respuesta válida,
+la evaluación se persiste `not_scored` con `responseOutcome: failed`. Los cortes
+por límite, interrupción, timeout y cancelación conservan razones distintas para
+no ocultar la causa bajo una etiqueta genérica.
+
+Un trabajo terminal de evaluación que no contiene `evaluationResult` se muestra
+como **Sin resultado validado**. Esto cubre Gateways anteriores y la
+interrupción provisional/terminal de leases sin mutar el trabajo al leerlo. No
+se deriva un resultado ni una puntuación de `job.status`.
+
+## D-029 — tres resultados antes de publicar una tasa
+
+Fecha: 2026-08-09
+
+Estado: aceptada, implementada
+
+La evidencia del Laboratorio se agrupa únicamente cuando coinciden prueba,
+versión y modelo exacto. Con menos de tres resultados puntuados se muestra
+**Muestra insuficiente** y no se calcula porcentaje. Tres sigue siendo una
+muestra pequeña: autoriza descripción, no ranking ni recomendación.
+
+`not_scored` se cuenta para hacer visible cuántas ejecuciones no produjeron
+evidencia de calidad, pero se excluye de tasa, mediana de duración y mediana de
+tokens. Mezclar cancelaciones o fallos operativos con respuestas puntuadas
+distorsionaría las métricas.
+
+## D-030 — una comparación es un par identificado y homogéneo
+
+Fecha: 2026-08-09
+
+Estado: aceptada, contrato implementado; orquestación visual pendiente
+
+Una comparación de evaluación contiene exactamente dos solicitudes, índices 0
+y 1, enlazadas por un UUID nuevo. El segundo miembro sólo es comparable si
+coinciden evaluación, versión, prompt exacto, máquina y proyecto, y si el modelo
+exacto es distinto. No se admiten grupos incompletos de más de dos miembros ni se
+reutiliza una ejecución individual como primer miembro implícito.
+
+La barrera del Gateway consulta trabajos activos antes de crear. Esa separación
+no es una transacción ni un bloqueo distribuido: dos peticiones concurrentes
+podrían observar el mismo estado. Por ahora el Desktop debe enviar el par en
+orden y representar una aceptación parcial; si se necesitara exclusión fuerte,
+haría falta una primitiva atómica del repositorio o base de datos.

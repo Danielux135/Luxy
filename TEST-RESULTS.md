@@ -659,6 +659,56 @@ test.txt`, `Luxy claves API.txt`, un handoff duplicado y `Web demos/`).
   relacionados no entraron en el commit.
 - Push/deploy: no ejecutados.
 
+### 2026-08-09 — Windows 11 — F4.3-T9
+
+- Base: commit local `032f6f4` más cambios de T9 sin commit.
+- Comando específico: Vitest de resultados, cierre fallido/cancelado e historial
+  del renderer.
+- Resultado específico: **30 pasadas, 0 fallos**, 4 archivos; 3 pruebas nuevas.
+- Comprobación completa: Prettier, lint, typecheck, suite y build.
+- Passed / failed / skipped: **1.546 passed, 0 failed, 9 skipped**, 83/83
+  archivos; duración final 61,59 s.
+- Exit code: 0 en todas. Fallos completos: ninguno.
+- Evidencia manual: pendiente; no se llamó a proveedores, precios ni deploy.
+
+### 2026-08-09 — Windows 11 — F4.3-T10
+
+- Base: `032f6f4` más T9/T10 sin commit.
+- Específicas: **19 pasadas, 0 fallos**, 3 archivos; 2 pruebas nuevas.
+- Primera matriz: lint, tipos y 1.548 pruebas verdes; build falló por importación
+  renderer apuntando al paquete shared.
+- Corrección: importar agregador y constante desde `evaluation-history.ts`.
+- Repetición completa final: lint exit 0, typecheck exit 0, **1.548 passed, 9
+  skipped, 0 failed**, build exit 0; 83/83 archivos, 44,45 s de Vitest.
+- Clasificación final: regresión de cableado detectada y corregida antes del
+  cierre; no queda fallo abierto.
+- Sin proveedor real, precios, deploy ni migración.
+
+### 2026-08-09 — Windows 11 — F4.4-T1
+
+- Base: `032f6f4` más T9/T10 y contrato de comparación sin commit.
+- Específicas shared/Gateway: **32 pasadas, 0 fallos**, 2 archivos; 9 pruebas
+  nuevas sobre campos inseparables, primer/segundo miembro, modelos distintos y
+  divergencias de grupo, prompt, máquina o proyecto.
+- Pruebas focalizadas de la evidencia previa: **32 pasadas, 0 fallos**, 4
+  archivos.
+- Typecheck inicial: 1 fallo por acceso no estrechado a la rama `error` de un
+  `IpcResult` en `Laboratory.tsx`; corregido con ramas discriminadas explícitas.
+- Repetición final: Prettier, lint, typecheck y build exit 0; **1.557 passed, 9
+  skipped, 0 failed**, 83/83 archivos; Vitest 38,80 s.
+- No se llamó a modelos, proveedores, precios, migraciones, deploy ni producción.
+
+### 2026-08-09 — Windows 11 — F4.4-T2
+
+- Base: `032f6f4` más T9/T10 y F4.4-T1/T2 sin commit.
+- Específicas shared/Gateway/política/orquestador: **40 pasadas, 0 fallos**, 4
+  archivos. Se añadieron 4 casos: política del segundo modelo y orden, corte tras
+  rechazo inicial y aceptación parcial sin reintento.
+- Matriz final: Prettier, lint, typecheck y build exit 0; **1.561 passed, 9
+  skipped, 0 failed**, 84/84 archivos; Vitest 43,16 s.
+- La prueba automatizada usa dobles IPC; no llamó a modelos, proveedores, precios,
+  migraciones, deploy ni producción.
+
 ## Plantilla
 
 ```markdown

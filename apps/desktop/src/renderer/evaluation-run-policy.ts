@@ -41,3 +41,22 @@ export function evaluationExecutionBlockReason(input: {
   if (!input.confirmed) return 'Confirma el posible consumo de tokens para habilitar el envio.';
   return null;
 }
+
+export function evaluationComparisonBlockReason(
+  input: Parameters<typeof evaluationExecutionBlockReason>[0] & {
+    secondModel: ModelDefinition | null;
+  },
+): string | null {
+  const baseReason = evaluationExecutionBlockReason(input);
+  if (baseReason !== null) return baseReason;
+  if (input.secondModel === null) return 'Selecciona un segundo modelo compatible.';
+  if (input.secondModel.apiModel === input.model?.apiModel) {
+    return 'La comparacion exige dos modelos exactos distintos.';
+  }
+  const provider = evaluationProvider(input.secondModel);
+  if (provider === null) return 'La familia del segundo modelo no tiene proveedor ejecutable.';
+  if (!input.machine!.providers.includes(provider)) {
+    return 'La maquina seleccionada no ofrece la familia del segundo modelo.';
+  }
+  return null;
+}

@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import type { StudioJob } from '@luxy/shared';
 import {
+  MIN_EVALUATION_EVIDENCE_SAMPLES,
+  aggregateModelEvaluationEvidence,
   collectActiveModelEvaluations,
   collectModelEvaluationHistory,
+  collectUnscoredTerminalEvaluations,
 } from './evaluation-history.js';
 
 function job(overrides: Partial<StudioJob> = {}): StudioJob {
@@ -123,5 +126,88 @@ describe('historial local del Laboratorio', () => {
         job({ status: 'cancelled' }),
       ]),
     ).toHaveLength(1);
+  });
+
+  it('hace visibles finales antiguos o interrumpidos sin inventar resultado', () => {
+    const activeMetadata = {
+      studioMode: 'evaluation',
+      evaluationId: 'speed-exact-v1',
+      evaluationVersion: 1,
+      evaluationPromptVersion: 1,
+      evaluationFixtureId: null,
+      evaluationValidationMode: 'automatic',
+      evaluationScoring: 'timing',
+      evaluationConfirmed: true,
+    };
+    const entries = collectUnscoredTerminalEvaluations([
+      job({ status: 'interrupted', metadata: activeMetadata }),
+      job({ status: 'failed', metadata: activeMetadata }),
+      job(),
+    ]);
+    expect(entries).toHaveLength(2);
+    expect(entries.map((entry) => entry.status).sort()).toEqual(['failed', 'interrupted']);
+    expect(entries.every((entry) => entry.reason.length > 0)).toBe(true);
+  });
+
+  it('no publica una tasa con muestra insuficiente', () => {
+    const entries = collectModelEvaluationHistory([
+      job(),
+      job({ id: '44444444-4444-4444-8444-444444444444' }),
+    ]);
+    expect(entries).toHaveLength(MIN_EVALUATION_EVIDENCE_SAMPLES - 1);
+    expect(aggregateModelEvaluationEvidence(entries)[0]).toMatchObject({
+      samples: 2,
+      scored: 2,
+      passRate: null,
+    });
+  });
+
+  it('calcula tasa y medianas solo con resultados puntuados', () => {
+    const base = job();
+    const result = base.metadata['evaluationResult'] as Record<string, unknown>;
+    const failed = (id: string, durationMs: number): StudioJob =>
+      job({
+        id,
+        metadata: {
+          ...base.metadata,
+          evaluationResult: { ...result, status: 'failed', durationMs, outputTokens: 4 },
+        },
+      });
+    const notScored = job({
+      id: '77777777-7777-4777-8777-777777777777',
+      metadata: {
+        ...base.metadata,
+        evaluationResult: {
+          ...result,
+          status: 'not_scored',
+          durationMs: 99_000,
+          outputTokens: 99_000,
+          checks: [],
+          reason: 'cancelada',
+          responseOutcome: 'cancelled',
+        },
+      },
+    });
+    const entries = collectModelEvaluationHistory([
+      job({
+        metadata: {
+          ...base.metadata,
+          evaluationResult: { ...result, durationMs: 1000, outputTokens: 1 },
+        },
+      }),
+      failed('55555555-5555-4555-8555-555555555555', 2000),
+      failed('66666666-6666-4666-8666-666666666666', 3000),
+      notScored,
+    ]);
+    expect(aggregateModelEvaluationEvidence(entries)[0]).toMatchObject({
+      samples: 4,
+      scored: 3,
+      passed: 1,
+      failed: 2,
+      notScored: 1,
+      passRate: 1 / 3,
+      medianDurationMs: 2000,
+      medianOutputTokens: 4,
+    });
   });
 });

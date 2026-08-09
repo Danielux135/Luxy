@@ -175,7 +175,7 @@ describe('P0.6d - una cancelacion conserva lo generado', () => {
       evaluationResult: {
         status: 'not_scored',
         responseOutcome: 'cancelled',
-        reason: 'la respuesta no termino de forma completa',
+        reason: 'la evaluacion fue cancelada por la persona',
       },
       evaluationValidatedAt: expect.any(String),
     });
