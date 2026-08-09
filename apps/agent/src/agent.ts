@@ -652,6 +652,9 @@ export class LuxyAgent {
             hasLocalChanges: outcome.hasLocalChanges,
             worktreePath: outcome.worktreePath,
             durationMs: outcome.durationMs,
+            ...(outcome.executedModel === undefined
+              ? {}
+              : { executedModel: outcome.executedModel }),
           };
           this.outcomes.pushFailed(job.id, payload);
           await this.outcomes.flush();
@@ -676,6 +679,9 @@ export class LuxyAgent {
             ...(outcome.responseTermination === undefined
               ? {}
               : { responseTermination: outcome.responseTermination }),
+            ...(outcome.executedModel === undefined
+              ? {}
+              : { executedModel: outcome.executedModel }),
           };
           this.outcomes.pushCancelled(job.id, payload);
           await this.outcomes.flush();

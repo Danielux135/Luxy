@@ -249,6 +249,8 @@ inyección de shell, pero no convierte en seguro el código que la prueba import
 
 - No usar la API de Anthropic. No usar `ANTHROPIC_API_KEY`.
 - No usar la API de OpenAI. No usar `OPENAI_API_KEY`.
+- El catálogo real de una conexión consulta sólo `/v1/models`; no sondea rutas
+  tentativas de precios (`D-022`).
 - No automatizar las páginas web de Claude ni de ChatGPT. Nada de navegadores.
 - Claude Code y Codex CLI se usan con **la sesión local autenticada**.
 - **Nunca `--dangerously-skip-permissions`** ni el equivalente de Codex.

@@ -357,6 +357,8 @@ test.txt`, `Luxy claves API.txt`, un handoff duplicado y `Web demos/`).
   archivos. `P0.9` aporta 8 pruebas.
 - Duración: 48,8 s la suite.
 - Fallos completos: ninguno.
+- Comprobación del diff: primer intento con un whitespace final en el salto de
+  línea de `DECISIONS.md`; corregido y repetido sin errores.
 - Clasificación: esperado.
 - Evidencia manual adicional: ninguna todavía. Lo verificado es el contrato del
   reductor de eventos locales, cuándo se considera que un directo es local y qué
@@ -399,6 +401,263 @@ test.txt`, `Luxy claves API.txt`, un handoff duplicado y `Web demos/`).
 - Evidencia manual adicional: ninguna. Las pruebas del agente escriben archivos
   de verdad en carpetas temporales, incluidas las dos de traversal; lo que falta
   es ver el botón **Abrir carpeta** en pantalla (`LA-012`).
+
+### 2026-08-09 — Windows 11 — F4.1-T4
+
+- Commit/base o diff: `feat/luxy-desktop` @ `59870c6`, más el diff local de
+  `F4.1-T4`; `package-lock.json` ya estaba modificado y queda fuera del paso.
+- Comando específico: `npx vitest run` sobre registro, catálogo leído y
+  comandos de Telegram.
+- Primera ejecución: 49 pasadas, 1 fallo. La familia SenseNova resolvía un alias
+  implícito aunque ningún modelo lo declaraba. Clasificación: regresión
+  encontrada por la prueba y corregida.
+- Ejecución específica final: **88 pasadas, 0 fallos**, 3 archivos.
+- Comprobación completa: `npm run lint`, `npm run typecheck`, `npm test`,
+  `npm run build`.
+- Exit code: 0 en las cuatro.
+- Passed / failed / skipped: **1.488 passed, 0 failed, 9 skipped**, 75/75
+  archivos; duración de Vitest 50,20 s.
+- Fallos completos finales: ninguno.
+- Comprobación del diff: la primera ejecución señaló whitespace final en dos
+  saltos Markdown nuevos; corregido. Repetición con `core.safecrlf=false`: exit
+  0, sin errores.
+- Clasificación: esperado.
+- Evidencia manual adicional: ninguna; no se consultó una API real. Precios y
+  máximos efectivos permanecen pendientes de `LA-014`/`LA-007`.
+
+### 2026-08-09 — Windows 11 — F4.1-T5
+
+- Commit/base o diff: `feat/luxy-desktop` @ `59870c6`, más `F4.1-T4/T5`; el
+  cambio ajeno de `package-lock.json` queda fuera.
+- Comando específico: Vitest sobre catálogo, registro y contrato IPC.
+- Resultado específico: **80 pasadas, 0 fallos**, 3 archivos.
+- Comprobación completa: `npm run lint`, `npm run typecheck`, `npm test`,
+  `npm run build`.
+- Exit code: 0 en las cuatro.
+- Passed / failed / skipped: **1.488 passed, 0 failed, 9 skipped**, 75/75
+  archivos; duración de Vitest 114,55 s.
+- Fallos completos: ninguno.
+- Clasificación: esperado.
+- Evidencia manual adicional: captura de Daniel con 22 modelos y rutas de
+  precios sin entradas útiles; origina `D-022`.
+
+### 2026-08-09 — Windows 11 — F4.2-T1
+
+- Commit/base o diff: `feat/luxy-desktop` @ `59870c6`, más el diff local
+  acumulado de `F4.1-T4/T5` y `F4.2-T1`; `package-lock.json` queda fuera.
+- Comando específico: Vitest sobre evidencia de modelos, registro y contrato
+  IPC.
+- Resultado específico: **71 pasadas, 0 fallos**, 3 archivos; 6 pruebas nuevas.
+- Comprobación completa: `npm run lint`, `npm run typecheck`, `npm test`,
+  `npm run build`.
+- Exit code: 0 en las cuatro.
+- Passed / failed / skipped: **1.494 passed, 0 failed, 9 skipped**, 76/76
+  archivos; duración de Vitest 171,25 s.
+- Fallos completos: ninguno.
+- Clasificación: esperado.
+- Evidencia manual adicional: pendiente `LA-017`; no se ejecutaron modelos ni
+  APIs reales.
+
+### 2026-08-09 — Windows 11 — F4.2-T2
+
+- Commit/base o diff: `feat/luxy-desktop` @ `59870c6`, más el diff local
+  acumulado de `F4.1-T4/T5` y `F4.2-T1/T2`; el cambio ajeno de
+  `package-lock.json` queda fuera.
+- Comando específico: build de `@luxy/shared` y Vitest sobre evidencia de
+  modelos, trabajos de conversación, finales del gateway, cancelaciones y cola
+  de resultados.
+- Primera ejecución específica: **28 pasadas, 3 fallos**. Los tres contratos
+  del gateway descartaban `executedModel` porque los tests importaban el
+  `dist` anterior de `@luxy/shared`. Clasificación: artefacto de build obsoleto.
+- Segunda ejecución específica: **30 pasadas, 1 fallo**. El handler de
+  cancelación sólo consideraba `null`, mientras una fixture heredada omitía
+  `model`. Clasificación: borde de compatibilidad encontrado y corregido.
+- Resultado específico final: **31 pasadas, 0 fallos**, 5 archivos.
+- Comprobación completa: `npm run lint`, `npm run typecheck`, `npm test`,
+  `npm run build`.
+- Exit code: 0 en las cuatro.
+- Passed / failed / skipped: **1.497 passed, 0 failed, 9 skipped**, 76/76
+  archivos; duración de Vitest 116,02 s.
+- Fallos completos finales: ninguno.
+- Comprobaciones adicionales: 64/64 pruebas documentales; Prettier sobre los
+  16 archivos del paso y `git diff --check`, exit 0. `npm run format:check`
+  global, exit 1 por deuda previa en numerosos archivos y por un HTML inválido
+  en `Web demos/GLM demos/index.html`; no pertenece a este cambio.
+- Clasificación: esperado tras las dos correcciones descritas.
+- Evidencia manual adicional: pendiente `LA-017`; no se invocaron proveedores
+  ni APIs reales.
+
+### 2026-08-09 — Windows 11 — F4.2-T3
+
+- Commit/base o diff: `feat/luxy-desktop` @ `59870c6`, más el diff local
+  acumulado de Fase 4; `package-lock.json` y archivos ajenos quedan fuera.
+- Comando específico: Vitest sobre paginación/agregación de modelos, contrato
+  IPC, handler de Studio y repositorio.
+- Resultado específico final: **60 pasadas, 0 fallos**, 4 archivos; 7 pruebas
+  nuevas respecto a `F4.2-T2`.
+- Primera comprobación de tipos: exit 1. `offset` aparecía como obligatorio en
+  preload, Conversaciones y Studio por usar un `default` en el esquema IPC.
+  Corregido dejándolo opcional en esa frontera; segunda ejecución exit 0.
+- Comprobación completa final: `npm run lint`, `npm run typecheck`, `npm test`,
+  `npm run build`.
+- Exit code final: 0 en las cuatro.
+- Passed / failed / skipped: **1.504 passed, 0 failed, 9 skipped**, 76/76
+  archivos; duración final de Vitest 99,84 s.
+- Fallos completos finales: ninguno.
+- Clasificación: incompatibilidad de tipos encontrada durante desarrollo y
+  corregida antes de la suite final.
+- Evidencia manual adicional: pendiente `LA-017`. No se consultaron APIs reales
+  ni se desplegó el Gateway.
+
+### 2026-08-09 — Windows 11 — F4.3-T1
+
+- Commit/base o diff: `feat/luxy-desktop` @ `59870c6`, más el diff local
+  acumulado de Fase 4; cambios ajenos y secretos quedan fuera.
+- Comando específico: build de `@luxy/shared` y Vitest sobre catálogo de
+  evaluaciones, registro de modelos y empaquetado de Desktop.
+- Resultado específico: **46 pasadas, 0 fallos**, 3 archivos; 3 pruebas nuevas.
+- Comprobación completa: `npm run lint`, `npm run typecheck`, `npm test`,
+  `npm run build`.
+- Exit code: 0 en las cuatro.
+- Passed / failed / skipped: **1.507 passed, 0 failed, 9 skipped**, 77/77
+  archivos; duración de Vitest 57,06 s.
+- Fallos completos: ninguno.
+- Clasificación: esperado.
+- Evidencia manual adicional: pendiente `LA-018`; no se ejecutó ningún modelo,
+  benchmark o API real.
+
+### 2026-08-09 — Windows 11 — F4.3-T2
+
+- Commit/base o diff: `feat/luxy-desktop` @ `59870c6`, más el diff local
+  acumulado de Fase 4; cambios ajenos y secretos quedan fuera.
+- Comando específico: build de `@luxy/shared` y Vitest sobre catálogo, fixtures,
+  validadores, registro de modelos y empaquetado de Desktop.
+- Resultado específico: **53 pasadas, 0 fallos**, 4 archivos; 7 pruebas nuevas.
+- Comprobación completa: `npm run lint`, `npm run typecheck`, `npm test`,
+  `npm run build`.
+- Exit code: 0 en las cuatro.
+- Passed / failed / skipped: **1.514 passed, 0 failed, 9 skipped**, 78/78
+  archivos; duración de Vitest 82,97 s.
+- Fallos completos: ninguno.
+- Clasificación: esperado.
+- Evidencia manual adicional: pendiente `LA-018`; no se ejecutó código generado,
+  navegador, modelo, benchmark ni API real.
+
+### 2026-08-09 — Windows 11 — F4.3-T3
+
+- Commit/base o diff: `feat/luxy-desktop` @ `59870c6`, más el diff local
+  acumulado de Fase 4; cambios ajenos y secretos quedan fuera.
+- Comando específico: build de `@luxy/shared` y Vitest sobre evaluaciones,
+  composición de prompt, fixtures, registro y empaquetado de Desktop.
+- Resultado específico: **55 pasadas, 0 fallos**, 4 archivos; 2 pruebas nuevas.
+- Comprobación completa: `npm run lint`, `npm run typecheck`, `npm test`,
+  `npm run build`.
+- Exit code: 0 en las cuatro.
+- Passed / failed / skipped: **1.516 passed, 0 failed, 9 skipped**, 78/78
+  archivos; duración de Vitest 116,19 s.
+- Fallos completos: ninguno.
+- Clasificación: esperado.
+- Evidencia manual adicional: pendiente `LA-018`; no hubo IPC, Gateway,
+  proveedor, persistencia ni API real.
+
+### 2026-08-09 — Windows 11 — F4.3-T4
+
+- Commit/base o diff: `feat/luxy-desktop` @ `59870c6`, más el diff local
+  acumulado de Fase 4; `package-lock.json`, secretos y demos ajenos preservados.
+- Comando específico: build de `@luxy/shared` y Vitest sobre esquema de
+  evaluación, compatibilidad de conversaciones, Gateway, aislamiento del agente
+  y catálogo/fixtures.
+- Resultado específico: **37 pasadas, 0 fallos**, 6 archivos; 7 pruebas nuevas.
+- Comprobación completa: Prettier de archivos tocados, `npm run lint`,
+  `npm run typecheck`, `npm test`, `npm run build`.
+- Exit code: 0 en las cuatro comprobaciones obligatorias y en formato.
+- Passed / failed / skipped: **1.523 passed, 0 failed, 9 skipped**, 80/80
+  archivos; duración final de Vitest 73,00 s.
+- Fallos durante desarrollo: dos expectativas iniciales. El Gateway leía el
+  `dist` shared anterior antes de reconstruirlo; el agente aún ejecutaba checks
+  para evaluaciones. Se reconstruyó shared y se generalizó la barrera de solo
+  lectura; la repetición específica y la matriz completa quedaron verdes.
+- Clasificación final: esperado.
+- Evidencia manual adicional: pendiente `LA-018`; no hubo IPC de ejecución,
+  proveedor, API real, migración ni deploy.
+
+### 2026-08-09 — Windows 11 — F4.3-T5
+
+- Commit/base o diff: `feat/luxy-desktop` @ `59870c6`, más el diff local
+  acumulado; cambios ajenos, claves y demos preservados.
+- Comando específico: build shared y Vitest sobre resultados de evaluación y
+  cierre final del Gateway.
+- Resultado específico: **18 pasadas, 0 fallos**, 2 archivos; 8 pruebas nuevas.
+- Comprobación completa: Prettier de archivos tocados, `npm run lint`,
+  `npm run typecheck`, `npm test` y `npm run build`.
+- Exit code: 0 en todas.
+- Passed / failed / skipped: **1.531 passed, 0 failed, 9 skipped**, 81/81
+  archivos; duración final de Vitest 125,12 s.
+- Fallos completos: ninguno.
+- Clasificación: esperado.
+- Evidencia manual adicional: ninguna necesaria para este contrato; `LA-018`
+  sigue pendiente. No se llamó a modelos, APIs o precios ni se hizo deploy.
+
+### 2026-08-09 — Windows 11 — F4.3-T6
+
+- Commit/base o diff: `feat/luxy-desktop` @ `59870c6`, más el diff local
+  acumulado; cambios ajenos y archivos sensibles preservados.
+- Comando específico: Vitest sobre parser de historial, resultados, IPC y
+  documentación.
+- Resultado específico: **104 pasadas, 0 fallos**, 4 archivos; 4 pruebas nuevas.
+- Comprobación completa: Prettier, `npm run lint`, `npm run typecheck`,
+  `npm test` y `npm run build`.
+- Exit code: 0 en todas.
+- Passed / failed / skipped: **1.535 passed, 0 failed, 9 skipped**, 82/82
+  archivos; duración final de Vitest 91,50 s.
+- Fallos completos: ninguno.
+- Clasificación: esperado.
+- Evidencia manual adicional: `LA-018` ampliada; no hubo creación de trabajos,
+  proveedor, precios, API de modelos, migración ni deploy.
+
+### 2026-08-09 — Windows 11 — F4.3-T7
+
+- Commit/base o diff: `feat/luxy-desktop` @ `59870c6`, más el diff acumulado;
+  cambios ajenos y sensibles preservados.
+- Comando específico: build shared y Vitest sobre catálogo, fixtures,
+  resultados, contrato, Gateway, política/historial renderer y agente.
+- Resultado específico: **50 pasadas, 0 fallos**, 8 archivos; 6 pruebas nuevas.
+- Comprobación completa: Prettier, `npm run lint`, `npm run typecheck`,
+  `npm test` y `npm run build`.
+- Exit code: 0 en todas.
+- Passed / failed / skipped: **1.541 passed, 0 failed, 9 skipped**, 83/83
+  archivos; duración final de Vitest 147,94 s.
+- Fallos completos: ninguno.
+- Clasificación: esperado.
+- Evidencia manual adicional: `LA-018` y `LA-019` pendientes. No se ejecutó un
+  modelo, consultó precio, desplegó Gateway ni aplicó migración.
+
+### 2026-08-09 — Windows 11 — F4.3-T8
+
+- Commit/base o diff: `feat/luxy-desktop` @ `59870c6`, más el diff acumulado;
+  archivos ajenos y sensibles preservados.
+- Comando específico: Vitest sobre cancelación Gateway, resultado automático,
+  historial/política del renderer y contrato de Studio.
+- Resultado específico: **38 pasadas, 0 fallos**, 5 archivos; 2 pruebas nuevas.
+- Comprobación completa: Prettier, `npm run lint`, `npm run typecheck`,
+  `npm test` y `npm run build`.
+- Exit code: 0 en todas.
+- Passed / failed / skipped: **1.543 passed, 0 failed, 9 skipped**, 83/83
+  archivos; duración final de Vitest 135,59 s.
+- Fallos completos: ninguno.
+- Clasificación: esperado.
+- Evidencia manual adicional: `LA-018`/`LA-019` pendientes; no se ejecutó ni
+  canceló un proveedor real, consultó precio o desplegó Gateway.
+
+### 2026-08-09 — Windows 11 — checkpoint Modelos/Laboratorio
+
+- Commit: `feat: incorpora modelos y laboratorio reproducible`.
+- Validación usada para cerrar el checkpoint: 1.543 passed, 9 skipped, 0
+  failed; lint, typecheck y build con exit 0.
+- Comprobación del índice: `git diff --cached --check`, exit 0.
+- Exclusiones: el cambio ajeno de `package-lock.json` y archivos sensibles/no
+  relacionados no entraron en el commit.
+- Push/deploy: no ejecutados.
 
 ## Plantilla
 

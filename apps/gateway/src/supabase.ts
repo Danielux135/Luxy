@@ -18,6 +18,7 @@ export interface SelectOptions {
   filters?: Record<string, string>;
   order?: string;
   limit?: number;
+  offset?: number;
 }
 
 export class SupabaseClient {
@@ -63,6 +64,7 @@ export class SupabaseClient {
     }
     if (options.order) params.set('order', options.order);
     if (options.limit) params.set('limit', String(options.limit));
+    if (options.offset !== undefined) params.set('offset', String(options.offset));
     return params.toString();
   }
 
@@ -111,11 +113,7 @@ export class SupabaseClient {
     });
   }
 
-  async update<T>(
-    table: string,
-    filters: Record<string, string>,
-    values: unknown,
-  ): Promise<T[]> {
+  async update<T>(table: string, filters: Record<string, string>, values: unknown): Promise<T[]> {
     const params = new URLSearchParams(filters);
     return this.request<T[]>(`/${table}?${params.toString()}`, {
       method: 'PATCH',

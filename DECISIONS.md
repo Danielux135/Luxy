@@ -270,3 +270,102 @@ Estado: aceptada
 Claude y Codex comparten `PROJECT-STATE.md`, `CURRENT-TASK.md`,
 `MASTER-PLAN.md`, `CHANGELOG-WORK.md`, `TEST-RESULTS.md` y `LOCAL-ACTIONS.md`.
 Cada paso se documenta al cambiar de estado. El chat no sustituye este relevo.
+
+## D-022 — no consultar precios que la pasarela no publica
+
+Fecha: 2026-08-09
+
+Estado: aceptada, implementada
+
+La pasarela confirmó 22 modelos, pero ninguna ruta probada publicó precios
+útiles: dos respuestas contenían cero entradas y otra devolvió 404. Por decisión
+explícita de Daniel, Luxy consulta únicamente `/v1/models`; no sondea rutas de
+precios ni repite «sin precio» en cada modelo.
+
+La ausencia de precio no bloquea un modelo ni autoriza a inventar una cifra. Si
+otra conexión futura documenta una API de precios real, será una integración
+explícita de esa conexión, no una batería de rutas tentativas.
+
+## D-023 — definir y confirmar una evaluación antes de ejecutarla
+
+Fecha: 2026-08-09
+
+Estado: aceptada, implementada en el contrato; ejecución UI deshabilitada
+
+Preparar o previsualizar una prueba no autoriza a consumir tokens. Un trabajo de
+evaluación exige `confirmed: true`, un `apiModel` exacto y un snapshot versionado
+de definición, fixture, scoring y modo de validación. El Gateway compara ese
+snapshot y el prompt completo con el catálogo actual antes de crear el trabajo.
+
+La ejecución se representa con `studioMode: evaluation` y metadata, sin
+migración. El agente la trata como solo lectura: no crea worktree, no concede
+herramientas, no escribe memoria y no ejecuta comprobaciones del proyecto. La
+metadata nunca incluye una puntuación hasta que un validador real la produzca.
+El botón del Laboratorio sigue deshabilitado; conectar el IPC será una decisión
+posterior y explícita.
+
+## D-024 — una salida incompleta o no automática no recibe puntuación
+
+Fecha: 2026-08-09
+
+Estado: aceptada, implementada
+
+El Gateway sólo aplica los validadores locales cuando una evaluación confirmó
+un `responseOutcome: completed`, conserva un modelo efectivo y su snapshot
+sigue coincidiendo con el catálogo. `truncated`, `interrupted`, `timed_out` o un
+final antiguo sin evidencia se guardan como `not_scored`, no como fallo del
+modelo.
+
+Los modos `manual`, `sandbox` y `trace` también quedan `not_scored` hasta que
+exista su revisor o runner real. El resultado conserva checks, duración, tokens
+y tamaño de salida, pero no calcula una nota numérica ni un ranking: esos datos
+no tienen todavía una fórmula aprobada y convertir un booleano en una nota
+aparentemente objetiva sería inventar evidencia.
+
+## D-025 — el historial del Laboratorio se lee bajo demanda
+
+Fecha: 2026-08-09
+
+Estado: aceptada, implementada
+
+Laboratorio lee como máximo los últimos 100 trabajos una vez al abrirse. No usa
+el polling de Trabajos ni crea otro temporizador. Sólo el botón **Actualizar**
+repite la lectura. La pantalla muestra como máximo 12 resultados recientes y
+hace visible el límite de cobertura.
+
+Antes de presentar metadata como evidencia, el renderer valida su esquema y
+comprueba que evaluación, versión y modelo coinciden con el trabajo. Una entrada
+incompleta o contradictoria se ignora; no se repara ni se infiere.
+
+## D-026 — primera ejecución sólo automática, individual y doblemente confirmada
+
+Fecha: 2026-08-09
+
+Estado: aceptada, implementada
+
+La primera apertura del Laboratorio se limita a rapidez exacta, instrucciones,
+JSON y contexto largo, porque son las únicas pruebas con validador puro. Código,
+frontend, español y tool calling no pueden ejecutarse hasta disponer del runner
+o revisor que declararon desde el catálogo.
+
+Crear el trabajo exige una casilla de posible consumo y un diálogo final que
+repite prueba, modelo exacto y máquina. La ausencia de precio se muestra como
+desconocida y no provoca consultas (`D-022`). Gateway vuelve a validar prompt,
+snapshot y política, y rechaza otra evaluación activa ya visible del mismo
+Studio. Esta última barrera reduce duplicados, pero no es un lock transaccional
+entre dos peticiones que lleguen exactamente a la vez.
+
+## D-027 — cancelar una evaluación significa sin puntuar
+
+Fecha: 2026-08-09
+
+Estado: aceptada, implementada
+
+Una cancelación iniciada por la persona no demuestra calidad ni falta de calidad
+del modelo. Gateway conserva cualquier parcial recuperable, pero el resultado de
+Laboratorio queda `not_scored` con `responseOutcome: cancelled`; nunca `failed`.
+La regla también se aplica si se canceló antes de recibir texto.
+
+Laboratorio no sondea el cierre. Muestra la solicitud como enviada y sólo cambia
+el estado cuando la persona pulsa **Actualizar**. Así se conserva `D-025` y no se
+reintroduce tráfico periódico para una operación ocasional.

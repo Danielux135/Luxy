@@ -6,6 +6,7 @@ import {
   claimRequestSchema,
   jobEventsRequestSchema,
   jobCompleteRequestSchema,
+  evaluateModelEvaluationCompletion,
   jobFailRequestSchema,
   jobCancelledRequestSchema,
   approvalCompleteRequestSchema,
@@ -388,14 +389,31 @@ export const handleJobComplete = withMachineAuth(async (request, deps, machine, 
   if (repeated !== null) return repeated;
 
   const result = body.data;
+  const effectiveModel =
+    job.model ??
+    result.executedModel ??
+    (typeof job.metadata.model === 'string' ? job.metadata.model.slice(0, 128) : null);
+  const evaluationResult = evaluateModelEvaluationCompletion({
+    metadata: job.metadata,
+    output: result.summary,
+    responseOutcome: result.responseOutcome ?? null,
+    model: effectiveModel,
+    durationMs: result.durationMs,
+    ...(result.usage === undefined
+      ? {}
+      : {
+          usage: {
+            inputTokens: result.usage.inputTokens,
+            outputTokens: result.usage.outputTokens,
+          },
+        }),
+  });
   await deps.repo.updateJob(jobId, {
     status: 'completed',
     completed_at: new Date().toISOString(),
     result_summary: result.summary,
     error_message: null,
-    model:
-      job.model ??
-      (typeof job.metadata.model === 'string' ? job.metadata.model.slice(0, 128) : null),
+    model: effectiveModel,
     lease_expires_at: null,
     metadata: {
       ...job.metadata,
@@ -407,6 +425,13 @@ export const handleJobComplete = withMachineAuth(async (request, deps, machine, 
       branch: result.branch,
       worktreePath: result.worktreePath,
       sessionId: result.sessionId,
+      ...(result.executedModel === undefined ? {} : { executedModel: result.executedModel }),
+      ...(evaluationResult === null
+        ? {}
+        : {
+            evaluationResult,
+            evaluationValidatedAt: new Date().toISOString(),
+          }),
       // referencia al archivo, nunca su contenido: vive en la maquina que lo
       // genero y aqui solo viaja lo justo para encontrarlo (`D-013`)
       ...(result.artifact === undefined ? {} : { artifact: result.artifact }),
@@ -427,7 +452,7 @@ export const handleJobComplete = withMachineAuth(async (request, deps, machine, 
             conversationMemory: result.conversationMemory,
             conversationMemorySource: {
               provider: job.provider,
-              model: job.model,
+              model: effectiveModel,
               savedAt: new Date().toISOString(),
             },
           }),
@@ -506,12 +531,16 @@ export const handleJobFail = withMachineAuth(async (request, deps, machine, para
     status: 'failed',
     completed_at: new Date().toISOString(),
     error_message: body.data.errorMessage,
+    ...((job.model ?? null) === null && body.data.executedModel !== undefined
+      ? { model: body.data.executedModel }
+      : {}),
     lease_expires_at: null,
     metadata: {
       ...job.metadata,
       worktreePath: body.data.worktreePath,
       hasLocalChanges: body.data.hasLocalChanges,
       durationMs: body.data.durationMs,
+      ...(body.data.executedModel === undefined ? {} : { executedModel: body.data.executedModel }),
     },
   });
 
@@ -560,17 +589,38 @@ export const handleJobCancelled = withMachineAuth(async (request, deps, machine,
   // pararla no puede costar lo ya generado: si el agente manda el texto
   // parcial, se guarda como resultado con su final real al lado (`D-017`).
   const partial = body.data.partialText?.trim() ?? '';
+  const effectiveModel =
+    job.model ??
+    body.data.executedModel ??
+    (typeof job.metadata.model === 'string' ? job.metadata.model.slice(0, 128) : null);
+  const evaluationResult = evaluateModelEvaluationCompletion({
+    metadata: job.metadata,
+    output: partial,
+    responseOutcome: 'cancelled',
+    model: effectiveModel,
+    durationMs: body.data.durationMs,
+  });
   await deps.repo.updateJob(jobId, {
     status: 'cancelled',
     completed_at: new Date().toISOString(),
     lease_expires_at: null,
     ...(partial.length > 0 ? { result_summary: partial } : {}),
+    ...((job.model ?? null) === null && body.data.executedModel !== undefined
+      ? { model: body.data.executedModel }
+      : {}),
     metadata: {
       ...job.metadata,
       worktreePath: body.data.worktreePath,
       modifiedFiles: body.data.modifiedFiles,
       durationMs: body.data.durationMs,
-      ...(partial.length > 0 ? { responseOutcome: 'cancelled' } : {}),
+      ...(body.data.executedModel === undefined ? {} : { executedModel: body.data.executedModel }),
+      ...(partial.length > 0 || evaluationResult !== null ? { responseOutcome: 'cancelled' } : {}),
+      ...(evaluationResult === null
+        ? {}
+        : {
+            evaluationResult,
+            evaluationValidatedAt: new Date().toISOString(),
+          }),
       ...(body.data.responseTermination === undefined
         ? {}
         : { responseTermination: body.data.responseTermination }),

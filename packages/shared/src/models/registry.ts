@@ -134,9 +134,11 @@ export class ModelRegistry {
     const direct = this.aliases.get(alias);
     if (direct !== undefined) return this.models.get(direct) ?? null;
 
-    // un alias que coincide con el nombre de una familia usa su predeterminado
+    // un alias que coincide con una familia solo existe si hay un
+    // predeterminado EXPLICITO. Usar el primer modelo como fallback inventaria
+    // comandos para familias nuevas aunque ninguna entrada declare alias.
     if (isModelFamily(alias) && this.listByFamily(alias).length > 0) {
-      return this.defaultForFamily(alias);
+      return this.listByFamily(alias).find((model) => model.defaultForFamily) ?? null;
     }
     return null;
   }

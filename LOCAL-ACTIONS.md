@@ -211,7 +211,11 @@ No lo cambio yo: es tu configuración de máquina y no está en el repositorio.
 
 ## LA-013 — completar el push
 
-Estado: `pending` — 2026-08-06.
+Estado: **`completada` — verificada el 2026-08-09.**
+
+La rama local y `origin/feat/luxy-desktop` apuntan ambas a `59870c6`. Las
+instrucciones inferiores se conservan como registro histórico; no hay que
+repetir el push.
 
 Daniel autorizó commit y push. El commit está hecho: `af095b3` sobre
 `feat/luxy-desktop`, 33 archivos, +2.849/−116. **El push lo rechazó el sistema
@@ -229,7 +233,17 @@ handoff duplicado y `Web demos/`. Los dos primeros contienen credenciales.
 
 ## LA-014 — leer el catálogo real de la pasarela
 
-Estado: `pending` — abierta el 2026-08-06 tras `F4.1-T1`.
+Estado: **`completada` por decisión — 2026-08-09.**
+
+La segunda lectura mostró `/api/pricing` con 200 y 0 entradas, `/v1/pricing`
+con 404 y `/api/models` con 200 y 0 entradas. Daniel decidió que, si la
+pasarela no publica precios, Luxy no debe consultarlos. `F4.1-T5` elimina esos
+sondeos; el botón actualiza únicamente la lista de modelos.
+
+La lectura devolvió 22 modelos y cero precios reconocibles. Falta repetir
+**Consultar a la pasarela** con el diagnóstico de tres rutas incorporado en
+`F4.1-T3`; esa segunda lectura debe indicar código HTTP, claves superiores y
+número de entradas por ruta.
 
 En Studio → **Modelos** hay un panel nuevo, «Catálogo real de la conexión», con
 el botón **Consultar a la pasarela**. Hace dos peticiones con tu clave —
@@ -298,7 +312,12 @@ la IA.
 
 ## LA-016 — retirar el portátil sin perder nada
 
-Estado: `pending` — abierta el 2026-08-07. **Es lo único urgente.**
+Estado: **`completada` en Git — verificada el 2026-08-09.**
+
+Los dos destinos remotos existen: `origin/feat/luxy-desktop` contiene el
+checkpoint actual y `origin/luxy/phase-4d-session-host` apunta a `e27aa05`, el
+commit de rescate. Las claves y `secrets.enc` siguen siendo material local y no
+se incorporan al repositorio.
 
 `portatil-clase` se va a retirar. Lo que está sólo en su disco desaparece.
 
@@ -345,10 +364,133 @@ equipo y sólo dos tenían cambios.
 ## Operaciones no autorizadas
 
 - Commit del checkpoint: **autorizado y hecho** el 2026-08-06 (`af095b3`).
-- Push: autorizado por Daniel; pendiente de ejecutar (`LA-013`).
-- Deploy de Wrangler: no autorizado.
+- Push del checkpoint: autorizado, ejecutado y verificado (`LA-013`).
+- Deploy de Wrangler: autorizado y ejecutado por Daniel el 2026-08-07; cualquier
+  despliegue nuevo vuelve a requerir autorización.
 - Aplicar `0005`, `0006` o cualquier migración: no autorizado.
 - Producción: no autorizada.
+
+## LA-017 — comprobar la evidencia local por modelo
+
+Estado: `pending` — abierta el 2026-08-09 tras `F4.2-T1` y ampliada tras
+`F4.2-T2`.
+
+Reconstruye/reinicia Studio y abre **Modelos**. Cada modelo usado en el historial
+revisado debe mostrar tasa de completas, mediana y finales problemáticos. Los
+modelos sin muestra deben decir «sin ejecuciones atribuibles».
+
+Comprobaciones concretas:
+
+1. navegar fuera de Modelos y volver no produce sondeo continuo;
+2. una cancelación aparece «aparte» y no baja la tasa del modelo;
+3. un trabajo antiguo sin `responseOutcome` pero con estado `completed` cuenta
+   como completo;
+4. si falla la lectura del historial, aparece un aviso y el catálogo sigue
+   visible.
+5. crear un trabajo eligiendo un modelo exacto y comprobar que sus métricas
+   aparecen bajo ese modelo;
+6. crear otro trabajo eligiendo sólo una familia o su predeterminado y comprobar
+   que aparece bajo el `apiModel` exacto realmente usado, no como trabajo sin
+   atribución;
+7. cancelar una respuesta en curso y comprobar que la cancelación se suma
+   «aparte», bajo el modelo efectivo, sin reducir la tasa de completas.
+8. encima del catálogo debe aparecer «Evidencia local: N trabajos revisados»;
+9. con menos de 1.000 trabajos debe decir «historial reciente completo»;
+10. si aparece «el gateway no avanzó al paginar», Studio está conectado a una
+    versión anterior del Gateway. La prueba de paginación debe repetirse con el
+    Gateway local actualizado o después de un despliegue expresamente
+    autorizado;
+11. entrar una vez en Modelos puede hacer varias lecturas consecutivas de 100,
+    pero quedarse en la pantalla no debe repetirlas ni iniciar polling.
+
+Antes de probar, reconstruye y reinicia tanto Studio como el agente. El campo
+`executedModel` viaja desde el agente al gateway; dejar un agente antiguo en
+ejecución haría que los trabajos nuevos siguieran sin esa evidencia.
+
+`F4.2-T3` también cambia el Gateway. Reiniciar sólo Studio no actualiza la pieza
+desplegada; no se ha hecho deploy en este paso porque necesita autorización.
+
+## LA-018 — comprobar el catálogo del Laboratorio
+
+Estado: `pending` — abierta el 2026-08-09 tras `F4.3-T1`.
+
+Reconstruye/reinicia Studio y abre **Laboratorio** en la navegación lateral.
+
+Comprobaciones concretas:
+
+1. aparecen exactamente 8 pruebas definidas;
+2. están rapidez, código, frontend, español, instrucciones, JSON, contexto largo
+   y tool calling;
+3. cada tarjeta muestra versión, identificador, prompt exacto, criterios y
+   capacidades requeridas;
+4. las seis pruebas que dependen de datos indican «fixture disponible», junto a
+   su identificador, tipo y número de caracteres;
+5. el aviso superior dice que sólo las pruebas automáticas pueden ejecutarse,
+   que requieren confirmación, pueden consumir tokens y no se consulta precio;
+6. rapidez, instrucciones, JSON y contexto largo pueden habilitar **Ejecutar
+   prueba individual**; las otras cuatro muestran su motivo de bloqueo;
+7. la navegación a Modelos y al resto de secciones sigue funcionando;
+8. rapidez, instrucciones, JSON y contexto largo muestran «validador local»;
+9. código muestra «runner aislado pendiente», frontend y español «revisión
+   manual», y tool calling «traza pendiente».
+10. en «Preparar una prueba», cambiar la prueba actualiza la lista de modelos
+    compatibles y la longitud del prompt;
+11. contexto largo muestra la fixture `numbered-context-anchors-v1` y una vista
+    previa mucho mayor que las pruebas cortas;
+12. el selector aclara que filtra capacidades declaradas y no verificadas;
+13. abrir «Ver prompt final completo» muestra cabecera, instrucciones y, cuando
+    corresponde, la fixture entre delimitadores;
+14. cambiar prueba o modelo no crea trabajos ni produce peticiones al Gateway.
+15. aparece una confirmación de consumo; al cambiar prueba o modelo se desmarca
+    automáticamente;
+16. «Resultados guardados» hace una lectura de los últimos 100 trabajos al
+    abrir; si no hay evaluaciones muestra un estado vacío y no vuelve a pedir
+    datos por sí solo;
+17. pulsar «Actualizar» repite sólo esa lectura. Cambiar prueba/modelo no la
+    repite ni crea trabajos.
+18. si existe una evaluación activa válida, aparece un panel separado con ID,
+    prueba, modelo y estado; no cambia solo mientras se observa la pantalla.
+
+Esta comprobación necesita reconstruir Desktop y tener accesible el Gateway ya
+configurado para leer el historial. No requiere agente activo, clave de
+proveedor, ejecución real ni deploy nuevo.
+
+`F4.3-T5` no añade ningún cambio visual ni una acción manual nueva: prepara la
+validación del cierre en Gateway, pero no crea trabajos. No se debe intentar
+fabricar una evaluación mediante API para probarlo; la cobertura automatizada
+comprueba ese contrato sin consumir tokens.
+
+## LA-019 — primera evaluación individual
+
+Estado: `pending` — requiere decisión de Daniel porque consume tokens.
+
+Requisitos: reconstruir/reiniciar Desktop y agente con este worktree, y usar un
+Gateway construido con `F4.3-T7`. El Gateway desplegado anteriormente no conoce
+este contrato; no se ha desplegado nada en este paso. El código está en el
+checkpoint local de Modelos/Laboratorio, todavía sin push.
+
+Prueba mínima recomendada:
+
+1. abrir **Laboratorio** y seleccionar **Rapidez de respuesta corta**;
+2. elegir una máquina conectada, proyecto y un modelo exacto que se quiera
+   probar;
+3. comprobar que el precio aparece como desconocido, sin peticiones de precio;
+4. marcar la confirmación y pulsar **Ejecutar prueba individual**;
+5. revisar el diálogo: debe repetir prueba, modelo y máquina. Cancelar no crea
+   nada; aceptar sí puede consumir tokens;
+6. al aceptar aparece un `LUX-…`; seguirlo en **Trabajos**;
+7. mientras esté activo, Laboratorio debe bloquear una segunda evaluación;
+8. para probar cancelación, pulsar **Cancelar** y rechazar el diálogo: no cambia
+   nada. Aceptarlo una vez deja el botón como **Cancelación solicitada** y no
+   permite repetirlo;
+9. pulsar **Actualizar** hasta que el agente confirme el cierre: una cancelación
+   debe aparecer `Sin puntuar`, nunca como fallo;
+10. si se deja terminar, pulsar **Actualizar**: debe aparecer `Validada` sólo si la salida
+    fue exactamente `LISTO`; cualquier corte queda `Sin puntuar`;
+11. no debe existir worktree, diff, memoria ni comprobaciones de proyecto.
+
+No probar todavía Código, Frontend, Español o Tool calling: Gateway debe
+rechazarlos y no existe un runner seguro para puntuarlos.
 
 ## LA-008 — migración al ordenador nuevo: hecha
 

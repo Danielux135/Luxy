@@ -70,7 +70,10 @@ describe('eventos tardios despues de cancelar', () => {
 });
 
 describe('P0.6d - una cancelacion conserva lo generado', () => {
-  async function cancelDeps(updateJob: ReturnType<typeof vi.fn>): Promise<unknown> {
+  async function cancelDeps(
+    updateJob: ReturnType<typeof vi.fn>,
+    overrides: Record<string, unknown> = {},
+  ): Promise<unknown> {
     return {
       db: await fakeDb(),
       repo: {
@@ -84,6 +87,8 @@ describe('P0.6d - una cancelacion conserva lo generado', () => {
           completedAt: null,
           metadata: { studioMode: 'conversation' },
           telegramChatId: null,
+          model: null,
+          ...overrides,
         })),
         updateJob,
       },
@@ -110,6 +115,7 @@ describe('P0.6d - una cancelacion conserva lo generado', () => {
         worktreePath: null,
         durationMs: 1_420_000,
         partialText: '<html>veintitres minutos de generacion',
+        executedModel: 'Kimi-K2.6',
       }),
       deps,
       { jobId: JOB_ID },
@@ -119,7 +125,11 @@ describe('P0.6d - una cancelacion conserva lo generado', () => {
     const [, patch] = updateJob.mock.calls[0] as unknown as [string, Record<string, unknown>];
     expect(patch['status']).toBe('cancelled');
     expect(patch['result_summary']).toBe('<html>veintitres minutos de generacion');
-    expect(patch['metadata']).toMatchObject({ responseOutcome: 'cancelled' });
+    expect(patch['model']).toBe('Kimi-K2.6');
+    expect(patch['metadata']).toMatchObject({
+      responseOutcome: 'cancelled',
+      executedModel: 'Kimi-K2.6',
+    });
   });
 
   it('sin texto parcial no inventa resultado ni final', async () => {
@@ -135,5 +145,40 @@ describe('P0.6d - una cancelacion conserva lo generado', () => {
     const [, patch] = updateJob.mock.calls[0] as unknown as [string, Record<string, unknown>];
     expect(patch).not.toHaveProperty('result_summary');
     expect(patch['metadata']).not.toHaveProperty('responseOutcome');
+  });
+
+  it('una evaluacion cancelada queda explicitamente sin puntuar', async () => {
+    const updateJob = vi.fn(async () => undefined);
+    const deps = (await cancelDeps(updateJob, {
+      model: 'DeepSeek-V4-Pro',
+      metadata: {
+        studioMode: 'evaluation',
+        evaluationId: 'speed-exact-v1',
+        evaluationVersion: 1,
+        evaluationPromptVersion: 1,
+        evaluationFixtureId: null,
+        evaluationValidationMode: 'automatic',
+        evaluationScoring: 'timing',
+        evaluationConfirmed: true,
+      },
+    })) as never as Parameters<typeof handleJobCancelled>[1];
+
+    await handleJobCancelled(
+      cancelRequest({ modifiedFiles: [], worktreePath: null, durationMs: 750 }),
+      deps,
+      { jobId: JOB_ID },
+    );
+
+    const [, patch] = updateJob.mock.calls[0] as unknown as [string, Record<string, unknown>];
+    expect(patch['metadata']).toMatchObject({
+      responseOutcome: 'cancelled',
+      evaluationResult: {
+        status: 'not_scored',
+        responseOutcome: 'cancelled',
+        reason: 'la respuesta no termino de forma completa',
+      },
+      evaluationValidatedAt: expect.any(String),
+    });
+    expect(patch).not.toHaveProperty('result_summary');
   });
 });

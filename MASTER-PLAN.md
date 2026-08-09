@@ -1,6 +1,6 @@
 # Luxy — plan maestro
 
-Última actualización: **2026-08-06**
+Última actualización: **2026-08-09**
 
 ## Estados
 
@@ -108,19 +108,53 @@ contexto sin recurrir a comandos de Telegram.
 ## Fase 4 — Modelos, conexiones y Laboratorio
 
 Prioridad: **P2**  
-Estado global: `planned`
+Estado global: `in_progress`
 
 - F4.1: inventario real de conexiones, proveedores, modelos y capacidades.
-  **`implemented` a medias (2026-08-06)**: Studio consulta `/v1/models` y
-  `/api/pricing` y guarda el catálogo con fecha. Falta llevarlo al catálogo que
-  se usa de verdad y traducir los multiplicadores a coste (`LA-014`).
+  **`implemented` (2026-08-09)**: Studio consulta sólo `/v1/models` y guarda el
+  catálogo con fecha. La lectura real dio 22 modelos y `F4.1-T4` alineó el
+  catálogo operativo. La pasarela no publica precios útiles y, por decisión de
+  Daniel (`F4.1-T5`), Luxy no los consulta. Los topes siguen sin inventarse y
+  dependen de evidencia de `LA-007`.
 - F4.2: disponibilidad, velocidad, estabilidad y errores por modelo.
+  **`implemented` inicialmente (2026-08-09)**: `F4.2-T1` resume los últimos 100
+  trabajos, sin benchmarks ni sondeo. `F4.2-T2` conserva el modelo realmente
+  ejecutado incluso si el trabajo sólo pidió una familia, también en fallos y
+  cancelaciones. `F4.2-T3` pagina una sola vez hasta 1.000 trabajos, hace visible
+  la cobertura y detecta un Gateway que aún no soporte `offset`. Falta
+  validación visual (`LA-017`).
 - F4.3: pruebas reproducibles: rapidez, código, frontend, español,
-  instrucciones, JSON, contexto largo y tool calling.
+  instrucciones, JSON, contexto largo y tool calling. **`implemented`
+  inicialmente (2026-08-09)**: `F4.3-T1` define las ocho pruebas con versión,
+  prompt, fixture, capacidades y criterios, y las muestra en Laboratorio. La
+  ejecución permanece deshabilitada. `F4.3-T2` añade seis fixtures deterministas
+  y validadores puros para rapidez exacta, instrucciones, JSON y contexto largo;
+  las otras cuatro declaran sandbox, revisión manual o traza como requisito en
+  vez de inventar una nota. `F4.3-T3` añade selección por capacidades declaradas
+  y prompt compuesto visible. `F4.3-T4` define confirmación literal, modelo
+  exacto y snapshot persistente, valida el prompt contra el catálogo y reserva
+  una ejecución de solo lectura. La UI mantiene el botón deshabilitado y no
+  llama al Gateway. `F4.3-T5` valida al cerrar únicamente resultados completos
+  de modos automáticos y persiste checks y métricas en metadata; parciales y
+  runners pendientes quedan `not_scored`. Falta presentar resultados y conectar
+  una primera ejecución individual bajo acción explícita. `F4.3-T6` presenta
+  hasta 12 resultados recientes mediante una lectura acotada y actualización
+  manual, sin polling. `F4.3-T7` conecta una ejecución individual sólo para los
+  cuatro validadores automáticos, con doble acción humana, modelo exacto y
+  barreras repetidas en Gateway. Comparaciones y runners manual/sandbox/traza
+  siguen deshabilitados. `F4.3-T8` muestra la evaluación activa, permite pedir
+  su cancelación y persiste el cierre como `not_scored`, todo bajo actualización
+  manual y sin polling.
 - F4.4: ejecución simultánea controlada para comparar modelos.
 - F4.5: guardar prompt, parámetros, respuesta, tokens, tiempos y puntuación.
 - F4.6: recomendador por tarea basado en evidencia local y feedback.
-- F4.7: nunca ejecutar benchmarks de pago sin una acción explícita.
+- F4.7: nunca ejecutar benchmarks de pago sin una acción explícita. Cumplido en
+  la primera ejecución: casilla y diálogo final; Luxy no consulta ni afirma
+  conocer el precio.
+
+Checkpoint de esta fase: `F4.1-T4/T5`, `F4.2-T1/T2/T3` y `F4.3-T1`–`F4.3-T8`
+quedaron commiteados localmente el 2026-08-09 con el mensaje
+`feat: incorpora modelos y laboratorio reproducible`. No se hizo push ni deploy.
 
 No afirmar capacidades por nombre o marketing. Se marcan como verificadas sólo
 con evidencia fechada.

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { hashToken } from '../auth.js';
-import { handleJobComplete } from './api.js';
+import { handleJobComplete, handleJobFail } from './api.js';
 
 const TOKEN = 'token-final-0123456789abcdefghijkl';
 const MACHINE_ID = '11111111-1111-4111-8111-111111111111';
@@ -53,9 +53,10 @@ function job(status: 'running' | 'completed' | 'failed' | 'cancelled' | 'interru
 async function run(
   status: 'running' | 'completed' | 'failed' | 'cancelled' | 'interrupted',
   extras: Record<string, unknown> = {},
+  metadata: Record<string, unknown> = {},
 ) {
   const repo = {
-    getJobById: vi.fn(async () => job(status)),
+    getJobById: vi.fn(async () => ({ ...job(status), metadata })),
     updateJob: vi.fn(async () => job('completed')),
     recordProviderUsage: vi.fn(async () => undefined),
   };
@@ -184,6 +185,126 @@ describe('resultado final idempotente', () => {
     );
   });
 
+  it('persiste el modelo efectivo de un trabajo completado', async () => {
+    const { response, repo } = await run('running', { executedModel: 'DeepSeek-V4-Pro' });
+    expect(response.status).toBe(200);
+    expect(repo.updateJob).toHaveBeenCalledWith(
+      JOB_ID,
+      expect.objectContaining({
+        model: 'DeepSeek-V4-Pro',
+        metadata: expect.objectContaining({ executedModel: 'DeepSeek-V4-Pro' }),
+      }),
+    );
+  });
+
+  it('valida y persiste una evaluacion automatica completada', async () => {
+    const { response, repo } = await run(
+      'running',
+      {
+        summary: 'LISTO',
+        responseOutcome: 'completed',
+        executedModel: 'DeepSeek-V4-Pro',
+        usage: {
+          provider: 'deepseek',
+          model: 'DeepSeek-V4-Pro',
+          inputTokens: 20,
+          outputTokens: 1,
+          estimatedCost: 0,
+        },
+      },
+      {
+        studioMode: 'evaluation',
+        evaluationId: 'speed-exact-v1',
+        evaluationVersion: 1,
+        evaluationPromptVersion: 1,
+        evaluationFixtureId: null,
+        evaluationValidationMode: 'automatic',
+        evaluationScoring: 'timing',
+        evaluationConfirmed: true,
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(repo.updateJob).toHaveBeenCalledWith(
+      JOB_ID,
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          evaluationResult: expect.objectContaining({
+            status: 'passed',
+            model: 'DeepSeek-V4-Pro',
+            durationMs: 10,
+            inputTokens: 20,
+            outputTokens: 1,
+          }),
+          evaluationValidatedAt: expect.any(String),
+        }),
+      }),
+    );
+  });
+
+  it('no puntua una evaluacion truncada', async () => {
+    const { repo } = await run(
+      'running',
+      { responseOutcome: 'truncated', executedModel: 'DeepSeek-V4-Pro' },
+      {
+        studioMode: 'evaluation',
+        evaluationId: 'speed-exact-v1',
+        evaluationVersion: 1,
+        evaluationPromptVersion: 1,
+        evaluationFixtureId: null,
+        evaluationValidationMode: 'automatic',
+        evaluationScoring: 'timing',
+        evaluationConfirmed: true,
+      },
+    );
+    expect(repo.updateJob).toHaveBeenCalledWith(
+      JOB_ID,
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          evaluationResult: expect.objectContaining({ status: 'not_scored' }),
+        }),
+      }),
+    );
+  });
+
+  it('persiste el modelo efectivo aunque el proveedor falle', async () => {
+    const repo = {
+      getJobById: vi.fn(async () => job('running')),
+      updateJob: vi.fn(async () => job('failed')),
+    };
+    const deps = {
+      db: await fakeDb(),
+      repo,
+      telegram: { editMessageText: vi.fn(async () => undefined) },
+      logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    } as never as Parameters<typeof handleJobFail>[1];
+
+    const response = await handleJobFail(
+      new Request(`https://gateway.test/api/jobs/${JOB_ID}/fail`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' },
+        body: JSON.stringify({
+          errorMessage: 'fallo simulado',
+          hasLocalChanges: false,
+          worktreePath: null,
+          durationMs: 1200,
+          executedModel: 'DeepSeek-V4-Pro',
+        }),
+      }),
+      deps,
+      { jobId: JOB_ID },
+    );
+
+    expect(response.status).toBe(200);
+    expect(repo.updateJob).toHaveBeenCalledWith(
+      JOB_ID,
+      expect.objectContaining({
+        model: 'DeepSeek-V4-Pro',
+        metadata: expect.objectContaining({ executedModel: 'DeepSeek-V4-Pro' }),
+      }),
+    );
+  });
+
   // POR QUE EXISTE: la respuesta completa ya se guarda entera, y eso puede ser
   // una pagina web. La tarjeta de Telegram no puede convertirse en veinte
   // mensajes; el resultado completo se lee en Studio.
@@ -232,10 +353,7 @@ describe('resultado final idempotente', () => {
     expect(patch.result_summary).toHaveLength(20_000);
 
     // pero la tarjeta va recortada y lo dice
-    const enviado = [
-      ...telegram.editMessageText.mock.calls,
-      ...telegram.sendMessage.mock.calls,
-    ]
+    const enviado = [...telegram.editMessageText.mock.calls, ...telegram.sendMessage.mock.calls]
       .flat()
       .filter((arg): arg is string => typeof arg === 'string')
       .join('\n');
@@ -245,7 +363,10 @@ describe('resultado final idempotente', () => {
 
   it('un resultado sin final declarado conserva el contrato anterior', async () => {
     const { repo } = await run('running');
-    const [, patch] = repo.updateJob.mock.calls[0] as [string, { metadata: Record<string, unknown> }];
+    const [, patch] = repo.updateJob.mock.calls[0] as [
+      string,
+      { metadata: Record<string, unknown> },
+    ];
     expect(patch.metadata).not.toHaveProperty('responseOutcome');
     expect(patch.metadata).not.toHaveProperty('responseTermination');
   });

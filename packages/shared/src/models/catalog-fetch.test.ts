@@ -90,7 +90,7 @@ describe('buildCatalogSnapshot', () => {
     expect(conFantasma.models.map((model) => model.apiModel)).toEqual(['deepseek-chat']);
   });
 
-  it('sin precios sigue habiendo catalogo', () => {
+  it('sin consultar precios sigue habiendo catalogo', () => {
     const sinPrecios = buildCatalogSnapshot({
       connectionId: 'hcnsec',
       fetchedAt: '2026-08-06T14:00:00.000Z',
@@ -102,6 +102,7 @@ describe('buildCatalogSnapshot', () => {
     expect(sinPrecios.pricingAvailable).toBe(false);
     expect(sinPrecios.notice).toContain('no sirve precios');
     expect(sinPrecios.models.every((model) => model.billing === 'unknown')).toBe(true);
+    expect(sinPrecios.pricingProbes).toBeUndefined();
   });
 
   it('una respuesta de precios con otra forma no rompe nada', () => {

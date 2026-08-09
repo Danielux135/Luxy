@@ -1,5 +1,392 @@
 # Luxy — tarea activa
 
+## Checkpoint de continuidad — 2026-08-09
+
+Paso activo: **LA-018 — validar el Laboratorio actualizado**
+
+Estado: **pending — Daniel, 2026-08-09**
+
+Checkpoint local: **`feat: incorpora modelos y laboratorio reproducible`**.
+Rama un commit por delante de origen; no se hizo push ni deploy.
+
+Paso cerrado: **F4.3-T8 — seguimiento y cancelación sin polling**
+
+Estado: **done — Codex, 2026-08-09**
+
+Objetivo: hacer visible una evaluación activa y permitir detenerla sin perder
+la trazabilidad ni confundir una cancelación con un fallo del modelo.
+
+Criterio de aceptación: detectar sólo trabajos activos con snapshot válido;
+mostrar ID, prueba, modelo y estado; cancelación confirmada y no repetible desde
+la misma sesión; ninguna actualización automática; cierre cancelado persistido
+como `not_scored`, con o sin texto parcial.
+
+Resultado: cumplido. Laboratorio incorpora el panel **Evaluación activa** y
+actualización manual. Gateway genera `evaluationResult` con final `cancelled` y
+motivo explícito. Específicas 38/38; suite completa 1.543 pasadas, 9 omitidas, 0
+fallos; lint, tipos y build en verde.
+
+Restricciones: no se ejecutaron ni cancelaron trabajos reales; sin polling,
+precios, migración, deploy, commit ni push. `LA-018` y `LA-019` siguen pendientes.
+
+Siguiente acción exacta: validación visual `LA-018`; después, sólo si Daniel
+acepta consumo, `LA-019` incluye comprobar el estado activo y una cancelación.
+
+Paso cerrado: **F4.3-T7 — primera ejecución individual confirmada**
+
+Estado: **done — Codex, 2026-08-09**
+
+Objetivo: conectar una única evaluación automática desde Laboratorio con
+confirmación explícita, conservando fuera todos los runners y comparaciones aún
+no implementados.
+
+Criterio de aceptación: sólo rapidez, instrucciones, JSON y contexto largo;
+modelo exacto, máquina conectada, proveedor y proyecto compatibles; casilla más
+diálogo final; una evaluación activa visible como máximo; prompt/snapshot
+validados otra vez en Gateway; ejecución de solo lectura en el agente.
+
+Resultado: cumplido. La interfaz permite crear el trabajo y señala su `shortId`;
+Gateway rechaza pruebas no automáticas y una segunda evaluación activa ya
+observada para el mismo Studio. El precio se declara desconocido y no se
+consulta. Específicas 50/50; suite completa 1.541 pasadas, 9 omitidas, 0 fallos;
+lint, tipos y build en verde.
+
+Restricciones preservadas: no se ejecutó ningún modelo durante el desarrollo;
+sin comparación, sandbox, rúbrica, tool calling, precios, migración, deploy,
+commit ni push. La barrera de concurrencia del Gateway es preventiva, no una
+exclusión transaccional de base de datos.
+
+Siguiente acción exacta: completar primero `LA-018` visual y, si Daniel acepta
+el consumo, `LA-019` con la prueba corta de rapidez. Requiere Desktop, agente y
+Gateway construidos desde este mismo código.
+
+Paso cerrado: **F4.3-T6 — historial visible sin polling**
+
+Estado: **done — Codex, 2026-08-09**
+
+Objetivo: presentar resultados de evaluaciones ya guardados sin habilitar la
+creación de trabajos ni añadir sondeo periódico.
+
+Criterio de aceptación: una lectura acotada a los últimos 100 trabajos al abrir
+Laboratorio; actualización sólo por botón; aceptar únicamente
+`evaluationResult` válido y coherente con ID, versión y modelo del trabajo;
+mostrar estado, checks, duración, tamaño y tokens disponibles.
+
+Resultado: cumplido. El parser puro descarta tareas normales, metadata inválida
+y resultados con identidad contradictoria. La pantalla muestra hasta 12
+resultados recientes o un estado vacío explícito. Cambiar prueba/modelo no
+recarga historial. Específicas 104/104; suite completa 1.535 pasadas, 9
+omitidas, 0 fallos; lint, tipos y build en verde.
+
+Restricciones preservadas: una lectura de historial no ejecuta modelos; sin
+polling, precios, creación, sandbox, tool calling, migración, deploy, commit ni
+push. `LA-017` y `LA-018` siguen pendientes.
+
+Siguiente acción exacta: reconstruir Studio y completar `LA-018` ampliada. El
+próximo bloque técnico será fijar la política de la primera ejecución individual
+y sus estados de interfaz antes de habilitarla.
+
+Paso cerrado: **F4.3-T5 — resultado automático persistible**
+
+Estado: **done — Codex, 2026-08-09**
+
+Objetivo: convertir la salida final de un trabajo de evaluación legítimo en un
+resultado trazable mediante los validadores puros existentes, sin ejecutar
+modelos ni código generado.
+
+Criterio de aceptación: sólo una respuesta `completed` y un snapshot idéntico
+al catálogo pueden validarse; conservar modelo, versión, fixture, checks,
+caracteres, duración y tokens disponibles; parciales y modos no automáticos
+quedan `not_scored`; ninguna nota subjetiva o numérica.
+
+Resultado: cumplido. Shared aporta el esquema y evaluador puro. Al cerrar un
+trabajo, Gateway guarda `evaluationResult` y `evaluationValidatedAt` en metadata
+sin migración. Las tareas normales no cambian. Matriz específica 18/18; suite
+completa 1.531 pasadas, 9 omitidas, 0 fallos; lint, tipos y build en verde.
+
+Restricciones preservadas: botón e IPC de ejecución deshabilitados; sin APIs
+reales, precios, sandbox, tool calling, rúbricas, migración, deploy, commit ni
+push. `LA-017` y `LA-018` siguen pendientes.
+
+Siguiente acción exacta: ejecutar `LA-018`. El siguiente bloque técnico será
+definir la política de una primera ejecución individual y su presentación de
+resultado antes de conectar el botón; no se habilitarán comparaciones múltiples
+ni runners pendientes a la vez.
+
+Paso cerrado: **F4.3-T4 — confirmación y contrato persistente**
+
+Estado: **done — Codex, 2026-08-09**
+
+Objetivo: definir qué datos y qué confirmación necesitará una ejecución
+reproducible, conservar ese snapshot en trabajos/metadata y asegurar una ruta de
+solo lectura, sin conectar todavía el botón del Laboratorio.
+
+Criterio de aceptación: confirmación literal y modelo exacto obligatorios;
+snapshot y prompt idénticos al catálogo actual; metadata sin puntuación
+inventada; agente sin worktree, herramientas, memoria ni checks; interfaz sin
+IPC ejecutable.
+
+Restricciones: ninguna llamada real, precio, migración, deploy, commit ni push.
+`LA-017` y `LA-018` continúan pendientes.
+
+Resultado: cumplido. Shared valida el snapshot versionado; Gateway rechaza
+prompts o definiciones alteradas y guarda identidad, fixture, scoring y modo de
+validación en metadata. El agente reconoce `studioMode: evaluation` como solo
+lectura. Laboratorio muestra una casilla informativa que se reinicia al cambiar
+la selección y un botón permanentemente deshabilitado. Específicas 37/37;
+suite completa 1.523 pasadas, 9 omitidas, 0 fallos; lint, tipos y build en verde.
+
+Siguiente acción exacta: ejecutar `LA-018` ampliada. El siguiente bloque de
+código será `F4.3-T5`: persistir y validar resultados automáticos ya guardados,
+sin habilitar sandbox, revisión manual, tool calling ni ejecuciones múltiples.
+
+Paso cerrado: **F4.3-T3 — selección compatible y previsualización**
+
+Estado: **done — Codex, 2026-08-09**
+
+Objetivo: permitir elegir una prueba y un modelo que declare sus capacidades,
+y revisar el prompt final compuesto con la fixture, sin enviarlo ni crear un
+trabajo.
+
+Criterio de aceptación: filtro de compatibilidad puro con pruebas; composición
+determinista y segura del prompt; interfaz con selectores, longitud y vista
+previa; cero IPC, Gateway, proveedor, persistencia o botón de ejecución.
+
+Restricciones: las capacidades del catálogo no se presentan como verificadas;
+sin precios, APIs reales, migraciones, deploy, commit ni push. `LA-017` y
+`LA-018` siguen pendientes.
+
+Resultado: cumplido. Un filtro puro cruza los requisitos de la prueba con las
+capacidades declaradas y excluye modelos deshabilitados. La composición añade
+cabecera versionada, instrucciones y fixture delimitada como datos. Laboratorio
+permite elegir prueba/modelo y ver longitud, fixture y prompt completo, sin
+botón ni IPC. Matriz específica 55/55; suite completa 1.516 pasadas, 9 omitidas,
+0 fallos; lint, tipos y build en verde.
+
+Siguiente acción exacta: ejecutar `LA-018` ampliada. El próximo bloque de código
+será diseñar la confirmación explícita y el contrato persistente de una
+ejecución (`F4.3-T4`/`F4.5`), sin habilitar llamadas hasta que ese límite esté
+probado.
+
+---
+
+### Paso anterior cerrado
+
+Paso cerrado: **F4.3-T2 — fixtures y validadores locales**
+
+Estado: **done — Codex, 2026-08-09**
+
+Objetivo: materializar las fixtures versionadas del Laboratorio y evaluar de
+forma local las salidas que admiten validación pura, sin ejecutar código
+generado ni llamar a modelos.
+
+Criterio de aceptación: toda `fixtureId` del catálogo resuelve a una fixture
+determinista; rapidez exacta, instrucciones, JSON y contexto largo tienen
+validadores automáticos con diagnósticos; código, frontend, español y tool
+calling declaran el runner seguro que todavía necesitan, sin puntuación falsa.
+
+Restricciones: nada de `eval`, shell, navegador, proveedor real, precios,
+migraciones, deploy, commit ni push. `LA-017` y `LA-018` siguen pendientes como
+comprobaciones visuales.
+
+Resultado: cumplido. Las seis `fixtureId` resuelven a contenido determinista,
+incluido un contexto de 1.200 líneas y un proyecto virtual de solo lectura.
+Rapidez exacta, instrucciones, JSON y recuperación larga tienen validadores
+puros; código, frontend, español y tool calling informan respectivamente de
+sandbox, revisión o traza pendientes. Matriz específica 53/53; suite completa
+1.514 pasadas, 9 omitidas, 0 fallos; lint, tipos y build en verde.
+
+Siguiente acción exacta: `LA-018`, comprobar las etiquetas y datos de fixture.
+El siguiente bloque de código será `F4.3-T3`: previsualizar el prompt final y
+seleccionar un modelo compatible, todavía sin enviar nada, antes de diseñar la
+confirmación explícita de ejecución.
+
+---
+
+### Paso anterior cerrado
+
+Paso cerrado: **F4.3-T1 — catálogo reproducible del Laboratorio**
+
+Estado: **done — Codex, 2026-08-09**
+
+Objetivo: definir y mostrar un catálogo versionado de pruebas de modelos con
+objetivo, requisitos y criterios de evaluación explícitos, sin ejecutar ninguna
+llamada ni consumir tokens.
+
+Criterio de aceptación: ocho áreas iniciales de `F4.3` representadas mediante
+un contrato puro con pruebas; nueva sección Laboratorio en Studio que indique
+claramente que está en preparación; ninguna red, benchmark automático ni dato
+de rendimiento inventado.
+
+Restricciones: sin precios, APIs reales, migraciones, deploy, commit ni push.
+`LA-017` sigue pendiente en paralelo como comprobación manual de Modelos.
+
+Resultado: cumplido. `@luxy/shared` contiene ocho definiciones versionadas y
+validadas con prompt, scoring, capacidades, fixture y criterios. Studio incorpora
+la sección **Laboratorio**, que las muestra en modo preparación y no ofrece
+ninguna acción ejecutable. Pruebas específicas 46/46; suite completa 1.507
+pasadas, 9 omitidas, 0 fallos; lint, tipos y build en verde.
+
+Siguiente acción exacta: `LA-018`, reconstruir Studio y revisar que Laboratorio
+muestra las ocho pruebas y declara inequívocamente que no ejecuta modelos. El
+siguiente paso de código será `F4.3-T2`, crear las fixtures deterministas y sus
+validadores locales antes de habilitar cualquier ejecución.
+
+---
+
+### Paso anterior cerrado
+
+Paso cerrado: **F4.2-T3 — paginar la evidencia local de modelos**
+
+Estado: **done — Codex, 2026-08-09**
+
+Objetivo: dejar de limitar silenciosamente las métricas a una sola página de
+100 trabajos. Añadir `offset` al historial existente y cargar sus páginas una
+sola vez al abrir Modelos, con un tope local explícito para no generar tráfico
+sin límite.
+
+Criterio de aceptación: el contrato de historial acepta un desplazamiento
+validado; Modelos agrega páginas sin polling, evita duplicados y dice si alcanzó
+el tope; pruebas de paginación y contratos, documentación y validación completa.
+
+Restricciones: ninguna API real, precio, benchmark, migración, commit, push ni
+deploy. `LA-017` permanece pendiente y se ampliará con la cobertura visible.
+
+Resultado: cumplido. El historial acepta `offset`; Modelos carga páginas de 100
+una sola vez, elimina IDs repetidos y revisa hasta 1.000 trabajos. La pantalla
+dice cuántos leyó, si alcanzó el tope y si un Gateway anterior repitió la misma
+página. Matriz específica 60/60; suite completa 1.504 pasadas, 9 omitidas, 0
+fallos; lint, tipos y build en verde.
+
+Siguiente acción exacta: ejecutar `LA-017` contra el Gateway actualizado. Si la
+pantalla avisa que el Gateway no avanzó al paginar, el Desktop nuevo está usando
+todavía un Gateway anterior; probar en local o autorizar un despliegue separado.
+
+---
+
+### Paso anterior cerrado
+
+Paso cerrado: **F4.2-T2 — atribuir el modelo efectivo**
+
+Estado: **done — Codex, 2026-08-09**
+
+Objetivo: cuando un trabajo pide sólo una familia y el agente elige su modelo
+predeterminado, conservar ese `apiModel` efectivo en la metadata para que las
+métricas locales puedan atribuirlo sin adivinar. Mantener compatibilidad con
+trabajos y agentes anteriores.
+
+Criterio de aceptación: el agente informa el modelo realmente resuelto, el
+gateway lo persiste, el agregador prefiere `job.model` y usa la metadata sólo
+como respaldo validado; pruebas de ambos contratos y guía manual concreta.
+
+Resultado: cumplido. El agente propaga `executedModel` en completados, fallos y
+cancelaciones; el valor informado por `usage.model` prevalece cuando existe. El
+gateway conserva el modelo efectivo sin sobrescribir uno ya guardado y Modelos
+puede atribuir también trabajos creados mediante una familia. Matriz específica
+31/31; suite completa 1.497 pasadas, 9 omitidas, 0 fallos; lint, tipos y build
+en verde.
+
+Siguiente acción exacta: reconstruir/reiniciar Studio y ejecutar `LA-017`, con
+especial atención a un trabajo creado eligiendo sólo una familia. Ese trabajo
+debe aparecer bajo el `apiModel` exacto que haya resuelto el agente.
+
+---
+
+### Paso anterior cerrado
+
+Paso: **F4.2-T1 — métricas locales por modelo**
+
+Estado: **done — Codex, 2026-08-09**
+
+Objetivo: aprovechar trabajos ya guardados para mostrar por modelo evidencia
+local de disponibilidad, velocidad, estabilidad y errores, sin ejecutar
+benchmarks ni llamadas adicionales. Primero se verificará qué campos reales
+existen; sólo se mostrará lo que pueda derivarse sin inventar datos.
+
+Criterio de aceptación inicial: agregación pura con pruebas de resultados
+completos, parciales y fallidos; integración pequeña en Modelos; ninguna red
+nueva; documentación y validación completa actualizadas.
+
+Resultado: cumplido. Modelos lee una sola vez los últimos 100 trabajos y muestra
+por `apiModel` tasa de respuestas completas, mediana de duración, truncaciones,
+interrupciones, timeout, fallos y cancelaciones separadas. No atribuye trabajos
+sin modelo exacto. Se añadieron 6 pruebas; suite completa: 1.494 pasadas, 9
+omitidas, 0 fallos; lint, tipos y build en verde.
+
+Siguiente acción exacta: reconstruir/reiniciar Studio y abrir **Modelos**
+(`LA-017`). Confirmar que los modelos usados muestran evidencia y los que no
+tienen muestra dicen «sin ejecuciones atribuibles», sin sondeo continuo.
+
+---
+
+### Paso anterior cerrado
+
+Paso: **F4.1-T5 — dejar de consultar precios no publicados**
+
+Estado: **done — Codex, 2026-08-09**
+
+Evidencia manual de Daniel: Studio obtiene 22 modelos, pero las tres rutas de
+precios no aportan datos (`/api/pricing`: 200 con 0 entradas; `/v1/pricing`:
+404; `/api/models`: 200 con 0 entradas). Decisión explícita: si la pasarela no
+permite consultar precios, Luxy no los consulta.
+
+Objetivo: conservar únicamente `/v1/models`, eliminar las peticiones de precios
+y simplificar la pantalla para informar una sola vez de que la conexión no
+publica precios, sin etiquetas repetidas por modelo.
+
+Resultado: cumplido. **Actualizar modelos** hace una sola petición a
+`/v1/models`; no prueba rutas de precios. La pantalla muestra un aviso neutro
+único y no repite «sin precio» en cada fila. Pruebas específicas 80/80; suite
+completa 1.488 pasadas, 9 omitidas, 0 fallos; lint, tipos y build en verde.
+
+Siguiente acción exacta: Daniel reconstruye/reinicia Studio para cargar este
+renderer. No hace falta volver a pulsar el botón por los precios; sólo se usa
+cuando quiera actualizar la lista de modelos.
+
+### Paso anterior: **F4.1-T4 — catálogo operativo alineado con la lectura real**
+
+Estado: **done — Codex, 2026-08-09**
+
+Objetivo inmediato: reconciliar este documento y el resto de la memoria
+canónica con el estado real de Git antes de continuar código. El worktree está
+en `feat/luxy-desktop`, HEAD `59870c6`, sincronizado con
+`origin/feat/luxy-desktop`. `P0.6c`, `F4.1-T1`–`F4.1-T3`, el push del
+checkpoint y el despliegue documentado del gateway ya ocurrieron, aunque varias
+secciones históricas inferiores todavía los presentan como pendientes.
+
+Restricciones del paso: preservar el cambio local ajeno de `package-lock.json`;
+no abrir ni modificar archivos de claves; no commit, push, deploy, migraciones
+ni llamadas reales de proveedor.
+
+`DOC-CHECKPOINT-002` quedó reconciliado al iniciar esta sesión. La inspección
+confirmó que la instantánea real sólo alimenta `availableModels`; los tres
+modelos descubiertos que no existen en `buildDefaultCatalog` no llegan al
+registro operativo.
+
+Objetivo de `F4.1-T4`: incorporar `step-explore`,
+`sensenova-6.7-flash-lite` y `sensenova-u1-fast` con un contrato conservador:
+texto básico, sin herramientas, sin alias y sin inventar límites, precios ni
+capacidades no verificadas. Actualizar la prueba antigua que aún contradice la
+lectura real de 22 modelos.
+
+Criterio de aceptación: los 22 identificadores observados el 2026-08-07 están
+representados en el catálogo operativo; los tres nuevos quedan marcados como no
+verificados y no reciben herramientas; pruebas específicas y comprobaciones
+completas en verde.
+
+Resultado: cumplido. Los tres modelos se incorporaron con capacidades mínimas;
+un alias de familia sólo se crea ahora si existe un predeterminado explícito.
+Pruebas específicas 88/88 y suite completa 1.488 pasadas, 9 omitidas, 0 fallos;
+lint, tipos y build en verde.
+
+Siguiente acción exacta: **Daniel — `LA-014`**. Reconstruir/reiniciar Studio y
+repetir **Consultar a la pasarela** para obtener el diagnóstico de las tres
+rutas de precios. `F4.1` no puede convertir precios ni topes sin esa evidencia.
+
+---
+
+## Bloque histórico anterior
+
 ID: **LUXY-P0-LONG-RESPONSES**  
 Prioridad: **P0 — bloquea la consolidación del checkpoint**  
 Estado: **en curso; `P0.0`–`P0.5`, `P0.6a`, `P0.6b`, `P0.6d`, `P0.8` y `P0.9`

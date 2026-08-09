@@ -1,6 +1,20 @@
 import { describe, expect, it, vi } from 'vitest';
 import { Repository } from './repository.js';
 
+describe('Repository.listJobs', () => {
+  it('pasa limite y desplazamiento a PostgREST', async () => {
+    const select = vi.fn(async () => []);
+    const repo = new Repository({ select } as never);
+
+    await repo.listJobs({ limit: 100, offset: 300 });
+
+    expect(select).toHaveBeenCalledWith(
+      'jobs',
+      expect.objectContaining({ limit: 100, offset: 300, order: 'created_at.desc' }),
+    );
+  });
+});
+
 describe('Repository.listPendingApprovalsForMachine', () => {
   it('ordena por la fecha real de solicitud de approvals', async () => {
     const select = vi.fn(async () => []);

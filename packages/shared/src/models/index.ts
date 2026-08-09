@@ -4,3 +4,6 @@ export * from './registry.js';
 export * from './catalog-fetch.js';
 export * from './router-v2.js';
 export * from './aliases.js';
+export * from './evaluations.js';
+export * from './evaluation-fixtures.js';
+export * from './evaluation-results.js';

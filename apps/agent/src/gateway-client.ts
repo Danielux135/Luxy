@@ -203,6 +203,7 @@ export class GatewayClient {
       targetMachineId?: string;
       status?: string;
       limit?: number;
+      offset?: number;
     } = {},
   ): Promise<StudioJob[]> {
     const query = new URLSearchParams();
@@ -211,6 +212,7 @@ export class GatewayClient {
     }
     if (filters.status !== undefined) query.set('status', filters.status);
     if (filters.limit !== undefined) query.set('limit', String(filters.limit));
+    if (filters.offset !== undefined) query.set('offset', String(filters.offset));
     const suffix = query.size === 0 ? '' : `?${query.toString()}`;
     const raw = await this.request('GET', `/api/studio/jobs${suffix}`);
     return studioJobsResponseSchema.parse(raw).jobs;

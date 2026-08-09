@@ -3,7 +3,6 @@ import { useEffect, useState, type JSX } from 'react';
 import {
   ModelRegistry,
   buildDefaultCatalog,
-  describeModelBilling,
   guessModelFamily,
   type CatalogSnapshot,
   type ConnectionProfile,
@@ -12,6 +11,12 @@ import {
   type StoredAgentConfig,
 } from '@luxy/shared';
 import { connectionSecretName } from '../../shared/ipc.js';
+import {
+  describeModelEvidence,
+  loadModelEvidenceHistory,
+  summarizeModelEvidence,
+} from '../model-evidence.js';
+import type { ModelEvidence } from '../model-evidence.js';
 import { Empty, Field, Notice, Panel, Tag } from '../ui/primitives.js';
 import type { ConfigSummary } from '../useConfig.js';
 
@@ -22,6 +27,7 @@ const FAMILIA: Record<ModelFamily, string> = {
   kimi: 'Kimi',
   minimax: 'MiniMax',
   qwen: 'Qwen',
+  sensenova: 'SenseNova',
   step: 'Step',
   stepaudio: 'StepAudio',
   stepimage: 'Step Image',
@@ -76,6 +82,52 @@ function useCatalogSnapshot(summary: ConfigSummary): {
   }, [connectionId, leido]);
 
   return { snapshot, setSnapshot, connectionId };
+}
+
+/** lee una vez el historial reciente; no sondea ni ejecuta modelos */
+function useModelEvidence(): {
+  evidence: Map<string, ModelEvidence>;
+  loading: boolean;
+  error: string | null;
+  sampleSize: number;
+  capped: boolean;
+  paginationStalled: boolean;
+} {
+  const [evidence, setEvidence] = useState<Map<string, ModelEvidence>>(new Map());
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [sampleSize, setSampleSize] = useState(0);
+  const [capped, setCapped] = useState(false);
+  const [paginationStalled, setPaginationStalled] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    void loadModelEvidenceHistory(async (offset, limit) => {
+      const result = await window.luxy.listStudioJobs({ limit, offset });
+      if (!result.ok) throw new Error(result.error);
+      return result.value.jobs;
+    })
+      .then((history) => {
+        if (!active) return;
+        setEvidence(summarizeModelEvidence(history.jobs));
+        setSampleSize(history.jobs.length);
+        setCapped(history.capped);
+        setPaginationStalled(history.paginationStalled);
+        setError(null);
+      })
+      .catch((reason: unknown) => {
+        if (!active) return;
+        setError(reason instanceof Error ? reason.message : 'no se pudo leer el historial');
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  return { evidence, loading, error, sampleSize, capped, paginationStalled };
 }
 
 // -----------------------------------------------------------------------------
@@ -421,7 +473,7 @@ function CatalogoReal({
             disabled={busy}
             onClick={() => void refrescar()}
           >
-            {busy ? 'Consultando…' : 'Consultar a la pasarela'}
+            {busy ? 'Actualizando…' : 'Actualizar modelos'}
           </button>
         </>
       }
@@ -429,16 +481,14 @@ function CatalogoReal({
       {error !== null && <Notice tone="fault">{error}</Notice>}
       {snapshot === null ? (
         <Empty title="Sin consultar todavia">
-          Luxy trae un catalogo escrito a mano que nunca se ha verificado. Pulsa para preguntarle a
-          la pasarela que sirve de verdad y a que precio.
+          Pulsa para preguntarle a la pasarela que modelos sirve de verdad.
         </Empty>
       ) : (
         <>
-          <p className="list__meta">
-            Leido el {new Date(snapshot.fetchedAt).toLocaleString()} ·{' '}
-            {snapshot.pricingAvailable ? 'con precios' : 'sin precios declarados'}
-          </p>
-          {snapshot.notice !== null && <Notice tone="warn">{snapshot.notice}</Notice>}
+          <p className="list__meta">Leido el {new Date(snapshot.fetchedAt).toLocaleString()}</p>
+          <Notice tone="idle">
+            Esta conexion no publica precios por API; Luxy no los consulta.
+          </Notice>
           {[...porFamiliaReal.entries()].map(([familia, modelos]) => (
             <section key={familia}>
               <div className="silk">
@@ -449,15 +499,7 @@ function CatalogoReal({
                   <li key={model.apiModel}>
                     <div className="list__main">
                       <div className="list__name mono scroller">{model.apiModel}</div>
-                      <div className="list__meta">{describeModelBilling(model)}</div>
                     </div>
-                    <Tag tone={model.billing === 'call' ? 'warn' : undefined}>
-                      {model.billing === 'call'
-                        ? 'por llamada'
-                        : model.billing === 'token'
-                          ? 'por tokens'
-                          : 'sin precio'}
-                    </Tag>
                   </li>
                 ))}
               </ul>
@@ -471,6 +513,7 @@ function CatalogoReal({
 
 export function ModelsPage({ summary }: { summary: ConfigSummary }): JSX.Element {
   const { snapshot, setSnapshot, connectionId } = useCatalogSnapshot(summary);
+  const localEvidence = useModelEvidence();
   const registry = buildRegistry(summary, snapshot);
   const resolved = registry.resolveAll();
 
@@ -492,6 +535,20 @@ export function ModelsPage({ summary }: { summary: ConfigSummary }): JSX.Element
       </p>
 
       <CatalogoReal connectionId={connectionId} snapshot={snapshot} onSnapshot={setSnapshot} />
+
+      {localEvidence.error !== null && (
+        <Notice tone="warn">No se pudo leer la evidencia local: {localEvidence.error}</Notice>
+      )}
+      {!localEvidence.loading && localEvidence.error === null && (
+        <Notice tone={localEvidence.capped ? 'warn' : 'idle'}>
+          Evidencia local: {localEvidence.sampleSize} trabajos revisados
+          {localEvidence.paginationStalled
+            ? '; el gateway no avanzo al paginar y debe actualizarse para leer el resto.'
+            : localEvidence.capped
+              ? '; hay mas historial y la muestra se limita a los 1.000 mas recientes.'
+              : '; historial reciente completo.'}
+        </Notice>
+      )}
 
       {resolved.length === 0 ? (
         <Panel flush>
@@ -515,6 +572,13 @@ export function ModelsPage({ summary }: { summary: ConfigSummary }): JSX.Element
                       {definition.telegramAliases.length === 0
                         ? 'sin comando de Telegram'
                         : definition.telegramAliases.map((alias) => `/${alias}`).join('  ')}
+                    </div>
+                    <div className="list__meta">
+                      {localEvidence.loading
+                        ? 'leyendo ejecuciones recientes…'
+                        : localEvidence.evidence.has(definition.apiModel)
+                          ? describeModelEvidence(localEvidence.evidence.get(definition.apiModel)!)
+                          : 'sin ejecuciones atribuibles en el historial revisado'}
                     </div>
                     {!usable && unavailableReason !== null && (
                       <div className="list__meta">{unavailableReason}</div>

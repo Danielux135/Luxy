@@ -25,9 +25,12 @@ const SERVED_BY_CONNECTION = [
   'MiniMax-M3',
   'Qwen3.5-397B-A17B',
   'Qwen3.6-35B-A3B',
+  'sensenova-6.7-flash-lite',
+  'sensenova-u1-fast',
   'step-3.5-flash',
   'step-3.5-flash-2603',
   'step-3.7-flash',
+  'step-explore',
   'stepaudio-2.5-asr',
   'stepaudio-2.5-chat',
   'stepaudio-2.5-realtime',
@@ -92,14 +95,9 @@ describe('catalogo inicial', () => {
     }
   });
 
-  it('no contiene los cuatro modelos que la conexion no sirve', () => {
+  it('no contiene los dos modelos que la conexion no sirve', () => {
     const apiModels = CATALOG.map((model) => model.apiModel);
-    for (const ausente of [
-      'kat-coder-pro-v2',
-      'MiniMax-M2.7',
-      'sensenova-6.7-flash-lite',
-      'sensenova-u1-fast',
-    ]) {
+    for (const ausente of ['kat-coder-pro-v2', 'MiniMax-M2.7']) {
       expect(apiModels).not.toContain(ausente);
     }
   });
@@ -108,6 +106,20 @@ describe('catalogo inicial', () => {
     const apiModels = CATALOG.map((model) => model.apiModel);
     expect(apiModels).toContain('glm-5.1');
     expect(apiModels).toContain('auto');
+    expect(apiModels).toContain('step-explore');
+    expect(apiModels).toContain('sensenova-6.7-flash-lite');
+    expect(apiModels).toContain('sensenova-u1-fast');
+  });
+
+  it('los tres modelos nuevos no inventan capacidades ni herramientas', () => {
+    for (const apiModel of ['step-explore', 'sensenova-6.7-flash-lite', 'sensenova-u1-fast']) {
+      const model = CATALOG.find((entry) => entry.apiModel === apiModel);
+      expect(model?.capabilities).toEqual(['text']);
+      expect(model?.agentic).toBe(false);
+      expect(model?.allowedTools).toEqual([]);
+      expect(model?.supportsNativeTools).toBeNull();
+      expect(model?.metadata['contractVerified']).toBe(false);
+    }
   });
 
   it('cada familia tiene como mucho un predeterminado', () => {
@@ -188,6 +200,10 @@ describe('resolucion de alias', () => {
     ]) {
       expect(registry.resolveAlias(retirado)).toBeNull();
     }
+  });
+
+  it('una familia nueva sin predeterminado no inventa un alias', () => {
+    expect(registry.resolveAlias('sensenova')).toBeNull();
   });
 
   it('los routers no tienen alias de telegram', () => {

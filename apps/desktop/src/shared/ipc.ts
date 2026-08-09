@@ -276,6 +276,7 @@ export const studioJobsListArgsSchema = z.object({
   targetMachineId: z.string().uuid().optional(),
   status: jobStatusSchema.optional(),
   limit: z.number().int().min(1).max(100).default(30),
+  offset: z.number().int().min(0).max(100_000).optional(),
 });
 export const studioJobIdArgsSchema = z.object({ jobId: z.string().uuid() });
 export const studioJobActionArgsSchema = studioJobActionRequestSchema.extend({

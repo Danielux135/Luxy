@@ -1040,6 +1040,434 @@ entradas (success, data)` sí.
 - Siguiente paso exacto: en Studio de desarrollo, comprobar Conversaciones ya sin
   404, y repetir **Consultar a la pasarela** para leer el diagnóstico de precios.
 
+### 2026-08-09 — Codex — DOC-CHECKPOINT-002
+
+- Estado anterior: la rama real estaba en `59870c6` y sincronizada con origen,
+  pero `CURRENT-TASK.md`, `PROJECT-STATE.md`, `MASTER-PLAN.md` y
+  `LOCAL-ACTIONS.md` todavía presentaban `P0.6c`, el push y partes de `F4.1`
+  como pendientes.
+- Objetivo: reconciliar la memoria canónica antes de continuar código.
+- Hipótesis o causa demostrada: documentación de relevo no actualizada después
+  de los commits `265fd64` y `59870c6`; comprobado con Git y el código actual.
+- Archivos leídos: documentos obligatorios de relevo, historial reciente,
+  catálogo, registro, instantánea real y pantalla de Modelos.
+- Archivos modificados: `CURRENT-TASK.md`, `PROJECT-STATE.md`,
+  `MASTER-PLAN.md`, `LOCAL-ACTIONS.md`, `CHANGELOG-WORK.md`.
+- Comandos ejecutados: `git status --short --branch`, `git diff --stat`,
+  `git log`, `git branch -r` y `git rev-parse` sobre ramas local/remotas.
+- Resultado real: HEAD y `origin/feat/luxy-desktop` son `59870c6`; el rescate
+  de Remote existe en origen como `e27aa05`; se preservan el cambio ajeno de
+  `package-lock.json` y los archivos sin seguimiento.
+- Pruebas: no aplica todavía; reconciliación documental y comprobaciones Git de
+  solo lectura.
+- Decisiones: continuar como `F4.1-T4`; no reabrir `P0.6c` ni repetir pushes.
+- Riesgos o límites: precios y topes reales siguen sin evidencia; no se leen
+  secretos ni se llama a la pasarela.
+- Estado nuevo: `DOC-CHECKPOINT-002` `done`; `F4.1-T4` `in_progress`.
+- Siguiente paso exacto: representar en el catálogo operativo los tres modelos
+  observados que faltan, con capacidades conservadoras y pruebas sin red.
+
+### 2026-08-09 — Codex — F4.1-T4
+
+- Estado anterior: la lectura real de la pasarela contenía 22 modelos, pero
+  `buildDefaultCatalog` conservaba 19 y una prueba afirmaba que dos SenseNova no
+  se servían.
+- Objetivo: llevar los tres modelos observados al catálogo operativo sin
+  inventar capacidades, herramientas, precios ni límites.
+- Hipótesis o causa demostrada: la instantánea sólo alimentaba
+  `availableModels`; `step-explore`, `sensenova-6.7-flash-lite` y
+  `sensenova-u1-fast` no tenían definición y por tanto no llegaban al registro.
+- Archivos leídos: catálogo, tipos, registro y pruebas de modelos; pantalla de
+  Modelos; persistencia y parseo de la instantánea real.
+- Archivos modificados: `packages/shared/src/models/types.ts`, `catalog.ts`,
+  `registry.ts`, `registry.test.ts`; `apps/desktop/src/renderer/pages/Config.tsx`;
+  documentación canónica.
+- Comandos ejecutados: Prettier, Vitest específico, `npm run lint`,
+  `npm run typecheck`, `npm test`, `npm run build`, siempre mediante RTK.
+- Resultado real: el catálogo operativo contiene los 22 identificadores. Los
+  tres nuevos sólo declaran texto, quedan no agentic, sin herramientas, sin
+  alias y con contrato no verificado. Un alias de familia exige ahora un modelo
+  predeterminado explícito.
+- Pruebas: primera ejecución específica: 49 pasadas y 1 fallo, porque la familia
+  nueva inventaba `/sensenova`; corregido. Ejecución específica final: 88/88.
+  Suite completa: 1.488 pasadas, 9 omitidas, 0 fallos en 75 archivos. Lint,
+  tipos y build: exit 0. El primer `git diff --check` detectó los dos espacios
+  finales usados como salto Markdown en dos líneas nuevas; se sustituyeron por
+  párrafos y la repetición terminó con exit 0.
+- Decisiones: representar disponibilidad observada no autoriza a afirmar tool
+  calling, rapidez, precio o máximo de salida; se mantienen desconocidos.
+- Riesgos o límites: el `maxOutputTokens` por defecto sigue siendo 8.192 y no se
+  presenta como verificado; la segunda lectura de precios requiere `LA-014`.
+- Estado nuevo: `F4.1-T4` `done`; `F4.1` `implemented`, pendiente de evidencia
+  manual para precios y topes.
+- Siguiente paso exacto: Daniel reconstruye Studio y repite **Consultar a la
+  pasarela** (`LA-014`).
+
+### 2026-08-09 — Codex + Daniel — F4.1-T5
+
+- Estado anterior: Studio pedía `/v1/models` y después probaba tres rutas de
+  precios; la pantalla mostraba el diagnóstico y repetía «sin precio» para cada
+  modelo.
+- Objetivo: dejar de consultar precios que la pasarela no publica.
+- Hipótesis o causa demostrada: captura de Daniel con 22 modelos y tres sondeos
+  sin entradas útiles: dos respuestas vacías y un 404.
+- Archivos leídos: handler IPC del catálogo, pantalla de Modelos, contratos IPC,
+  parser y pruebas del catálogo.
+- Archivos modificados: `apps/desktop/src/main/ipc/handlers.ts`,
+  `apps/desktop/src/renderer/pages/Config.tsx`, prueba de catálogo y documentos
+  de continuidad/decisión.
+- Comandos ejecutados: Prettier, Vitest específico, búsqueda de rutas de precio,
+  `npm run lint`, `npm run typecheck`, `npm test`, `npm run build`.
+- Verificación de llamadas: la búsqueda de `/api/pricing`, `/v1/pricing` y
+  `/api/models` en `apps/desktop/src` devolvió 0 coincidencias y exit 1, que es
+  la convención de `rg` cuando no encuentra resultados.
+- Resultado real: **Actualizar modelos** realiza una sola petición a
+  `/v1/models`. La interfaz muestra una nota neutra única y sólo lista nombres;
+  desaparecen el diagnóstico de rutas y las etiquetas por modelo.
+- Pruebas: 80/80 específicas; suite completa 1.488 pasadas, 9 omitidas, 0
+  fallos en 75 archivos. Lint, tipos y build: exit 0. La primera comprobación
+  del diff encontró un salto Markdown con whitespace final en `DECISIONS.md`;
+  se sustituyó por un párrafo y la repetición quedó limpia.
+- Decisiones: `D-022`; una conexión futura con API de precios documentada
+  necesitará integración explícita. No se prueban rutas tentativas.
+- Riesgos o límites: los campos antiguos de precio se conservan en el formato
+  del snapshot para leer archivos existentes, pero no provocan red ni se pintan.
+- Estado nuevo: `F4.1-T5` `done`; `LA-014` cerrada por decisión.
+- Siguiente paso exacto: reconstruir/reiniciar Studio para cargar el renderer
+  nuevo; el botón queda sólo para actualizar modelos.
+
+### 2026-08-09 — Codex — F4.2-T1
+
+- Estado anterior: Modelos mostraba catálogo y disponibilidad declarada por la
+  conexión, pero no utilizaba la evidencia de trabajos ya guardados.
+- Objetivo: resumir disponibilidad, velocidad, estabilidad y errores por modelo
+  sin ejecutar benchmarks ni llamadas de proveedor.
+- Hipótesis o causa demostrada: `StudioJob` ya conserva `model`, estado,
+  `responseOutcome`, `durationMs`, fechas y error. No hace falta esquema nuevo.
+- Archivos leídos: contratos de trabajos, gateway de Studio, hooks de historial,
+  pantalla de Modelos y reglas de finales de respuesta.
+- Archivos modificados: nuevos `model-evidence.ts` y
+  `model-evidence.test.ts`, `Config.tsx` y documentación canónica.
+- Comandos ejecutados: Prettier, Vitest específico, `npm run lint`,
+  `npm run typecheck`, `npm test`, `npm run build`.
+- Resultado real: al abrir Modelos se leen una vez hasta 100 trabajos. Por
+  modelo exacto se muestran completas/observaciones, porcentaje, mediana de las
+  completas, truncadas, interrumpidas, timeout, fallidas y canceladas aparte.
+- Pruebas: 71/71 específicas; suite completa **1.494 pasadas, 9 omitidas, 0
+  fallos** en 76 archivos. Lint, tipos y build: exit 0.
+- Decisiones: (a) no inferir modelo desde proveedor; (b) cancelaciones no miden
+  inestabilidad del modelo; (c) la velocidad usa sólo respuestas completas;
+  (d) una lectura por apertura, nunca polling.
+- Riesgos o límites: muestra máxima de 100 trabajos; ejecuciones con `model:
+null` no pueden atribuirse; falta confirmación visual.
+- Estado nuevo: `F4.2-T1` `done`; `F4.2` `implemented` inicialmente.
+- Siguiente paso exacto: `LA-017`, reconstruir Studio y comprobar la vista.
+
+### 2026-08-09 — Codex — F4.2-T2
+
+- Estado anterior: las métricas sólo podían atribuir trabajos cuyo campo
+  `model` ya contenía un identificador exacto; al pedir una familia, el modelo
+  predeterminado resuelto por el agente podía perderse.
+- Objetivo: conservar el `apiModel` realmente ejecutado y usarlo como evidencia
+  en completados, fallos y cancelaciones, manteniendo compatibilidad con
+  agentes y trabajos anteriores.
+- Hipótesis o causa demostrada: el agente resolvía el modelo antes de invocar al
+  proveedor, pero los contratos de resultado no transportaban ese dato hasta
+  el gateway. Si el proveedor devuelve `usage.model`, ésa es la evidencia más
+  precisa y debe prevalecer.
+- Archivos modificados: `packages/shared/src/schemas.ts`,
+  `apps/agent/src/job-runner.ts`, `apps/agent/src/agent.ts`,
+  `apps/gateway/src/handlers/api.ts`,
+  `apps/desktop/src/renderer/model-evidence.ts` y sus pruebas relacionadas.
+- Comandos ejecutados: build de `@luxy/shared`, Prettier, Vitest específico,
+  `npm run lint`, `npm run typecheck`, `npm test` y `npm run build`, mediante
+  RTK.
+- Resultado real: `executedModel` viaja en todos los finales. Gateway rellena
+  `model` sólo si estaba vacío, conserva además `metadata.executedModel` y usa
+  el modelo efectivo en la fuente de memoria de conversación. El agregador
+  prefiere `job.model` y acepta la metadata sólo si es una cadena válida.
+- Pruebas: primera matriz específica, 28 pasadas y 3 fallos porque Gateway
+  cargaba el `dist` anterior de `@luxy/shared`; tras reconstruirlo, 30 pasadas y
+  1 fallo real: la cancelación de una fixture heredada omitía `model` y no se
+  trataba como vacío. Corregido sin sobrescribir valores existentes. Matriz
+  final 31/31; suite completa 1.497 pasadas, 9 omitidas, 0 fallos en 76
+  archivos. Lint, tipos y build: exit 0. Las 64 pruebas documentales, Prettier
+  sobre los archivos del paso y `git diff --check` también pasan. El
+  `format:check` global sigue fallando por deuda previa extendida y por el HTML
+  inválido de `Web demos/GLM demos/index.html`; no se modificaron esos archivos
+  ajenos al paso.
+- Decisiones: no inferir modelos históricos; guardar evidencia explícita. Un
+  `usage.model` del proveedor prevalece sobre el predeterminado resuelto.
+- Riesgos o límites: agentes antiguos no envían el campo; los trabajos ya
+  guardados sin modelo continúan sin atribución. Falta validación visual.
+- Estado nuevo: `F4.2-T2` `done`; `LA-017` queda como acción activa de Daniel.
+- Siguiente paso exacto: reconstruir/reiniciar Studio y el agente, y ejecutar
+  la lista ampliada de `LA-017`.
+
+### 2026-08-09 — Codex — F4.2-T3
+
+- Estado anterior: Modelos pedía una sola página de 100 trabajos y el agregador
+  descartaba cualquier elemento posterior, aunque el historial durable pudiera
+  ser mayor.
+- Objetivo: paginar la evidencia sin polling ni carga ilimitada y mostrar la
+  cobertura real de la muestra.
+- Hipótesis o causa demostrada: el contrato validaba sólo `limit`; repositorio y
+  PostgREST no recibían desplazamiento. La limitación estaba en toda la ruta,
+  no sólo en el renderer.
+- Archivos leídos: contratos compartidos e IPC, cliente de Gateway, handler de
+  Studio, repositorio/PostgREST, pantalla y agregador de Modelos y pruebas.
+- Archivos modificados: `packages/shared/src/schemas.ts`,
+  `apps/desktop/src/shared/ipc.ts`, `apps/agent/src/gateway-client.ts`,
+  `apps/gateway/src/supabase.ts`, `repository.ts`, `handlers/studio.ts`,
+  `apps/desktop/src/renderer/model-evidence.ts`, `pages/Config.tsx` y cuatro
+  archivos de pruebas.
+- Comandos ejecutados: build de `@luxy/shared`, Prettier, Vitest específico,
+  `npm run lint`, `npm run typecheck`, `npm test` y `npm run build`, siempre con
+  RTK.
+- Resultado real: `offset` opcional y validado llega hasta PostgREST. Modelos
+  lee páginas de 100 una sola vez, deduplica por ID, limita la revisión a 1.000
+  y hace una sonda de un registro para distinguir muestra completa de truncada.
+  Si un Gateway anterior repite la primera página, se detiene y lo avisa.
+- Pruebas: matriz específica final 60/60. Suite completa 1.504 pasadas, 9
+  omitidas, 0 fallos en 76 archivos. Lint, tipos y build: exit 0.
+- Fallo durante desarrollo: el primer `typecheck` encontró tres consumidores
+  antiguos porque el valor por defecto de Zod hacía `offset` obligatorio en el
+  tipo IPC. Se dejó opcional en Desktop y el valor `0` se aplica en Gateway;
+  repetición verde.
+- Decisiones: máximo local de 1.000 trabajos para evitar una lectura sin límite;
+  la interfaz declara el tope en vez de ocultarlo. No hay polling.
+- Riesgos o límites: el Gateway desplegado no se actualizó. Un Desktop nuevo
+  contra esa versión mostrará el aviso de paginación detenida hasta probar en
+  local o autorizar deploy.
+- Estado nuevo: `F4.2-T3` `done`; `LA-017` vuelve a ser el paso activo.
+- Siguiente paso exacto: reconstruir Studio y agente, usar Gateway actualizado
+  y ejecutar la lista de `LA-017`.
+
+### 2026-08-09 — Codex — F4.3-T1
+
+- Estado anterior: F4.3 enumeraba áreas de prueba, pero no existía Laboratorio
+  ni un contrato reproducible; cualquier comparación futura habría tenido que
+  inventar prompts y criterios en la interfaz.
+- Objetivo: crear el catálogo versionado y hacerlo revisable sin permitir aún
+  ejecuciones ni consumo de tokens.
+- Hipótesis o causa demostrada: no había ninguna definición de benchmark en
+  shared, Desktop, agente o Gateway. Las puntuaciones existentes pertenecían al
+  router y al feedback, no a evaluaciones reproducibles.
+- Archivos leídos: navegación de Desktop, primitivas visuales, catálogo y tipos
+  de modelos, exports compartidos y estilos existentes.
+- Archivos modificados: nuevos `packages/shared/src/models/evaluations.ts`,
+  `evaluations.test.ts` y `apps/desktop/src/renderer/pages/Laboratory.tsx`;
+  además `models/index.ts`, `App.tsx` y documentación canónica.
+- Comandos ejecutados: build de `@luxy/shared`, Prettier, Vitest específico,
+  `npm run lint`, `npm run typecheck`, `npm test` y `npm run build`, mediante
+  RTK.
+- Resultado real: ocho definiciones validadas cubren todas las áreas de F4.3.
+  Cada una fija versión, prompt, estrategia de scoring, capacidades, fixture y
+  criterios. La nueva navegación Laboratorio las muestra y declara modo
+  preparación; `executionEnabled` sólo admite `false`.
+- Pruebas: 46/46 específicas; suite completa 1.507 pasadas, 9 omitidas, 0
+  fallos en 77 archivos. Lint, tipos y build: exit 0.
+- Decisiones: separar definición de ejecución. Tener un prompt catalogado no
+  autoriza a llamar al proveedor; el runner exigirá una acción explícita y será
+  otro paso.
+- Riesgos o límites: las fixtures se nombran pero todavía no existen; no hay
+  validadores, selector, persistencia ni puntuaciones. La pantalla es catálogo,
+  no benchmark funcional.
+- Estado nuevo: `F4.3-T1` `done`; `LA-018` queda pendiente.
+- Siguiente paso exacto: validar visualmente el catálogo y después implementar
+  `F4.3-T2`, fixtures y validadores locales sin red.
+
+### 2026-08-09 — Codex — F4.3-T2
+
+- Estado anterior: el catálogo nombraba seis fixtures y estrategias de scoring,
+  pero las fixtures no existían y ninguna salida podía evaluarse localmente.
+- Objetivo: materializar datos reproducibles y separar validación pura de los
+  runners que requieren aislamiento o juicio humano.
+- Hipótesis o causa demostrada: `fixtureId` era sólo una referencia textual. No
+  había contenido, resolución por ID ni función de validación en el repositorio.
+- Archivos leídos: catálogo de evaluaciones, tipos de modelos, pantalla
+  Laboratorio, exports compartidos y pruebas del área.
+- Archivos modificados: nuevo
+  `packages/shared/src/models/evaluation-fixtures.ts` y su prueba;
+  `evaluations.ts`, `models/index.ts`, `Laboratory.tsx` y documentación.
+- Comandos ejecutados: build de `@luxy/shared`, Prettier, Vitest específico,
+  `npm run lint`, `npm run typecheck`, `npm test` y `npm run build`, con RTK.
+- Resultado real: seis fixtures versionadas y validadas, sin archivos
+  temporales ni red. El contexto largo se genera igual en cada lectura con
+  1.200 líneas y cuatro anclas; tool calling usa archivos virtuales. Cuatro
+  validadores puros devuelven checks explicables. Ninguna salida se ejecuta.
+- Pruebas: 53/53 específicas; suite completa 1.514 pasadas, 9 omitidas, 0
+  fallos en 78 archivos. Lint, tipos y build: exit 0.
+- Decisiones: una prueba de código no se puntúa hasta disponer de sandbox; una
+  rúbrica o traza no se presenta como automática. `validationMode` fija esta
+  distinción en el contrato.
+- Riesgos o límites: los validadores existen como lógica compartida, pero aún no
+  hay respuestas reales que pasarles; Laboratorio sigue sin selector ni botón.
+- Estado nuevo: `F4.3-T2` `done`; `LA-018` permanece pendiente y ampliada.
+- Siguiente paso exacto: `F4.3-T3`, selección compatible y previsualización del
+  prompt compuesto sin enviar nada.
+
+### 2026-08-09 — Codex — F4.3-T3
+
+- Estado anterior: catálogo, fixtures y validadores existían, pero no había
+  forma de elegir una prueba/modelo ni revisar el prompt que recibiría el
+  proveedor.
+- Objetivo: preparar una ejecución de forma completamente local y auditable,
+  manteniendo deshabilitado el envío.
+- Hipótesis o causa demostrada: Laboratorio sólo renderizaba las tarjetas; no
+  componía fixtures ni cruzaba requisitos con el catálogo operativo.
+- Archivos leídos: Laboratorio, configuración disponible en App, catálogo de
+  modelos, evaluaciones, fixtures, primitivas visuales y pruebas.
+- Archivos modificados: `evaluations.ts`, `evaluation-fixtures.ts` y sus pruebas;
+  `Laboratory.tsx`, `App.tsx` y documentación canónica.
+- Comandos ejecutados: build de `@luxy/shared`, Prettier, Vitest específico,
+  `npm run lint`, `npm run typecheck`, `npm test` y `npm run build`, mediante
+  RTK.
+- Resultado real: filtro puro por capacidades declaradas y estado habilitado;
+  prompt determinista con cabecera, versión, instrucciones y fixture delimitada
+  como datos. Studio muestra selectores, modelo efectivo de la vista previa,
+  tamaño, fixture y contenido completo. No existe botón ni llamada IPC.
+- Pruebas: 55/55 específicas; suite completa 1.516 pasadas, 9 omitidas, 0
+  fallos en 78 archivos. Lint, tipos y build: exit 0.
+- Decisiones: la lista compatible es una lectura del catálogo, no evidencia de
+  capacidad. El prompt no cambia entre modelos para conservar comparabilidad.
+- Riesgos o límites: el catálogo puede declarar capacidades aún no verificadas;
+  ninguna selección se persiste y el prompt largo puede ser grande al abrir su
+  detalle, aunque sólo se genera en memoria.
+- Estado nuevo: `F4.3-T3` `done`; `LA-018` permanece pendiente y ampliada.
+- Siguiente paso exacto: diseñar confirmación y persistencia antes de habilitar
+  la primera ejecución (`F4.3-T4`/`F4.5`).
+
+### 2026-08-09 — Codex — F4.3-T4
+
+- Estado anterior: Laboratorio componía una vista previa comparable, pero no
+  existía contrato de confirmación, persistencia ni aislamiento específico para
+  una futura ejecución.
+- Objetivo: fijar esas fronteras sin conectar la interfaz a ningún proveedor.
+- Hipótesis o causa demostrada: los trabajos existentes ya conservan prompt,
+  modelo y metadata; no hace falta migración, pero una tarea normal podría
+  recibir worktree y herramientas si se reutilizara sin un modo propio.
+- Archivos leídos: contratos shared, handler y pruebas de Studio, job runner,
+  Laboratorio y documentación canónica.
+- Archivos modificados: esquemas/evaluaciones shared, handler del Gateway, job
+  runner, Laboratorio, tres suites de contrato/aislamiento y documentación.
+- Comandos ejecutados: build de `@luxy/shared`, Prettier, Vitest específico,
+  lint, typecheck, suite completa y build mediante RTK.
+- Resultado real: `mode: evaluation` exige modelo exacto, confirmación literal
+  y snapshot versionado. Gateway compara definición y prompt con el catálogo y
+  persiste metadata sin score. El agente impide edición, herramientas, memoria
+  y checks. La UI sólo muestra confirmación futura y botón deshabilitado.
+- Pruebas: 37/37 específicas; suite completa 1.523 pasadas, 9 omitidas, 0
+  fallos en 80 archivos. Lint, tipos y build: exit 0.
+- Decisiones: `D-023`; definir, seleccionar o marcar una casilla no sustituye
+  la acción de ejecución. Toda puntuación debe proceder de un validador real.
+- Riesgos o límites: el endpoint ya entiende el contrato confirmado, pero el
+  renderer no lo invoca. Sandbox, rúbricas, trazas, comparaciones y scores aún
+  no están conectados.
+- Estado nuevo: `F4.3-T4` `done`; `LA-018` permanece pendiente y ampliada.
+- Siguiente paso exacto: `F4.3-T5`, contrato de resultado y validación local de
+  salidas persistidas, manteniendo deshabilitada la ejecución desde UI.
+
+### 2026-08-09 — Codex — F4.3-T5
+
+- Estado anterior: el trabajo podía conservar la definición confirmada, pero
+  su salida no se vinculaba a un resultado validado y trazable.
+- Objetivo: validar en el cierre las pruebas automáticas sin activar ninguna
+  ejecución ni confundir una salida parcial con un suspenso.
+- Hipótesis o causa demostrada: `handleJobComplete` ya reúne snapshot, salida,
+  modelo, final, duración y usage; aplicar ahí lógica pura evita una segunda
+  lectura y no requiere migración.
+- Archivos modificados: nuevo `evaluation-results.ts` y su suite, export shared,
+  handler final del Gateway, pruebas del cierre y documentación canónica.
+- Resultado real: contrato persistible con `passed`, `failed` y `not_scored`;
+  guarda checks y métricas observadas. Sólo valida `completed` con catálogo
+  vigente. Modos manual/sandbox/traza explican por qué siguen sin puntuación.
+- Pruebas: 18/18 específicas; suite completa 1.531 pasadas, 9 omitidas, 0
+  fallos en 81 archivos. Lint, tipos y build: exit 0.
+- Decisiones: `D-024`; no hay nota numérica ni ranking. Un corte de transporte
+  no se atribuye como fallo de calidad del modelo.
+- Riesgos o límites: no hay UI de resultados ni trabajos reales; el botón sigue
+  deshabilitado. `evaluationValidatedAt` se genera al persistir en Gateway.
+- Estado nuevo: `F4.3-T5` `done`; `LA-018` permanece pendiente.
+- Siguiente paso exacto: diseñar la primera ejecución individual y cómo mostrar
+  su resultado, manteniendo fuera comparaciones y runners no implementados.
+
+### 2026-08-09 — Codex — F4.3-T6
+
+- Estado anterior: Gateway podía guardar resultados validados, pero Laboratorio
+  no tenía forma de leerlos o distinguirlos de metadata arbitraria.
+- Objetivo: mostrar evidencia histórica sin habilitar ejecución ni polling.
+- Hipótesis o causa demostrada: la lista existente de trabajos ya contiene toda
+  la metadata necesaria; basta una lectura acotada y un parser estricto.
+- Archivos modificados: nuevos `evaluation-history.ts` y su prueba,
+  `Laboratory.tsx` y documentación canónica.
+- Resultado real: lectura única de 100 trabajos al montar, actualización manual
+  y hasta 12 resultados visibles. Se muestran estado, checks, modelo, fecha,
+  duración, caracteres y tokens; metadata incoherente se descarta.
+- Pruebas: 104/104 específicas; suite completa 1.535 pasadas, 9 omitidas, 0
+  fallos en 82 archivos. Lint, tipos y build: exit 0.
+- Decisiones: `D-025`; consultar historial no autoriza a ejecutar y no necesita
+  un temporizador.
+- Riesgos o límites: resultados más antiguos que los últimos 100 trabajos no
+  aparecen. No hay datos reales hasta que se habilite y ejecute una evaluación.
+- Estado nuevo: `F4.3-T6` `done`; `LA-018` queda ampliada.
+- Siguiente paso exacto: definir política y estados de la primera ejecución
+  individual antes de conectar el botón.
+
+### 2026-08-09 — Codex — F4.3-T7
+
+- Estado anterior: contrato, validación e historial estaban listos, pero el
+  renderer nunca creaba una evaluación.
+- Objetivo: abrir una primera ejecución individual con el mínimo alcance seguro.
+- Archivos modificados: catálogo y pruebas, política nueva del renderer,
+  Laboratorio, handler/pruebas de Studio y documentación.
+- Resultado real: cuatro pruebas automáticas habilitadas; selección de
+  máquina/proyecto/modelo, casilla y diálogo final. Gateway rechaza modos no
+  automáticos, revalida prompt/snapshot y comprueba evaluaciones activas. El
+  agente conserva el aislamiento de solo lectura implementado en T4.
+- Pruebas: 50/50 específicas; suite completa 1.541 pasadas, 9 omitidas, 0
+  fallos en 83 archivos. Lint, tipos y build: exit 0.
+- Decisiones: `D-026`; precio desconocido sin consulta, una ejecución a la vez
+  en la experiencia normal y ninguna puntuación sin validador.
+- Riesgos o límites: la comprobación de concurrencia no es transaccional; un
+  Gateway anterior rechazará el contrato nuevo. No se hizo ninguna llamada real.
+- Estado nuevo: `F4.3-T7` `done`; `LA-018` y `LA-019` pendientes.
+- Siguiente paso exacto: validación visual y, sólo si Daniel acepta el consumo,
+  una ejecución de rapidez exacta con todas las piezas actualizadas.
+
+### 2026-08-09 — Codex — F4.3-T8
+
+- Estado anterior: se podía crear una evaluación, pero Laboratorio sólo decía
+  que se siguiera en Trabajos y una cancelación no generaba resultado evaluable.
+- Objetivo: seguimiento activo y cancelación coherente sin reintroducir polling.
+- Archivos modificados: parser/pruebas de historial, Laboratorio, handler y
+  pruebas de cancelación, y documentación canónica.
+- Resultado real: panel activo validado, cancelación confirmada con solicitud no
+  repetible en la sesión y cierre `not_scored` aunque no hubiera parcial.
+- Pruebas: 38/38 específicas; suite completa 1.543 pasadas, 9 omitidas, 0
+  fallos en 83 archivos. Lint, tipos y build: exit 0.
+- Decisiones: `D-027`; cancelar no equivale a suspender y el estado sólo se
+  vuelve a leer bajo acción explícita.
+- Riesgos o límites: si se reinicia Studio antes del cierre, se pierde sólo la
+  marca visual local de «solicitada»; Gateway conserva la petición. Hace falta
+  pulsar Actualizar para observar el final.
+- Estado nuevo: `F4.3-T8` `done`; `LA-018` y `LA-019` pendientes.
+- Siguiente paso exacto: validación visual y prueba real opcional con las tres
+  piezas actualizadas.
+
+### 2026-08-09 — Codex — COMMIT-F4-MODELOS-LABORATORIO
+
+- Autorización: Daniel pidió explícitamente «Commit y sigue».
+- Resultado: commit local con mensaje
+  `feat: incorpora modelos y laboratorio reproducible`.
+- Alcance: 48 archivos de código, pruebas y documentación de `F4.1-T4/T5`,
+  `F4.2-T1/T2/T3` y `F4.3-T1`–`F4.3-T8`.
+- Exclusiones preservadas: `package-lock.json`, archivos de claves, demos,
+  handoff copiado y `apps/gateway/tail.err`.
+- Estado remoto: rama un commit por delante de origen; no se hizo push ni deploy.
+- Evidencia previa al commit: 1.543 pasadas, 9 omitidas, 0 fallos; lint, tipos y
+  build en verde. `git diff --cached --check` correcto.
+
 ## Plantilla para próximas entradas
 
 ```markdown

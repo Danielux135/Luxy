@@ -101,6 +101,7 @@ export const MODEL_FAMILIES = [
   'kimi',
   'minimax',
   'qwen',
+  'sensenova',
   'step',
   'stepaudio',
   'stepimage',
@@ -166,7 +167,10 @@ export const modelDefinitionSchema = z.object({
     .string()
     .min(1)
     .max(64)
-    .regex(/^[a-z0-9][a-z0-9._-]*$/, 'la id de modelo admite minusculas, digitos, punto, guion y guion bajo'),
+    .regex(
+      /^[a-z0-9][a-z0-9._-]*$/,
+      'la id de modelo admite minusculas, digitos, punto, guion y guion bajo',
+    ),
   /**
    * identificador EXACTO que espera la API. no se normaliza, no se pasa a
    * minusculas y no se le tocan puntos ni guiones.
@@ -179,7 +183,11 @@ export const modelDefinitionSchema = z.object({
   capabilities: z.array(z.enum(MODEL_CAPABILITIES)).max(24).default([]),
   /** comandos de telegram, siempre en minusculas y con guion bajo, sin la barra */
   telegramAliases: z
-    .array(z.string().regex(/^[a-z0-9][a-z0-9_]*$/, 'un alias solo admite minusculas, digitos y guion bajo'))
+    .array(
+      z
+        .string()
+        .regex(/^[a-z0-9][a-z0-9_]*$/, 'un alias solo admite minusculas, digitos y guion bajo'),
+    )
     .max(8)
     .default([]),
   enabled: z.boolean().default(true),

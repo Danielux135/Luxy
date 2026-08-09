@@ -1,8 +1,10 @@
 # Luxy — estado canónico del proyecto
 
-Última actualización: **2026-08-07**  
-Estado documental: **checkpoint verificado en Windows; `P0.0`–`P0.5`, `P0.6a`,
-`P0.6b`, `P0.6d`, `P0.8` y `P0.9` cerrados**
+Última actualización: **2026-08-09**
+
+Estado documental: **checkpoint reconciliado en Windows; `F4.1-T4/T5`,
+`F4.2-T1/T2/T3` y `F4.3-T1`–`F4.3-T8` verificados y commiteados localmente;
+push pendiente**
 
 ## 1. Cómo interpretar este estado
 
@@ -74,17 +76,20 @@ Monorepo:
 
 ## 4. Checkpoint operativo conocido
 
-**Corrección del 2026-08-06, comprobada en este ordenador.** Lo que sigue en
-esta sección describía el checkpoint anterior y ya no es donde vive el trabajo:
+**Corrección del 2026-08-09, comprobada en este ordenador.** El checkpoint
+operativo actual es:
 
-- repositorio activo: `C:\Users\daniel\Desktop\Luxy`;
-- rama activa: `feat/luxy-desktop`, HEAD `af095b3` (commit autorizado por
-  Daniel el 2026-08-06 con `P0.6a`–`P0.6d`, `P0.8` y `P0.9`; **sin push**);
+- repositorio activo: el checkout `Luxy` del workspace actual;
+- rama activa: `feat/luxy-desktop`, HEAD local con el commit
+  `feat: incorpora modelos y laboratorio reproducible`, un commit por delante de
+  `origin/feat/luxy-desktop` (`59870c6`);
 - `P0.0`–`P0.5` están **commiteados** (`9012eda`, `16c6e9a`, `845c3cb`,
   `c6e5094`). El riesgo de las 7.997 líneas sin commit que registraba `LA-008`
   ya no existe;
-- lo único sin seguimiento son cuatro elementos que no son código: dos archivos
-  de claves, un handoff duplicado y una carpeta `Web demos/`. No se han tocado.
+- `P0.6a`–`P0.6d`, `P0.8`, `P0.9`, `F4.1-T1`–`F4.1-T5`, `F4.2-T1`–`F4.2-T3`
+  y `F4.3-T1`–`F4.3-T8` están incorporados;
+- hay un cambio local ajeno en `package-lock.json` y elementos sin seguimiento
+  con claves/demos. Se preservan y no forman parte del trabajo actual.
 
 - Commit y push: **autorizados y hechos** el 2026-08-06 (`af095b3`, `9f0ab42`).
 - Despliegue del gateway: **autorizado y hecho** por Daniel el 2026-08-07,
@@ -110,26 +115,27 @@ necesario.
 
 ## 5. Capacidades implementadas
 
-| Área                   | Estado conocido           | Observaciones                                                                  |
-| ---------------------- | ------------------------- | ------------------------------------------------------------------------------ |
-| Agente, gateway y cola | Implementado              | polling saliente, leases, heartbeats, eventos y cancelación                    |
-| Desktop Electron       | Implementado              | agente en utility process, bandeja, configuración y secretos cifrados          |
-| Studio — trabajos      | Implementado en código    | formulario real, historial, eventos, resultado, diff y pruebas                 |
-| Worktrees              | Implementado              | la carpeta original no se modifica                                             |
-| Aplicar/descartar      | Implementado en código    | aplicar crea commit aislado; descartar borra worktree tras confirmar; sin push |
-| Conversaciones         | Implementado parcialmente | uno o dos modelos, streaming, historial, tiempos, tokens y cancelación         |
-| Diagnóstico del final  | Implementado y verificado | señal de transporte, aborto, límites efectivos y tokens; sin contenido         |
-| Finales explícitos     | Implementado y verificado | seis resultados; la salida parcial se conserva y no se reintenta a ciegas      |
-| Memoria                | Implementado y verificado | sin fallback: sólo un bloque válido la sustituye; el código se rechaza         |
-| Recomendaciones        | Implementado              | feedback y resultados ajustan una recomendación explícita; nunca cambia solo   |
-| Continuación           | Implementado              | unión con evidencia y aviso cuando no la hay; el parcial viaja como dato       |
-| Cancelación            | Implementado              | conserva lo generado como resultado; no ofrece continuar ni escribe memoria    |
-| Feedback               | Arreglo preparado         | el primer clic usa la respuesta del gateway; falta confirmación manual final   |
-| Proveedores/modelos    | Implementado parcialmente | Claude, Codex y familias HTTP; catálogo real y capacidades desiguales          |
-| Errores de proveedor   | Implementado y verificado | límite de plan y 429 explicados; se obedece `Retry-After`; intentos reales     |
-| Telegram               | Conservado                | canal secundario                                                               |
-| Mobile Android         | No iniciado               | prioridad posterior a estabilizar Desktop                                      |
-| Remote                 | Pausado                   | conservar código, ADR, threat model y pruebas                                  |
+| Área                   | Estado conocido           | Observaciones                                                                                                    |
+| ---------------------- | ------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| Agente, gateway y cola | Implementado              | polling saliente, leases, heartbeats, eventos y cancelación                                                      |
+| Desktop Electron       | Implementado              | agente en utility process, bandeja, configuración y secretos cifrados                                            |
+| Studio — trabajos      | Implementado en código    | formulario real, historial, eventos, resultado, diff y pruebas                                                   |
+| Worktrees              | Implementado              | la carpeta original no se modifica                                                                               |
+| Aplicar/descartar      | Implementado en código    | aplicar crea commit aislado; descartar borra worktree tras confirmar; sin push                                   |
+| Conversaciones         | Implementado parcialmente | uno o dos modelos, streaming, historial, tiempos, tokens y cancelación                                           |
+| Diagnóstico del final  | Implementado y verificado | señal de transporte, aborto, límites efectivos y tokens; sin contenido                                           |
+| Finales explícitos     | Implementado y verificado | seis resultados; la salida parcial se conserva y no se reintenta a ciegas                                        |
+| Memoria                | Implementado y verificado | sin fallback: sólo un bloque válido la sustituye; el código se rechaza                                           |
+| Recomendaciones        | Implementado              | feedback y resultados ajustan una recomendación explícita; nunca cambia solo                                     |
+| Continuación           | Implementado              | unión con evidencia y aviso cuando no la hay; el parcial viaja como dato                                         |
+| Cancelación            | Implementado              | conserva lo generado como resultado; no ofrece continuar ni escribe memoria                                      |
+| Feedback               | Arreglo preparado         | el primer clic usa la respuesta del gateway; falta confirmación manual final                                     |
+| Proveedores/modelos    | Implementado parcialmente | 22 modelos reales; sin sondeo de precios; evidencia local paginada hasta 1.000 trabajos; topes aún sin verificar |
+| Laboratorio            | Implementado inicialmente | catálogo, fixtures, validadores, selección y preview local; ejecución y persistencia aún deshabilitadas          |
+| Errores de proveedor   | Implementado y verificado | límite de plan y 429 explicados; se obedece `Retry-After`; intentos reales                                       |
+| Telegram               | Conservado                | canal secundario                                                                                                 |
+| Mobile Android         | No iniciado               | prioridad posterior a estabilizar Desktop                                                                        |
+| Remote                 | Pausado                   | conservar código, ADR, threat model y pruebas                                                                    |
 
 ## 6. Flujo de Conversaciones que ya funciona
 
@@ -367,30 +373,77 @@ Linux y aquí no existen: en esta máquina un fallo es una regresión.
 
 ## 10. Próximo objetivo
 
-El único objetivo activo es completar `LUXY-P0-LONG-RESPONSES`, descrito en
-`CURRENT-TASK.md`:
+`F4.1-T4` cerró la discrepancia entre la instantánea real y el catálogo
+operativo: `buildDefaultCatalog` representa ya los 22 modelos declarados por la
+pasarela el 2026-08-07. Los tres incorporados conservan un contrato mínimo y no
+reciben herramientas ni aliases implícitos.
 
-1. observar el final real de cada transporte sin registrar contenido ni claves;
-2. clasificar el resultado como completo, truncado, interrumpido, timeout,
-   cancelado o fallo;
-3. proteger la memoria anterior;
-4. conservar la salida parcial;
-5. ofrecer continuación y artefacto sólo después de tener estados fiables.
+Este paso no atribuye precios, tool calling ni límites de salida sin evidencia.
+`F4.1-T5` cerró la investigación de precios: las rutas observadas no publican
+entradas útiles y Daniel decidió no consultarlas. Luxy actualiza únicamente
+`/v1/models` y lo explica una vez en la pantalla. `LA-007` continúa bloqueada
+hasta verificar topes por modelo.
 
-Del punto 5, `P0.6a` y `P0.6b` cerraron la continuación el 2026-08-06; queda
-`P0.6c`, el artefacto.
+`F4.2-T1` añade evidencia local sin benchmarks: una lectura al abrir Modelos
+resume trabajos con modelo exacto en completas, parciales, fallos,
+cancelaciones y mediana de duración. La muestra está limitada a los últimos 100
+trabajos. `F4.2-T2` hace que el agente informe el `apiModel` realmente ejecutado
+y que el gateway lo conserve en completados, fallos y cancelaciones; así los
+trabajos creados mediante una familia dejan de quedar sin atribución. Los
+trabajos históricos sin ninguna evidencia de modelo siguen sin inferirse.
+`F4.2-T3` pagina el historial en bloques de 100 hasta 1.000 trabajos, muestra la
+cobertura y detecta un Gateway anterior que ignore el desplazamiento. Falta la
+comprobación visual `LA-017`; la paginación real requiere probar contra el
+Gateway actualizado.
 
-Los puntos 1 a 4 están cerrados (`P0.0`–`P0.3c`) y desde `P0.4` tienen una
-matriz de regresión completa en `apps/agent/src/response-matrix.test.ts`: los
-trece casos, sin red ni tokens. Del punto 5, `P0.5` cerró la mitad visible el
-2026-08-05: Studio ya no llama «Guardado» a una respuesta cortada, muestra
-tokens, duración y texto parcial, dice qué le pasó a la memoria y ofrece
-**Continuar generación** cuando el final es recuperable. Falta la mitad difícil,
-que es `P0.6`: unir los fragmentos sin duplicar y guardar las salidas largas
-como artefacto.
+`F4.3-T1` inicia Laboratorio sin gastar tokens: ocho pruebas versionadas cubren
+rapidez, código, frontend, español, instrucciones, JSON, contexto largo y tool
+calling. Studio muestra prompts y criterios, pero todas las definiciones llevan
+`executionEnabled: false`. `F4.3-T2` materializa las seis fixtures referenciadas
+y valida localmente salida exacta, restricciones, JSON y recuperación en
+contexto largo. Código necesita sandbox; frontend y español, rúbrica humana;
+tool calling, una traza real validada. `F4.3-T3` filtra modelos por capacidades
+declaradas y
+compone una vista previa idéntica para todos, con la fixture marcada como datos.
+No verifica capacidades ni crea trabajos. `F4.3-T4` añade el contrato
+versionado de una ejecución: exige confirmación literal y modelo exacto, y el
+Gateway sólo acepta el snapshot y prompt exactos del catálogo. La metadata
+conserva definición, fixture, scoring y modo de validación sin inventar una
+nota. El agente reserva un camino de solo lectura sin worktree, herramientas,
+memoria ni comprobaciones. Laboratorio muestra la confirmación futura y mantiene
+el botón deshabilitado: aún no hay IPC ni consumo.
 
-Aviso de alcance: nada de `P0.5` se ha visto en pantalla. Studio no arranca en
-este ordenador hasta resolver `LA-010`.
+`F4.3-T5` completa el contrato del resultado automático. En el cierre del
+trabajo, Gateway aplica únicamente validadores puros a una respuesta
+`completed` cuyo snapshot siga coincidiendo con el catálogo. Persiste checks,
+modelo, versión, fixture, final real, caracteres, duración y tokens disponibles
+como `evaluationResult`; una salida parcial, un modelo desconocido o un modo
+manual/sandbox/traza queda `not_scored`. No existe score numérico, ranking ni
+ejecución nueva.
 
-No avanzar a nuevas pantallas, Android, Remote o despliegue antes de cerrar este
-bloque y consolidar el checkpoint.
+`F4.3-T6` hace visible esa evidencia sin activar evaluaciones. Laboratorio lee
+una vez los últimos 100 trabajos al abrirse y sólo repite la lectura mediante
+**Actualizar**; no sondea. Un parser puro acepta exclusivamente resultados con
+esquema válido y coherentes con ID, versión y modelo del trabajo. La pantalla
+muestra hasta 12 recientes con estado, checks, duración, caracteres y tokens, o
+explica que todavía no existe ninguno.
+
+`F4.3-T7` habilita la primera ejecución individual únicamente para los cuatro
+modos automáticos. Exige máquina conectada, proyecto, familia soportada, modelo
+exacto, casilla de consumo y un segundo diálogo que repite prueba/modelo. El
+Gateway vuelve a validar catálogo y prompt, rechaza runners pendientes y evita
+crear otra evaluación cuando ya observa una activa del mismo Studio. No es un
+bloqueo transaccional entre solicitudes simultáneas: esa garantía exigiría otra
+estrategia de persistencia. El agente mantiene el trabajo sin worktree,
+herramientas, memoria ni checks del proyecto.
+
+`F4.3-T8` completa el ciclo visible sin introducir polling. Un parser separado
+identifica evaluaciones no terminales con snapshot válido; Laboratorio muestra
+ID, prueba, modelo y estado, y permite solicitar cancelación tras confirmación.
+La misma sesión no repite esa solicitud. Cuando el agente confirma el cierre,
+Gateway persiste `evaluationResult.status: not_scored` y
+`responseOutcome: cancelled`, incluso sin texto parcial.
+
+El bloque de respuestas largas (`P0.0`–`P0.9`, incluido el artefacto de
+`P0.6c`) está implementado y automatizadamente verificado. Su validación manual
+en Studio permanece separada en `LA-012`; no bloquea corregir el catálogo.

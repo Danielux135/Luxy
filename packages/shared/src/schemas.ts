@@ -17,6 +17,7 @@ import {
   MAX_ARTIFACT_BYTES,
 } from './constants.js';
 import { connectionProfileSchema } from './models/types.js';
+import { modelEvaluationExecutionSchema } from './models/evaluations.js';
 
 export const jobStatusSchema = z.enum(JOB_STATUSES);
 export const providerIdSchema = z.enum(PROVIDER_IDS);
@@ -496,6 +497,8 @@ export const jobCompleteRequestSchema = z.object({
   responseOutcome: responseOutcomeSchema.optional(),
   /** evidencia del transporte que sostiene ese resultado, sin contenido */
   responseTermination: responseTerminationSchema.optional(),
+  /** apiModel que el agente resolvio y envio realmente al proveedor */
+  executedModel: z.string().min(1).max(128).optional(),
   /**
    * medio producido por el trabajo: una imagen editada, un audio sintetizado.
    *
@@ -528,6 +531,8 @@ export const jobFailRequestSchema = z.object({
   hasLocalChanges: z.boolean().default(false),
   worktreePath: z.string().max(1024).nullable().default(null),
   durationMs: z.number().int().min(0).default(0),
+  /** ausente si el fallo ocurrio antes de invocar al proveedor */
+  executedModel: z.string().min(1).max(128).optional(),
 });
 
 export const jobCancelledRequestSchema = z.object({
@@ -545,6 +550,8 @@ export const jobCancelledRequestSchema = z.object({
    */
   partialText: z.string().max(MAX_CONVERSATION_RESULT_CHARS).optional(),
   responseTermination: responseTerminationSchema.optional(),
+  /** ausente si se cancelo antes de invocar al proveedor */
+  executedModel: z.string().min(1).max(128).optional(),
 });
 
 export const jobControlResponseSchema = z.object({
@@ -582,7 +589,7 @@ export const studioJobCreateRequestSchema = z
     prompt: promptSchema,
     priority: z.number().int().min(-100).max(100).default(0),
     /** ausente conserva el contrato anterior de tareas */
-    mode: z.enum(['task', 'conversation']).optional(),
+    mode: z.enum(['task', 'conversation', 'evaluation']).optional(),
     conversationId: z.string().uuid().optional(),
     conversationTurnId: z.string().uuid().optional(),
     conversationTitle: z.string().trim().min(1).max(120).optional(),
@@ -597,22 +604,51 @@ export const studioJobCreateRequestSchema = z
      * dos respuestas son el mismo documento.
      */
     continuesJobId: z.string().uuid().optional(),
+    /** snapshot versionado; solo se acepta con una confirmacion explicita */
+    evaluation: modelEvaluationExecutionSchema.optional(),
   })
   .superRefine((value, context) => {
-    if (value.mode !== 'conversation') return;
-    for (const field of [
-      'conversationId',
-      'conversationTurnId',
-      'conversationTitle',
-      'conversationUserMessage',
-    ] as const) {
-      if (value[field] === undefined) {
+    if (value.mode === 'conversation') {
+      for (const field of [
+        'conversationId',
+        'conversationTurnId',
+        'conversationTitle',
+        'conversationUserMessage',
+      ] as const) {
+        if (value[field] !== undefined) continue;
         context.addIssue({
           code: z.ZodIssueCode.custom,
           path: [field],
           message: 'es obligatorio en una conversacion',
         });
       }
+      return;
+    }
+
+    if (value.mode === 'evaluation') {
+      if (value.model === null) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['model'],
+          message: 'una evaluacion exige un modelo exacto',
+        });
+      }
+      if (value.evaluation === undefined) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['evaluation'],
+          message: 'falta la definicion confirmada de la evaluacion',
+        });
+      }
+      return;
+    }
+
+    if (value.evaluation !== undefined) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['evaluation'],
+        message: 'la definicion de evaluacion solo se admite en modo evaluation',
+      });
     }
   });
 
@@ -620,6 +656,7 @@ export const studioJobListQuerySchema = z.object({
   targetMachineId: z.string().uuid().optional(),
   status: jobStatusSchema.optional(),
   limit: z.coerce.number().int().min(1).max(100).default(30),
+  offset: z.coerce.number().int().min(0).max(100_000).default(0),
 });
 
 /**

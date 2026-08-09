@@ -9,6 +9,7 @@ import { StudioPage } from './pages/Studio.js';
 import { ConnectionsPage, ModelsPage, ProjectsPage } from './pages/Config.js';
 import { LogsPage, SettingsPage } from './pages/System.js';
 import { SetupPage } from './pages/Setup.js';
+import { LaboratoryPage } from './pages/Laboratory.js';
 
 const SECCIONES = [
   { id: 'inicio', label: 'Inicio', short: 'IN' },
@@ -17,6 +18,7 @@ const SECCIONES = [
   { id: 'proyectos', label: 'Proyectos', short: 'PR' },
   { id: 'conexiones', label: 'Conexiones', short: 'CX' },
   { id: 'modelos', label: 'Modelos', short: 'MD' },
+  { id: 'laboratorio', label: 'Laboratorio', short: 'LB' },
   { id: 'registros', label: 'Registros', short: 'RG' },
   { id: 'ajustes', label: 'Ajustes', short: 'AJ' },
 ] as const;
@@ -102,6 +104,7 @@ export function App(): JSX.Element {
           />
         )}
         {seccion === 'modelos' && <ModelsPage summary={summary} />}
+        {seccion === 'laboratorio' && <LaboratoryPage summary={summary} />}
         {seccion === 'registros' && <LogsPage />}
         {seccion === 'ajustes' && (
           <SettingsPage

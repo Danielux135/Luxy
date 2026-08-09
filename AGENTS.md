@@ -88,6 +88,8 @@ lo pida explícitamente.
 - Prohibida la API de Anthropic.
 - Prohibida la API de OpenAI.
 - Prohibidas `ANTHROPIC_API_KEY` y `OPENAI_API_KEY`.
+- El catálogo real de una conexión consulta sólo `/v1/models`; no sondea rutas
+  tentativas de precios (`D-022`).
 - Prohibida cualquier automatización de navegador (Selenium, Playwright) y de
   las interfaces web de Claude o ChatGPT.
 - Claude Code y Codex CLI se usan con la **sesión local** del ordenador.

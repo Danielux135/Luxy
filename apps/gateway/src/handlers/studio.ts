@@ -4,6 +4,8 @@
 // llamadas salen del proceso principal de Electron.
 import {
   PROVIDER_IDS,
+  MODEL_EVALUATIONS,
+  buildModelEvaluationPrompt,
   isMachineOnline,
   machineHasProject,
   machineSupportsProvider,
@@ -12,7 +14,7 @@ import {
   studioJobFeedbackRequestSchema,
   studioJobListQuerySchema,
 } from '@luxy/shared';
-import type { Job, Machine, ProviderId, StudioJob } from '@luxy/shared';
+import type { Job, Machine, ProviderId, StudioJob, StudioJobCreateRequest } from '@luxy/shared';
 import { errorResponse, json, readBody, withMachineAuth } from './api.js';
 
 function toStudioJob(job: Job): StudioJob {
@@ -41,6 +43,30 @@ function providersOf(machine: Machine): ProviderId[] {
   return PROVIDER_IDS.filter((provider) => machineSupportsProvider(machine, provider));
 }
 
+function evaluationContractError(body: StudioJobCreateRequest): string | null {
+  if (body.mode !== 'evaluation') return null;
+  const snapshot = body.evaluation!;
+  const definition = MODEL_EVALUATIONS.find((item) => item.id === snapshot.evaluationId);
+  const prompt = buildModelEvaluationPrompt(snapshot.evaluationId);
+  if (definition === undefined || prompt === null) return 'la evaluacion solicitada no existe';
+  if (!definition.executionEnabled || definition.validationMode !== 'automatic') {
+    return 'esta evaluacion todavia no tiene ejecucion automatica habilitada';
+  }
+  if (
+    snapshot.evaluationVersion !== definition.version ||
+    snapshot.fixtureId !== definition.fixtureId ||
+    snapshot.validationMode !== definition.validationMode ||
+    snapshot.scoring !== definition.scoring ||
+    snapshot.promptVersion !== 1
+  ) {
+    return 'la definicion de la evaluacion no coincide con el catalogo actual';
+  }
+  if (body.prompt !== prompt.text) {
+    return 'el prompt de la evaluacion no coincide con su version reproducible';
+  }
+  return null;
+}
+
 /** maquinas y capacidades reales para construir los selectores de Studio */
 export const handleStudioOptions = withMachineAuth(async (_request, deps) => {
   const machines = await deps.repo.listMachines();
@@ -60,6 +86,21 @@ export const handleStudioOptions = withMachineAuth(async (_request, deps) => {
 export const handleStudioJobCreate = withMachineAuth(async (request, deps, creator) => {
   const body = await readBody(request, studioJobCreateRequestSchema);
   if (!body.ok) return body.response;
+
+  const evaluationError = evaluationContractError(body.data);
+  if (evaluationError !== null) return errorResponse(evaluationError, 422);
+
+  if (body.data.mode === 'evaluation') {
+    const activeEvaluation = (await deps.repo.listActiveJobs()).find(
+      (job) =>
+        job.origin === 'studio' &&
+        job.metadata['studioMode'] === 'evaluation' &&
+        job.metadata['requestedByMachineId'] === creator.id,
+    );
+    if (activeEvaluation !== undefined) {
+      return errorResponse(`ya hay una evaluacion activa (${activeEvaluation.shortId})`, 409);
+    }
+  }
 
   const target = await deps.repo.getMachineById(body.data.targetMachineId);
   if (target === null || !target.enabled) {
@@ -101,7 +142,18 @@ export const handleStudioJobCreate = withMachineAuth(async (request, deps, creat
               ? {}
               : { continuesJobId: body.data.continuesJobId }),
           }
-        : {}),
+        : body.data.mode === 'evaluation'
+          ? {
+              studioMode: 'evaluation',
+              evaluationId: body.data.evaluation!.evaluationId,
+              evaluationVersion: body.data.evaluation!.evaluationVersion,
+              evaluationPromptVersion: body.data.evaluation!.promptVersion,
+              evaluationFixtureId: body.data.evaluation!.fixtureId,
+              evaluationValidationMode: body.data.evaluation!.validationMode,
+              evaluationScoring: body.data.evaluation!.scoring,
+              evaluationConfirmed: true,
+            }
+          : {}),
     },
   });
 
@@ -120,6 +172,7 @@ export const handleStudioJobs = withMachineAuth(async (request, deps, creator) =
     targetMachineId: url.searchParams.get('targetMachineId') ?? undefined,
     status: url.searchParams.get('status') ?? undefined,
     limit: url.searchParams.get('limit') ?? undefined,
+    offset: url.searchParams.get('offset') ?? undefined,
   });
   if (!query.success) return errorResponse('los filtros del historial no son validos', 422);
 

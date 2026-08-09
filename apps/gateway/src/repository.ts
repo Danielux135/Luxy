@@ -321,6 +321,7 @@ export class Repository {
       targetMachineId?: string;
       status?: JobStatus;
       limit?: number;
+      offset?: number;
     } = {},
   ): Promise<Job[]> {
     const filters: Record<string, string> = {};
@@ -335,6 +336,7 @@ export class Repository {
       filters,
       order: 'created_at.desc',
       limit: options.limit ?? 30,
+      offset: options.offset ?? 0,
     });
     return rows.map(toJob);
   }

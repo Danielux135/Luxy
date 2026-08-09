@@ -72,6 +72,13 @@ describe('trabajo de conversacion', () => {
           timedOut: false,
           cancelled: false,
           errorMessage: null,
+          usage: {
+            provider: 'codex',
+            model: 'codex-modelo-efectivo',
+            inputTokens: 10,
+            outputTokens: 20,
+            estimatedCost: 0,
+          },
         };
       }),
     };
@@ -112,6 +119,7 @@ describe('trabajo de conversacion', () => {
         testsFailed: 0,
         branch: null,
         worktreePath: null,
+        executedModel: 'codex-modelo-efectivo',
         conversationMemory: expect.objectContaining({
           summary: 'El usuario quiere entender el proyecto.',
         }),

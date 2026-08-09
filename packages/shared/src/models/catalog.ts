@@ -1,10 +1,11 @@
 // catalogo inicial de modelos.
 //
 // PROCEDENCIA: la lista se verifico contra GET /v1/models de la conexion el
-// 2026-07-28. Solo contiene modelos que la conexion sirve de verdad. Cuatro
-// modelos de la especificacion original (kat-coder-pro-v2, MiniMax-M2.7,
-// sensenova-6.7-flash-lite y sensenova-u1-fast) no los sirve esta conexion y por
-// eso no estan aqui. Se volveran a añadir cuando alguna conexion los ofrezca.
+// 2026-07-28 y se reconcilio con una lectura nueva el 2026-08-07. Solo contiene
+// modelos que la conexion ha declarado servir. `kat-coder-pro-v2` y
+// `MiniMax-M2.7` siguen fuera; la lectura nueva incorporo `step-explore` y dos
+// SenseNova. Que aparezcan en /v1/models no verifica herramientas, limites ni
+// otras capacidades: esos contratos se marcan aparte.
 //
 // El campo apiModel es EXACTO: no se normaliza ni se corrigen mayusculas.
 import {
@@ -236,6 +237,45 @@ const RAW_CATALOG = [
     telegramAliases: ['step_35_2603'],
     agentic: true,
     allowedTools: ALL_TOOLS,
+  },
+  {
+    id: 'step-explore',
+    apiModel: 'step-explore',
+    displayName: 'Step Explore',
+    family: 'step',
+    category: 'text',
+    capabilities: ['text'],
+    telegramAliases: [],
+    metadata: {
+      ...UNVERIFIED,
+      note: 'servido por la conexion el 2026-08-07; capacidades pendientes',
+    },
+  },
+  {
+    id: 'sensenova-6.7-flash-lite',
+    apiModel: 'sensenova-6.7-flash-lite',
+    displayName: 'SenseNova 6.7 Flash Lite',
+    family: 'sensenova',
+    category: 'text',
+    capabilities: ['text'],
+    telegramAliases: [],
+    metadata: {
+      ...UNVERIFIED,
+      note: 'servido por la conexion el 2026-08-07; capacidades pendientes',
+    },
+  },
+  {
+    id: 'sensenova-u1-fast',
+    apiModel: 'sensenova-u1-fast',
+    displayName: 'SenseNova U1 Fast',
+    family: 'sensenova',
+    category: 'text',
+    capabilities: ['text'],
+    telegramAliases: [],
+    metadata: {
+      ...UNVERIFIED,
+      note: 'servido por la conexion el 2026-08-07; capacidades pendientes',
+    },
   },
 
   // ---------------------------------------------------------------------------

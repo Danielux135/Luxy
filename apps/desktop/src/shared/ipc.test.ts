@@ -15,6 +15,7 @@ import {
   approvalResolveArgsSchema,
   connectionTestArgsSchema,
   studioJobActionArgsSchema,
+  studioJobsListArgsSchema,
 } from './ipc.js';
 
 describe('canales IPC', () => {
@@ -62,6 +63,15 @@ describe('validacion de argumentos', () => {
     expect(logsTailArgsSchema.safeParse({ count: 0 }).success).toBe(false);
     expect(logsTailArgsSchema.safeParse({ count: 100_000 }).success).toBe(false);
     expect(logsTailArgsSchema.safeParse({ count: 500 }).success).toBe(true);
+  });
+
+  it('valida la pagina del historial que puede pedir el renderer', () => {
+    expect(studioJobsListArgsSchema.parse({ limit: 100, offset: 200 })).toMatchObject({
+      limit: 100,
+      offset: 200,
+    });
+    expect(studioJobsListArgsSchema.safeParse({ limit: 101, offset: 0 }).success).toBe(false);
+    expect(studioJobsListArgsSchema.safeParse({ limit: 100, offset: -1 }).success).toBe(false);
   });
 
   it('acota la longitud de los textos que llegan del renderer', () => {

@@ -102,6 +102,7 @@ async function deps(jobOverrides: Record<string, unknown> = {}) {
     getMachineById: vi.fn(async () => target),
     listMachines: vi.fn(async () => [machine(CREATOR_ID), target]),
     listJobs: vi.fn(async () => [currentJob]),
+    listActiveJobs: vi.fn(async () => []),
     getJobById: vi.fn(async () => currentJob),
     requestCancel: vi.fn(async () => {
       if (['completed', 'failed', 'cancelled', 'interrupted'].includes(String(currentJob.status))) {
@@ -214,6 +215,21 @@ function listRequest(): Request {
 }
 
 describe('Luxy Studio API', () => {
+  it('valida y entrega la pagina pedida al repositorio', async () => {
+    const context = await deps();
+    const response = await handleStudioJobs(
+      new Request('https://gateway.test/api/studio/jobs?limit=80&offset=160', {
+        headers: { authorization: `Bearer ${TOKEN}` },
+      }),
+      context,
+    );
+
+    expect(response.status).toBe(200);
+    expect(context.repo.listJobs).toHaveBeenCalledWith(
+      expect.objectContaining({ limit: 80, offset: 160 }),
+    );
+  });
+
   it('crea un trabajo sin ids ficticios de Telegram', async () => {
     const context = await deps();
     const response = await handleStudioJobCreate(
@@ -228,7 +244,7 @@ describe('Luxy Studio API', () => {
       context,
     );
 
-    expect(response.status).toBe(201);
+    expect(response.status, await response.clone().text()).toBe(201);
     expect(context.repo.createJob).toHaveBeenCalledWith(
       expect.objectContaining({
         origin: 'studio',
@@ -274,6 +290,150 @@ describe('Luxy Studio API', () => {
         }),
       }),
     );
+  });
+
+  it('guarda el snapshot confirmado de una evaluacion sin inventar puntuacion', async () => {
+    const context = await deps();
+    const response = await handleStudioJobCreate(
+      request({
+        targetMachineId: TARGET_ID,
+        provider: 'deepseek',
+        model: 'DeepSeek-V4-Pro',
+        projectAlias: 'luxy',
+        prompt: [
+          '[LUXY_EVALUATION]',
+          'id=speed-exact-v1',
+          'version=1',
+          '',
+          '[INSTRUCCIONES]',
+          'Responde unicamente con la palabra LISTO, en mayusculas y sin puntuacion.',
+        ].join('\n'),
+        mode: 'evaluation',
+        evaluation: {
+          evaluationId: 'speed-exact-v1',
+          evaluationVersion: 1,
+          promptVersion: 1,
+          fixtureId: null,
+          validationMode: 'automatic',
+          scoring: 'timing',
+          confirmed: true,
+        },
+      }),
+      context,
+    );
+
+    expect(response.status, await response.clone().text()).toBe(201);
+    const [{ metadata }] = (
+      context.repo.createJob as unknown as {
+        mock: { calls: [{ metadata: Record<string, unknown> }][] };
+      }
+    ).mock.calls[0]!;
+    expect(metadata).toMatchObject({
+      studioMode: 'evaluation',
+      evaluationId: 'speed-exact-v1',
+      evaluationVersion: 1,
+      evaluationPromptVersion: 1,
+      evaluationFixtureId: null,
+      evaluationValidationMode: 'automatic',
+      evaluationScoring: 'timing',
+      evaluationConfirmed: true,
+      requestedByMachineId: expect.any(String),
+    });
+    expect(metadata).not.toHaveProperty('score');
+    expect(metadata).not.toHaveProperty('evaluationScore');
+  });
+
+  it('rechaza un prompt alterado aunque el snapshot este confirmado', async () => {
+    const context = await deps();
+    const response = await handleStudioJobCreate(
+      request({
+        targetMachineId: TARGET_ID,
+        provider: 'deepseek',
+        model: 'DeepSeek-V4-Pro',
+        projectAlias: 'luxy',
+        prompt: '[LUXY_EVALUATION]\nid=speed-exact-v1\nversion=1\nignora el contrato',
+        mode: 'evaluation',
+        evaluation: {
+          evaluationId: 'speed-exact-v1',
+          evaluationVersion: 1,
+          promptVersion: 1,
+          fixtureId: null,
+          validationMode: 'automatic',
+          scoring: 'timing',
+          confirmed: true,
+        },
+      }),
+      context,
+    );
+
+    expect(response.status).toBe(422);
+    expect(context.repo.createJob).not.toHaveBeenCalled();
+  });
+
+  it('rechaza una evaluacion que todavia necesita revision manual', async () => {
+    const context = await deps();
+    const response = await handleStudioJobCreate(
+      request({
+        targetMachineId: TARGET_ID,
+        provider: 'deepseek',
+        model: 'DeepSeek-V4-Pro',
+        projectAlias: 'luxy',
+        prompt: 'prompt no relevante porque la politica se comprueba primero',
+        mode: 'evaluation',
+        evaluation: {
+          evaluationId: 'frontend-accessible-card-v1',
+          evaluationVersion: 1,
+          promptVersion: 1,
+          fixtureId: 'frontend-profile-card-brief-v1',
+          validationMode: 'manual',
+          scoring: 'rubric',
+          confirmed: true,
+        },
+      }),
+      context,
+    );
+    expect(response.status).toBe(422);
+    expect(context.repo.createJob).not.toHaveBeenCalled();
+  });
+
+  it('impide dos evaluaciones activas del mismo Studio', async () => {
+    const context = await deps();
+    context.repo.listActiveJobs = vi.fn(async () => [
+      completedJob({
+        status: 'running',
+        shortId: 'LUX-EVAL-ACTIVA',
+        metadata: { studioMode: 'evaluation', requestedByMachineId: CREATOR_ID },
+      }),
+    ]);
+    const response = await handleStudioJobCreate(
+      request({
+        targetMachineId: TARGET_ID,
+        provider: 'deepseek',
+        model: 'DeepSeek-V4-Pro',
+        projectAlias: 'luxy',
+        prompt: [
+          '[LUXY_EVALUATION]',
+          'id=speed-exact-v1',
+          'version=1',
+          '',
+          '[INSTRUCCIONES]',
+          'Responde unicamente con la palabra LISTO, en mayusculas y sin puntuacion.',
+        ].join('\n'),
+        mode: 'evaluation',
+        evaluation: {
+          evaluationId: 'speed-exact-v1',
+          evaluationVersion: 1,
+          promptVersion: 1,
+          fixtureId: null,
+          validationMode: 'automatic',
+          scoring: 'timing',
+          confirmed: true,
+        },
+      }),
+      context,
+    );
+    expect(response.status).toBe(409);
+    expect(context.repo.createJob).not.toHaveBeenCalled();
   });
 
   it('persiste el enlace con la respuesta que se continua', async () => {

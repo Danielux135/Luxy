@@ -12,9 +12,7 @@ import {
   storedAgentConfigSchema,
   secretRegistry,
   buildCatalogSnapshot,
-  describePricingProbes,
 } from '@luxy/shared';
-import type { PricingProbe } from '@luxy/shared';
 import { detectEnvironment } from '@luxy/agent/dist/detect.js';
 import { GatewayClient } from '@luxy/agent/dist/gateway-client.js';
 import { buildMachineIdentity } from '@luxy/agent/dist/agent.js';
@@ -438,9 +436,7 @@ export function registerIpcHandlers(context: HandlerContext): void {
     if (apiKey === undefined) throw new Error('no hay clave guardada para esta conexion');
 
     const base = stored.baseUrl.replace(/\/+$/, '');
-    const pedir = async (
-      url: string,
-    ): Promise<{ payload: unknown | null; status: number | null }> => {
+    const pedir = async (url: string): Promise<unknown | null> => {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 30_000);
       try {
@@ -448,52 +444,24 @@ export function registerIpcHandlers(context: HandlerContext): void {
           headers: { Authorization: `Bearer ${apiKey}` },
           signal: controller.signal,
         });
-        if (!response.ok) return { payload: null, status: response.status };
-        return { payload: (await response.json()) as unknown, status: response.status };
+        if (!response.ok) return null;
+        return (await response.json()) as unknown;
       } catch {
-        // que falle la consulta de precios no puede tumbar el refresco entero
-        return { payload: null, status: null };
+        return null;
       } finally {
         clearTimeout(timer);
       }
     };
 
     const models = await pedir(`${base}/models`);
-    if (models.payload === null) throw new Error('la conexion no devolvio la lista de modelos');
-
-    // el panel de la pasarela sirve los precios fuera de /v1. Se prueban las
-    // rutas conocidas y se apunta QUE contesto cada una: la primera lectura
-    // real devolvio 22 modelos y cero precios sin decir por que.
-    const origin = base.replace(/\/v1$/, '');
-    const rutas = [`${origin}/api/pricing`, `${base}/pricing`, `${origin}/api/models`];
-    const probes: PricingProbe[] = [];
-    let pricingPayload: unknown | null = null;
-    for (const url of rutas) {
-      const intento = await pedir(url);
-      const payload = intento.payload;
-      const objeto = typeof payload === 'object' && payload !== null ? payload : null;
-      const lista =
-        objeto !== null && 'data' in objeto ? (objeto as { data?: unknown }).data : null;
-      probes.push({
-        url: url.slice(origin.length) || url,
-        status: intento.status,
-        topLevelKeys: objeto === null ? [] : Object.keys(objeto).slice(0, 8),
-        entryCount: Array.isArray(lista) ? lista.length : 0,
-      });
-      if (Array.isArray(lista) && lista.length > 0) {
-        pricingPayload = payload;
-        break;
-      }
-    }
+    if (models === null) throw new Error('la conexion no devolvio la lista de modelos');
 
     const snapshot = buildCatalogSnapshot({
       connectionId: args.connectionId,
       fetchedAt: new Date().toISOString(),
-      modelsPayload: models.payload,
-      pricingPayload,
-      notice:
-        pricingPayload === null ? `Sin precios por API. ${describePricingProbes(probes)}` : null,
-      pricingProbes: probes,
+      modelsPayload: models,
+      pricingPayload: null,
+      notice: 'Esta conexion no publica precios por API; Luxy no los consulta.',
     });
     writeCatalogSnapshot(context.catalogDirectory, snapshot);
     return snapshot;
