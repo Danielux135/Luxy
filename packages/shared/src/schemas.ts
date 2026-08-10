@@ -604,10 +604,19 @@ export const studioJobCreateRequestSchema = z
      * dos respuestas son el mismo documento.
      */
     continuesJobId: z.string().uuid().optional(),
+    /** trabajo agentic fallido cuyo worktree debe reanudarse */
+    resumeJobId: z.string().uuid().optional(),
     /** snapshot versionado; solo se acepta con una confirmacion explicita */
     evaluation: modelEvaluationExecutionSchema.optional(),
   })
   .superRefine((value, context) => {
+    if (value.resumeJobId !== undefined && value.mode !== undefined && value.mode !== 'task') {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['resumeJobId'],
+        message: 'solo una tarea editable puede reanudar un worktree',
+      });
+    }
     if (value.mode === 'conversation') {
       for (const field of [
         'conversationId',

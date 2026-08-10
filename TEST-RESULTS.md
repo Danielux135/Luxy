@@ -3,6 +3,69 @@
 Separar siempre resultados históricos, resultados de la copia actual y pruebas
 manuales. No transformar un fallo no ejecutado en «omitido».
 
+### 2026-08-10 — Codex — F4.8-T4
+
+- Prueba añadida: `buildProviderPrompt` incluye instrucciones de continuación
+  para un trabajo reanudado.
+- `npm.cmd run lint`: **pasado**.
+- `npm.cmd run typecheck`: **pasado**.
+- `npm.cmd test -- --run apps/agent/src/agent.test.ts`: **75/75 pasadas**.
+- `npm.cmd run desktop:build`: **pasado**; bundle de agente y renderer
+  reconstruidos en este worktree.
+- No se hicieron llamadas reales al proveedor ni despliegues.
+
+### 2026-08-10 — Codex — F4.8-T4b
+
+- `npm.cmd run lint`: pasado.
+- `npm.cmd run typecheck`: pasado.
+- `npm.cmd run desktop:test`: **328/328 pasadas**.
+- `npm.cmd run desktop:build`: pasado.
+
+### 2026-08-10 — Codex — F4.8-T4c
+
+- Prueba nueva: el prompt autónomo exige continuar fases y no terminar con una
+  pregunta.
+- `npm.cmd run lint`: pasado.
+- `npm.cmd run typecheck`: pasado.
+- `npm.cmd test -- --run apps/agent/src/agent.test.ts`: **76/76 pasadas**.
+- `npm.cmd run desktop:build`: pasado.
+
+### 2026-08-10 — Codex — F4.8-T4d
+
+- `npm.cmd run lint`: pasado.
+- `npm.cmd run typecheck`: pasado.
+- `npm.cmd test -- --run apps/agent/src/providers/providers.test.ts`: **72/72 pasadas**.
+- `npm.cmd run desktop:build`: pasado.
+
+### 2026-08-10 — Codex — F4.8-T1
+
+- Prueba focalizada: `vitest run apps/agent/src/agent.test.ts` — **72 passed, 0 failed**.
+- Casos nuevos: inicialización de proyecto no-Git, `.gitignore` creado sólo si falta, exclusión de `.env` y `node_modules`, commit local `estado inicial`.
+- `npm run lint`: pasado.
+- `npm run typecheck`: bloqueado por `TS2688`, falta `@cloudflare/workers-types` en las dependencias disponibles.
+- `npm test` y `npm run build`: no ejecutados después del bloqueo de typecheck.
+- No se llamó a proveedores reales ni se consumieron tokens.
+
+### 2026-08-10 — Codex — F4.8-T2
+
+- Pruebas focalizadas: agente, Gateway Studio y Desktop — **103 passed, 0 failed**.
+- Cobertura nueva: validar y reanudar la misma ruta/rama de worktree; Gateway
+  sólo acepta el intento anterior del mismo Studio, máquina, proyecto,
+  proveedor, modelo y prompt.
+- `npm run lint`: pasado en la ejecución conjunta.
+- `npm run typecheck`: bloqueado por `@cloudflare/workers-types` ausente y por
+  el enlace temporal de `@luxy/shared` al checkout original, que no contenía
+  todavía `resumeJobId`; no se ocultó el fallo.
+- `npm test` y `npm run build`: pendientes con dependencias completas.
+
+### 2026-08-10 — Codex — F4.8-T3
+
+- Comprobación local: `C:\Users\daniel\Desktop\test` no existe en este
+  portátil.
+- Prueba añadida para que una ruta inexistente produzca un error de proyecto
+  claro, no `ENOENT`.
+- Ejecución de la prueba nueva: pendiente tras restaurar dependencias.
+
 ## Línea base histórica del checkpoint
 
 ### 2026-08-02 — Windows — `luxy-work-update-001`
@@ -775,3 +838,30 @@ test.txt`, `Luxy claves API.txt`, un handoff duplicado y `Web demos/`).
 - Clasificación: regresión | ambiental | bloqueo | esperado.
 - Evidencia manual adicional:
 ```
+
+### 2026-08-10 10:08 — Windows 11 — F4.8-T2-DEPLOY
+
+- Base: rama `luxy/auto-init-git`, cambios de F4.8-T1/T2 sin commit.
+- Build Gateway: exit 0.
+- Suite Gateway/shared: **641 pasadas, 0 fallos**, 37 archivos; Vitest 8,45 s.
+- Primer dry-run sin configuración local: exit 1, clasificado ambiental; el
+  worktree no contiene el `wrangler.toml` ignorado por Git.
+- Dry-run final con configuración equivalente por argumentos: exit 0; bundle
+  467,92 KiB, gzip 105,63 KiB.
+- Deploy autorizado: exit 0; Worker `luxy-gateway`, versión
+  `33da28e0-4a72-4c0b-8661-50d1cc838dec`, cron `*/1 * * * *`.
+- Smoke check: `/health` respondió **HTTP 200**, `status: ok` y
+  `configured: true`.
+- No se ejecutaron modelos, migraciones, commit ni push.
+
+### 2026-08-10 10:25 — Windows 11 — F4.8-T2-TIMEOUT-RESTART
+
+- Build completo del monorepo: exit 0; shared, agent, desktop y gateway
+  compilados.
+- Deploy autorizado: exit 0; Worker `luxy-gateway`, versión
+  `a5cb5ba8-34d9-4cca-85ba-e02f95e3942f`, cron `*/1 * * * *`.
+- Smoke check: `/health` respondió **HTTP 200**, `status: ok` y
+  `configured: true`.
+- Arranque: proceso principal de Electron apunta a
+  `apps/desktop` del worktree `lux-auto-init-git`; ventana `Luxy` responde.
+- No se ejecutaron modelos ni se pulsó **Reintentar**.

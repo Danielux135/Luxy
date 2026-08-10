@@ -3,6 +3,40 @@
 Este archivo sólo contiene acciones que una IA no debe ejecutar por su cuenta.
 No repetir una acción marcada como completada sin una razón nueva.
 
+## LA-021 — validar inicialización automática de Git
+
+Estado: `pending`
+
+Reconstruir y reiniciar Desktop/agente desde el worktree de `F4.8-T1`. Configurar
+un proyecto editable que no tenga `.git` y lanzar un trabajo que escriba
+archivos. Comprobar que aparece `inicializando repositorio Git`, que se crea el
+commit local `estado inicial`, que `.env` y `node_modules` no entran en él y que
+el trabajo continúa en un worktree `luxy/...`.
+
+No se crea remoto ni se hace push. Si se cancela el trabajo, conservar el
+worktree y sus cambios para inspección.
+
+## LA-022 — validar reanudación del mismo worktree
+
+Estado: `pending`
+
+Precondiciones completadas el 2026-08-10: Desktop reconstruido y arrancado desde
+este worktree; Gateway desplegado en la versión
+`a5cb5ba8-34d9-4cca-85ba-e02f95e3942f` y `/health` HTTP 200. El bundle actual
+incluye el timeout ampliado del proveedor.
+
+Después de reconstruir Desktop/agente, lanzar una tarea que cree al menos un
+archivo y provocar un fallo temporal del proveedor. En el detalle, pulsar
+**Reintentar trabajo** y aceptar. Debe aparecer `reanudando worktree aislado` y
+la ruta/rama `luxy/...` debe ser la misma del intento anterior. El nuevo ID
+audita el segundo intento, pero no debe crear una segunda carpeta ni una página
+vacía.
+
+Tras F4.8-T4, comprobar además que el primer mensaje del modelo reanudado no
+anuncia una nueva “llamada 1” como si no existiera trabajo previo: debe revisar
+`git_status` y continuar desde los archivos actuales. Un HTTP 503 visible debe
+registrarse como fallo del proveedor, no como creación de un worktree nuevo.
+
 ## LA-001 — abrir el checkpoint en VS Code
 
 Estado: `pending`

@@ -72,6 +72,11 @@ Las decisiones de Studio también pasan por el gateway: aplicar crea un commit
 en la rama aislada y descartar elimina el worktree. Ambas exigen confirmación;
 ninguna mezcla la rama principal ni hace `push`.
 
+Si un proyecto editable todavía no tiene `.git`, el agente crea `.gitignore`
+si falta, excluye secretos, dependencias y salidas generadas, y crea el commit
+local `estado inicial` sin remoto antes de preparar el worktree. Con
+`allowEdits: false` no se inicializa y permanece en solo lectura.
+
 Conversaciones reutiliza los trabajos y eventos persistentes: la metadata agrupa
 conversación, turno y columnas de comparación. Es un modo de solo lectura: no
 crea worktree, no concede herramientas y no ejecuta comprobaciones. Codex exige

@@ -45,7 +45,7 @@ aplicar/descartar → historial.
 | F1.1 | Opciones reales de máquina/proyecto/proveedor | implemented | prueba E2E en Windows con gateway real               |
 | F1.2 | Crear y seguir trabajo desde formulario       | implemented | validación manual final                              |
 | F1.3 | Eventos, resultado, pruebas y diff            | implemented | revisar salidas grandes y paginación                 |
-| F1.4 | Worktree aislado                              | done        | mantener invariantes de seguridad                    |
+| F1.4 | Worktree aislado                              | implemented | preparar Git automáticamente en proyectos editables y mantener el aislamiento |
 | F1.5 | Aplicar cambios                               | implemented | confirmar commit real en rama aislada sin merge/push |
 | F1.6 | Descartar trabajo                             | implemented | confirmar diálogo y limpieza exacta                  |
 | F1.7 | Reintentos e idempotencia de decisiones       | implemented | prueba manual de corte/reinicio                      |

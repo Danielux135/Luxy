@@ -159,8 +159,9 @@ Los cuatro deben pasar.
 - **La carpeta de trabajo del usuario nunca se toca.**
 - No se borra un worktree con cambios sin aprobación explícita.
 - Cancelar **no borra cambios**: se informa de qué quedó modificado y dónde.
-- Si el proyecto no es un repositorio git: solo lectura, y se explica cómo
-  inicializarlo.
+- Si el proyecto permite ediciones y no es un repositorio git, el agente crea
+  `.gitignore`, inicializa Git y hace el commit local `estado inicial` antes de
+  crear el worktree. Si `allowEdits` es falso, sigue siendo solo lectura.
 
 ## Prohibido hacer automáticamente
 

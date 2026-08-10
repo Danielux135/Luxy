@@ -1,5 +1,71 @@
 # Luxy — tarea activa
 
+## F4.8-T4 — continuación explícita al reanudar un trabajo
+
+Estado: **implemented — Codex, 2026-08-10; pruebas pendientes de ejecutar**
+
+El reintento ya reutilizaba el mismo worktree, pero el proveedor recibía de
+nuevo el prompt original y podía anunciar otra vez la primera llamada. El
+agente añade ahora una instrucción de continuación cuando detecta un reintento:
+debe inspeccionar `git_status` y los archivos existentes, conservar lo hecho y
+trabajar sólo en la siguiente parte incompleta.
+
+Siguiente paso exacto: ejecutar lint, typecheck, prueba focalizada y build de
+Desktop en este worktree; después reintentar el trabajo con MiniMax.
+
+Corrección adicional: un trabajo cancelado mientras seguía en cola no tiene
+worktree que reanudar. Studio crea ahora un intento nuevo desde el proyecto
+base en ese caso; sólo reutiliza la rama existente cuando hay `worktreePath`.
+
+El agente también exige en el prompt que una tarea autónoma con varias fases no
+termine después de la primera respuesta ni cierre preguntando al usuario qué
+hacer; debe seguir llamando a la API y usando herramientas hasta completar los
+requisitos explícitos.
+
+## F4.8-T3 — diagnóstico de ruta de proyecto inexistente
+
+Estado: **implemented — Codex, 2026-08-10; prueba focalizada pendiente de repetir**
+
+`ensureGitRepository` valida ahora que la carpeta exista y sea un directorio
+antes de crear `.gitignore`; el error pide corregir la ruta en Ajustes en lugar
+de mostrar `ENOENT`.
+
+## F4.8-T2 — reanudar el mismo worktree tras un fallo del proveedor
+
+Estado: **deployed — Codex, 2026-08-10; validación manual pendiente**
+
+Un reintento de Studio conserva un nuevo registro para auditar el intento, pero
+transporta el trabajo anterior y el agente valida/reutiliza su mismo worktree y
+rama. La página ya creada no se reinicia desde el proyecto base.
+
+Gateway/shared verificados con 641 pruebas y desplegados en `luxy-gateway`,
+versión `a5cb5ba8-34d9-4cca-85ba-e02f95e3942f`. Desktop y agente están
+reconstruidos y ejecutándose desde este worktree; el timeout ampliado está en el
+bundle.
+
+Siguiente paso exacto: comprobar manualmente que el botón reanuda `LUX-L9CC` en
+la misma ruta y rama, sin crear otra carpeta `lux-l9cc-...`.
+
+## F4.8-T1 — inicialización automática de Git para proyectos editables
+
+Estado: **implemented — Codex, 2026-08-10; prueba focalizada verificada, matriz completa bloqueada por dependencia del entorno**
+
+Objetivo: permitir que un trabajo editable prepare una carpeta sin `.git`, cree
+un commit inicial local y después ejecute el modelo en un worktree aislado.
+
+Criterio: no sobrescribir `.gitignore`, excluir secretos/dependencias y crear
+`estado inicial` antes de `git worktree add`; conservar el rechazo de escritura
+cuando `allowEdits` sea falso.
+
+Resultado: preparación implementada en `apps/agent/src/git.ts`, conectada en
+`job-runner.ts`, con `.gitignore` seguro y commit local `estado inicial`.
+Prueba focalizada: 72/72 pasadas. `lint` pasó; `typecheck` no arrancó por falta
+de `@cloudflare/workers-types` en las dependencias disponibles.
+
+Siguiente paso exacto: reconstruir Desktop/agente con dependencias completas y
+probar un proyecto no-Git real; confirmar que el primer evento crea Git y que
+el trabajo termina en un worktree.
+
 ## Checkpoint de continuidad — 2026-08-09
 
 Paso activo: **LA-018 — validar el Laboratorio actualizado**

@@ -64,8 +64,10 @@ Añade carpetas con el selector nativo. El alias es lo que escribirás en Telegr
 Cada proyecto tiene sus permisos: leer, editar, commit y push. **El push está
 desactivado por defecto** y además exige doble confirmación.
 
-Un proyecto que permita edición **tiene que ser un repositorio git**: sin git no
-hay worktree, y sin worktree no hay aislamiento.
+Un proyecto que permita edición sin Git se prepara automáticamente en el primer
+trabajo: Luxy crea un `.gitignore` y el commit local `estado inicial`, sin
+remoto, antes de crear el worktree aislado. Un proyecto con `allowEdits: false`
+continúa siendo sólo de lectura.
 
 ### Paso 6 — Resumen
 

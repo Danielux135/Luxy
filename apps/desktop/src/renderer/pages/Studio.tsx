@@ -130,13 +130,18 @@ export function StudioPage(): JSX.Element {
     ) {
       return;
     }
+    const worktreePath = job.metadata['worktreePath'];
+    const canResumeExistingWorktree =
+      typeof worktreePath === 'string' && worktreePath.trim().length > 0;
     const accepted = window.confirm(
       [
         `¿Reintentar ${job.shortId}?`,
         '',
         `Proveedor: ${job.provider}`,
         `Modelo: ${job.model ?? 'predeterminado'}`,
-        'Se creará un trabajo nuevo y puede volver a consumir tokens.',
+        canResumeExistingWorktree
+          ? 'Se creará un nuevo intento, pero continuará en el mismo worktree y conservará los archivos ya creados.'
+          : 'Este intento se canceló antes de empezar y no tiene worktree. Se creará uno nuevo desde el proyecto base.',
       ].join('\n'),
     );
     if (!accepted) return;
@@ -147,6 +152,7 @@ export function StudioPage(): JSX.Element {
       projectAlias: job.projectAlias,
       prompt: job.prompt,
       priority: 0,
+      ...(canResumeExistingWorktree ? { resumeJobId: job.id } : {}),
     });
   };
 

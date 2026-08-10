@@ -73,8 +73,10 @@ máquina y la redacción de secretos viven ahí y se prueban de forma aislada.
    - Ninguna → el trabajo queda en cola.
 4. **Reclamación.** El agente llama a `luxy_claim_job`, que usa
    `FOR UPDATE SKIP LOCKED`. **Dos máquinas nunca obtienen el mismo trabajo.**
-5. **Ejecución.** Se crea un worktree, se lanza el proveedor, se ejecutan las
-   pruebas, se recoge el diff.
+5. **Preparación y ejecución.** Si el proyecto permite ediciones y aún no tiene
+   Git, el agente crea un `.gitignore` seguro y el commit local `estado inicial`
+   sin remoto. Después crea un worktree, lanza el proveedor, ejecuta las
+   pruebas y recoge el diff.
 6. **Progreso.** El agente manda eventos persistidos; Studio consulta el historial
    real. Si el origen es Telegram, el gateway también edita su mensaje.
 7. **Cierre.** `complete`, `fail` o `cancelled`. El agente guarda primero el

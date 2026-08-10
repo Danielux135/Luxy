@@ -1,5 +1,5 @@
 // operaciones de git y gestion de worktrees aislados
-import { cpSync, mkdirSync, existsSync, realpathSync } from 'node:fs';
+import { cpSync, mkdirSync, existsSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
 import { buildBranchName, isPathInside, containsTraversal } from '@luxy/shared';
 import { runProcess } from './process.js';
@@ -17,6 +17,26 @@ export class GitError extends Error {
 
 const GIT_TIMEOUT_MS = 120_000;
 
+const DEFAULT_GITIGNORE = [
+  '# secretos locales',
+  '.env',
+  '.env.*',
+  '!.env.example',
+  '',
+  '# dependencias y salidas generadas',
+  'node_modules/',
+  'dist/',
+  'out/',
+  'build/',
+  'release/',
+  '',
+  '# archivos temporales',
+  '*.log',
+  '.DS_Store',
+  'Thumbs.db',
+  '',
+].join('\n');
+
 /** ejecuta git con argumentos separados, nunca por shell */
 async function git(
   args: string[],
@@ -32,6 +52,71 @@ export async function isGitRepository(path: string): Promise<boolean> {
   if (!existsSync(path)) return false;
   const result = await git(['rev-parse', '--is-inside-work-tree'], path, 20_000);
   return result.exitCode === 0 && result.stdout.trim() === 'true';
+}
+
+/** prepara un proyecto editable que todavía no tiene repositorio Git. */
+export async function ensureGitRepository(
+  path: string,
+): Promise<{ initialized: boolean; createdGitignore: boolean }> {
+  if (!existsSync(path)) {
+    throw new GitError(
+      `la carpeta del proyecto no existe: "${path}"`,
+      'corrige la ruta del proyecto en Ajustes y vuelve a intentarlo',
+    );
+  }
+  if (!statSync(path).isDirectory()) {
+    throw new GitError(
+      `la ruta del proyecto no es una carpeta: "${path}"`,
+      'elige una carpeta de proyecto en Ajustes y vuelve a intentarlo',
+    );
+  }
+  if (await isGitRepository(path)) return { initialized: false, createdGitignore: false };
+
+  const gitignorePath = join(path, '.gitignore');
+  const createdGitignore = !existsSync(gitignorePath);
+  if (createdGitignore) writeFileSync(gitignorePath, DEFAULT_GITIGNORE, 'utf8');
+
+  const init = await git(['init', '--initial-branch=main'], path, 60_000);
+  if (init.exitCode !== 0) {
+    throw new GitError(
+      `no se pudo inicializar el repositorio Git: ${init.stderr.trim() || init.stdout.trim()}`,
+      'comprueba que la carpeta del proyecto permite escritura',
+    );
+  }
+
+  const add = await git(['add', '-A'], path, 120_000);
+  if (add.exitCode !== 0) {
+    throw new GitError(
+      `no se pudo preparar el estado inicial de Git: ${add.stderr.trim() || add.stdout.trim()}`,
+    );
+  }
+
+  const commit = await git(
+    [
+      '-c',
+      'user.name=Luxy',
+      '-c',
+      'user.email=luxy@local.invalid',
+      '-c',
+      'commit.gpgsign=false',
+      '-c',
+      'core.hooksPath=',
+      'commit',
+      '--no-verify',
+      '--allow-empty',
+      '-m',
+      'estado inicial',
+    ],
+    path,
+    120_000,
+  );
+  if (commit.exitCode !== 0) {
+    throw new GitError(
+      `no se pudo crear el commit inicial: ${commit.stderr.trim() || commit.stdout.trim()}`,
+    );
+  }
+
+  return { initialized: true, createdGitignore };
 }
 
 /** comprueba que el repositorio tiene HEAD, es decir, algun commit */
@@ -121,6 +206,46 @@ export async function createWorktree(
   }
 
   return { path: worktreePath, branch, baseRepository: repositoryPath };
+}
+
+/** recupera un worktree anterior sin crear otra rama ni copiar el proyecto. */
+export async function resumeWorktree(
+  repositoryPath: string,
+  worktreePath: string,
+  baseDirectory: string,
+): Promise<Worktree> {
+  const resolvedWorktree = resolve(worktreePath);
+  const resolvedBase = resolve(baseDirectory);
+  if (
+    containsTraversal(worktreePath) ||
+    !isPathInside(resolvedWorktree, resolvedBase) ||
+    !existsSync(resolvedWorktree)
+  ) {
+    throw new GitError('el worktree anterior no esta dentro de la carpeta segura de Luxy');
+  }
+  if (!(await isGitRepository(repositoryPath))) {
+    throw new GitError('el proyecto base ya no es un repositorio Git');
+  }
+
+  const top = await git(['rev-parse', '--show-toplevel'], resolvedWorktree, 20_000);
+  if (top.exitCode !== 0 || resolve(top.stdout.trim()) !== resolvedWorktree) {
+    throw new GitError('el worktree anterior no corresponde a la carpeta registrada');
+  }
+  const branch = await currentBranch(resolvedWorktree);
+  if (branch === null || !/^luxy\/[a-z0-9-]{1,180}$/.test(branch)) {
+    throw new GitError('la rama del worktree anterior no es una rama de Luxy');
+  }
+
+  const listed = await git(['worktree', 'list', '--porcelain'], repositoryPath, 20_000);
+  const block = listed.stdout.split(/\r?\n(?=worktree )/).find((entry) => {
+    const firstLine = entry.split(/\r?\n/)[0] ?? '';
+    return firstLine.startsWith('worktree ') && resolve(firstLine.slice('worktree '.length)) === resolvedWorktree;
+  });
+  if (listed.exitCode !== 0 || block === undefined || !block.includes(`branch refs/heads/${branch}`)) {
+    throw new GitError('el worktree anterior ya no esta registrado en el proyecto base');
+  }
+
+  return { path: resolvedWorktree, branch, baseRepository: repositoryPath };
 }
 
 /**

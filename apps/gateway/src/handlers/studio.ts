@@ -148,6 +148,32 @@ export const handleStudioJobCreate = withMachineAuth(async (request, deps, creat
     return errorResponse('la maquina elegida no ofrece ese proveedor', 422);
   }
 
+  let resumeMetadata: Record<string, unknown> = {};
+  if (body.data.resumeJobId !== undefined) {
+    const previous = await deps.repo.getJobById(body.data.resumeJobId);
+    if (
+      previous === null ||
+      previous.origin !== 'studio' ||
+      previous.metadata['requestedByMachineId'] !== creator.id ||
+      previous.targetMachineId !== target.id ||
+      previous.projectAlias !== body.data.projectAlias ||
+      previous.provider !== body.data.provider ||
+      previous.model !== body.data.model ||
+      previous.prompt !== body.data.prompt ||
+      !['failed', 'interrupted', 'cancelled'].includes(previous.status)
+    ) {
+      return errorResponse('el trabajo anterior no se puede reanudar desde este Studio', 409);
+    }
+    const worktreePath = previous.metadata['worktreePath'];
+    if (typeof worktreePath !== 'string' || worktreePath.length === 0) {
+      return errorResponse('el trabajo anterior no conserva un worktree reanudable', 409);
+    }
+    resumeMetadata = {
+      resumeFromJobId: previous.id,
+      resumeWorktreePath: worktreePath,
+    };
+  }
+
   const job = await deps.repo.createJob({
     origin: 'studio',
     telegramChatId: null,
@@ -163,6 +189,7 @@ export const handleStudioJobCreate = withMachineAuth(async (request, deps, creat
       model: body.data.model,
       requestedByMachineId: creator.id,
       requestedByMachineName: creator.name,
+      ...resumeMetadata,
       ...(body.data.mode === 'conversation'
         ? {
             studioMode: 'conversation',

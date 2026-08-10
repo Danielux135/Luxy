@@ -21,7 +21,9 @@ import {
   assertInsideWorktree,
   GitError,
   isGitRepository,
+  ensureGitRepository,
   createWorktree,
+  resumeWorktree,
   collectDiff,
   commitWorktree,
 } from './git.js';
@@ -403,6 +405,43 @@ describe('worktrees reales', () => {
     );
   }, 60_000);
 
+  it('inicializa un proyecto editable con gitignore y commit local', async () => {
+    const proyecto = join(temporal, 'proyecto-nuevo');
+    mkdirSync(join(proyecto, 'node_modules'), { recursive: true });
+    writeFileSync(join(proyecto, 'index.html'), '<h1>hola</h1>\n');
+    writeFileSync(join(proyecto, '.env'), 'SECRETO=no-debe-entrar\n');
+    writeFileSync(join(proyecto, 'node_modules', 'dependencia.js'), 'modulo\n');
+
+    const preparado = await ensureGitRepository(proyecto);
+
+    expect(preparado).toEqual({ initialized: true, createdGitignore: true });
+    expect(await isGitRepository(proyecto)).toBe(true);
+    const tracked = await runProcess({
+      executable: 'git',
+      args: ['ls-files'],
+      cwd: proyecto,
+      timeoutMs: 60_000,
+    });
+    expect(tracked.stdout).toContain('index.html');
+    expect(tracked.stdout).toContain('.gitignore');
+    expect(tracked.stdout).not.toContain('.env');
+    expect(tracked.stdout).not.toContain('node_modules');
+
+    const log = await runProcess({
+      executable: 'git',
+      args: ['log', '-1', '--pretty=%s'],
+      cwd: proyecto,
+      timeoutMs: 60_000,
+    });
+    expect(log.stdout.trim()).toBe('estado inicial');
+  }, 120_000);
+
+  it('explica cuando la carpeta editable ya no existe', async () => {
+    await expect(ensureGitRepository(join(temporal, 'desaparecido'))).rejects.toThrow(
+      'la carpeta del proyecto no existe',
+    );
+  });
+
   it('crea un worktree huerfano para permitir el primer commit aislado', async () => {
     const emptyRepo = join(temporal, 'empty-repo');
     const worktrees = join(temporal, 'empty-worktrees');
@@ -431,6 +470,30 @@ describe('worktrees reales', () => {
       timeoutMs: 60_000,
     });
     expect(branch.exitCode).toBe(0);
+  }, 120_000);
+
+  it('reanuda el worktree existente en vez de crear otra rama', async () => {
+    const proyecto = join(temporal, 'proyecto-reanudable');
+    const worktrees = join(temporal, 'worktrees-reanudables');
+    mkdirSync(proyecto, { recursive: true });
+    const git = async (args: string[]): Promise<void> => {
+      const r = await runProcess({ executable: 'git', args, cwd: proyecto, timeoutMs: 60_000 });
+      if (r.exitCode !== 0) throw new Error(`git ${args.join(' ')}: ${r.stderr}`);
+    };
+    await git(['init', '--initial-branch=main']);
+    await git(['config', 'user.email', 'test@example.local']);
+    await git(['config', 'user.name', 'Test']);
+    writeFileSync(join(proyecto, 'index.html'), '<h1>inicial</h1>\n');
+    await git(['add', '-A']);
+    await git(['commit', '-m', 'inicial']);
+
+    const original = await createWorktree(proyecto, 'LUX-OLD', 'pagina web', worktrees);
+    writeFileSync(join(original.path, 'index.html'), '<h1>ya creado</h1>\n');
+    const resumed = await resumeWorktree(proyecto, original.path, worktrees);
+
+    expect(resumed.path).toBe(original.path);
+    expect(resumed.branch).toBe(original.branch);
+    expect(readFileSync(join(resumed.path, 'index.html'), 'utf8')).toContain('ya creado');
   }, 120_000);
 });
 
@@ -612,6 +675,20 @@ describe('buildProviderPrompt', () => {
     const prompt = buildProviderPrompt(job());
     expect(prompt).toContain('worktree');
     expect(prompt).toContain('No ejecutes git push');
+  });
+
+  it('exige completar una tarea autonoma antes de responder', () => {
+    const prompt = buildProviderPrompt(job());
+    expect(prompt).toContain('La tarea es autonoma');
+    expect(prompt).toContain('no termines despues de una sola fase');
+    expect(prompt).toContain('no cierres con una pregunta');
+  });
+
+  it('indica continuar desde los archivos existentes al reanudar', () => {
+    const prompt = buildProviderPrompt(job({ resumeFromJobId: 'job-anterior' }));
+    expect(prompt).toContain('REANUDACION DE UN TRABAJO ANTERIOR');
+    expect(prompt).toContain('No empieces el proyecto desde cero');
+    expect(prompt).toContain('Continua solo con la siguiente parte incompleta');
   });
 });
 

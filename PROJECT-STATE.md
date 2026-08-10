@@ -1,6 +1,23 @@
 # Luxy — estado canónico del proyecto
 
-Última actualización: **2026-08-09**
+Última actualización: **2026-08-10**
+
+Actualización 2026-08-10: `F4.8-T4` implementado. Cuando un retry reutiliza el
+worktree, el prompt del agente marca explícitamente la ejecución como
+continuación y le ordena inspeccionar y conservar los archivos existentes. La
+prueba y la reconstrucción de Desktop quedan pendientes en este checkpoint.
+
+Actualización 2026-08-10: `F4.8-T1` implementado. Los proyectos con
+`allowEdits: true` que aún no tienen Git se inicializan automáticamente con un
+`.gitignore` seguro y el commit local `estado inicial`, sin remoto; después el
+trabajo usa el worktree aislado habitual. `allowEdits: false` sigue siendo sólo
+lectura. Prueba focalizada 72/72; typecheck pendiente por dependencia ausente.
+
+`F4.8-T2` implementado y desplegado: un reintento agentic conserva un nuevo
+registro, pero Gateway y agente validan y reutilizan el mismo worktree y rama.
+Una web parcial continúa desde sus archivos, no desde el proyecto base. Gateway
+`a5cb5ba8-34d9-4cca-85ba-e02f95e3942f`, `/health` HTTP 200; Desktop y agente
+reconstruidos con timeout ampliado; falta validación manual.
 
 Estado documental: **checkpoint reconciliado en Windows; `F4.1-T4/T5`,
 `F4.2-T1/T2/T3` y `F4.3-T1`–`F4.3-T8` verificados y commiteados localmente;
@@ -40,8 +57,9 @@ Restricciones:
   pagan ni se integran sus APIs.
 - No automatizar las webs de Claude o ChatGPT.
 - No usar `--dangerously-skip-permissions` ni equivalentes.
-- No tocar la carpeta original de un proyecto: toda edición ocurre en un
-  worktree aislado.
+- El modelo sólo edita en un worktree aislado; al primer trabajo editable Luxy
+  puede crear en la carpeta original el `.git` y el commit local `estado
+  inicial` necesarios para disponer de ese aislamiento.
 - No commit sin aprobación explícita de Daniel.
 - No push sin dos confirmaciones y `allowPush: true`.
 - No desplegar ni aplicar migraciones reales sin autorización explícita.
@@ -124,7 +142,7 @@ necesario.
 | Agente, gateway y cola | Implementado              | polling saliente, leases, heartbeats, eventos y cancelación                                       |
 | Desktop Electron       | Implementado              | agente en utility process, bandeja, configuración y secretos cifrados                             |
 | Studio — trabajos      | Implementado en código    | formulario real, historial, eventos, resultado, diff y pruebas                                    |
-| Worktrees              | Implementado              | la carpeta original no se modifica                                                                |
+| Worktrees              | Implementado              | la edición ocurre aislada; el primer trabajo puede preparar Git en un proyecto sin repositorio |
 | Aplicar/descartar      | Implementado en código    | aplicar crea commit aislado; descartar borra worktree tras confirmar; sin push                    |
 | Conversaciones         | Implementado parcialmente | uno o dos modelos, streaming, historial, tiempos, tokens y cancelación                            |
 | Diagnóstico del final  | Implementado y verificado | señal de transporte, aborto, límites efectivos y tokens; sin contenido                            |

@@ -19,6 +19,7 @@ import {
   HttpApiProvider,
   MemoryBudgetStore,
   EXAMPLE_HTTP_PROVIDERS,
+  resolveHttpRequestTimeout,
 } from './http-provider.js';
 import {
   httpProviderConfigSchema,
@@ -789,6 +790,18 @@ describe('HttpApiProvider: diagnostico del final de la respuesta', () => {
       inputTokens: 10,
       outputTokens: 4,
     });
+  });
+});
+
+describe('timeout de llamadas HTTP', () => {
+  it('deja que una llamada agentic use la hora completa del trabajo', () => {
+    expect(resolveHttpRequestTimeout({ timeoutMs: 3_600_000 })).toBe(3_600_000);
+  });
+
+  it('conserva el limite especifico de una llamada cuando existe', () => {
+    expect(
+      resolveHttpRequestTimeout({ timeoutMs: 3_600_000, requestTimeoutMs: 300_000 }),
+    ).toBe(300_000);
   });
 });
 

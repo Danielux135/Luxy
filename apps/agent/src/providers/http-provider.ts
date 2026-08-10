@@ -91,14 +91,6 @@ export function parseRetryAfter(value: string | null, now: number = Date.now()):
   return ms > 0 ? Math.min(ms, MAX_RETRY_AFTER_MS) : null;
 }
 
-/**
- * techo de una peticion suelta.
- *
- * cinco minutos cubren de sobra a los modelos lentos medidos (glm-5.2 ~120 s,
- * MiniMax-M3 ~240 s) sin dejar que uno colgado se coma la hora del trabajo.
- */
-const MAX_REQUEST_TIMEOUT_MS = 300_000;
-
 /** true si el fallo fue por agotarse el tiempo, no por un rechazo de la API */
 function esTimeout(error: unknown): boolean {
   if (error instanceof Error && error.name === 'AbortError') return true;
@@ -111,6 +103,17 @@ export class BudgetExceededError extends Error {
     super(message);
     this.name = 'BudgetExceededError';
   }
+}
+
+/**
+ * las llamadas agentic pueden incluir razonamiento antes de cada herramienta.
+ * el timeout general del trabajo debe gobernarlas; solo los lotes ponen un
+ * limite propio por llamada para no pagar una peticion enorme que se atasque.
+ */
+export function resolveHttpRequestTimeout(
+  request: Pick<ProviderRunRequest, 'timeoutMs' | 'requestTimeoutMs'>,
+): number {
+  return Math.min(request.timeoutMs, request.requestTimeoutMs ?? request.timeoutMs);
 }
 
 /** almacen del consumo diario, persistido por quien lo use */
@@ -346,7 +349,23 @@ export class HttpApiProvider implements ProviderExecution {
         useNativeTools: agentic.useNativeTools,
         signal: request.signal,
         callModel: (messages: LoopMessage[], tools: unknown[] | null) =>
-          this.callTurn(messages, tools, request),
+          retryWithBackoff(() => this.callTurn(messages, tools, request), {
+            maxAttempts: 3,
+            baseDelayMs: 2000,
+            maxDelayMs: 60_000,
+            signal: request.signal,
+            shouldRetry: (error) => !request.signal.aborted && statusOf(error) === 429,
+            delayForError: (error, _attempt, calculado) => {
+              const pedido = (error as { retryAfterMs?: number }).retryAfterMs;
+              return typeof pedido === 'number' ? Math.max(pedido, calculado) : null;
+            },
+            onRetry: (_error, _attempt, delayMs) => {
+              request.onEvent({
+                type: 'phase',
+                message: `limite de frecuencia del proveedor; esperando ${Math.ceil(delayMs / 1000)}s antes de reintentar`,
+              });
+            },
+          }),
         onEvent: (event: { type: 'phase' | 'tool' | 'text' | 'warning'; message: string }) =>
           request.onEvent({ type: event.type, message: event.message }),
       });
@@ -482,25 +501,9 @@ export class HttpApiProvider implements ProviderExecution {
     return modelo === this.config.model ? this.displayName : `${this.displayName} (${modelo})`;
   }
 
-  /**
-   * techo de una sola peticion.
-   *
-   * request.timeoutMs es el del TRABAJO (por defecto una hora). Usarlo tal cual
-   * en cada llamada significa que un modelo colgado bloquea el trabajo entero
-   * sin decir nada. Se acota, dejando margen a los modelos lentos conocidos.
-   */
+  /** techo de una llamada, respetando el timeout especifico de lotes. */
   private requestTimeout(request: ProviderRunRequest): number {
-    // quien llama puede pedir mas margen que el tope general. Los lotes lo
-    // hacen: ahi el tope no protege de nada, solo limita cuantos registros
-    // caben en una llamada, y con facturacion por llamada eso cuesta dinero.
-    // Una conversacion tiene cancelacion manual y latido de lease. No se corta
-    // por el tope fijo de cinco minutos: los modelos de razonamiento pueden
-    // tardar bastante sin estar colgados. Su ultima barrera es el timeout del
-    // trabajo configurado por el usuario (una hora por defecto).
-    const tope =
-      request.requestTimeoutMs ??
-      (request.readOnly === true ? request.timeoutMs : MAX_REQUEST_TIMEOUT_MS);
-    return Math.min(request.timeoutMs, tope);
+    return resolveHttpRequestTimeout(request);
   }
 
   /**

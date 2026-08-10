@@ -49,6 +49,12 @@ se toca. Aplicar crea un commit aislado sólo tras confirmación. Descartar elim
 el worktree sólo tras confirmación. Push requiere dos confirmaciones y
 `allowPush: true`.
 
+Corrección aceptada el 2026-08-10: si un proyecto editable no tiene Git, Luxy
+crea `.gitignore` sólo si no existe, ejecuta `git init` y crea el commit local
+`estado inicial` sin remoto antes de crear el worktree. No se inicializan
+proyectos con `allowEdits: false`; `.env`, dependencias y salidas generadas
+quedan excluidos por defecto.
+
 ## D-006 — tests sin tokens reales
 
 Fecha: 2026-07-27  

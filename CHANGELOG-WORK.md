@@ -3,6 +3,88 @@
 Registro cronológico y append-only. No reescribir una entrada anterior para que
 parezca correcta; añadir una corrección nueva.
 
+### 2026-08-10 — Codex — F4.8-T4
+
+- Observación: el retry reanudaba la misma ruta y rama, pero el modelo recibía
+  otra vez el prompt original y comenzaba anunciando la llamada 1; después el
+  proveedor devolvía HTTP 503.
+- Cambio: `buildProviderPrompt` añade instrucciones específicas de continuación
+  cuando existe `resumeFromJobId` o `resumeWorktreePath`: inspeccionar el estado
+  Git, conservar archivos y commits y continuar sólo con la parte incompleta.
+- Archivos modificados: `apps/agent/src/job-runner.ts`,
+  `apps/agent/src/agent.test.ts` y esta documentación de continuidad.
+- Decisión: el reintento conserva un nuevo registro de auditoría, pero no se
+  pretende conservar automáticamente el contexto interno del proveedor; el
+  worktree y sus commits son la fuente de verdad.
+- Riesgo abierto: HTTP 503 sigue siendo un fallo transitorio de MiniMax; esta
+  mejora evita reiniciar el trabajo lógico, pero no puede reparar una caída del
+  proveedor.
+- Siguiente paso exacto: ejecutar las comprobaciones y reconstruir Desktop.
+
+### 2026-08-10 — Codex — F4.8-T4b
+
+- Observación: `LUX-H7SA` estaba cancelado con “Sin eventos todavía”; nunca
+  había reclamado un worktree, por lo que no podía reanudarse.
+- Cambio: Studio detecta la ausencia de `worktreePath` y crea un intento nuevo
+  desde el proyecto base; los trabajos que sí tienen worktree conservan el
+  flujo de reanudación.
+- Verificación: lint, typecheck, Desktop 328/328 pruebas y build pasados.
+
+### 2026-08-10 — Codex — F4.8-T4c
+
+- Observación: Kimi devolvió “paso 2” y una pregunta aunque la tarea pedía
+  completar la web en varias llamadas; Luxy lo clasificó como `completed` al no
+  haber otra herramienta solicitada.
+- Cambio: el prompt agentic exige continuar fases autónomas, no preguntar al
+  usuario y responder sólo tras crear y comprobar todos los requisitos.
+- Verificación: lint, typecheck, agente 76/76 pruebas y build de Desktop
+  pasados.
+- Riesgo: el modelo puede ignorar instrucciones; una validación semántica
+  universal de “web completa” requiere criterios específicos por tarea.
+
+### 2026-08-10 — Codex — F4.8-T4d
+
+- Observación: Qwen devolvió HTTP 429 por límite de frecuencia.
+- Cambio: las vueltas agentic reintentan ahora un 429 hasta tres intentos,
+  respetando `Retry-After` y mostrando el tiempo de espera como evento; no se
+  reintentan 401 ni errores con contenido parcial.
+- Verificación: lint, typecheck, providers 72/72 y build de Desktop pasados.
+
+### 2026-08-10 — Codex — F4.8-T1 — inicio
+
+- Estado anterior: una carpeta sin repositorio Git hacía fallar el trabajo editable antes de crear el worktree.
+- Objetivo: inicializar Git automáticamente cuando el proyecto permite edición y crear un baseline local seguro.
+- Hipótesis: el bloqueo de la captura pertenece a la comprobación `isGitRepository`; el soporte existente sólo cubre repositorios Git sin `HEAD`.
+- Archivos previstos: `apps/agent/src/git.ts`, `apps/agent/src/job-runner.ts`, pruebas del agente y documentación de seguridad/continuidad.
+- Decisión: la inicialización será sólo para `allowEdits: true`, sin remoto, con `.gitignore` creado únicamente si falta y commit local `estado inicial`.
+- Siguiente paso exacto: implementar y ejecutar la prueba focalizada.
+
+### 2026-08-10 — Codex — F4.8-T1 — implementación
+
+- Archivos modificados: `apps/agent/src/git.ts`, `apps/agent/src/job-runner.ts`, `apps/agent/src/agent.test.ts`, documentación de seguridad y continuidad.
+- Resultado real: un proyecto editable sin Git crea `.gitignore` si falta, ejecuta `git init`, excluye secretos/dependencias/salidas y crea `estado inicial` con identidad local de Luxy; después continúa por `createWorktree`.
+- Pruebas: `vitest run apps/agent/src/agent.test.ts` — **72/72 pasadas**; cubre `.env`, `node_modules`, archivos normales y mensaje del commit. `npm run lint` pasó. `typecheck` falló antes de compilar por falta de `@cloudflare/workers-types`; suite completa y build quedan pendientes.
+- Decisiones: no se crea remoto; `.gitignore` existente nunca se sobrescribe; `allowEdits: false` sigue sin inicializar nada.
+- Estado nuevo: implementado; verificación completa bloqueada por dependencia ambiental.
+- Siguiente paso exacto: instalar/restaurar las dependencias autorizadas, reconstruir Desktop/agente y probar el flujo real en un proyecto no-Git.
+
+### 2026-08-10 — Codex — F4.8-T2
+
+- Estado anterior: **Reintentar trabajo** creaba otro trabajo y otro worktree, perdiendo el contexto de la página ya escrita.
+- Cambio: Studio envía `resumeJobId`; Gateway valida propietario, máquina, proyecto, proveedor, modelo, prompt y estado terminal. El agente valida la ruta bajo `%LOCALAPPDATA%\Luxy\worktrees`, su pertenencia al repositorio base y la rama `luxy/...`, y reanuda el worktree.
+- Archivos modificados: `packages/shared/src/schemas.ts`, `apps/gateway/src/handlers/studio.ts`, `apps/desktop/src/renderer/pages/Studio.tsx`, `apps/agent/src/git.ts`, `apps/agent/src/job-runner.ts`, `apps/agent/src/agent.test.ts`.
+- Resultado real: implementado; el nuevo registro audita el intento, pero la ejecución continúa en la misma página/rama.
+- Pruebas: nueva prueba de reanudación añadida; matriz completa pendiente por dependencia `@cloudflare/workers-types` ausente.
+- Siguiente paso exacto: restaurar dependencias, ejecutar `npm run check` y validar manualmente el reintento de `LUX-L9CC`.
+
+### 2026-08-10 — Codex — F4.8-T3
+
+- Observación: el primer intento con auto-inicialización falló con `ENOENT` al escribir `C:\Users\daniel\Desktop\test\.gitignore`.
+- Causa demostrada: la ruta configurada no existe en este portátil.
+- Cambio: `ensureGitRepository` valida existencia y tipo de carpeta antes de escribir y devuelve un `GitError` accionable.
+- Prueba añadida: ruta inexistente identificada como tal.
+- Siguiente paso exacto: seleccionar la carpeta real del proyecto en Ajustes y reconstruir el agente con este cambio.
+
 ## Historial consolidado anterior al protocolo
 
 ### 2026-08-01 — ChatGPT Work — AUDIT-001
@@ -1684,3 +1766,53 @@ controlada`; 23 archivos, T9/T10 y F4.4-T1/T2. `package-lock.json`, claves,
 - Estado nuevo:
 - Siguiente paso exacto:
 ```
+
+### 2026-08-10 10:08 — Codex — F4.8-T2-DEPLOY
+
+- Estado anterior: Desktop reconstruido y ejecutándose desde el worktree; el
+  Gateway desplegado todavía no aceptaba `resumeJobId`.
+- Objetivo: publicar el contrato de reanudación necesario para reutilizar el
+  mismo worktree tras un fallo del proveedor.
+- Hipótesis o causa demostrada: un Desktop nuevo contra un Gateway antiguo
+  perdería `resumeJobId` y crearía otro worktree.
+- Archivos leídos: `PROJECT-STATE.md`, `CURRENT-TASK.md`, `LOCAL-ACTIONS.md`,
+  `apps/gateway/package.json`, `apps/gateway/src/handlers/studio.ts` y
+  `packages/shared/src/schemas.ts`.
+- Archivos modificados: sólo documentación de continuidad.
+- Comandos ejecutados: build de Gateway, Vitest sobre Gateway/shared, dry-run
+  de Wrangler, despliegue autorizado y petición pública a `/health`.
+- Resultado real: Worker `luxy-gateway` desplegado en la versión
+  `33da28e0-4a72-4c0b-8661-50d1cc838dec`; `/health` respondió HTTP 200 con
+  `configured: true`.
+- Pruebas: build exit 0; 37 archivos y 641 pruebas pasadas, 0 fallos; dry-run
+  final exit 0.
+- Decisiones: conservar variables remotas con `--keep-vars`, el flag
+  `nodejs_compat` y el cron de un minuto; sin migraciones ni cambios de secretos.
+- Riesgos o límites: falta la validación manual de `LA-022`; no existe todavía
+  una prueba Gateway específica de `resumeJobId`.
+- Estado nuevo: Gateway y Desktop actualizados; validación manual pendiente.
+- Siguiente paso exacto: repetir `LUX-L9CC` desde **Reintentar trabajo** y
+  comprobar que conserva ruta y rama sin crear otro worktree.
+
+### 2026-08-10 10:25 — Codex — F4.8-T2-TIMEOUT-RESTART
+
+- Estado anterior: Gateway desplegado con `resumeJobId`; Desktop podía seguir
+  usando una instancia anterior del agente con timeout fijo de cinco minutos.
+- Objetivo: cerrar la instancia anterior, reconstruir el agente/Proveedor y
+  Desktop desde `lux-auto-init-git`, actualizar el Gateway y arrancar la copia
+  nueva.
+- Archivos modificados: ninguno por esta acción; se usó el código existente del
+  worktree. Se actualiza sólo esta documentación de continuidad.
+- Comandos ejecutados: `npm.cmd run build`; despliegue Wrangler conservando
+  variables remotas; smoke check de `/health`; arranque del binario Electron con
+  `apps/desktop` del worktree.
+- Resultado real: build exit 0; Worker `luxy-gateway` desplegado como versión
+  `a5cb5ba8-34d9-4cca-85ba-e02f95e3942f`; `/health` respondió HTTP 200 y
+  `configured: true`; Desktop abierto y apuntando a `lux-auto-init-git`.
+- Pruebas: `git diff --check` sin errores; no se inició ningún trabajo real.
+- Decisiones: no pulsar **Reintentar** hasta este despliegue; sin migraciones,
+  commit ni push.
+- Riesgos o límites: queda pendiente la validación manual de que MiniMax supera
+  cinco minutos y de que el reintento conserva exactamente la misma ruta y rama.
+- Estado nuevo: Desktop, agente y Gateway actualizados y ejecutándose.
+- Siguiente paso exacto: ejecutar manualmente `LA-022` sobre `LUX-L9CC`.
