@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState, type JSX } from 'react';
 import { buildDefaultCatalog, describeArtifactSize } from '@luxy/shared';
 import type { JobStatus, ProviderId, StudioJob, StudioMachine } from '@luxy/shared';
 import { Empty, Field, Notice, Panel, Tag } from '../ui/primitives.js';
+import { FormattedResponse } from '../formatted-response.js';
 import type { ConfigSummary } from '../useConfig.js';
 import {
   conversationArtifactOf,
@@ -26,10 +27,10 @@ import { useConversations } from '../useConversations.js';
 
 const STATUS: Record<JobStatus, string> = {
   queued: 'En cola',
-  waiting_for_machine: 'Esperando maquina',
+  waiting_for_machine: 'Esperando máquina',
   claimed: 'Preparando',
   running: 'Respondiendo',
-  waiting_for_approval: 'Esperando aprobacion',
+  waiting_for_approval: 'Esperando aprobación',
   completed: 'Guardado',
   failed: 'Fallido',
   cancelled: 'Cancelado',
@@ -184,7 +185,7 @@ function ResponseCard({
           </button>
         </p>
       )}
-      {showsText && <p className="prewrap conversation-response__text">{text}</p>}
+      {showsText && <FormattedResponse text={text} />}
       {current.errorMessage !== null && <Notice tone="fault">{current.errorMessage}</Notice>}
       {outcome?.memoryNote != null && <p className="list__meta">{outcome.memoryNote}</p>}
       {outcome?.canContinue === true && (
@@ -193,7 +194,7 @@ function ResponseCard({
           disabled={busy}
           onClick={() => onContinue(current)}
         >
-          Continuar generacion
+          Continuar generación
         </button>
       )}
       {isConversationRunning(current) && (
@@ -207,7 +208,7 @@ function ResponseCard({
       )}
       {current.status === 'completed' && (
         <div className="conversation-feedback" aria-label="Valorar respuesta">
-          <span className="list__meta">¿Te sirvio?</span>
+          <span className="list__meta">¿Te sirvió?</span>
           <button
             className="btn btn--quiet"
             data-selected={feedback === 'helpful'}
@@ -222,7 +223,7 @@ function ResponseCard({
             disabled={busy}
             onClick={() => onRate(current.id, 'not_helpful')}
           >
-            No me sirvio
+          No me sirvió
           </button>
         </div>
       )}
@@ -584,7 +585,7 @@ export function ConversationsPage({ summary }: { summary: ConfigSummary }): JSX.
                 </Field>
                 <div className="conversation-send">
                   <span className="list__meta">
-                    Solo lectura · guardado automatico · sin commit ni push
+        Solo lectura · guardado automático · sin commit ni push
                   </span>
                   <button
                     className="btn btn--primary"

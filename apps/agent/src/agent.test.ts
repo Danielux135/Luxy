@@ -23,6 +23,7 @@ import {
   isGitRepository,
   createWorktree,
   collectDiff,
+  commitWorktree,
 } from './git.js';
 import {
   loadConfig,
@@ -401,6 +402,36 @@ describe('worktrees reales', () => {
       GitError,
     );
   }, 60_000);
+
+  it('crea un worktree huerfano para permitir el primer commit aislado', async () => {
+    const emptyRepo = join(temporal, 'empty-repo');
+    const worktrees = join(temporal, 'empty-worktrees');
+    mkdirSync(emptyRepo, { recursive: true });
+    writeFileSync(join(emptyRepo, 'existente.txt'), 'ya estaba en el proyecto\n');
+    const git = async (args: string[]): Promise<void> => {
+      const r = await runProcess({ executable: 'git', args, cwd: emptyRepo, timeoutMs: 60_000 });
+      if (r.exitCode !== 0) throw new Error(`git ${args.join(' ')}: ${r.stderr}`);
+    };
+    await git(['init', '--initial-branch=main']);
+
+    const worktree = await createWorktree(emptyRepo, 'LUX-EMPTY', 'primer trabajo', worktrees);
+    expect(worktree.branch).toMatch(/^luxy\/empty-/);
+    expect(readFileSync(join(worktree.path, 'existente.txt'), 'utf8')).toContain('ya estaba');
+    writeFileSync(join(worktree.path, 'README.md'), '# Primer estado\n');
+    const diff = await collectDiff(worktree.path);
+    expect(diff.filesChanged).toBe(2);
+    expect(diff.modifiedFiles).toContain('existente.txt');
+    expect(diff.modifiedFiles).toContain('README.md');
+    const commit = await commitWorktree(worktree.path, 'estado inicial de Luxy');
+    expect(commit.ok).toBe(true);
+    const branch = await runProcess({
+      executable: 'git',
+      args: ['rev-parse', '--verify', worktree.branch],
+      cwd: emptyRepo,
+      timeoutMs: 60_000,
+    });
+    expect(branch.exitCode).toBe(0);
+  }, 120_000);
 });
 
 // -----------------------------------------------------------------------------

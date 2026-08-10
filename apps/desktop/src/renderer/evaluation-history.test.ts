@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import type { StudioJob } from '@luxy/shared';
+import { buildModelEvaluationPrompt, type StudioJob } from '@luxy/shared';
 import {
   MIN_EVALUATION_EVIDENCE_SAMPLES,
   aggregateModelEvaluationEvidence,
   collectActiveModelEvaluations,
+  collectModelEvaluationComparisons,
   collectModelEvaluationHistory,
   collectUnscoredTerminalEvaluations,
 } from './evaluation-history.js';
@@ -17,7 +18,7 @@ function job(overrides: Partial<StudioJob> = {}): StudioJob {
     provider: 'codex',
     model: 'gpt-evaluado',
     projectAlias: 'luxy',
-    prompt: '[LUXY_EVALUATION]',
+    prompt: buildModelEvaluationPrompt('speed-exact-v1')!.text,
     status: 'completed',
     priority: 0,
     claimedBy: null,
@@ -30,6 +31,11 @@ function job(overrides: Partial<StudioJob> = {}): StudioJob {
       studioMode: 'evaluation',
       evaluationId: 'speed-exact-v1',
       evaluationVersion: 1,
+      evaluationPromptVersion: 1,
+      evaluationFixtureId: null,
+      evaluationValidationMode: 'automatic',
+      evaluationScoring: 'timing',
+      evaluationConfirmed: true,
       evaluationValidatedAt: '2026-08-09T10:01:00.000Z',
       evaluationResult: {
         evaluationId: 'speed-exact-v1',
@@ -64,7 +70,14 @@ describe('historial local del Laboratorio', () => {
       '11111111-1111-4111-8111-111111111111',
       '33333333-3333-4333-8333-333333333333',
     ]);
-    expect(entries[0]?.result).toMatchObject({ status: 'passed', durationMs: 1200 });
+    expect(entries[0]).toMatchObject({
+      prompt: buildModelEvaluationPrompt('speed-exact-v1')!.text,
+      response: 'LISTO',
+      provider: 'codex',
+      projectAlias: 'luxy',
+      targetMachineId: '22222222-2222-4222-8222-222222222222',
+      result: { status: 'passed', durationMs: 1200 },
+    });
   });
 
   it('ignora tareas normales y resultados con forma invalida', () => {
@@ -83,6 +96,8 @@ describe('historial local del Laboratorio', () => {
         job({ metadata: { ...base.metadata, evaluationId: 'otra-prueba' } }),
         job({ metadata: { ...base.metadata, evaluationVersion: 2 } }),
         job({ model: 'otro-modelo' }),
+        job({ prompt: `${base.prompt}\nalterado` }),
+        job({ metadata: { ...base.metadata, evaluationScoring: 'exact' } }),
       ]),
     ).toEqual([]);
   });
@@ -209,5 +224,123 @@ describe('historial local del Laboratorio', () => {
       medianDurationMs: 2000,
       medianOutputTokens: 4,
     });
+  });
+
+  it('reconstruye un par completo solo por UUID e indices', () => {
+    const base = job();
+    const comparison = {
+      evaluationComparisonGroupId: '88888888-8888-4888-8888-888888888888',
+    };
+    const groups = collectModelEvaluationComparisons([
+      job({
+        metadata: { ...base.metadata, ...comparison, evaluationComparisonIndex: 0 },
+      }),
+      job({
+        id: '99999999-9999-4999-8999-999999999999',
+        shortId: 'LUX-EVAL-B',
+        model: 'otro-modelo',
+        metadata: {
+          ...base.metadata,
+          ...comparison,
+          evaluationComparisonIndex: 1,
+          evaluationResult: {
+            ...(base.metadata['evaluationResult'] as Record<string, unknown>),
+            model: 'otro-modelo',
+          },
+        },
+      }),
+    ]);
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0]).toMatchObject({
+      issue: null,
+      members: [
+        { index: 0, model: 'gpt-evaluado', result: { status: 'passed' } },
+        { index: 1, model: 'otro-modelo', result: { status: 'passed' } },
+      ],
+    });
+  });
+
+  it('expone un grupo parcial y no incorpora evaluaciones individuales', () => {
+    const base = job();
+    const groups = collectModelEvaluationComparisons([
+      base,
+      job({
+        metadata: {
+          ...base.metadata,
+          evaluationComparisonGroupId: '88888888-8888-4888-8888-888888888888',
+          evaluationComparisonIndex: 0,
+        },
+      }),
+    ]);
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0]).toMatchObject({
+      issue: 'Comparacion parcial: falta el modelo B.',
+      members: [{ index: 0 }],
+    });
+  });
+
+  it('mantiene visible un miembro terminal sin resultado validado', () => {
+    const base = job();
+    const groups = collectModelEvaluationComparisons([
+      job({
+        status: 'interrupted',
+        metadata: {
+          studioMode: 'evaluation',
+          evaluationId: 'speed-exact-v1',
+          evaluationVersion: 1,
+          evaluationPromptVersion: 1,
+          evaluationFixtureId: null,
+          evaluationValidationMode: 'automatic',
+          evaluationScoring: 'timing',
+          evaluationConfirmed: true,
+          evaluationComparisonGroupId: '88888888-8888-4888-8888-888888888888',
+          evaluationComparisonIndex: 0,
+        },
+      }),
+      job({
+        id: '99999999-9999-4999-8999-999999999999',
+        model: 'otro-modelo',
+        metadata: {
+          ...base.metadata,
+          evaluationComparisonGroupId: '88888888-8888-4888-8888-888888888888',
+          evaluationComparisonIndex: 1,
+          evaluationResult: {
+            ...(base.metadata['evaluationResult'] as Record<string, unknown>),
+            model: 'otro-modelo',
+          },
+        },
+      }),
+    ]);
+
+    expect(groups[0]?.members[0]).toMatchObject({ status: 'interrupted', result: null });
+    expect(groups[0]?.issue).toBeNull();
+  });
+
+  it('marca un UUID que mezcla contratos aunque tenga A y B', () => {
+    const base = job();
+    const comparison = {
+      evaluationComparisonGroupId: '88888888-8888-4888-8888-888888888888',
+    };
+    const groups = collectModelEvaluationComparisons([
+      job({ metadata: { ...base.metadata, ...comparison, evaluationComparisonIndex: 0 } }),
+      job({
+        id: '99999999-9999-4999-8999-999999999999',
+        model: 'otro-modelo',
+        projectAlias: 'otro-proyecto',
+        metadata: {
+          ...base.metadata,
+          ...comparison,
+          evaluationComparisonIndex: 1,
+          evaluationResult: {
+            ...(base.metadata['evaluationResult'] as Record<string, unknown>),
+            model: 'otro-modelo',
+          },
+        },
+      }),
+    ]);
+
+    expect(groups[0]?.issue).toContain('snapshots, prompts, maquinas o proyectos');
   });
 });

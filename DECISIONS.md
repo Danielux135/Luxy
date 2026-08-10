@@ -419,3 +419,49 @@ no es una transacción ni un bloqueo distribuido: dos peticiones concurrentes
 podrían observar el mismo estado. Por ahora el Desktop debe enviar el par en
 orden y representar una aceptación parcial; si se necesitara exclusión fuerte,
 haría falta una primitiva atómica del repositorio o base de datos.
+
+## D-031 — los pares se reconstruyen por identidad, no por proximidad
+
+Fecha: 2026-08-09
+
+Estado: aceptada, implementada
+
+La vista conjunta sólo agrupa trabajos que contienen el mismo UUID de comparación
+y los índices explícitos A/B. Fecha, prueba, prompt o modelos parecidos no bastan
+para emparejar trabajos independientes. Índices duplicados, pruebas/versiones
+mezcladas y miembros ausentes se muestran como problemas del grupo.
+
+La comparación presenta estado y evidencia de cada miembro, pero no elige un
+ganador. Un miembro cancelado, interrumpido, fallido o sin resultado validado
+permanece visible y no cuenta como derrota del modelo.
+
+## D-032 — recomendar exige dos muestras comparables maduras
+
+Fecha: 2026-08-09
+
+Estado: aceptada, implementada
+
+Laboratorio sólo puede proponer un modelo para una prueba/versión cuando al menos
+dos modelos exactos tienen tres resultados puntuados cada uno. Compara primero la
+tasa validada. Sólo en pruebas de rapidez usa la mediana de duración como
+desempate. Un `not_scored` se muestra, pero no altera esas métricas.
+
+El feedback explícito sólo desempata si hay al menos dos valoraciones de
+conversaciones completadas, del mismo proyecto y modelo exacto. No puede superar
+una diferencia en evidencia de evaluación. Si todo sigue empatado, Luxy dice
+**Sin recomendación**. Elegir la propuesta sólo cambia el selector: no confirma,
+ejecuta ni llama al proveedor.
+
+## D-033 — el formulario sólo ofrece runners disponibles
+
+Fecha: 2026-08-09
+
+Estado: aceptada, implementada tras validación manual
+
+El catálogo puede documentar pruebas manuales, sandbox o tool-trace, pero el
+selector que crea trabajos sólo enumera definiciones automáticas y habilitadas.
+Mostrar una prueba pendiente dentro del mismo selector hace parecer que la
+casilla está rota cuando en realidad actúa una barrera de seguridad.
+
+Las definiciones pendientes siguen visibles como fichas, con su requisito real.
+No se habilita un runner para resolver un problema de presentación.

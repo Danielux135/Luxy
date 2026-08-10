@@ -4,8 +4,11 @@
 
 Estado documental: **checkpoint reconciliado en Windows; `F4.1-T4/T5`,
 `F4.2-T1/T2/T3` y `F4.3-T1`–`F4.3-T8` verificados y commiteados localmente;
-`F4.3-T9/T10` y `F4.4-T1/T2` verificados después del commit y pendientes de
-commit; push pendiente**
+`F4.3-T9/T10` y `F4.4-T1/T2` commiteados en `3771549`; `F4.4-T3` y `F4.5/F4.6`
+verificados después del commit y pendientes de commit; push pendiente**
+
+Gateway desplegado con autorización el 2026-08-09: `luxy-gateway`, versión
+`b3fb5c99-5cf1-42a1-b011-f6d44b9f0730`; comprobación pública `/health` HTTP 200.
 
 ## 1. Cómo interpretar este estado
 
@@ -116,27 +119,27 @@ necesario.
 
 ## 5. Capacidades implementadas
 
-| Área                   | Estado conocido           | Observaciones                                                                                                    |
-| ---------------------- | ------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| Agente, gateway y cola | Implementado              | polling saliente, leases, heartbeats, eventos y cancelación                                                      |
-| Desktop Electron       | Implementado              | agente en utility process, bandeja, configuración y secretos cifrados                                            |
-| Studio — trabajos      | Implementado en código    | formulario real, historial, eventos, resultado, diff y pruebas                                                   |
-| Worktrees              | Implementado              | la carpeta original no se modifica                                                                               |
-| Aplicar/descartar      | Implementado en código    | aplicar crea commit aislado; descartar borra worktree tras confirmar; sin push                                   |
-| Conversaciones         | Implementado parcialmente | uno o dos modelos, streaming, historial, tiempos, tokens y cancelación                                           |
-| Diagnóstico del final  | Implementado y verificado | señal de transporte, aborto, límites efectivos y tokens; sin contenido                                           |
-| Finales explícitos     | Implementado y verificado | seis resultados; la salida parcial se conserva y no se reintenta a ciegas                                        |
-| Memoria                | Implementado y verificado | sin fallback: sólo un bloque válido la sustituye; el código se rechaza                                           |
-| Recomendaciones        | Implementado              | feedback y resultados ajustan una recomendación explícita; nunca cambia solo                                     |
-| Continuación           | Implementado              | unión con evidencia y aviso cuando no la hay; el parcial viaja como dato                                         |
-| Cancelación            | Implementado              | conserva lo generado como resultado; no ofrece continuar ni escribe memoria                                      |
-| Feedback               | Arreglo preparado         | el primer clic usa la respuesta del gateway; falta confirmación manual final                                     |
-| Proveedores/modelos    | Implementado parcialmente | 22 modelos reales; sin sondeo de precios; evidencia local paginada hasta 1.000 trabajos; topes aún sin verificar |
-| Laboratorio            | Implementado inicialmente | catálogo, fixtures, validadores, selección y preview local; ejecución y persistencia aún deshabilitadas          |
-| Errores de proveedor   | Implementado y verificado | límite de plan y 429 explicados; se obedece `Retry-After`; intentos reales                                       |
-| Telegram               | Conservado                | canal secundario                                                                                                 |
-| Mobile Android         | No iniciado               | prioridad posterior a estabilizar Desktop                                                                        |
-| Remote                 | Pausado                   | conservar código, ADR, threat model y pruebas                                                                    |
+| Área                   | Estado conocido           | Observaciones                                                                                     |
+| ---------------------- | ------------------------- | ------------------------------------------------------------------------------------------------- |
+| Agente, gateway y cola | Implementado              | polling saliente, leases, heartbeats, eventos y cancelación                                       |
+| Desktop Electron       | Implementado              | agente en utility process, bandeja, configuración y secretos cifrados                             |
+| Studio — trabajos      | Implementado en código    | formulario real, historial, eventos, resultado, diff y pruebas                                    |
+| Worktrees              | Implementado              | la carpeta original no se modifica                                                                |
+| Aplicar/descartar      | Implementado en código    | aplicar crea commit aislado; descartar borra worktree tras confirmar; sin push                    |
+| Conversaciones         | Implementado parcialmente | uno o dos modelos, streaming, historial, tiempos, tokens y cancelación                            |
+| Diagnóstico del final  | Implementado y verificado | señal de transporte, aborto, límites efectivos y tokens; sin contenido                            |
+| Finales explícitos     | Implementado y verificado | seis resultados; la salida parcial se conserva y no se reintenta a ciegas                         |
+| Memoria                | Implementado y verificado | sin fallback: sólo un bloque válido la sustituye; el código se rechaza                            |
+| Recomendaciones        | Implementado              | feedback y resultados ajustan una recomendación explícita; nunca cambia solo                      |
+| Continuación           | Implementado              | unión con evidencia y aviso cuando no la hay; el parcial viaja como dato                          |
+| Cancelación            | Implementado              | conserva lo generado como resultado; no ofrece continuar ni escribe memoria                       |
+| Feedback               | Arreglo preparado         | el primer clic usa la respuesta del gateway; falta confirmación manual final                      |
+| Proveedores/modelos    | Implementado; validar     | 22 modelos reales; sin sondeo de precios; evidencia local paginada hasta 1.000 trabajos           |
+| Laboratorio            | Implementado; validar     | catálogo, ejecución individual/par, persistencia, evidencia, comparación y recomendación prudente |
+| Errores de proveedor   | Implementado y verificado | límite de plan y 429 explicados; se obedece `Retry-After`; intentos reales                        |
+| Telegram               | Conservado                | canal secundario                                                                                  |
+| Mobile Android         | No iniciado               | prioridad posterior a estabilizar Desktop                                                         |
+| Remote                 | Pausado                   | conservar código, ADR, threat model y pruebas                                                     |
 
 ## 6. Flujo de Conversaciones que ya funciona
 
@@ -466,15 +469,43 @@ mostrar una aceptación parcial y no asumir atomicidad.
 `F4.4-T2` conecta esa orquestación en Laboratorio. La persona elige modo, dos
 modelos y confirma una sola vez; Desktop envía miembro 0 y luego 1. Un rechazo
 del primero detiene el par y uno del segundo deja el primero visible como estado
-parcial, sin reintento. La presentación conjunta por UUID queda para `F4.4-T3`.
+parcial, sin reintento. La presentación conjunta por UUID quedaba para `F4.4-T3`.
+
+`F4.4-T3` cierra esa presentación: el historial valida UUID/índice juntos y
+reconstruye A/B exclusivamente por esa identidad. El panel conserva pares
+parciales, estados activos, `not_scored` y terminales sin resultado. Duplicados o
+pruebas/versiones mezcladas se marcan inválidos; no hay emparejamiento por fecha
+ni ganador automático.
+
+`F4.5` queda cubierto sin una migración adicional: `jobs` ya conserva prompt y
+respuesta completos, y `evaluationResult` conserva snapshot, modelo efectivo,
+checks, final, caracteres, duración y tokens. Laboratorio reúne esa evidencia en
+un detalle colapsado. `failed/not_scored` sustituyen cualquier nota numérica
+subjetiva.
+
+`F4.6` añade recomendación local provisional. Exige dos modelos con tres
+resultados puntuados de la misma prueba/versión. Prioriza tasa; mediana sólo para
+`timing`; feedback repetido de conversaciones completadas del mismo proyecto
+sólo desempata. Empates e insuficiencia no producen recomendación y seleccionar
+el modelo no ejecuta nada.
+
+La primera validación visual detectó una ambigüedad: el selector permitía elegir
+Frontend, cuyo runner manual está bloqueado, y por eso deshabilitaba confirmación
+y botón. Se corrigió separando las cuatro opciones ejecutables de las ocho fichas
+del catálogo. No se relajó la política de runners.
+
+La primera prueba de comparación devolvió `422` porque el Worker remoto aún era
+anterior al contrato A/B. Tras renovar la sesión Cloudflare de la cuenta correcta,
+se desplegó el Worker existente y `/health` confirmó que responde. Falta repetir
+la prueba funcional desde Desktop con el agente reiniciado.
 
 Estimación de alcance a 2026-08-09, sujeta a validación manual y decisiones de
 producto:
 
-- Modelos/Laboratorio: **93–95%**;
-- Luxy Studio v1 de escritorio, excluyendo Mobile: **67–71%**;
+- Modelos/Laboratorio: **100% implementado; validación manual pendiente**;
+- Luxy Studio v1 de escritorio, excluyendo Mobile: **72–76%**;
 - roadmap completo actual, incluyendo Proyectos avanzados, Playground, Flujos y
-  Android: **41–46%**.
+  Android: **44–49%**.
 
 El porcentaje completo es menor porque las fases 3, 5, 6 y 7 siguen planificadas;
 no invalida que el núcleo de Studio ya sea utilizable.

@@ -6,6 +6,64 @@ Paso activo: **LA-018 — validar el Laboratorio actualizado**
 
 Estado: **pending — Daniel, 2026-08-09**
 
+Implementación cerrada: **F4.5/F4.6 — evidencia y recomendación local**
+
+Estado: **done — Codex, 2026-08-09; Modelos/Laboratorio 100% en código**
+
+F4.5 auditado y cerrado: el trabajo conserva prompt y respuesta completos; el
+snapshot/resultados conservan prueba, versión, fixture, modo, scoring, modelo,
+checks, final, caracteres, duración y tokens. Laboratorio permite revisar juntos
+esos datos sin duplicarlos ni crear una puntuación numérica subjetiva.
+
+F4.6 implementado: sólo recomienda provisionalmente cuando dos modelos exactos
+acumulan tres resultados puntuados cada uno para la misma prueba/versión. Usa
+tasa, mediana únicamente en rapidez y feedback repetido del mismo proyecto como
+desempate. Con empate o muestra insuficiente no recomienda. **Seleccionar modelo**
+no ejecuta ni confirma nada.
+
+Validación automática: 1.572 pasadas, 9 omitidas, 0 fallos en 85 archivos;
+Prettier, lint, typecheck y build verdes. No hubo llamadas reales, precios,
+migración, push ni deploy.
+
+Estado real: **100% funcional implementado, pendiente de validación manual por
+Daniel**. Los cuatro validadores automáticos son ejecutables; pruebas manuales,
+sandbox y tool-trace permanecen visibles pero bloqueadas por diseño.
+
+Gateway actualizado y desplegado con autorización: Worker `luxy-gateway`, versión
+`b3fb5c99-5cf1-42a1-b011-f6d44b9f0730`; `/health` HTTP 200. El `422` de la captura
+correspondía al Gateway anterior.
+
+Siguiente acción única: completar `LA-018/LA-019` siguiendo `LOCAL-ACTIONS.md`.
+No ampliar Modelos/Laboratorio antes de recoger ese resultado.
+
+Incidencia manual resuelta: el formulario ya no ofrece Frontend, Código, Español
+o Tool calling como pruebas ejecutables. Sólo muestra las cuatro automáticas y
+mantiene las otras cuatro como fichas informativas pendientes. Tras reconstruir
+y recargar, la casilla debe poder marcarse si máquina/proyecto/modelo son válidos.
+Matriz posterior a la corrección: 1.572 pasadas, 9 omitidas, 0 fallos; build
+correcto.
+
+Paso cerrado: **F4.4-T3 — presentación conjunta por UUID**
+
+Estado: **done — Codex, 2026-08-09; posterior a `3771549`**
+
+Resultado: Laboratorio reconstruye comparaciones únicamente desde UUID e índices
+0/1 validados. El panel conjunto muestra modelo A/B, ID de trabajo, estado y
+resultado. Un grupo parcial, duplicado, con identidades mezcladas o con miembro
+terminal sin resultado queda advertido; nunca se completa por proximidad temporal
+ni se declara ganador.
+
+Validación: 49/49 específicas; suite completa 1.565 pasadas, 9 omitidas y 0
+fallos en 84 archivos; lint, typecheck y build verdes. Los primeros fixtures
+incompletos fueron corregidos sin rebajar el contrato.
+
+Checkpoint local: `3771549 feat: añade evidencia y comparación controlada`.
+F4.4-T3 queda como cambio posterior aún sin commit. Sin push ni deploy.
+
+Siguiente acción exacta: auditar `F4.5` frente a los datos que ya persisten
+(prompt/snapshot, respuesta, tokens, tiempos y resultado), implementar sólo los
+huecos demostrados y después validar manualmente el flujo de comparación.
+
 Paso cerrado: **F4.4-T2 — orquestación Desktop de dos modelos**
 
 Estado: **done — Codex, 2026-08-09; posterior al checkpoint local**

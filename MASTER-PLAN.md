@@ -151,22 +151,35 @@ Estado global: `in_progress`
 - F4.4: ejecución simultánea controlada para comparar modelos. `F4.4-T1` ya
   define el par de exactamente dos modelos y valida su homogeneidad en Gateway;
   `F4.4-T2` lo orquesta desde Desktop, conserva aceptación parcial y nunca
-  reintenta automáticamente. Queda presentación conjunta por UUID.
-- F4.5: guardar prompt, parámetros, respuesta, tokens, tiempos y puntuación.
-- F4.6: recomendador por tarea basado en evidencia local y feedback.
+  reintenta automáticamente. `F4.4-T3` presenta juntos A/B sólo por UUID e
+  índice, incluidos parciales y finales sin resultado. Bloque funcional cerrado;
+  validación manual pendiente.
+- F4.5: `done`. Prompt/respuesta completos viven en el trabajo; snapshot,
+  modelo, checks, final, tokens y tiempos en el resultado validado. Laboratorio
+  los presenta juntos sin puntuación numérica inventada.
+- F4.6: `done`. Recomendación provisional por prueba/versión con dos modelos y
+  mínimo tres puntuados por modelo; tasa primero, timing/feedback sólo como
+  desempates controlados. Empate o muestra insuficiente no producen ganador.
 - F4.7: nunca ejecutar benchmarks de pago sin una acción explícita. Cumplido en
   la primera ejecución: casilla y diálogo final; Luxy no consulta ni afirma
   conocer el precio.
 
+Corrección de validación manual: el formulario de ejecución consume
+`EXECUTABLE_MODEL_EVALUATIONS` y ya no mezcla runners pendientes con las cuatro
+pruebas automáticas. Las ocho definiciones continúan visibles en el catálogo.
+
 Checkpoint de esta fase: `F4.1-T4/T5`, `F4.2-T1/T2/T3` y `F4.3-T1`–`F4.3-T8`
 quedaron commiteados localmente el 2026-08-09 con el mensaje
 `feat: incorpora modelos y laboratorio reproducible`. No se hizo push ni deploy.
+`F4.3-T9/T10` y `F4.4-T1/T2` se añadieron después en el checkpoint local
+`3771549 feat: añade evidencia y comparación controlada`. `F4.4-T3` queda
+posterior a ese commit.
 
-Estimación orientativa: Fase 4 al 93–95%; Studio v1 de escritorio al 67–71%;
-roadmap completo al 41–46%. Para cerrar Laboratorio y consolidar Studio v1 se
-estiman 3–6 sesiones similares, sin contar bloqueos de deploy/configuración o
-decisiones manuales. Flujos y Android amplían el trabajo a varias decenas de
-sesiones.
+Estado funcional: **Fase 4 y Modelos/Laboratorio al 100% implementados en
+código**, con `LA-018/LA-019` pendientes de validación manual. Studio v1 de
+escritorio queda aproximadamente al 72–76% y el roadmap completo al 44–49%.
+Incidencias encontradas durante la validación pueden exigir correcciones; Flujos
+y Android siguen ampliando el trabajo a varias decenas de sesiones.
 
 No afirmar capacidades por nombre o marketing. Se marcan como verificadas sólo
 con evidencia fechada.

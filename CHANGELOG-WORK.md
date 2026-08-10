@@ -1540,7 +1540,133 @@ null` no pueden atribuirse; falta confirmación visual.
 - Siguiente paso exacto: F4.4-T3, reconstruir y presentar juntos los dos
   miembros por UUID, incluidos parcial, cancelación y fallo sin puntuación falsa.
 
+### 2026-08-09 — Codex — checkpoint y F4.4-T3
+
+- Checkpoint: commit local `3771549 feat: añade evidencia y comparación
+controlada`; 23 archivos, T9/T10 y F4.4-T1/T2. `package-lock.json`, claves,
+  demos, handoff copiado y `tail.err` quedaron fuera. Sin push ni deploy.
+- Objetivo posterior: reconstruir y presentar juntos los miembros de cada par.
+- Resultado real: metadata de comparación validada como grupo/índice inseparable;
+  agregador exclusivo por UUID e índice; panel conjunto con A/B, modelo, trabajo,
+  estado y resultado. Pares parciales, duplicados, identidades mezcladas y
+  terminales sin resultado quedan señalados, nunca emparejados por fecha.
+- Pruebas: 49/49 específicas; suite completa 1.565 pasadas, 9 omitidas, 0
+  fallos en 84 archivos. Lint, tipos y build: exit 0.
+- Incidencia: los primeros fixtures nuevos omitían el snapshot completo y fueron
+  rechazados por el agregador; se corrigieron los fixtures, no se relajó el
+  contrato, y la matriz se repitió en verde.
+- Decisión: `D-031`; una vista conjunta describe ambos miembros, no decide un
+  ganador ni convierte ausencia operativa en evidencia de calidad.
+- Git: F4.4-T3 queda después de `3771549`, sin commit, push ni deploy.
+- Siguiente paso exacto: revisar F4.5 contra la evidencia ya persistida, cerrar
+  cualquier hueco real y preparar la validación manual de comparación.
+
+### 2026-08-09 — Codex — F4.5/F4.6 y cierre funcional de Modelos/Laboratorio
+
+- Estado anterior: el trabajo ya persistía prompt, respuesta, snapshot, modelo,
+  tokens, tiempos y validación, pero Laboratorio no reunía esa trazabilidad ni
+  emitía una recomendación prudente.
+- Objetivo: cerrar evidencia y recomendador sin inventar puntuaciones ni ejecutar
+  modelos automáticamente.
+- F4.5: cada resultado validado expone en un detalle colapsado proveedor,
+  proyecto, máquina, modo, scoring, prompt completo y respuesta completa; tokens,
+  duración, checks y final ya permanecían en `evaluationResult`/trabajo.
+- F4.6: recomendación provisional sólo con dos modelos que tengan al menos tres
+  resultados puntuados de la misma prueba y versión. Tasa validada primero;
+  duración sólo desempata pruebas `timing`; feedback sólo desempata con al menos
+  dos valoraciones de conversaciones completadas del mismo proyecto/modelo.
+- Seguridad de producto: empates e insuficiencia muestran **Sin recomendación**;
+  seleccionar la propuesta no ejecuta nada y vuelve a exigir confirmación.
+- Integridad final: historial/recomendador sólo aceptan si metadata, resultado y
+  prompt completo coinciden; los pares también detectan mezcla de snapshot,
+  prompt, máquina o proyecto bajo un mismo UUID.
+- Pruebas focalizadas: 26/26, 3 archivos. Matriz completa: 1.572 pasadas, 9
+  omitidas, 0 fallos en 85 archivos; Prettier, lint, tipos y build exit 0.
+- Estado: alcance v1 de Modelos/Laboratorio **100% implementado en código**;
+  validación manual `LA-018/LA-019` pendiente. Manual, sandbox y tool-trace siguen
+  bloqueados y etiquetados como expansión futura, no como runners disponibles.
+- Git: posterior a `3771549`, sin commit, push ni deploy. Archivos ajenos fuera.
+- Siguiente paso exacto: Daniel ejecuta la lista única de `LOCAL-ACTIONS.md`; si
+  no aparecen incidencias, cerrar Fase 4 y pasar al siguiente bloque de Studio.
+
+### 2026-08-09 — Codex — corrección de validación manual del selector
+
+- Evidencia recibida: captura de Laboratorio con
+  `frontend-accessible-card-v1`; la casilla y el botón estaban deshabilitados con
+  el mensaje de runner/revisión pendiente.
+- Causa: el formulario de ejecución mezclaba las ocho definiciones del catálogo
+  con las cuatro pruebas realmente automáticas. El bloqueo era correcto, pero la
+  opción no debía ofrecerse como ejecutable.
+- Corrección: `EXECUTABLE_MODEL_EVALUATIONS` compartido y selector limitado a
+  las cuatro automáticas. El encabezado muestra `4 ejecutables · 8 definidas` y
+  la nota explica que manual/sandbox/traza siguen documentadas abajo.
+- Compatibilidad: una selección antigua conservada por recarga/HMR cae a la
+  primera automática; no se habilitan runners inseguros.
+- Pruebas focalizadas: 15/15; suite completa 1.572 pasadas, 9 omitidas, 0
+  fallos en 85 archivos; tipos, lint y build exit 0.
+- Git: posterior a `3771549`, sin commit, push ni deploy.
+
+### 2026-08-09 — Codex — despliegue autorizado del Gateway
+
+- Motivo: el Desktop nuevo enviaba comparación A/B, pero el Worker conectado
+  rechazaba el contrato con `422 cuerpo no cumple el contrato esperado`.
+- Acción autorizada: `wrangler deploy` sobre el Worker existente `luxy-gateway`.
+- Resultado: deploy correcto en
+  `https://luxy-gateway.danielux135.workers.dev`, versión
+  `b3fb5c99-5cf1-42a1-b011-f6d44b9f0730`; `/health` respondió HTTP 200.
+- No se cambiaron secretos, migraciones, push ni otros Workers. El primer intento
+  falló por sesión Cloudflare de otra cuenta; se renovó OAuth y el segundo intento
+  publicó correctamente.
+- Siguiente acción: reiniciar agente/Desktop y repetir una comparación con
+  confirmación explícita.
+
+### 2026-08-09 — Codex — UI-RESPONSE-FORMATTING
+
+- Corrección visual: las comparaciones controladas ya no heredan el `display:flex`
+  de las listas anidadas; el título, UUID y miembros ocupan ahora el ancho correcto.
+- Conversaciones: las respuestas de las IA se renderizan con Markdown seguro
+  (encabezados, listas, énfasis, enlaces y bloques de código), preservando el texto
+  original y sus acentos sin insertar HTML no confiable.
+- Verificación: typecheck correcto y 328 pruebas del Desktop pasadas.
+
+### 2026-08-09 — Codex — INITIAL-COMMIT-ISOLATED
+
+- Cambio solicitado: permitir que Luxy trabaje con un repositorio Git vacío y
+  cree su primer commit desde **Aplicar cambios**.
+- Implementación: el agente crea una rama huérfana en el worktree aislado cuando
+  no existe `HEAD`; la carpeta principal no se modifica. `collectDiff` y el commit
+  aprobado funcionan también sobre esa rama sin historia.
+- Si el repositorio vacío ya tiene archivos sin seguimiento, se copian al worktree
+  aislado (excluyendo `.git`) antes de ejecutar la tarea, para que el primer commit
+  represente el estado real del proyecto.
+- Seguridad: sigue siendo necesaria la aprobación explícita; no se hace commit
+  automático ni push.
+- Prueba: caso real de worktree vacío añadido; 71/71 pruebas de Agent pasadas.
+- Incidencia posterior: el primer reinicio usó `apps/desktop/out/agent/host-entry.js`
+  generado antes del cambio. Se reconstruyó el Desktop completo para propagar la
+  rama huérfana al proceso que realmente arranca Luxy.
+
+### 2026-08-09 — Codex — STUDIO-RETRY
+
+- Incidencia observada: DeepSeek terminó trabajos con HTTP 502 después de escribir
+  parte del proyecto; Trabajos no ofrecía una forma explícita de repetirlos.
+- Cambio: los trabajos `failed`, `interrupted` y `cancelled` muestran **Reintentar
+  trabajo**. La acción pide confirmación y crea un trabajo nuevo con la misma
+  máquina, proveedor, modelo, proyecto y prompt; no reintenta automáticamente.
+- Verificación: typecheck y ESLint correctos; Desktop reconstruido.
+
 ## Plantilla para próximas entradas
+
+### 2026-08-09 — Codex — LAB-RESPONSE-TIME
+
+- Observación: el tiempo total ya se persistía en `evaluationResult.durationMs`,
+  pero Laboratorio lo mostraba sólo como un valor suelto en milisegundos.
+- Cambio: historial, comparaciones A/B y evidencia muestran ahora **Tiempo de
+  respuesta** con lectura humana (ms, s o min), conservando el valor exacto en
+  ms.
+- Límite: una evaluación en curso no tiene tiempo final; aparece como pendiente
+  hasta que termine y se pulse **Actualizar**.
+- Verificación: `npm run desktop:test` — 328 pruebas pasadas.
 
 ```markdown
 ### AAAA-MM-DD HH:MM — <IA> — <ID>

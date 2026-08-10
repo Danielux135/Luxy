@@ -1,6 +1,6 @@
 // operaciones de git y gestion de worktrees aislados
-import { mkdirSync, existsSync, realpathSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { cpSync, mkdirSync, existsSync, realpathSync } from 'node:fs';
+import { join, resolve, sep } from 'node:path';
 import { buildBranchName, isPathInside, containsTraversal } from '@luxy/shared';
 import { runProcess } from './process.js';
 import { worktreesDir } from './paths.js';
@@ -85,13 +85,6 @@ export async function createWorktree(
       'inicializalo con: git init && git add -A && git commit -m "inicial"',
     );
   }
-  if (!(await hasHead(repositoryPath))) {
-    throw new GitError(
-      'el repositorio no tiene ningun commit todavia',
-      'crea el primer commit antes de lanzar tareas de edicion',
-    );
-  }
-
   const branch = buildBranchName(shortId, prompt);
   const folderName = `${shortId.toLowerCase()}-${Date.now()}`;
   const worktreePath = resolve(join(baseDirectory, folderName));
@@ -103,16 +96,28 @@ export async function createWorktree(
 
   mkdirSync(baseDirectory, { recursive: true });
 
-  const result = await git(
-    ['worktree', 'add', '-b', branch, worktreePath, 'HEAD'],
-    repositoryPath,
-    180_000,
-  );
+  const hasInitialCommit = await hasHead(repositoryPath);
+  // Un repositorio vacio puede entrar en el flujo aislado: la rama huerfana
+  // nace sin historia y el commit aprobado sera su primer commit.
+  const worktreeArgs = hasInitialCommit
+    ? ['worktree', 'add', '-b', branch, worktreePath, 'HEAD']
+    : ['worktree', 'add', '--orphan', '-b', branch, worktreePath];
+  const result = await git(worktreeArgs, repositoryPath, 180_000);
   if (result.exitCode !== 0) {
     throw new GitError(
       `no se pudo crear el worktree: ${result.stderr.trim() || result.stdout.trim()}`,
       'comprueba que no exista ya una rama con ese nombre',
     );
+  }
+
+  if (!hasInitialCommit) {
+    // Un repositorio sin historial puede tener archivos sin seguimiento. Se
+    // copian al worktree aislado para que el primer commit represente el
+    // proyecto real; `.git` nunca cruza a la rama huérfana.
+    cpSync(repositoryPath, worktreePath, {
+      recursive: true,
+      filter: (source) => source === repositoryPath || !source.split(sep).includes('.git'),
+    });
   }
 
   return { path: worktreePath, branch, baseRepository: repositoryPath };
@@ -169,10 +174,11 @@ export async function collectDiff(worktreePath: string, maxDiffBytes = 60_000): 
   // se incluyen los archivos nuevos para que aparezcan en el diff
   await git(['add', '-A', '--intent-to-add'], worktreePath).catch(() => undefined);
 
+  const diffBase = (await hasHead(worktreePath)) ? ['HEAD'] : [];
   const [statusResult, statResult, diffResult] = await Promise.all([
     git(['status', '--porcelain=v1'], worktreePath),
-    git(['diff', '--stat', 'HEAD'], worktreePath),
-    git(['diff', 'HEAD'], worktreePath),
+    git(['diff', '--stat', ...diffBase], worktreePath),
+    git(['diff', ...diffBase], worktreePath),
   ]);
 
   const modifiedFiles = parseModifiedFiles(statusResult.stdout);

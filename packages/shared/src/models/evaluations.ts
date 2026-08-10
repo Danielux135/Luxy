@@ -243,3 +243,9 @@ export const MODEL_EVALUATIONS: readonly ModelEvaluationDefinition[] = z
   .array(modelEvaluationDefinitionSchema)
   .length(MODEL_EVALUATION_CATEGORIES.length)
   .parse(DEFINITIONS);
+
+/** opciones que el formulario puede ejecutar hoy; el catalogo conserva el resto */
+export const EXECUTABLE_MODEL_EVALUATIONS: readonly ModelEvaluationDefinition[] =
+  MODEL_EVALUATIONS.filter(
+    (evaluation) => evaluation.executionEnabled && evaluation.validationMode === 'automatic',
+  );

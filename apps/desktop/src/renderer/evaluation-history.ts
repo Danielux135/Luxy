@@ -1,5 +1,6 @@
 import {
   TERMINAL_JOB_STATUSES,
+  buildModelEvaluationPrompt,
   modelEvaluationJobMetadataSchema,
   storedModelEvaluationResultSchema,
 } from '@luxy/shared';
@@ -10,6 +11,11 @@ export interface ModelEvaluationHistoryEntry {
   shortId: string;
   createdAt: string;
   validatedAt: string | null;
+  provider: string;
+  projectAlias: string;
+  targetMachineId: string | null;
+  prompt: string;
+  response: string | null;
   result: StoredModelEvaluationResult;
 }
 
@@ -30,6 +36,25 @@ export interface UnscoredTerminalEvaluationEntry {
   status: JobStatus;
   createdAt: string;
   reason: string;
+}
+
+export interface ModelEvaluationComparisonMember {
+  jobId: string;
+  shortId: string;
+  index: 0 | 1;
+  model: string;
+  status: JobStatus;
+  createdAt: string;
+  result: StoredModelEvaluationResult | null;
+}
+
+export interface ModelEvaluationComparison {
+  groupId: string;
+  evaluationId: string;
+  evaluationVersion: number;
+  members: ModelEvaluationComparisonMember[];
+  issue: string | null;
+  createdAt: string;
 }
 
 export const MIN_EVALUATION_EVIDENCE_SAMPLES = 3;
@@ -109,12 +134,21 @@ export function collectModelEvaluationHistory(
   const entries: ModelEvaluationHistoryEntry[] = [];
   for (const job of jobs) {
     if (job.origin !== 'studio' || job.metadata['studioMode'] !== 'evaluation') continue;
+    const metadata = modelEvaluationJobMetadataSchema.safeParse(job.metadata);
+    if (!metadata.success) continue;
     const parsed = storedModelEvaluationResultSchema.safeParse(job.metadata['evaluationResult']);
     if (!parsed.success) continue;
     const result = parsed.data;
+    const expectedPrompt = buildModelEvaluationPrompt(result.evaluationId);
     if (
-      job.metadata['evaluationId'] !== result.evaluationId ||
-      job.metadata['evaluationVersion'] !== result.evaluationVersion ||
+      metadata.data.evaluationId !== result.evaluationId ||
+      metadata.data.evaluationVersion !== result.evaluationVersion ||
+      metadata.data.evaluationPromptVersion !== result.promptVersion ||
+      metadata.data.evaluationFixtureId !== result.fixtureId ||
+      metadata.data.evaluationValidationMode !== result.validationMode ||
+      metadata.data.evaluationScoring !== result.scoring ||
+      expectedPrompt === null ||
+      job.prompt !== expectedPrompt.text ||
       (job.model !== null && job.model !== result.model)
     ) {
       continue;
@@ -124,6 +158,11 @@ export function collectModelEvaluationHistory(
       jobId: job.id,
       shortId: job.shortId,
       createdAt: job.createdAt,
+      provider: job.provider,
+      projectAlias: job.projectAlias,
+      targetMachineId: job.targetMachineId,
+      prompt: job.prompt,
+      response: job.resultSummary,
       validatedAt:
         typeof validatedAt === 'string' && !Number.isNaN(Date.parse(validatedAt))
           ? validatedAt
@@ -185,4 +224,109 @@ export function collectUnscoredTerminalEvaluations(
     });
   }
   return entries.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+
+/** reconstruye pares solo desde UUID/indice validados; nunca empareja por proximidad */
+export function collectModelEvaluationComparisons(
+  jobs: readonly StudioJob[],
+): ModelEvaluationComparison[] {
+  const groups = new Map<
+    string,
+    {
+      evaluationId: string;
+      evaluationVersion: number;
+      identityMismatch: boolean;
+      contractKey: string;
+      contractMismatch: boolean;
+      members: ModelEvaluationComparisonMember[];
+    }
+  >();
+  for (const job of jobs) {
+    const metadata = modelEvaluationJobMetadataSchema.safeParse(job.metadata);
+    if (
+      !metadata.success ||
+      metadata.data.evaluationComparisonGroupId === undefined ||
+      metadata.data.evaluationComparisonIndex === undefined ||
+      job.model === null
+    ) {
+      continue;
+    }
+    const parsedResult = storedModelEvaluationResultSchema.safeParse(
+      job.metadata['evaluationResult'],
+    );
+    const result =
+      parsedResult.success &&
+      parsedResult.data.evaluationId === metadata.data.evaluationId &&
+      parsedResult.data.evaluationVersion === metadata.data.evaluationVersion &&
+      parsedResult.data.model === job.model
+        ? parsedResult.data
+        : null;
+    const contractKey = JSON.stringify([
+      metadata.data.evaluationPromptVersion,
+      metadata.data.evaluationFixtureId,
+      metadata.data.evaluationValidationMode,
+      metadata.data.evaluationScoring,
+      job.prompt,
+      job.targetMachineId,
+      job.projectAlias,
+    ]);
+    const group = groups.get(metadata.data.evaluationComparisonGroupId) ?? {
+      evaluationId: metadata.data.evaluationId,
+      evaluationVersion: metadata.data.evaluationVersion,
+      identityMismatch: false,
+      contractKey,
+      contractMismatch: false,
+      members: [],
+    };
+    if (
+      group.evaluationId !== metadata.data.evaluationId ||
+      group.evaluationVersion !== metadata.data.evaluationVersion
+    ) {
+      group.identityMismatch = true;
+    }
+    if (group.contractKey !== contractKey) group.contractMismatch = true;
+    group.members.push({
+      jobId: job.id,
+      shortId: job.shortId,
+      index: metadata.data.evaluationComparisonIndex,
+      model: job.model,
+      status: job.status,
+      createdAt: job.createdAt,
+      result,
+    });
+    groups.set(metadata.data.evaluationComparisonGroupId, group);
+  }
+
+  return [...groups.entries()]
+    .map(([groupId, group]) => {
+      const members = [...group.members].sort(
+        (a, b) => a.index - b.index || a.createdAt.localeCompare(b.createdAt),
+      );
+      const indexes = members.map((member) => member.index);
+      const issue = group.identityMismatch
+        ? 'Grupo invalido: mezcla pruebas o versiones distintas.'
+        : group.contractMismatch
+          ? 'Grupo invalido: mezcla snapshots, prompts, maquinas o proyectos.'
+          : members.length !== new Set(indexes).size
+            ? 'Grupo ambiguo: hay indices de miembro repetidos.'
+            : !indexes.includes(0)
+              ? 'Comparacion parcial: falta el modelo A.'
+              : !indexes.includes(1)
+                ? 'Comparacion parcial: falta el modelo B.'
+                : members[0]!.model === members[1]!.model
+                  ? 'Grupo invalido: ambos miembros usan el mismo modelo exacto.'
+                  : null;
+      return {
+        groupId,
+        evaluationId: group.evaluationId,
+        evaluationVersion: group.evaluationVersion,
+        members,
+        issue,
+        createdAt: members.reduce(
+          (latest, member) => (member.createdAt > latest ? member.createdAt : latest),
+          members[0]!.createdAt,
+        ),
+      };
+    })
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }

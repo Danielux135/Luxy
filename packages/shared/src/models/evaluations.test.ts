@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  EXECUTABLE_MODEL_EVALUATIONS,
   MODEL_EVALUATIONS,
   MODEL_EVALUATION_CATEGORIES,
   modelDeclaresEvaluationCapabilities,
@@ -24,6 +25,12 @@ describe('catalogo del Laboratorio', () => {
       expect(evaluation.successCriteria.length).toBeGreaterThan(0);
       expect(evaluation.executionEnabled).toBe(evaluation.validationMode === 'automatic');
     }
+    expect(EXECUTABLE_MODEL_EVALUATIONS).toHaveLength(4);
+    expect(
+      EXECUTABLE_MODEL_EVALUATIONS.every(
+        (evaluation) => evaluation.executionEnabled && evaluation.validationMode === 'automatic',
+      ),
+    ).toBe(true);
   });
 
   it('las pruebas sensibles declaran sus requisitos y fixtures', () => {

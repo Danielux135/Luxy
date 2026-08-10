@@ -460,12 +460,28 @@ Comprobaciones concretas:
 22. cambiar **Modo de ejecución** a **Comparar dos modelos**: aparece Modelo B,
     no permite repetir el modelo exacto y avisa si la máquina no ofrece su
     proveedor;
+    El selector de prueba debe mostrar sólo 4 opciones automáticas; Frontend,
+    Código, Español y Tool calling sólo aparecen en las fichas inferiores;
 23. marcar la confirmación y pulsar el botón sólo hasta ver el diálogo: debe
     enumerar A, B, máquina, dos ejecuciones y ausencia de precios. Pulsar
     **Cancelar** no crea trabajos ni consume tokens;
 24. prueba real opcional: aceptar el diálogo crea dos IDs y ambos aparecen en
     **Evaluación activa** tras Actualizar. Esta acción sí llama a los modelos y
     puede consumir tokens; no es necesaria para validar la interfaz.
+25. cuando exista un par guardado, **Comparaciones controladas** debe mostrar un
+    único grupo con A y B. Si sólo existe A o un miembro terminó sin resultado,
+    debe indicarlo como parcial/sin validar, nunca elegir ganador ni buscar otro
+    trabajo cercano para completar el par.
+26. en **Resultados guardados**, abrir **Ver evidencia reproducible**: comprobar
+    proveedor, proyecto, máquina, modo, scoring, prompt y respuesta completos;
+    cerrar/abrir el detalle no realiza red;
+27. con menos de dos modelos que tengan 3 resultados puntuados de la misma
+    prueba/versión, **Recomendación local** debe decir **Sin recomendación**;
+28. al alcanzar ese umbral, debe mostrar una propuesta provisional y su razón.
+    Un empate real sigue sin ganador; cancelados/fallos operativos no empeoran la
+    tasa;
+29. pulsar **Seleccionar modelo** sólo cambia Modelo A. La casilla de confirmación
+    queda desmarcada y no se crea ningún trabajo.
 
 Esta comprobación necesita reconstruir Desktop y tener accesible el Gateway ya
 configurado para leer el historial. No requiere agente activo, clave de

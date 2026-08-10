@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState, type JSX } from 'react';
 import { TERMINAL_JOB_STATUSES } from '@luxy/shared';
 import type { JobStatus, ProviderId, StudioJob, StudioJobAction } from '@luxy/shared';
 import { Empty, Field, Notice, Panel, Readout, Tag } from '../ui/primitives.js';
+import { FormattedResponse } from '../formatted-response.js';
 import { canDecideStudioJob, parseStudioDecision } from '../studio-decision.js';
 import { useStudio } from '../useStudio.js';
 
@@ -117,6 +118,36 @@ export function StudioPage(): JSX.Element {
     );
     if (!accepted) return;
     await studio.decide(job.id, action);
+  };
+
+  const retry = async (): Promise<void> => {
+    const job = studio.detail?.job;
+    if (
+      job === undefined ||
+      typeof job.targetMachineId !== 'string' ||
+      !['failed', 'interrupted', 'cancelled'].includes(job.status) ||
+      studio.busy
+    ) {
+      return;
+    }
+    const accepted = window.confirm(
+      [
+        `¿Reintentar ${job.shortId}?`,
+        '',
+        `Proveedor: ${job.provider}`,
+        `Modelo: ${job.model ?? 'predeterminado'}`,
+        'Se creará un trabajo nuevo y puede volver a consumir tokens.',
+      ].join('\n'),
+    );
+    if (!accepted) return;
+    await studio.create({
+      targetMachineId: job.targetMachineId,
+      provider: job.provider,
+      model: job.model,
+      projectAlias: job.projectAlias,
+      prompt: job.prompt,
+      priority: 0,
+    });
   };
 
   return (
@@ -275,11 +306,18 @@ export function StudioPage(): JSX.Element {
               {studio.detail.job.resultSummary !== null && (
                 <div className="studio-detail__block">
                   <div className="list__meta">Resultado</div>
-                  <p className="prewrap">{studio.detail.job.resultSummary}</p>
+              <FormattedResponse text={studio.detail.job.resultSummary} />
                 </div>
               )}
               {studio.detail.job.errorMessage !== null && (
                 <Notice tone="fault">{studio.detail.job.errorMessage}</Notice>
+              )}
+              {['failed', 'interrupted', 'cancelled'].includes(studio.detail.job.status) && (
+                <div className="studio-decision__actions">
+                  <button className="btn btn--primary" disabled={studio.busy} onClick={() => void retry()}>
+                    Reintentar trabajo
+                  </button>
+                </div>
               )}
               {diffStat !== null && (
                 <div className="studio-detail__block">

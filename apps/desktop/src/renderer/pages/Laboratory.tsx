@@ -1,6 +1,7 @@
-// Catalogo del Laboratorio. Esta primera version solo prepara pruebas: no
-// ejecuta modelos ni hace red hasta que exista una confirmacion explicita.
+// Catalogo y ejecucion controlada del Laboratorio. Nunca hace red ni ejecuta
+// modelos hasta que exista una confirmacion explicita.
 import {
+  EXECUTABLE_MODEL_EVALUATIONS,
   MODEL_EVALUATIONS,
   buildDefaultCatalog,
   buildModelEvaluationPrompt,
@@ -8,18 +9,22 @@ import {
   modelDeclaresEvaluationCapabilities,
   type ModelEvaluationDefinition,
   type StoredModelEvaluationResult,
+  type StudioJob,
   type StudioJobCreateRequest,
   type StudioMachine,
 } from '@luxy/shared';
 import { useCallback, useEffect, useState, type JSX } from 'react';
 import { createControlledEvaluationPair } from '../evaluation-comparison.js';
+import { assessModelEvaluationRecommendation } from '../evaluation-recommendation.js';
 import {
   MIN_EVALUATION_EVIDENCE_SAMPLES,
   aggregateModelEvaluationEvidence,
   collectActiveModelEvaluations,
+  collectModelEvaluationComparisons,
   collectModelEvaluationHistory,
   collectUnscoredTerminalEvaluations,
   type ActiveModelEvaluationEntry,
+  type ModelEvaluationComparison,
   type ModelEvaluationHistoryEntry,
   type UnscoredTerminalEvaluationEntry,
 } from '../evaluation-history.js';
@@ -66,6 +71,12 @@ function when(iso: string): string {
   return Number.isNaN(date.getTime()) ? iso : date.toLocaleString('es-ES', { hour12: false });
 }
 
+function responseTime(milliseconds: number): string {
+  if (milliseconds < 1000) return `${milliseconds.toLocaleString()} ms`;
+  if (milliseconds < 60_000) return `${(milliseconds / 1000).toFixed(1)} s (${milliseconds.toLocaleString()} ms)`;
+  return `${(milliseconds / 60_000).toFixed(1)} min (${milliseconds.toLocaleString()} ms)`;
+}
+
 function ResultHistory({
   entries,
 }: {
@@ -89,7 +100,7 @@ function ResultHistory({
             </div>
             <div className="list__meta">
               {entry.shortId} · {when(entry.validatedAt ?? entry.createdAt)} ·{' '}
-              {entry.result.durationMs.toLocaleString()} ms ·{' '}
+              Tiempo de respuesta: {responseTime(entry.result.durationMs)} ·{' '}
               {entry.result.outputChars.toLocaleString()} caracteres
               {entry.result.inputTokens === null || entry.result.outputTokens === null
                 ? ' · tokens no disponibles'
@@ -103,6 +114,18 @@ function ResultHistory({
             {entry.result.reason !== null && (
               <div className="list__meta">{entry.result.reason}</div>
             )}
+            <details>
+              <summary>Ver evidencia reproducible</summary>
+              <div className="list__meta">
+                {entry.provider} · {entry.projectAlias} · máquina{' '}
+                {entry.targetMachineId ?? 'no registrada'} · {entry.result.validationMode} ·{' '}
+                {entry.result.scoring}
+              </div>
+              <p className="silk">Prompt guardado</p>
+              <pre className="mono prewrap">{entry.prompt}</pre>
+              <p className="silk">Respuesta guardada</p>
+              <pre className="mono prewrap">{entry.response ?? 'Sin respuesta persistida'}</pre>
+            </details>
           </li>
         );
       })}
@@ -133,6 +156,65 @@ function UnscoredTerminalHistory({
             {entry.shortId} · {entry.status} · {when(entry.createdAt)}
           </div>
           <div className="list__meta">{entry.reason}</div>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function ComparisonHistory({
+  comparisons,
+}: {
+  comparisons: readonly ModelEvaluationComparison[];
+}): JSX.Element {
+  const terminal = ['completed', 'failed', 'cancelled', 'interrupted'];
+  return (
+    <ul className="list">
+      {comparisons.slice(0, 12).map((comparison) => (
+        <li key={comparison.groupId} className="comparison-entry">
+          <div className="list__main">
+            <span>
+              {MODEL_EVALUATIONS.find((item) => item.id === comparison.evaluationId)?.title ??
+                comparison.evaluationId}{' '}
+              · v{comparison.evaluationVersion}
+            </span>
+            <Tag tone={comparison.issue === null ? 'ok' : 'warn'}>
+              {comparison.issue === null ? 'Par completo' : 'Par incompleto'}
+            </Tag>
+          </div>
+          <div className="list__meta mono">Grupo {comparison.groupId}</div>
+          <ul className="list">
+            {comparison.members.map((member) => (
+              <li key={member.jobId}>
+                <div className="list__main">
+                  <span>
+                    Modelo {member.index === 0 ? 'A' : 'B'} · {member.model}
+                  </span>
+                  <span className="row">
+                    <Tag>{member.status}</Tag>
+                    {member.result === null ? (
+                      <Tag tone="warn">
+                        {terminal.includes(member.status)
+                          ? 'Sin resultado validado'
+                          : 'Resultado pendiente'}
+                      </Tag>
+                    ) : (
+                      <Tag tone={resultTone(member.result.status)}>
+                        {RESULT_LABELS[member.result.status]}
+                      </Tag>
+                    )}
+                  </span>
+                </div>
+                <div className="list__meta">
+                  {member.shortId} · {when(member.createdAt)}
+                  {member.result === null
+                    ? ''
+                    : ` · Tiempo de respuesta: ${responseTime(member.result.durationMs)}`}
+                </div>
+              </li>
+            ))}
+          </ul>
+          {comparison.issue !== null && <Notice tone="warn">{comparison.issue}</Notice>}
         </li>
       ))}
     </ul>
@@ -187,13 +269,15 @@ function EvaluationCard({ evaluation }: { evaluation: ModelEvaluationDefinition 
 }
 
 export function LaboratoryPage({ summary }: { summary: ConfigSummary }): JSX.Element {
-  const [evaluationId, setEvaluationId] = useState(MODEL_EVALUATIONS[0]!.id);
+  const [evaluationId, setEvaluationId] = useState(EXECUTABLE_MODEL_EVALUATIONS[0]!.id);
   const [modelId, setModelId] = useState('');
   const [secondModelId, setSecondModelId] = useState('');
   const [executionMode, setExecutionMode] = useState<'individual' | 'comparison'>('individual');
   const [confirmed, setConfirmed] = useState(false);
   const [history, setHistory] = useState<ModelEvaluationHistoryEntry[]>([]);
   const [unscoredTerminal, setUnscoredTerminal] = useState<UnscoredTerminalEvaluationEntry[]>([]);
+  const [comparisons, setComparisons] = useState<ModelEvaluationComparison[]>([]);
+  const [studioJobs, setStudioJobs] = useState<StudioJob[]>([]);
   const [historyLoading, setHistoryLoading] = useState(true);
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [machines, setMachines] = useState<StudioMachine[]>([]);
@@ -206,7 +290,9 @@ export function LaboratoryPage({ summary }: { summary: ConfigSummary }): JSX.Ele
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [createdShortId, setCreatedShortId] = useState<string | null>(null);
-  const evaluation = MODEL_EVALUATIONS.find((item) => item.id === evaluationId)!;
+  const evaluation =
+    EXECUTABLE_MODEL_EVALUATIONS.find((item) => item.id === evaluationId) ??
+    EXECUTABLE_MODEL_EVALUATIONS[0]!;
   const connectionId = summary.config?.connections?.[0]?.id ?? null;
   const models = connectionId === null ? [] : buildDefaultCatalog(connectionId);
   const compatibleModels = models.filter((model) =>
@@ -224,6 +310,13 @@ export function LaboratoryPage({ summary }: { summary: ConfigSummary }): JSX.Ele
   const machine = machines.find((item) => item.id === machineId) ?? null;
   const provider = evaluationProvider(selectedModel);
   const evidence = aggregateModelEvaluationEvidence(history);
+  const recommendation = assessModelEvaluationRecommendation({
+    evaluation,
+    entries: history,
+    jobs: studioJobs,
+    allowedModels: compatibleModels.map((model) => model.apiModel),
+    projectAlias,
+  });
 
   useEffect(() => {
     setConfirmed(false);
@@ -251,10 +344,13 @@ export function LaboratoryPage({ summary }: { summary: ConfigSummary }): JSX.Ele
       window.luxy.getStudioOptions(),
     ]);
     if (historyResult.ok && optionsResult.ok) {
-      setHistory(collectModelEvaluationHistory(historyResult.value.jobs));
-      setUnscoredTerminal(collectUnscoredTerminalEvaluations(historyResult.value.jobs));
+      const jobs = historyResult.value.jobs;
+      setHistory(collectModelEvaluationHistory(jobs));
+      setUnscoredTerminal(collectUnscoredTerminalEvaluations(jobs));
+      setComparisons(collectModelEvaluationComparisons(jobs));
+      setStudioJobs(jobs);
       setMachines(optionsResult.value.machines);
-      const active = collectActiveModelEvaluations(historyResult.value.jobs);
+      const active = collectActiveModelEvaluations(jobs);
       setActiveEntries(active);
       setActiveEvaluation(active.length > 0);
       setHistoryError(null);
@@ -301,15 +397,15 @@ export function LaboratoryPage({ summary }: { summary: ConfigSummary }): JSX.Ele
     const comparison = executionMode === 'comparison' && selectedSecondModel !== null;
     const accepted = window.confirm(
       [
-        `¿Ejecutar ${comparison ? 'comparacion' : 'prueba'}: ${evaluation.title}?`,
+        `¿Ejecutar ${comparison ? 'comparación' : 'prueba'}: ${evaluation.title}?`,
         '',
         `Modelo exacto A: ${selectedModel.apiModel}`,
         ...(comparison ? [`Modelo exacto B: ${selectedSecondModel.apiModel}`] : []),
-        `Maquina: ${machine.name}`,
-        'Esta accion puede consumir tokens. Luxy no consulta ni conoce el precio.',
+        `Máquina: ${machine.name}`,
+        'Esta acción puede consumir tokens. Luxy no consulta ni conoce el precio.',
         comparison
-          ? 'Se crearan dos evaluaciones de solo lectura, en orden y con el mismo prompt.'
-          : 'Solo se creara una evaluacion individual de solo lectura.',
+          ? 'Se crearán dos evaluaciones de solo lectura, en orden y con el mismo prompt.'
+          : 'Solo se creará una evaluación individual de solo lectura.',
       ].join('\n'),
     );
     if (!accepted) return;
@@ -380,7 +476,9 @@ export function LaboratoryPage({ summary }: { summary: ConfigSummary }): JSX.Ele
     <>
       <div className="page__head">
         <h1 className="page__title">Laboratorio</h1>
-        <Tag>{MODEL_EVALUATIONS.length} pruebas definidas</Tag>
+        <Tag>
+          {EXECUTABLE_MODEL_EVALUATIONS.length} ejecutables · {MODEL_EVALUATIONS.length} definidas
+        </Tag>
       </div>
       <p className="page__lede">
         Pruebas versionadas para comparar modelos con los mismos prompts, fixtures y criterios.
@@ -417,9 +515,9 @@ export function LaboratoryPage({ summary }: { summary: ConfigSummary }): JSX.Ele
           </Field>
           <Field label="Prueba reproducible">
             <select value={evaluation.id} onChange={(event) => setEvaluationId(event.target.value)}>
-              {MODEL_EVALUATIONS.map((item) => (
+              {EXECUTABLE_MODEL_EVALUATIONS.map((item) => (
                 <option key={item.id} value={item.id}>
-                  {item.title} · v{item.version}
+                  {item.title} · v{item.version} · automática
                 </option>
               ))}
             </select>
@@ -477,7 +575,9 @@ export function LaboratoryPage({ summary }: { summary: ConfigSummary }): JSX.Ele
           )}
         </div>
         <Notice tone="warn">
-          Vista previa local: seleccionar un modelo no confirma capacidades ni envia este prompt.
+          Vista previa local: este formulario sólo incluye las cuatro pruebas automáticas.
+          Seleccionar un modelo no confirma capacidades ni envía el prompt. Las pruebas que
+          necesitan revisión, sandbox o trazas siguen documentadas más abajo como pendientes.
         </Notice>
         <Readout
           items={[
@@ -575,6 +675,16 @@ export function LaboratoryPage({ summary }: { summary: ConfigSummary }): JSX.Ele
         </Panel>
       )}
 
+      {comparisons.length > 0 && (
+        <Panel title="Comparaciones controladas" actions={<Tag>mismo prompt</Tag>}>
+          <p className="list__meta">
+            Pares reconstruidos sólo por UUID e índice guardados. Un miembro ausente, cancelado o
+            sin resultado permanece visible y nunca se sustituye por otra ejecución cercana.
+          </p>
+          <ComparisonHistory comparisons={comparisons} />
+        </Panel>
+      )}
+
       {evidence.length > 0 && (
         <Panel title="Evidencia descriptiva" actions={<Tag>sin ranking</Tag>}>
           <p className="list__meta">
@@ -599,7 +709,7 @@ export function LaboratoryPage({ summary }: { summary: ConfigSummary }): JSX.Ele
                   {` · ${summary.notScored} sin puntuar`}
                   {summary.medianDurationMs === null
                     ? ''
-                    : ` · mediana ${summary.medianDurationMs.toLocaleString()} ms`}
+                    : ` · mediana de respuesta ${responseTime(summary.medianDurationMs)}`}
                   {summary.medianOutputTokens === null
                     ? ''
                     : ` · ${summary.medianOutputTokens.toLocaleString()} tokens salida`}
@@ -613,6 +723,46 @@ export function LaboratoryPage({ summary }: { summary: ConfigSummary }): JSX.Ele
           </Notice>
         </Panel>
       )}
+
+      <Panel
+        title="Recomendación local"
+        actions={<Tag tone={recommendation.status === 'recommended' ? 'ok' : 'warn'}>prudente</Tag>}
+      >
+        {recommendation.recommendation !== null ? (
+          <>
+            <div className="list__main">
+              <span>{recommendation.recommendation.model}</span>
+              <button
+                className="btn"
+                type="button"
+                onClick={() => {
+                  const model = compatibleModels.find(
+                    (item) => item.apiModel === recommendation.recommendation?.model,
+                  );
+                  if (model !== undefined) setModelId(model.id);
+                }}
+              >
+                Seleccionar modelo
+              </button>
+            </div>
+            <p className="list__meta">{recommendation.recommendation.reason}</p>
+            <Notice tone="idle">
+              Recomendación provisional para esta prueba y versión. Seleccionarla no ejecuta nada ni
+              sustituye tu confirmación.
+            </Notice>
+          </>
+        ) : recommendation.status === 'insufficient_samples' ? (
+          <Notice tone="idle">
+            Sin recomendación: hacen falta al menos dos modelos con tres resultados puntuados cada
+            uno para esta misma prueba y versión.
+          </Notice>
+        ) : (
+          <Notice tone="idle">
+            Sin recomendación: la evidencia suficiente continúa empatada y Luxy no fuerza un
+            ganador.
+          </Notice>
+        )}
+      </Panel>
 
       <Panel
         title="Resultados guardados"
@@ -635,7 +785,7 @@ export function LaboratoryPage({ summary }: { summary: ConfigSummary }): JSX.Ele
         ) : historyError !== null ? (
           <Notice tone="fault">{historyError}</Notice>
         ) : history.length === 0 && unscoredTerminal.length === 0 ? (
-          <Empty title="Todavia no hay evaluaciones guardadas">
+          <Empty title="Todavía no hay evaluaciones guardadas">
             El Laboratorio sigue en preparacion. No hace falta ejecutar nada para validar esta
             pantalla.
           </Empty>

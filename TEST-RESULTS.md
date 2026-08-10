@@ -709,6 +709,58 @@ test.txt`, `Luxy claves API.txt`, un handoff duplicado y `Web demos/`).
 - La prueba automatizada usa dobles IPC; no llamó a modelos, proveedores, precios,
   migraciones, deploy ni producción.
 
+### 2026-08-09 — Windows 11 — F4.4-T3
+
+- Base: commit local `3771549` más presentación conjunta sin commit.
+- Primera ejecución específica: 46 pasadas y 3 fallos nuevos porque los fixtures
+  históricos no contenían el snapshot completo requerido; el agregador los
+  rechazó correctamente.
+- Corrección: completar los fixtures. No se relajó el esquema ni el agregador.
+- Específicas finales: **49 pasadas, 0 fallos**, 4 archivos; cubren metadata
+  inseparable, par completo, parcial y miembro terminal sin resultado.
+- Matriz final: lint, typecheck y build exit 0; **1.565 passed, 9 skipped, 0
+  failed**, 84/84 archivos; Vitest 44,62 s.
+- Sin modelos reales, proveedores, precios, migración, push ni deploy.
+
+### 2026-08-09 — Windows 11 — F4.5/F4.6, cierre funcional
+
+- Base: `3771549` más F4.4-T3/F4.5/F4.6 sin commit.
+- F4.5 auditado: persistencia completa ya cubierta por pruebas Gateway, incluida
+  respuesta de 20.000 caracteres; historial ampliado para conservar/exponer
+  prompt, respuesta, proveedor, proyecto y máquina junto al resultado.
+- F4.6: 6 pruebas nuevas para umbral de dos modelos × tres puntuados, exclusión
+  de `not_scored`, desempate de rapidez, empate sin ganador, feedback repetido y
+  aislamiento por proyecto/estado/modo.
+- Endurecimiento final: evidencia rechazada si snapshot, resultado o prompt no
+  coinciden; un UUID con contratos distintos se marca inválido.
+- Focalizadas finales: **26 pasadas, 0 fallos**, 3 archivos.
+- Matriz final: Prettier, lint, typecheck y build exit 0; **1.572 passed, 9
+  skipped, 0 failed**, 85/85 archivos; Vitest 41,86 s.
+- Alcance Modelos/Laboratorio: 100% implementado; evidencia manual pendiente.
+- Sin modelos reales, precios, migración, push, deploy ni producción.
+
+### 2026-08-09 — Windows 11 — selector ejecutable tras validación visual
+
+- Evidencia: captura real con prueba Frontend seleccionada y bloqueo de
+  runner/revisión pendiente.
+- Clasificación: UX/selección, no fallo de la barrera de seguridad.
+- Corrección: selector derivado de las cuatro definiciones automáticas; ocho
+  fichas del catálogo conservadas.
+- Específicas: **15 pasadas, 0 fallos**, 3 archivos; typecheck y lint exit 0.
+- Matriz final: **1.572 passed, 9 skipped, 0 failed**, 85/85 archivos; build exit
+  0; Vitest 50,16 s.
+- No se ejecutó ningún modelo ni se consultaron precios.
+
+### 2026-08-09 — Windows 11 — despliegue Gateway para validar comparación
+
+- Primer deploy: rechazado por OAuth de una cuenta Cloudflare distinta; no cambió
+  el Worker.
+- Tras renovar sesión con la cuenta propietaria: `wrangler deploy` correcto para
+  `luxy-gateway`, versión `b3fb5c99-5cf1-42a1-b011-f6d44b9f0730`.
+- Smoke check: `/health` respondió **HTTP 200** y `status: ok`.
+- No se ejecutaron modelos, no se consumieron tokens y no se consultaron precios.
+- Pendiente: reiniciar Desktop/agente y repetir la comparación A/B.
+
 ## Plantilla
 
 ```markdown

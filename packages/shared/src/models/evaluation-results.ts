@@ -11,16 +11,32 @@ import {
   MODEL_EVALUATION_VALIDATION_MODES,
 } from './evaluations.js';
 
-export const modelEvaluationJobMetadataSchema = z.object({
-  studioMode: z.literal('evaluation'),
-  evaluationId: z.string().regex(/^[a-z0-9][a-z0-9-]*$/),
-  evaluationVersion: z.number().int().min(1),
-  evaluationPromptVersion: z.literal(1),
-  evaluationFixtureId: z.string().min(1).max(80).nullable(),
-  evaluationValidationMode: z.enum(MODEL_EVALUATION_VALIDATION_MODES),
-  evaluationScoring: z.enum(MODEL_EVALUATION_SCORING),
-  evaluationConfirmed: z.literal(true),
-});
+export const modelEvaluationJobMetadataSchema = z
+  .object({
+    studioMode: z.literal('evaluation'),
+    evaluationId: z.string().regex(/^[a-z0-9][a-z0-9-]*$/),
+    evaluationVersion: z.number().int().min(1),
+    evaluationPromptVersion: z.literal(1),
+    evaluationFixtureId: z.string().min(1).max(80).nullable(),
+    evaluationValidationMode: z.enum(MODEL_EVALUATION_VALIDATION_MODES),
+    evaluationScoring: z.enum(MODEL_EVALUATION_SCORING),
+    evaluationConfirmed: z.literal(true),
+    evaluationComparisonGroupId: z.string().uuid().optional(),
+    evaluationComparisonIndex: z.union([z.literal(0), z.literal(1)]).optional(),
+  })
+  .superRefine((value, context) => {
+    if (
+      (value.evaluationComparisonGroupId === undefined) ===
+      (value.evaluationComparisonIndex === undefined)
+    ) {
+      return;
+    }
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['evaluationComparisonGroupId'],
+      message: 'grupo e indice de comparacion deben viajar juntos',
+    });
+  });
 
 export const storedModelEvaluationResultSchema = z.object({
   evaluationId: z.string().regex(/^[a-z0-9][a-z0-9-]*$/),

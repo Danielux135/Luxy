@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { evaluateModelEvaluationCompletion } from './evaluation-results.js';
+import {
+  evaluateModelEvaluationCompletion,
+  modelEvaluationJobMetadataSchema,
+} from './evaluation-results.js';
 
 const metadata = {
   studioMode: 'evaluation',
@@ -125,5 +128,21 @@ describe('resultado persistible de una evaluacion', () => {
       status: 'not_scored',
       reason: 'el snapshot no coincide con el catalogo actual',
     });
+  });
+
+  it('valida junta la identidad persistida de una comparacion', () => {
+    expect(
+      modelEvaluationJobMetadataSchema.safeParse({
+        ...metadata,
+        evaluationComparisonGroupId: '88888888-8888-4888-8888-888888888888',
+      }).success,
+    ).toBe(false);
+    expect(
+      modelEvaluationJobMetadataSchema.safeParse({
+        ...metadata,
+        evaluationComparisonGroupId: '88888888-8888-4888-8888-888888888888',
+        evaluationComparisonIndex: 1,
+      }).success,
+    ).toBe(true);
   });
 });
