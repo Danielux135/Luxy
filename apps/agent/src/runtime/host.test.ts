@@ -4,7 +4,7 @@
 // health() y los heartbeats fallan de forma controlada, que es justo lo que hay
 // que comprobar (el agente arranca igual y sigue reintentando).
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { agentEventSchema, agentHostStatusSchema, agentConfigSchema } from '@luxy/shared';
@@ -26,7 +26,7 @@ afterEach(() => {
   rmSync(temporal, { recursive: true, force: true });
 });
 
-function buildConfig(): AgentConfig {
+function buildConfig(projects: AgentConfig['projects'] = {}): AgentConfig {
   return agentConfigSchema.parse({
     machineName: 'maquina-de-pruebas',
     // puerto 1 esta cerrado: el gateway nunca respondera
@@ -36,6 +36,7 @@ function buildConfig(): AgentConfig {
     pollIntervalMs: 500,
     // ni claude ni codex: la deteccion no debe depender de lo que haya instalado
     providers: { claude: { enabled: false }, codex: { enabled: false }, http: [] },
+    projects,
   });
 }
 
@@ -118,6 +119,37 @@ describe('AgentHost sin configuracion', () => {
   it('parar un agente que nunca arranco no lanza', async () => {
     const host = buildHost(null);
     await expect(host.stop()).resolves.toBeUndefined();
+  });
+});
+
+describe('espacios de trabajo preparados', () => {
+  it('crea un worktree antes de que exista ningun trabajo y conserva el contexto añadido', async () => {
+    const projectPath = join(temporal, 'proyecto');
+    mkdirSync(projectPath);
+    writeFileSync(join(projectPath, 'base.txt'), 'base', 'utf8');
+    const host = buildHost(
+      buildConfig({ demo: { path: projectPath, type: 'other', allowEdits: true } }),
+    );
+
+    const workspace = await host.prepareWorktree('demo', 'contexto previo');
+    expect(workspace.projectAlias).toBe('demo');
+    expect(workspace.path).toContain(join(temporal, 'worktrees'));
+    expect(existsSync(join(workspace.path, 'base.txt'))).toBe(true);
+
+    writeFileSync(join(workspace.path, 'contexto.txt'), 'dato añadido antes del prompt', 'utf8');
+    expect(existsSync(join(workspace.path, 'contexto.txt'))).toBe(true);
+  });
+
+  it('rechaza preparar carpetas en proyectos de solo lectura', async () => {
+    const projectPath = join(temporal, 'solo-lectura');
+    mkdirSync(projectPath);
+    const host = buildHost(
+      buildConfig({ demo: { path: projectPath, type: 'other', allowEdits: false } }),
+    );
+
+    await expect(host.prepareWorktree('demo', 'no permitido')).rejects.toThrow(
+      'no permite crear espacios editables',
+    );
   });
 });
 

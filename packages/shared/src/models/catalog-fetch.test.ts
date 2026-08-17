@@ -126,6 +126,8 @@ describe('guessModelFamily', () => {
     expect(guessModelFamily('glm-5.2')).toBe('glm');
     expect(guessModelFamily('qwen-max')).toBe('qwen');
     expect(guessModelFamily('kat-coder-pro-v2.5')).toBe('kat');
+    expect(guessModelFamily('hy3')).toBe('hunyuan');
+    expect(guessModelFamily('Tencent-Hunyuan-Hy3')).toBe('hunyuan');
     expect(guessModelFamily('claude-sonnet-4')).toBe('claude');
     expect(guessModelFamily('gpt-4o')).toBe('openai');
     expect(guessModelFamily('algo-raro')).toBe('otros');
@@ -176,7 +178,7 @@ describe('diagnostico de precios', () => {
   });
 });
 
-describe('familias de los 22 modelos reales', () => {
+describe('familias de los 23 modelos reales', () => {
   it('agrupa los que la primera lectura dejo en "otros"', () => {
     // los 22 de la lectura del 2026-08-07: 14 caian en "otros" porque step,
     // minimax y sensenova no estaban contemplados
@@ -199,8 +201,9 @@ describe('familias de los 22 modelos reales', () => {
       'kat-coder-pro-v2.5',
       'Kimi-K2.6',
       'MiniMax-M3',
-      'Qwen3.5-397B-A17B',
-      'Qwen3.6-35B-A3B',
+      'hy3',
+      'Qwen3-Embedding-8B',
+      'Qwen3.6-27B',
       'sensenova-6.7-flash-lite',
       'sensenova-u1-fast',
       'step-3.5-flash',
@@ -214,7 +217,7 @@ describe('familias de los 22 modelos reales', () => {
       'stepaudio-2.5-realtime',
       'stepaudio-2.5-tts',
     ];
-    expect(REALES).toHaveLength(22);
+    expect(REALES).toHaveLength(23);
     for (const modelo of REALES) expect(guessModelFamily(modelo)).not.toBe('otros');
   });
 });

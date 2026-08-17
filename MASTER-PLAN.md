@@ -40,16 +40,16 @@ Objetivo: completar de extremo a extremo
 máquina → proyecto → proveedor/modelo → tarea → progreso → resultado → diff →
 aplicar/descartar → historial.
 
-| ID   | Trabajo                                       | Estado      | Pendiente real                                       |
-| ---- | --------------------------------------------- | ----------- | ---------------------------------------------------- |
-| F1.1 | Opciones reales de máquina/proyecto/proveedor | implemented | prueba E2E en Windows con gateway real               |
-| F1.2 | Crear y seguir trabajo desde formulario       | implemented | validación manual final                              |
-| F1.3 | Eventos, resultado, pruebas y diff            | implemented | revisar salidas grandes y paginación                 |
+| ID   | Trabajo                                       | Estado      | Pendiente real                                                                |
+| ---- | --------------------------------------------- | ----------- | ----------------------------------------------------------------------------- |
+| F1.1 | Opciones reales de máquina/proyecto/proveedor | implemented | prueba E2E en Windows con gateway real                                        |
+| F1.2 | Crear y seguir trabajo desde formulario       | implemented | validación manual final                                                       |
+| F1.3 | Eventos, resultado, pruebas y diff            | implemented | revisar salidas grandes y paginación                                          |
 | F1.4 | Worktree aislado                              | implemented | preparar Git automáticamente en proyectos editables y mantener el aislamiento |
-| F1.5 | Aplicar cambios                               | implemented | confirmar commit real en rama aislada sin merge/push |
-| F1.6 | Descartar trabajo                             | implemented | confirmar diálogo y limpieza exacta                  |
-| F1.7 | Reintentos e idempotencia de decisiones       | implemented | prueba manual de corte/reinicio                      |
-| F1.8 | Historial durable                             | implemented | validar más de 100 trabajos/paginación               |
+| F1.5 | Aplicar cambios                               | implemented | confirmar commit real en rama aislada sin merge/push                          |
+| F1.6 | Descartar trabajo                             | implemented | confirmar diálogo y limpieza exacta                                           |
+| F1.7 | Reintentos e idempotencia de decisiones       | implemented | prueba manual de corte/reinicio                                               |
+| F1.8 | Historial durable                             | implemented | validar más de 100 trabajos/paginación                                        |
 
 No añadir tarjetas decorativas ni datos simulados. Toda pantalla debe consumir
 estado real.
@@ -101,6 +101,8 @@ Estado global: `planned`
 - F3.5: artefactos generados versionados o exportables.
 - F3.6: memoria de proyecto con procedencia y caducidad/corrección.
 - F3.7: límites de contexto visibles y selección de qué entra en el prompt.
+- F3.8: espacios de trabajo preparados antes del prompt y reutilizables entre
+  trabajos. **`implemented` (2026-08-11, F4.8-T5)**; validación manual pendiente.
 
 Criterio de salida: Daniel puede entrar en un proyecto y ver/operar todo su
 contexto sin recurrir a comandos de Telegram.
@@ -112,7 +114,9 @@ Estado global: `in_progress`
 
 - F4.1: inventario real de conexiones, proveedores, modelos y capacidades.
   **`implemented` (2026-08-09)**: Studio consulta sólo `/v1/models` y guarda el
-  catálogo con fecha. La lectura real dio 22 modelos y `F4.1-T4` alineó el
+  catálogo con fecha. La lectura real del 2026-08-11 dio 23 modelos y
+  `F4.3-T11` convirtió ese snapshot en la fuente de las pantallas operativas;
+  `F4.1-T4` alineó el
   catálogo operativo. La pasarela no publica precios útiles y, por decisión de
   Daniel (`F4.1-T5`), Luxy no los consulta. Los topes siguen sin inventarse y
   dependen de evidencia de `LA-007`.

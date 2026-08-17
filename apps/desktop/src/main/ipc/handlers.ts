@@ -4,18 +4,20 @@
 // resultado uniforme. Al renderer nunca le llega una traza ni un secreto: solo
 // un mensaje pensado para leerse, y una pista de que hacer.
 import { type BrowserWindow, dialog, ipcMain, safeStorage, shell, app } from 'electron';
-import { readFileSync, existsSync, mkdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { readFileSync, existsSync, mkdirSync, realpathSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import type { z } from 'zod';
 import {
   redact,
   storedAgentConfigSchema,
   secretRegistry,
   buildCatalogSnapshot,
+  isPathInside,
 } from '@luxy/shared';
 import { detectEnvironment } from '@luxy/agent/dist/detect.js';
 import { GatewayClient } from '@luxy/agent/dist/gateway-client.js';
 import { buildMachineIdentity } from '@luxy/agent/dist/agent.js';
+import { worktreesDir } from '@luxy/agent/dist/paths.js';
 import type { StoredAgentConfig } from '@luxy/shared';
 import {
   IPC_INVOKE,
@@ -28,6 +30,8 @@ import {
   migrationImportArgsSchema,
   connectionTestArgsSchema,
   approvalResolveArgsSchema,
+  workspacePrepareArgsSchema,
+  workspaceOpenArgsSchema,
   studioJobCreateArgsSchema,
   studioJobFeedbackArgsSchema,
   studioJobActionArgsSchema,
@@ -381,6 +385,26 @@ export function registerIpcHandlers(context: HandlerContext): void {
     // el resultado real lo decide el agente: puede denegarla por politica
     await context.controller.executeApproval(args);
     return { ok: true, message: 'peticion enviada al agente' };
+  });
+
+  handle(IPC_INVOKE.workspacePrepare, workspacePrepareArgsSchema, async (args) => {
+    const workspace = await context.controller.prepareWorktree(args.projectAlias, args.label);
+    context.log('espacio de trabajo preparado', {
+      projectAlias: workspace.projectAlias,
+      branch: workspace.branch,
+    });
+    return workspace;
+  });
+
+  handle(IPC_INVOKE.workspaceOpen, workspaceOpenArgsSchema, async (args) => {
+    const root = realpathSync(resolve(worktreesDir()));
+    const candidate = realpathSync(resolve(args.path));
+    if (!isPathInside(candidate, root) || candidate === root) {
+      throw new Error('la ruta no pertenece a un espacio de trabajo de Luxy');
+    }
+    const error = await shell.openPath(candidate);
+    if (error.length > 0) throw new Error(`no se pudo abrir el espacio: ${error}`);
+    return { opened: true };
   });
 
   // ---------------------------------------------------------------------------

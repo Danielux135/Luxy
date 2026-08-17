@@ -171,31 +171,35 @@ const RAW_CATALOG = [
     allowedTools: ALL_TOOLS,
   },
   {
-    id: 'qwen3.5-397b-a17b',
-    supportsNativeTools: true,
-    metadata: TOOLS_OK,
-    apiModel: 'Qwen3.5-397B-A17B',
-    displayName: 'Qwen3.5 397B A17B',
-    family: 'qwen',
+    id: 'hy3',
+    metadata: { ...UNVERIFIED, note: 'servido por la conexion; capacidades pendientes' },
+    apiModel: 'hy3',
+    displayName: 'Hy3',
+    family: 'hunyuan',
     category: 'text',
-    capabilities: ['text', 'reasoning', 'coding', 'long_context', 'agent_tools'],
-    telegramAliases: ['qwen', 'qwen_397b'],
-    defaultForFamily: true,
-    agentic: true,
-    allowedTools: ALL_TOOLS,
+    capabilities: ['text'],
+    telegramAliases: [],
   },
   {
-    id: 'qwen3.6-35b-a3b',
-    supportsNativeTools: true,
-    metadata: TOOLS_OK,
-    apiModel: 'Qwen3.6-35B-A3B',
-    displayName: 'Qwen3.6 35B A3B',
+    id: 'qwen3-embedding-8b',
+    metadata: { ...UNVERIFIED, note: 'servido por la conexion; capacidades pendientes' },
+    apiModel: 'Qwen3-Embedding-8B',
+    displayName: 'Qwen3 Embedding 8B',
     family: 'qwen',
     category: 'text',
-    capabilities: ['text', 'coding', 'fast', 'agent_tools'],
-    telegramAliases: ['qwen_35b', 'qwen_36'],
-    agentic: true,
-    allowedTools: ALL_TOOLS,
+    capabilities: [],
+    telegramAliases: [],
+  },
+  {
+    id: 'qwen3.6-27b',
+    metadata: { ...UNVERIFIED, note: 'servido por la conexion; capacidades pendientes' },
+    apiModel: 'Qwen3.6-27B',
+    displayName: 'Qwen3.6 27B',
+    family: 'qwen',
+    category: 'text',
+    capabilities: ['text'],
+    telegramAliases: ['qwen', 'qwen_36'],
+    defaultForFamily: true,
   },
   {
     id: 'step-3.7-flash',
@@ -378,4 +382,77 @@ const RAW_CATALOG = [
 /** catalogo inicial, validado en tiempo de carga contra el esquema */
 export function buildDefaultCatalog(connectionId = DEFAULT_CONNECTION_ID): ModelDefinition[] {
   return RAW_CATALOG.map((entry) => modelDefinitionSchema.parse({ ...entry, connectionId }));
+}
+
+/**
+ * Convierte la última lectura real en el catálogo operativo. Las capacidades
+ * sólo se conservan para identificadores exactos ya conocidos; un modelo nuevo
+ * entra con el contrato mínimo y nunca hereda herramientas por parecido.
+ */
+export function buildCatalogForConnection(
+  connectionId: string,
+  servedModels: readonly string[],
+): ModelDefinition[] {
+  const knownByApiModel = new Map(
+    buildDefaultCatalog(connectionId).map((model) => [model.apiModel, model]),
+  );
+
+  return servedModels.map((apiModel, index) => {
+    const known = knownByApiModel.get(apiModel);
+    if (known !== undefined) return known;
+
+    const lower = apiModel.toLowerCase();
+    const family =
+      lower === 'hy3' || lower.includes('hunyuan')
+        ? 'hunyuan'
+        : lower.includes('qwen')
+          ? 'qwen'
+          : lower.includes('glm')
+            ? 'glm'
+            : lower.includes('deepseek')
+              ? 'deepseek'
+              : lower.includes('kimi')
+                ? 'kimi'
+                : lower.includes('kat')
+                  ? 'kat'
+                  : lower.includes('minimax')
+                    ? 'minimax'
+                    : lower.includes('sensenova')
+                      ? 'sensenova'
+                      : lower.startsWith('stepaudio')
+                        ? 'stepaudio'
+                        : lower.startsWith('step-image')
+                          ? 'stepimage'
+                          : lower.startsWith('step')
+                            ? 'step'
+                            : lower === 'auto' || lower.includes('router')
+                              ? 'router'
+                              : null;
+    const category =
+      family === 'router'
+        ? 'routing'
+        : family === 'stepaudio'
+          ? 'audio'
+          : family === 'stepimage'
+            ? 'image'
+            : 'text';
+    const safeId = lower.replace(/[^a-z0-9._-]+/g, '-').replace(/-+/g, '-');
+
+    return modelDefinitionSchema.parse({
+      id: safeId.length === 0 ? `model-${index}` : safeId,
+      apiModel,
+      displayName: apiModel,
+      family: family ?? 'other',
+      connectionId,
+      category,
+      capabilities: category === 'routing' ? ['routing', 'model_selection'] : [],
+      telegramAliases: [],
+      enabled: category !== 'routing',
+      supportsStreaming: false,
+      metadata: {
+        contractVerified: false,
+        note: `servido por la conexion; capacidades pendientes (${apiModel})`,
+      },
+    });
+  });
 }

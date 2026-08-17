@@ -73,7 +73,9 @@ export class CommandParseError extends Error {
 }
 
 /** separa "/comando@BotName resto" en sus partes */
-function splitCommand(text: string): { command: string; botName: string | null; rest: string } | null {
+function splitCommand(
+  text: string,
+): { command: string; botName: string | null; rest: string } | null {
   const match = /^\/([a-zA-Z0-9_]{1,32})(?:@([a-zA-Z0-9_]{1,32}))?(?:\s+([\s\S]*))?$/.exec(
     text.trim(),
   );
@@ -195,6 +197,7 @@ const PROVIDER_ALIASES: Record<ProviderId, string[]> = {
   codex: ['codex', 'chatgpt', 'gpt'],
   deepseek: ['deepseek', 'deep seek'],
   glm: ['glm', 'zhipu'],
+  hunyuan: ['hunyuan', 'hy3'],
   qwen: ['qwen', 'tongyi'],
   kimi: ['kimi', 'moonshot'],
   kat: ['kat', 'kat coder'],
@@ -378,10 +381,7 @@ export function splitBatchPrompt(prompt: string): {
   const texto = prompt.trim();
   const separador = texto.search(/\s/);
   if (separador === -1) {
-    throw new CommandParseError(
-      'falta la instruccion',
-      FORMATO_BATCH,
-    );
+    throw new CommandParseError('falta la instruccion', FORMATO_BATCH);
   }
 
   const file = texto.slice(0, separador);

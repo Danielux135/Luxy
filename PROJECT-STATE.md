@@ -1,5 +1,10 @@
 # Luxy — estado canónico del proyecto
 
+Actualización 2026-08-11: `F4.8-T5` implementado. Studio puede crear y abrir un
+worktree antes de una tarea, recordar el seleccionado y reutilizarlo en llamadas
+posteriores sin perder archivos. El contrato de Gateway necesita publicación
+manual y la interfaz necesita reconstrucción para la validación real.
+
 Última actualización: **2026-08-10**
 
 Actualización 2026-08-10: `F4.8-T4` implementado. Cuando un retry reutiliza el
@@ -59,7 +64,7 @@ Restricciones:
 - No usar `--dangerously-skip-permissions` ni equivalentes.
 - El modelo sólo edita en un worktree aislado; al primer trabajo editable Luxy
   puede crear en la carpeta original el `.git` y el commit local `estado
-  inicial` necesarios para disponer de ese aislamiento.
+inicial` necesarios para disponer de ese aislamiento.
 - No commit sin aprobación explícita de Daniel.
 - No push sin dos confirmaciones y `allowPush: true`.
 - No desplegar ni aplicar migraciones reales sin autorización explícita.
@@ -142,7 +147,7 @@ necesario.
 | Agente, gateway y cola | Implementado              | polling saliente, leases, heartbeats, eventos y cancelación                                       |
 | Desktop Electron       | Implementado              | agente en utility process, bandeja, configuración y secretos cifrados                             |
 | Studio — trabajos      | Implementado en código    | formulario real, historial, eventos, resultado, diff y pruebas                                    |
-| Worktrees              | Implementado              | la edición ocurre aislada; el primer trabajo puede preparar Git en un proyecto sin repositorio |
+| Worktrees              | Implementado              | la edición ocurre aislada; el primer trabajo puede preparar Git en un proyecto sin repositorio    |
 | Aplicar/descartar      | Implementado en código    | aplicar crea commit aislado; descartar borra worktree tras confirmar; sin push                    |
 | Conversaciones         | Implementado parcialmente | uno o dos modelos, streaming, historial, tiempos, tokens y cancelación                            |
 | Diagnóstico del final  | Implementado y verificado | señal de transporte, aborto, límites efectivos y tokens; sin contenido                            |
@@ -152,7 +157,7 @@ necesario.
 | Continuación           | Implementado              | unión con evidencia y aviso cuando no la hay; el parcial viaja como dato                          |
 | Cancelación            | Implementado              | conserva lo generado como resultado; no ofrece continuar ni escribe memoria                       |
 | Feedback               | Arreglo preparado         | el primer clic usa la respuesta del gateway; falta confirmación manual final                      |
-| Proveedores/modelos    | Implementado; validar     | 22 modelos reales; sin sondeo de precios; evidencia local paginada hasta 1.000 trabajos           |
+| Proveedores/modelos    | Implementado; validar     | 23 modelos reales; el snapshot detectado alimenta las pantallas operativas; sin sondeo de precios |
 | Laboratorio            | Implementado; validar     | catálogo, ejecución individual/par, persistencia, evidencia, comparación y recomendación prudente |
 | Errores de proveedor   | Implementado y verificado | límite de plan y 429 explicados; se obedece `Retry-After`; intentos reales                        |
 | Telegram               | Conservado                | canal secundario                                                                                  |
@@ -396,7 +401,7 @@ Linux y aquí no existen: en esta máquina un fallo es una regresión.
 ## 10. Próximo objetivo
 
 `F4.1-T4` cerró la discrepancia entre la instantánea real y el catálogo
-operativo: `buildDefaultCatalog` representa ya los 22 modelos declarados por la
+operativo: el snapshot persistido representa los 23 modelos declarados por la
 pasarela el 2026-08-07. Los tres incorporados conservan un contrato mínimo y no
 reciben herramientas ni aliases implícitos.
 

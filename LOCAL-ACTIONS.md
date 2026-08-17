@@ -1,5 +1,41 @@
 # Luxy — acciones locales de Daniel
 
+## LA-025 — confirmar que un trabajo no bloquea la interfaz
+
+Estado: `pending`.
+
+Ejecutar `rebuild-and-start-luxy.bat`, terminar un trabajo manteniendo Luxy en
+primer plano y comprobar que no aparece el aviso nativo de Electron. Al acabar,
+los desplegables y campos de Trabajos, Conversaciones y Laboratorio deben seguir
+respondiendo. Los avisos sí deben conservarse cuando Luxy esté minimizado o en
+segundo plano.
+
+## LA-024 — validar espacios de trabajo persistentes
+
+Estado: `pending` — requiere publicar Gateway y reconstruir Desktop/agente.
+
+1. Ejecutar `deploy-gateway.bat` desde la carpeta principal de Luxy.
+2. Ejecutar `rebuild-and-start-luxy.bat` desde esa misma carpeta.
+3. En Trabajos, pulsar **Preparar carpeta**, abrirla y crear un archivo de
+   contexto antes de enviar la tarea.
+4. Ejecutar una tarea que lea ese archivo; al terminar, cambiar de pantalla y
+   volver. El mismo worktree debe seguir seleccionado.
+5. Ejecutar otra tarea y comprobar en el detalle que conserva exactamente la
+   misma ruta y rama, sin crear otra carpeta.
+
+No requiere commit, push ni migración. El deploy sólo publica el contrato nuevo
+de Gateway; no se ha hecho automáticamente.
+
+## LA-023 — desplegar manualmente el contrato Hunyuan del Gateway
+
+Estado: `pending` — requiere acción explícita de Daniel.
+
+Ejecutar por doble clic `deploy-gateway.bat` desde la raíz del worktree. El
+script compila Shared/Gateway, prepara un dry-run y pide escribir `DESPLEGAR`
+antes de publicar. Usa `--keep-vars`, no cambia secretos y no aplica
+migraciones. Tras terminar, esperar unos segundos y comprobar que desaparece el
+aviso 422 del agente.
+
 Este archivo sólo contiene acciones que una IA no debe ejecutar por su cuenta.
 No repetir una acción marcada como completada sin una razón nueva.
 
@@ -447,6 +483,12 @@ desplegada; no se ha hecho deploy en este paso porque necesita autorización.
 ## LA-018 — comprobar el catálogo del Laboratorio
 
 Estado: `pending` — abierta el 2026-08-09 tras `F4.3-T1`.
+
+Actualización 2026-08-11 (`F4.3-T11`): reiniciar Desktop/agente y confirmar que
+Laboratorio ya no ofrece `Qwen3.5-397B-A17B` ni `Qwen3.6-35B-A3B`; debe usar los
+modelos del último snapshot. Una evaluación activa debe desaparecer por sí sola
+en unos 5 segundos tras terminar. Un 503 debe mostrar «Duración hasta el fallo»
+y el grupo «Par terminado», nunca aparentar una respuesta válida.
 
 Reconstruye/reinicia Studio y abre **Laboratorio** en la navegación lateral.
 

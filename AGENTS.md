@@ -159,6 +159,9 @@ Los cuatro deben pasar.
 - **La carpeta de trabajo del usuario nunca se toca.**
 - No se borra un worktree con cambios sin aprobación explícita.
 - Cancelar **no borra cambios**: se informa de qué quedó modificado y dónde.
+- Studio puede preparar un worktree antes de crear un trabajo y reutilizarlo en
+  varios trabajos. La selección se liga a máquina y proyecto; no se crea otro
+  worktree mientras se envíe esa ruta y no se descarta sin confirmación.
 - Si el proyecto permite ediciones y no es un repositorio git, el agente crea
   `.gitignore`, inicializa Git y hace el commit local `estado inicial` antes de
   crear el worktree. Si `allowEdits` es falso, sigue siendo solo lectura.

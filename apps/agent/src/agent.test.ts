@@ -686,7 +686,7 @@ describe('buildProviderPrompt', () => {
 
   it('indica continuar desde los archivos existentes al reanudar', () => {
     const prompt = buildProviderPrompt(job({ resumeFromJobId: 'job-anterior' }));
-    expect(prompt).toContain('REANUDACION DE UN TRABAJO ANTERIOR');
+    expect(prompt).toContain('ESPACIO DE TRABAJO EXISTENTE');
     expect(prompt).toContain('No empieces el proyecto desde cero');
     expect(prompt).toContain('Continua solo con la siguiente parte incompleta');
   });
@@ -818,7 +818,7 @@ describe('resolveJobModel', () => {
   });
 
   it('conserva el apiModel EXACTO, sin normalizar', () => {
-    for (const exacto of ['Qwen3.5-397B-A17B', 'kat-coder-pro-v2.5', 'Kimi-K2.6', 'MiniMax-M3']) {
+    for (const exacto of ['Qwen3.6-27B', 'kat-coder-pro-v2.5', 'Kimi-K2.6', 'MiniMax-M3']) {
       expect(resolveJobModel(job('qwen', { model: exacto }), config)).toBe(exacto);
     }
   });
@@ -896,7 +896,7 @@ describe('resolveJobModel con el catalogo', () => {
   it('resuelve el predeterminado de cada familia', () => {
     const config = conConexion('PENDIENTE_X', false);
     expect(resolveJobModel(trabajo('kimi'), config)).toBe('Kimi-K2.6');
-    expect(resolveJobModel(trabajo('qwen'), config)).toBe('Qwen3.5-397B-A17B');
+    expect(resolveJobModel(trabajo('qwen'), config)).toBe('Qwen3.6-27B');
     expect(resolveJobModel(trabajo('step'), config)).toBe('step-3.7-flash');
   });
 

@@ -149,6 +149,12 @@ export const handleStudioJobCreate = withMachineAuth(async (request, deps, creat
   }
 
   let resumeMetadata: Record<string, unknown> = {};
+  if (body.data.workspacePath !== undefined) {
+    if (target.id !== creator.id) {
+      return errorResponse('un espacio local solo puede usarse en esta misma maquina', 409);
+    }
+    resumeMetadata = { resumeWorktreePath: body.data.workspacePath };
+  }
   if (body.data.resumeJobId !== undefined) {
     const previous = await deps.repo.getJobById(body.data.resumeJobId);
     if (

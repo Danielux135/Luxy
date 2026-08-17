@@ -1,5 +1,86 @@
 # Luxy — tarea activa
 
+## GIT-CHECKPOINT-001 — consolidar y publicar el worktree activo
+
+Estado: **validado y autorizado para commit — Codex, 2026-08-17; push pendiente**
+
+Alcance: todo el desarrollo documentado posterior a `1b01fc3` dentro de
+`luxy/auto-init-git`; se excluyen la carpeta principal y cualquier archivo de
+claves. Validación fresca: lint, typecheck, 1.594 pruebas pasadas, 9 omitidas,
+0 fallos y build completo.
+
+Siguiente paso: crear el commit local. Para el push, Daniel debe establecer
+`allowPush: true` en la configuración de la máquina y dar la segunda confirmación
+obligatoria. No se abre PR ni se mezcla `main` en este paso.
+
+## UI-JOB-FOCUS — controles bloqueados después de terminar un trabajo
+
+Estado: **implementado y verificado automáticamente — Codex, 2026-08-11; validación manual pendiente**
+
+El final de cada trabajo abría una notificación nativa de Electron incluso con
+Luxy visible y enfocado. Ese era el único efecto global coincidente con la
+pérdida de interacción de desplegables y campos. Ahora los avisos sólo aparecen
+si Luxy está oculto o en segundo plano.
+
+Validación: 1.592 pruebas pasadas, 9 omitidas, lint, typecheck y build completos.
+Siguiente paso: reconstruir/reiniciar y terminar un trabajo con Luxy en primer
+plano; no debe aparecer el toast y los controles deben seguir respondiendo.
+
+## F4.8-T5 — espacios de trabajo preparados y reutilizables
+
+Estado: **implementado y verificado automáticamente — Codex, 2026-08-11; validación manual pendiente**
+
+Studio permite preparar un worktree antes de escribir o ejecutar la tarea,
+abrir su carpeta para añadir contexto y conservarlo seleccionado entre cambios
+de pantalla. Los trabajos siguientes pueden usar esa misma ruta y rama; el
+detalle de un trabajo permite recuperar cualquier worktree anterior. La ruta
+queda ligada a la máquina y proyecto locales, y Gateway rechaza transportarla a
+otra máquina.
+
+Validación: lint, typecheck, 1.590 pruebas pasadas, 9 omitidas, 0 fallos y build
+completo. Siguiente paso: publicar manualmente Gateway, reconstruir Luxy y
+confirmar un trabajo real con un archivo añadido antes del prompt.
+
+Corrección 2026-08-11: se observó que el Gateway desplegado anterior eliminaba
+`workspacePath`; el agente recibía un trabajo normal y creaba otra carpeta.
+Desktop verifica ahora la metadata devuelta y cancela con una explicación si la
+ruta no quedó ligada. Suite actual: 1.594 pasadas, 9 omitidas.
+
+## F4.3-T11 — catálogo detectado canónico y cierre correcto de evaluaciones
+
+Estado: **implemented y verificado automáticamente — Codex, 2026-08-11; validación manual pendiente**
+
+Causa demostrada: Laboratorio y Conversaciones siguen construyendo sus
+selectores con el catálogo estático. Esto permite ejecutar identificadores que
+la última lectura de `/v1/models` ya retiró. Además, Laboratorio no refresca los
+trabajos activos y etiqueta la duración de un fallo como tiempo de respuesta.
+
+Criterio: todas las pantallas operativas consumen el snapshot persistido; un
+modelo retirado no se puede seleccionar; mientras exista una evaluación activa
+se refresca con cadencia limitada; los fallos indican duración hasta el fallo y
+un par sólo se denomina correcto cuando ambos resultados son puntuables.
+
+Resultado: las pantallas operativas leen el snapshot persistido; el catálogo
+base contiene los 23 modelos observados, Hunyuan es proveedor ejecutable y el
+modelo de embeddings no se ofrece como chat. Laboratorio actualiza cada 5 s
+mientras haya trabajos activos y distingue duración hasta el fallo.
+
+Validación: `npm.cmd run check` correcto; 1.581 pruebas pasadas, 9 omitidas y 0
+fallos. Siguiente paso: reiniciar Luxy y confirmar visualmente el selector y el
+cierre automático de una prueba; no hace falta consumir tokens para comprobar
+que los modelos retirados han desaparecido.
+
+## UI-LAB-LAYOUT — coherencia visual de resultados y comparaciones
+
+Estado: **done — Codex, 2026-08-11**
+
+Los resultados guardados ya no reutilizan la fila horizontal genérica: título,
+estado, modelo, métricas, motivo y evidencia ocupan zonas verticales estables.
+Las comparaciones distribuyen identidad y métricas en una cuadrícula adaptable
+que pasa a una columna cuando no cabe. Se reconstruyó y reinició Desktop.
+
+Validación: lint, typecheck, 328 pruebas de Desktop y build completo en verde.
+
 ## F4.8-T4 — continuación explícita al reanudar un trabajo
 
 Estado: **implemented — Codex, 2026-08-10; pruebas pendientes de ejecutar**

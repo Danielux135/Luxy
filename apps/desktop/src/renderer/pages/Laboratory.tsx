@@ -3,7 +3,6 @@
 import {
   EXECUTABLE_MODEL_EVALUATIONS,
   MODEL_EVALUATIONS,
-  buildDefaultCatalog,
   buildModelEvaluationPrompt,
   getModelEvaluationFixture,
   modelDeclaresEvaluationCapabilities,
@@ -35,6 +34,7 @@ import {
 } from '../evaluation-run-policy.js';
 import { Empty, Field, Notice, Panel, Readout, Tag, type Tone } from '../ui/primitives.js';
 import type { ConfigSummary } from '../useConfig.js';
+import { useDetectedCatalog } from '../useCatalog.js';
 
 const CATEGORY_LABELS: Record<ModelEvaluationDefinition['category'], string> = {
   speed: 'Rapidez',
@@ -73,8 +73,16 @@ function when(iso: string): string {
 
 function responseTime(milliseconds: number): string {
   if (milliseconds < 1000) return `${milliseconds.toLocaleString()} ms`;
-  if (milliseconds < 60_000) return `${(milliseconds / 1000).toFixed(1)} s (${milliseconds.toLocaleString()} ms)`;
+  if (milliseconds < 60_000)
+    return `${(milliseconds / 1000).toFixed(1)} s (${milliseconds.toLocaleString()} ms)`;
   return `${(milliseconds / 60_000).toFixed(1)} min (${milliseconds.toLocaleString()} ms)`;
+}
+
+function durationLabel(result: StoredModelEvaluationResult): string {
+  if (result.responseOutcome === 'failed') return 'Duracion hasta el fallo';
+  if (result.responseOutcome === 'cancelled') return 'Duracion hasta la cancelacion';
+  if (result.responseOutcome === 'timed_out') return 'Duracion hasta agotar el tiempo';
+  return 'Tiempo de respuesta';
 }
 
 function ResultHistory({
@@ -83,14 +91,16 @@ function ResultHistory({
   entries: readonly ModelEvaluationHistoryEntry[];
 }): JSX.Element {
   return (
-    <ul className="list">
+    <ul className="list evaluation-history">
       {entries.slice(0, 12).map((entry) => {
         const definition = MODEL_EVALUATIONS.find((item) => item.id === entry.result.evaluationId);
         const passedChecks = entry.result.checks.filter((check) => check.passed).length;
         return (
-          <li key={entry.jobId}>
-            <div className="list__main">
-              <span>{definition?.title ?? entry.result.evaluationId}</span>
+          <li key={entry.jobId} className="evaluation-history__entry">
+            <div className="evaluation-history__header">
+              <strong className="evaluation-history__title">
+                {definition?.title ?? entry.result.evaluationId}
+              </strong>
               <span className="row">
                 <Tag tone={resultTone(entry.result.status)}>
                   {RESULT_LABELS[entry.result.status]}
@@ -98,23 +108,29 @@ function ResultHistory({
                 <Tag>{entry.result.model}</Tag>
               </span>
             </div>
-            <div className="list__meta">
-              {entry.shortId} · {when(entry.validatedAt ?? entry.createdAt)} ·{' '}
-              Tiempo de respuesta: {responseTime(entry.result.durationMs)} ·{' '}
-              {entry.result.outputChars.toLocaleString()} caracteres
-              {entry.result.inputTokens === null || entry.result.outputTokens === null
-                ? ' · tokens no disponibles'
-                : ` · ${entry.result.inputTokens} entrada / ${entry.result.outputTokens} salida`}
+            <div className="evaluation-history__metrics list__meta">
+              <span>
+                {entry.shortId} · {when(entry.validatedAt ?? entry.createdAt)}
+              </span>
+              <span>
+                {durationLabel(entry.result)}: {responseTime(entry.result.durationMs)}
+              </span>
+              <span>{entry.result.outputChars.toLocaleString()} caracteres</span>
+              <span>
+                {entry.result.inputTokens === null || entry.result.outputTokens === null
+                  ? 'Tokens no disponibles'
+                  : `${entry.result.inputTokens} entrada / ${entry.result.outputTokens} salida`}
+              </span>
+              {entry.result.checks.length > 0 && (
+                <span>
+                  Checks: {passedChecks}/{entry.result.checks.length}
+                </span>
+              )}
             </div>
-            {entry.result.checks.length > 0 && (
-              <div className="list__meta">
-                Checks: {passedChecks}/{entry.result.checks.length}
-              </div>
-            )}
             {entry.result.reason !== null && (
-              <div className="list__meta">{entry.result.reason}</div>
+              <div className="evaluation-history__reason list__meta">{entry.result.reason}</div>
             )}
-            <details>
+            <details className="evaluation-history__evidence">
               <summary>Ver evidencia reproducible</summary>
               <div className="list__meta">
                 {entry.provider} · {entry.projectAlias} · máquina{' '}
@@ -139,23 +155,25 @@ function UnscoredTerminalHistory({
   entries: readonly UnscoredTerminalEvaluationEntry[];
 }): JSX.Element {
   return (
-    <ul className="list">
+    <ul className="list evaluation-history">
       {entries.slice(0, 12).map((entry) => (
-        <li key={entry.jobId}>
-          <div className="list__main">
-            <span>
+        <li key={entry.jobId} className="evaluation-history__entry">
+          <div className="evaluation-history__header">
+            <strong className="evaluation-history__title">
               {MODEL_EVALUATIONS.find((item) => item.id === entry.evaluationId)?.title ??
                 entry.evaluationId}
-            </span>
+            </strong>
             <span className="row">
               <Tag tone="warn">Sin resultado validado</Tag>
               <Tag>{entry.model}</Tag>
             </span>
           </div>
-          <div className="list__meta">
-            {entry.shortId} · {entry.status} · {when(entry.createdAt)}
+          <div className="evaluation-history__metrics list__meta">
+            <span>{entry.shortId}</span>
+            <span>{entry.status}</span>
+            <span>{when(entry.createdAt)}</span>
           </div>
-          <div className="list__meta">{entry.reason}</div>
+          <div className="evaluation-history__reason list__meta">{entry.reason}</div>
         </li>
       ))}
     </ul>
@@ -169,27 +187,27 @@ function ComparisonHistory({
 }): JSX.Element {
   const terminal = ['completed', 'failed', 'cancelled', 'interrupted'];
   return (
-    <ul className="list">
+    <ul className="list comparison-list">
       {comparisons.slice(0, 12).map((comparison) => (
         <li key={comparison.groupId} className="comparison-entry">
-          <div className="list__main">
-            <span>
+          <div className="comparison-entry__header">
+            <strong className="comparison-entry__title">
               {MODEL_EVALUATIONS.find((item) => item.id === comparison.evaluationId)?.title ??
                 comparison.evaluationId}{' '}
               · v{comparison.evaluationVersion}
-            </span>
+            </strong>
             <Tag tone={comparison.issue === null ? 'ok' : 'warn'}>
-              {comparison.issue === null ? 'Par completo' : 'Par incompleto'}
+              {comparison.issue === null ? 'Par terminado' : 'Par incompleto'}
             </Tag>
           </div>
           <div className="list__meta mono">Grupo {comparison.groupId}</div>
-          <ul className="list">
+          <ul className="list comparison-members">
             {comparison.members.map((member) => (
-              <li key={member.jobId}>
-                <div className="list__main">
-                  <span>
+              <li key={member.jobId} className="comparison-member">
+                <div className="comparison-member__identity">
+                  <strong className="comparison-member__name">
                     Modelo {member.index === 0 ? 'A' : 'B'} · {member.model}
-                  </span>
+                  </strong>
                   <span className="row">
                     <Tag>{member.status}</Tag>
                     {member.result === null ? (
@@ -205,11 +223,11 @@ function ComparisonHistory({
                     )}
                   </span>
                 </div>
-                <div className="list__meta">
+                <div className="comparison-member__meta list__meta">
                   {member.shortId} · {when(member.createdAt)}
                   {member.result === null
                     ? ''
-                    : ` · Tiempo de respuesta: ${responseTime(member.result.durationMs)}`}
+                    : ` · ${durationLabel(member.result)}: ${responseTime(member.result.durationMs)}`}
                 </div>
               </li>
             ))}
@@ -290,11 +308,13 @@ export function LaboratoryPage({ summary }: { summary: ConfigSummary }): JSX.Ele
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [createdShortId, setCreatedShortId] = useState<string | null>(null);
+  const [pendingConfirmation, setPendingConfirmation] = useState<
+    { kind: 'execute' } | { kind: 'cancel'; entry: ActiveModelEvaluationEntry } | null
+  >(null);
   const evaluation =
     EXECUTABLE_MODEL_EVALUATIONS.find((item) => item.id === evaluationId) ??
     EXECUTABLE_MODEL_EVALUATIONS[0]!;
-  const connectionId = summary.config?.connections?.[0]?.id ?? null;
-  const models = connectionId === null ? [] : buildDefaultCatalog(connectionId);
+  const { models } = useDetectedCatalog(summary);
   const compatibleModels = models.filter((model) =>
     modelDeclaresEvaluationCapabilities(model, evaluation),
   );
@@ -366,6 +386,12 @@ export function LaboratoryPage({ summary }: { summary: ConfigSummary }): JSX.Ele
     void loadHistory();
   }, [loadHistory]);
 
+  useEffect(() => {
+    if (activeEntries.length === 0) return;
+    const timer = window.setInterval(() => void loadHistory(), 5_000);
+    return () => window.clearInterval(timer);
+  }, [activeEntries.length, loadHistory]);
+
   const executionPolicy = {
     evaluation,
     model: selectedModel,
@@ -395,20 +421,6 @@ export function LaboratoryPage({ summary }: { summary: ConfigSummary }): JSX.Ele
       return;
     }
     const comparison = executionMode === 'comparison' && selectedSecondModel !== null;
-    const accepted = window.confirm(
-      [
-        `¿Ejecutar ${comparison ? 'comparación' : 'prueba'}: ${evaluation.title}?`,
-        '',
-        `Modelo exacto A: ${selectedModel.apiModel}`,
-        ...(comparison ? [`Modelo exacto B: ${selectedSecondModel.apiModel}`] : []),
-        `Máquina: ${machine.name}`,
-        'Esta acción puede consumir tokens. Luxy no consulta ni conoce el precio.',
-        comparison
-          ? 'Se crearán dos evaluaciones de solo lectura, en orden y con el mismo prompt.'
-          : 'Solo se creará una evaluación individual de solo lectura.',
-      ].join('\n'),
-    );
-    if (!accepted) return;
     setCreating(true);
     setCreateError(null);
     setCreatedShortId(null);
@@ -462,7 +474,6 @@ export function LaboratoryPage({ summary }: { summary: ConfigSummary }): JSX.Ele
   };
 
   const cancelEvaluation = async (entry: ActiveModelEvaluationEntry): Promise<void> => {
-    if (!window.confirm(`¿Cancelar ${entry.shortId}?\n\nLa salida quedara sin puntuar.`)) return;
     setCancellingJobId(entry.jobId);
     setCreateError(null);
     const result = await window.luxy.cancelStudioJob(entry.jobId);
@@ -627,7 +638,7 @@ export function LaboratoryPage({ summary }: { summary: ConfigSummary }): JSX.Ele
           className="btn btn--primary"
           type="button"
           disabled={blockReason !== null}
-          onClick={() => void execute()}
+          onClick={() => setPendingConfirmation({ kind: 'execute' })}
         >
           {creating
             ? 'Creando evaluacion…'
@@ -638,7 +649,7 @@ export function LaboratoryPage({ summary }: { summary: ConfigSummary }): JSX.Ele
       </Panel>
 
       {activeEntries.length > 0 && (
-        <Panel title="Evaluacion activa" actions={<Tag tone="busy">sin polling</Tag>}>
+        <Panel title="Evaluacion activa" actions={<Tag tone="busy">actualizacion cada 5 s</Tag>}>
           <ul className="list">
             {activeEntries.map((entry) => (
               <li key={entry.jobId}>
@@ -654,7 +665,7 @@ export function LaboratoryPage({ summary }: { summary: ConfigSummary }): JSX.Ele
                     disabled={
                       cancellingJobId !== null || cancelRequestedJobIds.includes(entry.jobId)
                     }
-                    onClick={() => void cancelEvaluation(entry)}
+                    onClick={() => setPendingConfirmation({ kind: 'cancel', entry })}
                   >
                     {cancellingJobId === entry.jobId
                       ? 'Cancelando…'
@@ -670,7 +681,7 @@ export function LaboratoryPage({ summary }: { summary: ConfigSummary }): JSX.Ele
             ))}
           </ul>
           <p className="list__meta">
-            Pulsa Actualizar para leer su estado. Laboratorio no sondea el Gateway.
+            Se actualiza mientras haya evaluaciones activas. Tambien puedes pulsar Actualizar.
           </p>
         </Panel>
       )}
@@ -796,6 +807,61 @@ export function LaboratoryPage({ summary }: { summary: ConfigSummary }): JSX.Ele
           </>
         )}
       </Panel>
+
+      {pendingConfirmation !== null && (
+        <div className="confirm-layer" role="presentation">
+          <section
+            className="confirm-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="evaluation-confirm-title"
+          >
+            <div className="silk" id="evaluation-confirm-title">
+              Confirmar accion
+            </div>
+            {pendingConfirmation.kind === 'execute' ? (
+              <>
+                <p>
+                  ¿Ejecutar {executionMode === 'comparison' ? 'la comparacion' : 'la prueba'}{' '}
+                  <strong>{evaluation.title}</strong>?
+                </p>
+                <div className="list__meta">
+                  Modelo A: {selectedModel?.apiModel ?? 'ninguno'}
+                  {executionMode === 'comparison'
+                    ? ` · Modelo B: ${selectedSecondModel?.apiModel ?? 'ninguno'}`
+                    : ''}
+                  {' · '}Maquina: {machine?.name ?? 'ninguna'}
+                </div>
+                <Notice tone="warn">
+                  Puede consumir tokens. Luxy no consulta ni conoce el precio.
+                </Notice>
+              </>
+            ) : (
+              <p>
+                ¿Cancelar <strong>{pendingConfirmation.entry.shortId}</strong>? La salida quedara
+                sin puntuar.
+              </p>
+            )}
+            <div className="confirm-dialog__actions">
+              <button className="btn" type="button" onClick={() => setPendingConfirmation(null)}>
+                Volver
+              </button>
+              <button
+                className="btn btn--primary"
+                type="button"
+                onClick={() => {
+                  const pending = pendingConfirmation;
+                  setPendingConfirmation(null);
+                  if (pending.kind === 'execute') void execute();
+                  else void cancelEvaluation(pending.entry);
+                }}
+              >
+                {pendingConfirmation.kind === 'execute' ? 'Ejecutar' : 'Cancelar evaluacion'}
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
 
       {MODEL_EVALUATIONS.map((evaluation) => (
         <EvaluationCard key={evaluation.id} evaluation={evaluation} />

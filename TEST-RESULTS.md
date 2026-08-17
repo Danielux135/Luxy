@@ -1,5 +1,47 @@
 # Luxy — resultados de comprobación
 
+### 2026-08-17 — Windows 11 — GIT-CHECKPOINT-001
+
+- Base: `luxy/auto-init-git` @ `1b01fc3` más el checkpoint local autorizado.
+- Comando exacto: `npm.cmd run check`.
+- Exit code: 0.
+- Lint: correcto.
+- Typecheck: correcto.
+- Suite: **1.594 pasadas, 0 fallos, 9 omitidas**, 88/88 archivos; Vitest 73,15 s.
+- Build: shared, agent, desktop, gateway y paquetes Remote correctos.
+- Comprobaciones adicionales: `git diff --check` sin errores; el escaneo de
+  patrones de secretos sólo encontró valores ficticios en pruebas de redacción.
+- No se ejecutaron modelos reales, migraciones, deploy ni push.
+
+### 2026-08-11 — Codex — F4.8-T5-GATEWAY-GUARD
+
+- Evidencia local: `LUX-8ZLC`, ejecutado a las 12:04 locales, creó un worktree
+  nuevo porque no recibió `resumeWorktreePath`.
+- Focalizadas: 107 pasadas, 0 fallos.
+- Suite: 88 archivos; 1.594 pasadas, 9 omitidas, 0 fallos.
+- Lint, typecheck y build completo: correctos.
+
+### 2026-08-11 — Codex — UI-JOB-FOCUS
+
+- Prueba focalizada de política: 2 pasadas; IPC: 32 pasadas.
+- `npm.cmd run lint`: correcto.
+- `npm.cmd run typecheck`: correcto.
+- `npm.cmd test`: 87 archivos; 1.592 pasadas, 9 omitidas, 0 fallos.
+- `npm.cmd run build`: correcto en todos los workspaces.
+- Validación visual pendiente: Electron/Windows debe confirmar que desaparece
+  el bloqueo real.
+
+### 2026-08-11 — Codex — F4.8-T5
+
+- Focalizadas: 5 archivos, 162 pruebas pasadas, 0 fallos.
+- `npm.cmd run lint`: correcto.
+- `npm.cmd run typecheck`: correcto.
+- `npm.cmd test`: 86 archivos; 1.590 pasadas, 9 omitidas, 0 fallos.
+- `npm.cmd run build`: correcto en shared, agent, desktop, gateway y paquetes
+  remote.
+- Las pruebas crean repositorios y worktrees temporales reales; no llaman a
+  modelos ni consumen APIs.
+
 Separar siempre resultados históricos, resultados de la copia actual y pruebas
 manuales. No transformar un fallo no ejecutado en «omitido».
 
@@ -865,3 +907,55 @@ test.txt`, `Luxy claves API.txt`, un handoff duplicado y `Web demos/`).
 - Arranque: proceso principal de Electron apunta a
   `apps/desktop` del worktree `lux-auto-init-git`; ventana `Luxy` responde.
 - No se ejecutaron modelos ni se pulsó **Reintentar**.
+
+### 2026-08-11 — Windows 11 — OPS-BAT-LAUNCHERS
+
+- `rebuild-luxy.bat no-pause`: exit 0.
+- Build completo de shared, agent, desktop y gateway: correcto.
+- `git diff --check`: sin errores.
+- No se ejecutaron modelos ni se cambió el Gateway.
+
+### 2026-08-11 — Windows 11 — UI-LAB-LAYOUT
+
+- Prettier sobre `Laboratory.tsx` y `styles.css`: aplicado.
+- Lint: exit 0.
+- Typecheck: exit 0.
+- Desktop: **328 pasadas, 0 fallos**, 22 archivos; Vitest 4,89 s.
+- Build completo: exit 0.
+- `git diff --check`: sin errores.
+- Desktop reconstruido y reiniciado; sin modelos reales, deploy ni migraciones.
+
+### 2026-08-11 — Windows 11 — UI-LAB-LAYOUT-FOLLOWUP
+
+- Prettier check: correcto.
+- Lint: exit 0.
+- Build de Desktop: exit 0.
+- `git diff --check`: sin errores.
+- Desktop reiniciado; cambio exclusivamente CSS.
+
+### 2026-08-11 — Windows 11 — F4.3-T11
+
+- Pruebas focalizadas iniciales: 5 fallos por expectativas antiguas de los dos
+  Qwen retirados; se actualizaron al catálogo observado, sin ocultarlos.
+- `npm.cmd run check`: exit 0.
+- Lint: exit 0; typecheck: exit 0.
+- Suite: **1.581 pasadas, 9 omitidas, 0 fallos**, 85 archivos; Vitest 45,18 s.
+- Build completo: exit 0; renderer generado como `index-HRYQd_Kq.js`.
+- No se ejecutaron APIs ni modelos reales.
+
+### 2026-08-11 — Windows 11 — OPS-GATEWAY-BAT
+
+- Primer `deploy-gateway.bat check`: exit 1; Wrangler ignoró la extensión
+  `.example` y no encontró el entry point. No hubo despliegue.
+- Segundo `deploy-gateway.bat check`: exit 0; Shared y Gateway compilaron;
+  dry-run 468,11 KiB / gzip 105,68 KiB; configuración temporal eliminada.
+- No hubo deploy, migraciones ni cambios de secretos.
+
+### 2026-08-11 — Windows 11 — UI-LAB-CONFIRM
+
+- Focalizadas de Laboratorio: 20 pasadas, 0 fallos.
+- `npm.cmd run check`: exit 0.
+- Suite: **1.581 pasadas, 9 omitidas, 0 fallos**, 85 archivos; Vitest 54,50 s.
+- Lint, typecheck y build completo: correctos.
+- Bundle Desktop: `index-x1qEdl4I.js`, CSS `index-CzFkHRlN.css`.
+- Falta validación manual del foco de Electron tras una evaluación real.

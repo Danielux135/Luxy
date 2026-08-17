@@ -104,8 +104,8 @@ function completedJob(overrides: Record<string, unknown> = {}) {
   };
 }
 
-async function deps(jobOverrides: Record<string, unknown> = {}) {
-  const target = machine();
+async function deps(jobOverrides: Record<string, unknown> = {}, targetId = TARGET_ID) {
+  const target = machine(targetId);
   let currentJob = completedJob(jobOverrides);
   const repo = {
     getMachineById: vi.fn(async () => target),
@@ -289,6 +289,46 @@ describe('Luxy Studio API', () => {
     );
     const body = (await response.json()) as { job: { origin: string } };
     expect(body.job.origin).toBe('studio');
+  });
+
+  it('acepta un espacio preparado en la misma maquina y lo transporta al agente', async () => {
+    const context = await deps({}, CREATOR_ID);
+    const response = await handleStudioJobCreate(
+      request({
+        targetMachineId: CREATOR_ID,
+        provider: 'deepseek',
+        model: 'DeepSeek-V4-Pro',
+        projectAlias: 'luxy',
+        prompt: 'continua el trabajo',
+        workspacePath: 'C:\\Luxy\\worktrees\\espacio-1',
+      }),
+      context,
+    );
+    expect(response.status, await response.clone().text()).toBe(201);
+    expect(context.repo.createJob).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          resumeWorktreePath: 'C:\\Luxy\\worktrees\\espacio-1',
+        }),
+      }),
+    );
+  });
+
+  it('rechaza usar una ruta local en otra maquina', async () => {
+    const context = await deps();
+    const response = await handleStudioJobCreate(
+      request({
+        targetMachineId: TARGET_ID,
+        provider: 'deepseek',
+        model: 'DeepSeek-V4-Pro',
+        projectAlias: 'luxy',
+        prompt: 'continua el trabajo',
+        workspacePath: 'C:\\Luxy\\worktrees\\espacio-1',
+      }),
+      context,
+    );
+    expect(response.status).toBe(409);
+    expect(context.repo.createJob).not.toHaveBeenCalled();
   });
 
   it('guarda la identidad de una conversacion sin una tabla nueva', async () => {

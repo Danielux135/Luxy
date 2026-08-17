@@ -323,6 +323,36 @@ body {
   padding: 0;
 }
 
+.confirm-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: #070a0ecc;
+}
+
+.confirm-dialog {
+  width: min(560px, 100%);
+  padding: 20px;
+  border: 1px solid var(--signal);
+  border-radius: 6px;
+  background: var(--panel);
+  box-shadow: 0 24px 80px #000b;
+}
+
+.confirm-dialog p {
+  margin: 14px 0;
+}
+
+.confirm-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 18px;
+}
+
 /* rejilla de lecturas: el bloque de datos de un equipo de medida */
 .readout {
   display: grid;
@@ -454,6 +484,28 @@ body {
 .studio-form__prompt,
 .studio-form__actions {
   grid-column: 1 / -1;
+}
+
+.workspace-prepare,
+.workspace-active {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.workspace-prepare input {
+  flex: 1;
+}
+
+.workspace-active {
+  padding: 12px;
+  border: 1px solid var(--signal);
+  background: #ffb4540a;
+}
+
+.workspace-active > div:first-child {
+  flex: 1;
+  min-width: 0;
 }
 
 .studio-form__actions {
@@ -761,12 +813,151 @@ input[aria-invalid='true'] {
   border-bottom: 0;
 }
 
+/* modelos: la regla marca el cambio de familia; los miembros de una misma
+   familia forman un bloque continuo. */
+.model-catalog-family--inline + .model-catalog-family--inline {
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid var(--rule);
+}
+
+.model-catalog-family > .silk {
+  display: block;
+  margin: 0 0 8px;
+}
+
+.model-catalog-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.model-catalog-list > li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 16px;
+  border: 0;
+}
+
 .list > li.comparison-entry {
   display: block;
 }
 
 .comparison-entry > .list {
   margin-top: 12px;
+}
+
+/* laboratorio: cada resultado es una ficha vertical. La lista horizontal
+   genérica comprimía el título hasta superponerlo con métricas y etiquetas. */
+.evaluation-history > .evaluation-history__entry {
+  display: grid;
+  align-items: stretch;
+  gap: 10px;
+  padding: 16px 20px;
+}
+
+.evaluation-history__header,
+.comparison-entry__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  min-width: 0;
+}
+
+.evaluation-history__title,
+.comparison-entry__title,
+.comparison-member__name {
+  min-width: 0;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.evaluation-history__header > .row {
+  flex: none;
+  justify-content: flex-end;
+}
+
+.comparison-member__identity > .row {
+  justify-content: flex-start;
+}
+
+.evaluation-history__metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 16px;
+  margin-top: 0;
+}
+
+.evaluation-history__metrics > span {
+  min-width: 0;
+}
+
+.evaluation-history__reason {
+  margin-top: 0;
+  color: var(--text);
+}
+
+.evaluation-history__evidence {
+  min-width: 0;
+}
+
+.evaluation-history__evidence > summary {
+  width: max-content;
+  max-width: 100%;
+}
+
+.comparison-list > .comparison-entry {
+  padding: 18px 20px;
+}
+
+.comparison-members > .comparison-member {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.8fr) minmax(280px, 1.2fr);
+  align-items: center;
+  gap: 18px;
+  padding: 14px 20px;
+}
+
+.comparison-member__identity {
+  display: grid;
+  justify-items: start;
+  gap: 7px;
+  min-width: 0;
+}
+
+.comparison-member__meta {
+  min-width: 0;
+  margin-top: 0;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 920px) {
+  .comparison-members > .comparison-member {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+  }
+
+  .comparison-member__meta {
+    text-align: left;
+  }
+}
+
+@media (max-width: 620px) {
+  .evaluation-history__header,
+  .comparison-entry__header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .evaluation-history__header > .row {
+    justify-content: flex-start;
+  }
 }
 
 .list__main {

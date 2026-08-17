@@ -7,6 +7,36 @@ import { FormattedResponse } from '../formatted-response.js';
 import { canDecideStudioJob, parseStudioDecision } from '../studio-decision.js';
 import { useStudio } from '../useStudio.js';
 
+interface PreparedWorkspace {
+  machineId: string;
+  projectAlias: string;
+  path: string;
+  branch: string;
+}
+
+const WORKSPACE_STORAGE_KEY = 'luxy:studio-workspace';
+
+function readStoredWorkspace(): PreparedWorkspace | null {
+  try {
+    const value = window.localStorage.getItem(WORKSPACE_STORAGE_KEY);
+    if (value === null) return null;
+    const parsed: unknown = JSON.parse(value);
+    if (
+      typeof parsed !== 'object' ||
+      parsed === null ||
+      typeof (parsed as PreparedWorkspace).machineId !== 'string' ||
+      typeof (parsed as PreparedWorkspace).projectAlias !== 'string' ||
+      typeof (parsed as PreparedWorkspace).path !== 'string' ||
+      typeof (parsed as PreparedWorkspace).branch !== 'string'
+    ) {
+      return null;
+    }
+    return parsed as PreparedWorkspace;
+  } catch {
+    return null;
+  }
+}
+
 const STATUS: Record<JobStatus, string> = {
   queued: 'En cola',
   waiting_for_machine: 'Esperando maquina',
@@ -43,6 +73,10 @@ export function StudioPage(): JSX.Element {
   const [provider, setProvider] = useState<ProviderId | ''>('');
   const [model, setModel] = useState('');
   const [prompt, setPrompt] = useState('');
+  const [workspaceLabel, setWorkspaceLabel] = useState('trabajo continuo');
+  const [workspace, setWorkspace] = useState<PreparedWorkspace | null>(readStoredWorkspace);
+  const [workspaceBusy, setWorkspaceBusy] = useState(false);
+  const [workspaceError, setWorkspaceError] = useState<string | null>(null);
 
   const machine = studio.machines.find((item) => item.id === machineId) ?? null;
   const projects = useMemo(() => machine?.projects ?? [], [machine]);
@@ -58,6 +92,20 @@ export function StudioPage(): JSX.Element {
   useEffect(() => {
     if (!projects.includes(projectAlias)) setProjectAlias(projects[0] ?? '');
   }, [projectAlias, projects]);
+
+  useEffect(() => {
+    if (
+      workspace !== null &&
+      (workspace.projectAlias !== projectAlias || workspace.machineId !== machineId)
+    ) {
+      setWorkspace(null);
+    }
+  }, [machineId, projectAlias, workspace]);
+
+  useEffect(() => {
+    if (workspace === null) window.localStorage.removeItem(WORKSPACE_STORAGE_KEY);
+    else window.localStorage.setItem(WORKSPACE_STORAGE_KEY, JSON.stringify(workspace));
+  }, [workspace]);
 
   useEffect(() => {
     if (!providers.includes(provider as ProviderId)) setProvider(providers[0] ?? '');
@@ -92,6 +140,7 @@ export function StudioPage(): JSX.Element {
       projectAlias,
       prompt: prompt.trim(),
       priority: 0,
+      ...(workspace === null ? {} : { workspacePath: workspace.path }),
     });
     if (created) setPrompt('');
   };
@@ -156,6 +205,29 @@ export function StudioPage(): JSX.Element {
     });
   };
 
+  const prepareWorkspace = async (): Promise<void> => {
+    if (projectAlias.length === 0 || workspaceLabel.trim().length === 0 || workspaceBusy) return;
+    setWorkspaceBusy(true);
+    setWorkspaceError(null);
+    const result = await window.luxy.prepareWorkspace(projectAlias, workspaceLabel.trim());
+    if (result.ok) setWorkspace({ ...result.value, machineId });
+    else setWorkspaceError(result.error);
+    setWorkspaceBusy(false);
+  };
+
+  const useJobWorkspace = (): void => {
+    const job = studio.detail?.job;
+    if (job === undefined) return;
+    const path = job.metadata['worktreePath'];
+    const branch = job.metadata['branch'];
+    if (typeof path !== 'string' || typeof branch !== 'string') return;
+    setProjectAlias(job.projectAlias);
+    if (typeof job.targetMachineId !== 'string') return;
+    setMachineId(job.targetMachineId);
+    setWorkspace({ machineId: job.targetMachineId, projectAlias: job.projectAlias, path, branch });
+    setWorkspaceError(null);
+  };
+
   return (
     <>
       <div className="page__head">
@@ -200,6 +272,50 @@ export function StudioPage(): JSX.Element {
                 ))}
               </select>
             </Field>
+            <div className="studio-form__prompt">
+              <Field
+                label="Espacio de trabajo"
+                hint="Prepáralo antes del prompt, añade contexto y reutilízalo en todas las llamadas que quieras."
+              >
+                {workspace === null ? (
+                  <div className="workspace-prepare">
+                    <input
+                      type="text"
+                      value={workspaceLabel}
+                      maxLength={120}
+                      onChange={(event) => setWorkspaceLabel(event.target.value)}
+                      placeholder="nombre del espacio"
+                    />
+                    <button
+                      className="btn"
+                      type="button"
+                      disabled={workspaceBusy || projectAlias.length === 0}
+                      onClick={() => void prepareWorkspace()}
+                    >
+                      {workspaceBusy ? 'Preparando…' : 'Preparar carpeta'}
+                    </button>
+                  </div>
+                ) : (
+                  <div className="workspace-active">
+                    <div>
+                      <div className="list__name">Reutilizando {workspace.branch}</div>
+                      <div className="list__meta mono scroller">{workspace.path}</div>
+                    </div>
+                    <button
+                      className="btn"
+                      type="button"
+                      onClick={() => void window.luxy.openWorkspaceFolder(workspace.path)}
+                    >
+                      Abrir carpeta
+                    </button>
+                    <button className="btn" type="button" onClick={() => setWorkspace(null)}>
+                      Dejar de usar
+                    </button>
+                  </div>
+                )}
+              </Field>
+              {workspaceError !== null && <Notice tone="fault">{workspaceError}</Notice>}
+            </div>
             <Field label="Proveedor">
               <select
                 value={provider}
@@ -312,7 +428,7 @@ export function StudioPage(): JSX.Element {
               {studio.detail.job.resultSummary !== null && (
                 <div className="studio-detail__block">
                   <div className="list__meta">Resultado</div>
-              <FormattedResponse text={studio.detail.job.resultSummary} />
+                  <FormattedResponse text={studio.detail.job.resultSummary} />
                 </div>
               )}
               {studio.detail.job.errorMessage !== null && (
@@ -320,11 +436,34 @@ export function StudioPage(): JSX.Element {
               )}
               {['failed', 'interrupted', 'cancelled'].includes(studio.detail.job.status) && (
                 <div className="studio-decision__actions">
-                  <button className="btn btn--primary" disabled={studio.busy} onClick={() => void retry()}>
+                  <button
+                    className="btn btn--primary"
+                    disabled={studio.busy}
+                    onClick={() => void retry()}
+                  >
                     Reintentar trabajo
                   </button>
                 </div>
               )}
+              {typeof studio.detail.job.metadata['worktreePath'] === 'string' &&
+                typeof studio.detail.job.metadata['branch'] === 'string' && (
+                  <div className="studio-decision__actions">
+                    <button className="btn" type="button" onClick={useJobWorkspace}>
+                      Continuar en este worktree
+                    </button>
+                    <button
+                      className="btn"
+                      type="button"
+                      onClick={() =>
+                        void window.luxy.openWorkspaceFolder(
+                          String(studio.detail!.job.metadata['worktreePath']),
+                        )
+                      }
+                    >
+                      Abrir carpeta
+                    </button>
+                  </div>
+                )}
               {diffStat !== null && (
                 <div className="studio-detail__block">
                   <div className="list__meta">Resumen del diff</div>

@@ -1,5 +1,85 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-08-17 — Codex — GIT-CHECKPOINT-001
+
+- Estado anterior: `luxy/auto-init-git` estaba publicado en `1b01fc3`, con 44
+  archivos versionados modificados y 9 archivos nuevos del desarrollo posterior.
+- Objetivo: consolidar el checkpoint local autorizado por Daniel antes de
+  actualizar GitHub, sin incorporar la carpeta principal ni archivos sensibles.
+- Archivos revisados: código, pruebas, documentación y lanzadores del worktree
+  aislado; los archivos nuevos son políticas/pruebas de notificación y workspace,
+  catálogo compartido y cuatro lanzadores `.bat` documentados.
+- Comandos ejecutados: `gh auth status`, estado y remotos Git, comparación con
+  GitHub, `git diff --check`, búsqueda de patrones de secretos y `npm.cmd run check`.
+- Resultado real: GitHub conserva `1b01fc3`, pero no este checkpoint. El escaneo
+  sólo encontró credenciales ficticias en pruebas de redacción; no hay claves
+  reales en el alcance. Diff sin errores.
+- Pruebas: lint y typecheck correctos; 88 archivos, 1.594 pruebas pasadas,
+  9 omitidas y 0 fallos; build completo correcto.
+- Decisiones: Daniel autorizó el commit y pidió push. El commit se hace sólo en
+  `luxy/auto-init-git`. El push sigue sujeto a `allowPush: true` y a la segunda
+  confirmación obligatoria; la configuración actual deja `allowPush` sin definir.
+- Riesgos o límites: validaciones manuales `LA-024` y `LA-025` siguen pendientes;
+  no bloquean conservar el checkpoint, pero sí cerrar funcionalmente esas tareas.
+- Estado nuevo: checkpoint validado y autorizado para commit local.
+- Siguiente paso exacto: crear el commit; después, activar `allowPush` y pedir la
+  segunda confirmación antes de enviar la rama.
+
+### 2026-08-11 12:10 — Codex — F4.8-T5-GATEWAY-GUARD
+
+- Estado anterior: Studio mostraba una ruta preparada, pero el Gateway antiguo
+  eliminaba el campo y cada trabajo creaba otro worktree.
+- Evidencia: el log local muestra `LUX-8ZLC` a las 12:04 y la carpeta nueva
+  correspondiente; el agente sólo reutiliza cuando recibe
+  `resumeWorktreePath`.
+- Resultado: Desktop comprueba que la respuesta del Gateway conserva
+  exactamente la ruta solicitada. Si no, solicita cancelación y explica que hay
+  que ejecutar `deploy-gateway.bat`.
+- Archivos: `useStudio.ts` y prueba nueva de enlace de workspace.
+- Pruebas: focalizadas 107/107; suite 1.594 pasadas, 9 omitidas; lint, typecheck
+  y build correctos.
+- Siguiente paso: desplegar Gateway, reconstruir y repetir `LA-024`.
+
+### 2026-08-11 12:00 — Codex — UI-JOB-FOCUS
+
+- Estado anterior: tras finalizar un trabajo, la ventana seguía dibujando los
+  controles activos pero no aceptaba desplegables ni escritura.
+- Causa observada en código: cada final/fallo crea un toast nativo de Electron
+  incluso con la ventana enfocada; es el único efecto global del cierre y los
+  avisos aparecen en las capturas del fallo. Confirmación manual pendiente.
+- Archivos modificados: `apps/desktop/src/main/index.ts`, nueva política y su
+  prueba, y documentación de continuidad.
+- Resultado real: los toasts de trabajos se suprimen sólo cuando Luxy está
+  visible y enfocado; siguen activos en segundo plano.
+- Pruebas: focalizadas 34/34; suite 1.592 pasadas, 9 omitidas; lint, typecheck y
+  build completos correctos.
+- Riesgo: el bloqueo sólo puede darse por confirmado tras repetirlo en Electron
+  sobre Windows.
+- Siguiente paso exacto: `LA-025`.
+
+### 2026-08-11 11:42 — Codex — F4.8-T5
+
+- Estado anterior: cada tarea normal creaba otra carpeta; sólo un reintento de
+  fallo podía recuperar su worktree.
+- Objetivo: preparar la carpeta antes del prompt y reutilizarla en trabajos
+  sucesivos.
+- Causa demostrada: el contrato de creación no aceptaba un worktree elegido y
+  Desktop no tenía una operación local para prepararlo.
+- Archivos modificados: contratos shared/IPC, host y controlador del agente,
+  handlers de Desktop y Gateway, Studio, estilos, pruebas y documentación.
+- Resultado real: Studio prepara y abre una carpeta confinada, recuerda su
+  selección ligada a máquina/proyecto, la transporta al trabajo y permite
+  recuperar la ruta desde el historial. El agente reutiliza y protege el
+  contenido existente.
+- Pruebas: focalizadas 162/162; lint, typecheck, suite 1.590 pasadas y 9
+  omitidas, y build completo correctos.
+- Decisiones: sin migración; la ruta viaja en metadata existente. Conversaciones
+  y Laboratorio no admiten worktrees preparados.
+- Riesgos o límites: falta publicar Gateway y validación manual con proveedor;
+  no se hizo deploy, commit ni push.
+- Estado nuevo: implementado y verificado automáticamente.
+- Siguiente paso exacto: ejecutar `LA-024`.
+
 Registro cronológico y append-only. No reescribir una entrada anterior para que
 parezca correcta; añadir una corrección nueva.
 
@@ -1816,3 +1896,123 @@ controlada`; 23 archivos, T9/T10 y F4.4-T1/T2. `package-lock.json`, claves,
   cinco minutos y de que el reintento conserva exactamente la misma ruta y rama.
 - Estado nuevo: Desktop, agente y Gateway actualizados y ejecutándose.
 - Siguiente paso exacto: ejecutar manualmente `LA-022` sobre `LUX-L9CC`.
+
+### 2026-08-11 — Codex — OPS-BAT-LAUNCHERS
+
+- Objetivo: ofrecer reconstrucción y arranque de Luxy por doble clic, siempre
+  relativos a la raíz del worktree operativo.
+- Archivos modificados: `rebuild-luxy.bat`, `start-luxy.bat`,
+  `rebuild-and-start-luxy.bat` y `README.md`.
+- Resultado real: los lanzadores usan `%~dp0`, limpian `ELECTRON_RUN_AS_NODE`,
+  comprueban la salida de Desktop y localizan Electron en el worktree con
+  fallback a la instalación principal.
+- Pruebas: `rebuild-luxy.bat no-pause` ejecutado con exit 0; build completo
+  correcto. `git diff --check` sin errores.
+- Siguiente paso exacto: usar `rebuild-and-start-luxy.bat` tras cambios y
+  `start-luxy.bat` para abrir sin reconstruir.
+
+### 2026-08-11 — Codex — UI-LAB-LAYOUT
+
+- Estado anterior: en Laboratorio, la lista horizontal genérica repartía título,
+  métricas, checks y evidencia como columnas equivalentes. Los títulos quedaban
+  reducidos a pocas letras por línea y se superponían con el resto del contenido.
+- Objetivo: ordenar resultados guardados y comparaciones sin perder información
+  y mantener una lectura coherente en ventanas estrechas.
+- Archivos modificados: `apps/desktop/src/renderer/pages/Laboratory.tsx` y
+  `apps/desktop/src/renderer/styles.css`.
+- Resultado real: cada resultado tiene cabecera, etiquetas, métricas, motivo y
+  evidencia en filas propias; las métricas envuelven sin invadir el título. Los
+  miembros A/B usan una cuadrícula de dos columnas que cae a una sola columna
+  por debajo de 920 px.
+- Pruebas: Prettier aplicado; lint y typecheck exit 0; Desktop 328/328; build
+  completo exit 0; `git diff --check` sin errores.
+- Estado nuevo: implementado, verificado automáticamente, Desktop reconstruido y
+  reiniciado desde `lux-auto-init-git`.
+- Siguiente paso exacto: confirmación visual manual en Resultados guardados y
+  Comparaciones controladas.
+
+### 2026-08-11 — Codex — UI-LAB-LAYOUT-FOLLOWUP
+
+- Evidencia manual: la primera corrección aún alineaba las etiquetas de cada
+  modelo hacia el centro de la columna izquierda, distinta de la composición de
+  Evidencia descriptiva indicada como referencia.
+- Corrección: estados y validación quedan justo debajo del nombre del modelo y
+  alineados al mismo borde izquierdo; las métricas conservan su columna derecha.
+- Archivos modificados: `apps/desktop/src/renderer/styles.css`.
+- Pruebas: Prettier check, lint y build de Desktop exit 0; `git diff --check`
+  sin errores. Desktop reiniciado.
+- Siguiente paso exacto: confirmación visual manual con la segunda captura como
+  referencia.
+
+### 2026-08-11 10:01 — Codex — F4.3-T11
+
+- Estado anterior: Modelos persistía una lectura real de 23 identificadores,
+  pero Laboratorio y Conversaciones seguían usando el catálogo estático de 22.
+- Objetivo: hacer canónico el snapshot detectado en todas las pantallas que
+  ofrecen modelos y representar correctamente el cierre fallido.
+- Causa demostrada: `Laboratory.tsx` y `Conversations.tsx` llamaban directamente
+  a `buildDefaultCatalog`; Laboratorio sólo releía al montar o al pulsar
+  Actualizar; la vista llamaba «Tiempo de respuesta» a `durationMs` incluso con
+  `responseOutcome: failed`. Los logs de `LUX-LR82` y `LUX-TQC3` confirmaron dos
+  503 contra los Qwen retirados.
+- Archivos modificados: catálogo, familias/proveedores, pruebas de registry,
+  router, Telegram y agente; `useCatalog.ts`; páginas Modelos, Laboratorio,
+  Conversaciones y Setup; documentación de continuidad y modelos.
+- Comandos ejecutados: pruebas focalizadas, Prettier y `npm.cmd run check`.
+- Resultado real: el snapshot persistido sustituye la lista operativa; Hy3 se
+  agrupa y ejecuta como Hunyuan; el embedding queda visible pero no ejecutable;
+  Laboratorio refresca cada 5 s sólo mientras haya activos y etiqueta la
+  duración según el final. «Par completo» pasa a «Par terminado».
+- Pruebas: lint, typecheck y build correctos; 85 archivos, 1.581 pasadas, 9
+  omitidas, 0 fallos.
+- Decisiones: un identificador desconocido se conserva visible con capacidades
+  vacías; nunca hereda chat o herramientas por heurística.
+- Riesgos o límites: falta reiniciar y confirmar visualmente; no se realizó una
+  llamada real, deploy, commit ni push.
+- Estado nuevo: implementado y verificado automáticamente.
+- Siguiente paso exacto: reiniciar Luxy y comprobar selectores y refresco.
+
+### 2026-08-11 10:44 — Codex — OPS-GATEWAY-BAT
+
+- Objetivo: permitir que Daniel despliegue manualmente el contrato actualizado
+  del Gateway sin migraciones ni edición de secretos.
+- Archivos modificados: `deploy-gateway.bat`, `README.md`, `LOCAL-ACTIONS.md` y
+  documentación de continuidad.
+- Resultado real: el lanzador compila Shared/Gateway, crea una configuración
+  TOML temporal desde la plantilla, ejecuta dry-run, exige escribir `DESPLEGAR`,
+  publica con `--keep-vars` y elimina la configuración temporal.
+- Pruebas: el primer `check` falló porque Wrangler no interpreta `.toml.example`
+  como configuración; se corrigió. Segundo `check`: exit 0, bundle 468,11 KiB,
+  gzip 105,68 KiB; no se desplegó nada y el TOML temporal fue eliminado.
+- Estado nuevo: lanzador manual verificado sin publicación.
+- Siguiente paso exacto: Daniel ejecuta `deploy-gateway.bat` y confirma
+  escribiendo `DESPLEGAR`.
+
+### 2026-08-11 10:47 — Codex — OPS-MAIN-LAUNCHERS
+
+- Objetivo: concentrar los accesos manuales en `Desktop\Luxy` sin volver a
+  ejecutar por error el checkout distinto del que usa la aplicación.
+- Resultado real: los cuatro `.bat` de la carpeta principal delegan en
+  `%LOCALAPPDATA%\Luxy\worktrees\lux-auto-init-git` y fallan con un mensaje
+  claro si ese worktree no existe.
+- Pruebas: `deploy-gateway.bat check` lanzado desde la carpeta principal; exit
+  0, compilación y dry-run correctos, sin despliegue.
+- Siguiente paso exacto: usar desde ahora únicamente los accesos de la carpeta
+  principal.
+
+### 2026-08-11 11:09 — Codex — UI-LAB-CONFIRM
+
+- Evidencia manual: después de aceptar una evaluación, toda la ventana de
+  Electron dejaba de responder a desplegables, incluso fuera de Laboratorio.
+- Causa probable acotada: Laboratorio usaba `window.confirm()`, diálogo
+  bloqueante del renderer; no había ningún `disabled` global ni capa CSS activa.
+- Corrección: ejecución y cancelación usan ahora un diálogo React propio que se
+  desmonta antes de crear/cancelar el trabajo; se eliminaron los dos
+  `window.confirm()` de Laboratorio.
+- Archivos modificados: `Laboratory.tsx` y `styles.css`.
+- Pruebas: 20 focalizadas pasadas; matriz completa con lint, typecheck y build
+  correctos; 1.581 pasadas, 9 omitidas y 0 fallos.
+- Riesgo: falta confirmación manual porque las pruebas no reproducen la gestión
+  de foco de una ventana Electron real.
+- Siguiente paso exacto: reconstruir/reiniciar y ejecutar una prueba; al cerrar
+  el diálogo y terminar, comprobar desplegables en Laboratorio y Trabajos.

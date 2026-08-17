@@ -58,6 +58,7 @@ export const PROVIDER_IDS = [
   'codex',
   'deepseek',
   'glm',
+  'hunyuan',
   'qwen',
   // familias añadidas con el catalogo verificado contra la conexion
   'kimi',
@@ -73,6 +74,7 @@ export const LOCAL_CLI_PROVIDERS = ['claude', 'codex'] as const;
 export const HTTP_API_PROVIDERS = [
   'deepseek',
   'glm',
+  'hunyuan',
   'qwen',
   'kimi',
   'kat',

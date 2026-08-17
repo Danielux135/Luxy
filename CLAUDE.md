@@ -225,6 +225,11 @@ Toda tarea que pueda modificar archivos corre en
 **La carpeta de trabajo del usuario nunca se toca.** Los worktrees con cambios
 no se borran sin aprobación explícita.
 
+Studio también puede preparar el worktree antes del primer prompt, abrirlo para
+añadir contexto y reutilizar esa misma ruta en trabajos posteriores. La
+selección pertenece a una máquina y proyecto concretos; reutilizarla no crea
+otra rama ni otra carpeta.
+
 Si el proyecto no es un repo git: se permiten tareas de lectura y se rechazan
 las de edición, explicando cómo inicializarlo.
 

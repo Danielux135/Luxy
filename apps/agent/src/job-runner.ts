@@ -251,8 +251,8 @@ export function buildProviderPrompt(job: ClaimedJob): string {
   ) {
     parts.push(
       '',
-      'REANUDACION DE UN TRABAJO ANTERIOR:',
-      'Este worktree ya contiene archivos y posiblemente commits de una ejecucion anterior que fallo.',
+      'ESPACIO DE TRABAJO EXISTENTE:',
+      'Este worktree fue preparado antes de la llamada o ya se uso en una ejecucion anterior.',
       'No empieces el proyecto desde cero, no borres ni reemplaces lo que ya existe y no repitas las partes terminadas.',
       'Primero usa git_status y lee los archivos relevantes para identificar que quedo hecho.',
       'Continua solo con la siguiente parte incompleta de la tarea y conserva la estructura existente.',

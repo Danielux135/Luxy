@@ -606,6 +606,8 @@ export const studioJobCreateRequestSchema = z
     continuesJobId: z.string().uuid().optional(),
     /** trabajo agentic fallido cuyo worktree debe reanudarse */
     resumeJobId: z.string().uuid().optional(),
+    /** espacio local preparado o conservado que debe reutilizar esta tarea */
+    workspacePath: z.string().min(1).max(1024).optional(),
     /** snapshot versionado; solo se acepta con una confirmacion explicita */
     evaluation: modelEvaluationExecutionSchema.optional(),
   })
@@ -615,6 +617,20 @@ export const studioJobCreateRequestSchema = z
         code: z.ZodIssueCode.custom,
         path: ['resumeJobId'],
         message: 'solo una tarea editable puede reanudar un worktree',
+      });
+    }
+    if (value.workspacePath !== undefined && value.mode !== undefined && value.mode !== 'task') {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['workspacePath'],
+        message: 'solo una tarea editable puede usar un espacio de trabajo',
+      });
+    }
+    if (value.workspacePath !== undefined && value.resumeJobId !== undefined) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['workspacePath'],
+        message: 'elige un espacio directo o un trabajo anterior, no ambos',
       });
     }
     if (value.mode === 'conversation') {
