@@ -39,6 +39,13 @@ aviso 422 del agente.
 Este archivo sólo contiene acciones que una IA no debe ejecutar por su cuenta.
 No repetir una acción marcada como completada sin una razón nueva.
 
+## LA-023 — validar la rama de consolidación al finalizar
+
+Estado: `pending`
+
+Cuando termine `CONSOLIDATE-WORKTREES-001`, abrir Luxy desde esa rama y validar
+Trabajos, workspaces y el historial antes de retirar worktrees antiguos.
+
 ## LA-021 — comprobar el historial tras reiniciar Studio
 
 Estado: `pending`

@@ -83,6 +83,14 @@
 Registro cronológico y append-only. No reescribir una entrada anterior para que
 parezca correcta; añadir una corrección nueva.
 
+### 2026-08-20 — Codex — CONSOLIDATE-WORKTREES-001
+
+- Estado anterior: fases terminadas y correcciones posteriores estaban repartidas entre varios worktrees, con riesgo de arrancar una rama antigua.
+- Archivos y ramas integrados: `luxy/auto-init-git` y `luxy/phase-4d-session-host`.
+- Resultado: commits de integración `82e728a` y `cbac4f2`; cada uno pasó `npm.cmd run check` (1.602 y 1.622 pruebas pasadas, respectivamente; 9 omitidas).
+- Límites: quedan cambios sin commit en otros worktrees; se preservan y se integrarán por bloque. Los archivos personales y de claves no se versionan.
+- Siguiente paso exacto: integrar los cambios pendientes de catálogo, timeout y compatibilidad sobre esta rama.
+
 ### 2026-08-20 — Codex — BUG-HUNYUAN-002
 
 - Estado anterior: el Studio reiniciado desde `luxy/ux-001-detalle-trabajo` rechazaba los trabajos históricos con `provider: hunyuan` y mostraba el error de Zod completo.

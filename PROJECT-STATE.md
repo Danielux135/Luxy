@@ -2,6 +2,11 @@
 
 Última actualización: **2026-08-20**
 
+Consolidación en curso: `luxy/consolidate-worktrees` incorpora las fases de
+workspaces reutilizables y Remote 4d en commits independientes y validados.
+Los worktrees con cambios sin confirmar siguen preservados hasta integrar cada
+bloque sin mezclar archivos personales ni secretos.
+
 Actualización puntual: **BUG-HUNYUAN-002** recupera en la rama de Studio la
 compatibilidad ya desarrollada para el historial de proveedores. La lectura de
 trabajos admite identificadores seguros externos; crear, reintentar y continuar
