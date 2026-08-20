@@ -91,6 +91,13 @@ parezca correcta; añadir una corrección nueva.
 - Límites: quedan cambios sin commit en otros worktrees; se preservan y se integrarán por bloque. Los archivos personales y de claves no se versionan.
 - Siguiente paso exacto: integrar los cambios pendientes de catálogo, timeout y compatibilidad sobre esta rama.
 
+### 2026-08-20 — Codex — BUG-RATE-LIMIT-UX-001
+
+- Archivos modificados: `http-provider.ts` y su prueba.
+- Resultado: cada reintento HTTP 429 publica su espera en los eventos; el aviso final explica que se agotaron los intentos.
+- Pruebas: `npm.cmd test -- --run apps/agent/src/providers/providers.test.ts`, 73 pasadas.
+- Estado nuevo: commit local `ac38bcd`; sin llamadas reales, push, despliegue ni migraciones.
+
 ### 2026-08-20 — Codex — BUG-HUNYUAN-002
 
 - Estado anterior: el Studio reiniciado desde `luxy/ux-001-detalle-trabajo` rechazaba los trabajos históricos con `provider: hunyuan` y mostraba el error de Zod completo.
