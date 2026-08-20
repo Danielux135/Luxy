@@ -1,6 +1,6 @@
 // Conversaciones: chat persistente y comparacion de dos modelos sobre trabajos reales.
 import { useEffect, useMemo, useState, type JSX } from 'react';
-import { buildDefaultCatalog, describeArtifactSize } from '@luxy/shared';
+import { buildDefaultCatalog, describeArtifactSize, isProviderId } from '@luxy/shared';
 import type { JobStatus, ProviderId, StudioJob, StudioMachine } from '@luxy/shared';
 import { Empty, Field, Notice, Panel, Tag } from '../ui/primitives.js';
 import { FormattedResponse } from '../formatted-response.js';
@@ -386,6 +386,12 @@ export function ConversationsPage({ summary }: { summary: ConfigSummary }): JSX.
                           onContinue={(source) => {
                             // se reutiliza el mismo modelo: continuar con otro
                             // distinto es empezar una respuesta nueva
+                            if (!isProviderId(source.provider)) {
+                              window.alert(
+                                'Este proveedor pertenece al historial y ya no esta disponible para continuar.',
+                              );
+                              return;
+                            }
                             setProviderA(source.provider);
                             setModelA(source.model ?? '');
                             setCompare(false);

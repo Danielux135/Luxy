@@ -1,6 +1,6 @@
 # Luxy — plan maestro
 
-Última actualización: **2026-08-09**
+Última actualización: **2026-08-20**
 
 ## Estados
 
@@ -12,6 +12,12 @@
 - `blocked`: necesita una decisión o acción externa concreta.
 
 Los estados se actualizan al completar cada paso, no al final de una fase.
+
+## Incidencias del checkpoint
+
+| ID | Trabajo | Estado | Criterio de salida |
+| --- | --- | --- | --- |
+| BUG-HUNYUAN-002 | Compatibilidad de historial al reiniciar Studio | implemented | Studio reconstruido y reiniciado; falta la comprobación visual de `LA-021`. |
 
 ## Fase 0 — estabilizar y consolidar el checkpoint
 

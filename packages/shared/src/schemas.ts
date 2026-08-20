@@ -691,7 +691,10 @@ export const studioJobSchema = z.object({
   shortId: z.string().min(1).max(32),
   origin: jobOriginSchema,
   targetMachineId: z.string().uuid().nullable(),
-  provider: providerIdSchema,
+  // los trabajos ya persistidos pueden proceder de una conexion que Studio ya
+  // no tiene en su catalogo. Al leerlos se conserva un identificador seguro,
+  // sin convertir el historial en un enum cerrado de proveedores actuales.
+  provider: z.string().regex(/^[a-z][a-z0-9_-]{0,63}$/),
   model: z.string().max(128).nullable(),
   projectAlias: projectAliasSchema,
   prompt: promptSchema,

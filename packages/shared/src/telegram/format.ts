@@ -9,6 +9,7 @@ export const PROVIDER_LABELS: Record<ProviderId, string> = {
   codex: 'Codex',
   deepseek: 'DeepSeek',
   glm: 'GLM',
+  hunyuan: 'Hunyuan',
   qwen: 'Qwen',
   kimi: 'Kimi',
   kat: 'KAT',

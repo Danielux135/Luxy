@@ -3,6 +3,14 @@
 Este archivo sólo contiene acciones que una IA no debe ejecutar por su cuenta.
 No repetir una acción marcada como completada sin una razón nueva.
 
+## LA-021 — comprobar el historial tras reiniciar Studio
+
+Estado: `pending`
+
+En **Trabajos**, verificar que desaparece el bloque técnico que decía
+`invalid_enum_value` para `provider: hunyuan` y que el historial vuelve a listar
+los trabajos. No crear ni reintentar un trabajo para esta comprobación.
+
 ## LA-001 — abrir el checkpoint en VS Code
 
 Estado: `pending`

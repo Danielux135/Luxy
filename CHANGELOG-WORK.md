@@ -3,6 +3,16 @@
 Registro cronológico y append-only. No reescribir una entrada anterior para que
 parezca correcta; añadir una corrección nueva.
 
+### 2026-08-20 — Codex — BUG-HUNYUAN-002
+
+- Estado anterior: el Studio reiniciado desde `luxy/ux-001-detalle-trabajo` rechazaba los trabajos históricos con `provider: hunyuan` y mostraba el error de Zod completo.
+- Causa demostrada: la corrección previa quedó sin commit en el worktree `lux/bug-hunyuan-backcompat`; esta rama se creó desde una base anterior.
+- Archivos modificados: contrato compartido, aliases y etiquetas de proveedores, protecciones de reintento/continuación y pruebas de esquema.
+- Resultado: el historial se lee con identificadores seguros y las acciones de ejecución sólo aceptan proveedores reconocidos. Studio fue reconstruido y reiniciado desde esta rama.
+- Validación automática: `npm.cmd run check` correcta, 1.582 pruebas pasadas y 9 omitidas; sin llamadas reales, push, despliegue ni migraciones.
+- Corrección del reinicio: el primer lanzamiento directo apuntó por error a la raíz del monorepo y Electron mostró «Unable to find Electron app». Se cerró ese proceso y se abrió correctamente el paquete `apps/desktop`.
+- Siguiente paso: completar la comprobación visual `LA-021`.
+
 ## Historial consolidado anterior al protocolo
 
 ### 2026-08-01 — ChatGPT Work — AUDIT-001

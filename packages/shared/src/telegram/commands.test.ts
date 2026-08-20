@@ -201,6 +201,12 @@ describe('alias de modelo en telegram', () => {
     expect(task('/kimi proyecto arregla el bug').provider).toBe('kimi');
   });
 
+  it('conserva hunyuan para poder leer y continuar trabajos historicos', () => {
+    // el historial persistido puede contener proveedores que el catalogo actual
+    // ya no propone. El contrato no puede rechazar esos trabajos al cargarlos.
+    expect(task('/hunyuan proyecto continua el trabajo anterior').provider).toBe('hunyuan');
+  });
+
   it('un alias explicito fija el apiModel EXACTO', () => {
     expect(task('/kimi_k26 proyecto tarea').model).toBe('Kimi-K2.6');
     expect(task('/qwen_36 proyecto tarea').model).toBe('Qwen3.6-35B-A3B');

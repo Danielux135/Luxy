@@ -58,6 +58,9 @@ export const PROVIDER_IDS = [
   'codex',
   'deepseek',
   'glm',
+  // se conserva por compatibilidad con trabajos historicos ya persistidos.
+  // excluirla del enum hace que Studio no pueda ni siquiera leerlos.
+  'hunyuan',
   'qwen',
   // familias añadidas con el catalogo verificado contra la conexion
   'kimi',
@@ -66,6 +69,11 @@ export const PROVIDER_IDS = [
   'step',
 ] as const;
 
+/** distingue una familia ejecutable actual de un identificador historico leido */
+export function isProviderId(value: string): value is (typeof PROVIDER_IDS)[number] {
+  return (PROVIDER_IDS as readonly string[]).includes(value);
+}
+
 // proveedores que se ejecutan mediante un cli local con sesion autenticada
 export const LOCAL_CLI_PROVIDERS = ['claude', 'codex'] as const;
 
@@ -73,6 +81,7 @@ export const LOCAL_CLI_PROVIDERS = ['claude', 'codex'] as const;
 export const HTTP_API_PROVIDERS = [
   'deepseek',
   'glm',
+  'hunyuan',
   'qwen',
   'kimi',
   'kat',

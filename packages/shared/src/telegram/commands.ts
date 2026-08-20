@@ -195,6 +195,7 @@ const PROVIDER_ALIASES: Record<ProviderId, string[]> = {
   codex: ['codex', 'chatgpt', 'gpt'],
   deepseek: ['deepseek', 'deep seek'],
   glm: ['glm', 'zhipu'],
+  hunyuan: ['hunyuan', 'tencent hunyuan'],
   qwen: ['qwen', 'tongyi'],
   kimi: ['kimi', 'moonshot'],
   kat: ['kat', 'kat coder'],

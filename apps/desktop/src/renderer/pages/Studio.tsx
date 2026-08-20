@@ -1,6 +1,6 @@
 // primer corte vertical de Luxy Studio: crear, seguir y cancelar trabajos.
 import { useEffect, useMemo, useState, type JSX } from 'react';
-import { TERMINAL_JOB_STATUSES } from '@luxy/shared';
+import { isProviderId, TERMINAL_JOB_STATUSES } from '@luxy/shared';
 import type { JobStatus, ProviderId, StudioJob, StudioJobAction } from '@luxy/shared';
 import { Empty, Field, Notice, Panel, Readout, Tag } from '../ui/primitives.js';
 import { FormattedResponse } from '../formatted-response.js';
@@ -145,6 +145,10 @@ export function StudioPage(): JSX.Element {
       ].join('\n'),
     );
     if (!accepted) return;
+    if (!isProviderId(job.provider)) {
+      window.alert('Este proveedor historico ya no esta disponible para reintentar el trabajo.');
+      return;
+    }
     await studio.create({
       targetMachineId: job.targetMachineId,
       provider: job.provider,

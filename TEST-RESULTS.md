@@ -3,6 +3,12 @@
 Separar siempre resultados históricos, resultados de la copia actual y pruebas
 manuales. No transformar un fallo no ejecutado en «omitido».
 
+## 2026-08-20 — BUG-HUNYUAN-002
+
+- Prueba enfocada: `npm.cmd test -- --run packages/shared/src/schemas.test.ts packages/shared/src/telegram/commands.test.ts`: **40 passed**, exit 0.
+- Validación completa: `npm.cmd run check`: **exit 0**; lint, typecheck, build y **1.582 passed**, 9 skipped en 88 archivos.
+- Studio: reiniciado desde el paquete `apps/desktop` de `luxy/ux-001-detalle-trabajo`; la ventana **Luxy** está abierta con proceso `17020`. Pendiente confirmar `LA-021`.
+
 ## Línea base histórica del checkpoint
 
 ### 2026-08-02 — Windows — `luxy-work-update-001`

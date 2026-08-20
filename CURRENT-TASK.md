@@ -1,5 +1,16 @@
 # Luxy — tarea activa
 
+## BUG-HUNYUAN-002 — recuperar compatibilidad del historial
+
+Estado: **implemented — Codex, 2026-08-20; Studio reiniciado**
+
+El Studio reiniciado desde `luxy/ux-001-detalle-trabajo` no incorporaba la
+corrección sin commit que sigue en `lux/bug-hunyuan-backcompat`: al validar el
+historial, un trabajo con `provider: hunyuan` hacía fallar toda la carga.
+Se trasladó la compatibilidad de lectura y sus pruebas sin modificar ni limpiar
+el worktree original. `npm.cmd run check` terminó correctamente y Studio fue
+reiniciado desde esta rama; falta confirmar visualmente la carga en `LA-021`.
+
 ## Checkpoint de continuidad — 2026-08-09
 
 Paso activo: **UX-001 — trazabilidad de llamadas y carpeta del trabajo**

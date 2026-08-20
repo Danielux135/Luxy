@@ -1,6 +1,11 @@
 # Luxy — estado canónico del proyecto
 
-Última actualización: **2026-08-09**
+Última actualización: **2026-08-20**
+
+Actualización puntual: **BUG-HUNYUAN-002** recupera en la rama de Studio la
+compatibilidad ya desarrollada para el historial de proveedores. La lectura de
+trabajos admite identificadores seguros externos; crear, reintentar y continuar
+siguen acotados a proveedores reconocidos. No se realizó despliegue ni migración.
 
 Estado documental: **checkpoint reconciliado en Windows; `F4.1-T4/T5`,
 `F4.2-T1/T2/T3` y `F4.3-T1`–`F4.3-T8` verificados y commiteados localmente;
