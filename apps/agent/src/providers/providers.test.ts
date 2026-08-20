@@ -546,6 +546,41 @@ describe('HttpApiProvider: diagnostico del final de la respuesta', () => {
     };
   }
 
+  it('muestra cada reintento cuando el proveedor limita la frecuencia', async () => {
+    let intentos = 0;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+      intentos += 1;
+      if (intentos === 1) {
+        return new Response('demasiadas peticiones', { status: 429, headers: { 'Retry-After': '1' } });
+      }
+      return new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(
+              new TextEncoder().encode(
+                'data: {"choices":[{"delta":{"content":"LISTO"},"finish_reason":"stop"}]}\n',
+              ),
+            );
+          },
+          cancel() {
+            /* el final fuerte hace que Luxy cierre el stream localmente */
+          },
+        }),
+        { status: 200 },
+      );
+    });
+
+    const events: string[] = [];
+    const provider = new HttpApiProvider(config, 'una-clave');
+    const result = await provider.run(peticion({ onEvent: (event) => events.push(`${event.type}:${event.message}`) }));
+
+    expect(result.ok).toBe(true);
+    expect(intentos).toBe(2);
+    expect(events).toContainEqual(
+      expect.stringMatching(/^warning:DeepSeek limita la frecuencia; reintento 2\/3 en [1-3] s\.$/),
+    );
+  });
+
   it('conserva finish_reason length y los limites efectivos de una respuesta truncada', async () => {
     const body = new ReadableStream<Uint8Array>({
       start(controller) {

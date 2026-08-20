@@ -224,6 +224,7 @@ export class HttpApiProvider implements ProviderExecution {
           signal: request.signal,
           // no se reintenta si la clave es invalida o la peticion es incorrecta
           shouldRetry: (error) => {
+            if ((error as { retryable?: unknown }).retryable === false) return false;
             // un timeout o una cancelacion NO se reintentan: esperar tres veces
             // lo mismo solo triplica el tiempo antes de decir que fallo
             if (error instanceof Error && error.name === 'AbortError') return false;
@@ -246,6 +247,18 @@ export class HttpApiProvider implements ProviderExecution {
           delayForError: (error, _attempt, calculado) => {
             const pedido = (error as { retryAfterMs?: number }).retryAfterMs;
             return typeof pedido === 'number' ? Math.max(pedido, calculado) : null;
+          },
+          // el aviso final de un 429 llega despues de los reintentos. Sin este
+          // evento parecia que Luxy fallaba al instante aunque acabara de
+          // esperar unos segundos entre solicitudes.
+          onRetry: (error, attempt, delayMs) => {
+            if (statusOf(error) !== 429) return;
+            request.onEvent({
+              type: 'warning',
+              message:
+                `${this.label(request)} limita la frecuencia; ` +
+                `reintento ${attempt + 2}/3 en ${Math.max(1, Math.ceil(delayMs / 1000))} s.`,
+            });
           },
         },
       );
@@ -899,8 +912,9 @@ export function describeHttpError(error: unknown, displayName: string): string {
   if (status === 429) {
     return (
       `${displayName} esta limitando las peticiones por frecuencia.\n\n` +
-      'Luxy ya espera lo que pide el proveedor antes de reintentar. Si sigue ' +
-      'pasando, espacia las peticiones o usa otro modelo un rato.'
+      'Luxy agoto sus reintentos para esta ejecucion. Si el proveedor indico ' +
+      '`Retry-After`, ya respeto esa espera; si no, los reintentos son cortos. ' +
+      'Espera un poco antes de crear otro trabajo o usa otro modelo.'
     );
   }
   // 524 y 504 son timeouts del borde de Cloudflare delante del proveedor: el
