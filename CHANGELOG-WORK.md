@@ -98,6 +98,13 @@ parezca correcta; añadir una corrección nueva.
 - Pruebas: `npm.cmd test -- --run apps/agent/src/providers/providers.test.ts`, 73 pasadas.
 - Estado nuevo: commit local `ac38bcd`; sin llamadas reales, push, despliegue ni migraciones.
 
+### 2026-08-20 — Codex — BUG-TIMEOUT-DEEPSEEK-001
+
+- Archivos modificados: `http-provider.ts` y su prueba.
+- Resultado: un límite de salida durante razonamiento sin texto visible se clasifica y explica sin revelar razonamiento ni reintentar inútilmente.
+- Pruebas: `npm.cmd test -- --run apps/agent/src/providers/providers.test.ts`, 75 pasadas.
+- Estado nuevo: commit local `0976308`; sin llamadas reales, push, despliegue ni migraciones.
+
 ### 2026-08-20 — Codex — BUG-HUNYUAN-002
 
 - Estado anterior: el Studio reiniciado desde `luxy/ux-001-detalle-trabajo` rechazaba los trabajos históricos con `provider: hunyuan` y mostraba el error de Zod completo.

@@ -55,6 +55,10 @@ manuales. No transformar un fallo no ejecutado en «omitido».
 
 - `npm.cmd test -- --run apps/agent/src/providers/providers.test.ts`: **73 passed**, exit 0.
 
+## 2026-08-20 — BUG-TIMEOUT-DEEPSEEK-001
+
+- `npm.cmd test -- --run apps/agent/src/providers/providers.test.ts`: **75 passed**, exit 0.
+
 ## 2026-08-20 — BUG-HUNYUAN-002
 
 - Prueba enfocada: `npm.cmd test -- --run packages/shared/src/schemas.test.ts packages/shared/src/telegram/commands.test.ts`: **40 passed**, exit 0.
