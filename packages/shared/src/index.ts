@@ -9,6 +9,7 @@ export * from './ids.js';
 export * from './redact.js';
 export * from './backoff.js';
 export * from './paths.js';
+export * from './test-commands.js';
 export * from './budget.js';
 export * from './router.js';
 export * from './machines.js';

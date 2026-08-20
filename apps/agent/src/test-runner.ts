@@ -1,50 +1,12 @@
 // ejecucion de los comandos de comprobacion de cada proyecto.
 // SOLO se ejecutan comandos declarados en config.json: es una lista blanca.
-import type { TestCommand, TestRunResult, ProjectConfig } from '@luxy/shared';
+import { validateTestCommand } from '@luxy/shared';
+import type { TestRunResult, ProjectConfig } from '@luxy/shared';
 import { runProcess, BASE_ENV_ALLOWLIST } from './process.js';
 
-/**
- * ejecutables permitidos. cualquier otro se rechaza aunque aparezca en la
- * configuracion, para que un config.json manipulado no pueda ejecutar
- * cualquier binario del sistema.
- */
-export const ALLOWED_TEST_EXECUTABLES = [
-  'npm',
-  'npx',
-  'pnpm',
-  'yarn',
-  'node',
-  'flutter',
-  'dart',
-  'python',
-  'python3',
-  'pytest',
-  'cargo',
-  'go',
-  'dotnet',
-  'make',
-  'tsc',
-  'vitest',
-  'jest',
-  'eslint',
-];
-
-/** argumentos que nunca se admiten en un comando de comprobacion */
-const FORBIDDEN_ARG_PATTERNS = [
-  // nada que llame al shell
-  /^-c$/i,
-  /^--eval$/i,
-  /^-e$/i,
-  // nada que publique o despliegue
-  /^publish$/i,
-  /^deploy$/i,
-  /^push$/i,
-];
-
-export interface CommandValidation {
-  allowed: boolean;
-  reason: string | null;
-}
+// compatibilidad para consumidores existentes; la politica autoritativa es la
+// misma funcion pura que usa ahora Studio antes de guardar.
+export { ALLOWED_TEST_EXECUTABLES, validateTestCommand } from '@luxy/shared';
 
 /** motivo por el que las comprobaciones del proyecto no pueden ejecutarse */
 export function hostChecksBlockedReason(project: ProjectConfig): string | null {
@@ -53,41 +15,6 @@ export function hostChecksBlockedReason(project: ProjectConfig): string | null {
     'las comprobaciones en el sistema anfitrion estan desactivadas para este proyecto; ' +
     'revisa el diff y habilita allowHostChecks solo si confias en el codigo que se ejecutara'
   );
-}
-
-/**
- * valida un comando de comprobacion antes de ejecutarlo.
- * comprueba la lista blanca y descarta argumentos peligrosos.
- */
-export function validateTestCommand(command: TestCommand): CommandValidation {
-  const [executable, args] = command;
-
-  // el ejecutable se compara sin extension, porque en windows npm es npm.cmd
-  const normalized = executable.toLowerCase().replace(/\.(cmd|bat|exe|ps1)$/, '');
-
-  if (!ALLOWED_TEST_EXECUTABLES.includes(normalized)) {
-    return {
-      allowed: false,
-      reason: `"${executable}" no esta en la lista de ejecutables permitidos`,
-    };
-  }
-
-  // una ruta en el ejecutable permitiria saltarse la lista blanca
-  if (/[\\/]/.test(executable)) {
-    return { allowed: false, reason: 'el ejecutable no puede incluir una ruta' };
-  }
-
-  for (const arg of args) {
-    if (FORBIDDEN_ARG_PATTERNS.some((pattern) => pattern.test(arg))) {
-      return { allowed: false, reason: `el argumento "${arg}" no esta permitido` };
-    }
-    // se rechaza cualquier metacaracter de shell aunque shell este desactivado
-    if (/[;&|`$><]/.test(arg)) {
-      return { allowed: false, reason: `el argumento "${arg}" contiene caracteres no permitidos` };
-    }
-  }
-
-  return { allowed: true, reason: null };
 }
 
 /**

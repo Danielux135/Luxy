@@ -71,6 +71,12 @@ manuales. No transformar un fallo no ejecutado en «omitido».
 - `npm.cmd run typecheck`: exit 0.
 - No hubo llamadas reales, push, despliegues ni migraciones.
 
+## 2026-08-20 — COMMAND-POLICY-001
+
+- `npm.cmd run build --workspace @luxy/shared`: exit 0.
+- `npm.cmd test -- --run apps/agent/src/agent.test.ts`: **76 passed**, exit 0.
+- No hubo llamadas reales, push, despliegues ni migraciones.
+
 ### 2026-08-10 — Codex — F4.8-T4
 
 - Prueba añadida: `buildProviderPrompt` incluye instrucciones de continuación

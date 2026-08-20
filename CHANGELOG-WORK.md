@@ -124,6 +124,14 @@ parezca correcta; añadir una corrección nueva.
 - Límites: no hubo llamadas reales, push, despliegue ni migraciones. Quedan más cambios sin commit en otros worktrees por revisar.
 - Siguiente paso exacto: crear el commit local y continuar con el siguiente bloque aislado.
 
+### 2026-08-20 — Codex — COMMAND-POLICY-001
+
+- Objetivo: usar una única política pura para validar los comandos de comprobación, tanto antes de guardarlos como justo antes de ejecutarlos.
+- Archivos modificados: módulo compartido nuevo, exportación del paquete y adaptador compatible del agente.
+- Resultado: la lista blanca y el rechazo de shell, evaluación, publicación y despliegue ya no pueden divergir entre consumidores.
+- Pruebas: compilación de `@luxy/shared` y `apps/agent/src/agent.test.ts`, 76 pasadas.
+- Siguiente paso exacto: commit local y continuar con el perfil de proyecto que consumirá esta política en Studio.
+
 ### 2026-08-10 — Codex — F4.8-T4
 
 - Observación: el retry reanudaba la misma ruta y rama, pero el modelo recibía

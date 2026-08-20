@@ -7,8 +7,9 @@ Estado: **in_progress — Codex, 2026-08-20**
 La rama aislada `luxy/consolidate-worktrees` parte de `6bd7077` y ya integra
 `luxy/auto-init-git` y `luxy/phase-4d-session-host` como commits separados,
 ambos con `npm.cmd run check` correcto. El bloque de catálogo ya está integrado;
-quedan por integrar los cambios sin commit de timeout y compatibilidad, sin
-incluir archivos personales o secretos no versionados.
+la política única de comandos de comprobación también está integrada. Quedan por
+integrar los cambios sin commit de perfiles, timeout y compatibilidad, sin incluir
+archivos personales o secretos no versionados.
 
 ## BUG-HUNYUAN-002 — recuperar compatibilidad del historial
 
