@@ -111,8 +111,23 @@ describe('catalogo inicial', () => {
     expect(detected.map((model) => model.apiModel)).not.toContain('Qwen3.5-397B-A17B');
     expect(detected.find((model) => model.apiModel === 'modelo-recien-publicado')).toMatchObject({
       family: 'other',
-      capabilities: [],
+      capabilities: ['text'],
       supportsNativeTools: null,
+      supportsStreaming: true,
+    });
+  });
+
+  it('los modelos detectados desconocidos conservan el contrato mínimo de texto', () => {
+    const [model] = buildCatalogForConnection(DEFAULT_CONNECTION_ID, ['modelo-nuevo']);
+    expect(model).toMatchObject({
+      apiModel: 'modelo-nuevo',
+      family: 'other',
+      category: 'text',
+      capabilities: ['text'],
+      enabled: true,
+      supportsStreaming: true,
+      supportsNativeTools: null,
+      allowedTools: [],
     });
   });
 

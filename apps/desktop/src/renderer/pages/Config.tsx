@@ -24,7 +24,6 @@ import type { ConfigSummary } from '../useConfig.js';
 const FAMILIA: Record<ModelFamily, string> = {
   deepseek: 'DeepSeek',
   glm: 'GLM',
-  hunyuan: 'Hunyuan',
   kat: 'KAT',
   kimi: 'Kimi',
   minimax: 'MiniMax',

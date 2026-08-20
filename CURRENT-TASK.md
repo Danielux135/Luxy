@@ -6,9 +6,9 @@ Estado: **in_progress — Codex, 2026-08-20**
 
 La rama aislada `luxy/consolidate-worktrees` parte de `6bd7077` y ya integra
 `luxy/auto-init-git` y `luxy/phase-4d-session-host` como commits separados,
-ambos con `npm.cmd run check` correcto. Quedan por integrar los cambios sin
-commit de los worktrees de catálogo, timeout y compatibilidad, sin incluir
-archivos personales o secretos no versionados.
+ambos con `npm.cmd run check` correcto. El bloque de catálogo ya está integrado;
+quedan por integrar los cambios sin commit de timeout y compatibilidad, sin
+incluir archivos personales o secretos no versionados.
 
 ## BUG-HUNYUAN-002 — recuperar compatibilidad del historial
 
@@ -82,9 +82,10 @@ se refresca con cadencia limitada; los fallos indican duración hasta el fallo y
 un par sólo se denomina correcto cuando ambos resultados son puntuables.
 
 Resultado: las pantallas operativas leen el snapshot persistido; el catálogo
-base contiene los 23 modelos observados, Hunyuan es proveedor ejecutable y el
-modelo de embeddings no se ofrece como chat. Laboratorio actualiza cada 5 s
-mientras haya trabajos activos y distingue duración hasta el fallo.
+base contiene los 23 modelos observados. `hy3` es un modelo de texto de la
+familia «Otros», mientras que `hunyuan` se conserva únicamente como proveedor
+histórico legible. Laboratorio actualiza cada 5 s mientras haya trabajos activos
+y distingue duración hasta el fallo.
 
 Validación: `npm.cmd run check` correcto; 1.581 pruebas pasadas, 9 omitidas y 0
 fallos. Siguiente paso: reiniciar Luxy y confirmar visualmente el selector y el

@@ -115,6 +115,15 @@ parezca correcta; añadir una corrección nueva.
 - Corrección del reinicio: el primer lanzamiento directo apuntó por error a la raíz del monorepo y Electron mostró «Unable to find Electron app». Se cerró ese proceso y se abrió correctamente el paquete `apps/desktop`.
 - Siguiente paso: completar la comprobación visual `LA-021`.
 
+### 2026-08-20 — Codex — CATALOG-DETECTED-003
+
+- Objetivo: integrar el bloque pendiente de catálogo sin confundir el proveedor histórico `hunyuan` con la familia de modelo `hy3`.
+- Archivos modificados: catálogo y parser de `/v1/models` compartidos, tipos, vista de Configuración y pruebas de catálogo/registro.
+- Resultado: `hy3` queda en la familia `other`; los modelos de texto nuevos detectados exponen sólo texto y streaming, sin herramientas, capacidades de agente ni contratos inventados. La lectura de trabajos con `provider: hunyuan` se conserva en el bloque de compatibilidad anterior.
+- Pruebas: `catalog-fetch.test.ts` y `registry.test.ts`, 53 pasadas; `npm.cmd run typecheck`, exit 0.
+- Límites: no hubo llamadas reales, push, despliegue ni migraciones. Quedan más cambios sin commit en otros worktrees por revisar.
+- Siguiente paso exacto: crear el commit local y continuar con el siguiente bloque aislado.
+
 ### 2026-08-10 — Codex — F4.8-T4
 
 - Observación: el retry reanudaba la misma ruta y rama, pero el modelo recibía

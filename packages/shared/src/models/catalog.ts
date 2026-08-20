@@ -172,27 +172,36 @@ const RAW_CATALOG = [
   },
   {
     id: 'hy3',
-    metadata: { ...UNVERIFIED, note: 'servido por la conexion; capacidades pendientes' },
+    metadata: {
+      ...UNVERIFIED,
+      note: 'servido por la conexion el 2026-08-11; capacidades pendientes',
+    },
     apiModel: 'hy3',
-    displayName: 'Hy3',
-    family: 'hunyuan',
+    displayName: 'hy3',
+    family: 'other',
     category: 'text',
     capabilities: ['text'],
     telegramAliases: [],
   },
   {
     id: 'qwen3-embedding-8b',
-    metadata: { ...UNVERIFIED, note: 'servido por la conexion; capacidades pendientes' },
+    metadata: {
+      ...UNVERIFIED,
+      note: 'servido por la conexion el 2026-08-11; capacidades pendientes',
+    },
     apiModel: 'Qwen3-Embedding-8B',
     displayName: 'Qwen3 Embedding 8B',
     family: 'qwen',
     category: 'text',
-    capabilities: [],
+    capabilities: ['text'],
     telegramAliases: [],
   },
   {
     id: 'qwen3.6-27b',
-    metadata: { ...UNVERIFIED, note: 'servido por la conexion; capacidades pendientes' },
+    metadata: {
+      ...UNVERIFIED,
+      note: 'servido por la conexion el 2026-08-11; capacidades pendientes',
+    },
     apiModel: 'Qwen3.6-27B',
     displayName: 'Qwen3.6 27B',
     family: 'qwen',
@@ -385,9 +394,9 @@ export function buildDefaultCatalog(connectionId = DEFAULT_CONNECTION_ID): Model
 }
 
 /**
- * Convierte la última lectura real en el catálogo operativo. Las capacidades
- * sólo se conservan para identificadores exactos ya conocidos; un modelo nuevo
- * entra con el contrato mínimo y nunca hereda herramientas por parecido.
+ * Convierte la última lectura real en el catálogo operativo. Los modelos ya
+ * conocidos conservan su contrato; los nuevos reciben la categoría más segura
+ * que permiten sus identificadores, sin herramientas ni capacidades inventadas.
  */
 export function buildCatalogForConnection(
   connectionId: string,
@@ -397,15 +406,13 @@ export function buildCatalogForConnection(
     buildDefaultCatalog(connectionId).map((model) => [model.apiModel, model]),
   );
 
-  return servedModels.map((apiModel, index) => {
+  return servedModels.map((apiModel) => {
     const known = knownByApiModel.get(apiModel);
     if (known !== undefined) return known;
 
     const lower = apiModel.toLowerCase();
     const family =
-      lower === 'hy3' || lower.includes('hunyuan')
-        ? 'hunyuan'
-        : lower.includes('qwen')
+      lower.includes('qwen')
           ? 'qwen'
           : lower.includes('glm')
             ? 'glm'
@@ -427,7 +434,7 @@ export function buildCatalogForConnection(
                             ? 'step'
                             : lower === 'auto' || lower.includes('router')
                               ? 'router'
-                              : null;
+                              : 'other';
     const category =
       family === 'router'
         ? 'routing'
@@ -439,16 +446,21 @@ export function buildCatalogForConnection(
     const safeId = lower.replace(/[^a-z0-9._-]+/g, '-').replace(/-+/g, '-');
 
     return modelDefinitionSchema.parse({
-      id: safeId.length === 0 ? `model-${index}` : safeId,
+      id: safeId.length === 0 ? `model-${servedModels.indexOf(apiModel)}` : safeId,
       apiModel,
       displayName: apiModel,
-      family: family ?? 'other',
+      family,
       connectionId,
       category,
-      capabilities: category === 'routing' ? ['routing', 'model_selection'] : [],
+      capabilities:
+        category === 'text'
+          ? ['text']
+          : category === 'routing'
+            ? ['routing', 'model_selection']
+            : [],
       telegramAliases: [],
       enabled: category !== 'routing',
-      supportsStreaming: false,
+      supportsStreaming: category === 'text',
       metadata: {
         contractVerified: false,
         note: `servido por la conexion; capacidades pendientes (${apiModel})`,

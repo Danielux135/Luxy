@@ -12,6 +12,11 @@ compatibilidad ya desarrollada para el historial de proveedores. La lectura de
 trabajos admite identificadores seguros externos; crear, reintentar y continuar
 siguen acotados a proveedores reconocidos. No se realizó despliegue ni migración.
 
+Actualización puntual: el catálogo detectado clasifica `hy3` como modelo de texto
+de la familia `other`; esto no elimina el identificador histórico `hunyuan` de
+los trabajos ya guardados. Los modelos nuevos detectados quedan sin herramientas
+ni capacidad de agente.
+
 Actualización 2026-08-11: `F4.8-T5` implementado. Studio puede crear y abrir un
 worktree antes de una tarea, recordar el seleccionado y reutilizarlo en llamadas
 posteriores sin perder archivos. El contrato de Gateway necesita publicación

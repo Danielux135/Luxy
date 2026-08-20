@@ -19,6 +19,7 @@ Los estados se actualizan al completar cada paso, no al final de una fase.
 | --- | --- | --- | --- |
 | CONSOLIDATE-WORKTREES-001 | Consolidar fases repartidas en worktrees | in_progress | Todas las fases terminadas están en commits verificables de una rama de integración. |
 | BUG-HUNYUAN-002 | Compatibilidad de historial al reiniciar Studio | implemented | Studio reconstruido y reiniciado; falta la comprobación visual de `LA-021`. |
+| CATALOG-DETECTED-003 | Reconciliar familias del catálogo detectado | done | `hy3` figura como modelo `other`; los proveedores históricos siguen siendo legibles. |
 
 ## Fase 0 — estabilizar y consolidar el checkpoint
 

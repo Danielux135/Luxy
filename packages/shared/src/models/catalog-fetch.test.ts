@@ -126,8 +126,6 @@ describe('guessModelFamily', () => {
     expect(guessModelFamily('glm-5.2')).toBe('glm');
     expect(guessModelFamily('qwen-max')).toBe('qwen');
     expect(guessModelFamily('kat-coder-pro-v2.5')).toBe('kat');
-    expect(guessModelFamily('hy3')).toBe('hunyuan');
-    expect(guessModelFamily('Tencent-Hunyuan-Hy3')).toBe('hunyuan');
     expect(guessModelFamily('claude-sonnet-4')).toBe('claude');
     expect(guessModelFamily('gpt-4o')).toBe('openai');
     expect(guessModelFamily('algo-raro')).toBe('otros');
@@ -188,6 +186,7 @@ describe('familias de los 23 modelos reales', () => {
     expect(guessModelFamily('step-image-edit-2')).toBe('step-media');
     expect(guessModelFamily('MiniMax-M3')).toBe('minimax');
     expect(guessModelFamily('sensenova-u1-fast')).toBe('sensenova');
+    expect(guessModelFamily('hy3')).toBe('otros');
     expect(guessModelFamily('auto')).toBe('router');
   });
 
@@ -218,6 +217,8 @@ describe('familias de los 23 modelos reales', () => {
       'stepaudio-2.5-tts',
     ];
     expect(REALES).toHaveLength(23);
-    for (const modelo of REALES) expect(guessModelFamily(modelo)).not.toBe('otros');
+    for (const modelo of REALES.filter((item) => item !== 'hy3')) {
+      expect(guessModelFamily(modelo)).not.toBe('otros');
+    }
   });
 });

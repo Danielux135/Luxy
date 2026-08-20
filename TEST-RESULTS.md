@@ -65,6 +65,12 @@ manuales. No transformar un fallo no ejecutado en «omitido».
 - Validación completa: `npm.cmd run check`: **exit 0**; lint, typecheck, build y **1.582 passed**, 9 skipped en 88 archivos.
 - Studio: reiniciado desde el paquete `apps/desktop` de `luxy/ux-001-detalle-trabajo`; la ventana **Luxy** está abierta con proceso `17020`. Pendiente confirmar `LA-021`.
 
+## 2026-08-20 — CATALOG-DETECTED-003
+
+- `npm.cmd test -- --run packages/shared/src/models/catalog-fetch.test.ts packages/shared/src/models/registry.test.ts`: **53 passed**, exit 0.
+- `npm.cmd run typecheck`: exit 0.
+- No hubo llamadas reales, push, despliegues ni migraciones.
+
 ### 2026-08-10 — Codex — F4.8-T4
 
 - Prueba añadida: `buildProviderPrompt` incluye instrucciones de continuación
