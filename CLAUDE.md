@@ -72,6 +72,11 @@ Las decisiones de Studio también pasan por el gateway: aplicar crea un commit
 en la rama aislada y descartar elimina el worktree. Ambas exigen confirmación;
 ninguna mezcla la rama principal ni hace `push`.
 
+Si un proyecto editable todavía no tiene `.git`, el agente crea `.gitignore`
+si falta, excluye secretos, dependencias y salidas generadas, y crea el commit
+local `estado inicial` sin remoto antes de preparar el worktree. Con
+`allowEdits: false` no se inicializa y permanece en solo lectura.
+
 Conversaciones reutiliza los trabajos y eventos persistentes: la metadata agrupa
 conversación, turno y columnas de comparación. Es un modo de solo lectura: no
 crea worktree, no concede herramientas y no ejecuta comprobaciones. Codex exige
@@ -219,6 +224,11 @@ Toda tarea que pueda modificar archivos corre en
 `%LOCALAPPDATA%\Luxy\worktrees\<id>-<timestamp>`, rama `luxy/<id>-<slug>`.
 **La carpeta de trabajo del usuario nunca se toca.** Los worktrees con cambios
 no se borran sin aprobación explícita.
+
+Studio también puede preparar el worktree antes del primer prompt, abrirlo para
+añadir contexto y reutilizar esa misma ruta en trabajos posteriores. La
+selección pertenece a una máquina y proyecto concretos; reutilizarla no crea
+otra rama ni otra carpeta.
 
 Si el proyecto no es un repo git: se permiten tareas de lectura y se rechazan
 las de edición, explicando cómo inicializarlo.

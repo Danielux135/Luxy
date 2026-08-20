@@ -1,5 +1,85 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-08-17 — Codex — GIT-CHECKPOINT-001
+
+- Estado anterior: `luxy/auto-init-git` estaba publicado en `1b01fc3`, con 44
+  archivos versionados modificados y 9 archivos nuevos del desarrollo posterior.
+- Objetivo: consolidar el checkpoint local autorizado por Daniel antes de
+  actualizar GitHub, sin incorporar la carpeta principal ni archivos sensibles.
+- Archivos revisados: código, pruebas, documentación y lanzadores del worktree
+  aislado; los archivos nuevos son políticas/pruebas de notificación y workspace,
+  catálogo compartido y cuatro lanzadores `.bat` documentados.
+- Comandos ejecutados: `gh auth status`, estado y remotos Git, comparación con
+  GitHub, `git diff --check`, búsqueda de patrones de secretos y `npm.cmd run check`.
+- Resultado real: GitHub conserva `1b01fc3`, pero no este checkpoint. El escaneo
+  sólo encontró credenciales ficticias en pruebas de redacción; no hay claves
+  reales en el alcance. Diff sin errores.
+- Pruebas: lint y typecheck correctos; 88 archivos, 1.594 pruebas pasadas,
+  9 omitidas y 0 fallos; build completo correcto.
+- Decisiones: Daniel autorizó el commit y pidió push. El commit se hace sólo en
+  `luxy/auto-init-git`. El push sigue sujeto a `allowPush: true` y a la segunda
+  confirmación obligatoria; la configuración actual deja `allowPush` sin definir.
+- Riesgos o límites: validaciones manuales `LA-024` y `LA-025` siguen pendientes;
+  no bloquean conservar el checkpoint, pero sí cerrar funcionalmente esas tareas.
+- Estado nuevo: checkpoint validado y autorizado para commit local.
+- Siguiente paso exacto: crear el commit; después, activar `allowPush` y pedir la
+  segunda confirmación antes de enviar la rama.
+
+### 2026-08-11 12:10 — Codex — F4.8-T5-GATEWAY-GUARD
+
+- Estado anterior: Studio mostraba una ruta preparada, pero el Gateway antiguo
+  eliminaba el campo y cada trabajo creaba otro worktree.
+- Evidencia: el log local muestra `LUX-8ZLC` a las 12:04 y la carpeta nueva
+  correspondiente; el agente sólo reutiliza cuando recibe
+  `resumeWorktreePath`.
+- Resultado: Desktop comprueba que la respuesta del Gateway conserva
+  exactamente la ruta solicitada. Si no, solicita cancelación y explica que hay
+  que ejecutar `deploy-gateway.bat`.
+- Archivos: `useStudio.ts` y prueba nueva de enlace de workspace.
+- Pruebas: focalizadas 107/107; suite 1.594 pasadas, 9 omitidas; lint, typecheck
+  y build correctos.
+- Siguiente paso: desplegar Gateway, reconstruir y repetir `LA-024`.
+
+### 2026-08-11 12:00 — Codex — UI-JOB-FOCUS
+
+- Estado anterior: tras finalizar un trabajo, la ventana seguía dibujando los
+  controles activos pero no aceptaba desplegables ni escritura.
+- Causa observada en código: cada final/fallo crea un toast nativo de Electron
+  incluso con la ventana enfocada; es el único efecto global del cierre y los
+  avisos aparecen en las capturas del fallo. Confirmación manual pendiente.
+- Archivos modificados: `apps/desktop/src/main/index.ts`, nueva política y su
+  prueba, y documentación de continuidad.
+- Resultado real: los toasts de trabajos se suprimen sólo cuando Luxy está
+  visible y enfocado; siguen activos en segundo plano.
+- Pruebas: focalizadas 34/34; suite 1.592 pasadas, 9 omitidas; lint, typecheck y
+  build completos correctos.
+- Riesgo: el bloqueo sólo puede darse por confirmado tras repetirlo en Electron
+  sobre Windows.
+- Siguiente paso exacto: `LA-025`.
+
+### 2026-08-11 11:42 — Codex — F4.8-T5
+
+- Estado anterior: cada tarea normal creaba otra carpeta; sólo un reintento de
+  fallo podía recuperar su worktree.
+- Objetivo: preparar la carpeta antes del prompt y reutilizarla en trabajos
+  sucesivos.
+- Causa demostrada: el contrato de creación no aceptaba un worktree elegido y
+  Desktop no tenía una operación local para prepararlo.
+- Archivos modificados: contratos shared/IPC, host y controlador del agente,
+  handlers de Desktop y Gateway, Studio, estilos, pruebas y documentación.
+- Resultado real: Studio prepara y abre una carpeta confinada, recuerda su
+  selección ligada a máquina/proyecto, la transporta al trabajo y permite
+  recuperar la ruta desde el historial. El agente reutiliza y protege el
+  contenido existente.
+- Pruebas: focalizadas 162/162; lint, typecheck, suite 1.590 pasadas y 9
+  omitidas, y build completo correctos.
+- Decisiones: sin migración; la ruta viaja en metadata existente. Conversaciones
+  y Laboratorio no admiten worktrees preparados.
+- Riesgos o límites: falta publicar Gateway y validación manual con proveedor;
+  no se hizo deploy, commit ni push.
+- Estado nuevo: implementado y verificado automáticamente.
+- Siguiente paso exacto: ejecutar `LA-024`.
+
 Registro cronológico y append-only. No reescribir una entrada anterior para que
 parezca correcta; añadir una corrección nueva.
 
@@ -12,6 +92,88 @@ parezca correcta; añadir una corrección nueva.
 - Validación automática: `npm.cmd run check` correcta, 1.582 pruebas pasadas y 9 omitidas; sin llamadas reales, push, despliegue ni migraciones.
 - Corrección del reinicio: el primer lanzamiento directo apuntó por error a la raíz del monorepo y Electron mostró «Unable to find Electron app». Se cerró ese proceso y se abrió correctamente el paquete `apps/desktop`.
 - Siguiente paso: completar la comprobación visual `LA-021`.
+
+### 2026-08-10 — Codex — F4.8-T4
+
+- Observación: el retry reanudaba la misma ruta y rama, pero el modelo recibía
+  otra vez el prompt original y comenzaba anunciando la llamada 1; después el
+  proveedor devolvía HTTP 503.
+- Cambio: `buildProviderPrompt` añade instrucciones específicas de continuación
+  cuando existe `resumeFromJobId` o `resumeWorktreePath`: inspeccionar el estado
+  Git, conservar archivos y commits y continuar sólo con la parte incompleta.
+- Archivos modificados: `apps/agent/src/job-runner.ts`,
+  `apps/agent/src/agent.test.ts` y esta documentación de continuidad.
+- Decisión: el reintento conserva un nuevo registro de auditoría, pero no se
+  pretende conservar automáticamente el contexto interno del proveedor; el
+  worktree y sus commits son la fuente de verdad.
+- Riesgo abierto: HTTP 503 sigue siendo un fallo transitorio de MiniMax; esta
+  mejora evita reiniciar el trabajo lógico, pero no puede reparar una caída del
+  proveedor.
+- Siguiente paso exacto: ejecutar las comprobaciones y reconstruir Desktop.
+
+### 2026-08-10 — Codex — F4.8-T4b
+
+- Observación: `LUX-H7SA` estaba cancelado con “Sin eventos todavía”; nunca
+  había reclamado un worktree, por lo que no podía reanudarse.
+- Cambio: Studio detecta la ausencia de `worktreePath` y crea un intento nuevo
+  desde el proyecto base; los trabajos que sí tienen worktree conservan el
+  flujo de reanudación.
+- Verificación: lint, typecheck, Desktop 328/328 pruebas y build pasados.
+
+### 2026-08-10 — Codex — F4.8-T4c
+
+- Observación: Kimi devolvió “paso 2” y una pregunta aunque la tarea pedía
+  completar la web en varias llamadas; Luxy lo clasificó como `completed` al no
+  haber otra herramienta solicitada.
+- Cambio: el prompt agentic exige continuar fases autónomas, no preguntar al
+  usuario y responder sólo tras crear y comprobar todos los requisitos.
+- Verificación: lint, typecheck, agente 76/76 pruebas y build de Desktop
+  pasados.
+- Riesgo: el modelo puede ignorar instrucciones; una validación semántica
+  universal de “web completa” requiere criterios específicos por tarea.
+
+### 2026-08-10 — Codex — F4.8-T4d
+
+- Observación: Qwen devolvió HTTP 429 por límite de frecuencia.
+- Cambio: las vueltas agentic reintentan ahora un 429 hasta tres intentos,
+  respetando `Retry-After` y mostrando el tiempo de espera como evento; no se
+  reintentan 401 ni errores con contenido parcial.
+- Verificación: lint, typecheck, providers 72/72 y build de Desktop pasados.
+
+### 2026-08-10 — Codex — F4.8-T1 — inicio
+
+- Estado anterior: una carpeta sin repositorio Git hacía fallar el trabajo editable antes de crear el worktree.
+- Objetivo: inicializar Git automáticamente cuando el proyecto permite edición y crear un baseline local seguro.
+- Hipótesis: el bloqueo de la captura pertenece a la comprobación `isGitRepository`; el soporte existente sólo cubre repositorios Git sin `HEAD`.
+- Archivos previstos: `apps/agent/src/git.ts`, `apps/agent/src/job-runner.ts`, pruebas del agente y documentación de seguridad/continuidad.
+- Decisión: la inicialización será sólo para `allowEdits: true`, sin remoto, con `.gitignore` creado únicamente si falta y commit local `estado inicial`.
+- Siguiente paso exacto: implementar y ejecutar la prueba focalizada.
+
+### 2026-08-10 — Codex — F4.8-T1 — implementación
+
+- Archivos modificados: `apps/agent/src/git.ts`, `apps/agent/src/job-runner.ts`, `apps/agent/src/agent.test.ts`, documentación de seguridad y continuidad.
+- Resultado real: un proyecto editable sin Git crea `.gitignore` si falta, ejecuta `git init`, excluye secretos/dependencias/salidas y crea `estado inicial` con identidad local de Luxy; después continúa por `createWorktree`.
+- Pruebas: `vitest run apps/agent/src/agent.test.ts` — **72/72 pasadas**; cubre `.env`, `node_modules`, archivos normales y mensaje del commit. `npm run lint` pasó. `typecheck` falló antes de compilar por falta de `@cloudflare/workers-types`; suite completa y build quedan pendientes.
+- Decisiones: no se crea remoto; `.gitignore` existente nunca se sobrescribe; `allowEdits: false` sigue sin inicializar nada.
+- Estado nuevo: implementado; verificación completa bloqueada por dependencia ambiental.
+- Siguiente paso exacto: instalar/restaurar las dependencias autorizadas, reconstruir Desktop/agente y probar el flujo real en un proyecto no-Git.
+
+### 2026-08-10 — Codex — F4.8-T2
+
+- Estado anterior: **Reintentar trabajo** creaba otro trabajo y otro worktree, perdiendo el contexto de la página ya escrita.
+- Cambio: Studio envía `resumeJobId`; Gateway valida propietario, máquina, proyecto, proveedor, modelo, prompt y estado terminal. El agente valida la ruta bajo `%LOCALAPPDATA%\Luxy\worktrees`, su pertenencia al repositorio base y la rama `luxy/...`, y reanuda el worktree.
+- Archivos modificados: `packages/shared/src/schemas.ts`, `apps/gateway/src/handlers/studio.ts`, `apps/desktop/src/renderer/pages/Studio.tsx`, `apps/agent/src/git.ts`, `apps/agent/src/job-runner.ts`, `apps/agent/src/agent.test.ts`.
+- Resultado real: implementado; el nuevo registro audita el intento, pero la ejecución continúa en la misma página/rama.
+- Pruebas: nueva prueba de reanudación añadida; matriz completa pendiente por dependencia `@cloudflare/workers-types` ausente.
+- Siguiente paso exacto: restaurar dependencias, ejecutar `npm run check` y validar manualmente el reintento de `LUX-L9CC`.
+
+### 2026-08-10 — Codex — F4.8-T3
+
+- Observación: el primer intento con auto-inicialización falló con `ENOENT` al escribir `C:\Users\daniel\Desktop\test\.gitignore`.
+- Causa demostrada: la ruta configurada no existe en este portátil.
+- Cambio: `ensureGitRepository` valida existencia y tipo de carpeta antes de escribir y devuelve un `GitError` accionable.
+- Prueba añadida: ruta inexistente identificada como tal.
+- Siguiente paso exacto: seleccionar la carpeta real del proyecto en Ajustes y reconstruir el agente con este cambio.
 
 ## Historial consolidado anterior al protocolo
 
@@ -1750,3 +1912,173 @@ controlada`; 23 archivos, T9/T10 y F4.4-T1/T2. `package-lock.json`, claves,
   renderer, GPU y utility process de la rama nueva quedaron vivos.
 - No se hizo push ni despliegue. La métrica de llamadas requerirá actualizar el
   Gateway antes de poder guardarse en trabajos nuevos de producción.
+
+### 2026-08-10 10:08 — Codex — F4.8-T2-DEPLOY
+
+- Estado anterior: Desktop reconstruido y ejecutándose desde el worktree; el
+  Gateway desplegado todavía no aceptaba `resumeJobId`.
+- Objetivo: publicar el contrato de reanudación necesario para reutilizar el
+  mismo worktree tras un fallo del proveedor.
+- Hipótesis o causa demostrada: un Desktop nuevo contra un Gateway antiguo
+  perdería `resumeJobId` y crearía otro worktree.
+- Archivos leídos: `PROJECT-STATE.md`, `CURRENT-TASK.md`, `LOCAL-ACTIONS.md`,
+  `apps/gateway/package.json`, `apps/gateway/src/handlers/studio.ts` y
+  `packages/shared/src/schemas.ts`.
+- Archivos modificados: sólo documentación de continuidad.
+- Comandos ejecutados: build de Gateway, Vitest sobre Gateway/shared, dry-run
+  de Wrangler, despliegue autorizado y petición pública a `/health`.
+- Resultado real: Worker `luxy-gateway` desplegado en la versión
+  `33da28e0-4a72-4c0b-8661-50d1cc838dec`; `/health` respondió HTTP 200 con
+  `configured: true`.
+- Pruebas: build exit 0; 37 archivos y 641 pruebas pasadas, 0 fallos; dry-run
+  final exit 0.
+- Decisiones: conservar variables remotas con `--keep-vars`, el flag
+  `nodejs_compat` y el cron de un minuto; sin migraciones ni cambios de secretos.
+- Riesgos o límites: falta la validación manual de `LA-022`; no existe todavía
+  una prueba Gateway específica de `resumeJobId`.
+- Estado nuevo: Gateway y Desktop actualizados; validación manual pendiente.
+- Siguiente paso exacto: repetir `LUX-L9CC` desde **Reintentar trabajo** y
+  comprobar que conserva ruta y rama sin crear otro worktree.
+
+### 2026-08-10 10:25 — Codex — F4.8-T2-TIMEOUT-RESTART
+
+- Estado anterior: Gateway desplegado con `resumeJobId`; Desktop podía seguir
+  usando una instancia anterior del agente con timeout fijo de cinco minutos.
+- Objetivo: cerrar la instancia anterior, reconstruir el agente/Proveedor y
+  Desktop desde `lux-auto-init-git`, actualizar el Gateway y arrancar la copia
+  nueva.
+- Archivos modificados: ninguno por esta acción; se usó el código existente del
+  worktree. Se actualiza sólo esta documentación de continuidad.
+- Comandos ejecutados: `npm.cmd run build`; despliegue Wrangler conservando
+  variables remotas; smoke check de `/health`; arranque del binario Electron con
+  `apps/desktop` del worktree.
+- Resultado real: build exit 0; Worker `luxy-gateway` desplegado como versión
+  `a5cb5ba8-34d9-4cca-85ba-e02f95e3942f`; `/health` respondió HTTP 200 y
+  `configured: true`; Desktop abierto y apuntando a `lux-auto-init-git`.
+- Pruebas: `git diff --check` sin errores; no se inició ningún trabajo real.
+- Decisiones: no pulsar **Reintentar** hasta este despliegue; sin migraciones,
+  commit ni push.
+- Riesgos o límites: queda pendiente la validación manual de que MiniMax supera
+  cinco minutos y de que el reintento conserva exactamente la misma ruta y rama.
+- Estado nuevo: Desktop, agente y Gateway actualizados y ejecutándose.
+- Siguiente paso exacto: ejecutar manualmente `LA-022` sobre `LUX-L9CC`.
+
+### 2026-08-11 — Codex — OPS-BAT-LAUNCHERS
+
+- Objetivo: ofrecer reconstrucción y arranque de Luxy por doble clic, siempre
+  relativos a la raíz del worktree operativo.
+- Archivos modificados: `rebuild-luxy.bat`, `start-luxy.bat`,
+  `rebuild-and-start-luxy.bat` y `README.md`.
+- Resultado real: los lanzadores usan `%~dp0`, limpian `ELECTRON_RUN_AS_NODE`,
+  comprueban la salida de Desktop y localizan Electron en el worktree con
+  fallback a la instalación principal.
+- Pruebas: `rebuild-luxy.bat no-pause` ejecutado con exit 0; build completo
+  correcto. `git diff --check` sin errores.
+- Siguiente paso exacto: usar `rebuild-and-start-luxy.bat` tras cambios y
+  `start-luxy.bat` para abrir sin reconstruir.
+
+### 2026-08-11 — Codex — UI-LAB-LAYOUT
+
+- Estado anterior: en Laboratorio, la lista horizontal genérica repartía título,
+  métricas, checks y evidencia como columnas equivalentes. Los títulos quedaban
+  reducidos a pocas letras por línea y se superponían con el resto del contenido.
+- Objetivo: ordenar resultados guardados y comparaciones sin perder información
+  y mantener una lectura coherente en ventanas estrechas.
+- Archivos modificados: `apps/desktop/src/renderer/pages/Laboratory.tsx` y
+  `apps/desktop/src/renderer/styles.css`.
+- Resultado real: cada resultado tiene cabecera, etiquetas, métricas, motivo y
+  evidencia en filas propias; las métricas envuelven sin invadir el título. Los
+  miembros A/B usan una cuadrícula de dos columnas que cae a una sola columna
+  por debajo de 920 px.
+- Pruebas: Prettier aplicado; lint y typecheck exit 0; Desktop 328/328; build
+  completo exit 0; `git diff --check` sin errores.
+- Estado nuevo: implementado, verificado automáticamente, Desktop reconstruido y
+  reiniciado desde `lux-auto-init-git`.
+- Siguiente paso exacto: confirmación visual manual en Resultados guardados y
+  Comparaciones controladas.
+
+### 2026-08-11 — Codex — UI-LAB-LAYOUT-FOLLOWUP
+
+- Evidencia manual: la primera corrección aún alineaba las etiquetas de cada
+  modelo hacia el centro de la columna izquierda, distinta de la composición de
+  Evidencia descriptiva indicada como referencia.
+- Corrección: estados y validación quedan justo debajo del nombre del modelo y
+  alineados al mismo borde izquierdo; las métricas conservan su columna derecha.
+- Archivos modificados: `apps/desktop/src/renderer/styles.css`.
+- Pruebas: Prettier check, lint y build de Desktop exit 0; `git diff --check`
+  sin errores. Desktop reiniciado.
+- Siguiente paso exacto: confirmación visual manual con la segunda captura como
+  referencia.
+
+### 2026-08-11 10:01 — Codex — F4.3-T11
+
+- Estado anterior: Modelos persistía una lectura real de 23 identificadores,
+  pero Laboratorio y Conversaciones seguían usando el catálogo estático de 22.
+- Objetivo: hacer canónico el snapshot detectado en todas las pantallas que
+  ofrecen modelos y representar correctamente el cierre fallido.
+- Causa demostrada: `Laboratory.tsx` y `Conversations.tsx` llamaban directamente
+  a `buildDefaultCatalog`; Laboratorio sólo releía al montar o al pulsar
+  Actualizar; la vista llamaba «Tiempo de respuesta» a `durationMs` incluso con
+  `responseOutcome: failed`. Los logs de `LUX-LR82` y `LUX-TQC3` confirmaron dos
+  503 contra los Qwen retirados.
+- Archivos modificados: catálogo, familias/proveedores, pruebas de registry,
+  router, Telegram y agente; `useCatalog.ts`; páginas Modelos, Laboratorio,
+  Conversaciones y Setup; documentación de continuidad y modelos.
+- Comandos ejecutados: pruebas focalizadas, Prettier y `npm.cmd run check`.
+- Resultado real: el snapshot persistido sustituye la lista operativa; Hy3 se
+  agrupa y ejecuta como Hunyuan; el embedding queda visible pero no ejecutable;
+  Laboratorio refresca cada 5 s sólo mientras haya activos y etiqueta la
+  duración según el final. «Par completo» pasa a «Par terminado».
+- Pruebas: lint, typecheck y build correctos; 85 archivos, 1.581 pasadas, 9
+  omitidas, 0 fallos.
+- Decisiones: un identificador desconocido se conserva visible con capacidades
+  vacías; nunca hereda chat o herramientas por heurística.
+- Riesgos o límites: falta reiniciar y confirmar visualmente; no se realizó una
+  llamada real, deploy, commit ni push.
+- Estado nuevo: implementado y verificado automáticamente.
+- Siguiente paso exacto: reiniciar Luxy y comprobar selectores y refresco.
+
+### 2026-08-11 10:44 — Codex — OPS-GATEWAY-BAT
+
+- Objetivo: permitir que Daniel despliegue manualmente el contrato actualizado
+  del Gateway sin migraciones ni edición de secretos.
+- Archivos modificados: `deploy-gateway.bat`, `README.md`, `LOCAL-ACTIONS.md` y
+  documentación de continuidad.
+- Resultado real: el lanzador compila Shared/Gateway, crea una configuración
+  TOML temporal desde la plantilla, ejecuta dry-run, exige escribir `DESPLEGAR`,
+  publica con `--keep-vars` y elimina la configuración temporal.
+- Pruebas: el primer `check` falló porque Wrangler no interpreta `.toml.example`
+  como configuración; se corrigió. Segundo `check`: exit 0, bundle 468,11 KiB,
+  gzip 105,68 KiB; no se desplegó nada y el TOML temporal fue eliminado.
+- Estado nuevo: lanzador manual verificado sin publicación.
+- Siguiente paso exacto: Daniel ejecuta `deploy-gateway.bat` y confirma
+  escribiendo `DESPLEGAR`.
+
+### 2026-08-11 10:47 — Codex — OPS-MAIN-LAUNCHERS
+
+- Objetivo: concentrar los accesos manuales en `Desktop\Luxy` sin volver a
+  ejecutar por error el checkout distinto del que usa la aplicación.
+- Resultado real: los cuatro `.bat` de la carpeta principal delegan en
+  `%LOCALAPPDATA%\Luxy\worktrees\lux-auto-init-git` y fallan con un mensaje
+  claro si ese worktree no existe.
+- Pruebas: `deploy-gateway.bat check` lanzado desde la carpeta principal; exit
+  0, compilación y dry-run correctos, sin despliegue.
+- Siguiente paso exacto: usar desde ahora únicamente los accesos de la carpeta
+  principal.
+
+### 2026-08-11 11:09 — Codex — UI-LAB-CONFIRM
+
+- Evidencia manual: después de aceptar una evaluación, toda la ventana de
+  Electron dejaba de responder a desplegables, incluso fuera de Laboratorio.
+- Causa probable acotada: Laboratorio usaba `window.confirm()`, diálogo
+  bloqueante del renderer; no había ningún `disabled` global ni capa CSS activa.
+- Corrección: ejecución y cancelación usan ahora un diálogo React propio que se
+  desmonta antes de crear/cancelar el trabajo; se eliminaron los dos
+  `window.confirm()` de Laboratorio.
+- Archivos modificados: `Laboratory.tsx` y `styles.css`.
+- Pruebas: 20 focalizadas pasadas; matriz completa con lint, typecheck y build
+  correctos; 1.581 pasadas, 9 omitidas y 0 fallos.
+- Riesgo: falta confirmación manual porque las pruebas no reproducen la gestión
+  de foco de una ventana Electron real.
+- Siguiente paso exacto: reconstruir/reiniciar y ejecutar una prueba; al cerrar
+  el diálogo y terminar, comprobar desplegables en Laboratorio y Trabajos.

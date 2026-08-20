@@ -45,7 +45,14 @@ import {
   detectManifestChanges,
   describeManifestChanges,
 } from './tools/manifest-guard.js';
-import { createWorktree, collectDiff, isGitRepository, type Worktree } from './git.js';
+import {
+  createWorktree,
+  collectDiff,
+  ensureGitRepository,
+  isGitRepository,
+  resumeWorktree,
+  type Worktree,
+} from './git.js';
 import { hostChecksBlockedReason, runProjectTests, summarizeTests } from './test-runner.js';
 import type { AgentLogger } from './logger.js';
 import { describeError } from './logger.js';
@@ -235,10 +242,31 @@ export function buildProviderPrompt(job: ClaimedJob): string {
   }
 
   parts.push('Tarea solicitada:', job.prompt);
+
+  const resumedFromJob = job.metadata['resumeFromJobId'];
+  const resumedWorktree = job.metadata['resumeWorktreePath'];
+  if (
+    (typeof resumedFromJob === 'string' && resumedFromJob.trim().length > 0) ||
+    (typeof resumedWorktree === 'string' && resumedWorktree.trim().length > 0)
+  ) {
+    parts.push(
+      '',
+      'ESPACIO DE TRABAJO EXISTENTE:',
+      'Este worktree fue preparado antes de la llamada o ya se uso en una ejecucion anterior.',
+      'No empieces el proyecto desde cero, no borres ni reemplaces lo que ya existe y no repitas las partes terminadas.',
+      'Primero usa git_status y lee los archivos relevantes para identificar que quedo hecho.',
+      'Continua solo con la siguiente parte incompleta de la tarea y conserva la estructura existente.',
+    );
+  }
+
   parts.push(
     '',
     'Trabajas dentro de un worktree de git aislado. No salgas de este directorio.',
     'No ejecutes git push. No despliegues nada. No modifiques credenciales.',
+    'La tarea es autonoma: no preguntes al usuario que hacer despues si el prompt ya contiene una peticion concreta.',
+    'Si el prompt pide varias llamadas, varias partes o completar una entrega, no termines despues de una sola fase.',
+    'Continua usando las herramientas y las llamadas a la API hasta cumplir todos los requisitos explicitos.',
+    'Solo responde que has terminado cuando hayas creado y comprobado todos los archivos solicitados; no cierres con una pregunta ni con una lista de trabajo pendiente.',
   );
 
   return parts.join('\n');
@@ -535,12 +563,27 @@ export async function runJob(
     const conversation = isStudioConversation(job);
     const evaluation = isStudioEvaluation(job);
     const readOnlyStudioRun = conversation || evaluation;
-    const isRepository = readOnlyStudioRun ? false : await isGitRepository(project.path);
+    let isRepository = false;
+    if (!readOnlyStudioRun && project.allowEdits) {
+      const prepared = await ensureGitRepository(project.path);
+      isRepository = true;
+      if (prepared.initialized) {
+        deps.emit('phase', 'inicializando repositorio Git');
+        deps.emit(
+          'log',
+          prepared.createdGitignore
+            ? 'repositorio Git creado con .gitignore y commit "estado inicial"'
+            : 'repositorio Git creado con commit "estado inicial"',
+        );
+      }
+    } else if (!readOnlyStudioRun) {
+      isRepository = await isGitRepository(project.path);
+    }
     const canEdit = !readOnlyStudioRun && project.allowEdits && isRepository;
 
     if (!readOnlyStudioRun && !isRepository) {
       if (project.allowEdits) {
-        // sin git no hay aislamiento posible: se rechaza editar y se explica
+        // esta rama sólo queda para una comprobación inconsistente del proyecto
         return {
           kind: 'failed',
           errorMessage: [
@@ -562,15 +605,22 @@ export async function runJob(
     // 4. crear el worktree aislado
     let workingDirectory = project.path;
     if (canEdit) {
-      deps.emit('phase', 'creando worktree aislado');
-      worktree = await createWorktree(
-        project.path,
-        job.shortId,
-        job.prompt,
-        deps.worktreesDirectory,
-      );
+      const resumePath = job.metadata['resumeWorktreePath'];
+      if (typeof resumePath === 'string' && resumePath.length > 0) {
+        deps.emit('phase', 'reanudando worktree aislado');
+        worktree = await resumeWorktree(project.path, resumePath, deps.worktreesDirectory);
+        deps.emit('log', `worktree reanudado en ${worktree.path} (rama ${worktree.branch})`);
+      } else {
+        deps.emit('phase', 'creando worktree aislado');
+        worktree = await createWorktree(
+          project.path,
+          job.shortId,
+          job.prompt,
+          deps.worktreesDirectory,
+        );
+        deps.emit('log', `worktree en ${worktree.path} (rama ${worktree.branch})`);
+      }
       workingDirectory = worktree.path;
-      deps.emit('log', `worktree en ${worktree.path} (rama ${worktree.branch})`);
     }
 
     if (signal.aborted) {

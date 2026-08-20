@@ -7,6 +7,30 @@ compatibilidad ya desarrollada para el historial de proveedores. La lectura de
 trabajos admite identificadores seguros externos; crear, reintentar y continuar
 siguen acotados a proveedores reconocidos. No se realizó despliegue ni migración.
 
+Actualización 2026-08-11: `F4.8-T5` implementado. Studio puede crear y abrir un
+worktree antes de una tarea, recordar el seleccionado y reutilizarlo en llamadas
+posteriores sin perder archivos. El contrato de Gateway necesita publicación
+manual y la interfaz necesita reconstrucción para la validación real.
+
+Última actualización: **2026-08-10**
+
+Actualización 2026-08-10: `F4.8-T4` implementado. Cuando un retry reutiliza el
+worktree, el prompt del agente marca explícitamente la ejecución como
+continuación y le ordena inspeccionar y conservar los archivos existentes. La
+prueba y la reconstrucción de Desktop quedan pendientes en este checkpoint.
+
+Actualización 2026-08-10: `F4.8-T1` implementado. Los proyectos con
+`allowEdits: true` que aún no tienen Git se inicializan automáticamente con un
+`.gitignore` seguro y el commit local `estado inicial`, sin remoto; después el
+trabajo usa el worktree aislado habitual. `allowEdits: false` sigue siendo sólo
+lectura. Prueba focalizada 72/72; typecheck pendiente por dependencia ausente.
+
+`F4.8-T2` implementado y desplegado: un reintento agentic conserva un nuevo
+registro, pero Gateway y agente validan y reutilizan el mismo worktree y rama.
+Una web parcial continúa desde sus archivos, no desde el proyecto base. Gateway
+`a5cb5ba8-34d9-4cca-85ba-e02f95e3942f`, `/health` HTTP 200; Desktop y agente
+reconstruidos con timeout ampliado; falta validación manual.
+
 Estado documental: **checkpoint reconciliado en Windows; `F4.1-T4/T5`,
 `F4.2-T1/T2/T3` y `F4.3-T1`–`F4.3-T8` verificados y commiteados localmente;
 `F4.3-T9/T10` y `F4.4-T1/T2` commiteados en `3771549`; `F4.4-T3` y `F4.5/F4.6`
@@ -45,8 +69,9 @@ Restricciones:
   pagan ni se integran sus APIs.
 - No automatizar las webs de Claude o ChatGPT.
 - No usar `--dangerously-skip-permissions` ni equivalentes.
-- No tocar la carpeta original de un proyecto: toda edición ocurre en un
-  worktree aislado.
+- El modelo sólo edita en un worktree aislado; al primer trabajo editable Luxy
+  puede crear en la carpeta original el `.git` y el commit local `estado
+inicial` necesarios para disponer de ese aislamiento.
 - No commit sin aprobación explícita de Daniel.
 - No push sin dos confirmaciones y `allowPush: true`.
 - No desplegar ni aplicar migraciones reales sin autorización explícita.
@@ -129,7 +154,7 @@ necesario.
 | Agente, gateway y cola | Implementado              | polling saliente, leases, heartbeats, eventos y cancelación                                       |
 | Desktop Electron       | Implementado              | agente en utility process, bandeja, configuración y secretos cifrados                             |
 | Studio — trabajos      | Implementado en código    | formulario real, historial, eventos, resultado, diff, pruebas y trazabilidad de llamadas/worktree |
-| Worktrees              | Implementado              | la carpeta original no se modifica                                                                |
+| Worktrees              | Implementado              | la carpeta original no se modifica; el primer trabajo puede preparar Git en un proyecto sin repositorio |
 | Aplicar/descartar      | Implementado en código    | aplicar crea commit aislado; descartar borra worktree tras confirmar; sin push                    |
 | Conversaciones         | Implementado parcialmente | uno o dos modelos, streaming, historial, tiempos, tokens y cancelación                            |
 | Diagnóstico del final  | Implementado y verificado | señal de transporte, aborto, límites efectivos y tokens; sin contenido                            |
@@ -139,7 +164,7 @@ necesario.
 | Continuación           | Implementado              | unión con evidencia y aviso cuando no la hay; el parcial viaja como dato                          |
 | Cancelación            | Implementado              | conserva lo generado como resultado; no ofrece continuar ni escribe memoria                       |
 | Feedback               | Arreglo preparado         | el primer clic usa la respuesta del gateway; falta confirmación manual final                      |
-| Proveedores/modelos    | Implementado; validar     | 22 modelos reales; sin sondeo de precios; evidencia local paginada hasta 1.000 trabajos           |
+| Proveedores/modelos    | Implementado; validar     | 23 modelos reales; el snapshot detectado alimenta las pantallas operativas; sin sondeo de precios |
 | Laboratorio            | Implementado; validar     | catálogo, ejecución individual/par, persistencia, evidencia, comparación y recomendación prudente |
 | Errores de proveedor   | Implementado y verificado | límite de plan y 429 explicados; se obedece `Retry-After`; intentos reales                        |
 | Telegram               | Conservado                | canal secundario                                                                                  |
@@ -397,7 +422,7 @@ el Gateway con autorización para que los trabajos nuevos persistan la métrica.
 No cambia los trabajos anteriores ni crea migraciones.
 
 `F4.1-T4` cerró la discrepancia entre la instantánea real y el catálogo
-operativo: `buildDefaultCatalog` representa ya los 22 modelos declarados por la
+operativo: el snapshot persistido representa los 23 modelos declarados por la
 pasarela el 2026-08-07. Los tres incorporados conservan un contrato mínimo y no
 reciben herramientas ni aliases implícitos.
 

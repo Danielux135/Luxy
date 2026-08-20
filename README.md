@@ -38,21 +38,21 @@ Las claves se guardan **cifradas** con tu cuenta de Windows y no vuelven a pedir
 
 ### Documentación
 
-| Documento                                     | De qué trata                                          |
-| --------------------------------------------- | ----------------------------------------------------- |
-| [PROJECT-STATE.md](PROJECT-STATE.md)          | estado canónico, incidencias y checkpoint actual      |
-| [CURRENT-TASK.md](CURRENT-TASK.md)            | siguiente bloque de trabajo sin rehacer investigación |
-| [MASTER-PLAN.md](MASTER-PLAN.md)              | fases, prioridades y criterios de aceptación          |
-| [DECISIONS.md](DECISIONS.md)                  | decisiones vinculantes y su motivo                    |
-| [AI-WORK-PROTOCOL.md](AI-WORK-PROTOCOL.md)    | relevo y documentación entre Claude y Codex           |
-| [DESKTOP.md](docs/DESKTOP.md)                 | la aplicación, su arquitectura y su seguridad         |
-| [INSTALLATION.md](docs/INSTALLATION.md)       | instalar y configurar                                 |
-| [ARRANQUE-ORDENADOR-NUEVO.md](docs/ARRANQUE-ORDENADOR-NUEVO.md) | levantar el entorno completo desde un clon limpio |
-| [MODELS.md](docs/MODELS.md)                   | catálogo, alias y qué funciona de verdad              |
-| [AGENT_TOOLS.md](docs/AGENT_TOOLS.md)         | las herramientas, el confinamiento y las aprobaciones |
-| [SECURITY.md](docs/SECURITY.md)               | modelo de amenazas                                    |
-| [TELEGRAM.md](docs/TELEGRAM.md)               | comandos                                              |
-| [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | qué hacer cuando algo falla                           |
+| Documento                                                       | De qué trata                                          |
+| --------------------------------------------------------------- | ----------------------------------------------------- |
+| [PROJECT-STATE.md](PROJECT-STATE.md)                            | estado canónico, incidencias y checkpoint actual      |
+| [CURRENT-TASK.md](CURRENT-TASK.md)                              | siguiente bloque de trabajo sin rehacer investigación |
+| [MASTER-PLAN.md](MASTER-PLAN.md)                                | fases, prioridades y criterios de aceptación          |
+| [DECISIONS.md](DECISIONS.md)                                    | decisiones vinculantes y su motivo                    |
+| [AI-WORK-PROTOCOL.md](AI-WORK-PROTOCOL.md)                      | relevo y documentación entre Claude y Codex           |
+| [DESKTOP.md](docs/DESKTOP.md)                                   | la aplicación, su arquitectura y su seguridad         |
+| [INSTALLATION.md](docs/INSTALLATION.md)                         | instalar y configurar                                 |
+| [ARRANQUE-ORDENADOR-NUEVO.md](docs/ARRANQUE-ORDENADOR-NUEVO.md) | levantar el entorno completo desde un clon limpio     |
+| [MODELS.md](docs/MODELS.md)                                     | catálogo, alias y qué funciona de verdad              |
+| [AGENT_TOOLS.md](docs/AGENT_TOOLS.md)                           | las herramientas, el confinamiento y las aprobaciones |
+| [SECURITY.md](docs/SECURITY.md)                                 | modelo de amenazas                                    |
+| [TELEGRAM.md](docs/TELEGRAM.md)                                 | comandos                                              |
+| [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)                   | qué hacer cuando algo falla                           |
 
 ## 2. Qué puede hacer
 
@@ -120,6 +120,11 @@ npm run demo
 `npm run demo` simula un trabajo completo (worktree, proveedor, pruebas, diff)
 **sin consumir ninguna API ni credencial**.
 
+En **Trabajos**, «Preparar carpeta» crea el worktree antes de enviar el prompt.
+Puedes abrirlo, añadir archivos de contexto y mantenerlo seleccionado para
+varios trabajos. Desde el detalle de cualquier trabajo también puedes elegir
+«Continuar en este worktree».
+
 ## 6. Configuración de Telegram
 
 1. Habla con [@BotFather](https://t.me/BotFather) y usa `/newbot`.
@@ -179,6 +184,11 @@ Despliega y registra el webhook:
 ```powershell
 npx wrangler deploy
 ```
+
+En Windows también puedes ejecutar `deploy-gateway.bat`. Primero compila y hace
+un dry-run; sólo despliega después de escribir `DESPLEGAR`. Conserva variables y
+secretos remotos y nunca aplica migraciones. `deploy-gateway.bat check` realiza
+únicamente las comprobaciones.
 
 Detalle en [docs/CLOUDFLARE.md](docs/CLOUDFLARE.md).
 
@@ -258,6 +268,19 @@ porque esos valores cambian con el tiempo):
 O haz **doble clic** en `scripts\start-luxy.cmd`.
 
 Deja ese ordenador encendido. Detén Luxy con `Ctrl+C`.
+
+### Atajos sin terminal para Luxy Studio
+
+En la raíz del worktree de Studio hay tres archivos para abrir con doble clic:
+
+- `rebuild-luxy.bat`: reconstruye todos los paquetes.
+- `start-luxy.bat`: abre el Desktop ya reconstruido desde esta carpeta.
+- `rebuild-and-start-luxy.bat`: reconstruye y después abre Luxy.
+
+Usa `rebuild-and-start-luxy.bat` después de cambiar código del agente, Desktop,
+Gateway o `packages/shared`. Usa `start-luxy.bat` cuando no haya cambios y sólo
+quieras volver a abrir el programa. Los archivos calculan su propia ubicación,
+por lo que no dependen de la carpeta actual de Windows.
 
 ## 17. Autoarranque opcional
 

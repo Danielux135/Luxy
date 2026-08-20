@@ -3,13 +3,20 @@
 // la CLI y el proceso de escritorio usan exactamente este host: uno lo espera
 // con waitUntilStopped(), el otro lo maneja desde la bandeja. asi no hay dos
 // implementaciones del arranque que puedan divergir.
-import type { AgentConfig, AgentEvent, AgentEventSink, AgentHostStatus, AgentRunState } from '@luxy/shared';
-import { redact } from '@luxy/shared';
+import type {
+  AgentConfig,
+  AgentEvent,
+  AgentEventSink,
+  AgentHostStatus,
+  AgentRunState,
+} from '@luxy/shared';
+import { generateShortId, redact } from '@luxy/shared';
 import { randomUUID } from 'node:crypto';
 import { LuxyAgent } from '../agent.js';
 import { executeApproval, auditFilePath } from '../approvals.js';
 import { worktreesDir, logsDir } from '../paths.js';
 import { type AgentLogger, describeError } from '../logger.js';
+import { createWorktree, ensureGitRepository } from '../git.js';
 
 export interface AgentHostOptions {
   logger: AgentLogger;
@@ -69,7 +76,11 @@ export class AgentHost {
 
   private setRunState(next: AgentRunState): void {
     this.runState = next;
-    this.publish({ type: 'status.updated', at: new Date().toISOString(), status: this.getStatus() });
+    this.publish({
+      type: 'status.updated',
+      at: new Date().toISOString(),
+      status: this.getStatus(),
+    });
   }
 
   getStatus(): AgentHostStatus {
@@ -84,7 +95,11 @@ export class AgentHost {
   updateConfig(config: AgentConfig | null, providerKeys?: Record<string, string>): void {
     this.config = config;
     if (providerKeys) this.providerKeys = providerKeys;
-    this.publish({ type: 'status.updated', at: new Date().toISOString(), status: this.getStatus() });
+    this.publish({
+      type: 'status.updated',
+      at: new Date().toISOString(),
+      status: this.getStatus(),
+    });
   }
 
   /** encola una transicion para que no se solapen dos ordenes */
@@ -196,6 +211,24 @@ export class AgentHost {
       message: outcome.message,
     });
     return { ok: outcome.ok, message: outcome.message };
+  }
+
+  async prepareWorktree(
+    projectAlias: string,
+    label: string,
+  ): Promise<{ projectAlias: string; path: string; branch: string }> {
+    if (this.config === null) throw new AgentNotConfiguredError();
+    const project = this.config.projects[projectAlias];
+    if (project === undefined) throw new Error('el proyecto no existe en esta maquina');
+    if (!project.allowEdits) throw new Error('el proyecto no permite crear espacios editables');
+    await ensureGitRepository(project.path);
+    const worktree = await createWorktree(
+      project.path,
+      generateShortId(),
+      label,
+      this.options.worktreesDirectory ?? worktreesDir(),
+    );
+    return { projectAlias, path: worktree.path, branch: worktree.branch };
   }
 
   /** espera hasta que el agente se detenga. lo usa la CLI */

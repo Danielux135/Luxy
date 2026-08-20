@@ -17,6 +17,8 @@ import {
   worktreeOpenFolderArgsSchema,
   studioJobActionArgsSchema,
   studioJobsListArgsSchema,
+  workspaceOpenArgsSchema,
+  workspacePrepareArgsSchema,
 } from './ipc.js';
 
 describe('canales IPC', () => {
@@ -80,7 +82,7 @@ describe('validacion de argumentos', () => {
     expect(pickFolderArgsSchema.safeParse({ title: 'x'.repeat(500) }).success).toBe(false);
   });
 
-  it('admite solo una ruta acotada para abrir un worktree', () => {
+  it('valida las rutas cerradas para abrir y preparar worktrees', () => {
     expect(
       worktreeOpenFolderArgsSchema.safeParse({ worktreePath: 'C:/Luxy/worktrees/lux-1' }).success,
     ).toBe(true);
@@ -88,6 +90,13 @@ describe('validacion de argumentos', () => {
     expect(worktreeOpenFolderArgsSchema.safeParse({ worktreePath: 'x'.repeat(2000) }).success).toBe(
       false,
     );
+    expect(
+      workspacePrepareArgsSchema.safeParse({ projectAlias: 'luxy', label: 'mi espacio' }).success,
+    ).toBe(true);
+    expect(workspacePrepareArgsSchema.safeParse({ projectAlias: '', label: '' }).success).toBe(
+      false,
+    );
+    expect(workspaceOpenArgsSchema.safeParse({ path: 'C:/Luxy/worktrees/uno' }).success).toBe(true);
   });
 
   it('la prueba de conexion no admite una URL elegida por el renderer', () => {
@@ -169,6 +178,23 @@ describe('protocolo con el proceso del agente', () => {
         ok: true,
         error: null,
         status: { runState: 'running', agent: null, lastError: null },
+      }).success,
+    ).toBe(true);
+  });
+
+  it('transporta el worktree preparado en el ack correlacionado', () => {
+    expect(
+      hostResponseSchema.safeParse({
+        type: 'ack',
+        requestId: 'preparar-1',
+        ok: true,
+        error: null,
+        status: null,
+        workspace: {
+          projectAlias: 'luxy',
+          path: 'C:/Luxy/worktrees/uno',
+          branch: 'luxy/lux-abcd-mi-espacio',
+        },
       }).success,
     ).toBe(true);
   });

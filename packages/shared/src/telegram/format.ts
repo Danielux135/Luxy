@@ -37,7 +37,9 @@ export function formatDuration(ms: number): string {
   const minutes = Math.floor((totalSeconds % 3600) / 60);
   const seconds = totalSeconds % 60;
   const pad = (value: number): string => String(value).padStart(2, '0');
-  return hours > 0 ? `${pad(hours)}:${pad(minutes)}:${pad(seconds)}` : `${pad(minutes)}:${pad(seconds)}`;
+  return hours > 0
+    ? `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`
+    : `${pad(minutes)}:${pad(seconds)}`;
 }
 
 /** escapa los caracteres reservados de MarkdownV2 de telegram */
@@ -112,7 +114,11 @@ export function renderJobCreated(data: JobCardData): string {
     `Estado: ${STATUS_LABELS[data.status]}`,
   ];
   if (data.routerReason) {
-    lines.push('', `Proveedor elegido: ${PROVIDER_LABELS[data.provider]}`, `Motivo: ${data.routerReason}`);
+    lines.push(
+      '',
+      `Proveedor elegido: ${PROVIDER_LABELS[data.provider]}`,
+      `Motivo: ${data.routerReason}`,
+    );
   }
   return redact(lines.join('\n'));
 }

@@ -18,6 +18,14 @@ export interface StudioDetail {
   events: StudioJobEvent[];
 }
 
+export function workspaceBindingMatches(
+  request: StudioJobCreateRequest,
+  created: StudioJob,
+): boolean {
+  if (request.workspacePath === undefined) return true;
+  return created.metadata['resumeWorktreePath'] === request.workspacePath;
+}
+
 export function useStudio(): {
   machines: StudioMachine[];
   jobs: StudioJob[];
@@ -163,6 +171,16 @@ export function useStudio(): {
         const result = await window.luxy.createStudioJob(request);
         if (!result.ok) {
           setError(result.error);
+          return false;
+        }
+        if (!workspaceBindingMatches(request, result.value.job)) {
+          // Un Gateway anterior elimina workspacePath como campo desconocido y
+          // crea un trabajo normal. Se cancela de inmediato para no prometer
+          // reutilizacion mientras el agente prepara otra carpeta.
+          await window.luxy.cancelStudioJob(result.value.job.id);
+          setError(
+            'El Gateway desplegado no conserva el espacio de trabajo. Ejecuta deploy-gateway.bat antes de volver a intentarlo.',
+          );
           return false;
         }
         selectedId.current = result.value.job.id;

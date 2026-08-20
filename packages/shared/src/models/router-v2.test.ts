@@ -38,7 +38,7 @@ describe('router de modelos', () => {
 
   it('un alias sin version usa el predeterminado de la familia', () => {
     const decision = routeModel(registry(), { prompt: 'haz algo', explicitAlias: 'qwen' });
-    expect(decision.model?.definition.apiModel).toBe('Qwen3.5-397B-A17B');
+    expect(decision.model?.definition.apiModel).toBe('Qwen3.6-27B');
   });
 
   it('si el modelo pedido no esta disponible, sustituye Y lo explica', () => {
@@ -104,7 +104,10 @@ describe('router de modelos', () => {
   });
 
   it('un alias desconocido no rompe: enruta por contenido', () => {
-    const decision = routeModel(registry(), { prompt: 'arregla el bug', explicitAlias: 'inventado' });
+    const decision = routeModel(registry(), {
+      prompt: 'arregla el bug',
+      explicitAlias: 'inventado',
+    });
     expect(decision.model).not.toBeNull();
     expect(decision.substituted).toBeNull();
   });

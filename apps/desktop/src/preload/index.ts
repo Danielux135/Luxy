@@ -49,6 +49,9 @@ const bridge: LuxyBridge = {
   readCatalog: (connectionId: string) =>
     ipcRenderer.invoke(IPC_INVOKE.catalogRead, { connectionId }),
   resolveApproval: (args: unknown) => ipcRenderer.invoke(IPC_INVOKE.approvalResolve, args),
+  prepareWorkspace: (projectAlias: string, label: string) =>
+    ipcRenderer.invoke(IPC_INVOKE.workspacePrepare, { projectAlias, label }),
+  openWorkspaceFolder: (path: string) => ipcRenderer.invoke(IPC_INVOKE.workspaceOpen, { path }),
   getStudioOptions: () => ipcRenderer.invoke(IPC_INVOKE.studioOptions),
   createStudioJob: (args: unknown) => ipcRenderer.invoke(IPC_INVOKE.studioJobCreate, args),
   listStudioJobs: (args = { limit: 30 }) => ipcRenderer.invoke(IPC_INVOKE.studioJobsList, args),

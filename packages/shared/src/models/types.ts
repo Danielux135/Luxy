@@ -97,9 +97,11 @@ export type ModelCapability = (typeof MODEL_CAPABILITIES)[number];
 export const MODEL_FAMILIES = [
   'deepseek',
   'glm',
+  'hunyuan',
   'kat',
   'kimi',
   'minimax',
+  'other',
   'qwen',
   'sensenova',
   'step',

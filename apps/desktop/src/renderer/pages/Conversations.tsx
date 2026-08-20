@@ -1,7 +1,13 @@
 // Conversaciones: chat persistente y comparacion de dos modelos sobre trabajos reales.
 import { useEffect, useMemo, useState, type JSX } from 'react';
-import { buildDefaultCatalog, describeArtifactSize, isProviderId } from '@luxy/shared';
-import type { JobStatus, ProviderId, StudioJob, StudioMachine } from '@luxy/shared';
+import { describeArtifactSize, isProviderId } from '@luxy/shared';
+import type {
+  JobStatus,
+  ModelDefinition,
+  ProviderId,
+  StudioJob,
+  StudioMachine,
+} from '@luxy/shared';
 import { Empty, Field, Notice, Panel, Tag } from '../ui/primitives.js';
 import { FormattedResponse } from '../formatted-response.js';
 import type { ConfigSummary } from '../useConfig.js';
@@ -24,6 +30,7 @@ import {
   type LocalJobStream,
 } from '../conversation.js';
 import { useConversations } from '../useConversations.js';
+import { useDetectedCatalog } from '../useCatalog.js';
 
 const STATUS: Record<JobStatus, string> = {
   queued: 'En cola',
@@ -51,7 +58,11 @@ function formatDuration(milliseconds: number | null): string {
   return `${(milliseconds / 1000).toFixed(milliseconds < 10_000 ? 1 : 0)} s`;
 }
 
-function modelSuggestions(provider: ProviderId | '', summary: ConfigSummary): string[] {
+function modelSuggestions(
+  provider: ProviderId | '',
+  summary: ConfigSummary,
+  detectedModels: readonly ModelDefinition[],
+): string[] {
   if (provider === '') return [];
   if (provider === 'claude') return [summary.config?.providers.claude.model ?? 'opus'];
   if (provider === 'codex') {
@@ -59,9 +70,13 @@ function modelSuggestions(provider: ProviderId | '', summary: ConfigSummary): st
     return configured === undefined ? [] : [configured];
   }
 
-  const models = (summary.config?.connections ?? [])
-    .flatMap((connection) => buildDefaultCatalog(connection.id))
-    .filter((model) => model.family === provider && model.category === 'text')
+  const models = detectedModels
+    .filter(
+      (model) =>
+        model.family === provider &&
+        model.category === 'text' &&
+        model.capabilities.includes('text'),
+    )
     .map((model) => model.apiModel);
   return [...new Set(models)];
 }
@@ -223,7 +238,7 @@ function ResponseCard({
             disabled={busy}
             onClick={() => onRate(current.id, 'not_helpful')}
           >
-          No me sirvió
+            No me sirvió
           </button>
         </div>
       )}
@@ -232,6 +247,7 @@ function ResponseCard({
 }
 
 export function ConversationsPage({ summary }: { summary: ConfigSummary }): JSX.Element {
+  const { models: detectedModels } = useDetectedCatalog(summary);
   const conversations = useConversations();
   const { machineId, setMachineId, machine, projectAlias, setProjectAlias } = useMachineSelection(
     conversations.machines,
@@ -536,7 +552,7 @@ export function ConversationsPage({ summary }: { summary: ConfigSummary }): JSX.
                         spellCheck={false}
                       />
                       <datalist id="conversation-model-a">
-                        {modelSuggestions(providerA, summary).map((model) => (
+                        {modelSuggestions(providerA, summary, detectedModels).map((model) => (
                           <option key={model} value={model} />
                         ))}
                       </datalist>
@@ -566,7 +582,7 @@ export function ConversationsPage({ summary }: { summary: ConfigSummary }): JSX.
                           spellCheck={false}
                         />
                         <datalist id="conversation-model-b">
-                          {modelSuggestions(providerB, summary).map((model) => (
+                          {modelSuggestions(providerB, summary, detectedModels).map((model) => (
                             <option key={model} value={model} />
                           ))}
                         </datalist>
@@ -591,7 +607,7 @@ export function ConversationsPage({ summary }: { summary: ConfigSummary }): JSX.
                 </Field>
                 <div className="conversation-send">
                   <span className="list__meta">
-        Solo lectura · guardado automático · sin commit ni push
+                    Solo lectura · guardado automático · sin commit ni push
                   </span>
                   <button
                     className="btn btn--primary"

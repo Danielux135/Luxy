@@ -7,6 +7,7 @@ import {
   DEFAULT_CONNECTIONS,
   DEFAULT_CONNECTION_ID,
   ModelRegistry,
+  buildCatalogForConnection,
   buildDefaultCatalog,
   type StoredAgentConfig,
 } from '@luxy/shared';
@@ -508,7 +509,10 @@ export function SetupPage({
 function SetupModels({ served }: { served: string[] }): JSX.Element {
   const registry = new ModelRegistry({
     connections: DEFAULT_CONNECTIONS,
-    models: buildDefaultCatalog(),
+    models:
+      served.length === 0
+        ? buildDefaultCatalog()
+        : buildCatalogForConnection(DEFAULT_CONNECTION_ID, served),
     statuses: [
       {
         connectionId: DEFAULT_CONNECTION_ID,

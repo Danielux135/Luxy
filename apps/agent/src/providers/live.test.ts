@@ -28,12 +28,15 @@ const BASE = process.env['LUXY_BASE_URL'] ?? '';
 const enabled = LIVE && KEY.length > 0 && BASE.length > 0;
 
 /** modelos que respondieron a tool calling nativo en la comprobacion inicial */
-const MODEL = process.env['LUXY_LIVE_MODEL'] ?? 'Qwen3.6-35B-A3B';
+const MODEL = process.env['LUXY_LIVE_MODEL'] ?? 'Qwen3.6-27B';
 
 const suite = enabled ? describe : describe.skip;
 
 /** una vuelta real contra la API, sin streaming para simplificar la lectura */
-async function callModel(messages: LoopMessage[], tools: unknown[] | null): Promise<LoopTurnResult> {
+async function callModel(
+  messages: LoopMessage[],
+  tools: unknown[] | null,
+): Promise<LoopTurnResult> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 90_000);
   try {
@@ -49,7 +52,9 @@ async function callModel(messages: LoopMessage[], tools: unknown[] | null): Prom
       }),
     });
     if (!response.ok) {
-      throw new Error(`la API respondio ${response.status}: ${(await response.text()).slice(0, 200)}`);
+      throw new Error(
+        `la API respondio ${response.status}: ${(await response.text()).slice(0, 200)}`,
+      );
     }
 
     const body = (await response.json()) as {
@@ -352,11 +357,14 @@ suite('adaptadores de medios', () => {
       {
         model: 'step-router-v1',
         prompt: 'Necesito refactorizar un modulo grande de TypeScript.',
-        candidates: ['DeepSeek-V4-Pro', 'Qwen3.6-35B-A3B', 'Kimi-K2.6'],
+        candidates: ['DeepSeek-V4-Pro', 'Qwen3.6-27B', 'Kimi-K2.6'],
       },
       media(),
     );
     // puede no elegir ninguno, pero NUNCA uno que no estuviera en la lista
-    expect(result.model === null || ['DeepSeek-V4-Pro', 'Qwen3.6-35B-A3B', 'Kimi-K2.6'].includes(result.model)).toBe(true);
+    expect(
+      result.model === null ||
+        ['DeepSeek-V4-Pro', 'Qwen3.6-27B', 'Kimi-K2.6'].includes(result.model),
+    ).toBe(true);
   }, 180_000);
 });

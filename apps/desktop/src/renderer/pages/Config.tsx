@@ -2,6 +2,7 @@
 import { useEffect, useState, type JSX } from 'react';
 import {
   ModelRegistry,
+  buildCatalogForConnection,
   buildDefaultCatalog,
   guessModelFamily,
   type CatalogSnapshot,
@@ -23,9 +24,11 @@ import type { ConfigSummary } from '../useConfig.js';
 const FAMILIA: Record<ModelFamily, string> = {
   deepseek: 'DeepSeek',
   glm: 'GLM',
+  hunyuan: 'Hunyuan',
   kat: 'KAT',
   kimi: 'Kimi',
   minimax: 'MiniMax',
+  other: 'Otros',
   qwen: 'Qwen',
   sensenova: 'SenseNova',
   step: 'Step',
@@ -45,7 +48,15 @@ const FAMILIA: Record<ModelFamily, string> = {
  */
 function buildRegistry(summary: ConfigSummary, snapshot: CatalogSnapshot | null): ModelRegistry {
   const connections = (summary.config?.connections ?? []) as ConnectionProfile[];
-  const models = connections.length === 0 ? [] : buildDefaultCatalog(connections[0]!.id);
+  const models =
+    connections.length === 0
+      ? []
+      : snapshot?.connectionId === connections[0]!.id
+        ? buildCatalogForConnection(
+            connections[0]!.id,
+            snapshot.models.map((model) => model.apiModel),
+          )
+        : buildDefaultCatalog(connections[0]!.id);
   return new ModelRegistry({
     connections,
     models,
@@ -490,11 +501,11 @@ function CatalogoReal({
             Esta conexion no publica precios por API; Luxy no los consulta.
           </Notice>
           {[...porFamiliaReal.entries()].map(([familia, modelos]) => (
-            <section key={familia}>
+            <section key={familia} className="model-catalog-family model-catalog-family--inline">
               <div className="silk">
                 {familia} · {modelos.length}
               </div>
-              <ul className="list">
+              <ul className="model-catalog-list">
                 {modelos.map((model) => (
                   <li key={model.apiModel}>
                     <div className="list__main">
@@ -558,45 +569,49 @@ export function ModelsPage({ summary }: { summary: ConfigSummary }): JSX.Element
         </Panel>
       ) : (
         [...porFamilia.entries()].map(([familia, modelos]) => (
-          <Panel key={familia} title={FAMILIA[familia]} flush>
-            <ul className="list">
-              {modelos.map(({ definition, usable, unavailableReason, servedByConnection }) => (
-                <li key={definition.id}>
-                  <div className="list__main">
-                    <div className="list__name">
-                      {definition.displayName}{' '}
-                      {definition.defaultForFamily && <Tag tone="busy">predeterminado</Tag>}
+          <div key={familia} className="model-catalog-family">
+            <Panel title={FAMILIA[familia]} flush>
+              <ul className="model-catalog-list">
+                {modelos.map(({ definition, usable, unavailableReason, servedByConnection }) => (
+                  <li key={definition.id}>
+                    <div className="list__main">
+                      <div className="list__name">
+                        {definition.displayName}{' '}
+                        {definition.defaultForFamily && <Tag tone="busy">predeterminado</Tag>}
+                      </div>
+                      <div className="list__meta mono scroller">{definition.apiModel}</div>
+                      <div className="list__meta">
+                        {definition.telegramAliases.length === 0
+                          ? 'sin comando de Telegram'
+                          : definition.telegramAliases.map((alias) => `/${alias}`).join('  ')}
+                      </div>
+                      <div className="list__meta">
+                        {localEvidence.loading
+                          ? 'leyendo ejecuciones recientes…'
+                          : localEvidence.evidence.has(definition.apiModel)
+                            ? describeModelEvidence(
+                                localEvidence.evidence.get(definition.apiModel)!,
+                              )
+                            : 'sin ejecuciones atribuibles en el historial revisado'}
+                      </div>
+                      {!usable && unavailableReason !== null && (
+                        <div className="list__meta">{unavailableReason}</div>
+                      )}
                     </div>
-                    <div className="list__meta mono scroller">{definition.apiModel}</div>
-                    <div className="list__meta">
-                      {definition.telegramAliases.length === 0
-                        ? 'sin comando de Telegram'
-                        : definition.telegramAliases.map((alias) => `/${alias}`).join('  ')}
-                    </div>
-                    <div className="list__meta">
-                      {localEvidence.loading
-                        ? 'leyendo ejecuciones recientes…'
-                        : localEvidence.evidence.has(definition.apiModel)
-                          ? describeModelEvidence(localEvidence.evidence.get(definition.apiModel)!)
-                          : 'sin ejecuciones atribuibles en el historial revisado'}
-                    </div>
-                    {!usable && unavailableReason !== null && (
-                      <div className="list__meta">{unavailableReason}</div>
-                    )}
-                  </div>
-                  {definition.agentic && <Tag tone="busy">herramientas</Tag>}
-                  <Tag>{definition.category}</Tag>
-                  <Tag tone={usable ? 'ok' : servedByConnection === null ? 'warn' : 'fault'}>
-                    {usable
-                      ? 'disponible'
-                      : servedByConnection === null
-                        ? 'sin comprobar'
-                        : 'no disponible'}
-                  </Tag>
-                </li>
-              ))}
-            </ul>
-          </Panel>
+                    {definition.agentic && <Tag tone="busy">herramientas</Tag>}
+                    <Tag>{definition.category}</Tag>
+                    <Tag tone={usable ? 'ok' : servedByConnection === null ? 'warn' : 'fault'}>
+                      {usable
+                        ? 'disponible'
+                        : servedByConnection === null
+                          ? 'sin comprobar'
+                          : 'no disponible'}
+                    </Tag>
+                  </li>
+                ))}
+              </ul>
+            </Panel>
+          </div>
         ))
       )}
     </>

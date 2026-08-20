@@ -272,6 +272,18 @@ export const approvalResolveResultSchema = z.object({
   message: z.string(),
 });
 
+export const workspacePrepareArgsSchema = z.object({
+  projectAlias: z.string().min(1).max(64),
+  label: z.string().trim().min(1).max(120),
+});
+
+export const workspaceResultSchema = z.object({
+  projectAlias: z.string().min(1).max(64),
+  path: z.string().min(1).max(1024),
+  branch: z.string().min(1).max(256),
+});
+export const workspaceOpenArgsSchema = z.object({ path: z.string().min(1).max(1024) });
+
 // -----------------------------------------------------------------------------
 // Luxy Studio
 // -----------------------------------------------------------------------------
@@ -341,6 +353,11 @@ export interface LuxyBridge {
   resolveApproval(
     args: z.infer<typeof approvalResolveArgsSchema>,
   ): Promise<IpcResult<z.infer<typeof approvalResolveResultSchema>>>;
+  prepareWorkspace(
+    projectAlias: string,
+    label: string,
+  ): Promise<IpcResult<z.infer<typeof workspaceResultSchema>>>;
+  openWorkspaceFolder(path: string): Promise<IpcResult<{ opened: boolean }>>;
   getStudioOptions(): Promise<IpcResult<z.infer<typeof studioOptionsResultSchema>>>;
   createStudioJob(
     args: z.infer<typeof studioJobCreateArgsSchema>,

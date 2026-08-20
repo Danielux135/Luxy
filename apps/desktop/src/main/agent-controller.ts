@@ -8,7 +8,13 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { hostResponseSchema, redact } from '@luxy/shared';
-import type { AgentConfig, AgentEvent, AgentHostStatus, HostRequest } from '@luxy/shared';
+import type {
+  AgentConfig,
+  AgentEvent,
+  AgentHostStatus,
+  HostRequest,
+  HostResponse,
+} from '@luxy/shared';
 import { buildAgentProcessEnv } from './agent-environment.js';
 
 const STOPPED_STATUS: AgentHostStatus = { runState: 'stopped', agent: null, lastError: null };
@@ -26,10 +32,12 @@ export interface AgentControllerOptions {
 }
 
 interface Pending {
-  resolve: (status: AgentHostStatus) => void;
+  resolve: (response: HostAck) => void;
   reject: (error: Error) => void;
   timer: ReturnType<typeof setTimeout>;
 }
+
+type HostAck = Extract<HostResponse, { type: 'ack' }>;
 
 export class AgentControllerError extends Error {
   constructor(
@@ -175,7 +183,7 @@ export class AgentController {
             this.pending.delete(parsed.data.requestId);
             clearTimeout(waiting.timer);
             if (parsed.data.status !== null) this.lastStatus = parsed.data.status;
-            if (parsed.data.ok) waiting.resolve(this.lastStatus);
+            if (parsed.data.ok) waiting.resolve(parsed.data);
             else waiting.reject(new AgentControllerError(parsed.data.error ?? 'error desconocido'));
             break;
           }
@@ -224,7 +232,7 @@ export class AgentController {
     });
   }
 
-  private request(message: HostRequest): Promise<AgentHostStatus> {
+  private request(message: HostRequest): Promise<HostAck> {
     const child = this.child;
     if (child === null) {
       return Promise.reject(new AgentControllerError('el proceso del agente no esta arrancado'));
@@ -259,12 +267,14 @@ export class AgentController {
       config: this.config,
       providerKeys: this.providerKeys,
     });
-    return this.request({ type: 'start', requestId: randomUUID() });
+    const response = await this.request({ type: 'start', requestId: randomUUID() });
+    return response.status ?? this.lastStatus;
   }
 
   async stop(reason = 'peticion desde la interfaz'): Promise<AgentHostStatus> {
     if (this.child === null) return STOPPED_STATUS;
-    return this.request({ type: 'stop', requestId: randomUUID(), reason });
+    const response = await this.request({ type: 'stop', requestId: randomUUID(), reason });
+    return response.status ?? this.lastStatus;
   }
 
   async restart(): Promise<AgentHostStatus> {
@@ -296,7 +306,27 @@ export class AgentController {
         'arranca el agente antes de aprobar cambios.',
       );
     }
-    return this.request({ type: 'approval', requestId: randomUUID(), approval });
+    const response = await this.request({ type: 'approval', requestId: randomUUID(), approval });
+    return response.status ?? this.lastStatus;
+  }
+
+  async prepareWorktree(
+    projectAlias: string,
+    label: string,
+  ): Promise<NonNullable<HostAck['workspace']>> {
+    if (this.child === null) {
+      throw new AgentControllerError('el agente no esta arrancado', 'arranca el agente primero.');
+    }
+    const response = await this.request({
+      type: 'prepare_worktree',
+      requestId: randomUUID(),
+      projectAlias,
+      label,
+    });
+    if (response.workspace === null) {
+      throw new AgentControllerError('el agente no devolvio el espacio preparado');
+    }
+    return response.workspace;
   }
 
   /** apagado definitivo: para el agente y termina el proceso hijo */

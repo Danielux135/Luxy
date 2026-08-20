@@ -5,11 +5,11 @@
 Antes «proveedor» era a la vez el proveedor, el modelo y el comando de Telegram.
 Ahora son tres cosas separadas:
 
-| Concepto | Qué es | Dónde vive |
-|---|---|---|
-| **Conexión** | un endpoint con su clave y su dialecto | `config.json` + `secrets.enc` |
-| **Modelo** | un `apiModel` concreto que sirve esa conexión | catálogo en `packages/shared/src/models` |
-| **Alias** | el comando que escribes en Telegram | `telegramAliases` de cada modelo |
+| Concepto     | Qué es                                        | Dónde vive                               |
+| ------------ | --------------------------------------------- | ---------------------------------------- |
+| **Conexión** | un endpoint con su clave y su dialecto        | `config.json` + `secrets.enc`            |
+| **Modelo**   | un `apiModel` concreto que sirve esa conexión | catálogo en `packages/shared/src/models` |
+| **Alias**    | el comando que escribes en Telegram           | `telegramAliases` de cada modelo         |
 
 Una conexión sirve muchos modelos. Un modelo puede tener varios alias.
 
@@ -27,7 +27,7 @@ poder usarlo hacen falta además:
 3. que la conexión confirme que lo sirve.
 
 `servedByConnection` es `boolean | null`. **`null` significa «aún no se ha
-consultado», que no es lo mismo que «no está».** El botón *Sincronizar modelos* de
+consultado», que no es lo mismo que «no está».** El botón _Sincronizar modelos_ de
 la vista de Conexiones consulta `/v1/models` y actualiza esa información.
 
 ## Catálogo
@@ -37,30 +37,31 @@ nativo se comprobaron con llamadas reales.
 
 ### Texto y código
 
-| Modelo | Comandos | Herramientas nativas |
-|---|---|---|
-| `DeepSeek-V4-Pro` | `/deepseek` `/deepseek_pro` | sí |
-| `DeepSeek-V4-Flash` | `/deepseek_flash` | sí |
-| `glm-5.2` | `/glm` `/glm_52` | sí, **lento (~120 s)** |
-| `glm-5.1` | `/glm_51` | sí |
-| `kat-coder-pro-v2.5` | `/kat` `/kat_v25` | **sin acceso en la cuenta** |
-| `Kimi-K2.6` | `/kimi` `/kimi_k26` | sí |
-| `MiniMax-M3` | `/minimax` `/minimax_m3` | sí, **muy lento (~240 s)** |
-| `Qwen3.5-397B-A17B` | `/qwen` `/qwen_397b` | sí |
-| `Qwen3.6-35B-A3B` | `/qwen_35b` `/qwen_36` | sí |
-| `step-3.7-flash` | `/step` `/step_37` | sí |
-| `step-3.5-flash` | `/step_35` | **no**, usa pseudo-XML |
-| `step-3.5-flash-2603` | `/step_35_2603` | sí |
+| Modelo                | Comandos                    | Herramientas nativas        |
+| --------------------- | --------------------------- | --------------------------- |
+| `DeepSeek-V4-Pro`     | `/deepseek` `/deepseek_pro` | sí                          |
+| `DeepSeek-V4-Flash`   | `/deepseek_flash`           | sí                          |
+| `glm-5.2`             | `/glm` `/glm_52`            | sí, **lento (~120 s)**      |
+| `glm-5.1`             | `/glm_51`                   | sí                          |
+| `kat-coder-pro-v2.5`  | `/kat` `/kat_v25`           | **sin acceso en la cuenta** |
+| `Kimi-K2.6`           | `/kimi` `/kimi_k26`         | sí                          |
+| `MiniMax-M3`          | `/minimax` `/minimax_m3`    | sí, **muy lento (~240 s)**  |
+| `hy3`                 | sin alias de Telegram       | contrato pendiente          |
+| `Qwen3-Embedding-8B`  | sin alias de Telegram       | no, sólo embeddings         |
+| `Qwen3.6-27B`         | `/qwen` `/qwen_36`          | contrato pendiente          |
+| `step-3.7-flash`      | `/step` `/step_37`          | sí                          |
+| `step-3.5-flash`      | `/step_35`                  | **no**, usa pseudo-XML      |
+| `step-3.5-flash-2603` | `/step_35_2603`             | sí                          |
 
 ### Audio e imagen
 
-| Modelo | Comando | Estado |
-|---|---|---|
-| `stepaudio-2.5-chat` | `/audio_chat` | verificado |
-| `stepaudio-2.5-tts` | `/speak` | verificado |
-| `stepaudio-2.5-asr` | `/transcribe` | **sin verificar**, ver AGENT_TOOLS |
-| `stepaudio-2.5-realtime` | `/voice` | sin verificar |
-| `step-image-edit-2` | `/image_edit` | verificado |
+| Modelo                   | Comando       | Estado                             |
+| ------------------------ | ------------- | ---------------------------------- |
+| `stepaudio-2.5-chat`     | `/audio_chat` | verificado                         |
+| `stepaudio-2.5-tts`      | `/speak`      | verificado                         |
+| `stepaudio-2.5-asr`      | `/transcribe` | **sin verificar**, ver AGENT_TOOLS |
+| `stepaudio-2.5-realtime` | `/voice`      | sin verificar                      |
+| `step-image-edit-2`      | `/image_edit` | verificado                         |
 
 ### Enrutado
 

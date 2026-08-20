@@ -67,8 +67,13 @@ export function startHostEntry(port: ParentPort): void {
 
   host.subscribe((event) => send({ type: 'event', event }));
 
-  const ack = (requestId: string, ok: boolean, error: string | null): void => {
-    send({ type: 'ack', requestId, ok, error, status: host.getStatus() });
+  const ack = (
+    requestId: string,
+    ok: boolean,
+    error: string | null,
+    workspace: { projectAlias: string; path: string; branch: string } | null = null,
+  ): void => {
+    send({ type: 'ack', requestId, ok, error, status: host.getStatus(), workspace });
   };
 
   const handle = async (request: HostRequest): Promise<void> => {
@@ -88,6 +93,11 @@ export function startHostEntry(port: ParentPort): void {
       case 'status':
         ack(request.requestId, true, null);
         break;
+      case 'prepare_worktree': {
+        const workspace = await host.prepareWorktree(request.projectAlias, request.label);
+        ack(request.requestId, true, null, workspace);
+        break;
+      }
       case 'configure': {
         // la configuracion viene del proceso principal, pero se valida igual:
         // un borde entre procesos es una entrada externa
@@ -143,7 +153,11 @@ export function startHostEntry(port: ParentPort): void {
     logger.error(`${kind} en el proceso del agente`, described);
     send({
       type: 'event',
-      event: { type: 'agent.error', at: new Date().toISOString(), message: `${kind}: ${described.message}` },
+      event: {
+        type: 'agent.error',
+        at: new Date().toISOString(),
+        message: `${kind}: ${described.message}`,
+      },
     });
     // se le da un instante al mensaje antes de que el proceso termine
     setTimeout(() => process.exit(1), 200);

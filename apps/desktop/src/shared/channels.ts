@@ -34,6 +34,8 @@ export const IPC_INVOKE = {
   catalogRefresh: 'luxy:catalog:refresh',
   catalogRead: 'luxy:catalog:read',
   approvalResolve: 'luxy:approval:resolve',
+  workspacePrepare: 'luxy:workspace:prepare',
+  workspaceOpen: 'luxy:workspace:open',
   studioOptions: 'luxy:studio:options',
   studioJobCreate: 'luxy:studio:job:create',
   studioJobsList: 'luxy:studio:jobs:list',

@@ -17,6 +17,12 @@ export const hostRequestSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('restart'), requestId: z.string() }),
   z.object({ type: z.literal('status'), requestId: z.string() }),
   z.object({
+    type: z.literal('prepare_worktree'),
+    requestId: z.string(),
+    projectAlias: z.string().min(1).max(64),
+    label: z.string().trim().min(1).max(120),
+  }),
+  z.object({
     type: z.literal('configure'),
     requestId: z.string(),
     /** se valida con agentConfigSchema en el hijo; null = sin configurar */
@@ -72,6 +78,14 @@ export const hostResponseSchema = z.discriminatedUnion('type', [
     ok: z.boolean(),
     error: z.string().nullable(),
     status: agentHostStatusSchema.nullable(),
+    workspace: z
+      .object({
+        projectAlias: z.string().min(1).max(64),
+        path: z.string().min(1).max(1024),
+        branch: z.string().min(1).max(256),
+      })
+      .nullable()
+      .default(null),
   }),
   z.object({ type: z.literal('event'), event: agentEventSchema }),
 ]);

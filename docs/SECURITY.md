@@ -77,7 +77,10 @@ credencial ajena viaje por accidente; no sustituye un sandbox de sistema operati
 ## Rutas y sistema de archivos
 
 - Las rutas de proyecto deben ser **absolutas** y sin `..`.
-- Toda escritura debe caer dentro del worktree activo.
+- Toda escritura del modelo debe caer dentro del worktree activo. Como
+  preparación única, el agente puede crear `.gitignore`, `.git` y el commit
+  local `estado inicial` en un proyecto editable que todavía no tenga Git; esa
+  preparación no tiene remoto y excluye secretos y dependencias.
 - `isPathInside` compara **por segmentos**: `C:/wt/lux-1-malicioso` no cuenta
   como hijo de `C:/wt/lux-1`.
 - `assertInsideWorktree` además resuelve **enlaces simbólicos** con `realpath`,

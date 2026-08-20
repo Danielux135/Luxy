@@ -214,12 +214,12 @@ export function guessModelFamily(apiModel: string): string {
   if (name.includes('gpt') || name.includes('o1') || name.includes('o3')) return 'openai';
   if (name.includes('gemini')) return 'gemini';
   if (name.includes('kat')) return 'kat';
-  // los tres que faltaban: la primera lectura real dejo 14 de 22 modelos en
-  // "otros" porque ni step, ni minimax, ni sensenova estaban contemplados
+  // familias adicionales observadas en las lecturas reales de la conexion
   if (name.startsWith('stepaudio') || name.startsWith('step-image')) return 'step-media';
   if (name.includes('step')) return 'step';
   if (name.includes('minimax')) return 'minimax';
   if (name.includes('sensenova')) return 'sensenova';
+  if (name === 'hy3' || name.includes('hunyuan')) return 'hunyuan';
   if (name === 'auto') return 'router';
   return 'otros';
 }

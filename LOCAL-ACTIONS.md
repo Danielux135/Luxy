@@ -1,5 +1,41 @@
 # Luxy — acciones locales de Daniel
 
+## LA-025 — confirmar que un trabajo no bloquea la interfaz
+
+Estado: `pending`.
+
+Ejecutar `rebuild-and-start-luxy.bat`, terminar un trabajo manteniendo Luxy en
+primer plano y comprobar que no aparece el aviso nativo de Electron. Al acabar,
+los desplegables y campos de Trabajos, Conversaciones y Laboratorio deben seguir
+respondiendo. Los avisos sí deben conservarse cuando Luxy esté minimizado o en
+segundo plano.
+
+## LA-024 — validar espacios de trabajo persistentes
+
+Estado: `pending` — requiere publicar Gateway y reconstruir Desktop/agente.
+
+1. Ejecutar `deploy-gateway.bat` desde la carpeta principal de Luxy.
+2. Ejecutar `rebuild-and-start-luxy.bat` desde esa misma carpeta.
+3. En Trabajos, pulsar **Preparar carpeta**, abrirla y crear un archivo de
+   contexto antes de enviar la tarea.
+4. Ejecutar una tarea que lea ese archivo; al terminar, cambiar de pantalla y
+   volver. El mismo worktree debe seguir seleccionado.
+5. Ejecutar otra tarea y comprobar en el detalle que conserva exactamente la
+   misma ruta y rama, sin crear otra carpeta.
+
+No requiere commit, push ni migración. El deploy sólo publica el contrato nuevo
+de Gateway; no se ha hecho automáticamente.
+
+## LA-023 — desplegar manualmente el contrato Hunyuan del Gateway
+
+Estado: `pending` — requiere acción explícita de Daniel.
+
+Ejecutar por doble clic `deploy-gateway.bat` desde la raíz del worktree. El
+script compila Shared/Gateway, prepara un dry-run y pide escribir `DESPLEGAR`
+antes de publicar. Usa `--keep-vars`, no cambia secretos y no aplica
+migraciones. Tras terminar, esperar unos segundos y comprobar que desaparece el
+aviso 422 del agente.
+
 Este archivo sólo contiene acciones que una IA no debe ejecutar por su cuenta.
 No repetir una acción marcada como completada sin una razón nueva.
 
@@ -10,6 +46,40 @@ Estado: `pending`
 En **Trabajos**, verificar que desaparece el bloque técnico que decía
 `invalid_enum_value` para `provider: hunyuan` y que el historial vuelve a listar
 los trabajos. No crear ni reintentar un trabajo para esta comprobación.
+
+## LA-022 — validar inicialización automática de Git
+
+Estado: `pending`
+
+Reconstruir y reiniciar Desktop/agente desde el worktree de `F4.8-T1`. Configurar
+un proyecto editable que no tenga `.git` y lanzar un trabajo que escriba
+archivos. Comprobar que aparece `inicializando repositorio Git`, que se crea el
+commit local `estado inicial`, que `.env` y `node_modules` no entran en él y que
+el trabajo continúa en un worktree `luxy/...`.
+
+No se crea remoto ni se hace push. Si se cancela el trabajo, conservar el
+worktree y sus cambios para inspección.
+
+## LA-022 — validar reanudación del mismo worktree
+
+Estado: `pending`
+
+Precondiciones completadas el 2026-08-10: Desktop reconstruido y arrancado desde
+este worktree; Gateway desplegado en la versión
+`a5cb5ba8-34d9-4cca-85ba-e02f95e3942f` y `/health` HTTP 200. El bundle actual
+incluye el timeout ampliado del proveedor.
+
+Después de reconstruir Desktop/agente, lanzar una tarea que cree al menos un
+archivo y provocar un fallo temporal del proveedor. En el detalle, pulsar
+**Reintentar trabajo** y aceptar. Debe aparecer `reanudando worktree aislado` y
+la ruta/rama `luxy/...` debe ser la misma del intento anterior. El nuevo ID
+audita el segundo intento, pero no debe crear una segunda carpeta ni una página
+vacía.
+
+Tras F4.8-T4, comprobar además que el primer mensaje del modelo reanudado no
+anuncia una nueva “llamada 1” como si no existiera trabajo previo: debe revisar
+`git_status` y continuar desde los archivos actuales. Un HTTP 503 visible debe
+registrarse como fallo del proveedor, no como creación de un worktree nuevo.
 
 ## LA-001 — abrir el checkpoint en VS Code
 
@@ -421,6 +491,12 @@ desplegada; no se ha hecho deploy en este paso porque necesita autorización.
 ## LA-018 — comprobar el catálogo del Laboratorio
 
 Estado: `pending` — abierta el 2026-08-09 tras `F4.3-T1`.
+
+Actualización 2026-08-11 (`F4.3-T11`): reiniciar Desktop/agente y confirmar que
+Laboratorio ya no ofrece `Qwen3.5-397B-A17B` ni `Qwen3.6-35B-A3B`; debe usar los
+modelos del último snapshot. Una evaluación activa debe desaparecer por sí sola
+en unos 5 segundos tras terminar. Un 503 debe mostrar «Duración hasta el fallo»
+y el grupo «Par terminado», nunca aparentar una respuesta válida.
 
 Reconstruye/reinicia Studio y abre **Laboratorio** en la navegación lateral.
 

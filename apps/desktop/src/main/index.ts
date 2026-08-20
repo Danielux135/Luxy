@@ -4,6 +4,7 @@
 // bandeja. Nada de esto abre una consola: cerrar la ventana deja Luxy en la
 // bandeja y solo "Salir completamente" termina de verdad.
 import { app, BrowserWindow, Notification, safeStorage, shell } from 'electron';
+import { shouldShowDesktopNotification } from './notification-policy.js';
 import { join } from 'node:path';
 import { resolveStoredConfig } from '@luxy/shared';
 import { AgentController, resolveAgentEntry } from './agent-controller.js';
@@ -145,6 +146,16 @@ function log(message: string, fields: Record<string, unknown> = {}): void {
 
 function notify(title: string, body: string): void {
   if (!Notification.isSupported()) return;
+  if (
+    mainWindow !== null &&
+    !mainWindow.isDestroyed() &&
+    !shouldShowDesktopNotification({
+      windowVisible: mainWindow.isVisible(),
+      windowFocused: mainWindow.isFocused(),
+    })
+  ) {
+    return;
+  }
   new Notification({ title, body, silent: false }).show();
 }
 

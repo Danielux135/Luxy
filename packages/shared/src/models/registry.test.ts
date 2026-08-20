@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
+  buildCatalogForConnection,
   buildDefaultCatalog,
   DEFAULT_CONNECTIONS,
   DEFAULT_CONNECTION_ID,
@@ -13,7 +14,7 @@ import {
 
 const CATALOG = buildDefaultCatalog();
 
-/** apiModel que la conexion devolvio en /v1/models el 2026-07-28 */
+/** apiModel que la conexion devolvio en /v1/models el 2026-08-11 */
 const SERVED_BY_CONNECTION = [
   'auto',
   'DeepSeek-V4-Flash',
@@ -23,8 +24,9 @@ const SERVED_BY_CONNECTION = [
   'kat-coder-pro-v2.5',
   'Kimi-K2.6',
   'MiniMax-M3',
-  'Qwen3.5-397B-A17B',
-  'Qwen3.6-35B-A3B',
+  'hy3',
+  'Qwen3-Embedding-8B',
+  'Qwen3.6-27B',
   'sensenova-6.7-flash-lite',
   'sensenova-u1-fast',
   'step-3.5-flash',
@@ -83,7 +85,7 @@ describe('catalogo inicial', () => {
     // mayusculas, puntos y guiones tal cual los devuelve la API
     expect(exactos).toContain('DeepSeek-V4-Pro');
     expect(exactos).toContain('Kimi-K2.6');
-    expect(exactos).toContain('Qwen3.5-397B-A17B');
+    expect(exactos).toContain('Qwen3.6-27B');
     expect(exactos).toContain('MiniMax-M3');
     expect(exactos).toContain('kat-coder-pro-v2.5');
     expect(exactos).toContain('glm-5.2');
@@ -93,6 +95,25 @@ describe('catalogo inicial', () => {
     for (const model of CATALOG) {
       expect(SERVED_BY_CONNECTION).toContain(model.apiModel);
     }
+  });
+
+  it('la lectura real sustituye el catalogo operativo completo', () => {
+    const detected = buildCatalogForConnection(DEFAULT_CONNECTION_ID, [
+      'hy3',
+      'Qwen3.6-27B',
+      'modelo-recien-publicado',
+    ]);
+    expect(detected.map((model) => model.apiModel)).toEqual([
+      'hy3',
+      'Qwen3.6-27B',
+      'modelo-recien-publicado',
+    ]);
+    expect(detected.map((model) => model.apiModel)).not.toContain('Qwen3.5-397B-A17B');
+    expect(detected.find((model) => model.apiModel === 'modelo-recien-publicado')).toMatchObject({
+      family: 'other',
+      capabilities: [],
+      supportsNativeTools: null,
+    });
   });
 
   it('no contiene los dos modelos que la conexion no sirve', () => {
@@ -170,7 +191,7 @@ describe('resolucion de alias', () => {
     expect(registry.resolveAlias('glm')?.apiModel).toBe('glm-5.2');
     expect(registry.resolveAlias('kat')?.apiModel).toBe('kat-coder-pro-v2.5');
     expect(registry.resolveAlias('minimax')?.apiModel).toBe('MiniMax-M3');
-    expect(registry.resolveAlias('qwen')?.apiModel).toBe('Qwen3.5-397B-A17B');
+    expect(registry.resolveAlias('qwen')?.apiModel).toBe('Qwen3.6-27B');
     expect(registry.resolveAlias('step')?.apiModel).toBe('step-3.7-flash');
     expect(registry.resolveAlias('kimi')?.apiModel).toBe('Kimi-K2.6');
   });
@@ -178,7 +199,7 @@ describe('resolucion de alias', () => {
   it('los alias explicitos apuntan siempre al modelo concreto', () => {
     expect(registry.resolveAlias('glm_51')?.apiModel).toBe('glm-5.1');
     expect(registry.resolveAlias('glm_52')?.apiModel).toBe('glm-5.2');
-    expect(registry.resolveAlias('qwen_36')?.apiModel).toBe('Qwen3.6-35B-A3B');
+    expect(registry.resolveAlias('qwen_36')?.apiModel).toBe('Qwen3.6-27B');
     expect(registry.resolveAlias('step_35_2603')?.apiModel).toBe('step-3.5-flash-2603');
   });
 
@@ -372,8 +393,6 @@ describe('disponibilidad', () => {
       // soporte de herramientas sigue siendo DESCONOCIDO, no verificado
       'Kimi-K2.6',
       'MiniMax-M3',
-      'Qwen3.5-397B-A17B',
-      'Qwen3.6-35B-A3B',
       'step-3.7-flash',
       'step-3.5-flash-2603',
     ]);
