@@ -15,6 +15,7 @@ import {
   type ConversationSummary,
   type LocalJobStreams,
 } from './conversation.js';
+import { historyNeedsScopeFallback, jobsForProject } from './project-context.js';
 
 export interface ConversationDetail {
   job: StudioJob;
@@ -49,7 +50,7 @@ export function replaceConversationDetail(
     : { ...details, [updated.id]: { ...current, job: updated } };
 }
 
-export function useConversations(): {
+export function useConversations(projectScope: string | null = null): {
   machines: StudioMachine[];
   conversations: ConversationSummary[];
   history: StudioJob[];
@@ -61,6 +62,7 @@ export function useConversations(): {
   busy: boolean;
   cancellingIds: ReadonlySet<string>;
   error: string | null;
+  scopeFallback: boolean;
   select: (conversationId: string) => void;
   startNew: () => void;
   send: (request: SendConversationRequest) => Promise<boolean>;
@@ -76,6 +78,7 @@ export function useConversations(): {
   const [busy, setBusy] = useState(false);
   const [cancellingIds, setCancellingIds] = useState<ReadonlySet<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
+  const [scopeFallback, setScopeFallback] = useState(false);
   const jobsRef = useRef<StudioJob[]>([]);
   const selectedRef = useRef<string | null>(null);
   const draftingRef = useRef(false);
@@ -104,7 +107,10 @@ export function useConversations(): {
         machinesRef.current === null;
       const [options, history] = await Promise.all([
         optionsAreStale ? window.luxy.getStudioOptions() : Promise.resolve(null),
-        window.luxy.listStudioJobs({ limit: 100 }),
+        window.luxy.listStudioJobs({
+          limit: 100,
+          ...(projectScope === null ? {} : { projectAlias: projectScope }),
+        }),
       ]);
       if (options !== null && !options.ok) {
         setError(options.error);
@@ -119,9 +125,9 @@ export function useConversations(): {
         machinesRef.current = options.value.machines;
       }
 
-      const conversationJobs = history.value.jobs.filter(
-        (job) => parseConversationMetadata(job) !== null,
-      );
+      const visibleJobs = jobsForProject(history.value.jobs, projectScope);
+      setScopeFallback(historyNeedsScopeFallback(history.value.jobs, projectScope));
+      const conversationJobs = visibleJobs.filter((job) => parseConversationMetadata(job) !== null);
       const grouped = groupConversations(conversationJobs);
       let activeId = selectedRef.current;
       if (activeId === null && !draftingRef.current && grouped.length > 0) {
@@ -170,7 +176,7 @@ export function useConversations(): {
     } finally {
       refreshingRef.current = false;
     }
-  }, []);
+  }, [projectScope]);
 
   useEffect(() => {
     let active = true;
@@ -428,6 +434,7 @@ export function useConversations(): {
     busy,
     cancellingIds,
     error,
+    scopeFallback,
     select,
     startNew,
     send,

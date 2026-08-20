@@ -141,6 +141,13 @@ parezca correcta; añadir una corrección nueva.
 - Límites: falta integrar la interfaz de perfiles del worktree de origen. No hubo llamadas reales, push, despliegue ni migraciones.
 - Siguiente paso exacto: commit local e integrar los controles de Studio sobre este contrato ya probado.
 
+### 2026-08-20 — Codex — PROJECT-SCOPE-CORE-001
+
+- Objetivo: impedir que una vista acotada mezcle trabajos de otro proyecto, incluso contra un Gateway anterior que ignore el filtro.
+- Resultado: IPC, hooks y utilidades aceptan un alias validado; el cliente solicita el filtro y vuelve a filtrar localmente. La selección de máquina sólo acepta una que contenga el proyecto activo.
+- Pruebas: typecheck, compilación de Shared y 36 pruebas de contexto/IPC correctas.
+- Límite: la navegación y la barra visible permanecen pendientes; este commit no cambia todavía la pantalla que ve Daniel.
+
 ### 2026-08-10 — Codex — F4.8-T4
 
 - Observación: el retry reanudaba la misma ruta y rama, pero el modelo recibía

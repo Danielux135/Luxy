@@ -11,6 +11,7 @@ import {
   type agentEventSchema,
   agentHostStatusSchema,
   jobStatusSchema,
+  projectAliasSchema,
   studioJobActionRequestSchema,
   studioJobActionResponseSchema,
   studioJobCreateRequestSchema,
@@ -291,6 +292,7 @@ export const workspaceOpenArgsSchema = z.object({ path: z.string().min(1).max(10
 export const studioJobCreateArgsSchema = studioJobCreateRequestSchema;
 export const studioJobsListArgsSchema = z.object({
   targetMachineId: z.string().uuid().optional(),
+  projectAlias: projectAliasSchema.optional(),
   status: jobStatusSchema.optional(),
   limit: z.number().int().min(1).max(100).default(30),
   offset: z.number().int().min(0).max(100_000).optional(),

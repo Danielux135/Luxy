@@ -12,6 +12,7 @@ import type {
   StudioMachine,
 } from '@luxy/shared';
 import { CONVERSATION_OPTIONS_TTL_MS, conversationPollDelayMs } from './conversation.js';
+import { historyNeedsScopeFallback, jobsForProject } from './project-context.js';
 
 export interface StudioDetail {
   job: StudioJob;
@@ -26,13 +27,14 @@ export function workspaceBindingMatches(
   return created.metadata['resumeWorktreePath'] === request.workspacePath;
 }
 
-export function useStudio(): {
+export function useStudio(projectScope: string | null = null): {
   machines: StudioMachine[];
   jobs: StudioJob[];
   detail: StudioDetail | null;
   loading: boolean;
   busy: boolean;
   error: string | null;
+  scopeFallback: boolean;
   select: (jobId: string) => Promise<void>;
   create: (request: StudioJobCreateRequest) => Promise<boolean>;
   cancel: (jobId: string) => Promise<void>;
@@ -45,6 +47,7 @@ export function useStudio(): {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [scopeFallback, setScopeFallback] = useState(false);
   const selectedId = useRef<string | null>(null);
   const detailRef = useRef<StudioDetail | null>(null);
   const activeJobsRef = useRef(false);
@@ -68,7 +71,10 @@ export function useStudio(): {
       machinesRef.current === null;
     const [options, history] = await Promise.all([
       optionsAreStale ? window.luxy.getStudioOptions() : Promise.resolve(null),
-      window.luxy.listStudioJobs({ limit: 30 }),
+      window.luxy.listStudioJobs({
+        limit: projectScope === null ? 30 : 100,
+        ...(projectScope === null ? {} : { projectAlias: projectScope }),
+      }),
     ]);
     if (options !== null && !options.ok) {
       setError(options.error);
@@ -83,17 +89,19 @@ export function useStudio(): {
       machinesRef.current = options.value.machines;
     }
 
+    const visibleJobs = jobsForProject(history.value.jobs, projectScope);
     if (machinesRef.current !== null) setMachines(machinesRef.current);
-    setJobs(history.value.jobs);
+    setJobs(visibleJobs);
+    setScopeFallback(historyNeedsScopeFallback(history.value.jobs, projectScope));
     setError(null);
-    activeJobsRef.current = history.value.jobs.some(
+    activeJobsRef.current = visibleJobs.some(
       (job) => !(TERMINAL_JOB_STATUSES as readonly string[]).includes(job.status),
     );
 
     const current = selectedId.current;
     if (current === null) return;
     // un trabajo terminado que no ha cambiado ya no tiene eventos nuevos
-    const listed = history.value.jobs.find((job) => job.id === current) ?? null;
+    const listed = visibleJobs.find((job) => job.id === current) ?? null;
     const cached = detailRef.current;
     const unchanged =
       cached !== null &&
@@ -110,7 +118,7 @@ export function useStudio(): {
       detailRef.current = selected.value;
       setDetail(selected.value);
     }
-  }, []);
+  }, [projectScope]);
 
   useEffect(() => {
     let active = true;
@@ -235,5 +243,18 @@ export function useStudio(): {
     [reload],
   );
 
-  return { machines, jobs, detail, loading, busy, error, select, create, cancel, decide, reload };
+  return {
+    machines,
+    jobs,
+    detail,
+    loading,
+    busy,
+    error,
+    scopeFallback,
+    select,
+    create,
+    cancel,
+    decide,
+    reload,
+  };
 }

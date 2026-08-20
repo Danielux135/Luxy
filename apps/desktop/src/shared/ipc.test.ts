@@ -69,10 +69,14 @@ describe('validacion de argumentos', () => {
   });
 
   it('valida la pagina del historial que puede pedir el renderer', () => {
-    expect(studioJobsListArgsSchema.parse({ limit: 100, offset: 200 })).toMatchObject({
+    expect(
+      studioJobsListArgsSchema.parse({ projectAlias: 'luxy', limit: 100, offset: 200 }),
+    ).toMatchObject({
+      projectAlias: 'luxy',
       limit: 100,
       offset: 200,
     });
+    expect(studioJobsListArgsSchema.safeParse({ projectAlias: '../otro' }).success).toBe(false);
     expect(studioJobsListArgsSchema.safeParse({ limit: 101, offset: 0 }).success).toBe(false);
     expect(studioJobsListArgsSchema.safeParse({ limit: 100, offset: -1 }).success).toBe(false);
   });
