@@ -581,6 +581,62 @@ describe('HttpApiProvider: diagnostico del final de la respuesta', () => {
     );
   });
 
+  it('explica cuando el razonamiento agota la salida antes de responder', async () => {
+    const razonamientoPrivado = 'contenido privado que nunca debe salir';
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(
+          new TextEncoder().encode(
+            [
+              `data: {"choices":[{"delta":{"reasoning_content":${JSON.stringify(razonamientoPrivado)}}}]}`,
+              'data: {"choices":[{"delta":{},"finish_reason":"length"}]}',
+              'data: {"choices":[],"usage":{"prompt_tokens":321,"completion_tokens":8192}}',
+              'data: [DONE]',
+            ].join('\n') + '\n',
+          ),
+        );
+        controller.close();
+      },
+    });
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(body, { status: 200 }));
+
+    const provider = new HttpApiProvider(config, 'una-clave');
+    const result = await provider.run(peticion({ maxOutputTokens: 8192 }));
+
+    expect(result.ok).toBe(false);
+    expect(result.errorMessage).toContain(
+      'agoto el limite de salida durante el razonamiento antes de producir texto visible',
+    );
+    expect(result.errorMessage).toContain('8192 tokens de salida consumidos');
+    expect(result.errorMessage).not.toContain(razonamientoPrivado);
+  });
+
+  it('detecta el limite por consumo aunque el proveedor omita finish_reason', async () => {
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(
+          new TextEncoder().encode(
+            [
+              'data: {"choices":[],"usage":{"prompt_tokens":321,"completion_tokens":8192}}',
+              'data: [DONE]',
+            ].join('\n') + '\n',
+          ),
+        );
+        controller.close();
+      },
+    });
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(body, { status: 200 }));
+
+    const provider = new HttpApiProvider(config, 'una-clave');
+    const result = await provider.run(peticion({ maxOutputTokens: 8192 }));
+
+    expect(result.ok).toBe(false);
+    expect(result.errorMessage).toContain(
+      'agoto el limite de salida antes de producir texto visible o pedir una herramienta',
+    );
+    expect(result.errorMessage).toContain('8192 tokens de salida consumidos');
+  });
+
   it('conserva finish_reason length y los limites efectivos de una respuesta truncada', async () => {
     const body = new ReadableStream<Uint8Array>({
       start(controller) {

@@ -829,6 +829,32 @@ export class HttpApiProvider implements ProviderExecution {
     }
 
     if (turno.text.trim().length === 0 && turno.toolCalls.length === 0) {
+      const maxOutputTokens = this.maxTokensFor(request);
+      const reasoningChars = assembler.reasoningLength();
+      const outputBudgetExhausted =
+        turno.finishReason === 'length' ||
+        (turno.finalUsageReceived &&
+          turno.outputTokens > 0 &&
+          turno.outputTokens >= maxOutputTokens);
+      // caso real con DeepSeek-V4-Pro: marco `length` tras razonar y termino
+      // antes de poder pedir la primera herramienta. Algunos cierres pierden
+      // `finish_reason`; el consumo final contra el limite demuestra el mismo
+      // corte. Nunca se expone el contenido del razonamiento.
+      if (outputBudgetExhausted) {
+        const consumo =
+          turno.outputTokens > 0 ? ` (${turno.outputTokens} tokens de salida consumidos)` : '';
+        const fase =
+          reasoningChars > 0
+            ? 'durante el razonamiento antes de producir texto visible o pedir una herramienta'
+            : 'antes de producir texto visible o pedir una herramienta';
+        const error = new Error(
+          `el modelo agoto el limite de salida ${fase}${consumo}. Acota la tarea o aumenta max_tokens`,
+        );
+        // repetir no cambia el presupuesto de salida y solo vuelve a cobrar el
+        // mismo prompt; el usuario tiene que cambiar la tarea o el limite.
+        (error as { retryable?: boolean }).retryable = false;
+        throw error;
+      }
       throw new Error(
         turno.finalUsageReceived
           ? 'el proveedor termino y devolvio consumo, pero no envio texto visible en un formato compatible'
