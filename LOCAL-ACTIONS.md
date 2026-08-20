@@ -609,3 +609,19 @@ de Daniel.
 `npm run setup:machine` pide una URL de gateway y **rechaza lo que no empiece
 por `https://`**. `wrangler dev` sirve en `http://localhost:8787`. Con el
 gateway en local hay que escribir `config.json` a mano o usar un túnel.
+## LA-020 — integrar y comprobar la trazabilidad de Trabajos
+
+Estado: `parcial` — validación automática completa, commit local y Studio
+reiniciado el 2026-08-20; falta integrar y desplegar el Gateway con autorización.
+
+El cambio está aislado en la rama `luxy/ux-001-detalle-trabajo`. Antes de probar
+la interfaz, Daniel debe aprobar el commit e integrar el cambio conforme al flujo
+de worktrees. Después hay que reconstruir Shared, Agent y Desktop. El Gateway
+también cambia: su despliegue requiere autorización explícita y no se ha hecho.
+
+Con las tres piezas actualizadas, crea un trabajo HTTP agentic nuevo (por ejemplo
+MiniMax) y abre **Trabajos**. El detalle debe mostrar `Llamadas al modelo`,
+`Herramientas ejecutadas`, la ruta de **Carpeta de trabajo** y el botón **Abrir en
+el Explorador**. Un trabajo anterior debe decir `No registradas`; no se estima la
+cifra retrospectivamente. Si la tarea se ejecutó en otra máquina o ya se descartó
+el worktree, el botón debe explicar que la carpeta no está disponible localmente.

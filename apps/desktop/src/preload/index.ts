@@ -20,6 +20,8 @@ const bridge: LuxyBridge = {
   openLogsFolder: () => ipcRenderer.invoke(IPC_INVOKE.logsOpenFolder),
   openArtifactFolder: (jobId: string) =>
     ipcRenderer.invoke(IPC_INVOKE.artifactOpenFolder, { jobId }),
+  openWorktreeFolder: (worktreePath: string) =>
+    ipcRenderer.invoke(IPC_INVOKE.worktreeOpenFolder, { worktreePath }),
   pickFolder: (title?: string) => ipcRenderer.invoke(IPC_INVOKE.pickFolder, { title }),
 
   getConfig: () => ipcRenderer.invoke(IPC_INVOKE.configGet),

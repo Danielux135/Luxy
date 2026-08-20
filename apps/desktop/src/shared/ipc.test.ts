@@ -14,6 +14,7 @@ import {
   stopAgentArgsSchema,
   approvalResolveArgsSchema,
   connectionTestArgsSchema,
+  worktreeOpenFolderArgsSchema,
   studioJobActionArgsSchema,
   studioJobsListArgsSchema,
 } from './ipc.js';
@@ -77,6 +78,16 @@ describe('validacion de argumentos', () => {
   it('acota la longitud de los textos que llegan del renderer', () => {
     expect(stopAgentArgsSchema.safeParse({ reason: 'x'.repeat(500) }).success).toBe(false);
     expect(pickFolderArgsSchema.safeParse({ title: 'x'.repeat(500) }).success).toBe(false);
+  });
+
+  it('admite solo una ruta acotada para abrir un worktree', () => {
+    expect(
+      worktreeOpenFolderArgsSchema.safeParse({ worktreePath: 'C:/Luxy/worktrees/lux-1' }).success,
+    ).toBe(true);
+    expect(worktreeOpenFolderArgsSchema.safeParse({ worktreePath: '' }).success).toBe(false);
+    expect(worktreeOpenFolderArgsSchema.safeParse({ worktreePath: 'x'.repeat(2000) }).success).toBe(
+      false,
+    );
   });
 
   it('la prueba de conexion no admite una URL elegida por el renderer', () => {

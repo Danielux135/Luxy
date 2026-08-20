@@ -20,6 +20,7 @@ import type { StoredAgentConfig } from '@luxy/shared';
 import {
   IPC_INVOKE,
   artifactOpenFolderArgsSchema,
+  worktreeOpenFolderArgsSchema,
   catalogRefreshArgsSchema,
   configSaveArgsSchema,
   emptyArgsSchema,
@@ -47,6 +48,7 @@ import type { SecretStore } from '../secure-storage.js';
 import { MACHINE_TOKEN_SECRET, connectionSecretName } from '../../shared/ipc.js';
 import { deleteMigratedFile, inspectEnvFile, readEnvSecrets } from '../migration.js';
 import { readCatalogSnapshot, writeCatalogSnapshot } from '../catalog-store.js';
+import { resolveWorktreeDirectory } from '../worktree-directory.js';
 
 export interface HandlerContext {
   controller: AgentController;
@@ -55,6 +57,8 @@ export interface HandlerContext {
   logsDirectory: string;
   /** raiz de los artefactos generados; se abre, nunca se sirve por HTTP */
   artifactsDirectory: string;
+  /** raiz local a la que deben pertenecer los worktrees que se abran */
+  worktreesDirectory: string;
   /** donde se guarda el catalogo real leido de cada pasarela */
   catalogDirectory: string;
   /** archivos en claro donde pueden quedar secretos de versiones anteriores */
@@ -199,6 +203,15 @@ export function registerIpcHandlers(context: HandlerContext): void {
     }
     const error = await shell.openPath(directory);
     if (error.length > 0) throw new Error(`no se pudo abrir la carpeta: ${error}`);
+    return { opened: true };
+  });
+
+  handle(IPC_INVOKE.worktreeOpenFolder, worktreeOpenFolderArgsSchema, async (args) => {
+    // la ruta procede del trabajo persistido, pero sigue siendo entrada no
+    // confiable: resolver el enlace antes impide abrir fuera de Luxy.
+    const directory = resolveWorktreeDirectory(args.worktreePath, context.worktreesDirectory);
+    const error = await shell.openPath(directory);
+    if (error.length > 0) throw new Error(`no se pudo abrir la carpeta de trabajo: ${error}`);
     return { opened: true };
   });
 

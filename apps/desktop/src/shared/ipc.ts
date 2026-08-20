@@ -49,6 +49,11 @@ export const artifactOpenFolderArgsSchema = z.object({
     .regex(/^[A-Za-z0-9-]+$/, 'identificador de trabajo no valido'),
 });
 
+/** la ruta sigue validandose y confinándose en main antes de abrirse */
+export const worktreeOpenFolderArgsSchema = z.object({
+  worktreePath: z.string().min(1).max(1024),
+});
+
 export const logsTailArgsSchema = z.object({
   count: z.number().int().min(1).max(500).default(120),
 });
@@ -308,6 +313,7 @@ export interface LuxyBridge {
   tailLogs(count?: number): Promise<IpcResult<{ lines: string[] }>>;
   openLogsFolder(): Promise<IpcResult<{ opened: boolean }>>;
   openArtifactFolder(jobId: string): Promise<IpcResult<{ opened: boolean }>>;
+  openWorktreeFolder(worktreePath: string): Promise<IpcResult<{ opened: boolean }>>;
   pickFolder(title?: string): Promise<IpcResult<{ canceled: boolean; path: string | null }>>;
   getConfig(): Promise<IpcResult<z.infer<typeof configSummarySchema>>>;
   saveConfig(config: unknown): Promise<IpcResult<z.infer<typeof configSummarySchema>>>;

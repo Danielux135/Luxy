@@ -197,6 +197,19 @@ describe('resultado final idempotente', () => {
     );
   });
 
+  it('persiste las llamadas medidas sin derivarlas de los eventos', async () => {
+    const { response, repo } = await run('running', {
+      callMetrics: { modelCalls: 4, toolCalls: 6 },
+    });
+    expect(response.status).toBe(200);
+    expect(repo.updateJob).toHaveBeenCalledWith(
+      JOB_ID,
+      expect.objectContaining({
+        metadata: expect.objectContaining({ callMetrics: { modelCalls: 4, toolCalls: 6 } }),
+      }),
+    );
+  });
+
   it('valida y persiste una evaluacion automatica completada', async () => {
     const { response, repo } = await run(
       'running',

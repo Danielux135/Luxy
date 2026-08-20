@@ -870,6 +870,9 @@ export async function runJob(
               },
             }
           : {}),
+        ...(providerResult.callMetrics === undefined
+          ? {}
+          : { callMetrics: providerResult.callMetrics }),
       },
     };
   } catch (error) {

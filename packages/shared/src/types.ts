@@ -177,6 +177,14 @@ export interface ProviderUsage {
   estimatedCost: number;
 }
 
+/** contadores observables de una ejecucion del proveedor, sin texto ni secretos */
+export interface ProviderCallMetrics {
+  /** peticiones enviadas realmente al modelo durante este trabajo */
+  modelCalls: number;
+  /** herramientas locales que el modelo llego a ejecutar */
+  toolCalls: number;
+}
+
 // interfaz comun de todos los proveedores de ejecucion.
 // preparada para ampliaciones futuras (consejo de agentes, revision cruzada).
 export interface ProviderExecution {
@@ -272,6 +280,8 @@ export interface ProviderRunResult {
   cancelled: boolean;
   errorMessage: string | null;
   usage?: ProviderUsage;
+  /** solo lo rellenan los proveedores que pueden medir las llamadas con precision */
+  callMetrics?: ProviderCallMetrics;
   /**
    * por que termino de verdad la ultima peticion al proveedor.
    *

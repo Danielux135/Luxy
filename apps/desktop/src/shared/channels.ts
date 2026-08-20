@@ -18,6 +18,7 @@ export const IPC_INVOKE = {
   logsTail: 'luxy:logs:tail',
   logsOpenFolder: 'luxy:logs:open-folder',
   artifactOpenFolder: 'luxy:artifact:open-folder',
+  worktreeOpenFolder: 'luxy:worktree:open-folder',
   pickFolder: 'luxy:dialog:pick-folder',
   configGet: 'luxy:config:get',
   configSave: 'luxy:config:save',

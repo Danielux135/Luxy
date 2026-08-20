@@ -166,7 +166,8 @@ export class HttpApiProvider implements ProviderExecution {
 
   async detect(): Promise<ToolPresence> {
     // un proveedor http esta disponible si esta habilitado y tiene clave
-    const available = this.config.enabled && typeof this.apiKey === 'string' && this.apiKey.length > 0;
+    const available =
+      this.config.enabled && typeof this.apiKey === 'string' && this.apiKey.length > 0;
     return {
       available,
       version: available ? this.config.model : null,
@@ -205,10 +206,14 @@ export class HttpApiProvider implements ProviderExecution {
     // lo que el modelo alcanzo a escribir antes de cortarse. Se guarda aparte
     // del diagnostico a proposito: el diagnostico no lleva contenido.
     const parcial = { text: '' };
+    let modelCalls = 0;
 
     try {
       const result = await retryWithBackoff(
-        () => this.callApi(messages, request, diagnostics, parcial),
+        () => {
+          modelCalls += 1;
+          return this.callApi(messages, request, diagnostics, parcial);
+        },
         {
           maxAttempts: 3,
           baseDelayMs: 2000,
@@ -267,6 +272,7 @@ export class HttpApiProvider implements ProviderExecution {
         cancelled: false,
         errorMessage: null,
         usage,
+        callMetrics: { modelCalls, toolCalls: 0 },
         ...this.diagnosed(diagnostics),
       };
     } catch (error) {
@@ -336,7 +342,10 @@ export class HttpApiProvider implements ProviderExecution {
     request: ProviderRunRequest,
     agentic: AgenticContext,
   ): Promise<ProviderRunResult> {
-    request.onEvent({ type: 'phase', message: `${this.label(request)} trabajando con herramientas` });
+    request.onEvent({
+      type: 'phase',
+      message: `${this.label(request)} trabajando con herramientas`,
+    });
 
     try {
       const result = await runAgenticLoop(request.prompt, {
@@ -376,6 +385,7 @@ export class HttpApiProvider implements ProviderExecution {
           cancelled: true,
           errorMessage: 'trabajo cancelado',
           usage,
+          callMetrics: { modelCalls: result.turns, toolCalls: result.toolCallsExecuted },
         };
       }
 
@@ -395,6 +405,7 @@ export class HttpApiProvider implements ProviderExecution {
         cancelled: false,
         errorMessage: null,
         usage,
+        callMetrics: { modelCalls: result.turns, toolCalls: result.toolCallsExecuted },
       };
     } catch (error) {
       if (request.signal.aborted) {
@@ -575,9 +586,7 @@ export class HttpApiProvider implements ProviderExecution {
           max_tokens: this.maxTokensFor(request),
           stream: this.config.supportsStreaming,
           // algunos proveedores solo devuelven usage si se pide explicitamente
-          ...(this.config.supportsStreaming
-            ? { stream_options: { include_usage: true } }
-            : {}),
+          ...(this.config.supportsStreaming ? { stream_options: { include_usage: true } } : {}),
         }),
         signal: controller.signal,
       });

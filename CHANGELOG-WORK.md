@@ -1684,3 +1684,59 @@ controlada`; 23 archivos, T9/T10 y F4.4-T1/T2. `package-lock.json`, claves,
 - Estado nuevo:
 - Siguiente paso exacto:
 ```
+### 2026-08-20 08:27 — Codex — UX-001
+
+- Estado anterior: Studio mostraba pruebas, diff y eventos, pero no las llamadas
+  efectivas al modelo ni la ubicación del worktree.
+- Objetivo: hacer visibles ambas trazas y abrir el worktree desde Windows sin
+  entregar al renderer una capacidad de abrir rutas arbitrarias.
+- Hipótesis o causa demostrada: `runAgenticLoop` ya medía vueltas al modelo y
+  herramientas, pero `ProviderRunResult`, el cierre del Gateway y la pantalla no
+  conservaban ese dato.
+- Archivos leídos: Studio, IPC/preload/main, `job-runner`, proveedor HTTP,
+  `agentic-loop`, contratos shared, cierre Gateway y pruebas relacionadas.
+- Archivos modificados: contrato shared, proveedor HTTP, runner, Gateway, IPC,
+  main/preload, Studio y pruebas nuevas de métricas y confinamiento de rutas.
+- Comandos ejecutados: Prettier; build de `@luxy/shared`; lint; dos matrices
+  focalizadas de Vitest; typecheck completo.
+- Resultado real: lint correcto; 105 pruebas focalizadas correctas. La primera
+  matriz de 119 tuvo 118 correctas y 1 fallo porque el enlace temporal de
+  dependencias cargó el build compartido anterior. Typecheck no cerró por ese
+  mismo build, ausencia de `@cloudflare/workers-types` y un error previo de
+  `Config.tsx` con `other`.
+- Pruebas: se añadieron cobertura de `callMetrics`, parser de Studio, contrato
+  IPC y rechazo de una carpeta externa.
+- Decisiones: `modelCalls` es el número exacto de peticiones HTTP al modelo;
+  `toolCalls` se presenta aparte. Los trabajos históricos quedan sin cifra. Main
+  usa `realpath` y confina la carpeta bajo la raíz local antes de usar el
+  Explorador.
+- Riesgos o límites: requiere reconstruir y desplegar Gateway autorizado para
+  ver la métrica en una tarea nueva. El worktree temporal quedó con un enlace de
+  dependencias que el entorno no permitió retirar; está ignorado por Git.
+- Estado nuevo: bloqueado sólo para la matriz completa e integración, sin commit,
+  push, deploy, migración ni llamadas reales.
+- Siguiente paso exacto: seguir `LA-020`.
+
+### 2026-08-20 08:36 — Codex — UX-001, cierre de validación
+
+- Estado anterior: la matriz completa estaba bloqueada por un enlace temporal a
+  dependencias del checkout principal.
+- Acción: se retiró sólo ese junction confirmado y se instalaron dependencias
+  del worktree con `npm ci --ignore-scripts`.
+- Comandos ejecutados: `npm.cmd run typecheck`, `npm.cmd test` y `npm.cmd run build`.
+- Resultado real: typecheck y build correctos; Vitest 1.574 pasadas, 14 omitidas,
+  0 fallos, 87 archivos, 59,37 s.
+- Estado nuevo: UX-001 verificado y listo para el commit autorizado. No hubo
+  llamadas reales, migración, despliegue ni push.
+- Siguiente paso exacto: crear el commit y arrancar Desktop desde esta rama.
+
+### 2026-08-20 08:38 — Codex — UX-001, entrega local
+
+- Acción autorizada: commit local creado como `feat: muestra llamadas y worktree en Studio`.
+- Reinicio: se cerró el árbol Electron que ejecutaba otra rama y Studio se abrió
+  desde `luxy/ux-001-detalle-trabajo`.
+- Incidencia de arranque: `ELECTRON_RUN_AS_NODE=1` hacía que Electron iniciara
+  como Node; se eliminó sólo de la sesión de lanzamiento. El proceso principal,
+  renderer, GPU y utility process de la rama nueva quedaron vivos.
+- No se hizo push ni despliegue. La métrica de llamadas requerirá actualizar el
+  Gateway antes de poder guardarse en trabajos nuevos de producción.

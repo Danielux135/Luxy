@@ -123,7 +123,7 @@ necesario.
 | ---------------------- | ------------------------- | ------------------------------------------------------------------------------------------------- |
 | Agente, gateway y cola | Implementado              | polling saliente, leases, heartbeats, eventos y cancelación                                       |
 | Desktop Electron       | Implementado              | agente en utility process, bandeja, configuración y secretos cifrados                             |
-| Studio — trabajos      | Implementado en código    | formulario real, historial, eventos, resultado, diff y pruebas                                    |
+| Studio — trabajos      | Implementado en código    | formulario real, historial, eventos, resultado, diff, pruebas y trazabilidad de llamadas/worktree |
 | Worktrees              | Implementado              | la carpeta original no se modifica                                                                |
 | Aplicar/descartar      | Implementado en código    | aplicar crea commit aislado; descartar borra worktree tras confirmar; sin push                    |
 | Conversaciones         | Implementado parcialmente | uno o dos modelos, streaming, historial, tiempos, tokens y cancelación                            |
@@ -376,6 +376,20 @@ exit 0. Los 9 fallos «ambientales» eran exclusivos de la copia
 Linux y aquí no existen: en esta máquina un fallo es una regresión.
 
 ## 10. Próximo objetivo
+
+### UX-001 — trazabilidad del detalle de trabajos (2026-08-20)
+
+Implementado, verificado y commiteado en el worktree aislado
+`luxy/ux-001-detalle-trabajo`: los proveedores HTTP informan las llamadas
+efectivas al modelo y las herramientas ejecutadas. Gateway las conserva como
+`callMetrics`; Studio las presenta sin estimar los trabajos históricos. El detalle
+también muestra el worktree y permite abrirlo en el Explorador de Windows. El IPC
+resuelve enlaces y rechaza cualquier ruta fuera de
+`%LOCALAPPDATA%\Luxy\worktrees`.
+
+Lint, typecheck, 1.574 pruebas (14 omitidas) y build pasaron. Requiere desplegar
+el Gateway con autorización para que los trabajos nuevos persistan la métrica.
+No cambia los trabajos anteriores ni crea migraciones.
 
 `F4.1-T4` cerró la discrepancia entre la instantánea real y el catálogo
 operativo: `buildDefaultCatalog` representa ya los 22 modelos declarados por la

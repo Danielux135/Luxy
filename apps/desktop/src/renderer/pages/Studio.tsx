@@ -4,6 +4,7 @@ import { TERMINAL_JOB_STATUSES } from '@luxy/shared';
 import type { JobStatus, ProviderId, StudioJob, StudioJobAction } from '@luxy/shared';
 import { Empty, Field, Notice, Panel, Readout, Tag } from '../ui/primitives.js';
 import { FormattedResponse } from '../formatted-response.js';
+import { callMetricsOf } from '../studio-detail.js';
 import { canDecideStudioJob, parseStudioDecision } from '../studio-decision.js';
 import { useStudio } from '../useStudio.js';
 
@@ -43,6 +44,7 @@ export function StudioPage(): JSX.Element {
   const [provider, setProvider] = useState<ProviderId | ''>('');
   const [model, setModel] = useState('');
   const [prompt, setPrompt] = useState('');
+  const [worktreeError, setWorktreeError] = useState<string | null>(null);
 
   const machine = studio.machines.find((item) => item.id === machineId) ?? null;
   const projects = useMemo(() => machine?.projects ?? [], [machine]);
@@ -76,6 +78,9 @@ export function StudioPage(): JSX.Element {
   const testsPassed = typeof metadata['testsPassed'] === 'number' ? metadata['testsPassed'] : 0;
   const testsFailed = typeof metadata['testsFailed'] === 'number' ? metadata['testsFailed'] : 0;
   const decision = parseStudioDecision(metadata);
+  const callMetrics = studio.detail === null ? null : callMetricsOf(studio.detail.job);
+  const worktreePath =
+    typeof metadata['worktreePath'] === 'string' ? metadata['worktreePath'] : null;
   const canDecide = studio.detail !== null && canDecideStudioJob(studio.detail.job);
 
   const orderedJobs = useMemo(
@@ -148,6 +153,12 @@ export function StudioPage(): JSX.Element {
       prompt: job.prompt,
       priority: 0,
     });
+  };
+
+  const openWorktree = async (): Promise<void> => {
+    if (worktreePath === null) return;
+    const result = await window.luxy.openWorktreeFolder(worktreePath);
+    setWorktreeError(result.ok ? null : result.error);
   };
 
   return (
@@ -297,6 +308,16 @@ export function StudioPage(): JSX.Element {
                     value: String(testsFailed),
                     tone: testsFailed > 0 ? 'fault' : 'idle',
                   },
+                  {
+                    label: 'Llamadas al modelo',
+                    value: callMetrics === null ? 'No registradas' : String(callMetrics.modelCalls),
+                    tone: callMetrics === null ? 'idle' : undefined,
+                  },
+                  {
+                    label: 'Herramientas ejecutadas',
+                    value: callMetrics === null ? 'No registradas' : String(callMetrics.toolCalls),
+                    tone: callMetrics === null ? 'idle' : undefined,
+                  },
                 ]}
               />
               <div className="studio-detail__block">
@@ -306,15 +327,29 @@ export function StudioPage(): JSX.Element {
               {studio.detail.job.resultSummary !== null && (
                 <div className="studio-detail__block">
                   <div className="list__meta">Resultado</div>
-              <FormattedResponse text={studio.detail.job.resultSummary} />
+                  <FormattedResponse text={studio.detail.job.resultSummary} />
                 </div>
               )}
               {studio.detail.job.errorMessage !== null && (
                 <Notice tone="fault">{studio.detail.job.errorMessage}</Notice>
               )}
+              {worktreePath !== null && (
+                <div className="studio-detail__block">
+                  <div className="list__meta">Carpeta de trabajo</div>
+                  <p className="mono prewrap">{worktreePath}</p>
+                  <button className="btn" onClick={() => void openWorktree()}>
+                    Abrir en el Explorador
+                  </button>
+                  {worktreeError !== null && <Notice tone="fault">{worktreeError}</Notice>}
+                </div>
+              )}
               {['failed', 'interrupted', 'cancelled'].includes(studio.detail.job.status) && (
                 <div className="studio-decision__actions">
-                  <button className="btn btn--primary" disabled={studio.busy} onClick={() => void retry()}>
+                  <button
+                    className="btn btn--primary"
+                    disabled={studio.busy}
+                    onClick={() => void retry()}
+                  >
                     Reintentar trabajo
                   </button>
                 </div>

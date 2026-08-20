@@ -54,6 +54,11 @@ function artifactsDirectory(): string {
   return join(luxyDataDir(), 'artifacts');
 }
 
+/** la misma raiz que usa el agente para crear worktrees aislados */
+function worktreesDirectory(): string {
+  return join(luxyDataDir(), 'worktrees');
+}
+
 /** catalogos reales leidos de cada pasarela, con su fecha */
 function catalogDirectory(): string {
   return join(luxyDataDir(), 'catalog');
@@ -209,6 +214,7 @@ async function bootstrap(): Promise<void> {
     secretStore,
     logsDirectory: logsDirectory(),
     artifactsDirectory: artifactsDirectory(),
+    worktreesDirectory: worktreesDirectory(),
     catalogDirectory: catalogDirectory(),
     migrationCandidateFiles: migrationCandidateFiles(),
     getMainWindow: () => mainWindow,

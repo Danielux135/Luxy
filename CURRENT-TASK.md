@@ -2,7 +2,34 @@
 
 ## Checkpoint de continuidad — 2026-08-09
 
-Paso activo: **LA-018 — validar el Laboratorio actualizado**
+Paso activo: **UX-001 — trazabilidad de llamadas y carpeta del trabajo**
+
+Estado: **done — Codex, 2026-08-20; commit local y Studio reiniciado**
+
+Objetivo: conservar en cada trabajo las llamadas efectivas al modelo y a las
+herramientas, mostrarlas en Studio y permitir abrir de forma segura el worktree
+del trabajo desde Windows. El acceso desde el renderer debe quedar limitado a la
+raíz local de worktrees; los trabajos históricos sin métrica seguirán visibles
+como «no registrada».
+
+Archivos previstos: contrato de resultado, proveedor HTTP, persistencia del
+Gateway, IPC validado de Desktop, detalle de Trabajos y sus pruebas. No habrá
+llamadas reales, commit, push, despliegue ni migraciones.
+
+Resultado implementado: los trabajos HTTP nuevos conservan `callMetrics` con
+llamadas al modelo y herramientas ejecutadas; Trabajos muestra ambos valores y
+la ruta del worktree con **Abrir en el Explorador**. El proceso principal resuelve
+la ruta real y la confina bajo `%LOCALAPPDATA%\Luxy\worktrees` antes de abrirla.
+
+Evidencia: lint, typecheck, build y suite completa correctos: 1.574 pruebas
+pasadas y 14 omitidas. El bloqueo inicial era sólo el worktree sin dependencias;
+se instaló con scripts desactivados y se retiró el enlace temporal al checkout
+principal. Ver `TEST-RESULTS.md` y `LA-020`.
+
+Siguiente paso exacto: autorizar un deploy del Gateway antes de comprobar un
+trabajo Minimax nuevo en pantalla con las llamadas persistidas.
+
+Paso previo pendiente: **LA-018 — validar el Laboratorio actualizado**
 
 Estado: **pending — Daniel, 2026-08-09**
 

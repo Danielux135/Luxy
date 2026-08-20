@@ -519,6 +519,7 @@ describe('HttpApiProvider', () => {
       ok: true,
       finalText: 'Hola, Daniel.',
       usage: { inputTokens: 287, outputTokens: 476 },
+      callMetrics: { modelCalls: 1, toolCalls: 0 },
     });
     expect(events).toContain('text:Hola, Daniel.');
     expect(streamCancelled).toBe(true);
@@ -753,9 +754,7 @@ describe('HttpApiProvider: diagnostico del final de la respuesta', () => {
   });
 
   it('registra el codigo HTTP tambien cuando el proveedor rechaza la peticion', async () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response('sin creditos', { status: 402 }),
-    );
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('sin creditos', { status: 402 }));
 
     const provider = new HttpApiProvider(config, 'una-clave');
     const result = await provider.run(peticion());

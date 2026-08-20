@@ -426,6 +426,7 @@ export const handleJobComplete = withMachineAuth(async (request, deps, machine, 
       worktreePath: result.worktreePath,
       sessionId: result.sessionId,
       ...(result.executedModel === undefined ? {} : { executedModel: result.executedModel }),
+      ...(result.callMetrics === undefined ? {} : { callMetrics: result.callMetrics }),
       ...(evaluationResult === null
         ? {}
         : {

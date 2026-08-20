@@ -775,3 +775,37 @@ test.txt`, `Luxy claves API.txt`, un handoff duplicado y `Web demos/`).
 - Clasificación: regresión | ambiental | bloqueo | esperado.
 - Evidencia manual adicional:
 ```
+### 2026-08-20 — Windows 11 — UX-001
+
+- Commit/base o diff: rama aislada `luxy/ux-001-detalle-trabajo`, sin commit.
+- Comandos exactos: `npm.cmd run lint`; `npm.cmd test -- apps/agent/src/providers/providers.test.ts apps/desktop/src/shared/ipc.test.ts apps/desktop/src/main/worktree-directory.test.ts apps/desktop/src/renderer/studio-detail.test.ts`.
+- Exit code: 0 en ambos.
+- Passed / failed / skipped: lint sin errores; Vitest **105 passed, 0 failed**,
+  4 archivos, 9,59 s.
+- Duración: lint 38,7 s; Vitest 9,59 s.
+- Fallos completos: la matriz que añadía `final-outcome.test.ts` hizo **118
+  passed, 1 failed** porque el worktree no tenía `node_modules`; al enlazar los
+  del checkout original, `@luxy/shared` resolvió su `dist` anterior y eliminó
+  `callMetrics` al validar el cuerpo. No es evidencia contra el contrato fuente.
+  `npm.cmd run typecheck` también falló por ese `dist` anterior, por faltar
+  `@cloudflare/workers-types` y por un error preexistente en `Config.tsx`:
+  falta `other` en un `Record<ProviderId, string>`.
+- Clasificación: entorno de worktree y fallo preexistente; pendiente de matriz
+  completa tras integrar y reconstruir las dependencias del worktree real.
+- Evidencia manual adicional: ninguna; no se ejecutaron modelos, proveedores,
+  precios, migración, deploy, commit ni push.
+
+### 2026-08-20 — Windows 11 — UX-001, matriz completa
+
+- Commit/base o diff: rama aislada `luxy/ux-001-detalle-trabajo`, sin commit.
+- Comando exacto: `npm.cmd run typecheck`; `npm.cmd test`; `npm.cmd run build`.
+- Exit code: 0 en los tres.
+- Passed / failed / skipped: typecheck correcto; Vitest **1.574 passed, 14
+  skipped, 0 failed**, 87 archivos, 59,37 s; build correcto de los cinco
+  workspaces.
+- Duración: typecheck 17,3 s; Vitest 59,37 s; build 16,4 s.
+- Fallos completos: ninguno. El incidente de dependencias de la entrada anterior
+  quedó resuelto con `npm ci --ignore-scripts` dentro del worktree.
+- Clasificación: validación completa correcta.
+- Evidencia manual adicional: ninguna; no se ejecutaron modelos, proveedores,
+  precios, migración, deploy ni push.

@@ -499,6 +499,13 @@ export const jobCompleteRequestSchema = z.object({
   responseTermination: responseTerminationSchema.optional(),
   /** apiModel que el agente resolvio y envio realmente al proveedor */
   executedModel: z.string().min(1).max(128).optional(),
+  /** llamadas observadas al modelo y a las herramientas durante este trabajo */
+  callMetrics: z
+    .object({
+      modelCalls: z.number().int().min(0),
+      toolCalls: z.number().int().min(0),
+    })
+    .optional(),
   /**
    * medio producido por el trabajo: una imagen editada, un audio sintetizado.
    *

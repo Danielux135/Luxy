@@ -36,6 +36,10 @@ Hasta cerrar F0 no se empieza Android, Remote ni una expansión visual grande.
 Prioridad: **P1**  
 Estado global: `implemented`
 
+- UX-001: `implemented y verificado en worktree aislado; integración pendiente`.
+  Conserva llamadas reales de proveedores HTTP, muestra la carpeta de trabajo y
+  la abre sólo tras confinarla dentro de la raíz local de worktrees.
+
 Objetivo: completar de extremo a extremo
 máquina → proyecto → proveedor/modelo → tarea → progreso → resultado → diff →
 aplicar/descartar → historial.
