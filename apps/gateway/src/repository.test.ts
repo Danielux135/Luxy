@@ -13,6 +13,18 @@ describe('Repository.listJobs', () => {
       expect.objectContaining({ limit: 100, offset: 300, order: 'created_at.desc' }),
     );
   });
+
+  it('aplica el proyecto en PostgREST antes del limite', async () => {
+    const select = vi.fn(async () => []);
+    const repo = new Repository({ select } as never);
+
+    await repo.listJobs({ projectAlias: 'luxy', limit: 30 });
+
+    expect(select).toHaveBeenCalledWith(
+      'jobs',
+      expect.objectContaining({ filters: { project_alias: 'eq.luxy' }, limit: 30 }),
+    );
+  });
 });
 
 describe('Repository.listPendingApprovalsForMachine', () => {

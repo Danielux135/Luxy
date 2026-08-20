@@ -262,6 +262,21 @@ describe('Luxy Studio API', () => {
     );
   });
 
+  it('filtra el historial por proyecto antes de paginar', async () => {
+    const context = await deps();
+    const response = await handleStudioJobs(
+      new Request('https://gateway.test/api/studio/jobs?projectAlias=luxy&limit=30', {
+        headers: { authorization: `Bearer ${TOKEN}` },
+      }),
+      context,
+    );
+
+    expect(response.status).toBe(200);
+    expect(context.repo.listJobs).toHaveBeenCalledWith(
+      expect.objectContaining({ projectAlias: 'luxy', limit: 30 }),
+    );
+  });
+
   it('crea un trabajo sin ids ficticios de Telegram', async () => {
     const context = await deps();
     const response = await handleStudioJobCreate(

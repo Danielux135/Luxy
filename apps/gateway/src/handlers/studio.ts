@@ -243,6 +243,7 @@ export const handleStudioJobs = withMachineAuth(async (request, deps, creator) =
   const url = new URL(request.url);
   const query = studioJobListQuerySchema.safeParse({
     targetMachineId: url.searchParams.get('targetMachineId') ?? undefined,
+    projectAlias: url.searchParams.get('projectAlias') ?? undefined,
     status: url.searchParams.get('status') ?? undefined,
     limit: url.searchParams.get('limit') ?? undefined,
     offset: url.searchParams.get('offset') ?? undefined,

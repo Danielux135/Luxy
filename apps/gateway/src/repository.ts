@@ -319,6 +319,7 @@ export class Repository {
     options: {
       origin?: JobOrigin;
       targetMachineId?: string;
+      projectAlias?: string;
       status?: JobStatus;
       limit?: number;
       offset?: number;
@@ -329,6 +330,7 @@ export class Repository {
     if (options.targetMachineId !== undefined) {
       filters.target_machine_id = eq(options.targetMachineId);
     }
+    if (options.projectAlias !== undefined) filters.project_alias = eq(options.projectAlias);
     if (options.status !== undefined) filters.status = eq(options.status);
 
     const rows = await this.db.select<JobRow>('jobs', {

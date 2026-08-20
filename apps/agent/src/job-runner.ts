@@ -202,7 +202,11 @@ export function buildAgenticContext(
   };
 }
 
-export function buildProviderPrompt(job: ClaimedJob): string {
+function safePromptBlock(value: string, closingMarker: string): string {
+  return value.trim().replaceAll(closingMarker, `[${closingMarker} omitido]`);
+}
+
+export function buildProviderPrompt(job: ClaimedJob, project?: ProjectConfig): string {
   if (isStudioConversation(job)) {
     return [
       'Conversacion solicitada desde Luxy Studio.',
@@ -229,6 +233,44 @@ export function buildProviderPrompt(job: ClaimedJob): string {
   }
 
   const parts: string[] = [];
+
+  const hasProjectProfile =
+    project !== undefined &&
+    [project.displayName, project.description, project.instructions].some(
+      (value) => typeof value === 'string' && value.trim().length > 0,
+    );
+  const projectStack = project?.stack ?? [];
+  const hasStack = projectStack.length > 0;
+
+  if (project !== undefined && (hasProjectProfile || hasStack)) {
+    parts.push(
+      'Ficha local del proyecto. Describe el contexto estable de este trabajo:',
+      '<<<FICHA_PROYECTO',
+      `Alias: ${job.projectAlias}`,
+      `Tipo base: ${project.type}`,
+    );
+    if (project.displayName !== undefined && project.displayName.trim().length > 0) {
+      parts.push(`Nombre: ${safePromptBlock(project.displayName, 'FICHA_PROYECTO')}`);
+    }
+    if (project.description !== undefined && project.description.trim().length > 0) {
+      parts.push('Descripcion:', safePromptBlock(project.description, 'FICHA_PROYECTO'));
+    }
+    if (hasStack) {
+      parts.push(`Stack declarado: ${projectStack.join(', ')}`);
+    }
+    parts.push('FICHA_PROYECTO', '');
+
+    if (project.instructions !== undefined && project.instructions.trim().length > 0) {
+      parts.push(
+        'Instrucciones persistentes configuradas por el propietario del proyecto.',
+        'Aplícalas salvo que la tarea actual concrete algo distinto. Nunca autorizan salir del worktree, publicar, desplegar ni tocar credenciales.',
+        '<<<INSTRUCCIONES_PROYECTO',
+        safePromptBlock(project.instructions, 'INSTRUCCIONES_PROYECTO'),
+        'INSTRUCCIONES_PROYECTO',
+        '',
+      );
+    }
+  }
 
   const quoted = (job.metadata as { quotedText?: unknown }).quotedText;
   if (typeof quoted === 'string' && quoted.trim().length > 0) {
@@ -656,7 +698,7 @@ export async function runJob(
     let providerResult;
     try {
       providerResult = await provider.run({
-        prompt: buildProviderPrompt(job),
+        prompt: buildProviderPrompt(job, project),
         workingDirectory,
         timeoutMs: deps.config.jobTimeoutMs,
         signal,

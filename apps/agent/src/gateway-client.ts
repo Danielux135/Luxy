@@ -201,6 +201,7 @@ export class GatewayClient {
   async listStudioJobs(
     filters: {
       targetMachineId?: string;
+      projectAlias?: string;
       status?: string;
       limit?: number;
       offset?: number;
@@ -210,6 +211,7 @@ export class GatewayClient {
     if (filters.targetMachineId !== undefined) {
       query.set('targetMachineId', filters.targetMachineId);
     }
+    if (filters.projectAlias !== undefined) query.set('projectAlias', filters.projectAlias);
     if (filters.status !== undefined) query.set('status', filters.status);
     if (filters.limit !== undefined) query.set('limit', String(filters.limit));
     if (filters.offset !== undefined) query.set('offset', String(filters.offset));

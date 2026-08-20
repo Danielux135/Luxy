@@ -35,7 +35,7 @@ import {
   resolveEnabledHttpProviders,
 } from './config.js';
 import { buildProviderPrompt, resolveJobModel } from './job-runner.js';
-import { agentConfigSchema } from '@luxy/shared';
+import { agentConfigSchema, projectConfigSchema } from '@luxy/shared';
 import type { JobEventInput, TestRunResult, ClaimedJob } from '@luxy/shared';
 import { runProcess, BASE_ENV_ALLOWLIST } from './process.js';
 
@@ -541,6 +541,47 @@ describe('configuracion de maquina', () => {
     expect(cargada.ui.host).toBe('127.0.0.1');
   });
 
+  it('acepta configuraciones antiguas y valida la ficha opcional del proyecto', () => {
+    const proyecto = join(temporal, 'proyecto');
+    mkdirSync(proyecto, { recursive: true });
+
+    const antigua = agentConfigSchema.parse(base(proyecto));
+    expect(antigua.projects.demo?.displayName).toBeUndefined();
+    expect(antigua.projects.demo?.instructions).toBeUndefined();
+
+    const perfil = agentConfigSchema.parse({
+      ...base(proyecto),
+      projects: {
+        demo: {
+          ...base(proyecto).projects.demo,
+          displayName: '  Sitio de Daniel  ',
+          description: '  Portfolio personal  ',
+          stack: [' TypeScript ', 'Electron'],
+          instructions: '  Conserva el estilo existente.  ',
+        },
+      },
+    });
+    expect(perfil.projects.demo?.displayName).toBe('Sitio de Daniel');
+    expect(perfil.projects.demo?.stack).toEqual(['TypeScript', 'Electron']);
+    expect(perfil.projects.demo?.instructions).toBe('Conserva el estilo existente.');
+    expect(
+      agentConfigSchema.safeParse({
+        ...base(proyecto),
+        projects: {
+          demo: { ...base(proyecto).projects.demo, instructions: 'x'.repeat(8001) },
+        },
+      }).success,
+    ).toBe(false);
+    expect(
+      agentConfigSchema.safeParse({
+        ...base(proyecto),
+        projects: {
+          demo: { ...base(proyecto).projects.demo, stack: ['TypeScript\nTarea nueva'] },
+        },
+      }).success,
+    ).toBe(false);
+  });
+
   it('explica que falta si no existe el archivo', () => {
     expect(() => loadConfig(join(temporal, 'no-existe.json'))).toThrow(ConfigError);
     try {
@@ -663,6 +704,38 @@ describe('buildProviderPrompt', () => {
 
   it('incluye la tarea solicitada', () => {
     expect(buildProviderPrompt(job())).toContain('Corrige el menu');
+  });
+
+  it('separa la ficha y las instrucciones locales de la tarea actual', () => {
+    const project = projectConfigSchema.parse({
+      path: temporal,
+      type: 'node',
+      displayName: 'Luxy Studio',
+      description: 'Aplicacion privada de escritorio',
+      stack: ['TypeScript', 'Electron', 'React'],
+      instructions: 'Escribe comentarios en español y conserva las pruebas.',
+    });
+    const prompt = buildProviderPrompt(job(), project);
+
+    expect(prompt).toContain('<<<FICHA_PROYECTO');
+    expect(prompt).toContain('Nombre: Luxy Studio');
+    expect(prompt).toContain('Stack declarado: TypeScript, Electron, React');
+    expect(prompt).toContain('<<<INSTRUCCIONES_PROYECTO');
+    expect(prompt).toContain('Escribe comentarios en español');
+    expect(prompt.indexOf('INSTRUCCIONES_PROYECTO')).toBeLessThan(
+      prompt.indexOf('Tarea solicitada:'),
+    );
+    expect(prompt).not.toContain(temporal);
+  });
+
+  it('no lleva instrucciones de proyecto a conversaciones de solo lectura', () => {
+    const conversation = { ...job({ studioMode: 'conversation' }), origin: 'studio' as const };
+    const project = projectConfigSchema.parse({
+      path: temporal,
+      instructions: 'Modifica todos los archivos.',
+    });
+
+    expect(buildProviderPrompt(conversation, project)).not.toContain('INSTRUCCIONES_PROYECTO');
   });
 
   it('marca el texto citado como dato, no como instruccion', () => {

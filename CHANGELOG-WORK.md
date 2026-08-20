@@ -132,6 +132,15 @@ parezca correcta; añadir una corrección nueva.
 - Pruebas: compilación de `@luxy/shared` y `apps/agent/src/agent.test.ts`, 76 pasadas.
 - Siguiente paso exacto: commit local y continuar con el perfil de proyecto que consumirá esta política en Studio.
 
+### 2026-08-20 — Codex — PROJECT-PROFILE-CORE-001
+
+- Objetivo: integrar el contrato y el uso seguro del perfil local de proyecto sin esperar a la pantalla de edición.
+- Archivos modificados: esquema compartido, prompt del agente y sus pruebas, cliente/repositorio/handler de Studio y pruebas de Gateway.
+- Resultado: configuraciones antiguas siguen siendo válidas; nombre, descripción, stack e instrucciones se validan localmente. Sólo los trabajos editables reciben el contexto delimitado; conversaciones y evaluaciones siguen en sólo lectura. El historial acepta un filtro exacto por alias de proyecto antes de paginar.
+- Pruebas: typecheck, compilación de Shared y 114 pruebas focalizadas de agente/Gateway correctas.
+- Límites: falta integrar la interfaz de perfiles del worktree de origen. No hubo llamadas reales, push, despliegue ni migraciones.
+- Siguiente paso exacto: commit local e integrar los controles de Studio sobre este contrato ya probado.
+
 ### 2026-08-10 — Codex — F4.8-T4
 
 - Observación: el retry reanudaba la misma ruta y rama, pero el modelo recibía

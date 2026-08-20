@@ -686,6 +686,7 @@ export const studioJobCreateRequestSchema = z
 
 export const studioJobListQuerySchema = z.object({
   targetMachineId: z.string().uuid().optional(),
+  projectAlias: projectAliasSchema.optional(),
   status: jobStatusSchema.optional(),
   limit: z.coerce.number().int().min(1).max(100).default(30),
   offset: z.coerce.number().int().min(0).max(100_000).default(0),
@@ -818,6 +819,27 @@ export const testCommandSchema = z.tuple([
 export const projectConfigSchema = z.object({
   path: z.string().min(1),
   type: projectTypeSchema.default('other'),
+  // la ficha es local a cada maquina: la ruta y estas instrucciones no viajan
+  // al gateway. Los campos son opcionales para aceptar config.json antiguos.
+  displayName: z
+    .string()
+    .trim()
+    .max(80)
+    .regex(/^[^\r\n]*$/)
+    .optional(),
+  description: z.string().trim().max(600).optional(),
+  stack: z
+    .array(
+      z
+        .string()
+        .trim()
+        .min(1)
+        .max(48)
+        .regex(/^[^\r\n]+$/),
+    )
+    .max(16)
+    .optional(),
+  instructions: z.string().trim().max(8000).optional(),
   testCommands: z.array(testCommandSchema).max(10).default([]),
   // tiempo maximo por comando de comprobacion
   testTimeoutMs: z.number().int().min(1000).max(3_600_000).default(600_000),
