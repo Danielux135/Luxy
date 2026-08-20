@@ -59,9 +59,10 @@ Daniel es hispanohablante, en Windows 11. Espera:
 
 ## 1. Estado exacto del repositorio
 
-- Rama `master`, **todo en local, sin push**.
-- Último commit: `3ec8dea` (+ Fase 4c sin commitear todavía)
-- **1242 tests en verde**, lint, typecheck y build limpios.
+- Rama base `feat/luxy-desktop`; Fase 4d en el worktree aislado
+  `luxy/phase-4d-session-host`, **todo en local, sin push**.
+- Último commit: `3ec8dea` (+ Fases 4c y 4d sin commitear todavía)
+- **1262 tests en verde** (9 omitidos), lint, typecheck y build limpios.
 
 ### Commits de Luxy Remote, en orden
 
@@ -190,13 +191,16 @@ escrito no valen lo mismo.
 - `remote-host/display-sources.ts` — correlación `display_id` ↔ `getAllDisplays`.
 - `remote-host/session-indicator.ts` — texto del aviso visible (la ventana no
   tiene prueba; el texto sí).
+- `remote-host/session-host.ts` — orquestador inyectable: sesión, SDP firmado,
+  dos ventanas anti-replay, captura/entrada sincronizadas y cierre seguro.
+- `main/index.ts` — ciclo de vida de captura, eventos de monitores y cierre de
+  la sesión al salir de Luxy.
 - `src/shared/codec-preferences.ts` — orden AV1→VP9→H.264, `contentHint`,
   `degradationPreference`, perfiles de calidad.
 - `src/shared/capture-ipc.ts` — contrato con el renderer oculto y los **dos
   canales de datos**.
 
 ### Escrito y verificado a mano, SIN prueba automática
-
 - `remote-host/input-backend-koffi.ts` — `user32!SendInput` con koffi.
 - `remote-host/capture-window.ts` — renderer oculto, sesión propia,
   `setDisplayMediaRequestHandler`.
@@ -285,7 +289,7 @@ seguridad. Son las trampas reales de este dominio.
 
 ## 5. Lo que FALTA, en orden
 
-### FASE 4 (componentes hechos; falta el orquestador) — Host de Windows
+### FASE 4 (orquestador probado; falta el transporte real) — Host de Windows
 
 - [x] Renderer oculto dedicado (`BrowserWindow` con `show:false`) para captura y
       `RTCPeerConnection`. Sesión propia (`partition: luxy-capture`) para no
@@ -302,12 +306,15 @@ seguridad. Son las trampas reales de este dominio.
 - [x] IPC entre main y renderer oculto, con el control cruzando **como texto
       opaco** para que un renderer comprometido no se salte `guardControlMessage`.
 
-- [ ] **PENDIENTE: el orquestador.** Ver la especificación completa más abajo.
+- [x] **Orquestador implementado y probado sin Electron.** Ver el estado de la
+      Fase 4d más abajo.
+- [ ] **PENDIENTE: transporte/listener real de Supabase Realtime.** El contrato
+      `SignalingTransport` y `InMemorySignaling` existen, pero Desktop todavía
+      no tiene un adaptador de producción que reciba `session.request` y adopte
+      el `SessionHost` en la ranura conectada en `main/index.ts`.
 
 #### Verificado empíricamente en este equipo (Electron 43, Windows 11)
-
 Sonda ejecutada dentro de Electron, no deducido:
-
 - koffi 3.1.4 carga en Electron 43. **No hace falta recompilar para el ABI 148**:
   koffi usa N-API 8, que es ABI estable.
 - `koffi.sizeof(INPUT)` = 40 en x64, que es lo correcto.
@@ -318,17 +325,34 @@ Sonda ejecutada dentro de Electron, no deducido:
 - `new BrowserWindow({show:false})` se crea y no es visible.
 
 #### Lo que sigue SIN probar y sólo puede probar Daniel
-
 - Que el vídeo llegue de verdad y que AV1/VP9 se negocien en su GPU.
 - Multi-monitor: este equipo tiene una sola pantalla, así que la correlación con
   varios monitores y la geometría con escalas mixtas están sin ejercitar.
 - El bloqueo UIPI contra ventanas elevadas.
 - El indicador flotando sobre una aplicación a pantalla completa.
 - Que koffi sobreviva al empaquetado (`asarUnpack` está puesto, no comprobado).
+- El enganche de ciclo de vida de `main/index.ts` compila y su ranura tiene
+  prueba sin Electron, pero no se ha ejecutado una sesión real porque falta el
+  adaptador/listener de Supabase Realtime y todavía no existe el cliente móvil.
 
 ---
 
-### FASE 4d — El orquestador (LO SIGUIENTE QUE HAY QUE HACER)
+### FASE 4d — El orquestador (IMPLEMENTADO Y PROBADO SIN ELECTRON)
+
+Estado actual: `session-host.ts` une todas las piezas mediante interfaces
+inyectables y `main/index.ts` conecta captura, cambios de pantalla y apagado. Las
+20 pruebas nuevas cubren sólo visualización, canal equivocado, ventanas de replay
+separadas, SDP alterado y renegociado, revocación en caliente, límite UTF-8, las
+10 causas de cierre y `releaseAll()` antes de `dispose()`.
+
+El ritual de mutaciones revirtió 10 protecciones: las 10 rompieron pruebas. Nueve
+provocaron 1 fallo, compartir una lista distinta de monitores provocó 2 y disponer
+captura antes de liberar entrada provocó 14. El script temporal se borró después.
+
+**Límite que no debe ocultarse:** `SignalingTransport` tiene interfaz y transporte
+en memoria, no adaptador Supabase Realtime de producción. Por eso el orquestador
+está probado de extremo a extremo en memoria, pero un móvil real aún no puede
+originar `session.request` en Desktop.
 
 Los componentes existen y están probados, pero **nadie los une**: hoy no hay
 ningún camino que vaya de un mensaje del móvil a un clic. Falta un archivo,
@@ -367,7 +391,7 @@ extractFingerprints(sdp: string): string[]
 fingerprintsUnchanged(antes, ahora): boolean
 
 // packages/remote-protocol/src/signaling.ts
-interface SignalingTransport   // ya implementado por fase 3b
+interface SignalingTransport   // interfaz + InMemory; falta adaptador de producción
 acceptSignaling(...): SignalingVerdict
 ```
 
@@ -495,7 +519,6 @@ Daniel puede verificar: que el cursor caiga donde debe, que el vídeo llegue, qu
 funcione desde 4G.
 
 **E. Conectar un segundo monitor** cuando se quiera cerrar la Fase 4.
-
 - Motivo: el equipo de desarrollo tiene **una sola pantalla**. La correlación con
   varios monitores y toda la geometría con escalas mixtas —que es donde está el
   fallo 7, el más caro de la lista— están escritas y probadas con datos
@@ -504,7 +527,6 @@ funcione desde 4G.
   y que `monitorWarnings()` avise si las escalas no coinciden.
 
 **F. Empaquetar y probar el instalador** (`cd apps/desktop && npm run package`).
-
 - Motivo: `asarUnpack` de koffi está configurado pero **no comprobado**. Si está
   mal, el control de ratón y teclado falla sólo en la versión instalada, no en
   desarrollo, que es la peor forma posible de descubrirlo.
@@ -577,7 +599,6 @@ investigar**.
 
 ### Prompt para pegar
 
-> Trabajo en el repositorio local de Luxy, un monorepo TypeScript en Windows 11.
 > Lee `docs/CONTINUAR-LUXY-REMOTE.md` **entero** antes de tocar nada: es un
 > documento de traspaso y contiene el estado exacto, las decisiones ya tomadas y
 > los fallos ya corregidos.
@@ -590,8 +611,8 @@ investigar**.
 > No repitas la investigación ni reabras las decisiones de las secciones 2 y 3.
 > No reintroduzcas ninguno de los 13 fallos de la sección 4.
 >
-> Continúa por **la Fase 4d, el orquestador** (`session-host.ts`), que está
-> especificado con las firmas reales en la sección 5. Antes de escribir código,
+> Continúa por **el transporte/listener real de Supabase Realtime** pendiente tras
+> la Fase 4d, sin reabrir la decisión de transporte. Antes de escribir código,
 > dime en 10 líneas qué vas a tocar y qué no vas a poder probar automáticamente.
 >
 > Al terminar: ejecuta `npm run check`, haz el ritual de revertir protecciones de
