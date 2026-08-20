@@ -90,6 +90,12 @@ manuales. No transformar un fallo no ejecutado en «omitido».
 - `npm.cmd run build --workspace @luxy/shared`: exit 0.
 - `npm.cmd test -- --run apps/desktop/src/renderer/project-context.test.ts apps/desktop/src/shared/ipc.test.ts`: **36 passed**, exit 0.
 
+## 2026-08-20 — PROJECT-SCOPE-UI-001
+
+- `npm.cmd run typecheck`: exit 0.
+- `npm.cmd test -- --run apps/desktop/src`: **362 passed**, exit 0.
+- `npm.cmd run build --workspace @luxy/desktop`: exit 0.
+
 ### 2026-08-10 — Codex — F4.8-T4
 
 - Prueba añadida: `buildProviderPrompt` incluye instrucciones de continuación

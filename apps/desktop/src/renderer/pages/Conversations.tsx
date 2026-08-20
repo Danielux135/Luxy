@@ -31,6 +31,8 @@ import {
 } from '../conversation.js';
 import { useConversations } from '../useConversations.js';
 import { useDetectedCatalog } from '../useCatalog.js';
+import { preferredMachineForProject } from '../project-context.js';
+import { ProjectScopeBar } from '../ui/ProjectScopeBar.js';
 
 const STATUS: Record<JobStatus, string> = {
   queued: 'En cola',
@@ -81,7 +83,10 @@ function modelSuggestions(
   return [...new Set(models)];
 }
 
-function useMachineSelection(machines: StudioMachine[]): {
+function useMachineSelection(
+  machines: StudioMachine[],
+  projectScope: string | null,
+): {
   machineId: string;
   setMachineId: (value: string) => void;
   machine: StudioMachine | null;
@@ -93,19 +98,22 @@ function useMachineSelection(machines: StudioMachine[]): {
   const machine = machines.find((item) => item.id === machineId) ?? null;
 
   useEffect(() => {
-    if (machines.length === 0) {
+    const preferred = preferredMachineForProject(machines, machineId, projectScope);
+    if (preferred === null) {
       setMachineId('');
       return;
     }
-    if (!machines.some((item) => item.id === machineId && item.enabled)) {
-      setMachineId((machines.find((item) => item.enabled && item.online) ?? machines[0]!).id);
-    }
-  }, [machineId, machines]);
+    if (preferred.id !== machineId) setMachineId(preferred.id);
+  }, [machineId, machines, projectScope]);
 
   useEffect(() => {
     const projects = machine?.projects ?? [];
+    if (projectScope !== null && projects.includes(projectScope)) {
+      if (projectAlias !== projectScope) setProjectAlias(projectScope);
+      return;
+    }
     if (!projects.includes(projectAlias)) setProjectAlias(projects[0] ?? '');
-  }, [machine, projectAlias]);
+  }, [machine, projectAlias, projectScope]);
 
   return { machineId, setMachineId, machine, projectAlias, setProjectAlias };
 }
@@ -246,11 +254,22 @@ function ResponseCard({
   );
 }
 
-export function ConversationsPage({ summary }: { summary: ConfigSummary }): JSX.Element {
+export function ConversationsPage({
+  summary,
+  projectScope = null,
+  projectLabel = projectScope ?? '',
+  onClearProjectScope = () => {},
+}: {
+  summary: ConfigSummary;
+  projectScope?: string | null;
+  projectLabel?: string;
+  onClearProjectScope?: () => void;
+}): JSX.Element {
   const { models: detectedModels } = useDetectedCatalog(summary);
-  const conversations = useConversations();
+  const conversations = useConversations(projectScope);
   const { machineId, setMachineId, machine, projectAlias, setProjectAlias } = useMachineSelection(
     conversations.machines,
+    projectScope,
   );
   const providers = useMemo(() => machine?.providers ?? [], [machine]);
   const [providerA, setProviderA] = useState<ProviderId | ''>('');
@@ -321,6 +340,9 @@ export function ConversationsPage({ summary }: { summary: ConfigSummary }): JSX.
         <h1 className="page__title">Conversaciones</h1>
         <Tag>{formatConversationCount(conversations.conversations.length)}</Tag>
       </div>
+      {projectScope !== null && (
+        <ProjectScopeBar label={projectLabel} onClear={onClearProjectScope} />
+      )}
       <p className="page__lede">
         Consulta un modelo o compara dos con la misma pregunta. Las respuestas se transmiten desde
         la maquina elegida y quedan guardadas en el historial real de Luxy.
@@ -328,6 +350,13 @@ export function ConversationsPage({ summary }: { summary: ConfigSummary }): JSX.
 
       {conversations.error !== null && <Notice tone="fault">{conversations.error}</Notice>}
       {conversations.loading && <Notice tone="warn">Cargando conversaciones…</Notice>}
+      {conversations.scopeFallback && (
+        <Notice tone="warn">
+          El Gateway conectado aún no filtra por proyecto. Luxy ha ocultado localmente las
+          conversaciones ajenas, pero el historial puede ser incompleto hasta publicar la versión
+          nueva.
+        </Notice>
+      )}
 
       <div className="conversation-shell">
         <Panel
@@ -487,6 +516,7 @@ export function ConversationsPage({ summary }: { summary: ConfigSummary }): JSX.
                   <Field label="Proyecto" hint="Solo se usa como contexto de lectura.">
                     <select
                       value={projectAlias}
+                      disabled={projectScope !== null}
                       onChange={(event) => setProjectAlias(event.target.value)}
                     >
                       {(machine?.projects ?? []).map((project) => (

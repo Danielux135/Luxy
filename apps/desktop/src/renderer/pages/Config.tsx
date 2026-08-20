@@ -147,9 +147,11 @@ function useModelEvidence(): {
 export function ProjectsPage({
   summary,
   onSave,
+  onOpenProject,
 }: {
   summary: ConfigSummary;
   onSave: (config: unknown) => Promise<boolean>;
+  onOpenProject: (alias: string, destination: 'conversaciones' | 'trabajos') => void;
 }): JSX.Element {
   const projects = Object.entries(summary.config?.projects ?? {});
   const [alias, setAlias] = useState('');
@@ -265,6 +267,20 @@ export function ProjectsPage({
                 {proyecto.allowEdits && <Tag tone="busy">edita</Tag>}
                 {proyecto.allowCommit && <Tag tone="warn">commit</Tag>}
                 {proyecto.allowPush ? <Tag tone="fault">push</Tag> : <Tag>sin push</Tag>}
+                <button
+                  className="btn btn--quiet"
+                  type="button"
+                  onClick={() => onOpenProject(clave, 'conversaciones')}
+                >
+                  Conversaciones
+                </button>
+                <button
+                  className="btn btn--quiet"
+                  type="button"
+                  onClick={() => onOpenProject(clave, 'trabajos')}
+                >
+                  Trabajos
+                </button>
                 <button className="btn btn--quiet" onClick={() => void toggleHostChecks(clave)}>
                   {proyecto.allowHostChecks ? 'Pruebas: activas' : 'Pruebas: bloqueadas'}
                 </button>

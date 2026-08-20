@@ -10,6 +10,7 @@ import { ConnectionsPage, ModelsPage, ProjectsPage } from './pages/Config.js';
 import { LogsPage, SettingsPage } from './pages/System.js';
 import { SetupPage } from './pages/Setup.js';
 import { LaboratoryPage } from './pages/Laboratory.js';
+import { projectDisplayLabel } from './project-context.js';
 
 const SECCIONES = [
   { id: 'inicio', label: 'Inicio', short: 'IN' },
@@ -30,6 +31,7 @@ export function App(): JSX.Element {
     useAgent();
   const { summary, loading, save, setSecret, deleteSecret, reload } = useConfig();
   const [seccion, setSeccion] = useState<SeccionId>('inicio');
+  const [projectScope, setProjectScope] = useState<string | null>(null);
   // el onboarding se abre solo la primera vez, y a mano desde Ajustes
   const [setupAbierto, setSetupAbierto] = useState(false);
 
@@ -44,6 +46,7 @@ export function App(): JSX.Element {
         onFinish={() => {
           setSetupAbierto(false);
           void reload();
+          setProjectScope(null);
           setSeccion('inicio');
         }}
         onCancel={() => setSetupAbierto(false)}
@@ -52,6 +55,20 @@ export function App(): JSX.Element {
   }
 
   const trabajosActivos = status.agent?.activeJob == null ? 0 : 1;
+  const projectLabel =
+    projectScope === null
+      ? ''
+      : projectDisplayLabel(projectScope, summary.config?.projects[projectScope]);
+
+  const navigateGlobal = (next: SeccionId): void => {
+    setProjectScope(null);
+    setSeccion(next);
+  };
+
+  const openProject = (alias: string, destination: 'conversaciones' | 'trabajos'): void => {
+    setProjectScope(alias);
+    setSeccion(destination);
+  };
 
   return (
     <div className="app">
@@ -64,7 +81,7 @@ export function App(): JSX.Element {
             className="nav__item"
             data-short={entrada.short}
             aria-current={seccion === entrada.id ? 'page' : undefined}
-            onClick={() => setSeccion(entrada.id)}
+            onClick={() => navigateGlobal(entrada.id)}
           >
             {entrada.label}
             {entrada.id === 'trabajos' && trabajosActivos > 0 && (
@@ -93,9 +110,26 @@ export function App(): JSX.Element {
             agentHint={hint}
           />
         )}
-        {seccion === 'conversaciones' && <ConversationsPage summary={summary} />}
-        {seccion === 'trabajos' && <StudioPage />}
-        {seccion === 'proyectos' && <ProjectsPage summary={summary} onSave={save} />}
+        {seccion === 'conversaciones' && (
+          <ConversationsPage
+            key={projectScope ?? 'global'}
+            summary={summary}
+            projectScope={projectScope}
+            projectLabel={projectLabel}
+            onClearProjectScope={() => setProjectScope(null)}
+          />
+        )}
+        {seccion === 'trabajos' && (
+          <StudioPage
+            key={projectScope ?? 'global'}
+            projectScope={projectScope}
+            projectLabel={projectLabel}
+            onClearProjectScope={() => setProjectScope(null)}
+          />
+        )}
+        {seccion === 'proyectos' && (
+          <ProjectsPage summary={summary} onSave={save} onOpenProject={openProject} />
+        )}
         {seccion === 'conexiones' && (
           <ConnectionsPage
             summary={summary}

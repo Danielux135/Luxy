@@ -148,6 +148,13 @@ parezca correcta; añadir una corrección nueva.
 - Pruebas: typecheck, compilación de Shared y 36 pruebas de contexto/IPC correctas.
 - Límite: la navegación y la barra visible permanecen pendientes; este commit no cambia todavía la pantalla que ve Daniel.
 
+### 2026-08-20 — Codex — PROJECT-SCOPE-UI-001
+
+- Resultado: cada proyecto abre Trabajos o Conversaciones acotados a su alias, bloquea el selector para no mezclarlo y permite volver explícitamente a la vista global.
+- Defensa: si un Gateway anterior ignora el filtro, la interfaz elimina localmente lo ajeno y avisa de que el historial puede ser incompleto.
+- Pruebas: typecheck, 362 pruebas de Desktop y build de Desktop correctos.
+- Siguiente paso: integrar el editor ampliado del perfil de proyecto.
+
 ### 2026-08-10 — Codex — F4.8-T4
 
 - Observación: el retry reanudaba la misma ruta y rama, pero el modelo recibía

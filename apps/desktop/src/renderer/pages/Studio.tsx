@@ -5,7 +5,9 @@ import type { JobStatus, ProviderId, StudioJob, StudioJobAction } from '@luxy/sh
 import { Empty, Field, Notice, Panel, Readout, Tag } from '../ui/primitives.js';
 import { FormattedResponse } from '../formatted-response.js';
 import { callMetricsOf } from '../studio-detail.js';
+import { preferredMachineForProject } from '../project-context.js';
 import { canDecideStudioJob, parseStudioDecision } from '../studio-decision.js';
+import { ProjectScopeBar } from '../ui/ProjectScopeBar.js';
 import { useStudio } from '../useStudio.js';
 
 interface PreparedWorkspace {
@@ -67,8 +69,16 @@ function isTerminal(job: StudioJob): boolean {
   return (TERMINAL_JOB_STATUSES as readonly string[]).includes(job.status);
 }
 
-export function StudioPage(): JSX.Element {
-  const studio = useStudio();
+export function StudioPage({
+  projectScope = null,
+  projectLabel = projectScope ?? '',
+  onClearProjectScope = () => {},
+}: {
+  projectScope?: string | null;
+  projectLabel?: string;
+  onClearProjectScope?: () => void;
+}): JSX.Element {
+  const studio = useStudio(projectScope);
   const [machineId, setMachineId] = useState('');
   const [projectAlias, setProjectAlias] = useState('');
   const [provider, setProvider] = useState<ProviderId | ''>('');
@@ -85,15 +95,21 @@ export function StudioPage(): JSX.Element {
   const providers = useMemo(() => machine?.providers ?? [], [machine]);
 
   useEffect(() => {
-    if (studio.machines.length === 0 || machineId.length > 0) return;
-    const preferred =
-      studio.machines.find((item) => item.enabled && item.online) ?? studio.machines[0]!;
-    setMachineId(preferred.id);
-  }, [machineId, studio.machines]);
+    const preferred = preferredMachineForProject(studio.machines, machineId, projectScope);
+    if (preferred === null) {
+      if (machineId.length > 0) setMachineId('');
+      return;
+    }
+    if (preferred.id !== machineId) setMachineId(preferred.id);
+  }, [machineId, projectScope, studio.machines]);
 
   useEffect(() => {
+    if (projectScope !== null && projects.includes(projectScope)) {
+      if (projectAlias !== projectScope) setProjectAlias(projectScope);
+      return;
+    }
     if (!projects.includes(projectAlias)) setProjectAlias(projects[0] ?? '');
-  }, [projectAlias, projects]);
+  }, [projectAlias, projectScope, projects]);
 
   useEffect(() => {
     if (
@@ -251,6 +267,9 @@ export function StudioPage(): JSX.Element {
           {studio.jobs.length} recientes
         </Tag>
       </div>
+      {projectScope !== null && (
+        <ProjectScopeBar label={projectLabel} onClear={onClearProjectScope} />
+      )}
       <p className="page__lede">
         Crea una tarea desde Studio y sigue su ejecucion real: maquina, proyecto, modelo, eventos,
         comprobaciones y resumen del diff.
@@ -258,6 +277,12 @@ export function StudioPage(): JSX.Element {
 
       {studio.error !== null && <Notice tone="fault">{studio.error}</Notice>}
       {studio.loading && <Notice tone="warn">Cargando el estado del gateway…</Notice>}
+      {studio.scopeFallback && (
+        <Notice tone="warn">
+          El Gateway conectado aún no filtra por proyecto. Luxy ha ocultado localmente los trabajos
+          ajenos, pero el historial puede ser incompleto hasta publicar la versión nueva.
+        </Notice>
+      )}
 
       <Panel title="Nueva tarea">
         {studio.machines.length === 0 ? (
@@ -278,6 +303,7 @@ export function StudioPage(): JSX.Element {
             <Field label="Proyecto">
               <select
                 value={projectAlias}
+                disabled={projectScope !== null}
                 onChange={(event) => setProjectAlias(event.target.value)}
               >
                 {projects.map((project) => (

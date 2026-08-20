@@ -295,6 +295,27 @@ body {
   max-width: 68ch;
 }
 
+.project-scope {
+  align-items: center;
+  background: color-mix(in srgb, var(--accent) 9%, var(--panel));
+  border: 1px solid color-mix(in srgb, var(--accent) 38%, var(--line));
+  display: flex;
+  gap: 14px;
+  justify-content: space-between;
+  margin: 0 0 16px;
+  padding: 12px 14px;
+}
+
+.project-scope > span {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.project-scope strong {
+  overflow-wrap: anywhere;
+}
+
 /* =============================================================================
    piezas
    ========================================================================== */
