@@ -1,0 +1,11 @@
+{
+    "schema_version": 2,
+    "commit": "522d1d5eaf678c4721739ba5bd004b39cddb7e06",
+    "indexed_at": "2026-08-20T09:11:36Z",
+    "project": "Luxy-consolidate-worktrees",
+    "nodes": 3031,
+    "edges": 8877,
+    "original_size": 9895936,
+    "compressed_size": 2337775,
+    "compression_level": 9
+}
