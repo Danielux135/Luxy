@@ -1,5 +1,33 @@
 # Luxy — acciones locales de Daniel
 
+## LA-028 — completar el push de `feat/luxy-desktop` (LUXY-CONSOLIDATION-001)
+
+Estado: `pending` — abierta el 2026-08-21. Autorizada explícitamente por
+Daniel (dos confirmaciones: aprobación en chat y confirmación directa de que
+no había prompt de permiso pendiente); bloqueada por el entorno, no por
+falta de autorización.
+
+`git push origin feat/luxy-desktop` fue denegado dos veces por el sistema de
+permisos de esta sesión, sin mostrar ningún prompt de aprobación — parece una
+restricción dura del entorno para operaciones de red de Git, no algo que se
+pueda resolver reintentando o confirmando de nuevo en el chat.
+
+Estado verificado antes de pedir el push: HEAD `5312d00`, working tree limpio
+salvo el ruido conocido y documentado de `.codebase-memory/` (ver
+`AI-WORK-PROTOCOL.md` §9), sin secretos tracked/staged, sin cambios de
+producto pendientes. 24 commits por delante de `origin/feat/luxy-desktop`,
+sin `--force`, sin tocar ninguna otra rama.
+
+```powershell
+cd C:\Users\daniel\Desktop\Luxy
+git push origin feat/luxy-desktop
+```
+
+Resultado esperado: `origin/feat/luxy-desktop` avanza de `65ca161` a
+`5312d00` por fast-forward (no hay divergencia: es la misma rama, sólo con
+commits nuevos encima). Si git pide credenciales o hay algún rechazo del
+remoto, pega aquí la salida exacta.
+
 ## LA-026 — borrar el respaldo temporal de la memoria MCP (opcional)
 
 Estado: `pending` — abierta el 2026-08-21, no bloquea nada.
