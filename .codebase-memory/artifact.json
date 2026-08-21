@@ -1,11 +1,11 @@
 {
     "schema_version": 2,
-    "commit": "e40268a1a5687145dbd510c01fd4d8c64062d2b0",
-    "indexed_at": "2026-08-21T09:37:21Z",
+    "commit": "90eff248c75ef86345ea82c4da9121fd3bacfbfe",
+    "indexed_at": "2026-08-21T09:52:49Z",
     "project": "C-Users-daniel-Desktop-Luxy",
-    "nodes": 4448,
-    "edges": 14158,
-    "original_size": 16646144,
-    "compressed_size": 3662883,
+    "nodes": 4450,
+    "edges": 14172,
+    "original_size": 16580608,
+    "compressed_size": 3651156,
     "compression_level": 3
 }

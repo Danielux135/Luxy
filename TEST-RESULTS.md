@@ -1,5 +1,65 @@
 # Luxy — resultados de comprobación
 
+### 2026-08-21 15:00 — Windows 11 — smoke test manual de la copia canónica (LUXY-CONSOLIDATION-001)
+
+- Objetivo: verificar visualmente, con la app real corriendo, que la copia
+  canónica (`feat/luxy-desktop` @ `e40268a` en su momento; hoy `90eff24`) abre
+  y que el bloque integrado en la consolidación (diálogo de confirmación
+  React, ficha de proyecto, campos Proyecto/Rama) funciona de verdad, no sólo
+  en pruebas automatizadas.
+- Cómo: `npm run desktop:dev` real (Electron + Vite dev server), ventana
+  real en pantalla. Automatizado con UI Automation
+  (`System.Windows.Automation`, `InvokePattern`) para navegar/pulsar
+  botones por su nombre accesible — más fiable que coordenadas de píxel — y
+  capturas de pantalla (PowerShell + `System.Drawing`) para verificación
+  visual en cada paso. Máquina conectada: `portatil-clase`, gateway real
+  (`luxy-gateway.danielux135.workers.dev`), datos reales de Supabase (30
+  trabajos, 17 conversaciones guardadas, 3 proyectos).
+- Comprobado y correcto:
+  1. **Arranque**: agente en marcha, Gateway conectado, Studio abre en
+     Inicio sin errores de consola visibles.
+  2. **Diálogo de confirmación React**: en Trabajos, seleccionado el trabajo
+     fallido real `LUX-8APM` (minimax/MiniMax-M3), pulsado «Reintentar
+     trabajo» → aparece el diálogo `CONFIRMAR ACCION` con «¿Reintentar
+     LUX-8APM?», proveedor/modelo y el aviso de continuidad de worktree,
+     botones VOLVER/REINTENTAR. Cerrado con **VOLVER** — no se creó ningún
+     trabajo ni se llamó a ningún proveedor.
+  3. **Ficha editable de proyecto**: en Proyectos, pulsado «Editar ficha»
+     del proyecto `test` → panel «FICHA · TEST» con alias estable, nombre
+     visible, tipo base, stack, carpeta de la máquina y el aviso de que la
+     ficha es local y no se versiona. Cerrado con **CERRAR**, sin guardar
+     cambios.
+  4. **Campos Proyecto/Rama**: visibles en el detalle de `LUX-8APM`
+     (`PROYECTO: test`, `RAMA: sin rama`), junto a Estado, Origen,
+     Proveedor, Modelo, Pruebas OK/Falladas, Llamadas al modelo y
+     Herramientas ejecutadas.
+  5. **Navegación básica de Studio**: Inicio, Trabajos, Proyectos —
+     historial real de 30 trabajos, formulario «Nueva tarea» con
+     máquina/proyecto/proveedor resueltos.
+  6. **Conversaciones**: historial de 17 guardadas, una conversación real
+     abierta con turnos, tokens, duración y botones de feedback visibles.
+  7. **Laboratorio**: catálogo de pruebas (4 ejecutables · 8 definidas),
+     formulario «Preparar una prueba» resuelve máquina/proyecto/modelo
+     compatible sin errores.
+  8. **Ajustes (Configuración)**: nombre de máquina, URL del Gateway, token
+     enmascarado (`•••••••••••`, no se mostró el valor real), arranque y
+     seguridad visibles.
+- No ejecutado a propósito: ninguna API real de proveedor, ningún trabajo
+  nuevo, ninguna evaluación del Laboratorio, ninguna migración ni deploy. El
+  único job pre-existente tocado (`LUX-8APM`) sólo se **seleccionó** (lectura)
+  y su diálogo de reintento se **canceló**.
+- Problemas encontrados: **ninguno funcional.** Un problema puramente de
+  automatización (no del producto): el clic de ratón simulado por posición
+  de píxel fallaba de forma intermitente porque el foco de la ventana volvía
+  a esta sesión de Claude Code entre llamadas; se resolvió cambiando a
+  UI Automation (`InvokePattern` por nombre accesible), que no depende de
+  coordenadas ni de qué ventana tenga el foco del teclado. No requirió
+  ningún cambio de código en Luxy.
+- Cierre: `taskkill` sobre el proceso principal de Electron (PID capturado
+  al lanzar `npm run desktop:dev`) cerró limpiamente todo el árbol de
+  procesos (Electron + agente + Vite dev server). `tasklist` posterior:
+  cero procesos `electron.exe`/`node.exe` de Luxy restantes.
+
 ### Registros rescatados de `git stash@{0}` — 2026-08-21
 
 Los cinco registros siguientes existían en el checkout principal antes de la

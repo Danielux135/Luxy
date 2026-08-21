@@ -1,5 +1,47 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-08-21 15:00 — Claude — smoke test manual final de la copia canónica
+
+- Estado anterior: `LUXY-CONSOLIDATION-001` cerrada y commiteada (`90eff24`).
+  Daniel pidió, antes de cerrar la sesión, un smoke test manual real de
+  Studio (no sólo pruebas automatizadas) para validar visualmente el bloque
+  integrado: diálogo de confirmación React, ficha de proyecto, campos
+  Proyecto/Rama, y navegación básica de Trabajos/Conversaciones/
+  Laboratorio/Ajustes.
+- Objetivo: arrancar la app real desde `C:\Users\daniel\Desktop\Luxy` y
+  comprobarlo con la app en pantalla, sin ejecutar APIs reales ni trabajos
+  de pago.
+- Comandos ejecutados: `npm run desktop:dev` (Electron + Vite dev server,
+  en segundo plano). Automatización con PowerShell:
+  `System.Windows.Automation` (UI Automation, `InvokePattern` por nombre
+  accesible de botón) para navegar y pulsar controles, y
+  `System.Drawing`/`System.Windows.Forms.Screen` para capturas de pantalla
+  de verificación visual. `taskkill` sobre el proceso principal de Electron
+  al terminar.
+- Resultado real: arranque correcto (agente en marcha, Gateway conectado);
+  diálogo de confirmación React verificado en vivo sobre un trabajo fallido
+  real (`LUX-8APM`) y cancelado con «Volver» sin ejecutar nada; ficha de
+  proyecto verificada abriendo y cerrando la del proyecto `test` sin
+  guardar; campos Proyecto/Rama visibles en el detalle de un trabajo real;
+  Trabajos, Proyectos, Conversaciones, Laboratorio y Ajustes navegables sin
+  errores visibles, todos con datos reales (30 trabajos, 17 conversaciones,
+  3 proyectos). Detalle completo en `TEST-RESULTS.md`,
+  entrada `2026-08-21 15:00`.
+- Archivos modificados: `TEST-RESULTS.md` (esta entrada de smoke test).
+- Decisiones: ninguna nueva.
+- Riesgos o límites: la primera técnica de automatización probada (clic de
+  ratón por coordenadas) resultó poco fiable en este entorno porque el foco
+  de la ventana volvía intermitentemente a esta sesión de Claude Code entre
+  llamadas a PowerShell; no es un problema de Luxy, se resolvió cambiando a
+  UI Automation. No se ejecutó ninguna API real, trabajo nuevo, evaluación
+  del Laboratorio, migración ni deploy. El único job existente tocado
+  (`LUX-8APM`) sólo se leyó y su diálogo de reintento se canceló.
+- Estado nuevo: smoke test manual completado, **ningún fallo funcional
+  encontrado**. `LUXY-CONSOLIDATION-001` sigue `done`.
+- Siguiente paso exacto: ninguno de producto — a la espera de que Daniel
+  autorice el commit de esta entrada y decida, junto con ChatGPT/Codex y
+  Claude, el nuevo `MASTER-PLAN.md`.
+
 ### 2026-08-21 13:50 — Claude — LUXY-CONSOLIDATION-001 (documentación sincronizada, checkpoint final, cierre)
 
 - Estado anterior: línea canónica fusionada (`e40268a`), sólo un worktree
