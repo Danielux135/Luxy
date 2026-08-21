@@ -1,6 +1,13 @@
 # Luxy — plan maestro
 
-Última actualización: **2026-08-20**
+Última actualización: **2026-08-21**
+
+`LUXY-CONSOLIDATION-001` cerró la fila `CONSOLIDATE-WORKTREES-001` de la
+tabla siguiente: los ocho worktrees quedaron en una sola línea canónica
+(`feat/luxy-desktop`, HEAD `e40268a`). Detalle en `CURRENT-TASK.md` y
+`CHANGELOG-WORK.md`. Este plan sigue reflejando el estado del *producto*, que
+no cambió de alcance durante la consolidación — sólo se unificó dónde vive el
+código.
 
 ## Estados
 
@@ -17,8 +24,8 @@ Los estados se actualizan al completar cada paso, no al final de una fase.
 
 | ID | Trabajo | Estado | Criterio de salida |
 | --- | --- | --- | --- |
-| CONSOLIDATE-WORKTREES-001 | Consolidar fases repartidas en worktrees | in_progress | Todas las fases terminadas están en commits verificables de una rama de integración. |
-| BUG-HUNYUAN-002 | Compatibilidad de historial al reiniciar Studio | implemented | Studio reconstruido y reiniciado; falta la comprobación visual de `LA-021`. |
+| CONSOLIDATE-WORKTREES-001 | Consolidar fases repartidas en worktrees | done | Cerrado por `LUXY-CONSOLIDATION-001` el 2026-08-21: única línea canónica, `feat/luxy-desktop` @ `e40268a`, `git worktree list` reducido a esa copia. |
+| BUG-HUNYUAN-002 | Compatibilidad de historial al reiniciar Studio | implemented | El código está en `e40268a` (verificado archivo por archivo el 2026-08-21); falta la comprobación visual de `LA-021`. |
 | CATALOG-DETECTED-003 | Reconciliar familias del catálogo detectado | done | `hy3` figura como modelo `other`; los proveedores históricos siguen siendo legibles. |
 
 ## Fase 0 — estabilizar y consolidar el checkpoint

@@ -1,11 +1,11 @@
 {
     "schema_version": 2,
-    "commit": "c1b1869773dbba2c3f7047112c834e5632157268",
-    "indexed_at": "2026-08-20T09:27:26Z",
-    "project": "Luxy-consolidate-worktrees",
-    "nodes": 3049,
-    "edges": 8922,
-    "original_size": 9895936,
-    "compressed_size": 2343386,
-    "compression_level": 9
+    "commit": "e40268a1a5687145dbd510c01fd4d8c64062d2b0",
+    "indexed_at": "2026-08-21T09:37:21Z",
+    "project": "C-Users-daniel-Desktop-Luxy",
+    "nodes": 4448,
+    "edges": 14158,
+    "original_size": 16646144,
+    "compressed_size": 3662883,
+    "compression_level": 3
 }

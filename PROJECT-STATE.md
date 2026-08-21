@@ -1,11 +1,17 @@
 # Luxy — estado canónico del proyecto
 
-Última actualización: **2026-08-20**
+Última actualización: **2026-08-21**
 
-Consolidación en curso: `luxy/consolidate-worktrees` incorpora las fases de
-workspaces reutilizables y Remote 4d en commits independientes y validados.
-Los worktrees con cambios sin confirmar siguen preservados hasta integrar cada
-bloque sin mezclar archivos personales ni secretos.
+`LUXY-CONSOLIDATION-001` cerró la consolidación de los ocho worktrees en una
+sola línea canónica: `C:\Users\daniel\Desktop\Luxy`, rama `feat/luxy-desktop`,
+HEAD `e40268a`. `git worktree list` sólo contiene ya esa copia. El bloque de
+`luxy/consolidate-worktrees` (workspaces reutilizables, Remote 4d, ficha de
+proyecto, diálogos de confirmación React embebidos) quedó fusionado por
+fast-forward; los worktrees restantes se auditaron archivo por archivo y se
+eliminaron al confirmarse sin trabajo único. Detalle completo en
+`CURRENT-TASK.md` y en las entradas del 2026-08-21 de `CHANGELOG-WORK.md`.
+Las notas de «consolidación en curso» de más abajo describen ese proceso
+mientras estuvo abierto; quedan como historial, no como estado pendiente.
 
 Actualización puntual: **BUG-HUNYUAN-002** recupera en la rama de Studio la
 compatibilidad ya desarrollada para el historial de proveedores. La lectura de

@@ -24,7 +24,14 @@ Antes de proponer cambios:
    relevante de `TEST-RESULTS.md`.
 6. Leer `LOCAL-ACTIONS.md` para no repetir acciones que ya hizo Daniel.
 7. Ejecutar `git status --short --branch` y `git diff --stat`.
-8. Leer los archivos de código implicados antes de editar.
+8. Si hay un MCP de memoria/codebase-memory activado para Luxy (herramientas
+   `codebase-memory-mcp` — `list_projects`, `index_status`,
+   `get_architecture`, `search_graph`, `trace_path`…), consultarlo para
+   recuperar contexto estructural del código y relaciones entre módulos antes
+   de explorar a mano. Es una ayuda de navegación, no la fuente de verdad:
+   contrastar siempre lo que devuelva contra el código y `git` reales. Ver la
+   precedencia completa en el punto 12.
+9. Leer los archivos de código implicados antes de editar.
 
 La primera respuesta de la IA debe indicar:
 
@@ -131,7 +138,9 @@ La IA saliente debe dejar:
 - pruebas pendientes;
 - bloqueo concreto, si existe;
 - siguiente comando o archivo a leer;
-- ninguna promesa ambigua de «seguir luego».
+- ninguna promesa ambigua de «seguir luego»;
+- si se cerró un checkpoint importante, la memoria MCP reindexada sobre la
+  línea canónica (ver punto 9) y registrada en `CHANGELOG-WORK.md`.
 
 La IA entrante:
 
@@ -139,9 +148,51 @@ La IA entrante:
 - no limpia cambios que no reconoce;
 - compara documentación y diff;
 - continúa el ID activo;
-- pregunta sólo si falta una decisión que cambie materialmente la solución.
+- pregunta sólo si falta una decisión que cambie materialmente la solución;
+- consulta la memoria MCP para orientarse rápido, pero nunca la trata como
+  prueba por sí sola: la contrasta contra el código y `git` reales antes de
+  actuar sobre lo que devuelve.
 
-## 9. Operaciones reservadas a Daniel
+## 9. Memoria MCP / codebase-memory
+
+Luxy puede tener activado un MCP de memoria de código
+(`codebase-memory-mcp`) como ayuda de navegación y memoria técnica
+estructural entre sesiones e IAs. **No sustituye** a la documentación
+canónica ni al changelog: es un índice consultable del código, no una fuente
+de decisiones.
+
+Precedencia obligatoria cuando algo no coincide:
+
+```
+código y estado Git real
+        ↓
+documentación canónica (este archivo y los listados en el punto 2)
+        ↓
+memoria MCP
+        ↓
+conversaciones o handoffs antiguos
+```
+
+Uso esperado:
+
+- **Al empezar sesión**: consultarla para localizar código, arquitectura y
+  relaciones antes de explorar a mano con grep/glob (punto 2.8).
+- **En checkpoints importantes** (cierre de una fase, consolidación de una
+  línea canónica, relevo entre IAs): reindexar
+  (`index_repository`, normalmente `mode: full`), verificar con
+  `index_status`/`get_architecture`/`search_graph` que corresponde al
+  commit/worktree canónico actual, y registrar en `CHANGELOG-WORK.md` que la
+  memoria MCP se actualizó, con qué commit quedó sincronizada.
+- **No reindexar en cada cambio pequeño**: sólo en checkpoints, para no
+  convertir la indexación en ruido.
+- Si `.codebase-memory/` está versionado en el repositorio, dejar que la
+  herramienta lo genere; **nunca editar a mano `graph.db.zst`** ni el resto
+  de artefactos.
+- Si la memoria MCP contradice el código o la documentación, no se resuelve
+  a favor de la memoria: se registra la discrepancia y se corrige primero la
+  fuente canónica (código o documentación), después se reindexa.
+
+## 10. Operaciones reservadas a Daniel
 
 Sin autorización explícita, ninguna IA puede:
 
@@ -157,7 +208,7 @@ Sin autorización explícita, ninguna IA puede:
 Esas acciones se escriben en `LOCAL-ACTIONS.md` con comando, motivo, resultado
 esperado, riesgo y qué evidencia debe devolver Daniel.
 
-## 10. Prompt de arranque recomendado
+## 11. Prompt de arranque recomendado
 
 ```text
 Continúa Luxy desde el estado real del repositorio. Lee primero AGENTS.md,
@@ -168,7 +219,7 @@ migraciones. Confirma el ID activo, contrasta git status/diff y continúa el
 siguiente paso documentado. Actualiza la documentación después de cada paso.
 ```
 
-## 11. Qué no debe guardarse aquí
+## 12. Qué no debe guardarse aquí
 
 - secretos, tokens, claves o cabeceras;
 - prompts/respuestas privados completos;

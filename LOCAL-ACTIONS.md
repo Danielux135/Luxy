@@ -1,5 +1,37 @@
 # Luxy — acciones locales de Daniel
 
+## LA-026 — borrar el respaldo temporal de la memoria MCP (opcional)
+
+Estado: `pending` — abierta el 2026-08-21, no bloquea nada.
+
+Durante `LUXY-CONSOLIDATION-001` se movió aside el índice MCP local previo a
+fusionar `luxy/consolidate-worktrees` en `feat/luxy-desktop`, porque
+colisionaba con la versión versionada que trajo el merge. Ya se reindexó y
+verificó la memoria MCP sobre la línea canónica (`e40268a`), así que este
+respaldo ya no hace falta. El entorno denegó el permiso para borrarlo por
+comando (`rm -rf`), así que queda pendiente de que lo borres tú a mano si
+quieres:
+
+```powershell
+Remove-Item -Recurse -Force "C:\Users\daniel\Desktop\Luxy\.codebase-memory.pre-merge-backup"
+```
+
+No es información tuya: es un caché regenerable de la herramienta de memoria.
+Nada se pierde si lo borras.
+
+## LA-027 — auditar las 12 vulnerabilidades de `npm install`
+
+Estado: `pending` — abierta el 2026-08-21, deliberadamente pospuesta.
+
+Al sincronizar `node_modules` con el `package-lock.json` fusionado durante
+`LUXY-CONSOLIDATION-001`, `npm install` informó **12 vulnerabilidades: 5
+moderate, 6 high, 1 critical**. No se ejecutó `npm audit fix` ni
+`npm audit fix --force` a propósito: podría introducir cambios de versión
+incompatibles sin control, y la instrucción explícita fue posponerlo hasta
+cerrar la consolidación. Revisar con `npm audit` cuándo quieras auditarlo,
+decidiendo caso por caso qué actualizar; no aplicar `--force` sin revisar el
+changelog de cada paquete afectado.
+
 ## LA-025 — confirmar que un trabajo no bloquea la interfaz
 
 Estado: `pending`.

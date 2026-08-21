@@ -1,5 +1,317 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-08-21 13:50 — Claude — LUXY-CONSOLIDATION-001 (documentación sincronizada, checkpoint final, cierre)
+
+- Estado anterior: línea canónica fusionada (`e40268a`), sólo un worktree
+  restante, `git stash@{0}` auditado y descartado, memoria MCP reindexada y
+  verificada. Faltaba sincronizar la documentación de continuidad y repetir
+  el checkpoint completo antes de cerrar la tarea.
+- Objetivo: dejar `AI-WORK-PROTOCOL.md`, `CURRENT-TASK.md`,
+  `PROJECT-STATE.md`, `MASTER-PLAN.md` y `LOCAL-ACTIONS.md` coherentes con el
+  estado real, sin presentar la consolidación como trabajo pendiente, y
+  ejecutar el checkpoint final: `git status`, `git worktree list`, lint,
+  typecheck, suite, build, `git diff --check` y comprobación de secretos.
+- Archivos modificados:
+  - `AI-WORK-PROTOCOL.md`: nueva sección 9 «Memoria MCP / codebase-memory»
+    (precedencia código→documentación→MCP→handoffs, cuándo reindexar, qué no
+    hacer con `graph.db.zst`), referencias cruzadas añadidas en la sección 2
+    (inicio de sesión) y la 8 (relevo entre IAs); secciones 9–11 antiguas
+    renumeradas a 10–12 para mantener la secuencia.
+  - `CURRENT-TASK.md`: reescrito por completo. Sustituye el conjunto disperso
+    de tareas antiguas (`CONSOLIDATE-WORKTREES-001`, `BUG-HUNYUAN-002`,
+    `GIT-CHECKPOINT-001`, más el histórico de `F0`–`F4`/`P0.x`/`LA-0xx`) por
+    un único checkpoint activo que resume `LUXY-CONSOLIDATION-001` de
+    principio a fin, remite al `CHANGELOG-WORK.md` para el detalle
+    cronológico en vez de duplicarlo, y deja explícito que no hay tarea
+    siguiente todavía (el nuevo `MASTER-PLAN.md` empresarial se define
+    después, con Daniel, ChatGPT/Codex y Claude juntos).
+  - `PROJECT-STATE.md`: cabecera actualizada — línea canónica, HEAD, y una
+    nota de que las entradas anteriores de «consolidación en curso» son
+    historial, no estado pendiente.
+  - `MASTER-PLAN.md`: cabecera actualizada; fila `CONSOLIDATE-WORKTREES-001`
+    de la tabla de incidencias pasada de `in_progress` a `done` con motivo y
+    fecha; `BUG-HUNYUAN-002` anotada como código ya verificado en `e40268a`.
+  - `LOCAL-ACTIONS.md`: `LA-026` (borrar `.codebase-memory.pre-merge-backup/`,
+    opcional, comando incluido) y `LA-027` (auditar las 12 vulnerabilidades
+    de `npm audit` sin `--force`, pospuesto deliberadamente).
+  - `DECISIONS.md`, `AGENTS.md`, `CLAUDE.md`, `README.md`: revisados
+    (`grep` dirigido por `consolidat`/`worktree`); no necesitaban cambios —
+    describen arquitectura y política general, no un estado puntual que la
+    consolidación haya invalidado.
+- Comandos ejecutados para el checkpoint final: `git status --short
+  --branch`, `git worktree list`, `git diff --check`, `npm run lint`,
+  `npm run typecheck`, `npm test`, `npm run build`, y un escaneo de patrones
+  de secretos (`sk-…`, `api_key`, `service_role`, `Bearer`, bloques PEM)
+  sobre los documentos tocados en toda la sesión.
+- Resultado real: `git worktree list` → una sola línea (la copia canónica);
+  lint sin incidencias; typecheck sin errores; suite **94 archivos, 1.641
+  pasadas, 9 omitidas, 0 fallos**; build correcto en los cuatro workspaces;
+  `git diff --check` sin salida; los dos archivos de claves siguen sin
+  seguimiento y sin coincidencias de patrones de secreto en la documentación
+  tocada.
+- Decisiones: ninguna nueva.
+- Riesgos o límites: la documentación (7 archivos) sigue sin commitear,
+  pendiente de autorización explícita de Daniel — no se asumió que el
+  «adelante» de un bloque anterior cubriera también este. `npm install`
+  reportó 12 vulnerabilidades (5 moderate, 6 high, 1 critical); registradas
+  en `LA-027`, sin `npm audit fix` ejecutado por instrucción explícita.
+  `.codebase-memory.pre-merge-backup/` sigue en disco (permiso denegado para
+  borrarlo por comando); `LA-026` lo deja como acción manual opcional. No hay
+  validación manual de UI pendiente conocida, pero nadie ha visto todavía en
+  pantalla el diálogo de confirmación de `Studio.tsx` ni la ficha de
+  proyecto corriendo de verdad.
+- Estado nuevo: **`LUXY-CONSOLIDATION-001` = `done`.**
+- Siguiente paso exacto: ninguno de producto — a la espera de que Daniel
+  autorice el commit de esta documentación y decida, junto con ChatGPT/Codex
+  y Claude, el nuevo `MASTER-PLAN.md` para la etapa de Luxy Organization.
+
+### 2026-08-21 13:20 — Claude — LUXY-CONSOLIDATION-001 (memoria MCP reindexada sobre la línea canónica)
+
+- Estado anterior: `git worktree list` reducido a la copia canónica
+  (`e40268a`); el índice MCP (`codebase-memory-mcp`) no se había reindexado
+  explícitamente desde la fusión, aunque el watcher en segundo plano ya lo
+  había actualizado de forma autónoma.
+- Objetivo: verificar y forzar el checkpoint de memoria MCP sobre la línea
+  canónica, comprobar que recupera arquitectura/módulos/contexto reales, y
+  decidir el destino de `.codebase-memory.pre-merge-backup/`.
+- Herramientas usadas: `mcp__codebase-memory-mcp__list_projects`,
+  `index_status` (antes y después), `index_repository` (modo `full`,
+  `persistence: true`), `get_architecture`, `search_graph`.
+- Resultado real:
+  1. `index_status` reveló que el índice ya tenía
+     `git.head_sha: e40268a1a5687145dbd510c01fd4d8c64062d2b0` y
+     `git.base_sha: 65ca161...` — coincide exactamente con el commit
+     canónico actual. El watcher en segundo plano ya lo había refrescado tras
+     la fusión y la limpieza de worktrees.
+  2. Se forzó de todos modos un reindex explícito (`index_repository`,
+     `mode: full`, `persistence: true`) como checkpoint verificado, no sólo
+     confiado al watcher. Resultado: mismos 4.474 nodos / 14.190 aristas,
+     `status: indexed`, artefacto persistido en `.codebase-memory/graph.db.zst`.
+     9 archivos `parse_partial` (demos HTML, migraciones SQL, `markdown.ts`,
+     `secure-storage.test.ts`) — best-effort, ninguno crítico para la
+     estructura del código TypeScript. 0 archivos `skipped`.
+  3. Verificación de recuperación real: `get_architecture` devuelve los ocho
+     paquetes correctos del monorepo (`desktop`, `agent`, `gateway`, `shared`,
+     `remote-protocol`, `remote-crypto`, `migrations`, `setup-machine`) con
+     conteos de nodos coherentes. `search_graph` con la consulta
+     `"buildProjectProfileUpdate resolveHttpRequestTimeout"` — dos símbolos
+     que se integraron o verificaron en esta misma sesión — los localiza
+     exactamente en `apps/desktop/src/renderer/project-profile.ts:61-144` y
+     `apps/agent/src/providers/http-provider.ts:113-117`. La memoria MCP
+     corresponde al código real de `e40268a`.
+- Archivos modificados: `.codebase-memory/graph.db.zst` y
+  `.codebase-memory/artifact.json` (regenerados por la herramienta; no se
+  editaron a mano, según la regla de `CLAUDE.md`).
+- Decisión sobre `.codebase-memory.pre-merge-backup/`: con el reindex
+  verificado, el backup ya no hace falta. Intenté eliminarlo
+  (`rm -rf .codebase-memory.pre-merge-backup`) pero el entorno denegó el
+  permiso para ese comando. Queda pendiente que Daniel lo borre manualmente
+  (`C:\Users\daniel\Desktop\Luxy\.codebase-memory.pre-merge-backup\`) o
+  autorice explícitamente el comando; no bloquea el resto de la
+  consolidación.
+- Pruebas: no aplica (operación de indexación, no de código).
+- Decisiones: ninguna nueva.
+- Riesgos o límites: la cobertura del índice es best-effort; los 9 archivos
+  `parse_partial` no son código TypeScript de producto crítico. El backup
+  `.codebase-memory.pre-merge-backup/` sigue en disco, pendiente de limpieza
+  manual.
+- Estado nuevo: memoria MCP consolidada y verificada contra `e40268a`.
+- Siguiente paso exacto: sincronizar la documentación final
+  (`PROJECT-STATE.md`, `CURRENT-TASK.md`, `MASTER-PLAN.md`, `DECISIONS.md`,
+  `LOCAL-ACTIONS.md`, `AI-WORK-PROTOCOL.md`, `AGENTS.md`, `CLAUDE.md`,
+  `README.md`) y ejecutar el checkpoint final completo.
+
+### 2026-08-21 13:00 — Claude — LUXY-CONSOLIDATION-001 (últimos tres worktrees eliminados)
+
+- Estado anterior: quedaban `lux-timeout-deepseek`, `phase-4d-session-host` y
+  `ux-001-detalle-trabajo` sin auditar contra `e40268a`, más el propio
+  `luxy-consolidate-worktrees`, ya redundante tras la fusión.
+- Objetivo: completar la matriz de esos tres worktrees con evidencia
+  funcional concreta en las tres áreas que pidió Daniel explícitamente
+  (timeout/reintentos/diagnóstico DeepSeek, preservación de código de Remote,
+  detalle de trabajos), y dejar `git worktree list` con sólo la copia
+  canónica.
+- Comandos ejecutados: delegado a un subagente de sólo lectura — `git status
+  --short --branch`, `git diff` por archivo, `git show e40268a:<ruta>`,
+  `git merge-base --is-ancestor <head> e40268a`, `git ls-tree -r e40268a
+  --name-only`, lectura directa de código — sin ninguna mutación de git.
+  Verificación propia adicional: `grep -n "resolveHttpRequestTimeout\|
+  outputBudgetExhausted\|retryable === false"
+  apps/agent/src/providers/http-provider.ts` contra el checkout ya fusionado,
+  confirmando las tres funciones en las líneas 113, 227 y 834.
+- Resultado real, añadido a `.claude-consolidation-matrix.md`:
+  - `lux-timeout-deepseek` (sin commits propios, `65ca161`): los tres bloques
+    funcionales sin commitear —`resolveHttpRequestTimeout()` (una llamada
+    agentic usa el timeout completo del trabajo salvo que un lote imponga
+    uno menor), el guard `retryable === false` en `shouldRetry`, y la
+    detección de `outputBudgetExhausted` (DeepSeek-V4-Pro agotando la salida
+    razonando, con o sin `finish_reason`)— están **literalmente idénticos**
+    en `e40268a`, con los mismos tres tests nuevos en `providers.test.ts`.
+    Sólo difiere el modelo por defecto de `live.test.ts` (prueba manual, no
+    corre en CI), sin efecto funcional. Documentación de continuidad del
+    worktree: contenido ya reflejado en los archivos consolidados.
+  - `phase-4d-session-host` (HEAD `e27aa05`) y `ux-001-detalle-trabajo` (HEAD
+    `6bd7077`): ambos worktrees estaban limpios (sin `M`/`??`) y sus HEAD son
+    ancestros confirmados de `e40268a`
+    (`git merge-base --is-ancestor` exit 0). Para Remote: los 15 archivos de
+    `apps/desktop/src/main/remote-host/` (incluido `session-host.ts` + test)
+    existen en el árbol de `e40268a` — verificación de preservación de
+    código únicamente; Remote sigue pausado, ninguna ruta lo activa. Para
+    detalle de trabajos: `callMetricsOf` (`studio-detail.ts:10`),
+    `openWorktreeFolder` cableado por IPC (`shared/ipc.ts:330` +
+    `preload/index.ts:23`) e `isProviderId` (`constants.ts:73`) presentes y
+    cableados.
+  - Ningún caso de "REQUIERE DECISIÓN DE DANIEL" en estos tres worktrees.
+- Archivos modificados: `.claude-consolidation-matrix.md` (scratch, no
+  versionado) — tres secciones nuevas añadidas al final, sin tocar las
+  anteriores.
+- Comandos de eliminación ejecutados, con autorización previa de Daniel de
+  eliminar todo worktree sin trabajo único: `git worktree remove --force`
+  para `lux-timeout-deepseek`, `phase-4d-session-host` y
+  `ux-001-detalle-trabajo`; y, al comprobar que `luxy-consolidate-worktrees`
+  quedaba limpio y en el mismo commit `e40268a` que la copia canónica (ya
+  redundante como worktree separado), también para ese. `git worktree prune`
+  después de los cuatro.
+- Resultado real: los cuatro `git worktree remove` terminaron sin error.
+  `git worktree list` muestra únicamente
+  `C:/Users/daniel/Desktop/Luxy e40268a [feat/luxy-desktop]`.
+- Pruebas: ninguna nueva (no se tocó código de producto en este paso); la
+  verificación fue lectura y comparación contra el estado ya probado de
+  `e40268a`.
+- Decisiones: ninguna nueva.
+- Riesgos o límites: las ramas locales `luxy/timeout-deepseek-agentic`,
+  `luxy/phase-4d-session-host`, `luxy/ux-001-detalle-trabajo` y
+  `luxy/consolidate-worktrees` siguen existiendo (sólo se retiraron las
+  carpetas de trabajo, no las ramas). No se ha hecho push de ninguna rama.
+- Estado nuevo: los ocho worktrees originales de `LUXY-CONSOLIDATION-001`
+  quedan reducidos a uno solo, la copia canónica.
+- Siguiente paso exacto: reindexar la memoria MCP sobre la línea canónica y
+  decidir el destino de `.codebase-memory.pre-merge-backup/`; después,
+  sincronizar la documentación final y ejecutar el checkpoint de cierre.
+
+### 2026-08-21 12:30 — Claude — LUXY-CONSOLIDATION-001 (auditoría de git stash@{0})
+
+- Estado anterior: `git stash@{0}` conservaba el snapshot de cambios locales
+  del checkout principal previos al fast-forward (20 archivos rastreados + 5
+  sin seguimiento), sin auditar.
+- Objetivo: clasificar cada archivo del stash antes de decidir si se descarta,
+  siguiendo la instrucción explícita de Daniel de no borrarlo sin mirar.
+- Comandos ejecutados: `git diff --stat "stash@{0}^1" "stash@{0}"` (cambios
+  rastreados), `git ls-tree -r --name-only "stash@{0}^3"` (archivos sin
+  seguimiento capturados), comparación dirigida por título de prueba
+  (`comm -23` sobre los patrones `it(`/`describe(` de `agent.test.ts` y
+  `live.test.ts`), comparación por encabezado (`comm -23` sobre `## LA-`,
+  `| F`, `###`) para `LOCAL-ACTIONS.md`, `MASTER-PLAN.md`, `PROJECT-STATE.md`
+  y `TEST-RESULTS.md`, y diff directo contra HEAD para `catalog.ts`,
+  `catalog-fetch.ts`, `types.ts`, `useCatalog.ts` y el bloque CSS
+  `.model-catalog-list`.
+- Resultado real, por archivo:
+  - **YA INTEGRADO / REEMPLAZADO POR IMPLEMENTACIÓN POSTERIOR** (sin ninguna
+    diferencia semántica útil frente a `e40268a`): `CHANGELOG-WORK.md`,
+    `CURRENT-TASK.md`, `LOCAL-ACTIONS.md`, `MASTER-PLAN.md`, `PROJECT-STATE.md`,
+    `apps/agent/src/agent.test.ts`, `apps/agent/src/providers/live.test.ts`
+    (cero títulos de prueba únicos frente a HEAD), `apps/desktop/src/renderer/pages/Config.tsx`,
+    `Conversations.tsx`, `Laboratory.tsx`, `Setup.tsx`, `apps/desktop/src/renderer/styles.css`
+    (el bloque `.model-catalog-list > li { border: 0 }` que documentaba
+    `F4.1-UI2` ya está byte a byte en HEAD), `packages/shared/src/models/catalog.ts`,
+    `catalog-fetch.ts`, `catalog-fetch.test.ts`, `registry.test.ts`,
+    `router-v2.test.ts`, `types.ts`, `packages/shared/src/telegram/commands.test.ts`,
+    y el archivo sin seguimiento `apps/desktop/src/renderer/useCatalog.ts` (la
+    versión de HEAD es estrictamente más nueva: ya tiene el estado `loading`
+    que la del stash no tenía).
+  - **ANTIGUO/DESCARTABLE**: `deploy-gateway.bat`, `rebuild-and-start-luxy.bat`,
+    `rebuild-luxy.bat`, `start-luxy.bat` (sin seguimiento) — versiones que
+    redirigían a `lux-auto-init-git`, ya identificado como un error de una
+    tarea anterior; HEAD trae las versiones autocontenidas correctas.
+  - **ÚNICO Y NECESARIO**: cinco encabezados de `TEST-RESULTS.md`
+    (`F4.1-T6`, `F4.3-UI`, `F4.1-T7`, `F4.1-UI`, `F4.1-UI2`, todos
+    2026-08-11) ausentes en el historial de `e40268a`. El código que
+    documentan ya estaba confirmado presente por otra vía (ver arriba); eran
+    únicamente el rastro histórico de validación manual de Daniel, huérfano
+    porque las ramas divergieron antes de que `luxy/consolidate-worktrees`
+    los heredara.
+- Archivos modificados: `TEST-RESULTS.md` — los cinco registros rescatados,
+  con una nota que explica su procedencia y por qué no representan trabajo
+  pendiente.
+- Pruebas: ninguna (cambio puramente documental).
+- Decisiones: ninguna nueva.
+- Riesgos o límites: ninguno detectado; la clasificación cubre el 100% de los
+  25 archivos del stash.
+- Estado nuevo: `git stash@{0}` queda vacío de contenido útil no rescatado;
+  listo para `git stash drop` una vez que Daniel lo confirme.
+- Siguiente paso exacto: `git stash drop stash@{0}` (mantener `stash@{1}`,
+  ajeno a esta tarea); continuar con la matriz de los tres worktrees
+  restantes.
+
+### 2026-08-21 12:00 — Claude — LUXY-CONSOLIDATION-001 (línea canónica fusionada, primer lote de worktrees eliminado)
+
+- Estado anterior: bloque 1 (confirmaciones React + ficha de proyecto)
+  commiteado en `luxy/consolidate-worktrees` como `e40268a`, sin push. El
+  checkout principal (`feat/luxy-desktop`) seguía en `65ca161` con cambios
+  locales sin commit ya confirmados como duplicados o superados por el merge
+  pendiente.
+- Objetivo: con autorización explícita de Daniel, (a) portar los campos
+  `Proyecto`/`Rama` que faltaban de `lux-auto-init-git` en `Studio.tsx`, (b)
+  convertir `luxy/consolidate-worktrees` en la línea canónica fusionándola en
+  `feat/luxy-desktop`, y (c) eliminar físicamente los worktrees ya confirmados
+  sin trabajo único.
+- Archivos modificados:
+  - `apps/desktop/src/renderer/pages/Studio.tsx` (en `luxy-consolidate-worktrees`):
+    añadidos `Proyecto` (tras Origen) y `Rama` (tras Modelo) al `Readout` del
+    detalle, copiados de `lux-auto-init-git`.
+- Comandos ejecutados, en orden:
+  1. `npm run typecheck` / `npm run lint` en `luxy-consolidate-worktrees` tras
+     el cambio de `Studio.tsx` — limpios.
+  2. `git add` + `git commit` en `luxy-consolidate-worktrees` → `e40268a`.
+  3. En el checkout principal: `git stash push -u -m "pre-merge snapshot..."`
+     con la lista explícita de los archivos locales ya confirmados como
+     duplicados/superados (catálogo de modelos, páginas de Desktop, `.bat`),
+     dejando fuera del stash los archivos sensibles/ajenos (demos, claves,
+     `.codebase-memory/`).
+  4. `mv .codebase-memory .codebase-memory.pre-merge-backup` — colisionaba con
+     la versión versionada que trae el merge (el índice MCP es regenerable,
+     nunca se edita a mano).
+  5. `git merge --ff-only luxy/consolidate-worktrees` → fast-forward limpio
+     `65ca161..e40268a`, 88 archivos.
+  6. `npm install` — `node_modules` llevaba desde 2026-08-01 sin refrescar;
+     sin este paso `npm run typecheck` fallaba con errores de tipos falsos
+     (`callMetrics`, `workspacePath`, `resumeJobId` "no existen") causados por
+     una versión de dependencia desincronizada del `package-lock.json` recién
+     fusionado, no por el código.
+  7. `npm run typecheck`, `npm run lint`, `npm test`, `npm run build` en el
+     checkout principal ya fusionado.
+  8. `git worktree remove --force` para `lux-auto-init-git`, `lux-bug-hunyuan`
+     y `luxy-work-update-001`.
+- Resultado real: fast-forward limpio; typecheck y lint sin incidencias; suite
+  completa **94 archivos, 1.641 pasadas, 9 omitidas, 0 fallos**; build correcto
+  en shared/agent/desktop/gateway. Los tres `git worktree remove` terminaron
+  sin error. `git worktree list` confirma que sólo quedan
+  `lux-timeout-deepseek`, `luxy-consolidate-worktrees`, `phase-4d-session-host`
+  y `ux-001-detalle-trabajo` además del checkout principal.
+- Decisiones: ninguna nueva más allá de las ya registradas en la entrada
+  anterior.
+- Riesgos o límites: `git stash@{0}` de este checkout conserva el snapshot
+  previo al merge (recuperable, no descartado) por si algo de esos archivos
+  locales resultara tener valor no detectado; `.codebase-memory.pre-merge-backup/`
+  conserva el índice MCP local anterior por la misma razón, aunque es
+  regenerable. Ninguno de los dos se ha borrado todavía. Las ramas locales
+  `luxy/auto-init-git`, `lux/bug-hunyuan-backcompat` y
+  `luxy/work-update-001-studio` siguen existiendo (sólo se retiró la carpeta de
+  trabajo, no la rama). No se ha hecho push de `feat/luxy-desktop` ni de
+  `luxy/consolidate-worktrees`.
+- Estado nuevo: `feat/luxy-desktop` (este checkout) es ahora la línea canónica
+  con todo el bloque 1 integrado, en `e40268a`, 21 commits por delante de
+  `origin/feat/luxy-desktop`. `LUXY-CONSOLIDATION-001` sigue `in_progress`.
+- Siguiente paso exacto: auditar `lux-timeout-deepseek`, `phase-4d-session-host`
+  y `ux-001-detalle-trabajo` con el mismo procedimiento de matriz antes de
+  proponer su eliminación (sus HEAD ya están incluidos como commits en la línea
+  fusionada, así que es probable que tampoco tengan trabajo único, pero
+  `lux-timeout-deepseek` tiene cambios sin commitear sin comparar todavía).
+  Decidir con Daniel qué hacer con `git stash@{0}` y
+  `.codebase-memory.pre-merge-backup/`. Ningún commit de este checkout se ha
+  hecho todavía sobre la documentación de continuidad más allá de lo que trajo
+  el fast-forward — falta decidir si se commitea este propio registro.
+
 ### 2026-08-21 11:30 — Claude — LUXY-CONSOLIDATION-001 (bloque 1: ficha de proyecto + confirmaciones)
 
 - Estado anterior: `luxy/consolidate-worktrees` (`11dff48`) identificado como

@@ -1,5 +1,67 @@
 # Luxy — resultados de comprobación
 
+### Registros rescatados de `git stash@{0}` — 2026-08-21
+
+Los cinco registros siguientes existían en el checkout principal antes de la
+fusión con `luxy/consolidate-worktrees` y no habían llegado a esa rama. El
+código que documentan (catálogo de 23 modelos, `hy3`, separadores CSS por
+familia en `.model-catalog-list`) ya está confirmado presente y probado en
+`e40268a` por otra vía; se recuperan aquí sólo para no perder el rastro
+histórico de cuándo y cómo se validaron manualmente.
+
+### 2026-08-11 — Windows 11 — F4.1-T6
+
+- Cambio: catálogo alineado con los 23 modelos confirmados manualmente; sustituidos los Qwen antiguos y añadido `hy3`.
+- `npm.cmd run lint`: exit 0.
+- `npm.cmd run typecheck`: exit 0.
+- `npm.cmd test`: **1.573 passed, 0 failed, 9 skipped**, 85/85 archivos; exit 0.
+- `npm.cmd run build`: exit 0.
+- Prueba focalizada previa: **100 passed, 0 failed**, 4 archivos.
+- Sin proveedores reales, precios, migraciones, deploy, push ni consumo de tokens.
+
+### 2026-08-11 — Windows 11 — F4.3-UI
+
+- Cambio: layout específico para historial de evaluaciones, comparaciones y
+  evidencia; fallback responsive a una columna.
+- `npm.cmd run lint`: exit 0.
+- `npm.cmd run typecheck`: exit 0.
+- `npm.cmd test`: **1.573 passed, 0 failed, 9 skipped**, 85/85 archivos;
+  exit 0.
+- `npm.cmd run build`: exit 0.
+- No se ejecutaron modelos ni se consultaron precios.
+
+### 2026-08-11 — Windows 11 — F4.1-T7
+
+- Cambio: los selectores consumen el catálogo real persistido tras actualizar
+  modelos; añadido fallback seguro para identificadores nuevos.
+- `npm.cmd run lint`: exit 0.
+- `npm.cmd run typecheck`: exit 0.
+- `npm.cmd test`: **1.574 passed, 0 failed, 9 skipped**, 85/85 archivos;
+  exit 0.
+- `npm.cmd run build`: exit 0.
+- Pruebas focalizadas: **54 passed, 0 failed**, 3 archivos.
+- Sin proveedores reales, precios, migraciones, deploy, push ni consumo de
+  tokens.
+
+### 2026-08-11 — Windows 11 — F4.1-UI
+
+- Cambio: separadores visuales movidos de cada modelo al bloque de familia en
+  la pantalla Modelos.
+- `npm.cmd run lint`: exit 0.
+- `npm.cmd run typecheck`: exit 0.
+- `npm.cmd test`: **1.574 passed, 0 failed, 9 skipped**, 85/85 archivos;
+  exit 0.
+- `npm.cmd run build`: exit 0.
+
+### 2026-08-11 — Windows 11 — F4.1-UI2
+
+- Corrección: las listas del catálogo ya no heredan el borde por elemento de
+  `.list`; separación exclusiva por familia.
+- `npm.cmd run lint`: exit 0.
+- `npm.cmd run typecheck`: exit 0.
+- `npm.cmd test`: **1.574 passed, 0 failed, 9 skipped**, 85/85 archivos.
+- `npm.cmd run build`: exit 0.
+
 ### 2026-08-21 — Windows 11 — LUXY-CONSOLIDATION-001 (bloque 1)
 
 - Worktree: `luxy-consolidate-worktrees` (`luxy/consolidate-worktrees`), tras
