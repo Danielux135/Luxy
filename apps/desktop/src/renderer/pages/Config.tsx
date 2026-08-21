@@ -1,6 +1,7 @@
 // Proyectos, Conexiones y Modelos.
 import { useEffect, useState, type JSX } from 'react';
 import {
+  ALLOWED_TEST_EXECUTABLES,
   ModelRegistry,
   buildCatalogForConnection,
   buildDefaultCatalog,
@@ -8,6 +9,7 @@ import {
   type CatalogSnapshot,
   type ConnectionProfile,
   type ModelFamily,
+  type ProjectType,
   type ResolvedModel,
   type StoredAgentConfig,
 } from '@luxy/shared';
@@ -18,6 +20,12 @@ import {
   summarizeModelEvidence,
 } from '../model-evidence.js';
 import type { ModelEvidence } from '../model-evidence.js';
+import {
+  PROJECT_TYPE_LABELS,
+  buildProjectProfileUpdate,
+  projectToDraft,
+  type ProjectDraft,
+} from '../project-profile.js';
 import { Empty, Field, Notice, Panel, Tag } from '../ui/primitives.js';
 import type { ConfigSummary } from '../useConfig.js';
 
@@ -157,6 +165,10 @@ export function ProjectsPage({
   const [alias, setAlias] = useState('');
   const [path, setPath] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [editingAlias, setEditingAlias] = useState<string | null>(null);
+  const [draft, setDraft] = useState<ProjectDraft | null>(null);
+  const [profileError, setProfileError] = useState<string | null>(null);
+  const [profileSaved, setProfileSaved] = useState(false);
 
   const elegirCarpeta = async (): Promise<void> => {
     const result = await window.luxy.pickFolder('Elige la carpeta del proyecto');
@@ -180,11 +192,18 @@ export function ProjectsPage({
       setError('Configura primero la maquina en Ajustes.');
       return;
     }
+    if (base.projects[alias] !== undefined) {
+      setError('Ese alias ya existe. Abre su ficha para modificarlo.');
+      return;
+    }
+    const project = { ...defaultProject(), path };
     const next: StoredAgentConfig = {
       ...base,
-      projects: { ...base.projects, [alias]: { ...defaultProject(), path } },
+      projects: { ...base.projects, [alias]: project },
     };
     if (await onSave(next)) {
+      setEditingAlias(alias);
+      setDraft(projectToDraft(project));
       setAlias('');
       setPath('');
     }
@@ -195,20 +214,85 @@ export function ProjectsPage({
     if (base === null) return;
     const projects = { ...base.projects };
     delete projects[clave];
-    await onSave({ ...base, projects });
+    if (await onSave({ ...base, projects })) {
+      if (editingAlias === clave) {
+        setEditingAlias(null);
+        setDraft(null);
+      }
+    }
   };
 
-  const toggleHostChecks = async (clave: string): Promise<void> => {
+  const editar = (
+    clave: string,
+    project: NonNullable<StoredAgentConfig['projects']>[string],
+  ): void => {
+    setEditingAlias(clave);
+    setDraft(projectToDraft(project));
+    setProfileError(null);
+    setProfileSaved(false);
+  };
+
+  const elegirCarpetaFicha = async (): Promise<void> => {
+    if (draft === null) return;
+    const result = await window.luxy.pickFolder('Elige la carpeta del proyecto');
+    if (result.ok && !result.value.canceled && result.value.path !== null) {
+      const selectedPath = result.value.path;
+      setDraft((previous) => (previous === null ? null : { ...previous, path: selectedPath }));
+      setProfileSaved(false);
+    }
+  };
+
+  const guardarFicha = async (): Promise<void> => {
     const base = summary.config;
-    const project = base?.projects[clave];
-    if (base === null || project === undefined) return;
-    await onSave({
-      ...base,
-      projects: {
-        ...base.projects,
-        [clave]: { ...project, allowHostChecks: !project.allowHostChecks },
-      },
-    });
+    const project = editingAlias === null ? undefined : base?.projects[editingAlias];
+    if (base === null || project === undefined || draft === null || editingAlias === null) return;
+
+    setProfileError(null);
+    setProfileSaved(false);
+    const update = buildProjectProfileUpdate(project, draft);
+    if (!update.ok) {
+      setProfileError(update.error);
+      return;
+    }
+
+    if (
+      await onSave({
+        ...base,
+        projects: { ...base.projects, [editingAlias]: update.project },
+      })
+    ) {
+      setDraft(projectToDraft(update.project));
+      setProfileSaved(true);
+    } else {
+      setProfileError('No se pudo guardar la ficha. Revisa los campos e inténtalo de nuevo.');
+    }
+  };
+
+  const updateCheck = (
+    index: number,
+    field: 'executable' | 'argumentsText',
+    value: string,
+  ): void => {
+    setDraft((previous) =>
+      previous === null
+        ? null
+        : {
+            ...previous,
+            checks: previous.checks.map((check, checkIndex) =>
+              checkIndex === index ? { ...check, [field]: value } : check,
+            ),
+          },
+    );
+    setProfileSaved(false);
+  };
+
+  const removeCheck = (index: number): void => {
+    setDraft((previous) =>
+      previous === null
+        ? null
+        : { ...previous, checks: previous.checks.filter((_, checkIndex) => checkIndex !== index) },
+    );
+    setProfileSaved(false);
   };
 
   return (
@@ -246,6 +330,285 @@ export function ProjectsPage({
         </button>
       </Panel>
 
+      {editingAlias !== null && draft !== null && (
+        <Panel
+          title={`Ficha · ${editingAlias}`}
+          actions={
+            <button
+              className="btn btn--quiet"
+              type="button"
+              onClick={() => {
+                setEditingAlias(null);
+                setDraft(null);
+                setProfileError(null);
+                setProfileSaved(false);
+              }}
+            >
+              Cerrar
+            </button>
+          }
+        >
+          <Notice tone="idle">
+            Esta ficha vive sólo en la configuración de esta máquina. Las instrucciones se envían al
+            agente para los trabajos del proyecto; no incluyas claves ni secretos.
+          </Notice>
+          {profileError !== null && <Notice tone="fault">{profileError}</Notice>}
+          {profileSaved && <Notice tone="ok">Ficha guardada.</Notice>}
+
+          <div className="project-profile__grid">
+            <Field label="Alias estable" hint="Identifica trabajos e historial; no se renombra.">
+              <input type="text" value={editingAlias} readOnly />
+            </Field>
+            <Field label="Nombre visible" hint="Opcional; se muestra sin sustituir el alias.">
+              <input
+                type="text"
+                value={draft.displayName}
+                maxLength={80}
+                onChange={(event) => {
+                  setDraft({ ...draft, displayName: event.target.value });
+                  setProfileSaved(false);
+                }}
+                placeholder="Luxy"
+              />
+            </Field>
+            <Field label="Tipo base">
+              <select
+                value={draft.type}
+                onChange={(event) => {
+                  setDraft({ ...draft, type: event.target.value as ProjectType });
+                  setProfileSaved(false);
+                }}
+              >
+                {Object.entries(PROJECT_TYPE_LABELS).map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Stack" hint="Tecnologías separadas por comas; máximo 16.">
+              <input
+                type="text"
+                value={draft.stack}
+                onChange={(event) => {
+                  setDraft({ ...draft, stack: event.target.value });
+                  setProfileSaved(false);
+                }}
+                placeholder="TypeScript, Electron, React"
+              />
+            </Field>
+          </div>
+
+          <Field label="Carpeta de esta máquina">
+            <div className="row">
+              <input type="text" value={draft.path} readOnly style={{ flex: 1 }} />
+              <button className="btn" type="button" onClick={() => void elegirCarpetaFicha()}>
+                Cambiar
+              </button>
+            </div>
+          </Field>
+          <Field label="Descripción" hint={`${draft.description.length}/600 caracteres`}>
+            <textarea
+              rows={3}
+              value={draft.description}
+              maxLength={600}
+              onChange={(event) => {
+                setDraft({ ...draft, description: event.target.value });
+                setProfileSaved(false);
+              }}
+              placeholder="Qué hace el proyecto y qué parte mantiene esta máquina."
+            />
+          </Field>
+          <Field
+            label="Instrucciones del proyecto"
+            hint={`${draft.instructions.length}/8000 caracteres · La tarea actual prevalece cuando concreta algo distinto.`}
+          >
+            <textarea
+              rows={8}
+              value={draft.instructions}
+              maxLength={8000}
+              onChange={(event) => {
+                setDraft({ ...draft, instructions: event.target.value });
+                setProfileSaved(false);
+              }}
+              placeholder="Convenciones, archivos que preservar y criterios propios del proyecto."
+            />
+          </Field>
+
+          <section className="project-checks">
+            <div className="project-checks__head">
+              <div>
+                <div className="silk">Comprobaciones</div>
+                <p className="field__hint">
+                  Guardar no ejecuta nada. Cada línea de argumentos será un elemento separado y
+                  nunca se pasará a un shell.
+                </p>
+              </div>
+              <button
+                className="btn btn--quiet"
+                type="button"
+                disabled={draft.checks.length >= 10}
+                onClick={() => {
+                  setDraft({
+                    ...draft,
+                    checks: [...draft.checks, { executable: 'npm', argumentsText: 'test' }],
+                  });
+                  setProfileSaved(false);
+                }}
+              >
+                Añadir comando
+              </button>
+            </div>
+
+            <datalist id="project-check-executables">
+              {ALLOWED_TEST_EXECUTABLES.map((executable) => (
+                <option key={executable} value={executable} />
+              ))}
+            </datalist>
+
+            {draft.checks.length === 0 ? (
+              <p className="project-checks__empty">
+                Sin comandos. Luxy no ejecutará comprobaciones aunque el permiso esté activo.
+              </p>
+            ) : (
+              <div className="project-checks__list">
+                {draft.checks.map((check, index) => (
+                  <div className="project-check" key={index}>
+                    <div className="project-check__fields">
+                      <Field
+                        label={`Ejecutable ${index + 1}`}
+                        hint="Debe pertenecer a la lista blanca; no admite rutas."
+                      >
+                        <input
+                          type="text"
+                          list="project-check-executables"
+                          value={check.executable}
+                          maxLength={128}
+                          spellCheck={false}
+                          onChange={(event) => updateCheck(index, 'executable', event.target.value)}
+                        />
+                      </Field>
+                      <Field label="Argumentos" hint="Uno por línea. Ejemplo: run, después lint.">
+                        <textarea
+                          rows={3}
+                          value={check.argumentsText}
+                          spellCheck={false}
+                          onChange={(event) =>
+                            updateCheck(index, 'argumentsText', event.target.value)
+                          }
+                        />
+                      </Field>
+                    </div>
+                    <button
+                      className="btn btn--danger btn--quiet"
+                      type="button"
+                      onClick={() => removeCheck(index)}
+                    >
+                      Quitar comando
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <Field
+              label="Timeout por comando"
+              hint="Entre 1 y 3600 segundos; al agotarse se mata el árbol de procesos."
+            >
+              <div className="project-checks__timeout">
+                <input
+                  type="number"
+                  min={1}
+                  max={3600}
+                  step={0.001}
+                  value={draft.testTimeoutSeconds}
+                  onChange={(event) => {
+                    setDraft({ ...draft, testTimeoutSeconds: Number(event.target.value) });
+                    setProfileSaved(false);
+                  }}
+                />
+                <span>segundos</span>
+              </div>
+            </Field>
+
+            {draft.checks.length > 0 && !draft.allowHostChecks && (
+              <Notice tone="warn">
+                Hay comandos configurados, pero seguirán bloqueados hasta activar explícitamente las
+                comprobaciones en el host.
+              </Notice>
+            )}
+          </section>
+
+          <div className="project-profile__permissions">
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={draft.allowEdits}
+                onChange={(event) => {
+                  setDraft({ ...draft, allowEdits: event.target.checked });
+                  setProfileSaved(false);
+                }}
+              />
+              <span>
+                Permitir edición
+                <small>Los cambios siguen confinados a un worktree aislado.</small>
+              </span>
+            </label>
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={draft.allowHostChecks}
+                onChange={(event) => {
+                  setDraft({ ...draft, allowHostChecks: event.target.checked });
+                  setProfileSaved(false);
+                }}
+              />
+              <span>
+                Permitir comprobaciones en el host
+                <small>Pueden cargar código modificado; se mantienen bloqueadas por defecto.</small>
+              </span>
+            </label>
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={draft.allowCommit}
+                onChange={(event) => {
+                  setDraft({ ...draft, allowCommit: event.target.checked });
+                  setProfileSaved(false);
+                }}
+              />
+              <span>
+                Permitir commit
+                <small>Crear el commit todavía exige aprobación explícita.</small>
+              </span>
+            </label>
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={draft.allowPush}
+                onChange={(event) => {
+                  setDraft({ ...draft, allowPush: event.target.checked });
+                  setProfileSaved(false);
+                }}
+              />
+              <span>
+                Permitir push
+                <small>Es sólo una puerta; cada push sigue exigiendo dos confirmaciones.</small>
+              </span>
+            </label>
+          </div>
+          {draft.allowPush && (
+            <Notice tone="warn">
+              Push habilitado para este proyecto. Luxy no publicará nada sin las dos confirmaciones
+              obligatorias.
+            </Notice>
+          )}
+          <button className="btn btn--primary" type="button" onClick={() => void guardarFicha()}>
+            Guardar ficha
+          </button>
+        </Panel>
+      )}
+
       <Panel title="Proyectos configurados" flush>
         <Notice tone="warn">
           Las comprobaciones se ejecutan en Windows y pueden cargar codigo modificado por el modelo.
@@ -256,17 +619,26 @@ export function ProjectsPage({
             Añade una carpeta arriba para que Luxy pueda trabajar sobre ella.
           </Empty>
         ) : (
-          <ul className="list">
+          <ul className="list project-list">
             {projects.map(([clave, proyecto]) => (
               <li key={clave}>
                 <div className="list__main">
-                  <div className="list__name">{clave}</div>
-                  <div className="list__meta scroller">{proyecto.path}</div>
+                  <div className="list__name">{proyecto.displayName?.trim() || clave}</div>
+                  <div className="list__meta scroller">
+                    {proyecto.displayName?.trim() ? `${clave} · ` : ''}
+                    {proyecto.path}
+                  </div>
+                  {(proyecto.stack?.length ?? 0) > 0 && (
+                    <div className="list__meta">{proyecto.stack?.join(' · ')}</div>
+                  )}
                 </div>
                 <Tag>{proyecto.type}</Tag>
                 {proyecto.allowEdits && <Tag tone="busy">edita</Tag>}
                 {proyecto.allowCommit && <Tag tone="warn">commit</Tag>}
                 {proyecto.allowPush ? <Tag tone="fault">push</Tag> : <Tag>sin push</Tag>}
+                {proyecto.testCommands.length > 0 && (
+                  <Tag>{proyecto.testCommands.length} checks</Tag>
+                )}
                 <button
                   className="btn btn--quiet"
                   type="button"
@@ -281,8 +653,8 @@ export function ProjectsPage({
                 >
                   Trabajos
                 </button>
-                <button className="btn btn--quiet" onClick={() => void toggleHostChecks(clave)}>
-                  {proyecto.allowHostChecks ? 'Pruebas: activas' : 'Pruebas: bloqueadas'}
+                <button className="btn btn--quiet" onClick={() => editar(clave, proyecto)}>
+                  Editar ficha
                 </button>
                 <button className="btn btn--danger btn--quiet" onClick={() => void quitar(clave)}>
                   Quitar

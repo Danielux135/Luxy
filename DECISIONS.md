@@ -471,3 +471,77 @@ casilla está rota cuando en realidad actúa una barrera de seguridad.
 
 Las definiciones pendientes siguen visibles como fichas, con su requisito real.
 No se habilita un runner para resolver un problema de presentación.
+
+## D-034 — la ficha de proyecto es local y sus instrucciones están delimitadas
+
+Fecha: 2026-08-17
+
+Estado: aceptada, implementada
+
+Nombre visible, descripción, stack e instrucciones viven junto a la ruta en la
+configuración local de cada máquina. No viajan al Gateway ni a Supabase y no se
+versionan. La ruta tampoco entra en el prompt.
+
+Las instrucciones sólo se añaden a trabajos agentic del proyecto, dentro de un
+bloque explícito. La tarea actual puede concretarlas, pero nunca autorizan salir
+del worktree, publicar, desplegar ni tocar credenciales. Conversaciones y
+evaluaciones no las heredan porque conservan sus contratos de solo lectura.
+
+Editar la ficha puede cambiar `allowEdits`, `allowHostChecks`, `allowCommit` y
+`allowPush`, pero no ejecuta ninguna acción. Commit sigue requiriendo aprobación
+explícita y push conserva dos confirmaciones además de `allowPush: true`.
+
+## D-035 — los checks se editan como estructura y se validan dos veces
+
+Fecha: 2026-08-17
+
+Estado: aceptada, implementada
+
+Un check nunca es una orden de shell: se guarda como tupla de ejecutable y lista
+de argumentos. Studio ofrece un argumento por línea y aplica la política pura de
+`packages/shared/src/test-commands.ts`; guardar la ficha no ejecuta nada.
+
+El agente vuelve a validar justo antes de usar `spawn` con cwd, timeout y entorno
+permitido. Rechaza ejecutables fuera de lista, rutas, eval/shell, publicación,
+deploy, push y metacaracteres aunque una configuración haya sido manipulada fuera
+de Studio. `allowHostChecks` sigue siendo una puerta separada, explícita y falsa
+por defecto.
+No se habilita un runner para resolver un problema de presentación.
+
+## D-036 — el contexto de proyecto filtra en servidor y se defiende en Desktop
+
+Fecha: 2026-08-17
+
+Estado: aceptada, implementada
+
+Entrar en un proyecto fija su alias estable en Conversaciones o Trabajos. El
+nombre visible sólo sirve como etiqueta. Crear, reintentar, seleccionar y decidir
+se mantiene dentro de ese alias hasta que el usuario vuelve explícitamente a la
+vista global.
+
+`projectAlias` se valida en IPC y Gateway y llega a PostgREST antes de límite y
+offset. Desktop filtra de nuevo toda respuesta remota: así un Gateway anterior
+que ignore el parámetro nunca mezcla proyectos en pantalla. Esa defensa no se
+presenta como historial completo; se muestra un aviso hasta publicar el contrato
+nuevo. Navegar o filtrar nunca confirma un commit, descarta ni publica nada.
+
+## D-037 — confirmaciones bloqueantes de Desktop son un diálogo React embebido
+
+Fecha: 2026-08-21
+
+Estado: aceptada, implementada
+
+Toda confirmación bloqueante de Desktop (aplicar, descartar, reintentar,
+ejecutar o cancelar una evaluación) usa el mismo patrón: un estado
+`pendingConfirmation`/`pendingAction` con la acción propuesta y un diálogo React
+embebido (`.confirm-layer`/`.confirm-dialog`) que la describe antes de
+ejecutarla. No se usa `window.confirm()` ni `dialog.showMessageBox` de Electron.
+
+Motivo: `window.confirm()` bloquea el proceso de render y congela el resto de la
+interfaz mientras está abierto (`UI-LAB-CONFIRM`, 2026-08-11, corregido primero
+en Laboratory.tsx). La alternativa de un diálogo nativo vía IPC
+(`dialog.showMessageBox`, canal `luxy:dialog:confirm`) se evaluó y se descartó
+por decisión explícita de Daniel: añadía superficie nueva (canal IPC, handler en
+`main`, schema en `preload`) para un problema que el patrón React ya resolvía
+sin tocar el proceso principal. Studio.tsx se corrigió con este mismo patrón el
+2026-08-21, portando el que ya usaba Laboratory.tsx.

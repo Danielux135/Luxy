@@ -1,5 +1,93 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-08-21 11:30 — Claude — LUXY-CONSOLIDATION-001 (bloque 1: ficha de proyecto + confirmaciones)
+
+- Estado anterior: `luxy/consolidate-worktrees` (`11dff48`) identificado como
+  base de convergencia de ocho worktrees. Matriz de comparación completa contra
+  `lux-bug-hunyuan`, `lux-auto-init-git` y `luxy-work-update-001` en
+  `C:\Users\daniel\Desktop\Luxy\.claude-consolidation-matrix.md` (scratch, no
+  versionado). Dos decisiones de Daniel resueltas: (a) arquitectura de
+  confirmación bloqueante = diálogo React embebido para toda la app; (b)
+  integrar ya el bloque único de `lux-auto-init-git`.
+- Objetivo: aplicar esas dos decisiones sobre este worktree.
+- Archivos leídos: `Studio.tsx` y `Laboratory.tsx` de este worktree (patrón
+  `pendingConfirmation`/`confirm-layer`/`confirm-dialog`);
+  `apps/desktop/src/renderer/pages/Config.tsx`, `project-profile.ts` y
+  `project-profile.test.ts` de `lux-auto-init-git`; su `styles.css` (bloques
+  `.project-profile__*`/`.project-checks*`); su `DECISIONS.md` (`D-034` a
+  `D-036`).
+- Archivos modificados:
+  - `apps/desktop/src/renderer/pages/Studio.tsx`: sustituidos los dos
+    `window.confirm()` de `decide()`/`retry()` por el mismo patrón de estado +
+    diálogo React que ya usaba `Laboratory.tsx`. La comprobación de proveedor
+    histórico (`isProviderId`) se mantiene, ahora tras aceptar el diálogo, igual
+    que antes se hacía tras aceptar el `window.confirm()`.
+  - `apps/desktop/src/renderer/pages/Config.tsx`: `ProjectsPage` incorpora el
+    panel «Ficha · alias» completo (nombre visible, descripción, tipo, stack,
+    instrucciones, comandos de comprobación estructurados, timeout y los
+    cuatro permisos), conservando los botones `onOpenProject` que ya existían
+    en este worktree. `toggleHostChecks` se sustituye por el checkbox
+    `allowHostChecks` dentro de la ficha.
+  - Nuevos: `apps/desktop/src/renderer/project-profile.ts` y
+    `project-profile.test.ts` (lógica pura de la ficha, copiados de
+    `lux-auto-init-git` sin cambios).
+  - `apps/desktop/src/renderer/styles.css`: añadido el bloque
+    `.project-profile__*`/`.project-checks*`/`.project-list` con su
+    media-query, copiado de `lux-auto-init-git`.
+  - `DECISIONS.md`: añadidas `D-034`, `D-035`, `D-036` (texto de
+    `lux-auto-init-git`, sin cambios) y `D-037`, nueva, que documenta
+    explícitamente por qué se descartó el diálogo nativo IPC de
+    `lux-bug-hunyuan` en favor del patrón React ya existente.
+  - `TEST-RESULTS.md`: entrada de esta comprobación.
+- Comandos ejecutados: `npm run typecheck`; `npx vitest run
+  apps/desktop/src/renderer/project-profile.test.ts
+  apps/desktop/src/shared/ipc.test.ts`; `npm test`; `npm run lint`; `npm run
+  build`.
+- Resultado real: typecheck sin errores; 38/38 pruebas focalizadas; suite
+  completa 94 archivos, 1.641 pasadas, 9 omitidas, 0 fallos; lint sin
+  incidencias; build correcto en los cuatro workspaces.
+- Decisiones: `D-037` (nueva, ver `DECISIONS.md`).
+- Riesgos o límites: no se portaron los campos `Proyecto`/`Rama` que
+  `lux-auto-init-git` añadía al detalle de `Studio.tsx` (la matriz los marcó
+  como fusión manual pendiente, fuera del alcance ya decidido); no se tocó
+  `lux-bug-hunyuan` ni `luxy-work-update-001` todavía; ninguno de los tres
+  worktrees comparados se ha eliminado.
+- Estado nuevo: bloque 1 de `LUXY-CONSOLIDATION-001` cerrado en este worktree.
+  Sigue `in_progress` a nivel de tarea completa.
+- Siguiente paso exacto: decidir si se portan los campos `Proyecto`/`Rama` de
+  `Studio.tsx` (`lux-auto-init-git`); revisar si queda algo más que rescatar de
+  `lux-bug-hunyuan` fuera del bloque de diálogo ya resuelto; con eso,
+  `lux-auto-init-git` pasaría a eliminable. `luxy-work-update-001` ya es
+  eliminable sin condiciones según la matriz.
+
+### 2026-08-21 11:45 — Claude — LUXY-CONSOLIDATION-001 (bloque 1, cierre)
+
+- Estado anterior: bloque 1 verificado, pendiente sólo de decidir los campos
+  `Proyecto`/`Rama` de `Studio.tsx` y de autorización de commit.
+- Objetivo: cerrar el bloque 1 con la decisión de Daniel (portar los campos) y
+  commitear localmente.
+- Archivos modificados: `apps/desktop/src/renderer/pages/Studio.tsx` — añadidos
+  `{ label: 'Proyecto', value: studio.detail.job.projectAlias }` tras Origen y
+  `{ label: 'Rama', value: metadata['branch'] ?? 'sin rama' }` tras Modelo, en
+  el `Readout` del detalle, copiados de `lux-auto-init-git` sin adaptar (los
+  campos que la base tenía de más — métricas de llamadas, «abrir worktree» —
+  se conservan intactos).
+- Comandos ejecutados: `npm run typecheck`, `npm run lint`.
+- Resultado real: typecheck sin errores, lint sin incidencias.
+- Decisiones: ninguna nueva.
+- Riesgos o límites: no se repitió la suite completa tras este cambio puntual
+  de JSX (sin lógica nueva); el bloque 1 completo sí la tiene registrada en la
+  entrada anterior.
+- Estado nuevo: `lux-bug-hunyuan`, `lux-auto-init-git` y `luxy-work-update-001`
+  quedan sin trabajo único pendiente frente a esta base, según la matriz
+  actualizada en `.claude-consolidation-matrix.md` del checkout principal.
+  Daniel autorizó el commit de este bloque en `luxy/consolidate-worktrees`
+  (sin push).
+- Siguiente paso exacto: commitear este bloque; después, pedir a Daniel
+  confirmación explícita y separada para `git worktree remove` de los tres
+  worktrees ya sin trabajo único, y para decidir el destino final de
+  `luxy/consolidate-worktrees` (¿se convierte en `feat/luxy-desktop`? ¿push?).
+
 ### 2026-08-17 — Codex — GIT-CHECKPOINT-001
 
 - Estado anterior: `luxy/auto-init-git` estaba publicado en `1b01fc3`, con 44

@@ -1,5 +1,24 @@
 # Luxy — resultados de comprobación
 
+### 2026-08-21 — Windows 11 — LUXY-CONSOLIDATION-001 (bloque 1)
+
+- Worktree: `luxy-consolidate-worktrees` (`luxy/consolidate-worktrees`), tras
+  portar el diálogo React embebido a `Studio.tsx` (D-037) y la ficha de
+  proyecto de `lux-auto-init-git` (D-034/D-035/D-036, código ya integrado en
+  este worktree salvo el panel de UI).
+- Comandos ejecutados por separado: `npm run typecheck`, `npx vitest run
+  apps/desktop/src/renderer/project-profile.test.ts
+  apps/desktop/src/shared/ipc.test.ts`, `npm test`, `npm run lint`, `npm run
+  build`.
+- Typecheck: correcto, sin errores.
+- Pruebas focalizadas (`project-profile.test.ts`, `ipc.test.ts`): 38 pasadas, 0
+  fallos.
+- Suite completa: **94 archivos, 1.641 pasadas, 9 omitidas, 0 fallos**, 69,44 s.
+- Lint: sin incidencias.
+- Build: shared, agent, desktop y gateway correctos (electron-vite + tsc -b
+  para los cuatro workspaces).
+- No se ejecutaron modelos reales, migraciones, deploy, commit ni push.
+
 ### 2026-08-17 — Windows 11 — GIT-CHECKPOINT-001
 
 - Base: `luxy/auto-init-git` @ `1b01fc3` más el checkpoint local autorizado.

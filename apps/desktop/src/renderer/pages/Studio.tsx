@@ -89,6 +89,9 @@ export function StudioPage({
   const [workspace, setWorkspace] = useState<PreparedWorkspace | null>(readStoredWorkspace);
   const [workspaceBusy, setWorkspaceBusy] = useState(false);
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
+  const [pendingAction, setPendingAction] = useState<
+    { kind: 'decide'; action: StudioJobAction } | { kind: 'retry' } | null
+  >(null);
 
   const machine = studio.machines.find((item) => item.id === machineId) ?? null;
   const projects = useMemo(() => machine?.projects ?? [], [machine]);
@@ -169,24 +172,6 @@ export function StudioPage({
   const decide = async (action: StudioJobAction): Promise<void> => {
     const job = studio.detail?.job;
     if (job === undefined || !canDecideStudioJob(job)) return;
-
-    const branch = String(job.metadata['branch']);
-    const accepted = window.confirm(
-      action === 'commit'
-        ? [
-            `¿Aplicar los cambios de ${job.shortId}?`,
-            '',
-            `Luxy creara un commit en la rama aislada ${branch}.`,
-            'No hara push ni tocara produccion.',
-          ].join('\n')
-        : [
-            `¿Descartar definitivamente ${job.shortId}?`,
-            '',
-            'Se eliminara el worktree y todos sus cambios sin guardar.',
-            'Esta accion no se puede deshacer.',
-          ].join('\n'),
-    );
-    if (!accepted) return;
     await studio.decide(job.id, action);
   };
 
@@ -203,18 +188,6 @@ export function StudioPage({
     const worktreePath = job.metadata['worktreePath'];
     const canResumeExistingWorktree =
       typeof worktreePath === 'string' && worktreePath.trim().length > 0;
-    const accepted = window.confirm(
-      [
-        `¿Reintentar ${job.shortId}?`,
-        '',
-        `Proveedor: ${job.provider}`,
-        `Modelo: ${job.model ?? 'predeterminado'}`,
-        canResumeExistingWorktree
-          ? 'Se creará un nuevo intento, pero continuará en el mismo worktree y conservará los archivos ya creados.'
-          : 'Este intento se canceló antes de empezar y no tiene worktree. Se creará uno nuevo desde el proyecto base.',
-      ].join('\n'),
-    );
-    if (!accepted) return;
     if (!isProviderId(job.provider)) {
       window.alert('Este proveedor historico ya no esta disponible para reintentar el trabajo.');
       return;
@@ -448,8 +421,13 @@ export function StudioPage({
                     tone: tone(studio.detail.job.status),
                   },
                   { label: 'Origen', value: studio.detail.job.origin },
+                  { label: 'Proyecto', value: studio.detail.job.projectAlias },
                   { label: 'Proveedor', value: studio.detail.job.provider },
                   { label: 'Modelo', value: studio.detail.job.model ?? 'predeterminado' },
+                  {
+                    label: 'Rama',
+                    value: typeof metadata['branch'] === 'string' ? metadata['branch'] : 'sin rama',
+                  },
                   {
                     label: 'Pruebas OK',
                     value: String(testsPassed),
@@ -500,7 +478,7 @@ export function StudioPage({
                   <button
                     className="btn btn--primary"
                     disabled={studio.busy}
-                    onClick={() => void retry()}
+                    onClick={() => setPendingAction({ kind: 'retry' })}
                   >
                     Reintentar trabajo
                   </button>
@@ -563,14 +541,14 @@ export function StudioPage({
                     <button
                       className="btn btn--primary"
                       disabled={studio.busy}
-                      onClick={() => void decide('commit')}
+                      onClick={() => setPendingAction({ kind: 'decide', action: 'commit' })}
                     >
                       Aplicar cambios
                     </button>
                     <button
                       className="btn btn--danger"
                       disabled={studio.busy}
-                      onClick={() => void decide('discard')}
+                      onClick={() => setPendingAction({ kind: 'decide', action: 'discard' })}
                     >
                       Descartar trabajo
                     </button>
@@ -606,6 +584,77 @@ export function StudioPage({
           )}
         </Panel>
       </div>
+
+      {pendingAction !== null && studio.detail !== null && (
+        <div className="confirm-layer" role="presentation">
+          <section
+            className="confirm-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="studio-confirm-title"
+          >
+            <div className="silk" id="studio-confirm-title">
+              Confirmar accion
+            </div>
+            {pendingAction.kind === 'decide' ? (
+              <p>
+                {pendingAction.action === 'commit' ? (
+                  <>
+                    ¿Aplicar los cambios de <strong>{studio.detail.job.shortId}</strong>? Luxy
+                    creara un commit en la rama aislada{' '}
+                    {String(studio.detail.job.metadata['branch'])}. No hara push ni tocara
+                    produccion.
+                  </>
+                ) : (
+                  <>
+                    ¿Descartar definitivamente <strong>{studio.detail.job.shortId}</strong>? Se
+                    eliminara el worktree y todos sus cambios sin guardar. Esta accion no se puede
+                    deshacer.
+                  </>
+                )}
+              </p>
+            ) : (
+              <>
+                <p>
+                  ¿Reintentar <strong>{studio.detail.job.shortId}</strong>?
+                </p>
+                <div className="list__meta">
+                  Proveedor: {studio.detail.job.provider} · Modelo:{' '}
+                  {studio.detail.job.model ?? 'predeterminado'}
+                </div>
+                <p className="list__meta">
+                  {typeof studio.detail.job.metadata['worktreePath'] === 'string' &&
+                  String(studio.detail.job.metadata['worktreePath']).trim().length > 0
+                    ? 'Se creará un nuevo intento, pero continuará en el mismo worktree y conservará los archivos ya creados.'
+                    : 'Este intento se canceló antes de empezar y no tiene worktree. Se creará uno nuevo desde el proyecto base.'}
+                </p>
+              </>
+            )}
+            <div className="confirm-dialog__actions">
+              <button className="btn" type="button" onClick={() => setPendingAction(null)}>
+                Volver
+              </button>
+              <button
+                className="btn btn--primary"
+                type="button"
+                onClick={() => {
+                  const pending = pendingAction;
+                  setPendingAction(null);
+                  if (pending === null) return;
+                  if (pending.kind === 'decide') void decide(pending.action);
+                  else void retry();
+                }}
+              >
+                {pendingAction.kind === 'decide'
+                  ? pendingAction.action === 'commit'
+                    ? 'Aplicar'
+                    : 'Descartar'
+                  : 'Reintentar'}
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
     </>
   );
 }
