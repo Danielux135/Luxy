@@ -15,10 +15,20 @@ release/
 !.env.example
 !.env.providers.example
 wrangler.toml
+wrangler*.toml
+.wrangler-manual.toml
+!wrangler.toml.example
 config.json
 config.local.json
 .dev.vars
 .claude/settings.local.json
+Claves*.txt
+Luxy claves API.txt
+*claves*API*.txt
+
+# material local de referencia: no forma parte del producto
+Kat-coder-pro demos/
+Web demos/
 
 # artefactos locales de luxy
 logs/

@@ -192,6 +192,22 @@ Uso esperado:
   a favor de la memoria: se registra la discrepancia y se corrige primero la
   fuente canónica (código o documentación), después se reindexa.
 
+**Problema de diseño abierto, sin resolver (2026-08-21):** con
+`.codebase-memory/` versionado, el watcher en segundo plano de la
+herramienta reescribe `artifact.json` y `graph.db.zst` —incluido el commit
+al que apuntan y los conteos de nodos/aristas— cada vez que detecta un
+cambio, incluida una simple consulta o el propio commit que acaba de
+fijarlos. Eso deja el working tree sucio de forma recurrente sin que nadie
+haya tocado código, y commitear ese cambio dispara otro reindex que vuelve
+a ensuciarlo. Para el checkpoint del 2026-08-21 se restauró
+(`git checkout --`) al contenido del último commit válido sin desversionar
+nada, pero el ciclo puede repetirse. No se ha decidido todavía si la
+solución correcta es dejar de versionar `.codebase-memory/` (cada máquina
+regenera su propio índice local) o aceptar el ruido y sólo consolidarlo en
+checkpoints deliberados, ignorando el diff intermedio hasta entonces. Decidir
+esto es una decisión de arquitectura de Daniel, no algo que una IA deba
+resolver unilateralmente.
+
 ## 10. Operaciones reservadas a Daniel
 
 Sin autorización explícita, ninguna IA puede:
