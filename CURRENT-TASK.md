@@ -1,6 +1,46 @@
 # Luxy — tarea activa
 
-## Checkpoint de continuidad — 2026-08-21 13:30
+## Checkpoint de continuidad — 2026-08-21 (rama renombrada a `main`)
+
+`LUXY-CONSOLIDATION-001` está cerrada (`done`). Después de cerrarla, Daniel
+pidió un saneamiento final del checkpoint (secretos protegidos en
+`.gitignore`, scratch temporal eliminado, `.codebase-memory/artifact.json`
+documentado como problema de diseño abierto — ver `AI-WORK-PROTOCOL.md` §9)
+y, tras eso, renombrar la rama canónica a un nombre claro.
+
+**La rama local dejó de llamarse `feat/luxy-desktop` y ahora es `main`**
+(`git branch -m`, cambio puramente local). El remoto ya tenía `origin/main`
+como rama por defecto (`origin/HEAD -> origin/main`), en `c6e5094`, que es
+**ancestro directo** del HEAD actual: no hay divergencia, así que el push
+pendiente es un fast-forward limpio, no una reescritura de historia.
+`origin/feat/luxy-desktop` (`65ca161`) queda intacta en el remoto sin
+actualizar; qué hacer con ella (dejarla o borrarla) es una decisión
+pendiente y separada.
+
+- **Línea canónica actual**: `C:\Users\daniel\Desktop\Luxy`, rama `main`,
+  HEAD `02c2080`. Copia operativa real (registrada en
+  `%APPDATA%\Luxy\config.json`).
+- `git worktree list` contiene únicamente esa copia.
+- **Push pendiente, bloqueado por el entorno** (no por falta de
+  autorización): `git push origin main` fue denegado dos veces por el
+  sistema de permisos de esta sesión sin mostrar ningún prompt. Registrado
+  como acción manual de Daniel en `LOCAL-ACTIONS.md`, `LA-028`, con el
+  comando exacto.
+- Working tree limpio salvo el ruido conocido y ya documentado de
+  `.codebase-memory/artifact.json`/`graph.db.zst` (el watcher del MCP los
+  reescribe en cuanto detecta cualquier cambio; no es un problema de
+  producto, ver `AI-WORK-PROTOCOL.md` §9).
+- Sin secretos tracked ni staged. Sin cambios de producto sin commitear.
+
+Siguiente acción exacta: Daniel ejecuta `LA-028` (`git push origin main`)
+desde una terminal fuera de esta sesión. Después, decidir si se actualiza o
+se borra `origin/feat/luxy-desktop` en el remoto, y si se cambia el branch
+por defecto de GitHub (si no lo estuviera ya en `main`). Ninguna de las dos
+cosas se ha hecho todavía.
+
+---
+
+## Checkpoint de continuidad — 2026-08-21 13:30 (histórico — branch aún `feat/luxy-desktop` en este momento)
 
 Paso cerrado: **LUXY-CONSOLIDATION-001 — consolidación de los ocho worktrees**
 

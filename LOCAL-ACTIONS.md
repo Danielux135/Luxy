@@ -1,32 +1,43 @@
 # Luxy — acciones locales de Daniel
 
-## LA-028 — completar el push de `feat/luxy-desktop` (LUXY-CONSOLIDATION-001)
+## LA-028 — completar el push de `main` (LUXY-CONSOLIDATION-001)
 
-Estado: `pending` — abierta el 2026-08-21. Autorizada explícitamente por
-Daniel (dos confirmaciones: aprobación en chat y confirmación directa de que
-no había prompt de permiso pendiente); bloqueada por el entorno, no por
-falta de autorización.
+Estado: `pending` — abierta el 2026-08-21, actualizada el mismo día tras
+renombrar la rama local. Autorizada explícitamente por Daniel (dos
+confirmaciones: aprobación en chat y confirmación directa de que no había
+prompt de permiso pendiente); bloqueada por el entorno, no por falta de
+autorización.
 
-`git push origin feat/luxy-desktop` fue denegado dos veces por el sistema de
-permisos de esta sesión, sin mostrar ningún prompt de aprobación — parece una
-restricción dura del entorno para operaciones de red de Git, no algo que se
-pueda resolver reintentando o confirmando de nuevo en el chat.
+`git push` fue denegado dos veces por el sistema de permisos de esta sesión,
+sin mostrar ningún prompt de aprobación — parece una restricción dura del
+entorno para operaciones de red de Git, no algo que se pueda resolver
+reintentando o confirmando de nuevo en el chat.
 
-Estado verificado antes de pedir el push: HEAD `5312d00`, working tree limpio
-salvo el ruido conocido y documentado de `.codebase-memory/` (ver
+**Cambio tras la primera apertura de esta acción:** Daniel pidió una rama
+canónica con un nombre claro. El checkout local `feat/luxy-desktop` se
+renombró a `main` (`git branch -m`): es un cambio puramente local y
+reversible. `origin/HEAD` en el remoto ya apunta a `origin/main`
+(`c6e5094`), que es **ancestro directo** del HEAD actual — no hay divergencia,
+así que empujar a `main` es un fast-forward limpio, no una reescritura de
+historia. `origin/feat/luxy-desktop` (`65ca161`) queda intacto en el remoto,
+sin actualizar; decidir qué hacer con esa rama remota (dejarla, o borrarla
+una vez confirmado el push a `main`) es una decisión aparte, no incluida
+aquí.
+
+Estado verificado antes de pedir el push: HEAD `02c2080`, working tree
+limpio salvo el ruido conocido y documentado de `.codebase-memory/` (ver
 `AI-WORK-PROTOCOL.md` §9), sin secretos tracked/staged, sin cambios de
-producto pendientes. 24 commits por delante de `origin/feat/luxy-desktop`,
-sin `--force`, sin tocar ninguna otra rama.
+producto pendientes. 32 commits por delante de `origin/main`, sin
+`--force`, sin tocar ninguna otra rama.
 
 ```powershell
 cd C:\Users\daniel\Desktop\Luxy
-git push origin feat/luxy-desktop
+git push origin main
 ```
 
-Resultado esperado: `origin/feat/luxy-desktop` avanza de `65ca161` a
-`5312d00` por fast-forward (no hay divergencia: es la misma rama, sólo con
-commits nuevos encima). Si git pide credenciales o hay algún rechazo del
-remoto, pega aquí la salida exacta.
+Resultado esperado: `origin/main` avanza de `c6e5094` a `02c2080` (o al HEAD
+que tengas en el momento de ejecutarlo) por fast-forward. Si git pide
+credenciales o hay algún rechazo del remoto, pega aquí la salida exacta.
 
 ## LA-026 — borrar el respaldo temporal de la memoria MCP (opcional)
 

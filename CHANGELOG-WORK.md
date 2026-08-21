@@ -1,5 +1,49 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-08-21 16:00 — Claude — renombra la rama canónica a `main`
+
+- Estado anterior: saneamiento final cerrado (`5312d00`), `LA-028` abierta
+  para el push de `feat/luxy-desktop`, bloqueado por el entorno. Daniel
+  preguntó la diferencia entre «Luxy» (el proyecto) y `feat/luxy-desktop`
+  (la rama) y pidió un nombre claro como `main`.
+- Objetivo: renombrar la rama local sin perder historia ni forzar nada,
+  comprobando primero que no hay conflicto con lo que ya existe en el
+  remoto.
+- Comandos ejecutados: `git branch -vv`, `git branch -r`,
+  `git merge-base --is-ancestor c6e5094 HEAD`, `git log --oneline origin/main`,
+  `git log --oneline master` — todo de lectura, antes de tocar nada.
+- Resultado real:
+  1. El remoto ya tiene `origin/main` (`c6e5094`) como rama por defecto
+     (`origin/HEAD -> origin/main`), y ese commit es **ancestro directo**
+     del HEAD actual — misma historia, sin divergencia.
+  2. También existe una rama local `master` (`64d0210`, «primera version
+     funcional de Luxy»), antigua y sin relación con esta consolidación; no
+     se ha tocado.
+  3. `git branch -m feat/luxy-desktop main` — cambio puramente local y
+     reversible, sin afectar al remoto.
+  4. `git branch --set-upstream-to=origin/main main` — el tracking pasa de
+     `origin/feat/luxy-desktop` a `origin/main`. `git status` ahora informa
+     «ahead 32» respecto a `origin/main` (antes «ahead 25» respecto a
+     `origin/feat/luxy-desktop`, porque `origin/main` está más atrás).
+- Archivos modificados: `LOCAL-ACTIONS.md` (`LA-028` actualizada: comando de
+  push corregido a `git push origin main`, explica el cambio de nombre y
+  que `origin/feat/luxy-desktop` queda intacta sin actualizar), `CURRENT-TASK.md`
+  (nuevo checkpoint al principio con el estado real; el checkpoint anterior
+  se conserva debajo, marcado como histórico, sin reescribirlo).
+- Pruebas: ninguna (cambio de metadato de git y documentación, sin tocar
+  código).
+- Decisiones: ninguna nueva formal; queda pendiente decidir qué hacer con
+  `origin/feat/luxy-desktop` (dejarla o borrarla) una vez confirmado el push
+  a `main`.
+- Riesgos o límites: el push a `origin/main` sigue bloqueado por el entorno
+  (ver `LA-028`); hasta que Daniel lo ejecute, el remoto sigue exactamente
+  como estaba. Ningún dato se ha perdido ni reescrito: el rename es
+  puramente local.
+- Estado nuevo: rama canónica local = `main`, HEAD `02c2080` (antes de este
+  commit de documentación).
+- Siguiente paso exacto: Daniel ejecuta `LA-028`
+  (`git push origin main`) desde fuera de esta sesión.
+
 ### 2026-08-21 15:00 — Claude — smoke test manual final de la copia canónica
 
 - Estado anterior: `LUXY-CONSOLIDATION-001` cerrada y commiteada (`90eff24`).
