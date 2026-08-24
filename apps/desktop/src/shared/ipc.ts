@@ -129,12 +129,21 @@ export const configSaveArgsSchema = z.object({
   config: z.unknown(),
 });
 
-/** nombres de secreto admitidos: evita que el renderer escriba claves sueltas */
+/**
+ * nombres de secreto admitidos: evita que el renderer escriba claves sueltas.
+ *
+ * el tercer patron son los `apiKeyEnv` de providers.http (config.json), que
+ * siguen la convencion de variable de entorno (p.ej. DEEPSEEK_API_KEY): son
+ * los mismos nombres que ya acepta la CLI via .env.providers.
+ */
 export const secretNameSchema = z
   .string()
   .min(1)
   .max(80)
-  .regex(/^(machineToken|connection:[a-z0-9][a-z0-9-]*)$/, 'nombre de secreto no admitido');
+  .regex(
+    /^(machineToken|connection:[a-z0-9][a-z0-9-]*|[A-Z][A-Z0-9_]{0,62})$/,
+    'nombre de secreto no admitido',
+  );
 
 export const secretSetArgsSchema = z.object({
   name: secretNameSchema,

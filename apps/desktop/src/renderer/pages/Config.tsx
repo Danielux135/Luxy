@@ -696,11 +696,19 @@ export function ConnectionsPage({
   onDeleteSecret: (name: string) => Promise<boolean>;
 }): JSX.Element {
   const connections = (summary.config?.connections ?? []) as ConnectionProfile[];
+  const httpProviders = summary.config?.providers.http ?? [];
   const [editing, setEditing] = useState<string | null>(null);
   const [value, setValue] = useState('');
 
   const guardar = async (id: string): Promise<void> => {
     if (await onSetSecret(connectionSecretName(id), value)) {
+      setEditing(null);
+      setValue('');
+    }
+  };
+
+  const guardarProveedor = async (apiKeyEnv: string): Promise<void> => {
+    if (await onSetSecret(apiKeyEnv, value)) {
       setEditing(null);
       setValue('');
     }
@@ -806,6 +814,108 @@ export function ConnectionsPage({
                       <button
                         className="btn btn--danger btn--quiet"
                         onClick={() => void onDeleteSecret(secretName)}
+                      >
+                        Borrar
+                      </button>
+                    )}
+                  </div>
+                )}
+              </Field>
+            </Panel>
+          );
+        })
+      )}
+
+      <div className="page__head">
+        <h1 className="page__title">Proveedores HTTP</h1>
+        <Tag>{httpProviders.length}</Tag>
+      </div>
+      <p className="page__lede">
+        Claves de proveedores http sueltos (config.json, providers.http). El endpoint y el modelo
+        se editan en config.json; aqui solo se guarda la clave, cifrada igual que las conexiones.
+      </p>
+
+      {httpProviders.length === 0 ? (
+        <Panel flush>
+          <Empty title="Ningun proveedor http">
+            Añade una entrada en providers.http de config.json para que aparezca aqui.
+          </Empty>
+        </Panel>
+      ) : (
+        httpProviders.map((provider) => {
+          const configured = summary.secrets.configured[provider.apiKeyEnv] === true;
+          return (
+            <Panel
+              key={provider.id}
+              title={provider.displayName}
+              actions={
+                <>
+                  <Tag tone={provider.enabled ? 'ok' : undefined}>
+                    {provider.enabled ? 'activo' : 'desactivado'}
+                  </Tag>
+                  <Tag tone={configured ? 'ok' : 'warn'}>
+                    {configured ? 'clave configurada' : 'sin clave'}
+                  </Tag>
+                </>
+              }
+            >
+              <Field label="Base URL">
+                <input type="text" value={provider.baseUrl} readOnly />
+              </Field>
+              <Field label="Modelo">
+                <input type="text" value={provider.model} readOnly />
+              </Field>
+
+              <Field
+                label={`Clave de API (${provider.apiKeyEnv})`}
+                hint={
+                  configured
+                    ? 'Hay una clave guardada. Introduce una nueva para sustituirla.'
+                    : 'La clave se cifra al guardarla y no se muestra nunca.'
+                }
+              >
+                {editing === provider.apiKeyEnv ? (
+                  <div className="row">
+                    <input
+                      type="password"
+                      value={value}
+                      onChange={(event) => setValue(event.target.value)}
+                      placeholder="Pega la clave"
+                      autoFocus
+                      style={{ flex: 1 }}
+                    />
+                    <button
+                      className="btn btn--primary"
+                      onClick={() => void guardarProveedor(provider.apiKeyEnv)}
+                    >
+                      Guardar
+                    </button>
+                    <button className="btn btn--quiet" onClick={() => setEditing(null)}>
+                      Cancelar
+                    </button>
+                  </div>
+                ) : (
+                  <div className="row">
+                    <input
+                      type="password"
+                      value={configured ? '••••••••••••' : ''}
+                      readOnly
+                      style={{ flex: 1 }}
+                    />
+                    <button
+                      className="btn"
+                      onClick={() => {
+                        setEditing(provider.apiKeyEnv);
+                        setValue('');
+                      }}
+                      disabled={!summary.secrets.encryptionAvailable}
+                    >
+                      {configured ? 'Sustituir' : 'Añadir'}
+                    </button>
+                    {configured && (
+                      <button
+                        className="btn btn--danger btn--quiet"
+                        onClick={() => void onDeleteSecret(provider.apiKeyEnv)}
                       >
                         Borrar
                       </button>
