@@ -545,3 +545,24 @@ por decisión explícita de Daniel: añadía superficie nueva (canal IPC, handle
 `main`, schema en `preload`) para un problema que el patrón React ya resolvía
 sin tocar el proceso principal. Studio.tsx se corrigió con este mismo patrón el
 2026-08-21, portando el que ya usaba Laboratory.tsx.
+
+## D-038 — los proveedores HTTP dinámicos son configuración, no código
+
+Fecha: 2026-08-27
+
+Estado: aceptada, implementada
+
+Un endpoint que hable el contrato `chat completions` se administra desde
+Conexiones de Studio y se persiste en `providers.http`; su identificador no
+necesita entrar en un enum compilado. Un protocolo propietario distinto sigue
+requiriendo una implementación explícita de `ProviderExecution`.
+
+La clave se guarda únicamente en `SecretStore`, ligada a un proveedor de la
+configuración validada, y nunca vuelve al renderer ni entra en `config.json`.
+Cambiar el endpoint o eliminar el proveedor invalida la clave anterior. Las URLs
+remotas exigen HTTPS, HTTP sólo se admite en loopback y D-003 continúa bloqueando
+las APIs de Anthropic y OpenAI.
+
+Guardar aplica la configuración al agente inmediatamente si está libre. Si hay
+un trabajo activo, la recarga espera a que termine para no interrumpir ni repetir
+una respuesta parcial.

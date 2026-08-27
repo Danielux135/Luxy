@@ -25,7 +25,8 @@ const bridge: LuxyBridge = {
   pickFolder: (title?: string) => ipcRenderer.invoke(IPC_INVOKE.pickFolder, { title }),
 
   getConfig: () => ipcRenderer.invoke(IPC_INVOKE.configGet),
-  saveConfig: (config: unknown) => ipcRenderer.invoke(IPC_INVOKE.configSave, { config }),
+  saveConfig: (config: unknown, providerSecret?: { name: string; value: string }) =>
+    ipcRenderer.invoke(IPC_INVOKE.configSave, { config, providerSecret }),
   setSecret: (name: string, value: string) =>
     ipcRenderer.invoke(IPC_INVOKE.secretSet, { name, value }),
   deleteSecret: (name: string) => ipcRenderer.invoke(IPC_INVOKE.secretDelete, { name }),

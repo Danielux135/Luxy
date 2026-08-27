@@ -48,7 +48,32 @@ export function secretsToInvalidateForConfigChange(
       invalidated.push(connectionSecretName(connection.id));
     }
   }
-  return invalidated;
+
+  const nextHttpById = new Map(next.providers.http.map((provider) => [provider.id, provider]));
+  for (const provider of previous.providers.http) {
+    const replacement = nextHttpById.get(provider.id);
+    if (
+      replacement === undefined ||
+      replacement.apiKeyEnv !== provider.apiKeyEnv ||
+      canonicalEndpoint(replacement.baseUrl) !== canonicalEndpoint(provider.baseUrl)
+    ) {
+      invalidated.push(provider.apiKeyEnv);
+    }
+  }
+  return [...new Set(invalidated)];
+}
+
+/** el renderer solo puede tocar secretos vinculados a la configuracion actual */
+export function isSecretNameAllowedForConfig(
+  name: string,
+  config: StoredAgentConfig | null,
+): boolean {
+  if (name === MACHINE_TOKEN_SECRET) return true;
+  if (config === null) return false;
+  if (config.connections.some((connection) => connectionSecretName(connection.id) === name)) {
+    return true;
+  }
+  return config.providers.http.some((provider) => provider.apiKeyEnv === name);
 }
 
 export class ConfigStoreError extends Error {

@@ -12,7 +12,7 @@ import {
   renderJobCreated,
   renderError,
   formatDuration,
-  PROVIDER_LABELS,
+  providerLabel,
   STATUS_LABELS,
   splitAsCodeBlocks,
   machineSupportsProvider,
@@ -288,7 +288,7 @@ async function renderStatus(context: CommandContext): Promise<string> {
     for (const job of jobs) {
       const machine = machines.find((item) => item.id === job.claimedBy);
       lines.push(
-        `${job.shortId} - ${PROVIDER_LABELS[job.provider]} en ${job.projectAlias}` +
+        `${job.shortId} - ${providerLabel(job.provider)} en ${job.projectAlias}` +
           ` - ${STATUS_LABELS[job.status]}${machine ? ` (${machine.name})` : ''}`,
       );
     }
@@ -327,7 +327,7 @@ async function renderProviders(context: CommandContext): Promise<string> {
       (provider) => machineSupportsProvider(machine, provider),
     );
     lines.push(
-      `${machine.name}: ${available.map((id) => PROVIDER_LABELS[id]).join(', ') || 'ninguno'}`,
+      `${machine.name}: ${available.map(providerLabel).join(', ') || 'ninguno'}`,
     );
   }
   lines.push('', 'Claude y Codex usan la sesion local de cada ordenador.');
@@ -570,8 +570,8 @@ async function createJobFromRequest(
     substitution === null
       ? ''
       : [
-          `Pediste ${PROVIDER_LABELS[substitution.requested]}, pero ninguna maquina conectada lo ofrece.`,
-          `Luxy usara ${PROVIDER_LABELS[substitution.chosen]} en su lugar.`,
+          `Pediste ${providerLabel(substitution.requested)}, pero ninguna maquina conectada lo ofrece.`,
+          `Luxy usara ${providerLabel(substitution.chosen)} en su lugar.`,
           'Si esa maquina tiene la conexion configurada, comprueba que su agente este arrancado:',
           'las capacidades se anuncian en cada latido.',
           '',
@@ -702,7 +702,7 @@ async function handleJobDetail(
     `Estado: ${STATUS_LABELS[job.status]}`,
     `Maquina: ${machine?.name ?? 'sin asignar'}`,
     `Proyecto: ${job.projectAlias}`,
-    `Agente: ${PROVIDER_LABELS[job.provider]}`,
+    `Agente: ${providerLabel(job.provider)}`,
     `Creado: ${job.createdAt}`,
   ];
   if (job.metadata.branch) lines.push(`Rama: ${job.metadata.branch}`);

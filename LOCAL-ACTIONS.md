@@ -1,5 +1,23 @@
 # Luxy — acciones locales de Daniel
 
+## LA-029 — publicar y validar proveedores HTTP dinámicos
+
+Estado: `pending` — abierta el 2026-08-27. El commit local ya fue autorizado y
+creado; falta integrarlo antes de publicar.
+
+1. Integrar la rama `luxy/f4-9-dynamic-http-providers` en `main`.
+2. Autorizar y ejecutar la publicación del Gateway, porque cambia el contrato de
+   proveedores que Studio recibe.
+3. Reconstruir y arrancar Desktop/agente desde la línea integrada.
+4. En **Conexiones**, añadir una API compatible con `chat completions`, guardar
+   su clave, confirmar que aparece en Trabajos y Conversaciones y ejecutar una
+   petición manual sólo si se acepta su posible coste.
+5. Editar el endpoint y comprobar que Luxy exige introducir de nuevo la clave;
+   eliminar el proveedor y confirmar que desaparece de los selectores.
+
+No hace falta migración de base de datos. La implementación automatizada no
+llamó a ninguna API real.
+
 ## LA-028 — completar el push de `main` (LUXY-CONSOLIDATION-001)
 
 Estado: `pending` — abierta el 2026-08-21, actualizada el mismo día tras

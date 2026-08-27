@@ -4,6 +4,7 @@
 // llamadas salen del proceso principal de Electron.
 import {
   PROVIDER_IDS,
+  configurableProviderIdSchema,
   MODEL_EVALUATIONS,
   buildModelEvaluationPrompt,
   isMachineOnline,
@@ -40,7 +41,16 @@ function toStudioJob(job: Job): StudioJob {
 }
 
 function providersOf(machine: Machine): ProviderId[] {
-  return PROVIDER_IDS.filter((provider) => machineSupportsProvider(machine, provider));
+  const configured = machine.capabilities.httpProviders.flatMap((provider) => {
+    const parsed = configurableProviderIdSchema.safeParse(provider);
+    return parsed.success ? [parsed.data] : [];
+  });
+  return [
+    ...new Set([
+      ...PROVIDER_IDS.filter((provider) => machineSupportsProvider(machine, provider)),
+      ...configured,
+    ]),
+  ];
 }
 
 function evaluationContractError(body: StudioJobCreateRequest): string | null {

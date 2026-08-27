@@ -1,5 +1,62 @@
 # Luxy — tarea activa
 
+## F4.9-DYNAMIC-HTTP-PROVIDERS — proveedores HTTP configurables desde Studio
+
+Estado: **`done` — Codex, 2026-08-27**
+
+Objetivo cerrado: permitir añadir, editar, activar, desactivar y eliminar desde
+Studio un proveedor HTTP compatible con `chat completions`, guardar su clave
+cifrada y hacer que el agente lo use tras aplicar la configuración, sin editar
+`config.json` a mano.
+
+Resultado verificado:
+
+- formulario completo en Conexiones y disponibilidad dinámica en Trabajos y
+  Conversaciones;
+- validación Zod de identificador, URL, modelo, límites y duplicados;
+- clave ligada a la configuración y guardada en `SecretStore`, con invalidación
+  al eliminar el proveedor o cambiar su endpoint;
+- recarga inmediata si el agente está libre y diferida si ejecuta un trabajo;
+- `npm run check`: lint, tipos y builds correctos; 96 archivos, 1.656 pruebas
+  superadas y 9 omitidas;
+- commit local autorizado y creado; ninguna API real, push, deploy ni migración
+  ejecutados.
+
+Estado real de partida:
+
+- rama aislada `luxy/f4-9-dynamic-http-providers`, basada en `main` @ `2ae1291`;
+- `main` y `origin/main` ya coinciden en `2ae1291`; `LA-028` quedó superada por
+  el estado real aunque la documentación anterior todavía la presenta pendiente;
+- el commit `2ae1291` permite guardar claves de entradas ya existentes en
+  `providers.http`, pero no crear ni editar esas entradas desde Studio;
+- `LuxyAgent.initializeProviders` ya construye `HttpApiProvider` desde la
+  configuración y el flujo IPC ya puede reiniciar el agente;
+- Codebase Memory está operativo sobre `main` @ `2ae1291`. La cobertura de los
+  archivos candidatos no registra huecos, pero marca metadata cambiada; por eso
+  se contrasta el grafo con el código fuente del worktree antes de editar.
+
+Criterios de aceptación:
+
+1. Studio administra el proveedor completo: identificador, nombre, URL base,
+   modelo, clave, estado, streaming y límites seguros.
+2. Toda entrada se valida con Zod; no se aceptan URLs inseguras ni nombres de
+   secreto arbitrarios que no correspondan a la configuración guardada.
+3. Las claves permanecen fuera de `config.json`, cifradas por `SecretStore`.
+4. Guardar reinicia o actualiza el agente para que el proveedor aparezca en los
+   selectores sin reiniciar Luxy manualmente.
+5. Eliminar o cambiar el identificador de clave borra el secreto huérfano.
+6. No se llama a ninguna API real; lint, typecheck, suite y build quedan verdes.
+
+Archivos previstos: esquemas shared; store/IPC/configuración y renderer de
+Desktop; pruebas de contratos, almacenamiento, IPC/UI y runtime; documentación
+de continuidad. Sin commit, push, deploy ni migraciones.
+
+Siguiente paso exacto: integrar el commit local en `main` y ejecutar `LA-029`
+para publicar el Gateway, reconstruir Desktop/agente y validar desde Studio una
+API elegida por Daniel.
+
+---
+
 ## Checkpoint de continuidad — 2026-08-21 (rama renombrada a `main`)
 
 `LUXY-CONSOLIDATION-001` está cerrada (`done`). Después de cerrarla, Daniel

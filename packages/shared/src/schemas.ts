@@ -18,9 +18,15 @@ import {
 } from './constants.js';
 import { connectionProfileSchema } from './models/types.js';
 import { modelEvaluationExecutionSchema } from './models/evaluations.js';
+import type { ProviderId } from './types.js';
 
 export const jobStatusSchema = z.enum(JOB_STATUSES);
 export const providerIdSchema = z.enum(PROVIDER_IDS);
+/** identificador externo validado con la misma forma que exige postgres */
+export const configurableProviderIdSchema = z
+  .string()
+  .regex(/^[a-z][a-z0-9_-]{0,31}$/, 'identificador de proveedor no valido')
+  .transform((value) => value as ProviderId);
 export const jobEventTypeSchema = z.enum(JOB_EVENT_TYPES);
 export const approvalActionSchema = z.enum(APPROVAL_ACTIONS);
 export const jobOriginSchema = z.enum(JOB_ORIGINS);
@@ -74,7 +80,7 @@ export const machineCapabilitiesSchema = z.object({
   claude: toolPresenceSchema,
   codex: toolPresenceSchema,
   flutter: toolPresenceSchema,
-  httpProviders: z.array(z.string().max(32)).max(64),
+  httpProviders: z.array(configurableProviderIdSchema).max(64),
 });
 
 // -----------------------------------------------------------------------------
@@ -115,7 +121,7 @@ export const claimRequestSchema = z.object({
   // proveedores que esta maquina puede ejecutar ahora mismo
   // el tope de 16 se quedaba corto con un catalogo de modelos configurable:
   // una maquina puede anunciar muchas familias a la vez
-  supportedProviders: z.array(providerIdSchema).max(64),
+  supportedProviders: z.array(configurableProviderIdSchema).max(64),
   // alias de proyecto configurados en esta maquina
   projects: z.array(projectAliasSchema).max(64),
   leaseSeconds: z.number().int().min(30).max(3600).optional(),
@@ -124,7 +130,7 @@ export const claimRequestSchema = z.object({
 export const claimedJobSchema = z.object({
   id: z.string().uuid(),
   shortId: z.string(),
-  provider: providerIdSchema,
+  provider: configurableProviderIdSchema,
   model: z.string().max(128).nullable().default(null),
   projectAlias: projectAliasSchema,
   prompt: z.string(),
@@ -584,7 +590,7 @@ export const approvalCompleteRequestSchema = z.object({
 export const studioJobCreateRequestSchema = z
   .object({
     targetMachineId: z.string().uuid(),
-    provider: providerIdSchema,
+    provider: configurableProviderIdSchema,
     model: z
       .string()
       .min(1)
@@ -720,7 +726,7 @@ export const studioJobSchema = z.object({
   // los trabajos ya persistidos pueden proceder de una conexion que Studio ya
   // no tiene en su catalogo. Al leerlos se conserva un identificador seguro,
   // sin convertir el historial en un enum cerrado de proveedores actuales.
-  provider: z.string().regex(/^[a-z][a-z0-9_-]{0,63}$/),
+  provider: configurableProviderIdSchema,
   model: z.string().max(128).nullable(),
   projectAlias: projectAliasSchema,
   prompt: promptSchema,
@@ -747,7 +753,7 @@ export const studioMachineSchema = z.object({
   id: z.string().uuid(),
   name: machineNameSchema,
   projects: z.array(projectAliasSchema),
-  providers: z.array(providerIdSchema),
+  providers: z.array(configurableProviderIdSchema),
   online: z.boolean(),
   enabled: z.boolean(),
 });
@@ -855,16 +861,68 @@ export const projectConfigSchema = z.object({
   allowPush: z.boolean().default(false),
 });
 
+const httpProviderBaseUrlSchema = z
+  .string()
+  .max(300)
+  .url()
+  .superRefine((value, context) => {
+    let url: URL;
+    try {
+      url = new URL(value);
+    } catch {
+      // `.url()` ya añade el error legible; aqui solo se evitan excepciones.
+      return;
+    }
+    const loopback = ['localhost', '127.0.0.1', '::1'].includes(url.hostname);
+    if (url.protocol !== 'https:' && !(loopback && url.protocol === 'http:')) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'usa HTTPS; HTTP solo se admite en localhost',
+      });
+    }
+    if (
+      url.username.length > 0 ||
+      url.password.length > 0 ||
+      url.search.length > 0 ||
+      url.hash.length > 0
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'la URL base no admite credenciales, consulta ni fragmento',
+      });
+    }
+    const hostname = url.hostname.toLowerCase();
+    if (hostname === 'api.openai.com' || hostname.endsWith('.anthropic.com')) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'ese proveedor esta prohibido por la politica de Luxy',
+      });
+    }
+  });
+
 export const httpProviderConfigSchema = z.object({
-  id: z.string().min(1).max(32),
-  displayName: z.string().min(1).max(64),
-  baseUrl: z.string().url(),
-  model: z.string().min(1).max(128),
-  apiKeyEnv: z.string().min(1).max(64),
+  id: configurableProviderIdSchema,
+  displayName: z.string().trim().min(1).max(64),
+  baseUrl: httpProviderBaseUrlSchema,
+  model: z
+    .string()
+    .min(1)
+    .max(128)
+    .regex(/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/, 'modelo no valido'),
+  apiKeyEnv: z
+    .string()
+    .min(1)
+    .max(80)
+    // `connection:<id>` conserva las conexiones HTTP adaptadas que ya
+    // existian; las altas nuevas de Studio usan la convencion en mayusculas.
+    .regex(
+      /^(connection:[a-z0-9][a-z0-9-]*|[A-Z][A-Z0-9_]{0,62})$/,
+      'nombre interno de clave no valido',
+    ),
   enabled: z.boolean().default(false),
   supportsStreaming: z.boolean().default(true),
   maxOutputTokens: z.number().int().min(256).max(200_000).default(8192),
-  dailyBudget: z.number().min(0).default(0),
+  dailyBudget: z.number().min(0).max(1_000_000).default(0),
   /**
    * silencio que hay que ver tras una señal DEBIL antes de cerrar el flujo.
    *
@@ -875,6 +933,25 @@ export const httpProviderConfigSchema = z.object({
    */
   softTerminalGraceMs: z.number().int().min(1).max(120_000).default(SOFT_TERMINAL_GRACE_MS),
 });
+
+const httpProviderListSchema = z
+  .array(httpProviderConfigSchema)
+  .max(32)
+  .superRefine((providers, context) => {
+    for (const field of ['id', 'apiKeyEnv'] as const) {
+      const seen = new Set<string>();
+      providers.forEach((provider, index) => {
+        if (seen.has(provider[field])) {
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: [index, field],
+            message: `${field} debe ser unico`,
+          });
+        }
+        seen.add(provider[field]);
+      });
+    }
+  });
 
 export const agentConfigSchema = z.object({
   machineName: machineNameSchema,
@@ -905,7 +982,7 @@ export const agentConfigSchema = z.object({
           model: z.string().max(64).optional(),
         })
         .default({ enabled: true }),
-      http: z.array(httpProviderConfigSchema).default([]),
+      http: httpProviderListSchema.default([]),
     })
     .default({ claude: { enabled: true, model: 'opus' }, codex: { enabled: true }, http: [] }),
   ui: z

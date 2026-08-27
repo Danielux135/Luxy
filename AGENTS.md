@@ -88,6 +88,9 @@ lo pida explícitamente.
 - Prohibida la API de Anthropic.
 - Prohibida la API de OpenAI.
 - Prohibidas `ANTHROPIC_API_KEY` y `OPENAI_API_KEY`.
+- Los proveedores HTTP configurables desde Studio deben hablar el contrato
+  `chat completions`. Sus claves viven cifradas en `SecretStore`, nunca en
+  `config.json`; las URLs remotas exigen HTTPS y HTTP sólo se admite en loopback.
 - El catálogo real de una conexión consulta sólo `/v1/models`; no sondea rutas
   tentativas de precios (`D-022`).
 - Prohibida cualquier automatización de navegador (Selenium, Playwright) y de

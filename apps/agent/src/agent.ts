@@ -69,6 +69,8 @@ export interface LuxyAgentOptions {
   worktreesDirectory?: string;
   /** receptor de eventos en el proceso local; nunca debe lanzar */
   onEvent?: AgentEventSink;
+  /** avisa cuando el trabajo actual ya libero por completo el agente */
+  onIdle?: () => void;
 }
 
 /**
@@ -84,6 +86,7 @@ export class LuxyAgent {
 
   private readonly worktreesDirectory: string;
   private readonly emitEvent: AgentEventSink;
+  private readonly notifyIdle: () => void;
 
   private running = false;
   private stopping = false;
@@ -137,6 +140,7 @@ export class LuxyAgent {
     });
     this.worktreesDirectory = options.worktreesDirectory ?? worktreesDir();
     this.emitEvent = options.onEvent ?? ((): void => undefined);
+    this.notifyIdle = options.onIdle ?? ((): void => undefined);
     mkdirSync(this.worktreesDirectory, { recursive: true });
   }
 
@@ -714,6 +718,11 @@ export class LuxyAgent {
       this.activeJob = null;
       this.activeJobStartedAt = null;
       this.activeAbort = null;
+      try {
+        this.notifyIdle();
+      } catch {
+        /* una notificacion local rota no altera el resultado del trabajo */
+      }
     }
   }
 

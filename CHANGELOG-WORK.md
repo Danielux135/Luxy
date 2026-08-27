@@ -1,5 +1,67 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-08-27 10:49 — Codex — F4.9-DYNAMIC-HTTP-PROVIDERS, cierre
+
+- Estado anterior: el runtime aceptaba entradas escritas a mano en
+  `providers.http`, pero Studio no podía crearlas ni editarlas y los contratos
+  de proveedor seguían cerrados en varias rutas.
+- Cambio: proveedor HTTP dinámico validado de extremo a extremo; formulario de
+  alta/edición/borrado; clave cifrada y ligada a su configuración; invalidación
+  al cambiar endpoint; selectores dinámicos en Gateway, Trabajos y
+  Conversaciones; recarga inmediata o diferida del agente.
+- Archivos modificados: contratos y formato en `packages/shared`; host y agente
+  en `apps/agent`; Studio, IPC, configuración y secretos en `apps/desktop`;
+  handlers y pruebas de Studio en `apps/gateway`; documentación obligatoria y
+  `docs/PROVIDERS.md`.
+- Comandos ejecutados: consultas y cobertura de Codebase Memory; instalación
+  local con `npm install --ignore-scripts`; typecheck forzado; pruebas dirigidas;
+  `npm run lint`; `npm run format:check`; dos ejecuciones de `npm run check`.
+- Resultado real: la primera suite completa detectó una incompatibilidad con el
+  nombre histórico `connection:<id>` y se corrigió sin relajar la autorización
+  por pertenencia. La ejecución final de `npm run check` terminó con exit 0:
+  lint y tipos correctos, 96 archivos, 1.656 pruebas superadas, 9 omitidas y
+  builds de todos los workspaces correctos.
+- Límite conocido: `format:check` global falla en 333 archivos preexistentes y
+  no se usó para reformatear el repositorio; `git diff --check` sí queda como
+  comprobación acotada. No se automatizó la interfaz por política del proyecto.
+- Decisión: D-038. El contrato dinámico cubre `chat completions`; un protocolo
+  propietario diferente no se declara compatible por inferencia.
+- Commit: Daniel lo autorizó explícitamente; creado localmente con el mensaje
+  `feat: añade proveedores HTTP configurables` en la rama aislada.
+- Operaciones no realizadas: ninguna API real, push, deploy ni migración. `npm
+  install` volvió a informar las 12 vulnerabilidades ya abiertas en `LA-027`;
+  no se aplicó `audit fix`.
+- Estado nuevo: F4.9 implementada y verificada localmente.
+- Siguiente paso exacto: integrar el commit local y ejecutar `LA-029`.
+
+### 2026-08-26 11:40 — Codex — F4.9-DYNAMIC-HTTP-PROVIDERS, inicio
+
+- Estado anterior: consolidación cerrada y publicada; `main`/`origin/main` en
+  `2ae1291`. El último commit sólo permitía cifrar la clave de proveedores HTTP
+  previamente escritos en `config.json`.
+- Objetivo: administrar proveedores HTTP compatibles desde Studio y usarlos sin
+  editar archivos a mano.
+- Hipótesis o causa demostrada: el runtime ya consume `providers.http`; el hueco
+  es de edición, validación y recarga en Desktop.
+- Archivos leídos: documentación obligatoria; esquemas shared; configuración,
+  proveedor y host del agente; store, IPC, controlador y Configuración de Desktop.
+- Archivos modificados: `CURRENT-TASK.md`, `CHANGELOG-WORK.md`.
+- Comandos ejecutados: comprobación de Git/worktrees; Codebase Memory
+  `list_projects`, `index_status`, búsquedas, snippets, trazas y cobertura.
+- Resultado real: worktree aislado
+  `luxy/f4-9-dynamic-http-providers`; grafo `ready` sobre `2ae1291`; flujo
+  existente acotado desde `ConfigStore.save` hasta
+  `LuxyAgent.initializeProviders`.
+- Pruebas: el HEAD de partida pasó `npm run check` el 2026-08-26 antes de crear
+  la rama: 94 archivos, 1.641 pasadas, 9 omitidas, 0 fallos; lint, tipos y build
+  correctos.
+- Decisiones: ninguna API real; claves sólo en `SecretStore`; sin commit, push,
+  deploy ni migraciones.
+- Riesgos o límites: la metadata de cobertura del grafo está cambiada respecto
+  a su generación; se leerá el fuente exacto antes de cada edición.
+- Estado nuevo: `F4.9-DYNAMIC-HTTP-PROVIDERS` en progreso.
+- Siguiente paso exacto: definir contratos y persistencia segura del proveedor.
+
 ### 2026-08-21 16:00 — Claude — renombra la rama canónica a `main`
 
 - Estado anterior: saneamiento final cerrado (`5312d00`), `LA-028` abierta

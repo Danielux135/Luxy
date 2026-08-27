@@ -56,7 +56,7 @@ async function fakeDb(): Promise<unknown> {
   };
 }
 
-function machine(id = TARGET_ID) {
+function machine(id = TARGET_ID, httpProviders: string[] = ['deepseek']) {
   return {
     id,
     name: id === CREATOR_ID ? 'pc-casa' : 'portatil',
@@ -64,7 +64,7 @@ function machine(id = TARGET_ID) {
     platform: 'win32',
     platformVersion: '11',
     agentVersion: '0.1.0',
-    capabilities: capabilities(),
+    capabilities: capabilities(httpProviders),
     projects: ['luxy'],
     lastSeenAt: new Date().toISOString(),
     enabled: true,
@@ -104,8 +104,12 @@ function completedJob(overrides: Record<string, unknown> = {}) {
   };
 }
 
-async function deps(jobOverrides: Record<string, unknown> = {}, targetId = TARGET_ID) {
-  const target = machine(targetId);
+async function deps(
+  jobOverrides: Record<string, unknown> = {},
+  targetId = TARGET_ID,
+  targetProviders: string[] = ['deepseek'],
+) {
+  const target = machine(targetId, targetProviders);
   let currentJob = completedJob(jobOverrides);
   const repo = {
     getMachineById: vi.fn(async () => target),
@@ -737,8 +741,27 @@ describe('Luxy Studio API', () => {
     expect(context.repo.createJob).not.toHaveBeenCalled();
   });
 
+  it('crea un trabajo con un proveedor dinamico anunciado por la maquina', async () => {
+    const context = await deps({}, TARGET_ID, ['mi-api-privada']);
+    const response = await handleStudioJobCreate(
+      request({
+        targetMachineId: TARGET_ID,
+        provider: 'mi-api-privada',
+        model: null,
+        projectAlias: 'luxy',
+        prompt: 'haz algo',
+        priority: 0,
+      }),
+      context,
+    );
+    const body = (await response.json()) as { job: { provider: string } };
+
+    expect(response.status).toBe(201);
+    expect(body.job.provider).toBe('mi-api-privada');
+  });
+
   it('publica solo las capacidades que cada maquina ofrece', async () => {
-    const context = await deps();
+    const context = await deps({}, TARGET_ID, ['deepseek', 'mi-api-privada']);
     const response = await handleStudioOptions(
       new Request('https://gateway.test/api/studio/options', {
         headers: { authorization: `Bearer ${TOKEN}` },
@@ -748,6 +771,7 @@ describe('Luxy Studio API', () => {
     const body = (await response.json()) as { machines: Array<{ providers: string[] }> };
     expect(response.status).toBe(200);
     expect(body.machines[0]?.providers).toEqual(['deepseek']);
+    expect(body.machines[1]?.providers).toEqual(['deepseek', 'mi-api-privada']);
   });
 
   it('cancela una conversacion de inmediato aunque el agente siga esperando al proveedor', async () => {

@@ -124,11 +124,6 @@ export const configSummarySchema = z.object({
   secrets: secretsSummarySchema,
 });
 
-export const configSaveArgsSchema = z.object({
-  /** se valida con storedAgentConfigSchema en el proceso principal */
-  config: z.unknown(),
-});
-
 /**
  * nombres de secreto admitidos: evita que el renderer escriba claves sueltas.
  *
@@ -144,6 +139,18 @@ export const secretNameSchema = z
     /^(machineToken|connection:[a-z0-9][a-z0-9-]*|[A-Z][A-Z0-9_]{0,62})$/,
     'nombre de secreto no admitido',
   );
+
+export const configSaveArgsSchema = z.object({
+  /** se valida con storedAgentConfigSchema en el proceso principal */
+  config: z.unknown(),
+  /** alta o sustitucion atomica de la clave de un proveedor http */
+  providerSecret: z
+    .object({
+      name: secretNameSchema,
+      value: z.string().min(1).max(512),
+    })
+    .optional(),
+});
 
 export const secretSetArgsSchema = z.object({
   name: secretNameSchema,
@@ -339,7 +346,10 @@ export interface LuxyBridge {
   openWorktreeFolder(worktreePath: string): Promise<IpcResult<{ opened: boolean }>>;
   pickFolder(title?: string): Promise<IpcResult<{ canceled: boolean; path: string | null }>>;
   getConfig(): Promise<IpcResult<z.infer<typeof configSummarySchema>>>;
-  saveConfig(config: unknown): Promise<IpcResult<z.infer<typeof configSummarySchema>>>;
+  saveConfig(
+    config: unknown,
+    providerSecret?: { name: string; value: string },
+  ): Promise<IpcResult<z.infer<typeof configSummarySchema>>>;
   setSecret(name: string, value: string): Promise<IpcResult<z.infer<typeof secretsSummarySchema>>>;
   deleteSecret(name: string): Promise<IpcResult<z.infer<typeof secretsSummarySchema>>>;
   scanForSecrets(): Promise<IpcResult<z.infer<typeof migrationScanResultSchema>>>;

@@ -2,7 +2,7 @@
 // todo lo que entra por aqui es dato NO CONFIABLE: solo se extraen campos, nunca
 // se interpretan instrucciones que cambien las politicas de luxy.
 import { MAX_PROMPT_LENGTH, PROVIDER_IDS } from '../constants.js';
-import type { ProviderId } from '../types.js';
+import type { KnownProviderId, ProviderId } from '../types.js';
 import type { JobAttachment } from '../schemas.js';
 import { MODEL_TASK_COMMANDS, resolveModelAlias } from '../models/aliases.js';
 
@@ -192,7 +192,7 @@ export interface MentionExtraction {
 }
 
 // nombres con los que el usuario puede referirse a cada proveedor en lenguaje natural
-const PROVIDER_ALIASES: Record<ProviderId, string[]> = {
+const PROVIDER_ALIASES: Record<KnownProviderId, string[]> = {
   claude: ['claude', 'opus', 'sonnet'],
   codex: ['codex', 'chatgpt', 'gpt'],
   deepseek: ['deepseek', 'deep seek'],

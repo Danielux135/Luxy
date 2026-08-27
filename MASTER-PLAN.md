@@ -186,6 +186,11 @@ Estado global: `in_progress`
 - F4.7: nunca ejecutar benchmarks de pago sin una acción explícita. Cumplido en
   la primera ejecución: casilla y diálogo final; Luxy no consulta ni afirma
   conocer el precio.
+- F4.9: proveedores HTTP dinámicos administrados desde Studio. **`done`
+  (2026-08-27)**: alta, edición, activación, desactivación y borrado de endpoints
+  compatibles con `chat completions`; clave cifrada, validación segura, selectores
+  dinámicos y recarga del agente sin cortar el trabajo activo. Verificado con
+  `npm run check`; publicación y prueba manual pendientes en `LA-029`.
 
 Corrección de validación manual: el formulario de ejecución consume
 `EXECUTABLE_MODEL_EVALUATIONS` y ya no mezcla runners pendientes con las cuatro

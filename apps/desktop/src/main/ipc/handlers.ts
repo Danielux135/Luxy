@@ -47,7 +47,11 @@ import {
   type IpcResult,
 } from '../../shared/ipc.js';
 import type { AgentController } from '../agent-controller.js';
-import { secretsToInvalidateForConfigChange, type ConfigStore } from '../config-store.js';
+import {
+  isSecretNameAllowedForConfig,
+  secretsToInvalidateForConfigChange,
+  type ConfigStore,
+} from '../config-store.js';
 import type { SecretStore } from '../secure-storage.js';
 import { MACHINE_TOKEN_SECRET, connectionSecretName } from '../../shared/ipc.js';
 import { deleteMigratedFile, inspectEnvFile, readEnvSecrets } from '../migration.js';
@@ -258,7 +262,16 @@ export function registerIpcHandlers(context: HandlerContext): void {
       throw new Error(`la configuracion no es valida (${detalle})`);
     }
 
-    // Una clave queda ligada al endpoint que estaba guardado cuando se
+    if (
+      args.providerSecret !== undefined &&
+      !parsed.data.providers.http.some(
+        (provider) => provider.apiKeyEnv === args.providerSecret?.name,
+      )
+    ) {
+      throw new Error('la clave no pertenece a ningun proveedor HTTP configurado');
+    }
+
+    // una clave queda ligada al endpoint que estaba guardado cuando se
     // introdujo. Si el renderer cambia el servidor conservando el mismo id, se
     // elimina ANTES de guardar la configuracion nueva para impedir exfiltrarla.
     const previous = context.configStore.load();
@@ -271,6 +284,10 @@ export function registerIpcHandlers(context: HandlerContext): void {
     // NO al archivo: ConfigStore.save lo elimina de todas formas
     if (parsed.data.machineToken !== undefined) {
       context.secretStore.set(MACHINE_TOKEN_SECRET, parsed.data.machineToken);
+    }
+    if (args.providerSecret !== undefined) {
+      context.secretStore.set(args.providerSecret.name, args.providerSecret.value);
+      context.log('clave de proveedor HTTP guardada', { name: args.providerSecret.name });
     }
 
     context.configStore.save(parsed.data);
@@ -285,6 +302,9 @@ export function registerIpcHandlers(context: HandlerContext): void {
   });
 
   handle(IPC_INVOKE.secretSet, secretSetArgsSchema, async (args) => {
+    if (!isSecretNameAllowedForConfig(args.name, context.configStore.load())) {
+      throw new Error('el secreto no pertenece a la configuracion actual');
+    }
     context.secretStore.set(args.name, args.value);
     // no se registra el nombre con su valor en ningun log
     context.log('secreto guardado', { name: args.name });
@@ -293,6 +313,9 @@ export function registerIpcHandlers(context: HandlerContext): void {
   });
 
   handle(IPC_INVOKE.secretDelete, secretDeleteArgsSchema, async (args) => {
+    if (!isSecretNameAllowedForConfig(args.name, context.configStore.load())) {
+      throw new Error('el secreto no pertenece a la configuracion actual');
+    }
     context.secretStore.delete(args.name);
     context.log('secreto eliminado', { name: args.name });
     await context.reconfigureAgent();

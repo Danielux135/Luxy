@@ -105,7 +105,7 @@ export function startHostEntry(port: ParentPort): void {
         if (request.config !== null && request.config !== undefined) {
           config = agentConfigSchema.parse(request.config);
         }
-        host.updateConfig(config, request.providerKeys);
+        await host.updateConfig(config, request.providerKeys);
         ack(request.requestId, true, null);
         break;
       }

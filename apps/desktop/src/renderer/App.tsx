@@ -133,6 +133,7 @@ export function App(): JSX.Element {
         {seccion === 'conexiones' && (
           <ConnectionsPage
             summary={summary}
+            onSave={save}
             onSetSecret={setSecret}
             onDeleteSecret={deleteSecret}
           />

@@ -1,5 +1,26 @@
 # Luxy — resultados de comprobación
 
+### 2026-08-27 — Windows 11 — F4.9-DYNAMIC-HTTP-PROVIDERS
+
+- Worktree: `luxy/f4-9-dynamic-http-providers`, base `main` @ `2ae1291`.
+- `npm.cmd run check`: exit 0.
+- Lint: correcto.
+- Typecheck: correcto.
+- Suite completa: **96 archivos, 1.656 pruebas superadas, 9 omitidas, 0
+  fallos**.
+- Build: `remote-crypto`, `remote-protocol`, `shared`, `agent`, `desktop` y
+  `gateway` correctos.
+- Pruebas nuevas o ampliadas: validación de proveedores y URLs; IPC de guardado
+  conjunto; invalidación/autorización de secretos; formulario; exposición y
+  creación desde Gateway; recarga y parada limpia del host.
+- Incidencia encontrada y cerrada: el primer pase rechazó el nombre histórico
+  `connection:<id>`; el contrato final lo conserva y limita las altas nuevas de
+  Studio a nombres internos seguros.
+- `npm.cmd run format:check`: no es una puerta limpia del checkpoint; reportó
+  333 archivos preexistentes. No se aplicó formato global.
+- Sin API real, tokens, automatización de navegador, migración, deploy, commit
+  ni push.
+
 ### 2026-08-21 15:00 — Windows 11 — smoke test manual de la copia canónica (LUXY-CONSOLIDATION-001)
 
 - Objetivo: verificar visualmente, con la app real corriendo, que la copia

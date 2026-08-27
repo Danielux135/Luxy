@@ -1458,13 +1458,15 @@ input[aria-invalid='true'] {
 }
 
 .project-profile__grid,
-.project-profile__permissions {
+.project-profile__permissions,
+.http-provider-options {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0 18px;
 }
 
-.project-profile__permissions {
+.project-profile__permissions,
+.http-provider-options {
   margin: 4px 0 12px;
 }
 
@@ -1542,6 +1544,7 @@ input[aria-invalid='true'] {
 @media (max-width: 760px) {
   .project-profile__grid,
   .project-profile__permissions,
+  .http-provider-options,
   .project-check__fields {
     grid-template-columns: 1fr;
   }

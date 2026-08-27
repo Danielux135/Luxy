@@ -14,6 +14,8 @@ import {
   stopAgentArgsSchema,
   approvalResolveArgsSchema,
   connectionTestArgsSchema,
+  configSaveArgsSchema,
+  secretNameSchema,
   worktreeOpenFolderArgsSchema,
   studioJobActionArgsSchema,
   studioJobsListArgsSchema,
@@ -111,6 +113,22 @@ describe('validacion de argumentos', () => {
         baseUrl: 'https://atacante.example',
       }).success,
     ).toBe(false);
+  });
+
+  it('valida la clave atomica de un proveedor HTTP', () => {
+    expect(
+      configSaveArgsSchema.safeParse({
+        config: {},
+        providerSecret: { name: 'LUXY_HTTP_EXTERNO_API_KEY', value: 'clave-secreta' },
+      }).success,
+    ).toBe(true);
+    expect(
+      configSaveArgsSchema.safeParse({
+        config: {},
+        providerSecret: { name: '../clave', value: 'clave-secreta' },
+      }).success,
+    ).toBe(false);
+    expect(secretNameSchema.safeParse('LUXY_HTTP_EXTERNO_API_KEY').success).toBe(true);
   });
 });
 

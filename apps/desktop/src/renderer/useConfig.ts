@@ -29,7 +29,10 @@ export function useConfig(): {
   loading: boolean;
   error: string | null;
   reload: () => Promise<void>;
-  save: (config: unknown) => Promise<boolean>;
+  save: (
+    config: unknown,
+    providerSecret?: { name: string; value: string },
+  ) => Promise<boolean>;
   setSecret: (name: string, value: string) => Promise<boolean>;
   deleteSecret: (name: string) => Promise<boolean>;
 } {
@@ -62,8 +65,11 @@ export function useConfig(): {
     };
   }, []);
 
-  const save = useCallback(async (config: unknown) => {
-    const result = await window.luxy.saveConfig(config);
+  const save = useCallback(async (
+    config: unknown,
+    providerSecret?: { name: string; value: string },
+  ) => {
+    const result = await window.luxy.saveConfig(config, providerSecret);
     if (result.ok) {
       setSummary(result.value as ConfigSummary);
       setError(null);

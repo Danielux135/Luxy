@@ -171,13 +171,14 @@ validación es estructural.
 
 ### Un proveedor de IA
 
-1. Implementa `ProviderExecution` (`detect()` + `run()`) en
-   `apps/agent/src/providers/`.
-2. Si habla el formato de OpenAI, reutiliza `HttpApiProvider`: basta con añadir
-   su configuración a `providers.http` en `config.json`.
-3. Regístralo en `LuxyAgent.initializeProviders()`.
-4. Añádelo a `PROVIDER_IDS` en `shared/constants.ts` y a `PROVIDER_LABELS`.
-5. Tests de construcción de argumentos y de manejo de errores.
+1. Si habla el contrato `chat completions`, se añade desde Conexiones de Studio:
+   `HttpApiProvider` lo construye desde `providers.http` sin tocar código.
+2. Sólo si usa otro protocolo, implementa `ProviderExecution` (`detect()` +
+   `run()`) en `apps/agent/src/providers/` y regístralo en
+   `LuxyAgent.initializeProviders()`.
+3. Añade un identificador compilado a `PROVIDER_IDS` y `PROVIDER_LABELS` sólo
+   para una familia nativa con comportamiento propio, no para una conexión HTTP.
+4. Añade tests de construcción de argumentos y manejo de errores.
 
 **Antes de usar un flag de un CLI: ejecuta su `--help` y compruébalo.** No
 copies la sintaxis de otra versión. La detección de capacidades vive en
@@ -259,6 +260,9 @@ inyección de shell, pero no convierte en seguro el código que la prueba import
 
 - No usar la API de Anthropic. No usar `ANTHROPIC_API_KEY`.
 - No usar la API de OpenAI. No usar `OPENAI_API_KEY`.
+- Los proveedores HTTP configurables desde Studio deben hablar el contrato
+  `chat completions`. Sus claves viven cifradas en `SecretStore`, nunca en
+  `config.json`; las URLs remotas exigen HTTPS y HTTP sólo se admite en loopback.
 - El catálogo real de una conexión consulta sólo `/v1/models`; no sondea rutas
   tentativas de precios (`D-022`).
 - No automatizar las páginas web de Claude ni de ChatGPT. Nada de navegadores.

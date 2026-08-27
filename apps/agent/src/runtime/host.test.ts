@@ -160,16 +160,16 @@ describe('suscripcion a eventos', () => {
     const baja = host.subscribe((event) => recibidos.push(event));
 
     // updateConfig publica un status.updated
-    host.updateConfig(buildConfig());
+    await host.updateConfig(buildConfig());
     const tras1 = recibidos.length;
     expect(tras1).toBeGreaterThan(0);
 
     baja();
-    host.updateConfig(buildConfig());
+    await host.updateConfig(buildConfig());
     expect(recibidos.length).toBe(tras1);
   });
 
-  it('no duplica un suscriptor registrado dos veces', () => {
+  it('no duplica un suscriptor registrado dos veces', async () => {
     const host = buildHost(null);
     const recibidos: AgentEvent[] = [];
     const listener = (event: AgentEvent): void => {
@@ -178,11 +178,11 @@ describe('suscripcion a eventos', () => {
     host.subscribe(listener);
     host.subscribe(listener);
 
-    host.updateConfig(buildConfig());
+    await host.updateConfig(buildConfig());
     expect(recibidos.length).toBe(1);
   });
 
-  it('un suscriptor que lanza no impide que los demas reciban', () => {
+  it('un suscriptor que lanza no impide que los demas reciban', async () => {
     const host = buildHost(null);
     const recibidos: AgentEvent[] = [];
     host.subscribe(() => {
@@ -190,17 +190,17 @@ describe('suscripcion a eventos', () => {
     });
     host.subscribe((event) => recibidos.push(event));
 
-    expect(() => host.updateConfig(buildConfig())).not.toThrow();
+    await expect(host.updateConfig(buildConfig())).resolves.toBeUndefined();
     expect(recibidos.length).toBe(1);
   });
 
-  it('todos los eventos publicados cumplen el esquema', () => {
+  it('todos los eventos publicados cumplen el esquema', async () => {
     const host = buildHost(null);
     const invalidos: unknown[] = [];
     host.subscribe((event) => {
       if (!agentEventSchema.safeParse(event).success) invalidos.push(event);
     });
-    host.updateConfig(buildConfig());
+    await host.updateConfig(buildConfig());
     expect(invalidos).toEqual([]);
   });
 });
@@ -240,6 +240,28 @@ describe('ciclo de vida completo', () => {
     } finally {
       await host.stop();
     }
+  }, 90_000);
+
+  it('aplica una configuracion nueva sin reinicio manual', async () => {
+    const host = buildHost(buildConfig());
+    try {
+      await host.start();
+      await host.updateConfig({ ...buildConfig(), machineName: 'maquina-recargada' });
+      expect(host.getStatus().runState).toBe('running');
+      expect(host.getStatus().agent?.machineName).toBe('maquina-recargada');
+    } finally {
+      await host.stop();
+    }
+  }, 90_000);
+
+  it('se detiene al eliminar la configuracion sin intentar arrancar de nuevo', async () => {
+    const host = buildHost(buildConfig());
+    await host.start();
+
+    await host.updateConfig(null);
+
+    expect(host.getStatus().runState).toBe('stopped');
+    expect(host.getStatus().lastError).toBeNull();
   }, 90_000);
 
   it('emite agent.started y agent.stopped en orden', async () => {

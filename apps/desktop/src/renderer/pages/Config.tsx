@@ -26,6 +26,13 @@ import {
   projectToDraft,
   type ProjectDraft,
 } from '../project-profile.js';
+import {
+  buildHttpProvider,
+  emptyHttpProviderDraft,
+  httpProviderToDraft,
+  type HttpProviderConfig,
+  type HttpProviderDraft,
+} from '../http-provider-config.js';
 import { Empty, Field, Notice, Panel, Tag } from '../ui/primitives.js';
 import type { ConfigSummary } from '../useConfig.js';
 
@@ -688,10 +695,12 @@ function defaultProject(): NonNullable<StoredAgentConfig['projects']>[string] {
 
 export function ConnectionsPage({
   summary,
+  onSave,
   onSetSecret,
   onDeleteSecret,
 }: {
   summary: ConfigSummary;
+  onSave: (config: unknown, providerSecret?: { name: string; value: string }) => Promise<boolean>;
   onSetSecret: (name: string, value: string) => Promise<boolean>;
   onDeleteSecret: (name: string) => Promise<boolean>;
 }): JSX.Element {
@@ -699,6 +708,13 @@ export function ConnectionsPage({
   const httpProviders = summary.config?.providers.http ?? [];
   const [editing, setEditing] = useState<string | null>(null);
   const [value, setValue] = useState('');
+  const [editingProviderId, setEditingProviderId] = useState<string | null>(null);
+  const [providerDraft, setProviderDraft] = useState<HttpProviderDraft | null>(null);
+  const [providerSecret, setProviderSecret] = useState('');
+  const [providerError, setProviderError] = useState<string | null>(null);
+  const [pendingProviderDelete, setPendingProviderDelete] = useState<HttpProviderConfig | null>(
+    null,
+  );
 
   const guardar = async (id: string): Promise<void> => {
     if (await onSetSecret(connectionSecretName(id), value)) {
@@ -707,10 +723,82 @@ export function ConnectionsPage({
     }
   };
 
-  const guardarProveedor = async (apiKeyEnv: string): Promise<void> => {
-    if (await onSetSecret(apiKeyEnv, value)) {
-      setEditing(null);
-      setValue('');
+  const editarProveedor = (provider: HttpProviderConfig): void => {
+    setEditingProviderId(provider.id);
+    setProviderDraft(httpProviderToDraft(provider));
+    setProviderSecret('');
+    setProviderError(null);
+  };
+
+  const cancelarProveedor = (): void => {
+    setEditingProviderId(null);
+    setProviderDraft(null);
+    setProviderSecret('');
+    setProviderError(null);
+  };
+
+  const guardarProveedor = async (): Promise<void> => {
+    if (providerDraft === null || summary.config === null) return;
+    const existing = httpProviders.find((provider) => provider.id === editingProviderId) ?? null;
+    const built = buildHttpProvider(providerDraft, existing);
+    if (built.provider === null) {
+      setProviderError(built.error);
+      return;
+    }
+    if (
+      httpProviders.some(
+        (provider) => provider.id === built.provider?.id && provider.id !== editingProviderId,
+      )
+    ) {
+      setProviderError('Ya existe un proveedor con ese identificador.');
+      return;
+    }
+    const key = providerSecret.trim();
+    const endpointChanged =
+      existing !== null &&
+      existing.baseUrl.replace(/\/+$/, '') !== built.provider.baseUrl.replace(/\/+$/, '');
+    if (existing === null && key.length === 0) {
+      setProviderError('Introduce la clave de API para crear el proveedor.');
+      return;
+    }
+    if (
+      endpointChanged &&
+      summary.secrets.configured[existing.apiKeyEnv] === true &&
+      key.length === 0
+    ) {
+      setProviderError('Al cambiar el endpoint debes introducir de nuevo la clave de API.');
+      return;
+    }
+
+    const nextHttp =
+      existing === null
+        ? [...httpProviders, built.provider]
+        : httpProviders.map((provider) =>
+            provider.id === editingProviderId ? built.provider! : provider,
+          );
+    const nextConfig = {
+      ...summary.config,
+      providers: { ...summary.config.providers, http: nextHttp },
+    };
+    const saved = await onSave(
+      nextConfig,
+      key.length === 0 ? undefined : { name: built.provider.apiKeyEnv, value: key },
+    );
+    if (saved) cancelarProveedor();
+  };
+
+  const quitarProveedor = async (provider: HttpProviderConfig): Promise<void> => {
+    if (summary.config === null) return;
+    const nextConfig = {
+      ...summary.config,
+      providers: {
+        ...summary.config.providers,
+        http: httpProviders.filter((item) => item.id !== provider.id),
+      },
+    };
+    if (await onSave(nextConfig)) {
+      setPendingProviderDelete(null);
+      cancelarProveedor();
     }
   };
 
@@ -828,17 +916,175 @@ export function ConnectionsPage({
 
       <div className="page__head">
         <h1 className="page__title">Proveedores HTTP</h1>
-        <Tag>{httpProviders.length}</Tag>
+        <div className="row">
+          <Tag>{httpProviders.length}</Tag>
+          <button
+            className="btn btn--primary"
+            type="button"
+            disabled={!summary.secrets.encryptionAvailable || providerDraft !== null}
+            onClick={() => {
+              setEditingProviderId(null);
+              setProviderDraft(emptyHttpProviderDraft());
+              setProviderSecret('');
+              setProviderError(null);
+            }}
+          >
+            Añadir proveedor
+          </button>
+        </div>
       </div>
       <p className="page__lede">
-        Claves de proveedores http sueltos (config.json, providers.http). El endpoint y el modelo
-        se editan en config.json; aqui solo se guarda la clave, cifrada igual que las conexiones.
+        APIs compatibles con chat completions. Luxy cifra la clave, añade `/chat/completions` a la
+        URL base y aplica los cambios al agente sin exigir un reinicio manual.
       </p>
+
+      {providerDraft !== null && (
+        <Panel
+          title={editingProviderId === null ? 'Nuevo proveedor HTTP' : 'Editar proveedor HTTP'}
+        >
+          {providerError !== null && <Notice tone="fault">{providerError}</Notice>}
+          <Field
+            label="Identificador"
+            hint="Minúsculas, números, guion o guion bajo. Queda fijo después de crear el proveedor."
+          >
+            <input
+              type="text"
+              value={providerDraft.id}
+              readOnly={editingProviderId !== null}
+              maxLength={32}
+              spellCheck={false}
+              placeholder="mi-proveedor"
+              onChange={(event) => setProviderDraft({ ...providerDraft, id: event.target.value })}
+            />
+          </Field>
+          <Field label="Nombre visible">
+            <input
+              type="text"
+              value={providerDraft.displayName}
+              maxLength={64}
+              placeholder="Mi proveedor"
+              onChange={(event) =>
+                setProviderDraft({ ...providerDraft, displayName: event.target.value })
+              }
+            />
+          </Field>
+          <Field
+            label="URL base"
+            hint="Incluye la versión, por ejemplo https://api.example/v1. HTTPS es obligatorio salvo en localhost."
+          >
+            <input
+              type="url"
+              value={providerDraft.baseUrl}
+              maxLength={300}
+              spellCheck={false}
+              placeholder="https://api.example/v1"
+              onChange={(event) =>
+                setProviderDraft({ ...providerDraft, baseUrl: event.target.value })
+              }
+            />
+          </Field>
+          <Field label="Modelo predeterminado">
+            <input
+              type="text"
+              value={providerDraft.model}
+              maxLength={128}
+              spellCheck={false}
+              placeholder="modelo-texto-v2"
+              onChange={(event) =>
+                setProviderDraft({ ...providerDraft, model: event.target.value })
+              }
+            />
+          </Field>
+          <Field
+            label="Clave de API"
+            hint={
+              editingProviderId === null
+                ? 'Obligatoria al crear. Se cifra y no vuelve a mostrarse.'
+                : 'Déjala vacía para conservar la actual; introduce otra para sustituirla.'
+            }
+          >
+            <input
+              type="password"
+              value={providerSecret}
+              maxLength={512}
+              autoComplete="new-password"
+              placeholder={editingProviderId === null ? 'Pega la clave' : 'Sin cambios'}
+              onChange={(event) => setProviderSecret(event.target.value)}
+            />
+          </Field>
+          <div className="row">
+            <Field label="Máximo de tokens">
+              <input
+                type="number"
+                min={256}
+                max={200000}
+                step={256}
+                value={providerDraft.maxOutputTokens}
+                onChange={(event) =>
+                  setProviderDraft({ ...providerDraft, maxOutputTokens: event.target.value })
+                }
+              />
+            </Field>
+            <Field label="Presupuesto diario" hint="0 significa sin límite local.">
+              <input
+                type="number"
+                min={0}
+                max={1000000}
+                step="0.01"
+                value={providerDraft.dailyBudget}
+                onChange={(event) =>
+                  setProviderDraft({ ...providerDraft, dailyBudget: event.target.value })
+                }
+              />
+            </Field>
+          </div>
+          <div className="http-provider-options">
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={providerDraft.enabled}
+                onChange={(event) =>
+                  setProviderDraft({ ...providerDraft, enabled: event.target.checked })
+                }
+              />
+              <span>
+                Proveedor activo
+                <small>Se anunciará al Gateway cuando tenga una clave guardada.</small>
+              </span>
+            </label>
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={providerDraft.supportsStreaming}
+                onChange={(event) =>
+                  setProviderDraft({ ...providerDraft, supportsStreaming: event.target.checked })
+                }
+              />
+              <span>
+                Respuesta en streaming
+                <small>Desactívalo si el endpoint sólo devuelve JSON completo.</small>
+              </span>
+            </label>
+          </div>
+          <div className="row">
+            <button
+              className="btn btn--primary"
+              type="button"
+              onClick={() => void guardarProveedor()}
+            >
+              Guardar proveedor
+            </button>
+            <button className="btn btn--quiet" type="button" onClick={cancelarProveedor}>
+              Cancelar
+            </button>
+          </div>
+        </Panel>
+      )}
 
       {httpProviders.length === 0 ? (
         <Panel flush>
           <Empty title="Ningun proveedor http">
-            Añade una entrada en providers.http de config.json para que aparezca aqui.
+            Añade desde aquí una API compatible y quedará disponible en Trabajos y Conversaciones.
           </Empty>
         </Panel>
       ) : (
@@ -865,67 +1111,54 @@ export function ConnectionsPage({
               <Field label="Modelo">
                 <input type="text" value={provider.model} readOnly />
               </Field>
-
-              <Field
-                label={`Clave de API (${provider.apiKeyEnv})`}
-                hint={
-                  configured
-                    ? 'Hay una clave guardada. Introduce una nueva para sustituirla.'
-                    : 'La clave se cifra al guardarla y no se muestra nunca.'
-                }
-              >
-                {editing === provider.apiKeyEnv ? (
-                  <div className="row">
-                    <input
-                      type="password"
-                      value={value}
-                      onChange={(event) => setValue(event.target.value)}
-                      placeholder="Pega la clave"
-                      autoFocus
-                      style={{ flex: 1 }}
-                    />
-                    <button
-                      className="btn btn--primary"
-                      onClick={() => void guardarProveedor(provider.apiKeyEnv)}
-                    >
-                      Guardar
-                    </button>
-                    <button className="btn btn--quiet" onClick={() => setEditing(null)}>
-                      Cancelar
-                    </button>
-                  </div>
-                ) : (
-                  <div className="row">
-                    <input
-                      type="password"
-                      value={configured ? '••••••••••••' : ''}
-                      readOnly
-                      style={{ flex: 1 }}
-                    />
-                    <button
-                      className="btn"
-                      onClick={() => {
-                        setEditing(provider.apiKeyEnv);
-                        setValue('');
-                      }}
-                      disabled={!summary.secrets.encryptionAvailable}
-                    >
-                      {configured ? 'Sustituir' : 'Añadir'}
-                    </button>
-                    {configured && (
-                      <button
-                        className="btn btn--danger btn--quiet"
-                        onClick={() => void onDeleteSecret(provider.apiKeyEnv)}
-                      >
-                        Borrar
-                      </button>
-                    )}
-                  </div>
-                )}
-              </Field>
+              <div className="row">
+                <Tag>{provider.supportsStreaming ? 'streaming' : 'respuesta completa'}</Tag>
+                <Tag>{provider.maxOutputTokens.toLocaleString('es-ES')} tokens</Tag>
+                <button className="btn" type="button" onClick={() => editarProveedor(provider)}>
+                  Editar
+                </button>
+                <button
+                  className="btn btn--danger btn--quiet"
+                  type="button"
+                  onClick={() => setPendingProviderDelete(provider)}
+                >
+                  Eliminar
+                </button>
+              </div>
             </Panel>
           );
         })
+      )}
+
+      {pendingProviderDelete !== null && (
+        <div className="confirm-layer" role="presentation">
+          <section
+            className="confirm-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="provider-delete-title"
+          >
+            <div className="silk" id="provider-delete-title">
+              Eliminar proveedor
+            </div>
+            <p>
+              ¿Eliminar <strong>{pendingProviderDelete.displayName}</strong> y su clave cifrada?
+              Dejará de aparecer en Trabajos y Conversaciones.
+            </p>
+            <div className="confirm-dialog__actions">
+              <button className="btn" type="button" onClick={() => setPendingProviderDelete(null)}>
+                Volver
+              </button>
+              <button
+                className="btn btn--danger"
+                type="button"
+                onClick={() => void quitarProveedor(pendingProviderDelete)}
+              >
+                Eliminar
+              </button>
+            </div>
+          </section>
+        </div>
       )}
     </>
   );

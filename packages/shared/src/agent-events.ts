@@ -5,7 +5,7 @@
 // vive en shared y no depende de node: cruza fronteras de proceso y se valida
 // con zod en cada salto, igual que la entrada de telegram.
 import { z } from 'zod';
-import { providerIdSchema } from './schemas.js';
+import { configurableProviderIdSchema } from './schemas.js';
 
 /** estado del ciclo de vida del host, independiente del estado del agente */
 export const AGENT_RUN_STATES = ['stopped', 'starting', 'running', 'stopping'] as const;
@@ -19,7 +19,7 @@ export const agentStatusSchema = z.object({
   activeJob: z
     .object({
       shortId: z.string(),
-      provider: providerIdSchema,
+      provider: configurableProviderIdSchema,
       projectAlias: z.string(),
       startedAt: z.string(),
     })
@@ -69,7 +69,7 @@ export const agentEventSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('job.claimed'),
     ...jobBase,
-    provider: providerIdSchema,
+    provider: configurableProviderIdSchema,
     projectAlias: z.string(),
   }),
   z.object({ type: z.literal('job.phase'), ...jobBase, message: z.string() }),

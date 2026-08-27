@@ -62,30 +62,29 @@ Versión detectada durante el desarrollo: **0.141.0**.
 
 ## Familia 2: APIs HTTP configurables
 
-**DeepSeek**, **GLM** y **Qwen**. Compatibles con el formato de OpenAI, pero
-**sin usar el SDK oficial**: solo `fetch` nativo.
+Endpoints que hablen el contrato HTTP `chat completions`, incluidos los perfiles
+iniciales de **DeepSeek**, **GLM** y **Qwen**. Luxy usa `fetch` nativo y no el SDK
+de ningún proveedor.
 
 ### Claves
 
-```powershell
-Copy-Item .env.providers.example .env.providers
-notepad .env.providers
-```
+Las altas nuevas se hacen en **Studio > Conexiones**. La clave se cifra en
+`secrets.enc`, nunca se escribe en `config.json` y no vuelve a mostrarse al
+renderer. Al cambiar el endpoint hay que introducirla otra vez; al eliminar el
+proveedor también se elimina su secreto.
 
-```
-DEEPSEEK_API_KEY=tu-clave
-GLM_API_KEY=tu-clave
-QWEN_API_KEY=tu-clave
-```
-
-Las claves **solo** viven en ese archivo local. Nunca en `config.json`, ni en
-Supabase, ni en git, ni en Telegram, ni en los logs. Al cargarse se registran en
-`secretRegistry`, que las elimina de cualquier salida.
+Las instalaciones anteriores con `.env.providers` siguen pudiendo migrar sus
+claves al almacén cifrado. Nunca van a Supabase, git, Telegram ni los logs; al
+cargarse se registran en `secretRegistry`, que las elimina de cualquier salida.
 
 ### URLs y modelos
 
-**No están codificados a propósito**: cambian con el tiempo. Vienen como
-`PENDIENTE` y los rellenas tú en `%APPDATA%\Luxy\config.json`:
+**No están codificados a propósito**: cambian con el tiempo. Studio permite
+definir identificador, nombre visible, URL base, modelo, streaming y límites.
+Las URLs remotas deben usar HTTPS; HTTP sólo se admite en loopback. No se
+aceptan credenciales, query ni fragmento dentro de la URL.
+
+La forma persistida sigue siendo `providers.http`:
 
 ```json
 {
@@ -108,7 +107,8 @@ Supabase, ni en git, ni en Telegram, ni en los logs. Al cargarse se registran en
 ```
 
 Consulta la documentación oficial de cada servicio para los valores actuales.
-Luxy llama a `<baseUrl>/chat/completions`.
+Luxy llama a `<baseUrl>/chat/completions`; otros protocolos no son compatibles
+por el hecho de ser HTTP.
 
 ### Qué implementan
 
@@ -158,11 +158,13 @@ nuevo solo tiene que implementar `detect()` y `run()`.
 
 ## Añadir un proveedor HTTP nuevo
 
-1. Añade su configuración al array `providers.http` de `config.json`.
-2. Añade su clave a `.env.providers` con el nombre que pusiste en `apiKeyEnv`.
-3. Reinicia Luxy. `HttpApiProvider` es genérico: no hace falta tocar código.
+1. Abre **Studio > Conexiones** y pulsa **Añadir proveedor**.
+2. Introduce la URL base, el modelo y la clave; Studio valida y cifra el secreto.
+3. Guarda. Si el agente está libre se recarga en ese momento; si ejecuta un
+   trabajo, espera a que termine para no interrumpirlo.
+4. Selecciona el identificador nuevo en Trabajos o Conversaciones.
 
-Si el proveedor no habla el formato de OpenAI, implementa `ProviderExecution` en
+Si el proveedor no habla `chat completions`, implementa `ProviderExecution` en
 `apps/agent/src/providers/` y regístralo en `agent.ts`.
 
 ## Problemas

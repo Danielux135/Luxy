@@ -48,6 +48,8 @@ export class AgentHost {
   private config: AgentConfig | null;
   private providerKeys: Record<string, string>;
   private readonly listeners = new Set<AgentEventSink>();
+  /** una configuracion nueva espera a que termine el trabajo en curso */
+  private restartPending = false;
   /** serializa start/stop/restart: sin esto dos clics seguidos se pisan */
   private transition: Promise<void> = Promise.resolve();
 
@@ -91,14 +93,43 @@ export class AgentHost {
     };
   }
 
-  /** sustituye la configuracion. surte efecto en el siguiente arranque */
-  updateConfig(config: AgentConfig | null, providerKeys?: Record<string, string>): void {
+  /** sustituye la configuracion sin interrumpir un trabajo que ya esta en curso */
+  async updateConfig(
+    config: AgentConfig | null,
+    providerKeys?: Record<string, string>,
+  ): Promise<void> {
     this.config = config;
     if (providerKeys) this.providerKeys = providerKeys;
+    if (this.runState === 'starting') {
+      this.restartPending = true;
+    } else if (this.runState === 'running') {
+      if (this.agent?.getStatus().activeJob !== null) {
+        this.restartPending = true;
+      } else if (config === null) {
+        await this.stop('configuracion eliminada');
+      } else {
+        await this.restart();
+      }
+    }
     this.publish({
       type: 'status.updated',
       at: new Date().toISOString(),
       status: this.getStatus(),
+    });
+  }
+
+  /** aplica al quedar libre una configuracion guardada durante un trabajo */
+  private restartWhenIdle(): void {
+    if (!this.restartPending) return;
+    this.restartPending = false;
+    const applyConfig =
+      this.config === null ? this.stop('configuracion eliminada') : this.restart();
+    void applyConfig.catch((error: unknown) => {
+      this.lastError = redact(describeError(error).message);
+      this.options.logger.error(
+        'no se pudo aplicar la configuracion pendiente',
+        describeError(error),
+      );
     });
   }
 
@@ -124,12 +155,14 @@ export class AgentHost {
         stateDirectory: this.options.stateDirectory,
         worktreesDirectory: this.options.worktreesDirectory,
         onEvent: (event) => this.publish(event),
+        onIdle: () => this.restartWhenIdle(),
       });
 
       try {
         await agent.start();
         this.agent = agent;
         this.setRunState('running');
+        this.restartWhenIdle();
       } catch (error) {
         this.agent = null;
         this.lastError = redact(describeError(error).message);
@@ -140,6 +173,7 @@ export class AgentHost {
   }
 
   async stop(reason = 'peticion de parada'): Promise<void> {
+    if (reason !== 'reinicio') this.restartPending = false;
     return this.enqueue(async () => {
       const agent = this.agent;
       if (agent === null) {

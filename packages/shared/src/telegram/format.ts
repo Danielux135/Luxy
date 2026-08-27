@@ -1,10 +1,10 @@
 // construccion y division de los mensajes que luxy envia a telegram
 import { TELEGRAM_MAX_MESSAGE_LENGTH } from '../constants.js';
 import { redact } from '../redact.js';
-import type { JobStatus, ProviderId } from '../types.js';
+import type { JobStatus, KnownProviderId, ProviderId } from '../types.js';
 
 /** nombre legible de cada proveedor para mostrarlo en telegram */
-export const PROVIDER_LABELS: Record<ProviderId, string> = {
+export const PROVIDER_LABELS: Record<KnownProviderId, string> = {
   claude: 'Claude',
   codex: 'Codex',
   deepseek: 'DeepSeek',
@@ -16,6 +16,11 @@ export const PROVIDER_LABELS: Record<ProviderId, string> = {
   minimax: 'MiniMax',
   step: 'Step',
 };
+
+/** conserva un nombre externo legible aunque no forme parte del catalogo fijo */
+export function providerLabel(provider: ProviderId): string {
+  return PROVIDER_LABELS[provider as KnownProviderId] ?? provider;
+}
 
 /** texto legible de cada estado */
 export const STATUS_LABELS: Record<JobStatus, string> = {
@@ -110,13 +115,13 @@ export function renderJobCreated(data: JobCardData): string {
     `ID: ${data.shortId}`,
     `Maquina: ${data.machineName ?? 'sin asignar'}`,
     `Proyecto: ${data.projectAlias}`,
-    `Agente: ${PROVIDER_LABELS[data.provider]}`,
+    `Agente: ${providerLabel(data.provider)}`,
     `Estado: ${STATUS_LABELS[data.status]}`,
   ];
   if (data.routerReason) {
     lines.push(
       '',
-      `Proveedor elegido: ${PROVIDER_LABELS[data.provider]}`,
+      `Proveedor elegido: ${providerLabel(data.provider)}`,
       `Motivo: ${data.routerReason}`,
     );
   }
@@ -131,7 +136,7 @@ export function renderJobProgress(data: JobCardData): string {
     `ID: ${data.shortId}`,
     `Maquina: ${data.machineName ?? 'sin asignar'}`,
     `Proyecto: ${data.projectAlias}`,
-    `Agente: ${PROVIDER_LABELS[data.provider]}`,
+    `Agente: ${providerLabel(data.provider)}`,
   ];
   if (typeof data.durationMs === 'number') {
     lines.push(`Duracion: ${formatDuration(data.durationMs)}`);
@@ -155,7 +160,7 @@ export function renderJobFinished(data: JobFinishedData): string {
     `ID: ${data.shortId}`,
     `Maquina: ${data.machineName ?? 'sin asignar'}`,
     `Proyecto: ${data.projectAlias}`,
-    `Agente: ${PROVIDER_LABELS[data.provider]}`,
+    `Agente: ${providerLabel(data.provider)}`,
     `Duracion: ${formatDuration(data.durationMs ?? 0)}`,
     '',
     `Archivos modificados: ${data.filesChanged}`,

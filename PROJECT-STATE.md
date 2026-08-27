@@ -1,5 +1,22 @@
 # Luxy — estado canónico del proyecto
 
+Última actualización: **2026-08-27 — F4.9-DYNAMIC-HTTP-PROVIDERS**
+
+Luxy Studio ya permite añadir, editar, activar, desactivar y eliminar proveedores
+HTTP compatibles con `chat completions`, sin editar `config.json`. La clave se
+guarda cifrada, nunca vuelve al renderer y se invalida al cambiar de endpoint o
+eliminar el proveedor. Los identificadores configurados viajan por Gateway y
+aparecen en Trabajos y Conversaciones; el agente aplica la configuración al
+quedar libre, sin interrumpir un trabajo en curso. URLs remotas exigen HTTPS y
+siguen bloqueadas las APIs prohibidas por D-003.
+
+Estado: implementado y verificado en el worktree aislado
+`luxy/f4-9-dynamic-http-providers`, con el commit local
+`feat: añade proveedores HTTP configurables`; sin push, deploy ni migración. La
+puerta `npm run check` pasa con 96 archivos, 1.656 pruebas superadas y 9
+omitidas. No se llamó a ningún proveedor real; la integración, publicación y
+prueba manual están en `LA-029`.
+
 Última actualización: **2026-08-21**
 
 `LUXY-CONSOLIDATION-001` cerró la consolidación de los ocho worktrees en una

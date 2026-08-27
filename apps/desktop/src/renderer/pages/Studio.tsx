@@ -1,6 +1,6 @@
 // primer corte vertical de Luxy Studio: crear, seguir y cancelar trabajos.
 import { useEffect, useMemo, useState, type JSX } from 'react';
-import { isProviderId, TERMINAL_JOB_STATUSES } from '@luxy/shared';
+import { TERMINAL_JOB_STATUSES } from '@luxy/shared';
 import type { JobStatus, ProviderId, StudioJob, StudioJobAction } from '@luxy/shared';
 import { Empty, Field, Notice, Panel, Readout, Tag } from '../ui/primitives.js';
 import { FormattedResponse } from '../formatted-response.js';
@@ -188,7 +188,8 @@ export function StudioPage({
     const worktreePath = job.metadata['worktreePath'];
     const canResumeExistingWorktree =
       typeof worktreePath === 'string' && worktreePath.trim().length > 0;
-    if (!isProviderId(job.provider)) {
+    const target = studio.machines.find((item) => item.id === job.targetMachineId);
+    if (target === undefined || !target.providers.includes(job.provider)) {
       window.alert('Este proveedor historico ya no esta disponible para reintentar el trabajo.');
       return;
     }

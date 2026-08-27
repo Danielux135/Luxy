@@ -16,7 +16,10 @@ export type JobStatus = (typeof JOB_STATUSES)[number];
 export type StreamTransportEnd = (typeof STREAM_TRANSPORT_ENDS)[number];
 export type ResponseOutcome = (typeof RESPONSE_OUTCOMES)[number];
 export type ResponseAbortSource = (typeof RESPONSE_ABORT_SOURCES)[number];
-export type ProviderId = (typeof PROVIDER_IDS)[number];
+export type KnownProviderId = (typeof PROVIDER_IDS)[number];
+/** identificador externo validado en los bordes del sistema */
+export type ConfigurableProviderId = string & { readonly __providerId: unique symbol };
+export type ProviderId = KnownProviderId | ConfigurableProviderId;
 export type JobEventType = (typeof JOB_EVENT_TYPES)[number];
 export type ApprovalAction = (typeof APPROVAL_ACTIONS)[number];
 export type JobOrigin = (typeof JOB_ORIGINS)[number];
