@@ -295,9 +295,49 @@ interfaz: *workspace*, *privacy*, *vault*, *invitado en solo lectura*.
 | F9.10 | Identidad de usuario e invitación por correo | blocked |
 | F9.11 | Transportes del invitado: Studio, visor web, exportación | blocked |
 | F9.12 | `D-039`…, `docs/PRIVACY.md`, `SECURITY.md`, `threat-model.md` | planned |
+| F9.13 | Interfaz de la bóveda en Studio: crear, abrir, cerrar, clave de recuperación | planned |
+| F9.14 | El proceso principal envía `run_local_turn` y muestra el progreso | planned |
+| F9.15 | Endpoints del gateway para registros privados y permisos | planned |
+| F9.16 | Cliente de almacén de objetos para los blobs cifrados | planned |
+| F9.17 | Adaptador de Xavira: personajes, imagen, vídeo, sondeo y descarga | planned |
 
 `F9.10` y `F9.11` están `blocked`: contradicen `D-001` («no multi-tenant») y
-necesitan una decisión nueva que lo matice. `F9.1`–`F9.9` no dependen de ella.
+necesitan una decisión nueva que lo matice. El resto no depende de ella.
+
+### Corrección del plan — 2026-09-01
+
+`F9.13`–`F9.17` se añadieron **después** de cerrar `F9.5`, al detectar Daniel
+que el hueco de interfaz que se repetía en cada cierre no tenía ningún paso
+asignado. No era una fila olvidada: faltaban las cuatro capas que **consumen**
+la bóveda.
+
+Causa: el plan se escribió de dentro hacia fuera, desde el núcleo
+criptográfico, y cada paso era la siguiente capa que el anterior habilitaba.
+Todo lo que estaba al otro lado de esa frontera — interfaz, transporte,
+almacenamiento y proveedor — se quedó sin ID.
+
+Consecuencia concreta: con el plan anterior se podían completar `F9.6`–`F9.12`
+enteros y seguir sin poder abrir la bóveda ni generar una imagen.
+
+### Camino crítico hasta la primera imagen privada
+
+No es el orden numérico. Es este:
+
+```
+F9.13  interfaz: crear y abrir la bóveda
+F9.14  el main pide el turno al agente y muestra el progreso
+F9.17  adaptador de Xavira: personaje, imagen, sondeo, descarga
+   └─ hasta aquí: primera imagen privada, guardada sólo en local
+F9.6   migración
+F9.15  endpoints del gateway
+F9.16  almacén de objetos
+   └─ hasta aquí: además sincronizada entre equipos
+```
+
+`F9.7`, `F9.8` y `F9.9` no bloquean ese camino, pero `F9.8` (higiene de logs,
+cachés y miniaturas) **debe cerrarse antes de usar la bóveda con contenido
+real**: es el paso que evita que lo que se cifró con cuidado aparezca en claro
+en un log o en una caché de miniaturas.
 
 `F9.1` cerrado el 2026-09-01 sin dependencias nuevas: `@noble/hashes@2.2.0` ya
 traía `argon2` y `hkdf`, `@noble/curves@2.2.0` trae `x25519`, y AES-256-GCM lo

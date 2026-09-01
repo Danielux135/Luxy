@@ -166,8 +166,22 @@ media respuesta, esa respuesta se pierde.
 todavía **no envía** estas peticiones: el canal existe y el host lo atiende,
 pero nadie lo llama aún.
 
-Siguiente paso exacto: `F9.6` — migración con las columnas de ciphertext, sin
-tocar el enum `luxy_job_status`. Será la 0007.
+### Corrección del plan — 2026-09-01
+
+Daniel preguntó si el hueco de interfaz que yo repetía al cerrar cada paso
+estaba planeado. **No lo estaba**, y no faltaba una fila: faltaban las cuatro
+capas que consumen la bóveda. Añadidos `F9.13`–`F9.17` en `MASTER-PLAN.md`
+con su causa y el camino crítico. Los IDs cerrados no se renumeran.
+
+El camino hasta la primera imagen privada **no es el orden numérico**:
+`F9.13` → `F9.14` → `F9.17` da una imagen privada guardada sólo en local;
+`F9.6` → `F9.15` → `F9.16` añade la sincronización entre equipos.
+
+Siguiente paso exacto: decisión de Daniel entre dos órdenes válidos.
+`F9.6` (migración) sigue el orden numérico y deja la base lista para el
+transporte. `F9.13` (interfaz) llega antes a algo que se puede usar y ver.
+Recomendado: `F9.13`, porque cierra el hueco que motivó esta corrección y
+convierte cinco pasos ya hechos en algo comprobable a mano.
 
 ---
 

@@ -1,5 +1,37 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-09-01 15:40 — Claude — corrección del plan de la Fase 9
+
+- Motivo: Daniel preguntó si el hueco de interfaz que yo repetía al cerrar cada
+  paso estaba planeado. **No lo estaba.** Al revisarlo, no faltaba una fila:
+  faltaban las cuatro capas que **consumen** la bóveda.
+- Faltaban: interfaz en Studio, envío de `run_local_turn` desde el proceso
+  principal, endpoints del gateway, cliente de almacén de objetos y adaptador
+  del proveedor de imagen/vídeo.
+- Consecuencia concreta del defecto: con el plan anterior se podían completar
+  `F9.6`–`F9.12` **enteros** y seguir sin poder abrir la bóveda ni generar una
+  imagen. El plan no llegaba al objetivo declarado.
+- Causa: el plan se escribió de dentro hacia fuera, desde el núcleo
+  criptográfico, y cada paso era «la siguiente capa que el anterior habilita».
+  Todo lo que quedaba al otro lado de esa frontera se quedó sin ID. La señal
+  estaba a la vista —«ninguna pantalla lo usa» aparece al cierre de `F9.3`,
+  `F9.4` y `F9.5`— y la traté como nota al pie en vez de como lo que era.
+- Archivos modificados: `MASTER-PLAN.md` (cinco pasos nuevos, `F9.13`–`F9.17`,
+  nota de corrección y camino crítico explícito), `CURRENT-TASK.md`.
+- Los IDs ya cerrados **no se renumeran**: aparecen en commits y en entradas
+  anteriores del changelog, que no se reescriben.
+- Cambio de orden: el camino hasta la primera imagen privada **no es el orden
+  numérico**. Es `F9.13` → `F9.14` → `F9.17` (imagen privada sólo local), y
+  después `F9.6` → `F9.15` → `F9.16` (además sincronizada).
+- `F9.8` (higiene de logs, cachés y miniaturas) no bloquea ese camino, pero debe
+  cerrarse **antes de usar la bóveda con contenido real**: es el paso que evita
+  que lo cifrado con cuidado aparezca en claro en un log o en una caché.
+- Efecto en la estimación: la que di antes se calculó sobre un plan al que le
+  faltaban cuatro piezas, así que **era demasiado baja**. Corregida.
+- Sin cambios de código. Sin pruebas nuevas.
+- Siguiente paso exacto: sin cambios respecto a lo acordado — `F9.6` si se sigue
+  el orden numérico, o `F9.13` si se prioriza llegar antes a una imagen real.
+
 ### 2026-09-01 15:25 — Claude — F9.5, turno privado sin cola
 
 - Estado anterior: `F9.4` cerrado y commiteado (`cd4dd21`).
