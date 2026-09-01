@@ -79,8 +79,30 @@ el tope de 65.536 bytes de `crypto.getRandomValues`, y el coste de Argon2 bajado
 de 256 MiB (13 s medidos por desbloqueo) a la segunda opción recomendada por
 RFC 9106.
 
-Siguiente paso exacto: `F9.2` — esquemas Zod del nivel de privacidad, sobres,
-invitaciones y permisos en `packages/shared`, que no debe importar `node:*`.
+### F9.2 — done (Claude, 2026-09-01)
+
+`packages/shared/src/vault.ts`: la forma de lo que viaja cifrado, separada de la
+criptografía. Nivel `cloud` | `private` sin estado intermedio, lista cerrada de
+propósitos, registro privado **sin ningún campo donde quepa texto en claro**,
+medio con clave de objeto opaca, puente de Telegram apagado por defecto,
+invitaciones y permisos por conversación.
+
+`findPlaintextLeaks()` / `assertNoPlaintextLeak()` convierten en código
+ejecutable la regla de que una conversación privada no envía contenido en claro,
+y la ejecutan los dos lados. Exime los valores que ya son un sobre válido.
+
+35 pruebas. `npm run check` exit 0: 100 archivos, 1.764 superadas.
+
+### Xavira — API verificada en su documentación pública
+
+`GET /v1/generations/:id` permite **polling**, y el callback es opcional. Luxy
+no necesita exponer ningún endpoint público: el agente pregunta y descarga
+directo, y el Gateway no ve el resultado. Sin esto, la premisa de `F9` no se
+sostendría para vídeo. Detalle en `CHANGELOG-WORK.md`.
+
+Siguiente paso exacto: `F9.3` — `VaultService` en el proceso principal de
+Electron. Desbloqueo, bloqueo, auto-bloqueo por inactividad, y la llave maestra
+sólo en memoria del main: nunca al renderer, nunca a disco sin envolver.
 
 ---
 

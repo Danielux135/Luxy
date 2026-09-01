@@ -1,5 +1,68 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-09-01 13:10 — Claude — F9.2, contrato de la bóveda
+
+- Estado anterior: `F9.1` cerrado y commiteado (`524a8da`).
+- Objetivo: la **forma** de lo que viaja cifrado, en `packages/shared`, separada
+  de la criptografía que vive en `@luxy/vault-crypto`.
+- Archivos creados: `packages/shared/src/vault.ts` y `vault.test.ts`.
+- Archivos modificados: `packages/shared/src/index.ts` (export),
+  `packages/shared/package.json` (devDependency), `packages/shared/CLAUDE.md`.
+- Contenido: nivel de privacidad (`cloud` | `private`, sin estado intermedio),
+  lista cerrada de propósitos, sobre sellado, parámetros de Argon2 con topes,
+  envoltura de llave maestra con refinamiento por método, registro privado,
+  medio privado con clave de objeto opaca, puente de Telegram apagado por
+  defecto, invitaciones y permisos por conversación.
+- Dos decisiones de diseño que conviene registrar:
+  1. **El registro privado no tiene ningún campo donde quepa texto en claro.**
+     No hay `title`, ni `prompt`, ni `mimeType`. No se promete no enviarlos: no
+     hay por dónde. Una prueba recorre las claves del esquema y lo comprueba.
+  2. `findPlaintextLeaks()` / `assertNoPlaintextLeak()`: un guardián ejecutable
+     que recorre en profundidad un objeto destinado al gateway y devuelve los
+     campos prohibidos que lleva. Existe porque una regla escrita en un
+     documento se rompe sola; ésta se puede ejecutar en los dos lados.
+- Un fallo propio que encontró la prueba: el registro privado tenía un campo
+  `memory` que contiene un **sobre cifrado**, pero `memory` está en la lista de
+  campos prohibidos, así que el guardián marcaba como fuga un registro correcto.
+  Corregido por partida doble: el campo pasa a llamarse `sealedMemory`, y
+  `findPlaintextLeaks` exime los valores que ya son un sobre válido — lo que
+  importa es el contenido, no cómo se llame el campo. Hay prueba de que algo que
+  sólo *parece* un sobre sí cuenta como fuga.
+- Acoplamiento verificado: `shared` importa `@luxy/vault-crypto` **sólo como
+  dependencia de desarrollo**, y una prueba sella de verdad y valida el
+  resultado contra el esquema. Si las dos definiciones se separan, falla. El
+  código de producción de `shared` sigue sin cifrar ni descifrar nada, así que
+  la regla de pureza del paquete se mantiene.
+- Comandos ejecutados:
+  - `npx vitest run packages/shared/src/vault.test.ts` → **35/35**.
+  - `npm run check` → **exit 0**; 100 archivos, 1.764 superadas, 9 omitidas.
+- Estado nuevo: `F9.2` **done**.
+- Siguiente paso exacto: `F9.3`, `VaultService` en el proceso principal de
+  Electron: desbloqueo, bloqueo, auto-bloqueo y la llave sólo en memoria.
+
+### 2026-09-01 13:10 — Claude — hallazgo sobre la API de Xavira
+
+Daniel indicó que probará `xavira.ai`. Consultada su documentación pública
+(`xavira.ai/docs`), **sin registrarse ni usar credenciales**:
+
+- base `https://api.xavira.ai`, autenticación `Authorization: Bearer xav_live_…`;
+- `POST /v1/characters` — personaje persistente con identidad consistente;
+- `POST /v1/images:generate` — responde **201** con `output_url` si termina, o
+  **202** con `poll_url` si tarda. El adaptador debe soportar los dos;
+- `POST /v1/videos:generate` — siempre **202**, asíncrono;
+- `GET /v1/generations/:id` — **polling explícito, y el callback es opcional**;
+- spec en `https://api.xavira.ai/openapi.yaml`.
+
+**Lo importante para el diseño**: que el polling sea suficiente significa que
+Luxy no necesita exponer ningún endpoint público. El agente pregunta y descarga
+directamente; el Gateway no interviene y por tanto no ve el resultado. Encaja
+con la decisión de `docs/decisions/0001` de usar polling en vez de push. Si el
+callback fuese obligatorio, la única URL pública sería el Worker y el contenido
+habría pasado por él, rompiendo la premisa de `F9`.
+
+Riesgo pendiente: `output_url` es un enlace vivo al contenido. No puede
+guardarse en claro; por eso `outputUrl` ya está en `FORBIDDEN_PLAINTEXT_FIELDS`.
+
 ### 2026-09-01 13:05 — Claude — F9.1, paquete de criptografía de la bóveda
 
 - Estado anterior: `F9.0` cerrado (línea base verde). `F9-VAULT-001` sin empezar.

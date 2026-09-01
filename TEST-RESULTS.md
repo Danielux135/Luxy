@@ -1,5 +1,14 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-01 — Windows 11 (equipo `oscar`) — F9.2
+
+- Rama `luxy/f9-1-vault-crypto`, sobre `524a8da`.
+- `npx vitest run packages/shared/src/vault.test.ts`: **35/35**.
+- **`npm run check`: exit 0.** Lint, typecheck y build correctos.
+  Suite: **100 archivos, 1.764 superadas, 9 omitidas, 0 fallos**.
+- Sin llamadas a APIs reales. La documentación de Xavira se consultó como página
+  pública, sin registro ni credenciales.
+
 ### 2026-09-01 — Windows 11 (equipo `oscar`) — F9.1
 
 - Rama aislada `luxy/f9-1-vault-crypto`, base `main` @ `00a9cc1`.

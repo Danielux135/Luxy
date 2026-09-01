@@ -22,7 +22,8 @@ Si una función necesita disco o red, **no va aquí**. Va en `apps/agent` o
 |---|---|
 | `constants.ts` | valores compartidos; los enums nacen aquí |
 | `types.ts` | tipos de dominio e interfaces de proveedor |
-| `schemas.ts` | **todos** los esquemas Zod |
+| `schemas.ts` | esquemas Zod del contrato gateway/agente |
+| `vault.ts` | esquemas Zod de la boveda privada (F9) |
 | `redact.ts` | redacción de secretos y entorno seguro |
 | `paths.ts` | validación de rutas sin tocar disco |
 | `machines.ts` | selección de máquina, leases |
@@ -55,6 +56,18 @@ Así las pruebas fijan el tiempo y el azar sin `vi.mock`.
 
 **Excepción justificada:** `generateShortId` usa `crypto.getRandomValues`, que
 existe en ambos entornos.
+
+## Dónde va cada esquema Zod
+
+La mayoría van en `schemas.ts`. Hay tres excepciones, todas por cohesión de
+dominio: `models/types.ts`, `models/evaluations.ts` y `vault.ts`.
+
+`vault.ts` está separado porque describe la **forma** de lo que viaja cifrado,
+no el contrato entre gateway y agente. La criptografía correspondiente vive en
+`@luxy/vault-crypto`, que este paquete importa **sólo como dependencia de
+desarrollo**, para que una prueba verifique que las dos definiciones no se
+separan. El código de producción de `shared` no cifra ni descifra nada: eso
+seguiría valiendo aunque un día se importase en el Worker.
 
 ## Los esquemas Zod son el contrato
 
