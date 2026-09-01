@@ -29,3 +29,4 @@ export * from './padding.js';
 export * from './kdf.js';
 export * from './master-key.js';
 export * from './recipient.js';
+export * from './account.js';

@@ -3,6 +3,7 @@ export * from './constants.js';
 export * from './types.js';
 export * from './schemas.js';
 export * from './vault.js';
+export * from './vault-auth.js';
 export * from './vault-payloads.js';
 export * from './vault-prompt.js';
 export * from './response-outcome.js';
