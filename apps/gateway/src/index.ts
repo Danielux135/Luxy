@@ -42,6 +42,12 @@ import {
   handleStudioJobs,
   handleStudioOptions,
 } from './handlers/studio.js';
+import {
+  handleVaultConversations,
+  handleVaultDelete,
+  handleVaultPull,
+  handleVaultPush,
+} from './handlers/vault.js';
 import { redact } from '@luxy/shared';
 
 type Deps = ApiDeps & WebhookDeps;
@@ -90,6 +96,17 @@ const router = new Router<Deps>()
   )
   .post('/api/studio/jobs/:jobId/feedback', (request, deps, params) =>
     handleStudioJobFeedback(request, deps, params),
+  )
+  // boveda privada: el gateway transporta ciphertext, no lo lee
+  .post('/api/vault/records', (request, deps, params) => handleVaultPush(request, deps, params))
+  .get('/api/vault/conversations', (request, deps, params) =>
+    handleVaultConversations(request, deps, params),
+  )
+  .get('/api/vault/conversations/:conversationId', (request, deps, params) =>
+    handleVaultPull(request, deps, params),
+  )
+  .post('/api/vault/conversations/:conversationId/delete', (request, deps, params) =>
+    handleVaultDelete(request, deps, params),
   )
   .post('/api/studio/jobs/:jobId/action', (request, deps, params) =>
     handleStudioJobAction(request, deps, params),

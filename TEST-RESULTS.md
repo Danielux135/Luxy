@@ -1,5 +1,15 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-01 — Windows 11 (equipo `oscar`) — F9.6 y F9.15
+
+- **`npm run check`: exit 0.** Suite: **110 archivos, 1.924 superadas, 9
+  omitidas, 0 fallos**.
+- `migrations.test.ts` pasa a 35 pruebas: las tres tablas nuevas entran en las
+  listas de tablas exigidas y de RLS, más tres invariantes propias de la bóveda
+  (sin columnas en claro, RLS forzado, enum de trabajos intacto).
+- **La migración 0007 NO se ha ejecutado contra ningún Postgres.** Validación
+  estructural únicamente, como el resto (riesgo conocido nº3).
+
 ### 2026-09-01 — Windows 11 (equipo `oscar`) — F9.8
 
 - **`npm run check`: exit 0.** Suite: **109 archivos, 1.910 superadas, 9

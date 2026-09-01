@@ -15,7 +15,7 @@ import { argon2idAsync } from '@noble/hashes/argon2.js';
 import { hkdf } from '@noble/hashes/hkdf.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { KEY_BYTES } from './envelope.js';
-import { VaultCryptoError, utf8 } from './bytes.js';
+import { VaultCryptoError, toBase64Url, utf8 } from './bytes.js';
 
 /**
  * coste de Argon2id: la SEGUNDA opcion recomendada por RFC 9106 §4.
@@ -110,6 +110,7 @@ export async function deriveKeyEncryptionKey(
  */
 export const KEY_DOMAINS = [
   'index',
+  'vaultid',
   'conversation',
   'memory',
   'media',
@@ -143,4 +144,25 @@ export function deriveSubkey(
   // la sal de HKDF no aporta aqui: la entrada ya es una llave uniforme de 256
   // bits. La separacion real la hace `info`.
   return hkdf(sha256, masterKey, undefined, info, KEY_BYTES);
+}
+
+/**
+ * identificador publico de la boveda.
+ *
+ * Existe por un problema concreto: la unica identidad de Luxy es el token de
+ * maquina, y con eso los registros de un portatil no serian visibles desde el
+ * de sobremesa. Hace falta algo que diga "estas dos maquinas abren la MISMA
+ * boveda" sin inventar cuentas de usuario.
+ *
+ * Se deriva de la llave maestra con HKDF, asi que dos equipos que abren la
+ * misma boveda obtienen el mismo valor sin coordinarse. Y como HKDF no se
+ * invierte, el servidor puede guardarlo sin aprender nada de la llave.
+ *
+ * Lo que SI revela, y se asume: agrupa. El servidor ve que N registros son de
+ * la misma boveda. Ya lo veria por el patron de subidas.
+ *
+ * AGRUPA, NO AUTORIZA. Quien autoriza sigue siendo el token de maquina.
+ */
+export function deriveVaultId(masterKey: Uint8Array): string {
+  return toBase64Url(deriveSubkey(masterKey, 'vaultid'));
 }

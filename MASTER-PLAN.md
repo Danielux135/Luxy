@@ -288,7 +288,7 @@ interfaz: *workspace*, *privacy*, *vault*, *invitado en solo lectura*.
 | F9.3 | `VaultService` en el proceso principal: desbloqueo, bloqueo, auto-bloqueo | done |
 | F9.4 | Cifrado en cliente antes de subir, incluidas miniaturas | done |
 | F9.5 | `run_local_turn` en `host-protocol`: el turno privado no pasa por la cola | done |
-| F9.6 | Migración de columnas de ciphertext; el enum `luxy_job_status` no se toca | planned |
+| F9.6 | Migración de columnas de ciphertext; el enum `luxy_job_status` no se toca | implemented |
 | F9.7 | Sincronización entre equipos por emparejamiento y recovery key | planned |
 | F9.8 | Higiene de logs, cachés, miniaturas y notificaciones | done |
 | F9.9 | Puente explícito por conversación, apagado por defecto | planned |
@@ -297,7 +297,7 @@ interfaz: *workspace*, *privacy*, *vault*, *invitado en solo lectura*.
 | F9.12 | `D-039`…, `docs/PRIVACY.md`, `SECURITY.md`, `threat-model.md` | planned |
 | F9.13 | Interfaz de la bóveda en Studio: crear, abrir, cerrar, clave de recuperación | done |
 | F9.14 | El proceso principal envía `run_local_turn` y muestra el progreso | done |
-| F9.15 | Endpoints del gateway para registros privados y permisos | planned |
+| F9.15 | Endpoints del gateway para registros privados y permisos | implemented |
 | F9.16 | Cliente de almacén de objetos para los blobs cifrados | planned |
 | F9.17 | Adaptador de Xavira: personajes, imagen, vídeo, sondeo y descarga | implemented |
 

@@ -291,3 +291,53 @@ export function assertNoPlaintextLeak(payload: unknown): void {
     );
   }
 }
+
+// -----------------------------------------------------------------------------
+// sincronizacion entre equipos
+// -----------------------------------------------------------------------------
+
+/**
+ * identificador de boveda: 32 bytes derivados con HKDF, en base64url.
+ *
+ * agrupa los registros de una misma boveda sin que el servidor sepa nada de la
+ * llave. AGRUPA, NO AUTORIZA: quien autoriza sigue siendo el token de maquina.
+ */
+export const vaultIdSchema = base64UrlSchema.length(43);
+
+export const vaultSyncPushRequestSchema = z.object({
+  vaultId: vaultIdSchema,
+  conversationId: z.string().uuid(),
+  /** lote de turnos ya sellados. el servidor valida su forma, nunca su contenido */
+  records: z.array(privateRecordSchema).min(1).max(200),
+});
+
+export const vaultSyncPullQuerySchema = z.object({
+  vaultId: vaultIdSchema,
+  /** solo lo posterior a esta marca, para no rebajar todo cada vez */
+  since: z.string().datetime().optional(),
+  limit: z.coerce.number().int().min(1).max(500).default(200),
+});
+
+export const vaultSyncConversationSchema = z.object({
+  conversationId: z.string().uuid(),
+  turnCount: z.number().int().min(0),
+  updatedAt: z.string(),
+});
+
+export const vaultSyncListResponseSchema = z.object({
+  conversations: z.array(vaultSyncConversationSchema),
+});
+
+export const vaultSyncPullResponseSchema = z.object({
+  records: z.array(privateRecordSchema),
+});
+
+export const vaultSyncPushResponseSchema = z.object({
+  stored: z.number().int().min(0),
+  /** los que ya estaban: reenviar un lote no duplica nada */
+  skipped: z.number().int().min(0),
+});
+
+export type VaultSyncPushRequest = z.infer<typeof vaultSyncPushRequestSchema>;
+export type VaultSyncPullQuery = z.infer<typeof vaultSyncPullQuerySchema>;
+export type VaultSyncConversation = z.infer<typeof vaultSyncConversationSchema>;

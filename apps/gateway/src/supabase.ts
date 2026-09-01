@@ -113,6 +113,26 @@ export class SupabaseClient {
     });
   }
 
+  /**
+   * borra filas.
+   *
+   * PostgREST rechaza un DELETE sin filtros, lo cual es una red de seguridad
+   * util; aun asi se comprueba aqui, para que el error diga que pasa en vez de
+   * llegar como un 400 del servidor.
+   */
+  async delete(table: string, filters: Record<string, string>): Promise<number> {
+    if (Object.keys(filters).length === 0) {
+      throw new SupabaseError('un borrado sin filtros borraria la tabla entera', 400, '');
+    }
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(filters)) params.append(key, value);
+    const rows = await this.request<unknown[]>(`/${table}?${params.toString()}`, {
+      method: 'DELETE',
+      headers: { Prefer: 'return=representation' },
+    });
+    return Array.isArray(rows) ? rows.length : 0;
+  }
+
   async update<T>(table: string, filters: Record<string, string>, values: unknown): Promise<T[]> {
     const params = new URLSearchParams(filters);
     return this.request<T[]>(`/${table}?${params.toString()}`, {
@@ -147,5 +167,7 @@ export class SupabaseClient {
 
 // helper de filtros postgrest, para no repetir la sintaxis por todo el codigo
 export const eq = (value: string | number): string => `eq.${value}`;
+/** mayor o igual: se usa para traer solo lo posterior a una marca de tiempo */
+export const gte = (value: string | number): string => `gte.${value}`;
 export const isNull = (): string => 'is.null';
 export const inList = (values: Array<string | number>): string => `in.(${values.join(',')})`;

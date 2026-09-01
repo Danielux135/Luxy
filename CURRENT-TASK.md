@@ -237,10 +237,30 @@ Lo que YA se puede usar: crear la bóveda, abrirla, cerrarla, conversar en
 privado y que se guarde cifrado en este equipo.
 Lo que NO: sincronizar entre equipos, y generar imágenes o vídeo.
 
-Siguiente paso exacto: `F9.15` — endpoints del gateway para registros privados.
-Es lo que convierte el almacén local de `F9.14` en sincronización real, y los
-registros que ya se escriben son exactamente los que hay que subir, así que no
-hay formato que rehacer. Requiere antes `F9.6`, la migración.
+### F9.6 y F9.15 — implemented, sin ejecución real (2026-09-01)
+
+Migración `0007_luxy_vault.sql` y endpoints de sincronización.
+
+El problema de fondo era **de quién es un registro privado**: con sólo el token
+de máquina, lo del portátil no se ve desde el sobremesa. Resuelto con
+`vault_id`, derivado de la llave maestra con HKDF: dos equipos que abren la
+misma bóveda obtienen el mismo valor sin coordinarse, y el servidor lo guarda
+sin aprender nada de la llave.
+
+**Límite escrito en la migración**: el `vault_id` agrupa, **no autoriza**. Si
+algún día entra `F9.10` (usuarios), hay que revisarlo antes de abrirlo a nadie.
+
+El gateway ejecuta `assertNoPlaintextLeak` sobre cada registro antes de
+guardarlo, aunque el escritorio ya lo compruebe: un servidor que confía en que
+el cliente hizo los deberes acaba guardando lo que no debe.
+
+**La migración no se ha ejecutado contra ningún Postgres** (riesgo conocido nº3)
+y **el escritorio todavía no sincroniza**: los endpoints existen y nadie los
+llama.
+
+Siguiente paso exacto: el cliente de sincronización en el escritorio — subir lo
+nuevo y bajar lo que falte, usando los registros que `F9.14` ya escribe. O
+`F9.16` (almacén de objetos) si se prefiere cerrar antes el camino de medios.
 
 ---
 

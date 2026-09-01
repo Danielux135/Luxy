@@ -1,7 +1,7 @@
 // acceso a datos: traduce entre las filas de postgres y los tipos compartidos
 import { generateShortId } from '@luxy/shared';
-import type { Job, JobOrigin, JobStatus, Machine, ProviderId } from '@luxy/shared';
-import { type SupabaseClient, eq, inList } from './supabase.js';
+import type { Job, JobOrigin, JobStatus, Machine, PrivateRecord, ProviderId } from '@luxy/shared';
+import { type SupabaseClient, eq, gte, inList } from './supabase.js';
 
 interface MachineRow {
   id: string;
@@ -621,5 +621,97 @@ export class Repository {
       },
       false,
     );
+  }
+
+  // ---------------------------------------------------------------------------
+  // boveda privada
+  //
+  // Todo lo que pasa por aqui esta cifrado. El repositorio mueve filas; no hay
+  // ninguna operacion que pueda leer el contenido, porque no tiene la llave.
+  // ---------------------------------------------------------------------------
+
+  /** crea la conversacion si no existe. los turnos dependen de ella */
+  async ensureVaultConversation(vaultId: string, conversationId: string): Promise<void> {
+    await this.db.insertIfAbsent(
+      'vault_conversations',
+      { conversation_id: conversationId, vault_id: vaultId },
+      'conversation_id',
+    );
+  }
+
+  /**
+   * inserta turnos sin duplicar.
+   *
+   * `resolution=ignore-duplicates` sobre (vault_id, conversation_id, sequence):
+   * reenviar un lote tras un corte de red no crea copias. Devuelve cuantos eran
+   * nuevos de verdad, para poder distinguir "subido" de "ya estaba".
+   */
+  async insertVaultRecords(vaultId: string, records: PrivateRecord[]): Promise<number> {
+    if (records.length === 0) return 0;
+    const rows = records.map((record) => ({
+      record_id: record.recordId,
+      vault_id: vaultId,
+      conversation_id: record.conversationId,
+      sequence: record.sequence,
+      content: record.content,
+      sealed_memory: record.sealedMemory,
+      created_at: record.createdAt,
+    }));
+
+    const inserted = await this.db.insert<{ record_id: string }>(
+      'vault_records?on_conflict=vault_id,conversation_id,sequence',
+      rows,
+    ).catch(() => [] as { record_id: string }[]);
+    return inserted.length;
+  }
+
+  async listVaultConversations(query: {
+    vaultId: string;
+    since?: string;
+    limit: number;
+  }): Promise<{ conversation_id: string; turn_count: number; updated_at: string }[]> {
+    return this.db.select('vault_conversations', {
+      columns: 'conversation_id,turn_count,updated_at',
+      filters: {
+        vault_id: eq(query.vaultId),
+        ...(query.since === undefined ? {} : { updated_at: gte(query.since) }),
+      },
+      order: 'updated_at.desc',
+      limit: query.limit,
+    });
+  }
+
+  async listVaultRecords(
+    vaultId: string,
+    conversationId: string,
+    limit: number,
+  ): Promise<
+    {
+      record_id: string;
+      vault_id: string;
+      conversation_id: string;
+      sequence: number;
+      content: unknown;
+      sealed_memory: unknown;
+      created_at: string;
+    }[]
+  > {
+    return this.db.select('vault_records', {
+      columns: 'record_id,vault_id,conversation_id,sequence,content,sealed_memory,created_at',
+      filters: { vault_id: eq(vaultId), conversation_id: eq(conversationId) },
+      // por secuencia y no por fecha: el orden de la conversacion lo da la
+      // secuencia, y dos turnos pueden compartir marca de tiempo
+      order: 'sequence.asc',
+      limit,
+    });
+  }
+
+  /** borra la conversacion; la cascada se lleva turnos y medios */
+  async deleteVaultConversation(vaultId: string, conversationId: string): Promise<boolean> {
+    const removed = await this.db.delete('vault_conversations', {
+      vault_id: eq(vaultId),
+      conversation_id: eq(conversationId),
+    });
+    return removed > 0;
   }
 }

@@ -67,6 +67,9 @@ describe('migraciones - tablas exigidas', () => {
     'job_events',
     'approvals',
     'provider_usage',
+    'vault_records',
+    'vault_media',
+    'vault_conversations',
   ];
 
   it('crea todas las tablas del diseño', () => {
@@ -105,6 +108,9 @@ describe('migraciones - seguridad', () => {
       'job_events',
       'approvals',
       'provider_usage',
+      'vault_records',
+      'vault_media',
+      'vault_conversations',
     ];
     for (const tabla of tablas) {
       expect(allSql, `RLS no activado en ${tabla}`).toMatch(
@@ -129,6 +135,35 @@ describe('migraciones - seguridad', () => {
     expect(allSql).toMatch(/token_hash\s+text not null/i);
     // no debe existir ninguna columna que guarde el token en claro
     expect(allSql).not.toMatch(/\btoken\s+text\b/i);
+  });
+
+  it('la boveda no tiene ninguna columna donde quepa texto en claro', () => {
+    const vault = migrations.find((m) => m.name.includes('vault'));
+    expect(vault).toBeDefined();
+    // si alguien añade una de estas columnas "para poder buscar", el servidor
+    // dejaria de ser incapaz de leer y pasaria a ser alguien que promete no leer
+    for (const columna of ['title', 'prompt', 'mime_type', 'output_url', 'summary']) {
+      expect(vault!.sql, `la boveda no puede tener columna ${columna}`).not.toMatch(
+        new RegExp(`^\\s*${columna}\\s+(text|jsonb|varchar)`, 'im'),
+      );
+    }
+  });
+
+  it('la boveda fuerza RLS, como los tokens de maquina', () => {
+    for (const tabla of ['vault_records', 'vault_media', 'vault_conversations']) {
+      expect(allSql, `falta force row level security en ${tabla}`).toMatch(
+        new RegExp(`alter table public\\.${tabla}\\s+force row level security`, 'i'),
+      );
+    }
+  });
+
+  it('el enum de estados de trabajo no se toca en la migracion de boveda', () => {
+    const vault = migrations.find((m) => m.name.includes('vault'));
+    // un registro de boveda no es un trabajo y no pasa por la cola. Se prohibe
+    // MODIFICARLO, no nombrarlo: el comentario que explica por que no se toca es
+    // justo lo que hay que conservar.
+    expect(vault!.sql).not.toMatch(/(alter|create|drop)\s+type[\s\S]{0,80}luxy_job_status/i);
+    expect(vault!.sql).not.toMatch(/add\s+value[\s\S]{0,40}luxy_job_status/i);
   });
 
   it('no contiene ningun secreto real', () => {

@@ -1,5 +1,65 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-09-01 17:32 — Claude — F9.6 y F9.15, migración y endpoints de sincronización
+
+- **El problema de fondo que había que resolver primero**: ¿de quién es un
+  registro privado? La única identidad de Luxy es el token de máquina, y con eso
+  los registros de un portátil no serían visibles desde el de sobremesa. Sin
+  resolverlo, «sincronización» no significa nada.
+- Solución: **`vault_id`**, derivado de la llave maestra con HKDF
+  (`deriveVaultId`). Dos equipos que abren la misma bóveda obtienen el mismo
+  valor sin coordinarse, y como HKDF no se invierte el servidor puede guardarlo
+  sin aprender nada de la llave. No hace falta inventar cuentas de usuario, así
+  que no toca `D-001`.
+- **Límite escrito en la propia migración para que no se olvide**: el `vault_id`
+  **agrupa, no autoriza**. Quien autoriza sigue siendo el token de máquina. Una
+  máquina con token válido podría pedir los registros de cualquier `vault_id`
+  que conozca; no podría descifrarlos, pero los tendría. Es aceptable mientras
+  valga `D-001` (un solo usuario). Si algún día entra `F9.10`, hay que revisarlo
+  **antes** de abrirlo a nadie más.
+- `F9.6` — migración `0007_luxy_vault.sql`:
+  - tres tablas: `vault_records`, `vault_media`, `vault_conversations`;
+  - **el enum `luxy_job_status` no se toca**, con prueba que lo verifica
+    prohibiendo modificarlo y no nombrarlo, porque el comentario que explica por
+    qué no se toca es justo lo que hay que conservar;
+  - idempotencia por vault, conversación y secuencia, mismo patrón que los
+    eventos de trabajo: reenviar un lote tras un corte de red no duplica. Sin
+    esa garantía, la única opción segura sería no reintentar;
+  - borrado en cascada: sin él, borrar una conversación dejaría ciphertext
+    huérfano ocupando espacio para siempre;
+  - RLS activo **y forzado** en las tres, como `machine_tokens`. Ninguna
+    política: sin políticas y con RLS, nadie que no sea `service_role` ve una
+    fila;
+  - `vault_conversations` **no tiene columna de título**: va cifrado dentro de
+    cada turno. Prueba nueva que falla si alguien añade `title`, `prompt`,
+    `mime_type`, `output_url` o `summary` a la migración de bóveda;
+  - un fallo mío corregido antes de cerrar: el trigger usaba `new` también en
+    `DELETE`, donde es nulo. Ahora distingue por `tg_op`.
+- `F9.15` — endpoints y repositorio:
+  - cuatro rutas bajo `/api/vault`, todas con autenticación de máquina;
+  - **el gateway ejecuta `assertNoPlaintextLeak` sobre cada registro** antes de
+    guardarlo. El escritorio ya lo comprueba, pero un servidor que confía en que
+    el cliente hizo los deberes acaba guardando lo que no debe el día que
+    alguien cambia el cliente. Mismo razonamiento por el que el agente revalida
+    las aprobaciones;
+  - el log de subida registra la bóveda y cuántos registros, **nunca** el
+    identificador de conversación ni nada del contenido;
+  - añadidos `delete()` y `gte()` al cliente de Supabase, que no los tenía.
+- Comandos ejecutados: `npm run check` → **exit 0**; 110 archivos, 1.924
+  superadas, 9 omitidas.
+- Riesgos o límites:
+  - **la migración NO se ha ejecutado** contra ningún Postgres. Es el riesgo
+    conocido nº3 del proyecto y `0007` lo hereda entero.
+  - las pruebas del gateway verifican el **contrato**, no los manejadores de
+    extremo a extremo, porque van envueltos en `withMachineAuth`. Queda sin
+    verificar que la idempotencia y la cascada funcionen de verdad. Está escrito
+    en la cabecera del archivo de pruebas.
+  - **el escritorio todavía no sincroniza**: los endpoints existen y nadie los
+    llama.
+- Estado nuevo: `F9.6` y `F9.15` **implemented**, sin ejecución real.
+- Siguiente paso exacto: el cliente de sincronización en el escritorio, o
+  `F9.16` si se prefiere cerrar antes el camino de medios.
+
 ### 2026-09-01 17:15 — Claude — sincronización documental atrasada
 
 - Motivo: Daniel preguntó si todo el plan seguía documentado. Al comprobarlo,
