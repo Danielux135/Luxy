@@ -1645,3 +1645,24 @@ input[aria-invalid='true'] {
   resize: vertical;
   margin-bottom: 10px;
 }
+
+.vault-media {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.vault-media__item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+}
+
+.vault-media__preview {
+  max-width: 100%;
+  max-height: 46vh;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}

@@ -1,5 +1,44 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-09-01 17:50 — Claude — medios conectados a la interfaz
+
+- Estado anterior: `F9.16` local implementado pero sin nadie que lo llamara.
+- Objetivo: adjuntar y ver imágenes y vídeos dentro de una conversación privada.
+- Archivos modificados: `shared/channels.ts`, `shared/ipc.ts`,
+  `preload/index.ts`, `main/ipc/handlers.ts`, `main/index.ts`,
+  `renderer/useVault.ts`, `renderer/pages/Vault.tsx`, `renderer/styles.css`.
+- **La ruta del archivo la elige el usuario en un diálogo nativo del proceso
+  principal.** El renderer no propone ninguna. Si pudiera, tendría una vía para
+  leer cualquier archivo del equipo a través de Luxy.
+- **Los bytes descifrados no se guardan en el estado del renderer.** Se piden al
+  abrir y se sueltan al cerrar. Mantener imágenes descifradas en memoria las
+  dejaría vivas después de cerrar la bóveda, que es justo lo contrario de lo que
+  hace cerrarla.
+- **Tope de previsualización: 20 MB.** Los bytes cruzan el IPC como base64, que
+  infla un 33%; un vídeo de cientos de megas por ese camino congela la ventana.
+  Por encima del tope se devuelve el tipo pero no el contenido, y la interfaz
+  dice por qué: *«el archivo está guardado y cifrado; falta la parte que
+  reproduce vídeo sin descifrarlo entero en memoria»*. Prefiero un aviso honesto
+  a una previsualización que cuelga la aplicación.
+- Borrar una conversación ahora borra **primero los medios** y después la
+  conversación. Si sólo se borrara la conversación, sus archivos cifrados
+  quedarían ocupando disco sin nada que los referenciara.
+- Un detalle que corrigió el lint y mejoró el código: estaba partiendo la ruta
+  con una expresión regular para sacar el nombre del archivo. `basename` de
+  `node:path` hace eso mismo sin regex y sin errores de escape.
+- Comandos ejecutados:
+  - `npm run check` → **exit 0**; 111 archivos, 1.941 superadas, 9 omitidas.
+- Riesgos o límites:
+  - **sin confirmación manual**: no se ha adjuntado ni visto un medio real.
+  - las pruebas cubren el almacén (17) y el contrato; la interfaz de medios no
+    tiene pruebas propias, igual que el resto del renderer.
+  - el vídeo grande sigue sin poder verse. Es la misma limitación de antes,
+    ahora al menos **visible para el usuario** en vez de silenciosa.
+  - no hay generación de medios: esto adjunta archivos que ya tienes.
+- Estado nuevo: medios conectados de extremo a extremo en local.
+- Siguiente paso exacto: el cliente de sincronización que use los endpoints de
+  `F9.15`, o `F9.12` (documentación de privacidad).
+
 ### 2026-09-01 17:40 — Claude — F9.16, almacén de medios cifrados
 
 - Estado anterior: `F9.6` y `F9.15` implementados. Daniel pidió cerrar primero

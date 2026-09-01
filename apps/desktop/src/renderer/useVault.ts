@@ -45,6 +45,15 @@ export interface PrivateConversation {
   updatedAt: string;
 }
 
+export interface PrivateMediaItem {
+  mediaId: string;
+  mimeType: string;
+  displayName: string | null;
+  hasThumbnail: boolean;
+  /** false si es demasiado grande para previsualizar por ahora */
+  previewable: boolean;
+}
+
 export interface VaultController {
   status: VaultStatusView;
   loading: boolean;
@@ -71,6 +80,10 @@ export interface VaultController {
     projectAlias: string;
   }) => Promise<boolean>;
   removeConversation: (conversationId: string) => Promise<void>;
+  media: PrivateMediaItem[];
+  attaching: boolean;
+  attachMedia: () => Promise<void>;
+  openMedia: (mediaId: string) => Promise<string | null>;
   acknowledgeRecoveryKey: () => void;
   clearError: () => void;
 }
@@ -86,6 +99,8 @@ export function useVault(): VaultController {
   const [openConversationId, setOpenConversationId] = useState<string | null>(null);
   const [turns, setTurns] = useState<PrivateTurn[]>([]);
   const [sending, setSending] = useState(false);
+  const [media, setMedia] = useState<PrivateMediaItem[]>([]);
+  const [attaching, setAttaching] = useState(false);
   const mounted = useRef(true);
 
   const refresh = useCallback(async (): Promise<void> => {
@@ -98,6 +113,7 @@ export function useVault(): VaultController {
       if (!result.value.unlocked) {
         setConversations([]);
         setTurns([]);
+        setMedia([]);
         setOpenConversationId(null);
       }
     }
@@ -219,8 +235,59 @@ export function useVault(): VaultController {
       }
       const result = await window.luxy.readVaultConversation(conversationId);
       if (mounted.current && result.ok) setTurns(result.value.turns);
+      const mediaResult = await window.luxy.listVaultMedia(conversationId);
+      if (mounted.current && mediaResult.ok) setMedia(mediaResult.value.media);
     },
     [],
+  );
+
+  const reloadMedia = useCallback(async (): Promise<void> => {
+    if (openConversationId === null) return;
+    const result = await window.luxy.listVaultMedia(openConversationId);
+    if (mounted.current && result.ok) setMedia(result.value.media);
+  }, [openConversationId]);
+
+  const attachMedia = useCallback(async (): Promise<void> => {
+    if (openConversationId === null) {
+      setError('abre o empieza una conversacion antes de adjuntar');
+      return;
+    }
+    setAttaching(true);
+    setError(null);
+    try {
+      const result = await window.luxy.attachVaultMedia(openConversationId);
+      if (!result.ok) {
+        setError(result.error);
+        setHint(result.hint);
+        return;
+      }
+      await reloadMedia();
+    } finally {
+      if (mounted.current) setAttaching(false);
+    }
+  }, [openConversationId, reloadMedia]);
+
+  /**
+   * devuelve una data URL con los bytes descifrados, o null si el archivo es
+   * demasiado grande para previsualizarlo todavia.
+   *
+   * No se cachea a proposito: mantener imagenes descifradas en el estado del
+   * renderer las dejaria vivas despues de cerrar la boveda.
+   */
+  const openMedia = useCallback(
+    async (mediaId: string): Promise<string | null> => {
+      if (openConversationId === null) return null;
+      const result = await window.luxy.readVaultMedia({
+        conversationId: openConversationId,
+        mediaId,
+      });
+      if (!result.ok) {
+        setError(result.error);
+        return null;
+      }
+      return result.value.dataUrl;
+    },
+    [openConversationId],
   );
 
   const send = useCallback(
@@ -286,6 +353,10 @@ export function useVault(): VaultController {
     openConversation,
     send,
     removeConversation,
+    media,
+    attaching,
+    attachMedia,
+    openMedia,
     acknowledgeRecoveryKey: () => setRecoveryKey(null),
     clearError: () => setError(null),
   };

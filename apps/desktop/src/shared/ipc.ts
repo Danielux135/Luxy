@@ -250,6 +250,51 @@ export const vaultConversationSendResultSchema = z.object({
   error: z.string().nullable(),
 });
 
+/**
+ * tope de un archivo que se puede previsualizar.
+ *
+ * los bytes descifrados cruzan el IPC como texto base64, que infla un 33%. Un
+ * video de cientos de megas por ese camino congela la ventana, asi que por
+ * encima de este tope se devuelven los metadatos y no el contenido. La solucion
+ * real es un protocolo propio de Electron que sirva el flujo; no existe todavia
+ * y la interfaz lo dice en vez de fingir que carga.
+ */
+export const VAULT_PREVIEW_MAX_BYTES = 20 * 1024 * 1024;
+
+export const vaultMediaAttachArgsSchema = z.object({
+  conversationId: conversationIdSchema,
+});
+
+export const vaultMediaListArgsSchema = z.object({
+  conversationId: conversationIdSchema,
+});
+
+export const vaultMediaReadArgsSchema = z.object({
+  conversationId: conversationIdSchema,
+  mediaId: z.string().uuid(),
+});
+
+export const vaultMediaItemSchema = z.object({
+  mediaId: z.string(),
+  mimeType: z.string(),
+  displayName: z.string().nullable(),
+  byteSize: z.number().int().min(0),
+  hasThumbnail: z.boolean(),
+  /** false cuando pasa de VAULT_PREVIEW_MAX_BYTES */
+  previewable: z.boolean(),
+});
+
+export const vaultMediaListResultSchema = z.object({
+  media: z.array(vaultMediaItemSchema),
+});
+
+export const vaultMediaReadResultSchema = z.object({
+  mediaId: z.string(),
+  mimeType: z.string(),
+  /** data URL con los bytes descifrados. null si es demasiado grande */
+  dataUrl: z.string().nullable(),
+});
+
 export const configSaveArgsSchema = z.object({
   /** se valida con storedAgentConfigSchema en el proceso principal */
   config: z.unknown(),
@@ -533,6 +578,15 @@ export interface LuxyBridge {
     args: z.infer<typeof vaultConversationSendArgsSchema>,
   ): Promise<IpcResult<z.infer<typeof vaultConversationSendResultSchema>>>;
   deleteVaultConversation(conversationId: string): Promise<IpcResult<{ deleted: boolean }>>;
+  attachVaultMedia(
+    conversationId: string,
+  ): Promise<IpcResult<{ attached: number }>>;
+  listVaultMedia(
+    conversationId: string,
+  ): Promise<IpcResult<z.infer<typeof vaultMediaListResultSchema>>>;
+  readVaultMedia(
+    args: z.infer<typeof vaultMediaReadArgsSchema>,
+  ): Promise<IpcResult<z.infer<typeof vaultMediaReadResultSchema>>>;
   /** avisa de que la boveda se cerro sola. devuelve la funcion de baja */
   onVaultLocked(listener: () => void): () => void;
   /** devuelve la funcion de baja; sin ella se acumulan listeners al navegar */

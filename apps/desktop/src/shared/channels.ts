@@ -54,6 +54,9 @@ export const IPC_INVOKE = {
   vaultConversationRead: 'luxy:vault:conversation:read',
   vaultConversationSend: 'luxy:vault:conversation:send',
   vaultConversationDelete: 'luxy:vault:conversation:delete',
+  vaultMediaAttach: 'luxy:vault:media:attach',
+  vaultMediaList: 'luxy:vault:media:list',
+  vaultMediaRead: 'luxy:vault:media:read',
 } as const;
 
 /** canales de notificacion (main -> renderer) */

@@ -1,5 +1,12 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-01 — Windows 11 (equipo `oscar`) — medios en la interfaz
+
+- **`npm run check`: exit 0.** Suite: **111 archivos, 1.941 superadas, 9
+  omitidas, 0 fallos**.
+- **No confirmado manualmente**: no se ha adjuntado ni visualizado un medio real
+  desde la aplicación.
+
 ### 2026-09-01 — Windows 11 (equipo `oscar`) — F9.16 (parte local)
 
 - `npx vitest run apps/desktop/src/main/vault/media-store.test.ts`: **17/17**.

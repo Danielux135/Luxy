@@ -285,9 +285,28 @@ memoria vale para una imagen, no para un vídeo de cientos de megas.
 Reproducirlo sin escribirlo a disco exigirá un protocolo propio de Electron que
 sirva el flujo descifrado.
 
-Siguiente paso exacto: IPC e interfaz para adjuntar y ver medios en una
-conversación privada; después, el cliente de sincronización que use los
-endpoints de `F9.15`.
+### Medios conectados a la interfaz — implemented (2026-09-01)
+
+Ya se pueden adjuntar y ver imágenes y vídeos dentro de una conversación
+privada. La ruta la elige el usuario en un diálogo nativo del proceso
+principal: el renderer no propone ninguna, porque si pudiera tendría una vía
+para leer cualquier archivo del equipo a través de Luxy.
+
+Los bytes descifrados **no se guardan en el estado del renderer**: se piden al
+abrir y se sueltan al cerrar.
+
+Tope de previsualización de 20 MB. Por encima se devuelve el tipo pero no el
+contenido, y la interfaz dice por qué. Un vídeo grande sigue sin poder verse,
+pero ahora el límite es **visible** en vez de silencioso.
+
+Borrar una conversación borra primero sus medios.
+
+**Sin confirmación manual**: no se ha adjuntado ni visto un medio real.
+
+Siguiente paso exacto: el cliente de sincronización que use los endpoints de
+`F9.15` — subir lo nuevo y bajar lo que falte. O `F9.12`, la documentación de
+privacidad, que sigue pendiente y es la que explica todo esto a quien llegue
+después.
 
 ---
 

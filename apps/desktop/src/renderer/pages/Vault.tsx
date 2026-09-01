@@ -4,7 +4,7 @@
 // pantalla no muestra NADA de su contenido. Ni titulos, ni recuentos, ni "tu
 // ultima conversacion fue el martes". No es que se oculte: es que el renderer
 // no lo tiene, porque el proceso principal no puede descifrarlo sin la llave.
-import { useState, type JSX } from 'react';
+import { useEffect, useState, type JSX } from 'react';
 import { Empty, Field, Notice, Panel, Readout, Skeleton, Tag } from '../ui/primitives.js';
 import type { ConfigSummary } from '../useConfig.js';
 import {
@@ -113,6 +113,8 @@ function ConversationPanel({
         </div>
       )}
 
+      {vault.media.length > 0 && <MediaStrip vault={vault} />}
+
       {vault.error !== null && <Notice tone="fault">{vault.error}</Notice>}
 
       {projects.length === 0 ? (
@@ -158,6 +160,18 @@ function ConversationPanel({
             <button className="btn btn--primary" disabled={!canSend} onClick={submit}>
               {vault.sending ? 'Esperando respuesta…' : 'Enviar'}
             </button>
+            <button
+              className="btn"
+              disabled={vault.attaching || vault.openConversationId === null}
+              onClick={() => void vault.attachMedia()}
+              title={
+                vault.openConversationId === null
+                  ? 'Envía un mensaje primero para crear la conversación'
+                  : undefined
+              }
+            >
+              {vault.attaching ? 'Cifrando…' : 'Adjuntar'}
+            </button>
             {vault.openConversationId !== null && (
               <button
                 className="btn btn--danger"
@@ -171,6 +185,88 @@ function ConversationPanel({
         </>
       )}
     </Panel>
+  );
+}
+
+/**
+ * medios de la conversacion.
+ *
+ * Cada elemento se descifra al pedirlo y NO se guarda en el estado: mantener
+ * imagenes descifradas en memoria del renderer las dejaria vivas despues de
+ * cerrar la boveda, que es justo lo contrario de lo que hace cerrarla.
+ */
+function MediaStrip({ vault }: { vault: VaultController }): JSX.Element {
+  const [openId, setOpenId] = useState<string | null>(null);
+
+  return (
+    <div className="vault-media">
+      {vault.media.map((item) => (
+        <MediaTile
+          key={item.mediaId}
+          item={item}
+          open={openId === item.mediaId}
+          onToggle={() => setOpenId(openId === item.mediaId ? null : item.mediaId)}
+          vault={vault}
+        />
+      ))}
+    </div>
+  );
+}
+
+function MediaTile({
+  item,
+  open,
+  onToggle,
+  vault,
+}: {
+  item: VaultController['media'][number];
+  open: boolean;
+  onToggle: () => void;
+  vault: VaultController;
+}): JSX.Element {
+  const [dataUrl, setDataUrl] = useState<string | null>(null);
+  const [tooBig, setTooBig] = useState(false);
+
+  useEffect(() => {
+    if (!open) {
+      // al cerrar se suelta la copia descifrada en vez de dejarla en memoria
+      setDataUrl(null);
+      return;
+    }
+    let cancelled = false;
+    void vault.openMedia(item.mediaId).then((url) => {
+      if (cancelled) return;
+      if (url === null) setTooBig(true);
+      else setDataUrl(url);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, item.mediaId, vault]);
+
+  const isVideo = item.mimeType.startsWith('video/');
+
+  return (
+    <div className="vault-media__item">
+      <button className="btn btn--quiet" onClick={onToggle}>
+        {open ? 'Ocultar' : 'Ver'} · {item.displayName ?? item.mediaId.slice(0, 8)}
+      </button>
+
+      {open && tooBig && (
+        <Notice tone="warn">
+          Demasiado grande para previsualizarlo todavía. El archivo está guardado
+          y cifrado; falta la parte que reproduce vídeo sin descifrarlo entero en
+          memoria.
+        </Notice>
+      )}
+
+      {open && dataUrl !== null && !isVideo && (
+        <img className="vault-media__preview" src={dataUrl} alt="" />
+      )}
+      {open && dataUrl !== null && isVideo && (
+        <video className="vault-media__preview" src={dataUrl} controls />
+      )}
+    </div>
   );
 }
 

@@ -5,7 +5,7 @@
 // un mensaje pensado para leerse, y una pista de que hacer.
 import { type BrowserWindow, dialog, ipcMain, safeStorage, shell, app } from 'electron';
 import { readFileSync, existsSync, mkdirSync, realpathSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 import type { z } from 'zod';
 import {
   redact,
@@ -48,6 +48,10 @@ import {
   vaultAutoLockSetArgsSchema,
   vaultConversationIdArgsSchema,
   vaultConversationSendArgsSchema,
+  vaultMediaAttachArgsSchema,
+  vaultMediaListArgsSchema,
+  vaultMediaReadArgsSchema,
+  VAULT_PREVIEW_MAX_BYTES,
   vaultDeviceUnlockSetArgsSchema,
   vaultPasswordArgsSchema,
   vaultUnlockArgsSchema,
@@ -62,11 +66,27 @@ import {
 import type { SecretStore } from '../secure-storage.js';
 import { VaultError, type VaultService } from '../vault/vault-service.js';
 import type { PrivateConversationStore } from '../vault/conversation-store.js';
+import type { PrivateMediaStore } from '../vault/media-store.js';
 import { randomUUID } from 'node:crypto';
 import { MACHINE_TOKEN_SECRET, connectionSecretName } from '../../shared/ipc.js';
 import { deleteMigratedFile, inspectEnvFile, readEnvSecrets } from '../migration.js';
 import { readCatalogSnapshot, writeCatalogSnapshot } from '../catalog-store.js';
 import { resolveWorktreeDirectory } from '../worktree-directory.js';
+
+/** tipo declarado por la extension del archivo elegido en el dialogo */
+function mimeTypeFor(filePath: string): string {
+  const extension = filePath.toLowerCase().split('.').pop() ?? '';
+  const known: Record<string, string> = {
+    png: 'image/png',
+    jpg: 'image/jpeg',
+    jpeg: 'image/jpeg',
+    gif: 'image/gif',
+    webp: 'image/webp',
+    mp4: 'video/mp4',
+    webm: 'video/webm',
+  };
+  return known[extension] ?? 'application/octet-stream';
+}
 
 export interface HandlerContext {
   controller: AgentController;
@@ -82,6 +102,8 @@ export interface HandlerContext {
   vault: VaultService;
   /** conversaciones privadas cifradas en disco */
   privateConversations: PrivateConversationStore;
+  /** imagenes y videos privados, cifrados en disco */
+  privateMedia: PrivateMediaStore;
   /** raiz de los artefactos generados; se abre, nunca se sirve por HTTP */
   artifactsDirectory: string;
   /** raiz local a la que deben pertenecer los worktrees que se abran */
@@ -659,9 +681,94 @@ export function registerIpcHandlers(context: HandlerContext): void {
     turns: await context.privateConversations.read(context.vault, args.conversationId),
   }));
 
-  handle(IPC_INVOKE.vaultConversationDelete, vaultConversationIdArgsSchema, (args) => {
+  handle(IPC_INVOKE.vaultConversationDelete, vaultConversationIdArgsSchema, async (args) => {
+    // los medios primero: si solo se borrara la conversacion, sus archivos
+    // cifrados quedarian ocupando disco sin nada que los referenciara
+    await context.privateMedia.deleteConversation(args.conversationId);
     context.privateConversations.delete(args.conversationId);
     return { deleted: true };
+  });
+
+  // ---------------------------------------------------------------------------
+  // medios privados
+  // ---------------------------------------------------------------------------
+
+  /**
+   * adjunta archivos a una conversacion privada.
+   *
+   * La RUTA la elige el usuario en un dialogo nativo del proceso principal; el
+   * renderer no propone ninguna. Si pudiera, tendria una via para leer
+   * cualquier archivo del equipo a traves de Luxy.
+   */
+  handle(IPC_INVOKE.vaultMediaAttach, vaultMediaAttachArgsSchema, async (args) => {
+    if (!context.vault.isUnlocked()) {
+      throw new VaultError('la boveda esta bloqueada');
+    }
+    const window = context.getMainWindow();
+    if (window === null) throw new VaultError('no hay ventana desde la que elegir un archivo');
+
+    const picked = await dialog.showOpenDialog(window, {
+      title: 'Elige imagenes o videos',
+      properties: ['openFile', 'multiSelections'],
+      filters: [
+        { name: 'Imagenes y videos', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'mp4', 'webm'] },
+      ],
+    });
+    if (picked.canceled) return { attached: 0 };
+
+    let attached = 0;
+    for (const filePath of picked.filePaths) {
+      const bytes = new Uint8Array(readFileSync(filePath));
+      await context.privateMedia.add(context.vault, args.conversationId, bytes, {
+        mimeType: mimeTypeFor(filePath),
+        displayName: basename(filePath),
+        prompt: null,
+        width: null,
+        height: null,
+        durationMs: null,
+        characterId: null,
+        provider: null,
+        model: null,
+      });
+      attached += 1;
+    }
+    return { attached };
+  });
+
+  handle(IPC_INVOKE.vaultMediaList, vaultMediaListArgsSchema, async (args) => {
+    const items = await context.privateMedia.list(context.vault, args.conversationId);
+    return {
+      media: items.map((item) => ({
+        mediaId: item.mediaId,
+        mimeType: item.metadata.mimeType,
+        displayName: item.metadata.displayName,
+        byteSize: 0,
+        hasThumbnail: item.hasThumbnail,
+        previewable: true,
+      })),
+    };
+  });
+
+  handle(IPC_INVOKE.vaultMediaRead, vaultMediaReadArgsSchema, async (args) => {
+    const { bytes, mimeType } = await context.privateMedia.read(
+      context.vault,
+      args.conversationId,
+      args.mediaId,
+    );
+
+    if (bytes.length > VAULT_PREVIEW_MAX_BYTES) {
+      // se devuelve el tipo pero no el contenido: mandar cientos de megas en
+      // base64 por el IPC congela la ventana
+      return { mediaId: args.mediaId, mimeType, dataUrl: null };
+    }
+
+    return {
+      mediaId: args.mediaId,
+      mimeType,
+      // los bytes descifrados solo viven en memoria: nunca se escribe una copia
+      // en claro a disco, ni siquiera temporal
+      dataUrl: `data:${mimeType};base64,${Buffer.from(bytes).toString('base64')}`,
+    };
   });
 
   handle(IPC_INVOKE.vaultConversationSend, vaultConversationSendArgsSchema, async (args) => {

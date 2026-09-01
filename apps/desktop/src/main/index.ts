@@ -16,6 +16,8 @@ import {
   PrivateConversationStore,
   conversationsDirectory,
 } from './vault/conversation-store.js';
+import { PrivateMediaStore, mediaIndexDirectory } from './vault/media-store.js';
+import { LocalBlobStore, mediaDirectory } from './vault/blob-store.js';
 import { VAULT_DEVICE_SECRET } from '../shared/channels.js';
 import { registerIpcHandlers, unregisterIpcHandlers } from './ipc/handlers.js';
 import { LuxyTray } from './tray.js';
@@ -38,6 +40,7 @@ let configStore: ConfigStore | null = null;
 let secretStore: SecretStore | null = null;
 let vault: VaultService | null = null;
 let privateConversations: PrivateConversationStore | null = null;
+let privateMedia: PrivateMediaStore | null = null;
 let autoLockTimer: NodeJS.Timeout | null = null;
 let captureHost: CaptureHost | null = null;
 const remoteSessions = new SessionHostSlot();
@@ -279,6 +282,10 @@ async function bootstrap(): Promise<void> {
   });
 
   privateConversations = new PrivateConversationStore(conversationsDirectory(luxyConfigDir()));
+  privateMedia = new PrivateMediaStore(
+    mediaIndexDirectory(luxyConfigDir()),
+    new LocalBlobStore(mediaDirectory(luxyConfigDir())),
+  );
 
   // el bloqueo automatico se comprueba por reloj, no con un temporizador que
   // se dispare una vez: asi una suspension larga del equipo aparece bloqueada
@@ -308,6 +315,7 @@ async function bootstrap(): Promise<void> {
     secretStore,
     vault,
     privateConversations,
+    privateMedia,
     logsDirectory: logsDirectory(),
     artifactsDirectory: artifactsDirectory(),
     worktreesDirectory: worktreesDirectory(),
