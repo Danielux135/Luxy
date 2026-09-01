@@ -1,5 +1,14 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-01 — Windows 11 (equipo `oscar`) — F9.10
+
+- Tres archivos de prueba nuevos: `account.test.ts` (10), la ampliación de
+  `handlers/vault.test.ts` (16 en total), `account-client.test.ts` (8).
+- **`npm run check`: exit 0.** Suite: **116 archivos, 1.997 superadas, 9
+  omitidas, 0 fallos**.
+- Todo el gateway se prueba con **cliente y gateway falsos**. Nada se ha
+  ejecutado contra un Supabase real; la migración `0007` no está aplicada.
+
 ### 2026-09-01 — Windows 11 (equipo `oscar`) — medios en la interfaz
 
 - **`npm run check`: exit 0.** Suite: **111 archivos, 1.941 superadas, 9

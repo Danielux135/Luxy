@@ -292,7 +292,7 @@ interfaz: *workspace*, *privacy*, *vault*, *invitado en solo lectura*.
 | F9.7 | Sincronización entre equipos por emparejamiento y recovery key | planned |
 | F9.8 | Higiene de logs, cachés, miniaturas y notificaciones | done |
 | F9.9 | Puente explícito por conversación, apagado por defecto | planned |
-| F9.10 | Identidad de usuario e invitación por correo | in_progress (D-045) |
+| F9.10 | Identidad de usuario e invitación por correo | implemented (lógica; sin UI ni ejecución real) |
 | F9.11 | Transportes del invitado: Studio, visor web, exportación | planned |
 | F9.12 | `D-039`…, `docs/PRIVACY.md`, `SECURITY.md`, `threat-model.md` | planned |
 | F9.13 | Interfaz de la bóveda en Studio: crear, abrir, cerrar, clave de recuperación | done |

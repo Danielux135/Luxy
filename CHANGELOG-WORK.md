@@ -1,5 +1,48 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-09-01 20:30 — Claude — F9.10, cuentas de usuario (tres piezas)
+
+- `F9.10` en tres commits, por su tamaño. `D-045` y `D-046` lo guiaban.
+- **Pieza 1 — criptografía y contrato** (`ffbb9e6`): `account.ts` compone
+  `createAccount` / `openAccount` / `rewrapAccountPassword` sobre lo que ya
+  existía. `vault-auth.ts`, el contrato de registro, login en dos pasos y cambio
+  de contraseña. 10 pruebas.
+- **Pieza 2 — gateway** (`370d6d6`): endpoints de cuenta y `withVaultAuth`. La
+  corrección de `D-045`: la autorización pasa a ser por `owner_user_id`, no por
+  `vault_id`. Un token de una cuenta no da acceso al contenido de otra.
+  Rate limiting en register/login, que era el hueco que el `CLAUDE.md` del
+  gateway señalaba. 16 pruebas.
+- **Pieza 3 — cliente** (este commit): `account-client.ts`. Registra y abre una
+  cuenta contra el gateway sin que la contraseña salga del equipo. 8 pruebas con
+  un gateway falso con memoria que reproduce register + login + password.
+- Propiedades que quedan verificadas de extremo a extremo, con mocks:
+  - lo que se envía al registrarse **no lleva la contraseña**; la maestra viaja
+    envuelta;
+  - un login con contraseña incorrecta **falla en local** y ni siquiera llega a
+    `login/finish`: el servidor no se entera del intento salvo por el rate limit;
+  - un correo inexistente falla igual que una contraseña mala, por el señuelo;
+  - el cliente comprueba que el `vaultId` recibido es el que derivó: si el
+    servidor le diera otra cuenta, no sigue;
+  - cambiar la contraseña reenvuelve la maestra y **no recifra la bóveda**.
+- `npm run check` → **exit 0**; 116 archivos, 1.997 superadas.
+- **Lo que falta para que esto funcione de verdad**, y es sustancial:
+  - **la interfaz de cuenta no existe**: no hay pantalla de registro ni de
+    login. `account-client` está escrito y probado, pero nadie lo llama desde la
+    UI. El vault local (`vault.json`) y el vault de cuenta **conviven sin unirse
+    todavía**: hoy la bóveda se crea en local; falta el flujo que la cree contra
+    el servidor y guarde la sesión;
+  - la sincronización sigue autenticándose con el token de máquina, no con la
+    sesión de cuenta. Cambiarlo es el último cable;
+  - **nada se ha probado contra un Supabase real**, porque la migración no está
+    aplicada. Todo el gateway se prueba con cliente falso;
+  - sin prueba de que withVaultAuth deniega de verdad el acceso cruzado entre
+    usuarios: eso necesita Postgres.
+- Estado nuevo: `F9.10` **implemented en sus tres capas de lógica**, sin
+  interfaz y sin ejecución real.
+- Siguiente paso exacto: pantalla de cuenta (registro/login/logout) y unir el
+  vault local con el de cuenta, de modo que abrir la bóveda en un equipo nuevo
+  sea entrar con la contraseña.
+
 ### 2026-09-01 20:10 — Claude — 0007 rehecha con cuentas de usuario
 
 - Estado anterior: `D-045` y `D-046` registradas; `0007` marcada como «no
