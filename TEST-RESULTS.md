@@ -1,5 +1,13 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-01 — Windows 11 (equipo `oscar`) — F9.13
+
+- `npx vitest run apps/desktop/src/renderer/useVault.test.ts`: **10/10**.
+- **`npm run check`: exit 0.** Lint, typecheck y build correctos.
+  Suite: **105 archivos, 1.855 superadas, 9 omitidas, 0 fallos**.
+- **No confirmado manualmente**: no se ha arrancado Luxy para ver la pantalla.
+  Lo verificado es la lógica y el contrato, no el aspecto ni el flujo de clics.
+
 ### 2026-09-01 — Windows 11 (equipo `oscar`) — F9.5
 
 - `npx vitest run apps/agent/src/local-turn.test.ts`: **12/12**.

@@ -1,5 +1,42 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-09-01 15:50 — Claude — F9.13, interfaz de la bóveda
+
+- Estado anterior: `F9.5` cerrado; plan corregido con `F9.13`–`F9.17`.
+- Objetivo: cerrar el hueco que motivó la corrección del plan. La bóveda deja
+  de existir sólo por debajo y se puede crear, abrir, cerrar y configurar.
+- Archivos creados: `apps/desktop/src/renderer/useVault.ts`,
+  `pages/Vault.tsx`, `useVault.test.ts`.
+- Archivos modificados: `shared/ipc.ts` (`LuxyBridge`), `preload/index.ts`,
+  `renderer/App.tsx` (sección «Privado»), `renderer/styles.css`.
+- Cuatro estados de pantalla, y la regla que los ordena: **con la bóveda
+  cerrada no se muestra nada de su contenido**. Ni títulos, ni recuentos, ni
+  «tu última conversación fue el martes». No es que se oculte: el renderer no
+  lo tiene, porque el proceso principal no puede descifrarlo sin la llave.
+- El indicador de la barra de navegación es un punto lleno o vacío, **nunca un
+  recuento**. Un número ya diría cuántas conversaciones privadas hay.
+- La clave de recuperación tiene su propia pantalla, con casilla de
+  confirmación obligatoria antes de continuar, porque se muestra una sola vez
+  y no se guarda en ningún sitio. Estilo propio (`.vault-key`): grande,
+  monoespaciada y `user-select: all`, para copiarla de un tirón sin errores.
+- El renderer no guarda material criptográfico en ningún momento. La contraseña
+  vive lo justo para cruzar el IPC y se limpia del estado en cuanto se usa.
+- Un detalle que verifiqué en vez de suponer: comprobé qué clases CSS existen de
+  verdad antes de usarlas. `prose`, `code` y `btn--ghost` **no existían**;
+  usé `btn--quiet` y `mono`, que sí, y añadí una única regla nueva para la
+  clave de recuperación.
+- Comandos ejecutados:
+  - `npx vitest run apps/desktop/src/renderer/useVault.test.ts` → **10/10**.
+  - `npm run check` → **exit 0**; 105 archivos, 1.855 superadas, 9 omitidas.
+- Riesgos o límites: **no verificado a mano**. Está implementado y con pruebas
+  de contrato y de formato, pero no se ha abierto Luxy para verlo. Las pruebas
+  cubren la lógica, no el aspecto ni el flujo real de clics.
+  La pantalla dice explícitamente que todavía no hay conversaciones privadas:
+  falta `F9.14` para conectarla con el ejecutor.
+- Estado nuevo: `F9.13` **done, sin confirmación manual**.
+- Siguiente paso exacto: `F9.14`, que el proceso principal envíe
+  `run_local_turn` al agente y muestre el progreso.
+
 ### 2026-09-01 15:40 — Claude — corrección del plan de la Fase 9
 
 - Motivo: Daniel preguntó si el hueco de interfaz que yo repetía al cerrar cada

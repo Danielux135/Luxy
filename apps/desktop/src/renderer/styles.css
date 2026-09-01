@@ -1554,3 +1554,29 @@ input[aria-invalid='true'] {
     flex-direction: column;
   }
 }
+
+/* =============================================================================
+   boveda privada
+   ============================================================================= */
+
+.vault-prose {
+  max-width: 62ch;
+  line-height: 1.55;
+  margin: 0 0 12px;
+}
+
+/*
+ * la clave de recuperacion se muestra una sola vez, asi que tiene que leerse y
+ * copiarse sin esfuerzo: grande, monoespaciada y seleccionable de un tiron.
+ */
+.vault-key {
+  user-select: all;
+  font-size: 18px;
+  letter-spacing: 0.08em;
+  padding: 14px 16px;
+  margin: 12px 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--sunk);
+  word-break: break-all;
+}

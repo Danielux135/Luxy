@@ -61,6 +61,20 @@ const bridge: LuxyBridge = {
   rateStudioJob: (args: unknown) => ipcRenderer.invoke(IPC_INVOKE.studioJobFeedback, args),
   requestStudioJobAction: (args: unknown) => ipcRenderer.invoke(IPC_INVOKE.studioJobAction, args),
 
+  getVaultStatus: () => ipcRenderer.invoke(IPC_INVOKE.vaultStatus),
+  createVault: (password: string) => ipcRenderer.invoke(IPC_INVOKE.vaultCreate, { password }),
+  unlockVault: (args: unknown) => ipcRenderer.invoke(IPC_INVOKE.vaultUnlock, args),
+  lockVault: () => ipcRenderer.invoke(IPC_INVOKE.vaultLock),
+  changeVaultPassword: (args: unknown) =>
+    ipcRenderer.invoke(IPC_INVOKE.vaultChangePassword, args),
+  setVaultDeviceUnlock: (enabled: boolean) =>
+    ipcRenderer.invoke(IPC_INVOKE.vaultDeviceUnlockSet, { enabled }),
+  onVaultLocked: (listener: () => void) => {
+    const handler = (): void => listener();
+    ipcRenderer.on(IPC_EVENT.vaultLocked, handler);
+    return () => ipcRenderer.removeListener(IPC_EVENT.vaultLocked, handler);
+  },
+
   onAgentEvent: (listener) => {
     // el listener del renderer nunca ve el objeto IpcRendererEvent: solo el dato
     const handler = (_event: unknown, payload: unknown): void => {

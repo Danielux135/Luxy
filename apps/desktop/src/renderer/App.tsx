@@ -10,6 +10,8 @@ import { ConnectionsPage, ModelsPage, ProjectsPage } from './pages/Config.js';
 import { LogsPage, SettingsPage } from './pages/System.js';
 import { SetupPage } from './pages/Setup.js';
 import { LaboratoryPage } from './pages/Laboratory.js';
+import { VaultPage } from './pages/Vault.js';
+import { useVault } from './useVault.js';
 import { projectDisplayLabel } from './project-context.js';
 
 const SECCIONES = [
@@ -20,6 +22,7 @@ const SECCIONES = [
   { id: 'conexiones', label: 'Conexiones', short: 'CX' },
   { id: 'modelos', label: 'Modelos', short: 'MD' },
   { id: 'laboratorio', label: 'Laboratorio', short: 'LB' },
+  { id: 'privado', label: 'Privado', short: 'PV' },
   { id: 'registros', label: 'Registros', short: 'RG' },
   { id: 'ajustes', label: 'Ajustes', short: 'AJ' },
 ] as const;
@@ -30,6 +33,7 @@ export function App(): JSX.Element {
   const { status, activity, pending, approve, busy, error, hint, start, stop, restart } =
     useAgent();
   const { summary, loading, save, setSecret, deleteSecret, reload } = useConfig();
+  const vault = useVault();
   const [seccion, setSeccion] = useState<SeccionId>('inicio');
   const [projectScope, setProjectScope] = useState<string | null>(null);
   // el onboarding se abre solo la primera vez, y a mano desde Ajustes
@@ -87,6 +91,10 @@ export function App(): JSX.Element {
             {entrada.id === 'trabajos' && trabajosActivos > 0 && (
               <span className="nav__count">{trabajosActivos}</span>
             )}
+            {/* candado abierto o cerrado. Nunca un recuento: eso ya diria algo */}
+            {entrada.id === 'privado' && vault.status.configured && (
+              <span className="nav__count">{vault.status.unlocked ? '○' : '●'}</span>
+            )}
           </button>
         ))}
         <div className="nav__foot">
@@ -140,6 +148,7 @@ export function App(): JSX.Element {
         )}
         {seccion === 'modelos' && <ModelsPage summary={summary} />}
         {seccion === 'laboratorio' && <LaboratoryPage summary={summary} />}
+        {seccion === 'privado' && <VaultPage vault={vault} />}
         {seccion === 'registros' && <LogsPage />}
         {seccion === 'ajustes' && (
           <SettingsPage

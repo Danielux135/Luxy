@@ -440,6 +440,26 @@ export interface LuxyBridge {
   requestStudioJobAction(
     args: z.infer<typeof studioJobActionArgsSchema>,
   ): Promise<IpcResult<z.infer<typeof studioJobActionResultSchema>>>;
+
+  /**
+   * boveda privada.
+   *
+   * las contraseñas viajan del renderer al main, que es la unica direccion
+   * posible: el usuario las escribe en la ventana. De vuelta solo llega estado,
+   * salvo la clave de recuperacion en el instante exacto de crear la boveda.
+   */
+  getVaultStatus(): Promise<IpcResult<z.infer<typeof vaultStatusSchema>>>;
+  createVault(password: string): Promise<IpcResult<z.infer<typeof vaultCreateResultSchema>>>;
+  unlockVault(
+    args: z.infer<typeof vaultUnlockArgsSchema>,
+  ): Promise<IpcResult<z.infer<typeof vaultStatusSchema>>>;
+  lockVault(): Promise<IpcResult<z.infer<typeof vaultStatusSchema>>>;
+  changeVaultPassword(
+    args: z.infer<typeof vaultChangePasswordArgsSchema>,
+  ): Promise<IpcResult<z.infer<typeof vaultStatusSchema>>>;
+  setVaultDeviceUnlock(enabled: boolean): Promise<IpcResult<z.infer<typeof vaultStatusSchema>>>;
+  /** avisa de que la boveda se cerro sola. devuelve la funcion de baja */
+  onVaultLocked(listener: () => void): () => void;
   /** devuelve la funcion de baja; sin ella se acumulan listeners al navegar */
   onAgentEvent(listener: (event: z.infer<typeof agentEventSchema>) => void): () => void;
 }
