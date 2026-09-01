@@ -1,5 +1,56 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-09-01 17:40 — Claude — F9.16, almacén de medios cifrados
+
+- Estado anterior: `F9.6` y `F9.15` implementados. Daniel pidió cerrar primero
+  el camino de medios y dejar la subida para después.
+- Archivos creados: `apps/desktop/src/main/vault/blob-store.ts`,
+  `media-store.ts` y `media-store.test.ts`.
+- Alcance elegido: **local y cifrado ahora, con la interfaz lista para el
+  almacén remoto**. `BlobStore` tiene hoy una sola implementación, la de disco.
+  La remota subirá exactamente estos mismos bytes; que el contenido ya viaje
+  cifrado es lo que convierte esa segunda implementación en un cambio de
+  transporte y no en un rediseño.
+- Separación de responsabilidades, y por qué: `blob-store.ts` guarda bytes y
+  **no cifra**. Si cifrara, habría dos sitios decidiendo cómo se protege un
+  archivo y acabarían discrepando. El cifrado vive sólo en `private-store.ts`.
+- **El orden de escritura importa y está escrito en el código**: primero los
+  bytes, después el registro. Si falla a medias queda un archivo huérfano
+  —recuperable con una limpieza— en vez de un registro que apunta a algo que no
+  existe, que es un error que sólo aparece meses después al abrir la imagen.
+- Decisiones de opacidad, todas con prueba:
+  - **todo se guarda con extensión `.bin`**, también los vídeos. Un `.mp4` junto
+    a un `.png` ya diría que hay vídeo, y el explorador de Windows generaría
+    miniaturas de ambos;
+  - el nombre es la clave opaca de 32 hex, nunca el identificador de
+    conversación ni el nombre original;
+  - el índice no revela tipo, nombre, prompt ni personaje: todo va cifrado;
+  - la miniatura ocupa su propio archivo, igual de opaco y con su propia
+    subclave.
+- **Nunca se escribe una copia sin cifrar a disco, ni siquiera temporal.** Los
+  bytes descifrados se devuelven en memoria. Un temporal descifrado es
+  exactamente la fuga que la bóveda evita, y además sobrevive a un cierre
+  inesperado.
+- Borrar una conversación se lleva **los bytes**, no sólo el índice. Sin eso
+  quedarían archivos cifrados ocupando disco para siempre, sin nada que los
+  referenciara y sin forma de saber a qué pertenecían. Hay prueba que cuenta los
+  archivos antes y después.
+- Comandos ejecutados:
+  - `npx vitest run apps/desktop/src/main/vault/media-store.test.ts` → **17/17**.
+  - `npm run check` → **exit 0**; 111 archivos, 1.941 superadas, 9 omitidas.
+- Riesgos o límites:
+  - **sin conectar todavía**: no hay IPC ni interfaz para añadir o ver un medio.
+    El almacén funciona y está probado, pero nadie lo llama.
+  - **la implementación remota no existe**. Sólo la local. Sincronizar medios
+    entre equipos sigue pendiente.
+  - **vídeo largo**: devolver los bytes en memoria vale para una imagen, no para
+    un vídeo de cientos de megas. Reproducirlo sin escribirlo a disco exigirá un
+    protocolo propio de Electron que sirva el flujo descifrado. Queda anotado
+    como trabajo aparte, no resuelto.
+- Estado nuevo: `F9.16` **implemented** en su parte local.
+- Siguiente paso exacto: IPC e interfaz para adjuntar y ver medios en una
+  conversación privada; después, el cliente de sincronización.
+
 ### 2026-09-01 17:32 — Claude — F9.6 y F9.15, migración y endpoints de sincronización
 
 - **El problema de fondo que había que resolver primero**: ¿de quién es un

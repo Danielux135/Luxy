@@ -258,9 +258,36 @@ el cliente hizo los deberes acaba guardando lo que no debe.
 y **el escritorio todavía no sincroniza**: los endpoints existen y nadie los
 llama.
 
-Siguiente paso exacto: el cliente de sincronización en el escritorio — subir lo
-nuevo y bajar lo que falte, usando los registros que `F9.14` ya escribe. O
-`F9.16` (almacén de objetos) si se prefiere cerrar antes el camino de medios.
+### F9.16 — implemented en su parte local (2026-09-01)
+
+Daniel pidió cerrar primero el camino de medios. `BlobStore` guarda los bytes
+que `sealMedia` ya devolvió cifrados, y `PrivateMediaStore` une el registro con
+los archivos.
+
+`blob-store.ts` **no cifra**: si lo hiciera, habría dos sitios decidiendo cómo
+se protege un archivo y acabarían discrepando.
+
+Orden de escritura: bytes primero, registro después. Si falla a medias queda un
+huérfano recuperable en vez de un registro que apunta a nada.
+
+Todo se guarda como `.bin`, también el vídeo: un `.mp4` junto a un `.png` ya
+diría que hay vídeo, y Windows generaría miniaturas de ambos. Nunca se escribe
+una copia sin cifrar a disco, ni temporal.
+
+17 pruebas. `npm run check` exit 0: 111 archivos, 1.941 superadas.
+
+**Pendiente en F9.16**: la implementación remota no existe, sólo la local. Y
+**nadie llama al almacén todavía**: no hay IPC ni interfaz para adjuntar o ver
+un medio.
+
+**Limitación conocida, anotada como trabajo aparte**: devolver los bytes en
+memoria vale para una imagen, no para un vídeo de cientos de megas.
+Reproducirlo sin escribirlo a disco exigirá un protocolo propio de Electron que
+sirva el flujo descifrado.
+
+Siguiente paso exacto: IPC e interfaz para adjuntar y ver medios en una
+conversación privada; después, el cliente de sincronización que use los
+endpoints de `F9.15`.
 
 ---
 

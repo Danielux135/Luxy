@@ -1,5 +1,13 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-01 — Windows 11 (equipo `oscar`) — F9.16 (parte local)
+
+- `npx vitest run apps/desktop/src/main/vault/media-store.test.ts`: **17/17**.
+- **`npm run check`: exit 0.** Suite: **111 archivos, 1.941 superadas, 9
+  omitidas, 0 fallos**.
+- Medido en las pruebas: 10.000 bytes de contenido ocupan menos de 11.024 una
+  vez cifrados, es decir cabecera y etiqueta, no un porcentaje.
+
 ### 2026-09-01 — Windows 11 (equipo `oscar`) — F9.6 y F9.15
 
 - **`npm run check`: exit 0.** Suite: **110 archivos, 1.924 superadas, 9
