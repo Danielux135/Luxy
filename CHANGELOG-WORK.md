@@ -1,5 +1,34 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-09-01 20:45 — Claude — checkpoint de continuidad de F9-VAULT-001
+
+- Daniel pidió documentar todo para retomar desde aquí. Sin cambios de código.
+- Estado real verificado: rama `luxy/f9-1-vault-crypto`, **25 commits** sobre
+  `main` @ `00a9cc1`, árbol limpio. `npm run check` verde (116 archivos, 1.997
+  superadas, 9 omitidas).
+- Documentos actualizados:
+  - **`CURRENT-TASK.md`**: la cabecera de `F9-VAULT-001`, que estaba obsoleta
+    («sin empezar»), pasa a ser el **punto de retoma canónico**: qué funciona hoy
+    en local, la arquitectura de claves, la tabla de estado por paso, los **diez
+    puntos a tener en cuenta sin suavizar**, las decisiones que rigen el bloque, y
+    el **siguiente paso exacto** en cuatro sub-pasos ordenados. Los bloques `F9.x`
+    de más abajo se conservan como historial.
+  - **`PROJECT-STATE.md`**: resumen de la capacidad y puntero al punto de retoma.
+  - **`LOCAL-ACTIONS.md`**: `LA-031`, `blocked` — aplicar `0007`, desplegar el
+    gateway y probar la bóveda real. Marcada explícitamente como «NO ejecutar
+    todavía» hasta que exista la interfaz de cuenta.
+  - **`MASTER-PLAN.md`**: estado global de la Fase 9.
+- El aviso central, repetido en los tres sitios para que no se pierda: **hay dos
+  orígenes de la misma llave maestra sin unir** —vault local (`vault.json`, lo
+  que funciona) y vault de cuenta (`account-client` + gateway, recién hecho)— y
+  **`0007` no debe aplicarse hasta unirlos**, porque dejaría tablas que nada usa.
+- Nada probado contra Supabase real; rutas `/api/vault/*` sin desplegar;
+  generación de Xavira sin llamada real; sincronización aún autenticándose por
+  token de máquina en vez de por sesión de cuenta.
+- Siguiente paso exacto (documentado en `CURRENT-TASK.md`): pantalla de cuenta
+  (registro/login/logout), unir los dos vaults, sincronizar por sesión, y sólo
+  entonces `LA-031`.
+
 ### 2026-09-01 20:30 — Claude — F9.10, cuentas de usuario (tres piezas)
 
 - `F9.10` en tres commits, por su tamaño. `D-045` y `D-046` lo guiaban.

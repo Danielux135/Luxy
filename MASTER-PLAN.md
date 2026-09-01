@@ -271,6 +271,11 @@ servicio Windows salvo mantenimiento imprescindible del build.
 
 ## Fase 9 — Espacio privado cifrado y sincronizado
 
+**Punto de retoma 2026-09-01**: local completo y confirmado a mano; cuentas y
+sincronización con lógica hecha y probada con mocks, sin UI de cuenta ni
+ejecución contra Supabase real. `0007` rehecha con usuarios pero **NO aplicada**.
+Estado detallado y siguiente paso en `CURRENT-TASK.md`.
+
 Prioridad: **P1**, acordada con Daniel el 2026-09-01  
 Estado global: `planned`
 

@@ -35,33 +35,145 @@ Luxy ya no depende de ella; los commits manuales de Daniel sí.
 
 ## F9-VAULT-001 — conversaciones privadas cifradas y sincronizadas
 
-Estado: **`planned`** — diseño acordado con Daniel el 2026-09-01, sin empezar.
+Estado: **en curso, punto de retoma del 2026-09-01.** Rama aislada
+`luxy/f9-1-vault-crypto`, 25 commits sobre `main` @ `00a9cc1`. Árbol limpio.
+`npm run check` verde: 116 archivos, 1.997 pruebas superadas, 9 omitidas.
 
-Objetivo: una sección de Luxy que se abre con contraseña y cuyas conversaciones,
-memoria e imágenes/vídeos se cifran **en el equipo** antes de salir. La
-infraestructura (Gateway, Supabase, almacenamiento de objetos) guarda sólo
-ciphertext y nunca recibe la llave. Sincroniza entre los equipos de Daniel.
+> **PUNTO DE RETOMA — leer esto entero antes de tocar nada.** Debajo, cada paso
+> `F9.x` conserva su bloque de cierre como historial; esta cabecera es el estado
+> real que prevalece sobre ellos.
 
-Jerarquía de claves: `contraseña → Argon2id → KEK → llave maestra aleatoria →
-HKDF por dominio`. La llave maestra vive **sólo en memoria del proceso principal
-de Electron**; el renderer no la ve nunca. Tres envolturas independientes:
-contraseña, recovery key y, opcional, DPAPI para «recordar en este equipo».
+### Qué es y qué funciona hoy
 
-Pasos: `F9.1` criptografía (`packages/vault-crypto`, sin dependencias nuevas:
-`@noble/hashes@2.2.0` ya trae `argon2` y `hkdf`, y `@noble/curves@2.2.0` trae
-`x25519`) · `F9.2` esquemas · `F9.3` `VaultService` y bloqueo · `F9.4` cifrado
-en cliente antes de subir · `F9.5` `run_local_turn` en `host-protocol` · `F9.6`
-migración de columnas de ciphertext · `F9.7` sincronización entre equipos ·
-`F9.8` higiene de logs, cachés y notificaciones · `F9.9` puente explícito por
-conversación · `F9.10`–`F9.11` usuarios e invitación · `F9.12` documentación.
+Una sección **Privado** en Studio, con bóveda cifrada. Ya funciona de extremo a
+extremo **en local**, y Daniel lo confirmó a mano (crear, abrir, cerrar,
+conversar, ver el `.jsonl` cifrado):
 
-Decisiones pendientes antes de `F9.10`: contradice `D-001` («no multi-tenant») y
-exige una decisión nueva que lo matice. `F9.1`–`F9.9` no la necesitan.
+- crear/abrir/cerrar la bóveda, clave de recuperación, desbloqueo por Windows,
+  auto-bloqueo configurable;
+- conversaciones privadas: se ejecutan en la máquina local **sin pasar por la
+  cola de Supabase** (`run_local_turn`), se cifran y se guardan en
+  `%APPDATA%\Luxy\vault\conversations\<uuid>.jsonl`;
+- memoria acumulativa: cada turno envía resumen + 8 últimos turnos, no el hilo
+  entero;
+- adjuntar y **generar** imágenes/vídeo (adaptador de Xavira conectado), cifrado
+  en `vault\media\<hex>.bin`.
 
-Límites que la documentación debe recoger sin suavizar: el proveedor de IA ve el
-prompt; Telegram no puede leer ciphertext y por eso queda fuera salvo puente
-explícito; DPAPI no protege de otro proceso de la misma cuenta de Windows; las
-migraciones nunca se han ejecutado contra un Postgres real.
+### Arquitectura de claves (la que hay que respetar)
+
+```
+contraseña ──Argon2id(sal)──► llave maestra (256b, sólo en RAM del main)
+                                ├── HKDF ─────────────► subclaves de cifrado (por dominio y objeto)
+                                ├── HKDF ─────────────► vault_id (identificador público)
+                                └── Argon2id(2ª vuelta)► hash de acceso (lo ÚNICO que autentica en servidor)
+```
+
+`ARGON2_PARAMS`: t=3, m=64 MiB, p=1 (~2,7 s medidos; ver `D-040`). Guardados por
+envoltura y por cuenta, nunca leídos de la constante al abrir.
+
+### El estado que NO es intuitivo, y es lo primero a entender
+
+Hay **DOS orígenes de la misma llave maestra que todavía no están unidos**:
+
+1. **vault local** (`vault-service.ts` + `vault.json`): la bóveda que funciona
+   hoy. La llave maestra sale de un archivo en el disco de este equipo.
+2. **vault de cuenta** (`account-client.ts` + gateway): registro/login que
+   `F9.10` acaba de implementar. La llave maestra sale del `wrapped_master_key`
+   que devuelve el servidor tras probar el hash de acceso.
+
+**Los dos existen, los dos están probados, y NADIE los une todavía.** Ésa es la
+tarea de retoma. Ver la sección «Siguiente paso» al final.
+
+### Estado por paso
+
+| paso | qué es | estado |
+| --- | --- | --- |
+| F9.1 | `packages/vault-crypto` | done, verificado |
+| F9.2 | esquemas `vault.ts` | done |
+| F9.3 | `VaultService` (vault local) | done, confirmado a mano |
+| F9.4 | cifrado en cliente (`private-store`) | done |
+| F9.5 | `run_local_turn` sin cola | done |
+| F9.6 | migración `0007` | **rehecha con usuarios; NO aplicada** |
+| F9.7 | sincronización | done la lógica; ver aviso |
+| F9.8 | higiene de logs/cachés/devtools | done |
+| F9.13 | interfaz de la bóveda | done, confirmado a mano |
+| F9.14 | conversaciones e2e | done, confirmado a mano |
+| F9.16 | almacén de medios (local) | done; remoto no existe |
+| F9.17 | adaptador Xavira + generación | implemented; **sin llamada real** |
+| memoria | memoria acumulativa | done |
+| F9.10 | cuentas de usuario | **implemented (3 capas de lógica); SIN UI ni ejecución real** |
+| F9.9 | puente Telegram por conversación | planned |
+| F9.11 | transportes del invitado | planned |
+| F9.12 | documentación de privacidad | planned |
+
+### Lo que hay que tener en cuenta, sin suavizar
+
+1. **La migración `0007` NO está aplicada** contra ningún Postgres, y **NO debe
+   aplicarse todavía**: primero hay que unir el vault de cuenta con la UI, porque
+   aplicarla ahora deja tablas que nada usa. Cuando se aplique, es acción de
+   Daniel (SQL Editor de Supabase), y antes hay que confirmar contra qué proyecto
+   apunta el gateway (trampa 3 de `docs/ARRANQUE-ORDENADOR-NUEVO.md`).
+2. **Nada del gateway ni de las cuentas se ha ejecutado contra Supabase real.**
+   Todo son mocks: gateway falso, cliente falso. Incluida la autorización cruzada
+   entre usuarios de `withVaultAuth`, que sólo se confirma con Postgres delante.
+3. **Las rutas `/api/vault/*` no están desplegadas.** Existen en el código; falta
+   `wrangler deploy` (acción de Daniel, con autorización). Hasta entonces
+   sincronizar contra el gateway real falla.
+4. **La generación de Xavira nunca ha llamado a la API real.** El contrato viene
+   de su documentación pública. La primera llamada de verdad puede desmentir
+   nombres de campo o formato de error. La clave va en `SecretStore` como
+   `VAULT_MEDIA_API_KEY` (reservada), la pone Daniel en Conexiones.
+5. **La sincronización aún se autentica con el token de máquina, no con la sesión
+   de cuenta.** Con `0007` nueva (propiedad por `owner_user_id`), el cliente de
+   sync (`sync.ts`) y su handler quedaron desalineados a propósito: compilan y
+   pasan pruebas con mocks, pero **contra el esquema nuevo no funcionan**. Es
+   parte del cable que falta.
+6. **Vídeo grande**: se genera y guarda, pero no se previsualiza (tope de 20 MB
+   del IPC). Falta un protocolo de Electron que sirva el flujo descifrado.
+7. **Medios no se sincronizan**: sólo turnos. El almacén remoto (`F9.16` remoto,
+   p.ej. R2) no existe.
+8. **Sin streaming** en conversaciones privadas (`D-043`), a propósito.
+9. **`git config --global` de este equipo sigue sin configurar** (`LA-030`).
+10. Límites de diseño que van a `docs/PRIVACY.md` (`F9.12`, pendiente): el
+    proveedor de IA ve el prompt; Telegram no puede leer ciphertext; DPAPI no
+    protege de otro proceso de la misma cuenta; una filtración de la BD entrega N
+    llaves envueltas y la contraseña más débil de la organización es el objetivo;
+    el servidor no puede restablecer una contraseña; revocar un permiso no
+    recupera lo ya descifrado; las migraciones nunca se han probado en Postgres.
+
+### Decisiones que rigen este bloque
+
+`D-039` (contraseña envuelve, no cifra) · `D-040` (coste Argon2 medido) · `D-041`
+(propósito autenticado) · `D-042` (sondeo, nunca callback) · `D-043` (sin
+streaming) · `D-044` (relleno de longitud) · `D-045` (multiusuario, matiza
+`D-001`) · `D-046` (auth y cifrado por caminos separados).
+
+### Siguiente paso exacto (para quien retome)
+
+**Unir el vault de cuenta con la interfaz.** En concreto, y en este orden:
+
+1. **Pantalla de cuenta** en Studio (renderer): registro (correo + contraseña +
+   clave de recuperación), login (correo + contraseña), logout. Cuando no hay
+   sesión, la sección Privado pide entrar; el resto de Luxy sigue usable sin
+   loguearse. Ésa es la experiencia que pidió Daniel.
+2. **Unir los dos orígenes de la llave maestra.** Decisión de diseño abierta:
+   lo más limpio es que crear/abrir la bóveda pase SIEMPRE por la cuenta
+   (`account-client`), y que el vault local (`vault.json`) quede como caché de la
+   sesión para no volver a llamar al servidor en cada arranque. `VaultService`
+   tendría que aceptar una llave maestra que le llega de fuera (de la cuenta) en
+   vez de sólo generarla/leerla del archivo. Esto es lo que hace que un equipo
+   nuevo funcione sólo con la contraseña.
+3. **Sincronización por sesión de cuenta:** el handler `syncVault` del main
+   (`ipc/handlers.ts`) y `sync.ts` deben usar el `sessionToken` de la cuenta como
+   `Authorization`, y quitar el `vaultId` del cuerpo/query (la autorización ya la
+   da la sesión). El gateway ya lo espera así.
+4. **Sólo entonces**: aplicar `0007`, desplegar el gateway, y probar registro →
+   login desde un segundo equipo → sincronización real. Registrar todo en
+   `LOCAL-ACTIONS.md`.
+
+Después quedan `F9.9` (puente Telegram), `F9.11` (invitar a un tercero) y `F9.12`
+(documentación de privacidad). `F9.12` es barata y cierra deuda: conviene hacerla
+en cuanto la UI de cuenta esté, porque es la que explica todo esto a quien llegue.
 
 ### F9.1 — done (Claude, 2026-09-01, sin commit)
 

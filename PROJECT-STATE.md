@@ -1,5 +1,32 @@
 # Luxy — estado canónico del proyecto
 
+Última actualización: **2026-09-01 — F9-VAULT-001, punto de retoma**
+
+Capacidad nueva, en rama aislada `luxy/f9-1-vault-crypto` (25 commits sobre
+`main` @ `00a9cc1`, sin push): **bóveda privada cifrada**. Una sección
+«Privado» en Studio que se abre con contraseña y cuyas conversaciones, memoria
+e imágenes/vídeos se cifran en el equipo antes de salir. Funciona de extremo a
+extremo **en local** y Daniel lo confirmó a mano. La sincronización entre
+equipos y las cuentas de usuario tienen la lógica implementada y probada con
+mocks, **pero sin interfaz de cuenta y sin ejecución contra Supabase real**.
+
+`npm run check` verde: 116 archivos, 1.997 pruebas superadas, 9 omitidas.
+
+Lo canónico de esta capacidad —estado por paso, arquitectura de claves, los
+diez puntos a tener en cuenta y el siguiente paso exacto— vive en
+`CURRENT-TASK.md`, sección `F9-VAULT-001`, bajo «PUNTO DE RETOMA». Quien
+retome debe leerlo entero antes de tocar nada.
+
+Lo más importante para no equivocarse: hay **dos orígenes de la misma llave
+maestra que aún no están unidos** —el vault local (`vault.json`, lo que funciona
+hoy) y el vault de cuenta (`account-client` + gateway, recién implementado)—, y
+**la migración `0007` NO debe aplicarse todavía** porque dejaría tablas que nada
+usa. Se aplica después de unir la cuenta con la interfaz.
+
+Decisiones nuevas del bloque: `D-039` a `D-046`. `D-045` matiza `D-001`: Luxy
+admite varias personas con cuenta propia; el resto de `D-001` (coste cero, sin
+facturación) sigue vigente.
+
 Última actualización: **2026-09-01 — BUG-GIT-IDENTITY-001**
 
 Capacidad corregida: Luxy ya puede confirmar el trabajo de un worktree en un

@@ -1,5 +1,48 @@
 # Luxy — acciones locales de Daniel
 
+## LA-031 — aplicar 0007, desplegar el gateway y probar la bóveda real
+
+Estado: `blocked` — abierta el 2026-09-01. **NO ejecutar todavía.**
+
+Estas acciones cierran la bóveda de punta a punta, pero **sólo tienen sentido
+después** de que exista la interfaz de cuenta y el vault de cuenta esté unido a
+la UI (ver `CURRENT-TASK.md`, «Siguiente paso exacto»). Aplicar la migración o
+desplegar antes deja infraestructura que nada usa.
+
+Cuando llegue el momento, en este orden:
+
+1. **Confirmar contra qué proyecto de Supabase apunta el gateway** antes de
+   nada. Ya pasó una vez: el Worker apuntaba a un proyecto y el SQL Editor a
+   otro (trampa 3 de `docs/ARRANQUE-ORDENADOR-NUEVO.md`). El log del Worker trae
+   `supabaseHost`.
+
+2. **Aplicar `supabase/migrations/0007_luxy_vault.sql`** en el SQL Editor de ese
+   proyecto. Es aditiva: sólo `create table if not exists`, no toca datos ni el
+   enum `luxy_job_status`. Comprobación después:
+
+   ```sql
+   select tablename, rowsecurity from pg_tables
+   where schemaname = 'public' and tablename like 'vault%';
+   ```
+
+   Deben salir las cinco (`vault_users`, `vault_sessions`, `vault_conversations`,
+   `vault_records`, `vault_media`) con `rowsecurity = true`. Si alguna sale
+   `false`, PARAR: RLS no se activó y esas tablas quedarían expuestas.
+
+3. **Desplegar el gateway** (`wrangler deploy` desde `apps/gateway`) para que las
+   rutas `/api/vault/*` existan en producción. Requiere autorización explícita.
+
+4. **Registrar la API de Xavira**: guardar la clave en Conexiones como
+   `VAULT_MEDIA_API_KEY`, y hacer UNA generación real de prueba con un prompt
+   neutro, para confirmar que el contrato del adaptador (nombres de campo, 201
+   vs 202, sondeo, formato de error) coincide con la API de verdad.
+
+5. **Probar el flujo de cuenta**: registrar una cuenta, entrar desde un segundo
+   equipo con sólo la contraseña, y sincronizar. Verificar que en el `.jsonl`
+   local y en Supabase no hay texto legible.
+
+Registrar cada paso y su resultado real aquí abajo cuando se hagan.
+
 ## LA-030 — configurar la identidad de Git de este ordenador
 
 Estado: `pending` — abierta el 2026-09-01.
