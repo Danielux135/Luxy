@@ -233,6 +233,19 @@ async function bootstrap(): Promise<void> {
   // necesario en Windows para que las notificaciones se atribuyan a Luxy
   app.setAppUserModelId('com.luxy.desktop');
 
+  /**
+   * los volcados de fallo se quedan dentro de Luxy y no se envian a nadie.
+   *
+   * Un volcado del renderer contiene su memoria, y con la boveda abierta eso
+   * incluye conversaciones descifradas. Chromium los escribe aunque no se active
+   * el informador de fallos, asi que al menos acaban en una carpeta conocida,
+   * bajo la cuenta del usuario, y no en una ruta compartida del sistema.
+   *
+   * NO se llama a crashReporter.start(): sin el no se sube nada a ningun
+   * servidor. Un volcado que viajase seria contenido privado saliendo del PC.
+   */
+  app.setPath('crashDumps', join(luxyDataDir(), 'crash'));
+
   await app.whenReady();
   applyContentSecurityPolicy(isDev);
 

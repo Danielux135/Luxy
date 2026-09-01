@@ -1,5 +1,50 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-09-01 17:05 — Claude — F9.8, higiene de caminos laterales
+
+- Estado anterior: `F9.17` implementado. `F9.8` era el único paso marcado como
+  **condición dura antes de usar la bóveda con contenido real**.
+- Enfoque: auditar por dónde puede escaparse el contenido en vez de suponerlo.
+  El contenido cifrado no se filtra por el cifrado; se filtra por un registro,
+  una notificación o un volcado de fallo.
+- **Fuga 1 — herramientas de desarrollo abiertas en producción.** `devTools` no
+  estaba configurado, y su valor por defecto es `true`. Con la bóveda abierta el
+  renderer tiene conversaciones **descifradas** en memoria, así que cualquiera
+  que pulsase Ctrl+Shift+I en la aplicación instalada podía leerlas **sin la
+  contraseña**. Es exactamente el escenario que la bóveda existe para impedir.
+  Ahora `devTools: options.isDev`.
+- **Fuga 2 — volcados de fallo.** Chromium escribe minidumps aunque no se active
+  el informador de fallos, y un volcado del renderer contiene su memoria: con la
+  bóveda abierta, conversaciones descifradas en un `.dmp` sin cifrar. Ahora se
+  redirigen a `%APPDATA%\Luxy\crash`, bajo la cuenta del usuario. Y se deja
+  escrito por qué **no** se llama a `crashReporter.start()`: sin él no se sube
+  nada a ningún servidor, y un volcado que viajase sería contenido privado
+  saliendo del equipo.
+- **Fuga 3 — corrector ortográfico.** Ya estaba desactivado, pero sin explicar
+  por qué. Documentado: manda palabras a un servicio de Google y mantiene un
+  diccionario del usuario en disco. Con la bóveda abierta eso sería texto
+  privado saliendo por un camino que nadie mira.
+- **Comprobado y ya correcto, sin cambios**: un turno privado no dispara
+  notificaciones de Windows. `onAgentEvent` sólo notifica en `job.completed`,
+  `job.failed`, `approval.pending` y `agent.error`, y `host-entry` sólo emite
+  `job.phase` y `job.warning` para un turno privado. Era correcto por
+  construcción, no por casualidad, pero no había nada que lo fijara: añadido
+  `local-turn-privacy.test.ts` para que un evento nuevo no lo rompa en silencio.
+- **Comprobado y ya correcto**: `describeError()` aplica `redact()` a todo
+  mensaje de error antes de registrarlo (`logger.ts:113`).
+- Comandos ejecutados:
+  - `npm run check` → **exit 0**; 109 archivos, 1.910 superadas, 9 omitidas.
+- Riesgos o límites que quedan y se documentan sin suavizar:
+  - un volcado de fallo del renderer **sigue pudiendo** contener texto
+    descifrado si ocurre con la bóveda abierta. Se acota dónde cae y se impide
+    que salga del equipo; no se puede impedir que se escriba.
+  - la memoria del proceso sigue siendo legible para quien tenga depurador y la
+    misma cuenta de Windows. Es el límite de DPAPI, ya documentado.
+  - `wipe()` reduce la ventana, no la elimina: V8 pudo copiar el buffer antes.
+- Estado nuevo: `F9.8` **done**. Con esto se levanta la condición que bloqueaba
+  usar la bóveda con contenido real.
+- Siguiente paso exacto: `F9.15` y `F9.16` (sincronización), o cablear `F9.17`.
+
 ### 2026-09-01 16:52 — Claude — F9.17, adaptador de Xavira
 
 - Estado anterior: `F9.14` cerrado y confirmado a mano.

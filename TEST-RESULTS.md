@@ -1,5 +1,14 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-01 — Windows 11 (equipo `oscar`) — F9.8
+
+- **`npm run check`: exit 0.** Suite: **109 archivos, 1.910 superadas, 9
+  omitidas, 0 fallos**.
+- Cambios de endurecimiento no cubiertos por pruebas automáticas, porque son
+  configuración de Electron: `devTools: isDev` y la ruta de volcados. Se
+  verifican abriendo la aplicación empaquetada y comprobando que Ctrl+Shift+I
+  no abre nada.
+
 ### 2026-09-01 — Windows 11 (equipo `oscar`) — F9.17
 
 - `npx vitest run apps/agent/src/providers/xavira.test.ts`: **22/22**.

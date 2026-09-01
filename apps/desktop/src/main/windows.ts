@@ -83,7 +83,21 @@ export function createMainWindow(options: MainWindowOptions): BrowserWindow {
       webSecurity: true,
       allowRunningInsecureContent: false,
       experimentalFeatures: false,
+      /**
+       * el corrector ortografico manda palabras a un servicio de Google y
+       * mantiene un diccionario del usuario en disco. Con la boveda abierta,
+       * eso seria texto privado saliendo por un camino que nadie mira.
+       */
       spellcheck: false,
+      /**
+       * las herramientas de desarrollo SOLO en desarrollo.
+       *
+       * Con la boveda abierta, el renderer tiene conversaciones descifradas en
+       * memoria. Cualquiera que pulse Ctrl+Shift+I en la aplicacion instalada
+       * podria leerlas sin necesitar la contraseña, que es exactamente el
+       * escenario que la boveda existe para impedir.
+       */
+      devTools: options.isDev,
     },
   });
 

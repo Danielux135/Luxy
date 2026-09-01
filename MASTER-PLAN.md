@@ -290,7 +290,7 @@ interfaz: *workspace*, *privacy*, *vault*, *invitado en solo lectura*.
 | F9.5 | `run_local_turn` en `host-protocol`: el turno privado no pasa por la cola | done |
 | F9.6 | Migración de columnas de ciphertext; el enum `luxy_job_status` no se toca | planned |
 | F9.7 | Sincronización entre equipos por emparejamiento y recovery key | planned |
-| F9.8 | Higiene de logs, cachés, miniaturas y notificaciones | planned |
+| F9.8 | Higiene de logs, cachés, miniaturas y notificaciones | done |
 | F9.9 | Puente explícito por conversación, apagado por defecto | planned |
 | F9.10 | Identidad de usuario e invitación por correo | blocked |
 | F9.11 | Transportes del invitado: Studio, visor web, exportación | blocked |
