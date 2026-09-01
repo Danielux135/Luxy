@@ -43,10 +43,15 @@ import {
   handleStudioOptions,
 } from './handlers/studio.js';
 import {
+  handleVaultChangePassword,
   handleVaultConversations,
   handleVaultDelete,
+  handleVaultLoginFinish,
+  handleVaultLoginStart,
+  handleVaultLogout,
   handleVaultPull,
   handleVaultPush,
+  handleVaultRegister,
 } from './handlers/vault.js';
 import { redact } from '@luxy/shared';
 
@@ -97,7 +102,15 @@ const router = new Router<Deps>()
   .post('/api/studio/jobs/:jobId/feedback', (request, deps, params) =>
     handleStudioJobFeedback(request, deps, params),
   )
-  // boveda privada: el gateway transporta ciphertext, no lo lee
+  // cuentas de boveda: registro y login no exigen sesion previa
+  .post('/api/vault/register', (request, deps) => handleVaultRegister(request, deps))
+  .post('/api/vault/login/start', (request, deps) => handleVaultLoginStart(request, deps))
+  .post('/api/vault/login/finish', (request, deps) => handleVaultLoginFinish(request, deps))
+  .post('/api/vault/logout', (request, deps, params) => handleVaultLogout(request, deps, params))
+  .post('/api/vault/password', (request, deps, params) =>
+    handleVaultChangePassword(request, deps, params),
+  )
+  // sincronizacion: autorizada por sesion de usuario
   .post('/api/vault/records', (request, deps, params) => handleVaultPush(request, deps, params))
   .get('/api/vault/conversations', (request, deps, params) =>
     handleVaultConversations(request, deps, params),

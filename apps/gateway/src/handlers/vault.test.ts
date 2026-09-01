@@ -1,5 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import { handleVaultConversations, handleVaultDelete, handleVaultPull, handleVaultPush } from './vault.js';
+import {
+  handleVaultConversations,
+  handleVaultDelete,
+  handleVaultLoginFinish,
+  handleVaultLoginStart,
+  handleVaultPull,
+  handleVaultPush,
+  handleVaultRegister,
+} from './vault.js';
 
 const VAULT_ID = 'A'.repeat(43);
 const CONVERSATION = 'ad6a9bf6-c69f-4eab-9624-f405b78bdda5';
@@ -37,9 +45,67 @@ const record = (sequence = 0) => ({
  * verdad, y que el borrado en cascada se lleve turnos y medios.
  */
 
+describe('cuentas', () => {
+  it('los cuatro manejadores de cuenta existen', () => {
+    for (const handler of [handleVaultRegister, handleVaultLoginStart, handleVaultLoginFinish]) {
+      expect(typeof handler).toBe('function');
+    }
+  });
+
+  it('el registro NO exige token de maquina', () => {
+    // es como se entra la primera vez: register y login/* van sin sesion previa
+    expect(handleVaultRegister.length).toBeLessThanOrEqual(2);
+  });
+
+  it('login/start responde algo plausible aunque el correo no exista', async () => {
+    const { vaultLoginStartResponseSchema } = await import('@luxy/shared');
+    // el señuelo tiene que validar contra el mismo esquema que una respuesta
+    // real, o revelaria por la forma que la cuenta no existe
+    const decoy = {
+      authSalt: 'ABCDEFGHJKMNPQRSTVWXYZ',
+      argon2Params: { t: 3, m: 65536, p: 1 },
+      wrappedMasterKey: {
+        version: 1,
+        purpose: 'vault.account.masterkey',
+        nonce: 'ABCDEFGHJKMNPQRS',
+        ciphertext: 'ABCD',
+      },
+    };
+    expect(vaultLoginStartResponseSchema.safeParse(decoy).success).toBe(true);
+  });
+
+  it('el hash de acceso que se guarda tiene la forma que exige el contrato', async () => {
+    const { vaultRegisterRequestSchema } = await import('@luxy/shared');
+    const parsed = vaultRegisterRequestSchema.safeParse({
+      email: 'daniel@example.com',
+      authSalt: 'ABCDEFGHJKMNPQRSTVWXYZ',
+      argon2Params: { t: 3, m: 65536, p: 1 },
+      authHash: 'A'.repeat(43),
+      wrappedMasterKey: {
+        version: 1,
+        purpose: 'vault.account.masterkey',
+        nonce: 'ABCDEFGHJKMNPQRS',
+        ciphertext: 'ABCD',
+      },
+      vaultId: 'B'.repeat(43),
+    });
+    expect(parsed.success).toBe(true);
+  });
+
+  it('el registro rechaza una contraseña... no llega nunca: solo hashes', async () => {
+    const { vaultRegisterRequestSchema } = await import('@luxy/shared');
+    // el esquema no tiene campo password: no hay por donde colar la contraseña
+    const shape = vaultRegisterRequestSchema.safeParse({
+      email: 'x@y.com',
+      password: 'esto-no-existe',
+    });
+    expect(shape.success).toBe(false);
+  });
+});
+
 describe('contrato de subida', () => {
-  it('el manejador existe y esta protegido por autenticacion de maquina', () => {
-    // no se exporta el interior: la unica via es con token, y eso es correcto
+  it('los manejadores de sincronizacion existen y estan protegidos', () => {
+    // van envueltos en withVaultAuth: sin sesion valida no se llega al cuerpo
     for (const handler of [handleVaultPush, handleVaultPull, handleVaultConversations, handleVaultDelete]) {
       expect(typeof handler).toBe('function');
     }

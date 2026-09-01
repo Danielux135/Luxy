@@ -3,6 +3,22 @@ import { generateShortId } from '@luxy/shared';
 import type { Job, JobOrigin, JobStatus, Machine, PrivateRecord, ProviderId } from '@luxy/shared';
 import { type SupabaseClient, eq, gte, inList } from './supabase.js';
 
+const VAULT_USER_COLUMNS =
+  'id,email,auth_salt,argon2_t,argon2_m,argon2_p,auth_hash,wrapped_master_key,vault_id,disabled';
+
+interface VaultUserRow {
+  id: string;
+  email: string;
+  auth_salt: string;
+  argon2_t: number;
+  argon2_m: number;
+  argon2_p: number;
+  auth_hash: string;
+  wrapped_master_key: unknown;
+  vault_id: string;
+  disabled: boolean;
+}
+
 interface MachineRow {
   id: string;
   name: string;
@@ -630,11 +646,96 @@ export class Repository {
   // ninguna operacion que pueda leer el contenido, porque no tiene la llave.
   // ---------------------------------------------------------------------------
 
-  /** crea la conversacion si no existe. los turnos dependen de ella */
-  async ensureVaultConversation(vaultId: string, conversationId: string): Promise<void> {
+  // --- cuentas ---
+
+  async getVaultUserByEmail(email: string): Promise<VaultUserRow | null> {
+    return this.db.selectOne<VaultUserRow>('vault_users', {
+      columns: VAULT_USER_COLUMNS,
+      filters: { email: eq(email) },
+    });
+  }
+
+  async getVaultUserById(id: string): Promise<VaultUserRow | null> {
+    return this.db.selectOne<VaultUserRow>('vault_users', {
+      columns: VAULT_USER_COLUMNS,
+      filters: { id: eq(id) },
+    });
+  }
+
+  async createVaultUser(input: {
+    email: string;
+    authSalt: string;
+    argon2Params: { t: number; m: number; p: number };
+    authHash: string;
+    wrappedMasterKey: unknown;
+    vaultId: string;
+  }): Promise<{ id: string }> {
+    const rows = await this.db.insert<{ id: string }>('vault_users', {
+      email: input.email,
+      auth_salt: input.authSalt,
+      argon2_t: input.argon2Params.t,
+      argon2_m: input.argon2Params.m,
+      argon2_p: input.argon2Params.p,
+      auth_hash: input.authHash,
+      wrapped_master_key: input.wrappedMasterKey,
+      vault_id: input.vaultId,
+    });
+    const created = rows[0];
+    if (created === undefined) throw new Error('no se pudo crear la cuenta');
+    return created;
+  }
+
+  async updateVaultUserCredentials(
+    id: string,
+    input: {
+      authSalt: string;
+      argon2Params: { t: number; m: number; p: number };
+      authHash: string;
+      wrappedMasterKey: unknown;
+    },
+  ): Promise<void> {
+    await this.db.update('vault_users', { id: eq(id) }, {
+      auth_salt: input.authSalt,
+      argon2_t: input.argon2Params.t,
+      argon2_m: input.argon2Params.m,
+      argon2_p: input.argon2Params.p,
+      auth_hash: input.authHash,
+      wrapped_master_key: input.wrappedMasterKey,
+    });
+  }
+
+  // --- sesiones ---
+
+  async createVaultSession(userId: string, tokenHash: string, expiresAt: string): Promise<void> {
+    await this.db.insert('vault_sessions', {
+      user_id: userId,
+      token_hash: tokenHash,
+      expires_at: expiresAt,
+    }, false);
+  }
+
+  async revokeVaultSession(tokenHash: string): Promise<void> {
+    await this.db.update('vault_sessions', { token_hash: eq(tokenHash) }, {
+      revoked_at: new Date().toISOString(),
+    });
+  }
+
+  /** cierra todas las sesiones del usuario MENOS la actual */
+  async revokeOtherVaultSessions(userId: string, keepTokenHash: string): Promise<void> {
+    await this.db.update(
+      'vault_sessions',
+      { user_id: eq(userId), token_hash: `neq.${keepTokenHash}` },
+      { revoked_at: new Date().toISOString() },
+    );
+  }
+
+  // --- sincronizacion (autorizada por owner_user_id) ---
+
+  /** crea la conversacion a nombre del usuario si no existe */
+  async ensureVaultConversation(ownerUserId: string, conversationId: string): Promise<void> {
     await this.db.insertIfAbsent(
       'vault_conversations',
-      { conversation_id: conversationId, vault_id: vaultId },
+      { conversation_id: conversationId, owner_user_id: ownerUserId },
       'conversation_id',
     );
   }
@@ -642,15 +743,14 @@ export class Repository {
   /**
    * inserta turnos sin duplicar.
    *
-   * `resolution=ignore-duplicates` sobre (vault_id, conversation_id, sequence):
-   * reenviar un lote tras un corte de red no crea copias. Devuelve cuantos eran
-   * nuevos de verdad, para poder distinguir "subido" de "ya estaba".
+   * idempotente por (conversation_id, sequence): reenviar un lote tras un corte
+   * de red no crea copias. Devuelve cuantos eran nuevos de verdad.
    */
-  async insertVaultRecords(vaultId: string, records: PrivateRecord[]): Promise<number> {
+  async insertVaultRecords(ownerUserId: string, records: PrivateRecord[]): Promise<number> {
     if (records.length === 0) return 0;
     const rows = records.map((record) => ({
       record_id: record.recordId,
-      vault_id: vaultId,
+      owner_user_id: ownerUserId,
       conversation_id: record.conversationId,
       sequence: record.sequence,
       content: record.content,
@@ -658,22 +758,20 @@ export class Repository {
       created_at: record.createdAt,
     }));
 
-    const inserted = await this.db.insert<{ record_id: string }>(
-      'vault_records?on_conflict=vault_id,conversation_id,sequence',
-      rows,
-    ).catch(() => [] as { record_id: string }[]);
+    const inserted = await this.db
+      .insert<{ record_id: string }>('vault_records?on_conflict=conversation_id,sequence', rows)
+      .catch(() => [] as { record_id: string }[]);
     return inserted.length;
   }
 
-  async listVaultConversations(query: {
-    vaultId: string;
-    since?: string;
-    limit: number;
-  }): Promise<{ conversation_id: string; turn_count: number; updated_at: string }[]> {
+  async listVaultConversations(
+    ownerUserId: string,
+    query: { since?: string; limit: number },
+  ): Promise<{ conversation_id: string; turn_count: number; updated_at: string }[]> {
     return this.db.select('vault_conversations', {
       columns: 'conversation_id,turn_count,updated_at',
       filters: {
-        vault_id: eq(query.vaultId),
+        owner_user_id: eq(ownerUserId),
         ...(query.since === undefined ? {} : { updated_at: gte(query.since) }),
       },
       order: 'updated_at.desc',
@@ -682,13 +780,12 @@ export class Repository {
   }
 
   async listVaultRecords(
-    vaultId: string,
+    ownerUserId: string,
     conversationId: string,
     limit: number,
   ): Promise<
     {
       record_id: string;
-      vault_id: string;
       conversation_id: string;
       sequence: number;
       content: unknown;
@@ -697,19 +794,19 @@ export class Repository {
     }[]
   > {
     return this.db.select('vault_records', {
-      columns: 'record_id,vault_id,conversation_id,sequence,content,sealed_memory,created_at',
-      filters: { vault_id: eq(vaultId), conversation_id: eq(conversationId) },
-      // por secuencia y no por fecha: el orden de la conversacion lo da la
-      // secuencia, y dos turnos pueden compartir marca de tiempo
+      columns: 'record_id,conversation_id,sequence,content,sealed_memory,created_at',
+      // el filtro por usuario es la autorizacion: un usuario no puede leer los
+      // registros de otro aunque conozca el identificador de conversacion
+      filters: { owner_user_id: eq(ownerUserId), conversation_id: eq(conversationId) },
       order: 'sequence.asc',
       limit,
     });
   }
 
-  /** borra la conversacion; la cascada se lleva turnos y medios */
-  async deleteVaultConversation(vaultId: string, conversationId: string): Promise<boolean> {
+  /** borra la conversacion del usuario; la cascada se lleva turnos y medios */
+  async deleteVaultConversation(ownerUserId: string, conversationId: string): Promise<boolean> {
     const removed = await this.db.delete('vault_conversations', {
-      vault_id: eq(vaultId),
+      owner_user_id: eq(ownerUserId),
       conversation_id: eq(conversationId),
     });
     return removed > 0;

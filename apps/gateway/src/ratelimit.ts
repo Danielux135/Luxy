@@ -79,10 +79,28 @@ export function getMachineLimiter(): SlidingWindowRateLimiter {
   return machineLimiter;
 }
 
+let vaultAuthLimiter: SlidingWindowRateLimiter | null = null;
+
+/**
+ * limita los intentos de registro y login de cuenta.
+ *
+ * Es el unico endpoint publico y sin sesion, asi que es la superficie de fuerza
+ * bruta. 10 por minuto y correo deja usar el login normal y hace inviable
+ * probar contraseñas en masa. Aproximado por isolate, como el resto (ver
+ * riesgo conocido 1): suficiente contra un bucle, no contra un ataque
+ * distribuido, para el que la defensa real es Argon2id.
+ */
+export function getVaultAuthLimiter(): SlidingWindowRateLimiter {
+  vaultAuthLimiter ??= new SlidingWindowRateLimiter(10, 60_000);
+  return vaultAuthLimiter;
+}
+
 /** solo para tests: reinicia los limitadores compartidos */
 export function resetLimiters(): void {
   webhookLimiter?.reset();
   machineLimiter?.reset();
+  vaultAuthLimiter?.reset();
   webhookLimiter = null;
   machineLimiter = null;
+  vaultAuthLimiter = null;
 }
