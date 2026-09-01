@@ -1,5 +1,26 @@
 # Luxy — estado canónico del proyecto
 
+Última actualización: **2026-09-01 — BUG-GIT-IDENTITY-001**
+
+Capacidad corregida: Luxy ya puede confirmar el trabajo de un worktree en un
+ordenador **sin identidad de Git configurada**. `commitWorktree` aporta una
+identidad de respaldo (`Luxy <luxy@local.invalid>`) sólo cuando el equipo no
+tiene ninguna, conservando la autoría real del usuario cuando sí existe.
+Antes fallaba de forma silenciosa, después de haber inicializado el proyecto
+correctamente. `npm run check` exit 0: 96 archivos, 1.653 superadas, 14
+omitidas. Sin commit, push, deploy ni migración.
+
+Nota de entorno: la copia operativa de esta sesión es
+`C:\Users\oscar\Desktop\Daniel\Luxy`, un clon nuevo, no la
+`C:\Users\daniel\Desktop\Luxy` que describe el checkpoint del 2026-08-21.
+La integración de `F4.9` ya está hecha (`main` @ `00a9cc1`), aunque los
+documentos anteriores todavía la presentan como pendiente; `LA-029` sí sigue
+abierta. `LA-030` recoge la identidad global de Git de este equipo.
+
+Trabajo acordado y no empezado: `F5-VAULT-001`, conversaciones privadas
+cifradas en cliente y sincronizadas, con la infraestructura viendo sólo
+ciphertext. Diseño y pasos en `CURRENT-TASK.md`.
+
 Última actualización: **2026-08-27 — F4.9-DYNAMIC-HTTP-PROVIDERS**
 
 Luxy Studio ya permite añadir, editar, activar, desactivar y eliminar proveedores

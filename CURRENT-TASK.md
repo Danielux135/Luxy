@@ -1,5 +1,89 @@
 # Luxy — tarea activa
 
+## BUG-GIT-IDENTITY-001 — identidad de Git de respaldo al confirmar un worktree
+
+Estado: **`done` — Claude, 2026-09-01. Sin commit.**
+
+En un Windows sin `user.name`/`user.email`, Luxy inicializaba un proyecto
+editable correctamente pero **no podía confirmar el trabajo del modelo**:
+`ensureGitRepository` ya inyectaba una identidad de respaldo para su commit
+`estado inicial` y `commitWorktree`, en el mismo archivo, no inyectaba ninguna.
+
+Arreglado en `apps/agent/src/git.ts` con `FALLBACK_IDENTITY_ARGS` y
+`hasCommitIdentity()`. El respaldo entra **sólo** cuando el equipo no tiene
+identidad: un commit de trabajo conserva la autoría real del usuario cuando
+existe. Dos pruebas nuevas cubren los dos lados.
+
+`npm run check` → exit 0; 96 archivos, 1.653 superadas, 14 omitidas.
+Evidencia en `CHANGELOG-WORK.md` y `TEST-RESULTS.md` del 2026-09-01.
+
+Queda `LA-030`: la identidad global de este ordenador sigue sin configurar.
+Luxy ya no depende de ella; los commits manuales de Daniel sí.
+
+---
+
+## Discrepancias encontradas al abrir la sesión del 2026-09-01
+
+1. Este ordenador (`C:\Users\oscar\Desktop\Daniel\Luxy`) es un clon nuevo **sin
+   `node_modules`**. La línea canónica que describe `PROJECT-STATE.md` es
+   `C:\Users\daniel\Desktop\Luxy`. Ver `docs/ARRANQUE-ORDENADOR-NUEVO.md`.
+2. El «siguiente paso exacto» de `F4.9-DYNAMIC-HTTP-PROVIDERS` decía integrar el
+   commit local en `main`. **Ya está integrado**: `main` @ `00a9cc1` *es* ese
+   commit. `LA-029` (publicar y validar) sigue abierta; la integración no.
+
+---
+
+## F9-VAULT-001 — conversaciones privadas cifradas y sincronizadas
+
+Estado: **`planned`** — diseño acordado con Daniel el 2026-09-01, sin empezar.
+
+Objetivo: una sección de Luxy que se abre con contraseña y cuyas conversaciones,
+memoria e imágenes/vídeos se cifran **en el equipo** antes de salir. La
+infraestructura (Gateway, Supabase, almacenamiento de objetos) guarda sólo
+ciphertext y nunca recibe la llave. Sincroniza entre los equipos de Daniel.
+
+Jerarquía de claves: `contraseña → Argon2id → KEK → llave maestra aleatoria →
+HKDF por dominio`. La llave maestra vive **sólo en memoria del proceso principal
+de Electron**; el renderer no la ve nunca. Tres envolturas independientes:
+contraseña, recovery key y, opcional, DPAPI para «recordar en este equipo».
+
+Pasos: `F9.1` criptografía (`packages/vault-crypto`, sin dependencias nuevas:
+`@noble/hashes@2.2.0` ya trae `argon2` y `hkdf`, y `@noble/curves@2.2.0` trae
+`x25519`) · `F9.2` esquemas · `F9.3` `VaultService` y bloqueo · `F9.4` cifrado
+en cliente antes de subir · `F9.5` `run_local_turn` en `host-protocol` · `F9.6`
+migración de columnas de ciphertext · `F9.7` sincronización entre equipos ·
+`F9.8` higiene de logs, cachés y notificaciones · `F9.9` puente explícito por
+conversación · `F9.10`–`F9.11` usuarios e invitación · `F9.12` documentación.
+
+Decisiones pendientes antes de `F9.10`: contradice `D-001` («no multi-tenant») y
+exige una decisión nueva que lo matice. `F9.1`–`F9.9` no la necesitan.
+
+Límites que la documentación debe recoger sin suavizar: el proveedor de IA ve el
+prompt; Telegram no puede leer ciphertext y por eso queda fuera salvo puente
+explícito; DPAPI no protege de otro proceso de la misma cuenta de Windows; las
+migraciones nunca se han ejecutado contra un Postgres real.
+
+### F9.1 — done (Claude, 2026-09-01, sin commit)
+
+`packages/vault-crypto`, puro y sin dependencias nuevas. Sobre AES-256-GCM con
+propósito y versión autenticados; Argon2id sólo para la contraseña y HKDF para
+las subclaves; llave maestra con tres envolturas independientes (contraseña,
+recuperación, equipo); envoltura X25519 con clave efímera para compartir una
+conversación sin entregar el resto.
+
+71 pruebas propias. `npm run check` exit 0: 99 archivos, 1.729 superadas, 9
+omitidas. Decisiones `D-039`, `D-040`, `D-041`.
+
+Dos correcciones hechas en el código, no en las pruebas: `randomBytes()` sobre
+el tope de 65.536 bytes de `crypto.getRandomValues`, y el coste de Argon2 bajado
+de 256 MiB (13 s medidos por desbloqueo) a la segunda opción recomendada por
+RFC 9106.
+
+Siguiente paso exacto: `F9.2` — esquemas Zod del nivel de privacidad, sobres,
+invitaciones y permisos en `packages/shared`, que no debe importar `node:*`.
+
+---
+
 ## F4.9-DYNAMIC-HTTP-PROVIDERS — proveedores HTTP configurables desde Studio
 
 Estado: **`done` — Codex, 2026-08-27**

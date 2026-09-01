@@ -566,3 +566,82 @@ las APIs de Anthropic y OpenAI.
 Guardar aplica la configuración al agente inmediatamente si está libre. Si hay
 un trabajo activo, la recarga espera a que termine para no interrumpir ni repetir
 una respuesta parcial.
+
+## D-039 — la contraseña no cifra los datos, envuelve la llave maestra
+
+Fecha: 2026-09-01
+
+Estado: aceptada, implementada en `packages/vault-crypto`
+
+Los datos de la bóveda los cifra una llave maestra aleatoria de 256 bits. La
+contraseña sólo produce, vía Argon2id, la llave que envuelve a esa maestra.
+
+Consecuencias que justifican la indirección:
+
+- cambiar la contraseña reescribe una envoltura de decenas de bytes; **no**
+  obliga a recifrar la bóveda, que puede ocupar gigabytes;
+- pueden coexistir varias envolturas de la misma maestra, cada una con su forma
+  de abrirse — contraseña, clave de recuperación y almacén del sistema
+  operativo. Todas dan la misma llave y ninguna revela a las otras;
+- las subclaves salen de la maestra por HKDF con separación de dominio y de
+  objeto, así que existe una llave por conversación. Eso es lo que permite
+  compartir una sola sin entregar el resto.
+
+Argon2id se aplica **sólo** a la contraseña, que tiene poca entropía. Las
+subclaves usan HKDF, que es rápido porque su entrada ya es aleatoria. Invertir
+los dos usos sería un fallo grave en un sentido y desperdicio en el otro.
+
+## D-040 — el coste de Argon2id se elige con tiempos medidos, y se guarda con el dato
+
+Fecha: 2026-09-01
+
+Estado: aceptada, implementada
+
+Parámetros por defecto: `t=3`, `m=64 MiB`, `p=1` — la segunda opción recomendada
+por RFC 9106 §4. Medido en el equipo de desarrollo con `@noble/hashes`:
+
+| parámetros | coste |
+| --- | --- |
+| m=256 MiB, t=3 | ~12,8 s |
+| m=128 MiB, t=3 | ~5,6 s |
+| **m=64 MiB, t=3** | **~2,7 s** |
+| m=32 MiB, t=3 | ~1,3 s |
+
+Argon2 en JavaScript puro es mucho más lento que una implementación nativa, así
+que los 256 MiB que parecían prudentes sobre el papel daban 13 s por desbloqueo.
+Se rechaza bajar de la recomendación del RFC para ganar comodidad: el desbloqueo
+del día a día usa la envoltura del sistema operativo, que es instantánea, y los
+2,7 s sólo se pagan al crear la bóveda, al abrirla en un equipo nuevo o si el
+usuario desactiva «recordar en este equipo».
+
+`p=1` y no el `p=4` del RFC porque la implementación es de un solo hilo: con la
+misma `m` y `t`, subir las líneas no añade trabajo total. El atacante, que sí
+puede paralelizar, no gana nada con esa elección.
+
+Los parámetros se **guardan junto a cada envoltura** y se leen de ahí al abrir,
+nunca de la constante actual. Si algún día se suben, las bóvedas creadas antes
+siguen abriéndose. Al leerlos se validan contra límites duros: una envoltura
+manipulada no puede pedir memoria absurda y tumbar el proceso.
+
+## D-041 — todo dato cifrado lleva su propósito autenticado
+
+Fecha: 2026-09-01
+
+Estado: aceptada, implementada
+
+Cada sobre es AES-256-GCM con nonce aleatorio de 96 bits y datos autenticados
+asociados que incluyen la versión del formato y el propósito (`vault.media`,
+`vault.conversation`, `vault.masterkey.password`…).
+
+Que el propósito vaya **autenticado** y no como etiqueta suelta significa que
+reescribir ese campo no engaña a nadie: la etiqueta de GCM deja de cuadrar. Sin
+esto, el texto cifrado de una miniatura podría colarse donde se espera un
+mensaje, y la envoltura de la clave de recuperación podría presentarse como la
+de la contraseña.
+
+La versión también viaja autenticada, así que no se puede rebajar: nadie puede
+convencer a una versión futura de aplicar las reglas más débiles de la actual.
+
+Los errores de descifrado **no distinguen** entre llave incorrecta, propósito
+equivocado y dato alterado. Distinguirlos daría información útil a quien pruebe
+llaves.

@@ -269,6 +269,48 @@ Se conservan `packages/remote-protocol`, `packages/remote-crypto`, ADR, threat
 model, pruebas y código de host. No continuar WebRTC, TURN, captura, input o
 servicio Windows salvo mantenimiento imprescindible del build.
 
+## Fase 9 — Espacio privado cifrado y sincronizado
+
+Prioridad: **P1**, acordada con Daniel el 2026-09-01  
+Estado global: `planned`
+
+Una sección de Luxy que se abre con contraseña. Sus conversaciones, memoria e
+imágenes/vídeos se cifran **en el equipo** antes de salir; Gateway, Supabase y
+el almacenamiento de objetos guardan sólo ciphertext y nunca reciben la llave.
+Sincroniza entre los equipos de Daniel. Nomenclatura neutra en código e
+interfaz: *workspace*, *privacy*, *vault*, *invitado en solo lectura*.
+
+| ID | Trabajo | Estado |
+| --- | --- | --- |
+| F9.0 | Línea base verde en el equipo de trabajo | done (`BUG-GIT-IDENTITY-001`) |
+| F9.1 | `packages/vault-crypto`: Argon2id, HKDF, sobre AES-256-GCM, envoltura X25519 | done |
+| F9.2 | Esquemas Zod del nivel de privacidad, sobres, invitaciones y permisos | planned |
+| F9.3 | `VaultService` en el proceso principal: desbloqueo, bloqueo, auto-bloqueo | planned |
+| F9.4 | Cifrado en cliente antes de subir, incluidas miniaturas | planned |
+| F9.5 | `run_local_turn` en `host-protocol`: el turno privado no pasa por la cola | planned |
+| F9.6 | Migración de columnas de ciphertext; el enum `luxy_job_status` no se toca | planned |
+| F9.7 | Sincronización entre equipos por emparejamiento y recovery key | planned |
+| F9.8 | Higiene de logs, cachés, miniaturas y notificaciones | planned |
+| F9.9 | Puente explícito por conversación, apagado por defecto | planned |
+| F9.10 | Identidad de usuario e invitación por correo | blocked |
+| F9.11 | Transportes del invitado: Studio, visor web, exportación | blocked |
+| F9.12 | `D-039`…, `docs/PRIVACY.md`, `SECURITY.md`, `threat-model.md` | planned |
+
+`F9.10` y `F9.11` están `blocked`: contradicen `D-001` («no multi-tenant») y
+necesitan una decisión nueva que lo matice. `F9.1`–`F9.9` no dependen de ella.
+
+`F9.1` cerrado el 2026-09-01 sin dependencias nuevas: `@noble/hashes@2.2.0` ya
+traía `argon2` y `hkdf`, `@noble/curves@2.2.0` trae `x25519`, y AES-256-GCM lo
+pone WebCrypto. 71 pruebas propias; `npm run check` exit 0 con 1.729 superadas.
+Decisiones `D-039`, `D-040` y `D-041`.
+
+Límites que la documentación debe recoger sin suavizar: el proveedor de IA ve
+el prompt; Telegram no puede leer ciphertext y queda fuera salvo puente
+explícito; DPAPI no protege frente a otro proceso de la misma cuenta de
+Windows; revocar un permiso no recupera lo ya descifrado; las migraciones nunca
+se han ejecutado contra un Postgres real.
+
+
 ## Cierre de cada fase
 
 Una fase sólo pasa a `done` cuando:

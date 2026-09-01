@@ -1,5 +1,29 @@
 # Luxy — acciones locales de Daniel
 
+## LA-030 — configurar la identidad de Git de este ordenador
+
+Estado: `pending` — abierta el 2026-09-01.
+
+Este equipo no tiene `user.name` ni `user.email` en ningún ámbito
+(`git config --list --show-origin | grep user.` no devuelve nada). Los commits
+existentes de la historia son `Daniel <danielux135@gmail.com>`.
+
+`BUG-GIT-IDENTITY-001` ya hace que **Luxy** no dependa de esto: `commitWorktree`
+aporta una identidad de respaldo cuando el equipo no tiene ninguna. Pero los
+commits que Daniel haga **a mano desde una terminal** seguirán fallando.
+
+Intentado desde la sesión de IA y **denegado por el sistema de permisos sin
+mostrar diálogo**, igual que el `git push` de `LA-028`. Hay que ejecutarlo desde
+una terminal fuera de la sesión:
+
+```
+git config --global user.name "Daniel"
+git config --global user.email "danielux135@gmail.com"
+```
+
+Comprobación: `git config --list --show-origin | grep user.` debe mostrar las
+dos entradas con origen en el `.gitconfig` global.
+
 ## LA-029 — publicar y validar proveedores HTTP dinámicos
 
 Estado: `pending` — abierta el 2026-08-27. El commit local ya fue autorizado y

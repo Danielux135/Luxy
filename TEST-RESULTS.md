@@ -1,5 +1,50 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-01 — Windows 11 (equipo `oscar`) — F9.1
+
+- Rama aislada `luxy/f9-1-vault-crypto`, base `main` @ `00a9cc1`.
+- `npx vitest run packages/vault-crypto`: **71 pruebas, 71 superadas**, 11,0 s.
+  - `envelope.test.ts` 22 · `master-key.test.ts` 36 · `recipient.test.ts` 13.
+  - La prueba `los parametros reales funcionan de extremo a extremo` tarda
+    ~5,8 s a propósito: es la única que ejercita los parámetros de Argon2 que se
+    envían de verdad. El resto usa el mínimo aceptado.
+- `npx tsc -b tsconfig.build.json`: exit 0.
+- **`npm run check`: exit 0.**
+  - Lint: correcto.
+  - Typecheck: correcto.
+  - Suite: **99 archivos, 1.729 superadas, 9 omitidas, 0 fallos**.
+  - Build: los seis paquetes anteriores más `vault-crypto`; `dist/` emitido con
+    declaraciones y mapas.
+- Medición de Argon2id con `@noble/hashes` en este equipo, usada para fijar
+  `ARGON2_PARAMS` (ver `D-040`): 256 MiB/t=3 → 12.827 ms · 128 MiB/t=3 →
+  5.643 ms · **64 MiB/t=3 → 2.670 ms** · 32 MiB/t=3 → 1.321 ms.
+- Ninguna llamada a API real, ninguna dependencia nueva, ningún commit.
+
+### 2026-09-01 — Windows 11 (equipo `oscar`) — BUG-GIT-IDENTITY-001
+
+- Línea canónica: `main` @ `00a9cc1`, clon nuevo **sin `node_modules`**.
+- `npm install`: exit 0. Aviso: 6 paquetes con scripts de instalación sin
+  aprobar (`esbuild` ×3, `workerd`, `koffi`, `electron-winstaller`). No impidió
+  ni las pruebas ni el build.
+- **Línea base antes del arreglo**: `npm run check` con **1 fallo**.
+  96 archivos (1 rojo), 1.650 superadas, 14 omitidas.
+  `apps/agent/src/agent.test.ts:465` → `expect(commit.ok).toBe(true)` recibía
+  `false`, porque el equipo no tiene identidad de Git y `commitWorktree` no
+  aportaba una de respaldo.
+- `npx vitest run apps/agent/src/agent.test.ts` tras el arreglo: **81/81**.
+- **`npm run check` tras el arreglo: exit 0.**
+  - Lint: correcto.
+  - Typecheck: correcto.
+  - Suite: **96 archivos, 0 fallos**. Dos ejecuciones seguidas dieron
+    1.653 superadas / 14 omitidas y 1.658 superadas / 9 omitidas. La diferencia
+    son pruebas que se omiten segun las herramientas que detecta el equipo en
+    ese momento; el total (1.667) y los fallos (0) no varian.
+  - Build: `remote-crypto`, `remote-protocol`, `shared`, `agent`, `desktop` y
+    `gateway` correctos.
+- Diferencia con el registro del 2026-08-27 (1.656 superadas, 9 omitidas): son
+  omisiones por herramientas ausentes en este ordenador, más las 2 pruebas
+  nuevas. No es una regresión.
+
 ### 2026-08-27 — Windows 11 — F4.9-DYNAMIC-HTTP-PROVIDERS
 
 - Worktree: `luxy/f4-9-dynamic-http-providers`, base `main` @ `2ae1291`.

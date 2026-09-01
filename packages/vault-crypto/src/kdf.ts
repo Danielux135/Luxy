@@ -1,0 +1,146 @@
+// derivacion de la contraseña y separacion de dominios.
+//
+// dos funciones distintas que la gente confunde a menudo:
+//
+//   Argon2id  convierte una CONTRASEÑA (poca entropia, adivinable) en una llave.
+//             Es lento y caro en memoria a proposito: es lo unico que encarece
+//             probar millones de contraseñas a quien se lleve el archivo.
+//
+//   HKDF      convierte una LLAVE (ya aleatoria) en varias llaves independientes.
+//             Es rapido, y debe serlo: no hay nada que adivinar.
+//
+// usar HKDF sobre una contraseña seria un fallo grave. Usar Argon2id para las
+// subclaves solo seria lento sin ganar nada.
+import { argon2idAsync } from '@noble/hashes/argon2.js';
+import { hkdf } from '@noble/hashes/hkdf.js';
+import { sha256 } from '@noble/hashes/sha2.js';
+import { KEY_BYTES } from './envelope.js';
+import { VaultCryptoError, utf8 } from './bytes.js';
+
+/**
+ * coste de Argon2id: la SEGUNDA opcion recomendada por RFC 9106 §4.
+ *
+ * Elegido con tiempos medidos en el equipo de desarrollo, no a ojo. Argon2 en
+ * JavaScript puro es bastante mas lento que una implementacion nativa:
+ *
+ *     m=256 MiB, t=3  →  ~12,8 s   inaceptable para desbloquear
+ *     m=128 MiB, t=3  →   ~5,6 s   sigue siendo demasiado
+ *     m= 64 MiB, t=3  →   ~2,7 s   elegido
+ *     m= 32 MiB, t=3  →   ~1,3 s   por debajo de la recomendacion del RFC
+ *
+ * 2,7 s se paga pocas veces: al crear la boveda, al abrirla en un equipo nuevo
+ * y cuando el usuario desactiva "recordar en este equipo". El desbloqueo del
+ * dia a dia usa la envoltura del sistema operativo, que es instantanea.
+ *
+ * p=1 y no el p=4 del RFC porque esta implementacion es de un solo hilo: con la
+ * misma m y t, subir las lineas no añade trabajo total, solo lo reordena. El
+ * atacante, que si puede paralelizar, no gana nada con nuestra eleccion.
+ *
+ * los parametros se GUARDAN junto al material derivado. No se leen de esta
+ * constante al descifrar: si algun dia se suben, las bovedas antiguas deben
+ * seguir abriendose con los suyos.
+ */
+export const ARGON2_PARAMS = {
+  /** iteraciones */
+  t: 3,
+  /** memoria en KiB */
+  m: 64 * 1024,
+  /** paralelismo */
+  p: 1,
+} as const;
+
+export interface Argon2Params {
+  t: number;
+  m: number;
+  p: number;
+}
+
+/** limites defensivos: un archivo manipulado no puede pedir memoria absurda */
+const MAX_MEMORY_KIB = 2 * 1024 * 1024;
+
+export function assertArgon2Params(params: Argon2Params): void {
+  if (!Number.isInteger(params.t) || params.t < 1 || params.t > 16) {
+    throw new VaultCryptoError('parametros de derivacion no validos');
+  }
+  if (!Number.isInteger(params.m) || params.m < 8 * 1024 || params.m > MAX_MEMORY_KIB) {
+    throw new VaultCryptoError('parametros de derivacion no validos');
+  }
+  if (!Number.isInteger(params.p) || params.p < 1 || params.p > 4) {
+    throw new VaultCryptoError('parametros de derivacion no validos');
+  }
+}
+
+export const SALT_BYTES = 16;
+
+/**
+ * convierte la contraseña en la llave que envuelve la llave maestra (KEK).
+ *
+ * `onProgress` existe porque esto tarda cientos de milisegundos: la interfaz
+ * necesita poder decir "descifrando" en vez de parecer colgada.
+ */
+export async function deriveKeyEncryptionKey(
+  password: string,
+  salt: Uint8Array,
+  params: Argon2Params = ARGON2_PARAMS,
+  onProgress?: (fraction: number) => void,
+): Promise<Uint8Array> {
+  if (password.length === 0) throw new VaultCryptoError('la contraseña esta vacia');
+  if (salt.length !== SALT_BYTES) {
+    throw new VaultCryptoError(`la sal debe tener ${SALT_BYTES} bytes`);
+  }
+  assertArgon2Params(params);
+
+  return argon2idAsync(utf8(password), salt, {
+    t: params.t,
+    m: params.m,
+    p: params.p,
+    dkLen: KEY_BYTES,
+    // devuelve el control al bucle de eventos cada 10 ms para no congelar la UI
+    asyncTick: 10,
+    ...(onProgress === undefined ? {} : { onProgress }),
+  });
+}
+
+/**
+ * dominios de subclave.
+ *
+ * cada uno produce una llave distinta e independiente a partir de la maestra.
+ * Que se filtre la de miniaturas no compromete la de mensajes, y ningun sobre
+ * de un dominio se puede reabrir con la llave de otro.
+ */
+export const KEY_DOMAINS = [
+  'index',
+  'conversation',
+  'memory',
+  'media',
+  'thumbnail',
+  'identity',
+] as const;
+
+export type KeyDomain = (typeof KEY_DOMAINS)[number];
+
+/**
+ * deriva la subclave de un dominio a partir de la llave maestra.
+ *
+ * el `context` opcional separa ademas por objeto: con el se obtiene una llave
+ * distinta POR CONVERSACION, que es lo que permite compartir una sola sin
+ * entregar el resto de la boveda.
+ */
+export function deriveSubkey(
+  masterKey: Uint8Array,
+  domain: KeyDomain,
+  context = '',
+): Uint8Array {
+  if (masterKey.length !== KEY_BYTES) {
+    throw new VaultCryptoError(`la llave maestra debe tener ${KEY_BYTES} bytes`);
+  }
+  if (!KEY_DOMAINS.includes(domain)) {
+    throw new VaultCryptoError(`dominio de llave desconocido: "${domain}"`);
+  }
+  // el separador no puede aparecer en el dominio (son minusculas y guiones), de
+  // modo que ("media", "x:y") y ("media:x", "y") no colisionan nunca
+  const info = utf8(context.length === 0 ? `luxy.vault.${domain}` : `luxy.vault.${domain}|${context}`);
+  // la sal de HKDF no aporta aqui: la entrada ya es una llave uniforme de 256
+  // bits. La separacion real la hace `info`.
+  return hkdf(sha256, masterKey, undefined, info, KEY_BYTES);
+}

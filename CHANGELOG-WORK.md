@@ -1,5 +1,107 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-09-01 13:05 — Claude — F9.1, paquete de criptografía de la bóveda
+
+- Estado anterior: `F9.0` cerrado (línea base verde). `F9-VAULT-001` sin empezar.
+- Objetivo: `packages/vault-crypto`, la base criptográfica de la bóveda. Puro,
+  sin E/S, sin dependencias nuevas.
+- Archivos creados:
+  - `packages/vault-crypto/package.json`, `tsconfig.json`
+  - `src/bytes.ts` — base64url, `wipe()`, comparación en tiempo constante
+  - `src/envelope.ts` — sobre AES-256-GCM versionado con propósito autenticado
+  - `src/kdf.ts` — Argon2id para la contraseña, HKDF para las subclaves
+  - `src/master-key.ts` — llave maestra y sus tres envolturas
+  - `src/recipient.ts` — envoltura X25519 para compartir
+  - `src/index.ts` y tres archivos de prueba
+- Archivos modificados: `tsconfig.build.json` (referencia nueva).
+- Dependencias: **ninguna nueva**. `@noble/hashes@2.2.0` ya traía `argon2` y
+  `hkdf`, `@noble/curves@2.2.0` trae `x25519`, AES-256-GCM lo pone WebCrypto.
+- Dos fallos propios que encontraron las pruebas y se corrigieron en el código,
+  no en la prueba:
+  1. `randomBytes()` reventaba por encima de 65.536 bytes, el tope por llamada
+     de `crypto.getRandomValues`. Nunca habría fallado con llaves de 32 bytes,
+     pero sí al usarlo con un bloque de imagen o vídeo. Ahora rellena por trozos.
+  2. `m=256 MiB` daba **13 s** por desbloqueo. Medido, no estimado. Bajado a la
+     segunda opción recomendada de RFC 9106 (`t=3, m=64 MiB`) → ~2,7 s. Tabla
+     completa de tiempos en `D-040`.
+- Nota de tipos: `tsconfig.base.json` usa `lib: ["ES2023"]`, sin DOM, así que
+  `CryptoKey` y `BufferSource` no existen. En vez de añadir `DOM` al paquete —
+  que traería `window` y `document` a algo que no puede tocarlos — los tipos se
+  deducen de la propia API con `Awaited<ReturnType<typeof
+  crypto.subtle.importKey>>`. Así el paquete no compila si alguien intenta usar
+  el DOM desde él.
+- Comandos ejecutados:
+  - `npx vitest run packages/vault-crypto` → **71/71**.
+  - `npx tsc -b tsconfig.build.json` → exit 0.
+  - `npm run check` → **exit 0**; 99 archivos, 1.729 superadas, 9 omitidas.
+- Pruebas: 71 propias. Cubren ida y vuelta, alteración de un solo bit,
+  reetiquetado del propósito, versión desconocida, llave equivocada, separación
+  por dominio y por objeto, formato y normalización de la clave de recuperación,
+  cambio de contraseña sin recifrar, redirección de un sobre compartido a otro
+  destinatario, sustitución de la clave efímera, y que el invitado que recibe
+  una conversación no puede abrir las demás ni derivar la llave maestra.
+- Decisiones: `D-039`, `D-040` y `D-041`.
+- Riesgos o límites: el paquete es criptografía, no política. No decide qué se
+  cifra ni cuándo se bloquea; eso llega en `F9.3` y `F9.4`. `wipe()` reduce la
+  ventana en que una llave sigue en memoria, no la elimina: V8 pudo copiar el
+  buffer antes. Sin auditoría externa.
+- Estado nuevo: `F9.1` **done**, sin commit.
+- Siguiente paso exacto: `F9.2`, esquemas Zod del nivel de privacidad, sobres,
+  invitaciones y permisos en `packages/shared`.
+
+### 2026-09-01 12:33 — Claude — BUG-GIT-IDENTITY-001
+
+- Estado anterior: clon recién montado sin `node_modules`. Tras `npm install`,
+  `npm run check` fallaba con 1 prueba roja:
+  `apps/agent/src/agent.test.ts > worktrees reales > crea un worktree huerfano
+  para permitir el primer commit aislado`, en
+  `expect(commit.ok).toBe(true)` (línea 465).
+- Objetivo: dejar la línea base verde antes de empezar el bloque F9.
+- Hipótesis descartada: fallo ambiental sin más («este PC no tiene git
+  configurado, se configura y ya»).
+- Causa demostrada: `git config --list --show-origin | grep user.` no devuelve
+  nada en este equipo, pero el fallo **no es sólo del equipo**. En
+  `apps/agent/src/git.ts` conviven dos funciones que confirman:
+  `ensureGitRepository` ya inyectaba `-c user.name=Luxy -c
+  user.email=luxy@local.invalid` para su commit `estado inicial`, y
+  `commitWorktree` no inyectaba nada. Por eso en un Windows sin identidad de
+  Git, Luxy inicializa el proyecto correctamente y después **no puede confirmar
+  el trabajo del modelo**. Es un fallo de producto, no de la prueba.
+- Archivos leídos: `apps/agent/src/git.ts`, `apps/agent/src/agent.test.ts`,
+  `apps/agent/src/process.ts`, `PROJECT-STATE.md`, `CURRENT-TASK.md`,
+  `MASTER-PLAN.md`, `DECISIONS.md`, `AI-WORK-PROTOCOL.md`.
+- Archivos modificados:
+  - `apps/agent/src/git.ts`: constante `FALLBACK_IDENTITY_ARGS` y función
+    `hasCommitIdentity()`, que pregunta a git con `git var GIT_COMMITTER_IDENT`
+    en vez de leer la configuración a mano, porque la identidad puede venir de
+    entorno, config local, global o de sistema y sólo git conoce la precedencia.
+    `commitWorktree` usa la identidad de respaldo **sólo** si el equipo no tiene
+    ninguna: ese commit es trabajo del usuario y su autoría no se pisa.
+    `ensureGitRepository` pasa a reutilizar la misma constante; su commit sí es
+    de Luxy y usa el respaldo siempre.
+  - `apps/agent/src/agent.test.ts`: dos pruebas nuevas. Una fuerza un
+    repositorio sin identidad con `user.useConfigOnly=true` (así el caso se
+    reproduce aunque quien ejecute la suite sí tenga identidad global) y exige
+    autor `Luxy <luxy@local.invalid>`. La otra configura `Persona Real` y exige
+    que el respaldo **no** la pise.
+- Comandos ejecutados:
+  - `npm install` → exit 0.
+  - `npx vitest run apps/agent/src/agent.test.ts` → 81/81, incluidas las dos
+    nuevas y la que fallaba.
+  - `npm run check` → **exit 0**; 96 archivos, 1.653 superadas, 14 omitidas.
+- Resultado real: línea base verde. La prueba que fallaba pasa por el arreglo
+  del código, no por haber tocado la configuración del equipo.
+- Decisiones: la identidad de respaldo es un respaldo, no una firma. Un commit
+  de trabajo conserva la autoría real cuando existe.
+- Riesgos o límites: `git config --global` sigue sin estar puesto en este
+  equipo. Luxy ya no depende de ello, pero los commits que Daniel haga a mano
+  desde una terminal sí. Queda como `LA-030`. El intento de configurarlo desde
+  la sesión fue denegado por el sistema de permisos sin mostrar diálogo, igual
+  que el `git push` de `LA-028`.
+- Estado nuevo: `done`, sin commit. No se ha pedido ni autorizado commit.
+- Siguiente paso exacto: abrir `F9-VAULT-001` y empezar por `F9.1`
+  (`packages/vault-crypto`) en rama aislada.
+
 ### 2026-08-27 10:49 — Codex — F4.9-DYNAMIC-HTTP-PROVIDERS, cierre
 
 - Estado anterior: el runtime aceptaba entradas escritas a mano en
