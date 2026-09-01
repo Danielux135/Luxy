@@ -299,7 +299,7 @@ interfaz: *workspace*, *privacy*, *vault*, *invitado en solo lectura*.
 | F9.14 | El proceso principal envía `run_local_turn` y muestra el progreso | done |
 | F9.15 | Endpoints del gateway para registros privados y permisos | planned |
 | F9.16 | Cliente de almacén de objetos para los blobs cifrados | planned |
-| F9.17 | Adaptador de Xavira: personajes, imagen, vídeo, sondeo y descarga | planned |
+| F9.17 | Adaptador de Xavira: personajes, imagen, vídeo, sondeo y descarga | implemented |
 
 `F9.10` y `F9.11` están `blocked`: contradicen `D-001` («no multi-tenant») y
 necesitan una decisión nueva que lo matice. El resto no depende de ella.

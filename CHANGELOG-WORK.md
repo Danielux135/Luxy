@@ -1,5 +1,51 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-09-01 16:52 — Claude — F9.17, adaptador de Xavira
+
+- Estado anterior: `F9.14` cerrado y confirmado a mano.
+- Objetivo: el adaptador de la API de imagen y vídeo. Última pieza del camino
+  crítico hasta la primera imagen privada.
+- Archivos creados: `apps/agent/src/providers/xavira.ts` y su prueba.
+- Contrato implementado, verificado en su documentación pública el 2026-09-01:
+  `POST /v1/characters`, `POST /v1/images:generate` (201 con `output_url` o 202
+  con `poll_url`), `POST /v1/videos:generate` (202 siempre),
+  `GET /v1/generations/:id`.
+- **Se usa sondeo y NO `callback_url`, aunque la API lo ofrezca.** Un callback
+  exigiría una URL pública donde recibir el resultado, y la única que tiene Luxy
+  es el Worker: el contenido pasaría por el gateway, que es exactamente lo que
+  la bóveda existe para impedir. Hay prueba que verifica que la petición de
+  vídeo **nunca** incluye `callback_url`. Es la misma razón por la que el agente
+  sondea la cola en vez de exponer un puerto (`docs/decisions/0001`).
+- El sondeo sube el intervalo de forma exponencial: sondear cada 500 ms un vídeo
+  que tarda tres minutos son cientos de peticiones inútiles y un 429 asegurado.
+- **Una fuga real que encontró una prueba**: `redact()` sólo tapa los secretos
+  registrados, y esta clave llega por parámetro sin pasar por el registro.
+  Algunas APIs repiten la clave recibida en el cuerpo del error, así que un 400
+  podía acabar escribiéndola en el archivo de registro. Añadido `stripKey()`,
+  que se aplica **antes** de `redact()`. La prueba que lo detectó se conserva.
+- Otras decisiones con motivo:
+  - toda respuesta se valida con Zod, aunque venga de un proveedor de pago: una
+    respuesta con otra forma debe fallar aquí y no tres capas más abajo;
+  - la descarga exige **HTTPS**: una URL `http` sería contenido privado viajando
+    en claro por la red;
+  - el identificador se escapa en la ruta, porque uno con barra saltaría a otra
+    ruta de la API. Hay prueba;
+  - los errores traen una pista según el código: 401 clave, 402 sin créditos,
+    429 demasiadas peticiones.
+- El adaptador **no cifra ni escribe en disco**: pide, espera y devuelve bytes.
+  Quien los reciba decide qué hacer con ellos.
+- Comandos ejecutados:
+  - `npx vitest run apps/agent/src/providers/xavira.test.ts` → **22/22**.
+  - `npm run check` → **exit 0**; 108 archivos, 1.905 superadas, 9 omitidas.
+- Riesgos o límites:
+  - **Ninguna llamada real.** El contrato viene de la documentación pública, no
+    de haberlo ejecutado. La primera llamada de verdad puede revelar diferencias.
+  - **Todavía no está conectado.** Falta el mensaje de host que pida un medio,
+    el guardado cifrado del resultado y la interfaz. Eso es lo siguiente.
+- Estado nuevo: `F9.17` **implemented**, sin verificación contra la API real.
+- Siguiente paso exacto: conectar el adaptador al camino privado — generar,
+  descargar, cifrar con `sealMedia` y mostrarlo.
+
 ### 2026-09-01 16:45 — Claude — F9.14 confirmado y relleno contra la fuga de longitud
 
 - **`F9.14` confirmado manualmente por Daniel.** Pegó el contenido real de

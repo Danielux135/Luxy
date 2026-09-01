@@ -1,5 +1,15 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-01 — Windows 11 (equipo `oscar`) — F9.17
+
+- `npx vitest run apps/agent/src/providers/xavira.test.ts`: **22/22**.
+  Ninguna petición real: el transporte se inyecta y hay una prueba que espía
+  `globalThis.fetch` para confirmar que no se usa.
+- **`npm run check`: exit 0.** Suite: **108 archivos, 1.905 superadas, 9
+  omitidas, 0 fallos**.
+- **No verificado contra la API real.** El contrato procede de la documentación
+  pública consultada el 2026-09-01, sin registro ni credenciales.
+
 ### 2026-09-01 — Windows 11 (equipo `oscar`) — F9.14 confirmado + relleno
 
 - **Confirmado manualmente por Daniel** sobre el archivo real de una
