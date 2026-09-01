@@ -47,6 +47,32 @@ async function git(
   return { stdout: result.stdout, stderr: result.stderr, exitCode: result.exitCode };
 }
 
+/**
+ * identidad de respaldo para confirmar cuando el equipo no tiene ninguna.
+ *
+ * un Windows recien instalado no trae user.name ni user.email, y entonces
+ * `git commit` falla con "unable to auto-detect email address". Luxy no puede
+ * quedarse sin poder confirmar el trabajo del modelo por eso.
+ */
+const FALLBACK_IDENTITY_ARGS = [
+  '-c',
+  'user.name=Luxy',
+  '-c',
+  'user.email=luxy@local.invalid',
+] as const;
+
+/**
+ * indica si git puede resolver una identidad de autor en esta ruta.
+ *
+ * se pregunta a git en vez de leer la configuracion a mano porque la identidad
+ * puede venir de cuatro sitios distintos (variables de entorno, config local,
+ * global o de sistema) y solo git conoce la precedencia real.
+ */
+async function hasCommitIdentity(cwd: string): Promise<boolean> {
+  const result = await git(['var', 'GIT_COMMITTER_IDENT'], cwd, 20_000);
+  return result.exitCode === 0;
+}
+
 /** comprueba si una ruta es la raiz de un repositorio git */
 export async function isGitRepository(path: string): Promise<boolean> {
   if (!existsSync(path)) return false;
@@ -93,10 +119,9 @@ export async function ensureGitRepository(
 
   const commit = await git(
     [
-      '-c',
-      'user.name=Luxy',
-      '-c',
-      'user.email=luxy@local.invalid',
+      // el commit de arranque lo crea Luxy, no el usuario: aqui la identidad de
+      // respaldo se usa siempre, no solo cuando falta la del equipo.
+      ...FALLBACK_IDENTITY_ARGS,
       '-c',
       'commit.gpgsign=false',
       '-c',
@@ -332,8 +357,13 @@ export async function commitWorktree(
   const add = await git(['add', '-A'], worktreePath);
   if (add.exitCode !== 0) return { ok: false, output: add.stderr };
 
+  // este commit es trabajo del usuario, asi que su identidad manda. La de Luxy
+  // solo entra cuando el equipo no tiene ninguna, para no borrar la autoria.
+  const identity = (await hasCommitIdentity(worktreePath)) ? [] : [...FALLBACK_IDENTITY_ARGS];
+
   const commit = await git(
     [
+      ...identity,
       // se desactiva la firma para que no bloquee esperando una passphrase
       '-c',
       'commit.gpgsign=false',

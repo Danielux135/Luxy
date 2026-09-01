@@ -472,6 +472,60 @@ describe('worktrees reales', () => {
     expect(branch.exitCode).toBe(0);
   }, 120_000);
 
+  it('confirma con identidad de respaldo cuando el equipo no tiene ninguna', async () => {
+    const proyecto = join(temporal, 'proyecto-sin-identidad');
+    const worktrees = join(temporal, 'worktrees-sin-identidad');
+    mkdirSync(proyecto, { recursive: true });
+    const git = async (args: string[]): Promise<void> => {
+      const r = await runProcess({ executable: 'git', args, cwd: proyecto, timeoutMs: 60_000 });
+      if (r.exitCode !== 0) throw new Error(`git ${args.join(' ')}: ${r.stderr}`);
+    };
+    await git(['init', '--initial-branch=main']);
+    // useConfigOnly prohibe a git adivinar usuario@host, asi que el repositorio
+    // se queda sin identidad aunque quien ejecute la suite si tenga una global.
+    await git(['config', 'user.useConfigOnly', 'true']);
+
+    const worktree = await createWorktree(proyecto, 'LUX-NOID', 'sin identidad', worktrees);
+    writeFileSync(join(worktree.path, 'README.md'), '# sin identidad\n');
+    const commit = await commitWorktree(worktree.path, 'trabajo del modelo');
+    expect(commit.ok).toBe(true);
+
+    const author = await runProcess({
+      executable: 'git',
+      args: ['log', '-1', '--pretty=%an <%ae>'],
+      cwd: worktree.path,
+      timeoutMs: 60_000,
+    });
+    expect(author.stdout.trim()).toBe('Luxy <luxy@local.invalid>');
+  }, 120_000);
+
+  it('conserva la identidad del usuario cuando el equipo si tiene una', async () => {
+    const proyecto = join(temporal, 'proyecto-con-identidad');
+    const worktrees = join(temporal, 'worktrees-con-identidad');
+    mkdirSync(proyecto, { recursive: true });
+    const git = async (args: string[]): Promise<void> => {
+      const r = await runProcess({ executable: 'git', args, cwd: proyecto, timeoutMs: 60_000 });
+      if (r.exitCode !== 0) throw new Error(`git ${args.join(' ')}: ${r.stderr}`);
+    };
+    await git(['init', '--initial-branch=main']);
+    await git(['config', 'user.name', 'Persona Real']);
+    await git(['config', 'user.email', 'persona@example.local']);
+
+    const worktree = await createWorktree(proyecto, 'LUX-ID', 'con identidad', worktrees);
+    writeFileSync(join(worktree.path, 'README.md'), '# con identidad\n');
+    const commit = await commitWorktree(worktree.path, 'trabajo del modelo');
+    expect(commit.ok).toBe(true);
+
+    const author = await runProcess({
+      executable: 'git',
+      args: ['log', '-1', '--pretty=%an <%ae>'],
+      cwd: worktree.path,
+      timeoutMs: 60_000,
+    });
+    // la identidad de respaldo no puede pisar la del usuario
+    expect(author.stdout.trim()).toBe('Persona Real <persona@example.local>');
+  }, 120_000);
+
   it('reanuda el worktree existente en vez de crear otra rama', async () => {
     const proyecto = join(temporal, 'proyecto-reanudable');
     const worktrees = join(temporal, 'worktrees-reanudables');
