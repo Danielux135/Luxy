@@ -115,6 +115,8 @@ function ConversationPanel({
 
       {vault.media.length > 0 && <MediaStrip vault={vault} />}
 
+      <GeneratePanel vault={vault} />
+
       {vault.error !== null && <Notice tone="fault">{vault.error}</Notice>}
 
       {projects.length === 0 ? (
@@ -185,6 +187,112 @@ function ConversationPanel({
         </>
       )}
     </Panel>
+  );
+}
+
+/**
+ * generacion de imagen y video.
+ *
+ * El personaje es obligatorio porque el proveedor lo exige para generar: es lo
+ * que mantiene la misma apariencia entre generaciones. Se crea una vez y se
+ * reutiliza; su identificador vive en el proveedor, no aqui.
+ */
+function GeneratePanel({ vault }: { vault: VaultController }): JSX.Element {
+  const [characterId, setCharacterId] = useState('');
+  const [prompt, setPrompt] = useState('');
+  const [kind, setKind] = useState<'image' | 'video'>('image');
+  const [creating, setCreating] = useState(false);
+
+  const disabled = vault.openConversationId === null;
+  const canGenerate =
+    !disabled && characterId.trim().length > 0 && prompt.trim().length > 0 && !vault.generating;
+
+  return (
+    <details className="vault-generate">
+      <summary>Generar imagen o vídeo</summary>
+
+      {disabled && (
+        <Notice tone="idle">
+          Envía un mensaje primero: lo generado se guarda dentro de una
+          conversación.
+        </Notice>
+      )}
+
+      <Field
+        label="Personaje"
+        hint="El proveedor exige uno; es lo que mantiene la misma apariencia entre generaciones."
+      >
+        <input
+          value={characterId}
+          placeholder="identificador del personaje"
+          onChange={(event) => setCharacterId(event.target.value)}
+        />
+      </Field>
+
+      <div className="row">
+        <button
+          className="btn btn--quiet"
+          disabled={creating}
+          onClick={() => {
+            setCreating(true);
+            void vault
+              .createCharacter({})
+              .then((id) => {
+                if (id !== null) setCharacterId(id);
+              })
+              .finally(() => setCreating(false));
+          }}
+        >
+          {creating ? 'Creando…' : 'Crear personaje nuevo'}
+        </button>
+      </div>
+
+      <Field label="Descripción">
+        <textarea
+          rows={2}
+          value={prompt}
+          disabled={vault.generating}
+          onChange={(event) => setPrompt(event.target.value)}
+        />
+      </Field>
+
+      <div className="row">
+        <select value={kind} onChange={(event) => setKind(event.target.value as 'image' | 'video')}>
+          <option value="image">Imagen</option>
+          <option value="video">Vídeo</option>
+        </select>
+        <button
+          className="btn btn--primary"
+          disabled={!canGenerate}
+          onClick={() => {
+            void vault
+              .generateMedia({ characterId: characterId.trim(), prompt: prompt.trim(), kind })
+              .then((ok) => {
+                if (ok) setPrompt('');
+              });
+          }}
+        >
+          {vault.generating ? 'Generando…' : 'Generar'}
+        </button>
+      </div>
+
+      {vault.generating && (
+        <p className="field__hint">
+          Un vídeo puede tardar minutos. Luxy pregunta al proveedor cada pocos
+          segundos hasta que termina.
+        </p>
+      )}
+
+      {vault.lastCost !== null && (
+        <p className="field__hint">Última generación: {vault.lastCost} créditos.</p>
+      )}
+
+      <p className="field__hint">
+        El resultado se descarga y se cifra antes de tocar el disco. Lo que
+        escribas aquí lo recibe el proveedor: la bóveda protege lo que Luxy
+        guarda, no lo que un tercero ve porque se lo envías.
+      </p>
+    </details>
   );
 }
 

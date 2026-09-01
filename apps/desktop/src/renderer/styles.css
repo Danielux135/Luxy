@@ -1666,3 +1666,22 @@ input[aria-invalid='true'] {
   border: 1px solid var(--line);
   border-radius: 6px;
 }
+
+.vault-generate {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin-bottom: 14px;
+}
+
+.vault-generate > summary {
+  cursor: pointer;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  opacity: 0.75;
+}
+
+.vault-generate[open] > summary {
+  margin-bottom: 10px;
+}

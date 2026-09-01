@@ -295,6 +295,31 @@ export const vaultMediaReadResultSchema = z.object({
   dataUrl: z.string().nullable(),
 });
 
+export const vaultMediaGenerateArgsSchema = z.object({
+  conversationId: conversationIdSchema,
+  characterId: z.string().min(1).max(128),
+  prompt: z.string().min(1).max(2000),
+  kind: z.enum(['image', 'video']),
+  /** solo para video: anima una imagen ya generada */
+  fromGenerationId: z.string().max(128).optional(),
+});
+
+export const vaultCharacterCreateArgsSchema = z.object({
+  traits: z.record(z.string().max(64), z.string().max(120)).default({}),
+});
+
+export const vaultMediaGenerateResultSchema = z.object({
+  mediaId: z.string(),
+  mimeType: z.string(),
+  byteSize: z.number().int().min(0),
+  /** creditos declarados por el proveedor, para que el gasto sea visible */
+  costCredits: z.number().nullable(),
+});
+
+export const vaultCharacterCreateResultSchema = z.object({
+  characterId: z.string(),
+});
+
 export const configSaveArgsSchema = z.object({
   /** se valida con storedAgentConfigSchema en el proceso principal */
   config: z.unknown(),
@@ -587,6 +612,12 @@ export interface LuxyBridge {
   readVaultMedia(
     args: z.infer<typeof vaultMediaReadArgsSchema>,
   ): Promise<IpcResult<z.infer<typeof vaultMediaReadResultSchema>>>;
+  generateVaultMedia(
+    args: z.infer<typeof vaultMediaGenerateArgsSchema>,
+  ): Promise<IpcResult<z.infer<typeof vaultMediaGenerateResultSchema>>>;
+  createVaultCharacter(
+    args: z.infer<typeof vaultCharacterCreateArgsSchema>,
+  ): Promise<IpcResult<z.infer<typeof vaultCharacterCreateResultSchema>>>;
   /** avisa de que la boveda se cerro sola. devuelve la funcion de baja */
   onVaultLocked(listener: () => void): () => void;
   /** devuelve la funcion de baja; sin ella se acumulan listeners al navegar */

@@ -57,6 +57,8 @@ export const IPC_INVOKE = {
   vaultMediaAttach: 'luxy:vault:media:attach',
   vaultMediaList: 'luxy:vault:media:list',
   vaultMediaRead: 'luxy:vault:media:read',
+  vaultMediaGenerate: 'luxy:vault:media:generate',
+  vaultCharacterCreate: 'luxy:vault:character:create',
 } as const;
 
 /** canales de notificacion (main -> renderer) */
@@ -106,8 +108,20 @@ export const MACHINE_TOKEN_SECRET = 'machineToken';
  */
 export const VAULT_DEVICE_SECRET = 'VAULT_DEVICE_KEY';
 
+/**
+ * clave del proveedor de generacion de imagen y video.
+ *
+ * Reservada por el mismo motivo que la del equipo: la gestiona solo el proceso
+ * principal, y nadie puede apropiarsela declarando un proveedor http con este
+ * apiKeyEnv.
+ */
+export const VAULT_MEDIA_API_SECRET = 'VAULT_MEDIA_API_KEY';
+
 /** nombres que la interfaz no puede fijar ni reutilizar como apiKeyEnv */
-export const RESERVED_SECRET_NAMES: readonly string[] = [VAULT_DEVICE_SECRET];
+export const RESERVED_SECRET_NAMES: readonly string[] = [
+  VAULT_DEVICE_SECRET,
+  VAULT_MEDIA_API_SECRET,
+];
 
 export function connectionSecretName(connectionId: string): string {
   return `connection:${connectionId}`;

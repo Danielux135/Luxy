@@ -1,5 +1,42 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-09-01 19:50 — Claude — generación de imagen y vídeo conectada
+
+- Estado anterior: el adaptador `xavira.ts` existía con 22 pruebas pero nadie lo
+  llamaba.
+- Archivos modificados: `shared/channels.ts`, `shared/ipc.ts`,
+  `preload/index.ts`, `main/ipc/handlers.ts`, `renderer/useVault.ts`,
+  `renderer/pages/Vault.tsx`, `renderer/styles.css`.
+- **La llamada la hace el proceso principal, no el agente.** El agente existe
+  para lanzar procesos y manejar worktrees, y aquí no interviene ninguno de los
+  dos. El proceso principal ya tiene red y ya lee secretos cifrados.
+- `VAULT_MEDIA_API_KEY` entra en `RESERVED_SECRET_NAMES`, por el mismo motivo
+  que la llave del equipo: nadie puede apropiarse de ese nombre declarando un
+  proveedor HTTP con ese `apiKeyEnv`.
+- Camino completo: generar → **sondear** (`D-042`, nunca callback) → descargar →
+  `sealMedia` → disco. Los bytes descargados **no llegan a existir sin cifrar**
+  en el sistema de ficheros en ningún momento.
+- El log de generación registra sólo el tipo y el tamaño. Ni el prompt, ni la
+  conversación, ni la URL del resultado.
+- La interfaz muestra los **créditos** que declara el proveedor tras cada
+  generación, para que el gasto sea visible y no una sorpresa a fin de mes.
+- El panel avisa de que un vídeo puede tardar minutos y de que Luxy sondea. Sin
+  eso, una espera de tres minutos parece un cuelgue.
+- **Límite escrito en el código y en la interfaz**: el prompt lo recibe el
+  proveedor. La bóveda protege lo que Luxy guarda y transporta, no lo que un
+  tercero ve porque el usuario decidió enviárselo. Se guarda cifrado junto al
+  medio, pero eso no lo retira de los registros del proveedor.
+- Comandos: `npm run check` → **exit 0**; 112 archivos, 1.953 superadas.
+- Riesgos o límites:
+  - **sigue sin llamarse a la API real**. El contrato viene de la documentación
+    pública. La primera llamada de verdad puede revelar diferencias en nombres
+    de campo o en el formato de error.
+  - la creación de personaje envía rasgos vacíos: el catálogo real de rasgos del
+    proveedor no está modelado, y el identificador se puede pegar a mano.
+  - un vídeo grande se genera y se guarda, pero **no se puede previsualizar**
+    por el tope de 20 MB del IPC. Es la limitación ya documentada.
+- Siguiente paso exacto: cliente de sincronización.
+
 ### 2026-09-01 19:30 — Claude — memoria acumulativa en conversaciones privadas
 
 - Problema: cada turno reenviaba el hilo entero. Con veinte turnos eso

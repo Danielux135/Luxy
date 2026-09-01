@@ -84,6 +84,15 @@ export interface VaultController {
   attaching: boolean;
   attachMedia: () => Promise<void>;
   openMedia: (mediaId: string) => Promise<string | null>;
+  generating: boolean;
+  /** créditos declarados por el proveedor en la última generación */
+  lastCost: number | null;
+  generateMedia: (input: {
+    characterId: string;
+    prompt: string;
+    kind: 'image' | 'video';
+  }) => Promise<boolean>;
+  createCharacter: (traits: Record<string, string>) => Promise<string | null>;
   acknowledgeRecoveryKey: () => void;
   clearError: () => void;
 }
@@ -101,6 +110,8 @@ export function useVault(): VaultController {
   const [sending, setSending] = useState(false);
   const [media, setMedia] = useState<PrivateMediaItem[]>([]);
   const [attaching, setAttaching] = useState(false);
+  const [generating, setGenerating] = useState(false);
+  const [lastCost, setLastCost] = useState<number | null>(null);
   const mounted = useRef(true);
 
   const refresh = useCallback(async (): Promise<void> => {
@@ -333,6 +344,58 @@ export function useVault(): VaultController {
     [openConversationId, reloadConversations],
   );
 
+  /**
+   * genera un medio y lo guarda cifrado.
+   *
+   * Tarda: la generación no es inmediata y el proceso principal sondea al
+   * proveedor hasta que termina. `generating` existe para que la interfaz lo
+   * diga en vez de parecer colgada.
+   */
+  const generateMedia = useCallback(
+    async (input: {
+      characterId: string;
+      prompt: string;
+      kind: 'image' | 'video';
+    }): Promise<boolean> => {
+      if (openConversationId === null) {
+        setError('abre o empieza una conversacion antes de generar');
+        return false;
+      }
+      setGenerating(true);
+      setError(null);
+      try {
+        const result = await window.luxy.generateVaultMedia({
+          conversationId: openConversationId,
+          ...input,
+        });
+        if (!result.ok) {
+          setError(result.error);
+          setHint(result.hint);
+          return false;
+        }
+        setLastCost(result.value.costCredits);
+        await reloadMedia();
+        return true;
+      } finally {
+        if (mounted.current) setGenerating(false);
+      }
+    },
+    [openConversationId, reloadMedia],
+  );
+
+  const createCharacter = useCallback(
+    async (traits: Record<string, string>): Promise<string | null> => {
+      const result = await window.luxy.createVaultCharacter({ traits });
+      if (!result.ok) {
+        setError(result.error);
+        setHint(result.hint);
+        return null;
+      }
+      return result.value.characterId;
+    },
+    [],
+  );
+
   return {
     status,
     loading,
@@ -357,6 +420,10 @@ export function useVault(): VaultController {
     attaching,
     attachMedia,
     openMedia,
+    generating,
+    lastCost,
+    generateMedia,
+    createCharacter,
     acknowledgeRecoveryKey: () => setRecoveryKey(null),
     clearError: () => setError(null),
   };

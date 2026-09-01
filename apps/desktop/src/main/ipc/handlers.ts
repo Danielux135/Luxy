@@ -53,6 +53,8 @@ import {
   vaultMediaAttachArgsSchema,
   vaultMediaListArgsSchema,
   vaultMediaReadArgsSchema,
+  vaultMediaGenerateArgsSchema,
+  vaultCharacterCreateArgsSchema,
   VAULT_PREVIEW_MAX_BYTES,
   vaultDeviceUnlockSetArgsSchema,
   vaultPasswordArgsSchema,
@@ -70,7 +72,19 @@ import { VaultError, type VaultService } from '../vault/vault-service.js';
 import type { PrivateConversationStore } from '../vault/conversation-store.js';
 import type { PrivateMediaStore } from '../vault/media-store.js';
 import { randomUUID } from 'node:crypto';
-import { MACHINE_TOKEN_SECRET, connectionSecretName } from '../../shared/ipc.js';
+import {
+  MACHINE_TOKEN_SECRET,
+  VAULT_MEDIA_API_SECRET,
+  connectionSecretName,
+} from '../../shared/ipc.js';
+import {
+  XaviraError,
+  awaitGeneration,
+  createCharacter,
+  downloadOutput,
+  generateImage,
+  generateVideo,
+} from '@luxy/agent/dist/providers/xavira.js';
 import { deleteMigratedFile, inspectEnvFile, readEnvSecrets } from '../migration.js';
 import { readCatalogSnapshot, writeCatalogSnapshot } from '../catalog-store.js';
 import { resolveWorktreeDirectory } from '../worktree-directory.js';
@@ -749,6 +763,108 @@ export function registerIpcHandlers(context: HandlerContext): void {
         previewable: true,
       })),
     };
+  });
+
+  /**
+   * opciones del proveedor de generacion.
+   *
+   * La clave sale de `SecretStore` y NUNCA pasa por el renderer, igual que las
+   * demas. La llamada la hace el proceso principal, que ya tiene red: no hace
+   * falta pasar por el agente, cuya razon de ser es lanzar procesos y manejar
+   * worktrees, nada de lo cual interviene aqui.
+   */
+  const mediaProviderOptions = (signal: AbortSignal) => {
+    const apiKey = context.secretStore.get(VAULT_MEDIA_API_SECRET);
+    if (apiKey === undefined) {
+      throw new VaultError(
+        'no hay clave del proveedor de imagenes guardada en este equipo',
+        'guardala en Conexiones antes de generar',
+      );
+    }
+    return { baseUrl: 'https://api.xavira.ai', apiKey, signal };
+  };
+
+  handle(IPC_INVOKE.vaultCharacterCreate, vaultCharacterCreateArgsSchema, async (args) => {
+    if (!context.vault.isUnlocked()) throw new VaultError('la boveda esta bloqueada');
+    const controller = new AbortController();
+    try {
+      const characterId = await createCharacter(
+        { traits: args.traits },
+        mediaProviderOptions(controller.signal),
+      );
+      return { characterId };
+    } catch (error) {
+      if (error instanceof XaviraError) throw new VaultError(error.message, error.hint);
+      throw error;
+    }
+  });
+
+  /**
+   * genera una imagen o un video y lo guarda cifrado.
+   *
+   * Limite que conviene tener presente al leer esto: el prompt sale de este
+   * equipo hacia el proveedor, y **el proveedor lo ve**. La boveda protege lo
+   * que Luxy guarda y transporta, no lo que un tercero recibe porque el usuario
+   * decidio enviarselo. Se guarda cifrado junto al medio, pero eso no lo retira
+   * de los registros del proveedor.
+   */
+  handle(IPC_INVOKE.vaultMediaGenerate, vaultMediaGenerateArgsSchema, async (args) => {
+    if (!context.vault.isUnlocked()) throw new VaultError('la boveda esta bloqueada');
+
+    const controller = new AbortController();
+    const options = mediaProviderOptions(controller.signal);
+
+    try {
+      const started =
+        args.kind === 'image'
+          ? await generateImage({ characterId: args.characterId, prompt: args.prompt }, options)
+          : await generateVideo(
+              {
+                characterId: args.characterId,
+                prompt: args.prompt,
+                ...(args.fromGenerationId === undefined
+                  ? {}
+                  : { fromGenerationId: args.fromGenerationId }),
+              },
+              options,
+            );
+
+      // sondeo, nunca callback: un callback exigiria una URL publica y el
+      // contenido pasaria por el gateway (D-042)
+      const finished = await awaitGeneration(started, options);
+      if (finished.outputUrl === null) {
+        throw new VaultError('el proveedor no devolvio ningun resultado');
+      }
+
+      const { bytes, mimeType } = await downloadOutput(finished.outputUrl, options);
+
+      // se cifra ANTES de tocar el disco: los bytes descargados no llegan a
+      // existir sin cifrar en el sistema de ficheros en ningun momento
+      const stored = await context.privateMedia.add(context.vault, args.conversationId, bytes, {
+        mimeType,
+        displayName: null,
+        prompt: args.prompt,
+        width: null,
+        height: null,
+        durationMs: null,
+        characterId: args.characterId,
+        provider: 'xavira',
+        model: null,
+      });
+
+      // ni el prompt, ni la conversacion, ni la URL del resultado
+      context.log('medio privado generado', { kind: args.kind, byteSize: stored.byteSize });
+
+      return {
+        mediaId: stored.mediaId,
+        mimeType,
+        byteSize: stored.byteSize,
+        costCredits: finished.costCredits,
+      };
+    } catch (error) {
+      if (error instanceof XaviraError) throw new VaultError(error.message, error.hint);
+      throw error;
+    }
   });
 
   handle(IPC_INVOKE.vaultMediaRead, vaultMediaReadArgsSchema, async (args) => {
