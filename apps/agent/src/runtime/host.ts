@@ -17,6 +17,7 @@ import { executeApproval, auditFilePath } from '../approvals.js';
 import { worktreesDir, logsDir } from '../paths.js';
 import { type AgentLogger, describeError } from '../logger.js';
 import { createWorktree, ensureGitRepository } from '../git.js';
+import type { LocalTurnInput, LocalTurnResult } from '../local-turn.js';
 
 export interface AgentHostOptions {
   logger: AgentLogger;
@@ -52,6 +53,13 @@ export class AgentHost {
   private restartPending = false;
   /** serializa start/stop/restart: sin esto dos clics seguidos se pisan */
   private transition: Promise<void> = Promise.resolve();
+  /**
+   * turnos privados en curso, para poder cancelarlos.
+   *
+   * viven aqui y no en LuxyAgent porque no son trabajos de la cola: no tienen
+   * lease que renovar ni estado que reportar a nadie.
+   */
+  private readonly localTurns = new Map<string, AbortController>();
 
   constructor(private readonly options: AgentHostOptions) {
     this.config = options.config;
@@ -245,6 +253,43 @@ export class AgentHost {
       message: outcome.message,
     });
     return { ok: outcome.ok, message: outcome.message };
+  }
+
+  /**
+   * ejecuta un turno de conversacion privada.
+   *
+   * No pasa por la cola de Supabase, y por tanto el gateway no se entera de que
+   * existe. El progreso se publica a los suscriptores del host — es decir, al
+   * proceso principal de Electron — y el texto vuelve como valor de retorno,
+   * nunca como evento persistido.
+   */
+  async runLocalTurn(
+    input: LocalTurnInput,
+    onProgress: (type: string, message: string) => void,
+  ): Promise<LocalTurnResult> {
+    if (this.config === null) throw new AgentNotConfiguredError();
+    if (this.agent === null || this.runState !== 'running') {
+      throw new Error('el agente no esta en marcha en esta maquina');
+    }
+    if (this.localTurns.has(input.localTurnId)) {
+      throw new Error('ese turno ya se esta ejecutando');
+    }
+
+    const abort = new AbortController();
+    this.localTurns.set(input.localTurnId, abort);
+    try {
+      return await this.agent.runPrivateTurn(input, abort.signal, onProgress);
+    } finally {
+      this.localTurns.delete(input.localTurnId);
+    }
+  }
+
+  /** cancela un turno privado. conserva lo que el modelo ya habia escrito */
+  cancelLocalTurn(localTurnId: string): boolean {
+    const abort = this.localTurns.get(localTurnId);
+    if (abort === undefined) return false;
+    abort.abort();
+    return true;
   }
 
   async prepareWorktree(

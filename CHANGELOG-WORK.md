@@ -1,5 +1,52 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-09-01 15:25 — Claude — F9.5, turno privado sin cola
+
+- Estado anterior: `F9.4` cerrado y commiteado (`cd4dd21`).
+- Objetivo: que un turno privado se ejecute en la máquina local **sin pasar por
+  la cola de Supabase**. Era el cambio estructural del bloque: hasta ahora el
+  agente sólo recibía trabajo reclamándolo del gateway.
+- Archivos creados: `apps/agent/src/local-turn.ts` y `local-turn.test.ts`.
+- Archivos modificados: `packages/shared/src/host-protocol.ts`
+  (`run_local_turn`, `cancel_local_turn`, respuesta `local_turn`),
+  `apps/agent/src/agent.ts` (`runPrivateTurn`),
+  `apps/agent/src/runtime/host.ts` (`runLocalTurn`, `cancelLocalTurn`).
+- Cómo se hizo, y por qué así: en vez de escribir un segundo ejecutor, se
+  construye un **trabajo sintético** y se pasa por `runJob`, el de siempre. Se
+  marca con `studioMode: 'conversation'`, que es la etiqueta que ya activa el
+  camino de sólo lectura — sin worktree, sin herramientas de escritura, sin
+  comprobaciones en el anfitrión. Un turno privado no debe poder tocar archivos,
+  y así hereda esa garantía en vez de reimplementarla.
+- El aislamiento se consigue no dando las tres piezas que hablan con el gateway:
+  - `emit` va sólo a quien llama, no a la `EventQueue`, así que no existe el
+    camino por el que un evento acabaría en Supabase;
+  - el resultado se devuelve, no se persiste con `outcomes`;
+  - `downloadAttachment` lanza `LocalTurnIsolationError`. Es deliberadamente
+    ruidoso: si esa rama se ejecuta alguna vez, alguien rompió el aislamiento
+    sin darse cuenta, y es mejor que falle a que suba el contenido en silencio.
+- **La prueba que sostiene todo el bloque**: espía `globalThis.fetch` durante un
+  turno completo y verifica **cero llamadas**. También con proveedor ausente y
+  con proyecto inexistente, que son los caminos de error.
+- Lo que se pierde y queda documentado en el propio archivo: no hay lease, no
+  hay reintento tras un corte y no hay historial en el servidor. Si Luxy se
+  cierra a media respuesta, esa respuesta se pierde. Es el precio de que nadie
+  más la vea.
+- Un fallo mío que encontró la suite: el proveedor falso devolvía `text` en vez
+  de `finalText`, el campo real de `ProviderRunResult`. El turno fallaba con
+  «Cannot read properties of undefined (reading 'trim')». Corregida la prueba,
+  no el código; el comentario del archivo explica el campo correcto para que no
+  se repita.
+- Comandos ejecutados:
+  - `npx vitest run apps/agent/src/local-turn.test.ts` → **12/12**.
+  - `npm run check` → **exit 0**; 104 archivos, 1.845 superadas, 9 omitidas.
+- Riesgos o límites: `runLocalTurn` exige el agente **en marcha**, porque los
+  proveedores se construyen al arrancar. El proceso principal de Electron
+  todavía **no envía** estas peticiones: el canal existe en el protocolo y el
+  host lo atiende, pero nadie lo llama aún.
+- Estado nuevo: `F9.5` **done**.
+- Siguiente paso exacto: `F9.6`, migración con las columnas de ciphertext. El
+  enum `luxy_job_status` no se toca.
+
 ### 2026-09-01 15:12 — Claude — F9.4, cifrado en el cliente
 
 - Estado anterior: `F9.3` cerrado y commiteado (`883e098`).

@@ -142,10 +142,32 @@ Claves de objeto aleatorias, nunca derivadas del contenido ni del nombre.
 **Pendiente**: esto sella y abre, pero **todavía no sube nada**. No hay cliente
 de almacén de objetos, ni endpoints en el gateway, ni migración.
 
-Siguiente paso exacto: `F9.5` — `run_local_turn` en `host-protocol`, para que un
-turno privado se ejecute en la máquina local sin pasar por la cola de Supabase.
-Es el cambio estructural del bloque: hoy el agente sólo recibe trabajo por la
-cola.
+### F9.5 — done (Claude, 2026-09-01)
+
+Un turno privado ya se ejecuta en la máquina local sin tocar la cola de
+Supabase. En vez de escribir un segundo ejecutor, se construye un trabajo
+sintético y se pasa por `runJob`, marcado como conversación: esa etiqueta ya
+activa el camino de sólo lectura, así que un turno privado hereda la garantía
+de no tocar archivos en vez de reimplementarla.
+
+El aislamiento se consigue **no dando** las tres piezas que hablan con el
+gateway: los eventos van a quien llama y no a la `EventQueue`, el resultado se
+devuelve y no se persiste, y `downloadAttachment` lanza
+`LocalTurnIsolationError` en vez de llamar. La prueba que lo sostiene espía
+`globalThis.fetch` durante un turno completo y verifica **cero llamadas**.
+
+Lo que se pierde, y está escrito en el propio archivo: no hay lease, no hay
+reintento tras un corte y no hay historial en el servidor. Si Luxy se cierra a
+media respuesta, esa respuesta se pierde.
+
+12 pruebas. `npm run check` exit 0: 104 archivos, 1.845 superadas.
+
+**Pendiente**: `runLocalTurn` exige el agente en marcha. El proceso principal
+todavía **no envía** estas peticiones: el canal existe y el host lo atiende,
+pero nadie lo llama aún.
+
+Siguiente paso exacto: `F9.6` — migración con las columnas de ciphertext, sin
+tocar el enum `luxy_job_status`. Será la 0007.
 
 ---
 

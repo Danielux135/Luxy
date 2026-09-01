@@ -29,6 +29,7 @@ import { detectEnvironment, describeCapabilities } from './detect.js';
 import { ClaudeCodeProvider } from './providers/claude.js';
 import { CodexCliProvider } from './providers/codex.js';
 import { HttpApiProvider, MemoryBudgetStore } from './providers/http-provider.js';
+import { runLocalTurn, type LocalTurnInput, type LocalTurnResult } from './local-turn.js';
 import { runJob } from './job-runner.js';
 import { worktreesDir, stateDir, logsDir } from './paths.js';
 import { executeApproval, auditFilePath } from './approvals.js';
@@ -213,6 +214,34 @@ export class LuxyAgent {
   /** espera hasta que el agente se detenga. es lo que usa la CLI */
   async waitUntilStopped(): Promise<void> {
     await this.loops?.catch(() => undefined);
+  }
+
+  /**
+   * ejecuta un turno privado en esta maquina, sin cola y sin gateway.
+   *
+   * Es el unico trabajo que no se reclama: llega por memoria desde el proceso
+   * principal. Usa los mismos proveedores ya detectados y las mismas claves,
+   * pero ni encola eventos ni persiste el resultado, asi que nada de este turno
+   * llega a Supabase. Ver local-turn.ts.
+   *
+   * Exige el agente en marcha porque los proveedores se construyen al arrancar.
+   */
+  async runPrivateTurn(
+    input: LocalTurnInput,
+    signal: AbortSignal,
+    onProgress: (type: string, message: string) => void,
+  ): Promise<LocalTurnResult> {
+    if (this.providers.size === 0) {
+      throw new Error('el agente no tiene proveedores disponibles en esta maquina');
+    }
+    return runLocalTurn(input, signal, {
+      config: this.config,
+      logger: this.logger,
+      getProvider: (id) => this.providers.get(id) ?? null,
+      worktreesDirectory: this.worktreesDirectory,
+      apiKeyFor: (connectionId) => this.providerKeys[`connection:${connectionId}`],
+      onProgress,
+    });
   }
 
   private async initializeProviders(): Promise<void> {

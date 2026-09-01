@@ -54,6 +54,34 @@ export const hostRequestSchema = z.discriminatedUnion('type', [
       confirmedTwice: z.boolean().default(false),
     }),
   }),
+  /**
+   * ejecuta un turno de conversacion privada en esta maquina.
+   *
+   * Es el UNICO camino de trabajo que no pasa por la cola de Supabase, y existe
+   * exactamente por eso: un turno privado no puede encolarse en un servidor que
+   * no debe poder leerlo. El prompt viaja por memoria entre dos procesos de
+   * Luxy, igual que ya hacen las claves de API en 'configure'.
+   *
+   * A cambio se pierde lo que da la cola: no hay lease, no hay reintento tras
+   * un corte y no hay historial en el servidor. Si Luxy se cierra a media
+   * respuesta, esa respuesta se pierde. Es el precio de que nadie mas la vea.
+   */
+  z.object({
+    type: z.literal('run_local_turn'),
+    requestId: z.string(),
+    /** identificador local; NO es un id de trabajo del gateway */
+    localTurnId: z.string().uuid(),
+    provider: z.string().min(1).max(64),
+    model: z.string().max(128).nullable().default(null),
+    projectAlias: z.string().min(1).max(64),
+    /** texto en claro. no se escribe en ningun log ni se devuelve al gateway */
+    prompt: z.string().min(1).max(2_000_000),
+  }),
+  z.object({
+    type: z.literal('cancel_local_turn'),
+    requestId: z.string(),
+    localTurnId: z.string().uuid(),
+  }),
   z.object({ type: z.literal('shutdown'), requestId: z.string() }),
 ]);
 
@@ -88,6 +116,25 @@ export const hostResponseSchema = z.discriminatedUnion('type', [
       .default(null),
   }),
   z.object({ type: z.literal('event'), event: agentEventSchema }),
+  /**
+   * resultado de un turno privado.
+   *
+   * viaja aparte de 'ack' porque lleva el TEXTO de la respuesta, que en el
+   * camino normal nunca sale del agente sin pasar por el gateway. Aqui es al
+   * reves: es lo unico que debe llegar al proceso principal, y solo a el.
+   */
+  z.object({
+    type: z.literal('local_turn'),
+    requestId: z.string(),
+    localTurnId: z.string(),
+    outcome: z.enum(['completed', 'failed', 'cancelled']),
+    text: z.string(),
+    error: z.string().nullable(),
+    executedModel: z.string().nullable(),
+    durationMs: z.number().int().min(0),
+    inputTokens: z.number().int().min(0).nullable(),
+    outputTokens: z.number().int().min(0).nullable(),
+  }),
 ]);
 
 export type HostResponse = z.infer<typeof hostResponseSchema>;

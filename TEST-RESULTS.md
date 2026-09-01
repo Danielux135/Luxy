@@ -1,5 +1,14 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-01 — Windows 11 (equipo `oscar`) — F9.5
+
+- `npx vitest run apps/agent/src/local-turn.test.ts`: **12/12**.
+  Incluye la prueba que espía `globalThis.fetch` durante un turno completo y
+  verifica cero llamadas de red.
+- **`npm run check`: exit 0.** Lint, typecheck y build correctos.
+  Suite: **104 archivos, 1.845 superadas, 9 omitidas, 0 fallos**.
+- Ninguna API real, ningún token gastado: el proveedor de las pruebas es falso.
+
 ### 2026-09-01 — Windows 11 (equipo `oscar`) — F9.4
 
 - `npx vitest run packages/vault-crypto/src/blob.test.ts`: **11/11**.
