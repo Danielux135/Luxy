@@ -186,12 +186,50 @@ export const vaultAutoLockSetArgsSchema = z.object({
   ]),
 });
 
+/**
+ * lo que se cuenta de la cuenta. Ni el token de sesion ni nada derivado de la
+ * contraseña: el correo, si hay sesion viva y cuando caduca.
+ */
+export const vaultAccountStatusSchema = z.object({
+  /** cuenta a la que pertenece la boveda de este equipo, haya sesion o no */
+  email: z.string().nullable(),
+  signedIn: z.boolean(),
+  expiresAt: z.string().nullable(),
+  /** se entro con la clave de recuperacion: conviene elegir contraseña nueva */
+  openedWithRecoveryKey: z.boolean(),
+});
+
 export const vaultStatusSchema = z.object({
   configured: z.boolean(),
   unlocked: z.boolean(),
   methods: z.object({ password: z.boolean(), recovery: z.boolean(), device: z.boolean() }),
   autoLockMinutes: z.number().int().min(0),
   lockingInMs: z.number().int().min(0).nullable(),
+  account: vaultAccountStatusSchema,
+});
+
+/**
+ * credenciales de la cuenta.
+ *
+ * el correo se valida aqui y otra vez en el proceso principal: esta es la
+ * comodidad de la interfaz, la de alli es la que cuenta.
+ */
+export const vaultAccountArgsSchema = z.object({
+  email: z.string().trim().min(3).max(320),
+  password: z.string().min(1).max(512),
+});
+
+/**
+ * entrar en la cuenta por una de las dos puertas.
+ *
+ * `method` decide con que se abre la llave que devuelve el servidor. Las dos
+ * abren la misma bóveda; la clave de recuperación es la que permite entrar
+ * desde un ordenador nuevo cuando se ha olvidado la contraseña.
+ */
+export const vaultAccountLoginArgsSchema = z.object({
+  email: z.string().trim().min(3).max(320),
+  method: z.enum(['password', 'recovery']).default('password'),
+  secret: z.string().min(1).max(512),
 });
 
 /** unica respuesta del bloque que lleva un secreto, y solo al crear */
@@ -589,6 +627,25 @@ export interface LuxyBridge {
    * salvo la clave de recuperacion en el instante exacto de crear la boveda.
    */
   getVaultStatus(): Promise<IpcResult<z.infer<typeof vaultStatusSchema>>>;
+  /** crea la cuenta: la llave maestra nace aqui y el servidor la guarda envuelta */
+  registerVaultAccount(
+    args: z.infer<typeof vaultAccountArgsSchema>,
+  ): Promise<IpcResult<z.infer<typeof vaultCreateResultSchema>>>;
+  /** entra en una cuenta ya existente, con contraseña o clave de recuperación */
+  loginVaultAccount(
+    args: z.infer<typeof vaultAccountLoginArgsSchema>,
+  ): Promise<IpcResult<z.infer<typeof vaultStatusSchema>>>;
+  /**
+   * sube a una cuenta nueva la boveda que ya existia en este equipo.
+   *
+   * devuelve una clave de recuperación nueva —la anterior deja de valer—,
+   * porque la vieja se mostró una vez y no hay copia con la que cerrar la
+   * llave para el servidor.
+   */
+  linkVaultAccount(
+    args: z.infer<typeof vaultAccountArgsSchema>,
+  ): Promise<IpcResult<z.infer<typeof vaultCreateResultSchema>>>;
+  logoutVaultAccount(): Promise<IpcResult<z.infer<typeof vaultStatusSchema>>>;
   createVault(password: string): Promise<IpcResult<z.infer<typeof vaultCreateResultSchema>>>;
   unlockVault(
     args: z.infer<typeof vaultUnlockArgsSchema>,

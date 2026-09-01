@@ -85,6 +85,7 @@ export async function handleVaultRegister(request: Request, deps: ApiDeps): Prom
     authHash: body.data.authHash,
     wrappedMasterKey: body.data.wrappedMasterKey,
     vaultId: body.data.vaultId,
+    recovery: body.data.recovery,
   });
 
   const session = await issueSession(deps, user.id);
@@ -112,6 +113,17 @@ export async function handleVaultLoginStart(request: Request, deps: ApiDeps): Pr
     authSalt: user.auth_salt,
     argon2Params: { t: user.argon2_t, m: user.argon2_m, p: user.argon2_p },
     wrappedMasterKey: user.wrapped_master_key,
+    // las dos puertas viajan juntas: pedir la de recuperacion aparte diria al
+    // servidor que alguien ha olvidado su contraseña, y no le hace falta saberlo
+    recovery: {
+      authSalt: user.recovery_salt,
+      argon2Params: {
+        t: user.recovery_argon2_t,
+        m: user.recovery_argon2_m,
+        p: user.recovery_argon2_p,
+      },
+      wrappedMasterKey: user.recovery_wrapped_master_key,
+    },
   });
 }
 
@@ -124,7 +136,14 @@ export async function handleVaultLoginFinish(request: Request, deps: ApiDeps): P
   }
 
   const user = await deps.repo.getVaultUserByEmail(body.data.email);
-  if (user === null || user.disabled || !verifyAuthHash(body.data.authHash, user.auth_hash)) {
+  // las dos puertas prueban lo mismo: que quien llama puede abrir la boveda. La
+  // de recuperacion es la que hace utilizable un «he olvidado la contraseña»
+  // desde un ordenador nuevo
+  const proves =
+    user !== null &&
+    (verifyAuthHash(body.data.authHash, user.auth_hash) ||
+      verifyAuthHash(body.data.authHash, user.recovery_auth_hash));
+  if (user === null || user.disabled || !proves) {
     // mismo mensaje para "no existe" y "hash incorrecto": no se distingue
     return errorResponse('correo o contraseña incorrectos', 401);
   }
@@ -148,7 +167,13 @@ export const handleVaultChangePassword = withVaultAuth(async (request, deps, use
 
   const stored = await deps.repo.getVaultUserById(user.id);
   if (stored === null) return errorResponse('la cuenta ya no existe', 401);
-  if (!verifyAuthHash(body.data.currentAuthHash, stored.auth_hash)) {
+  // vale la contraseña actual o la clave de recuperacion: sin esto, quien entra
+  // con la clave tendria acceso pero no podria elegir una contraseña nueva, que
+  // es justo lo que va a querer hacer
+  const proves =
+    verifyAuthHash(body.data.currentAuthHash, stored.auth_hash) ||
+    verifyAuthHash(body.data.currentAuthHash, stored.recovery_auth_hash);
+  if (!proves) {
     return errorResponse('la contraseña actual no es correcta', 403);
   }
 
@@ -232,10 +257,10 @@ export const handleVaultPush = withVaultAuth(async (request, deps, user) => {
 
 export const handleVaultConversations = withVaultAuth(async (request, deps, user) => {
   const url = new URL(request.url);
+  // el vaultId ya no viaja: la autorizacion es el usuario de la sesion, y la
+  // consulta se hace siempre sobre lo suyo. Un cliente viejo puede seguir
+  // mandandolo; se ignora a proposito en vez de rechazarlo.
   const query = vaultSyncPullQuerySchema.safeParse({
-    // el vaultId del contrato queda por compatibilidad, pero NO autoriza: la
-    // autorizacion es el usuario de la sesion
-    vaultId: url.searchParams.get('vaultId') ?? user.vaultId,
     since: url.searchParams.get('since') ?? undefined,
     limit: url.searchParams.get('limit') ?? undefined,
   });
@@ -296,23 +321,31 @@ async function currentSessionHash(request: Request): Promise<string> {
  * da siempre los mismos datos, asi que probar dos veces no delata que no hay
  * cuenta. Es plausible, no valida: el login fallara igual en el hash.
  */
-function decoyLoginStart(email: string): {
-  authSalt: string;
-  argon2Params: { t: number; m: number; p: number };
-  wrappedMasterKey: { version: number; purpose: string; nonce: string; ciphertext: string };
-} {
+function decoyLoginStart(email: string): unknown {
   // sal derivada del correo, deterministica dentro de esta respuesta
   const seed = [...email].reduce((acc, ch) => (acc * 31 + ch.charCodeAt(0)) % 1_000_000, 7);
   const filler = (n: number, len: number): string =>
     Array.from({ length: len }, (_v, i) => 'ABCDEFGHJKMNPQRSTVWXYZ23456789'[(seed + i * n) % 30]).join('');
   return {
     authSalt: filler(3, 22),
-    argon2Params: { ...(({ t: 3, m: 64 * 1024, p: 1 }))},
+    argon2Params: { t: 3, m: 64 * 1024, p: 1 },
     wrappedMasterKey: {
       version: 1,
       purpose: 'vault.account.masterkey',
       nonce: filler(5, 16),
       ciphertext: filler(7, 64),
+    },
+    // el señuelo tambien trae la puerta de recuperacion: omitirla diria que
+    // esa cuenta no existe, que es justo lo que el señuelo evita decir
+    recovery: {
+      authSalt: filler(11, 22),
+      argon2Params: { t: 1, m: 8 * 1024, p: 1 },
+      wrappedMasterKey: {
+        version: 1,
+        purpose: 'vault.account.recovery',
+        nonce: filler(13, 16),
+        ciphertext: filler(17, 64),
+      },
     },
   };
 }

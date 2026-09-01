@@ -56,9 +56,12 @@ import {
   vaultMediaGenerateArgsSchema,
   vaultCharacterCreateArgsSchema,
   VAULT_PREVIEW_MAX_BYTES,
+  vaultAccountArgsSchema,
+  vaultAccountLoginArgsSchema,
   vaultDeviceUnlockSetArgsSchema,
   vaultPasswordArgsSchema,
   vaultUnlockArgsSchema,
+  type vaultStatusSchema,
   type IpcResult,
 } from '../../shared/ipc.js';
 import type { AgentController } from '../agent-controller.js';
@@ -69,6 +72,7 @@ import {
 } from '../config-store.js';
 import type { SecretStore } from '../secure-storage.js';
 import { VaultError, type VaultService } from '../vault/vault-service.js';
+import type { VaultAccountManager } from '../vault/account-manager.js';
 import type { PrivateConversationStore } from '../vault/conversation-store.js';
 import type { PrivateMediaStore } from '../vault/media-store.js';
 import { syncVault } from '../vault/sync.js';
@@ -117,6 +121,11 @@ export interface HandlerContext {
    * material criptografico: lo unico que devuelven es `status()`.
    */
   vault: VaultService;
+  /**
+   * cuenta de la boveda: sesion contra el gateway y origen de la llave maestra
+   * en un equipo nuevo. Guarda el token de sesion; no lo entrega al renderer.
+   */
+  accounts: VaultAccountManager;
   /** conversaciones privadas cifradas en disco */
   privateConversations: PrivateConversationStore;
   /** imagenes y videos privados, cifrados en disco */
@@ -641,11 +650,49 @@ export function registerIpcHandlers(context: HandlerContext): void {
   // vez y no se guarda.
   // ---------------------------------------------------------------------------
 
-  handle(IPC_INVOKE.vaultStatus, emptyArgsSchema, () => context.vault.status());
+  /**
+   * estado de la boveda mas el de la cuenta, en una sola respuesta.
+   *
+   * van juntos porque la interfaz los necesita a la vez —«cerrada» y «sin
+   * sesion» son dos cosas distintas y se arreglan de forma distinta— y porque
+   * asi el refresco periodico del renderer no dobla las llamadas.
+   */
+  const vaultStatus = (): z.infer<typeof vaultStatusSchema> => ({
+    ...context.vault.status(),
+    account: context.accounts.status(),
+  });
+
+  handle(IPC_INVOKE.vaultStatus, emptyArgsSchema, () => vaultStatus());
+
+  handle(IPC_INVOKE.vaultAccountRegister, vaultAccountArgsSchema, async (args) => {
+    const { recoveryKey } = await context.accounts.register(args.email, args.password);
+    context.log('cuenta de boveda creada');
+    return { status: vaultStatus(), recoveryKey };
+  });
+
+  handle(IPC_INVOKE.vaultAccountLogin, vaultAccountLoginArgsSchema, async (args) => {
+    await context.accounts.login(args.email, args.secret, args.method);
+    // se registra por que puerta se entro, sin el secreto: una entrada con
+    // clave de recuperacion es justo lo que conviene poder ver despues
+    context.log('sesion de boveda iniciada', { method: args.method });
+    return vaultStatus();
+  });
+
+  /** sube a una cuenta nueva la boveda que ya existia en este equipo */
+  handle(IPC_INVOKE.vaultAccountLink, vaultAccountArgsSchema, async (args) => {
+    const { recoveryKey } = await context.accounts.link(args.email, args.password);
+    context.log('boveda local vinculada a una cuenta');
+    return { status: vaultStatus(), recoveryKey };
+  });
+
+  handle(IPC_INVOKE.vaultAccountLogout, emptyArgsSchema, async () => {
+    await context.accounts.logout();
+    return vaultStatus();
+  });
 
   handle(IPC_INVOKE.vaultCreate, vaultPasswordArgsSchema, async (args) => {
     const { recoveryKey } = await context.vault.create(args.password);
-    return { status: context.vault.status(), recoveryKey };
+    return { status: vaultStatus(), recoveryKey };
   });
 
   handle(IPC_INVOKE.vaultUnlock, vaultUnlockArgsSchema, async (args) => {
@@ -658,28 +705,39 @@ export function registerIpcHandlers(context: HandlerContext): void {
       if (args.method === 'password') await context.vault.unlock(args.secret);
       else await context.vault.unlockWithRecoveryKey(args.secret);
     }
-    return context.vault.status();
+    return vaultStatus();
   });
 
   handle(IPC_INVOKE.vaultLock, emptyArgsSchema, () => {
     context.vault.lock();
-    return context.vault.status();
+    return vaultStatus();
   });
 
+  /**
+   * cambia la contraseña por el camino que corresponda.
+   *
+   * Con la boveda vinculada a una cuenta, cambiarla solo aqui dejaria este
+   * equipo abriendo con una contraseña que ningun otro reconoce: pasa por el
+   * servidor y despues se rehace la envoltura local.
+   */
   handle(IPC_INVOKE.vaultChangePassword, vaultChangePasswordArgsSchema, async (args) => {
-    await context.vault.changePassword(args.currentPassword, args.newPassword);
-    return context.vault.status();
+    if (context.vault.boundAccount() === null) {
+      await context.vault.changePassword(args.currentPassword, args.newPassword);
+    } else {
+      await context.accounts.changePassword(args.currentPassword, args.newPassword);
+    }
+    return vaultStatus();
   });
 
   handle(IPC_INVOKE.vaultDeviceUnlockSet, vaultDeviceUnlockSetArgsSchema, async (args) => {
     if (args.enabled) await context.vault.enableDeviceUnlock();
     else context.vault.disableDeviceUnlock();
-    return context.vault.status();
+    return vaultStatus();
   });
 
   handle(IPC_INVOKE.vaultAutoLockSet, vaultAutoLockSetArgsSchema, (args) => {
     context.vault.setAutoLockMinutes(args.minutes);
-    return context.vault.status();
+    return vaultStatus();
   });
 
   // ---------------------------------------------------------------------------
@@ -797,17 +855,13 @@ export function registerIpcHandlers(context: HandlerContext): void {
     const stored = context.configStore.load();
     if (stored === null) throw new VaultError('Luxy no esta configurado en esta maquina');
 
-    const machineToken = context.secretStore.get(MACHINE_TOKEN_SECRET) ?? stored.machineToken;
-    if (machineToken === undefined) {
-      throw new VaultError(
-        'falta el token de maquina',
-        'vuelve a registrar esta instalacion desde Ajustes',
-      );
-    }
-
-    return syncVault(context.vault, context.privateConversations, context.vault.vaultId(), {
+    // autoriza la SESION DE LA CUENTA, no el token de maquina: el gateway
+    // decide de quien es cada registro por el usuario de esa sesion, y dos
+    // personas pueden compartir una maquina sin compartir boveda (D-045)
+    return syncVault(context.vault, context.privateConversations, {
       gatewayUrl: stored.gatewayUrl,
-      machineToken,
+      sessionToken: context.accounts.sessionToken(),
+      onUnauthorized: () => context.accounts.forgetSession(),
     });
   });
 

@@ -44,6 +44,10 @@ export const IPC_INVOKE = {
   studioJobFeedback: 'luxy:studio:job:feedback',
   studioJobAction: 'luxy:studio:job:action',
   vaultStatus: 'luxy:vault:status',
+  vaultAccountRegister: 'luxy:vault:account:register',
+  vaultAccountLogin: 'luxy:vault:account:login',
+  vaultAccountLink: 'luxy:vault:account:link',
+  vaultAccountLogout: 'luxy:vault:account:logout',
   vaultCreate: 'luxy:vault:create',
   vaultUnlock: 'luxy:vault:unlock',
   vaultLock: 'luxy:vault:lock',
@@ -118,10 +122,21 @@ export const VAULT_DEVICE_SECRET = 'VAULT_DEVICE_KEY';
  */
 export const VAULT_MEDIA_API_SECRET = 'VAULT_MEDIA_API_KEY';
 
+/**
+ * sesion abierta en la cuenta de la boveda.
+ *
+ * Es una credencial reutilizable contra el gateway, asi que vive en el almacen
+ * cifrado del sistema y no en config.json. Reservada por el mismo motivo que
+ * las otras dos: nadie puede apropiarsela declarando un proveedor http con este
+ * apiKeyEnv.
+ */
+export const VAULT_SESSION_SECRET = 'VAULT_ACCOUNT_SESSION';
+
 /** nombres que la interfaz no puede fijar ni reutilizar como apiKeyEnv */
 export const RESERVED_SECRET_NAMES: readonly string[] = [
   VAULT_DEVICE_SECRET,
   VAULT_MEDIA_API_SECRET,
+  VAULT_SESSION_SECRET,
 ];
 
 export function connectionSecretName(connectionId: string): string {

@@ -300,19 +300,24 @@ export function assertNoPlaintextLeak(payload: unknown): void {
  * identificador de boveda: 32 bytes derivados con HKDF, en base64url.
  *
  * agrupa los registros de una misma boveda sin que el servidor sepa nada de la
- * llave. AGRUPA, NO AUTORIZA: quien autoriza sigue siendo el token de maquina.
+ * llave. AGRUPA, NO AUTORIZA: quien autoriza es la sesion de la cuenta, y el
+ * servidor decide de quien es cada registro por el usuario de esa sesion.
+ *
+ * Sigue existiendo porque el cliente lo usa para comprobar, tras entrar, que le
+ * han dado su cuenta y no otra. En las peticiones de sincronizacion es
+ * OPCIONAL y no se envia: mandarlo invitaba a confundirlo con una credencial.
  */
 export const vaultIdSchema = base64UrlSchema.length(43);
 
 export const vaultSyncPushRequestSchema = z.object({
-  vaultId: vaultIdSchema,
+  vaultId: vaultIdSchema.optional(),
   conversationId: z.string().uuid(),
   /** lote de turnos ya sellados. el servidor valida su forma, nunca su contenido */
   records: z.array(privateRecordSchema).min(1).max(200),
 });
 
 export const vaultSyncPullQuerySchema = z.object({
-  vaultId: vaultIdSchema,
+  vaultId: vaultIdSchema.optional(),
   /** solo lo posterior a esta marca, para no rebajar todo cada vez */
   since: z.string().datetime().optional(),
   limit: z.coerce.number().int().min(1).max(500).default(200),

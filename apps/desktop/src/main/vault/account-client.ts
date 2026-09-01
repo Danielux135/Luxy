@@ -11,7 +11,9 @@
 import {
   createAccount,
   openAccount,
-  rewrapAccountPassword,
+  openAccountWithRecoveryKey,
+  type AccountPasswordCredentials,
+  type AccountRegistration,
   type Argon2Params,
   type OpenedAccount,
   type SealedEnvelope,
@@ -28,13 +30,35 @@ export interface AccountClientDeps {
   fetchImpl?: typeof fetch;
 }
 
+/** por que puerta se abrio la cuenta */
+export type AccountLoginMethod = 'password' | 'recovery';
+
 export interface AccountSession {
   sessionToken: string;
   expiresAt: string;
   vaultId: string;
+  /**
+   * con que se abrio.
+   *
+   * hace falta para cambiar la contraseña despues: la prueba de «lo que ya
+   * sabes» se deriva con la sal y el coste de LA PUERTA por la que entraste, no
+   * con los de la contraseña.
+   */
+  openedWith: AccountLoginMethod;
+  /**
+   * coste con el que se creo la cuenta.
+   *
+   * viaja con la sesion porque probar la contraseña ACTUAL al cambiarla exige
+   * repetir la derivacion con el mismo coste, no con el de hoy: subir el coste
+   * por defecto no puede dejar fuera a quien se registro antes (D-040).
+   */
+  argon2Params: Argon2Params;
   /** llave maestra abierta; quien la reciba la borra al bloquear */
   masterKey: Uint8Array;
 }
+
+/** sesion sin llave: lo que devuelve vincular una boveda que ya existia */
+export type AccountSessionWithoutKey = Omit<AccountSession, 'masterKey'>;
 
 class AccountError extends VaultError {}
 
@@ -77,19 +101,52 @@ export async function registerAccount(
   assertPassword(password);
 
   const { registration, account, recoveryKey } = await createAccount(password, params);
-  const raw = await post(deps, '/api/vault/register', { email: normalizeEmail(email), ...registration });
+  const session = await submitRegistration(deps, email, registration);
+
+  return {
+    session: { ...session, masterKey: account.masterKey },
+    recoveryKey,
+  };
+}
+
+/**
+ * registra en una cuenta nueva una boveda que YA existe en este equipo.
+ *
+ * La diferencia con `registerAccount` es de donde sale la llave maestra: aqui
+ * la envoltura la ha construido `VaultService` con la suya, asi que el
+ * contenido ya cifrado en este equipo sigue abriendose igual. Es lo que evita
+ * que una boveda anterior a las cuentas se quede aislada.
+ */
+export async function linkAccount(
+  deps: AccountClientDeps,
+  email: string,
+  registration: AccountRegistration,
+): Promise<AccountSessionWithoutKey> {
+  return submitRegistration(deps, email, registration);
+}
+
+async function submitRegistration(
+  deps: AccountClientDeps,
+  email: string,
+  registration: AccountRegistration,
+): Promise<AccountSessionWithoutKey> {
+  const raw = await post(deps, '/api/vault/register', {
+    email: normalizeEmail(email),
+    ...registration,
+  });
 
   const parsed = vaultSessionResponseSchema.safeParse(raw);
   if (!parsed.success) throw new AccountError('el gateway respondio algo inesperado al registrar');
+  if (parsed.data.vaultId !== registration.vaultId) {
+    throw new AccountError('la cuenta creada no coincide con la boveda de este equipo');
+  }
 
   return {
-    session: {
-      sessionToken: parsed.data.sessionToken,
-      expiresAt: parsed.data.expiresAt,
-      vaultId: parsed.data.vaultId,
-      masterKey: account.masterKey,
-    },
-    recoveryKey,
+    sessionToken: parsed.data.sessionToken,
+    expiresAt: parsed.data.expiresAt,
+    vaultId: parsed.data.vaultId,
+    argon2Params: registration.argon2Params,
+    openedWith: 'password',
   };
 }
 
@@ -106,7 +163,8 @@ export async function registerAccount(
 export async function loginAccount(
   deps: AccountClientDeps,
   email: string,
-  password: string,
+  secret: string,
+  method: AccountLoginMethod = 'password',
 ): Promise<AccountSession> {
   const normalized = normalizeEmail(email);
 
@@ -114,16 +172,34 @@ export async function loginAccount(
   const start = vaultLoginStartResponseSchema.safeParse(startRaw);
   if (!start.success) throw new AccountError('el gateway respondio algo inesperado');
 
+  // la puerta elegida decide con que sal, que coste y que sobre se deriva; el
+  // servidor entrega las dos y no sabe cual se usa
+  const door =
+    method === 'password'
+      ? {
+          authSalt: start.data.authSalt,
+          argon2Params: start.data.argon2Params,
+          wrappedMasterKey: start.data.wrappedMasterKey as SealedEnvelope,
+        }
+      : {
+          authSalt: start.data.recovery.authSalt,
+          argon2Params: start.data.recovery.argon2Params,
+          wrappedMasterKey: start.data.recovery.wrappedMasterKey as SealedEnvelope,
+        };
+
   let account: OpenedAccount;
   try {
-    account = await openAccount(password, {
-      authSalt: start.data.authSalt,
-      argon2Params: start.data.argon2Params,
-      wrappedMasterKey: start.data.wrappedMasterKey as SealedEnvelope,
-    });
+    account =
+      method === 'password'
+        ? await openAccount(secret, door)
+        : await openAccountWithRecoveryKey(secret, door);
   } catch {
     // incluye el caso del señuelo: un correo inexistente da datos que no abren
-    throw new AccountError('correo o contraseña incorrectos');
+    throw new AccountError(
+      method === 'password'
+        ? 'correo o contraseña incorrectos'
+        : 'esa clave de recuperacion no abre esta cuenta',
+    );
   }
 
   const raw = await post(deps, '/api/vault/login/finish', {
@@ -143,6 +219,8 @@ export async function loginAccount(
     sessionToken: parsed.data.sessionToken,
     expiresAt: parsed.data.expiresAt,
     vaultId: account.vaultId,
+    argon2Params: door.argon2Params,
+    openedWith: method,
     masterKey: account.masterKey,
   };
 }
@@ -159,25 +237,27 @@ export async function logoutAccount(deps: AccountClientDeps, sessionToken: strin
 /**
  * cambia la contraseña de la cuenta.
  *
- * Reenvuelve la maestra en local y envia la envoltura nueva mas la prueba de la
- * actual. El servidor no recifra la boveda: solo sustituye credenciales.
+ * Recibe la envoltura nueva ya construida —la hace `VaultService`, que es quien
+ * tiene la llave maestra— y la prueba de la contraseña actual. El servidor no
+ * recifra la boveda: solo sustituye credenciales.
  */
 export async function changeAccountPassword(
   deps: AccountClientDeps,
   sessionToken: string,
-  masterKey: Uint8Array,
   currentAuthHash: string,
-  newPassword: string,
-  params?: Argon2Params,
+  renewed: AccountPasswordCredentials,
 ): Promise<void> {
-  assertPassword(newPassword);
-  const renewed = await rewrapAccountPassword(masterKey, newPassword, params);
-
   const doFetch = deps.fetchImpl ?? fetch;
   const response = await doFetch(`${deps.gatewayUrl.replace(/\/+$/, '')}/api/vault/password`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${sessionToken}` },
-    body: JSON.stringify({ currentAuthHash, ...renewed }),
+    body: JSON.stringify({
+      currentAuthHash,
+      authSalt: renewed.authSalt,
+      argon2Params: renewed.argon2Params,
+      authHash: renewed.authHash,
+      wrappedMasterKey: renewed.wrappedMasterKey,
+    }),
   });
   if (!response.ok) {
     if (response.status === 403) throw new AccountError('la contraseña actual no es correcta');

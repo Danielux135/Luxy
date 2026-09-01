@@ -70,8 +70,47 @@ describe('cuentas', () => {
         nonce: 'ABCDEFGHJKMNPQRS',
         ciphertext: 'ABCD',
       },
+      // la puerta de recuperacion viaja tambien en el señuelo: omitirla
+      // delataria que esa cuenta no existe
+      recovery: {
+        authSalt: 'ZYXWVTSRQPNMKJHGFEDCBA',
+        argon2Params: { t: 1, m: 8192, p: 1 },
+        wrappedMasterKey: {
+          version: 1,
+          purpose: 'vault.account.recovery',
+          nonce: 'ZYXWVTSRQPNMKJHG',
+          ciphertext: 'DCBA',
+        },
+      },
     };
     expect(vaultLoginStartResponseSchema.safeParse(decoy).success).toBe(true);
+  });
+
+  it('un sobre de recuperacion no cuela como sobre de contraseña', async () => {
+    const { vaultLoginStartResponseSchema } = await import('@luxy/shared');
+    // el proposito viaja autenticado (D-041), y ademas el servidor no acepta
+    // por la forma que se intercambien las dos puertas
+    const cruzado = {
+      authSalt: 'ABCDEFGHJKMNPQRSTVWXYZ',
+      argon2Params: { t: 3, m: 65536, p: 1 },
+      wrappedMasterKey: {
+        version: 1,
+        purpose: 'vault.account.recovery',
+        nonce: 'ABCDEFGHJKMNPQRS',
+        ciphertext: 'ABCD',
+      },
+      recovery: {
+        authSalt: 'ZYXWVTSRQPNMKJHGFEDCBA',
+        argon2Params: { t: 1, m: 8192, p: 1 },
+        wrappedMasterKey: {
+          version: 1,
+          purpose: 'vault.account.masterkey',
+          nonce: 'ZYXWVTSRQPNMKJHG',
+          ciphertext: 'DCBA',
+        },
+      },
+    };
+    expect(vaultLoginStartResponseSchema.safeParse(cruzado).success).toBe(false);
   });
 
   it('el hash de acceso que se guarda tiene la forma que exige el contrato', async () => {
@@ -88,8 +127,39 @@ describe('cuentas', () => {
         ciphertext: 'ABCD',
       },
       vaultId: 'B'.repeat(43),
+      recovery: {
+        authSalt: 'ZYXWVTSRQPNMKJHGFEDCBA',
+        argon2Params: { t: 1, m: 8192, p: 1 },
+        authHash: 'C'.repeat(43),
+        wrappedMasterKey: {
+          version: 1,
+          purpose: 'vault.account.recovery',
+          nonce: 'ZYXWVTSRQPNMKJHG',
+          ciphertext: 'DCBA',
+        },
+      },
     });
     expect(parsed.success).toBe(true);
+  });
+
+  it('el registro exige la copia de recuperacion', async () => {
+    const { vaultRegisterRequestSchema } = await import('@luxy/shared');
+    // sin ella, una cuenta quedaria sin red de seguridad: olvidar la contraseña
+    // seria perder la boveda, y el servidor no puede restablecerla
+    const sinRecuperacion = {
+      email: 'daniel@example.com',
+      authSalt: 'ABCDEFGHJKMNPQRSTVWXYZ',
+      argon2Params: { t: 3, m: 65536, p: 1 },
+      authHash: 'A'.repeat(43),
+      wrappedMasterKey: {
+        version: 1,
+        purpose: 'vault.account.masterkey',
+        nonce: 'ABCDEFGHJKMNPQRS',
+        ciphertext: 'ABCD',
+      },
+      vaultId: 'B'.repeat(43),
+    };
+    expect(vaultRegisterRequestSchema.safeParse(sinRecuperacion).success).toBe(false);
   });
 
   it('el registro rechaza una contraseña... no llega nunca: solo hashes', async () => {

@@ -32,7 +32,9 @@
 --
 -- Consecuencia que se asume: el servidor NO puede restablecer una contraseña.
 -- Puede borrar una cuenta, nunca recuperar su contenido. La clave de
--- recuperacion es la unica red de seguridad real.
+-- recuperacion es la unica red de seguridad real, y por eso se guarda tambien
+-- aqui su copia de la llave: para que funcione desde cualquier ordenador y no
+-- solo desde el que creo la boveda.
 -- -----------------------------------------------------------------------------
 create table if not exists public.vault_users (
   id                  uuid primary key default gen_random_uuid(),
@@ -52,6 +54,21 @@ create table if not exists public.vault_users (
   auth_hash           text not null,
   -- llave maestra cifrada con la contraseña; el servidor no puede abrirla
   wrapped_master_key  jsonb not null,
+  -- LA MISMA llave maestra, cifrada con la clave de recuperacion. Es la unica
+  -- red de seguridad real: sin esto, olvidar la contraseña solo se podria
+  -- arreglar en el ordenador donde se creo la boveda, y desde uno nuevo no
+  -- habria forma de entrar. Con esto, la clave de recuperacion abre en
+  -- cualquier sitio, y el servidor sigue sin poder abrir ninguna de las dos.
+  --
+  -- Su coste de Argon2id es mas bajo a proposito (D-049): la clave de
+  -- recuperacion no es una contraseña, son ~157 bits al azar. Encarecer cada
+  -- intento no compra nada cuando no hay diccionario que probar.
+  recovery_salt       text not null,
+  recovery_argon2_t   integer not null,
+  recovery_argon2_m   integer not null,
+  recovery_argon2_p   integer not null,
+  recovery_auth_hash  text not null,
+  recovery_wrapped_master_key jsonb not null,
   -- identificador de boveda que el cliente deriva por su cuenta. Se guarda para
   -- que el cliente pueda comprobar, tras entrar, que el servidor le ha dado la
   -- cuenta correcta y no otra.
@@ -67,12 +84,22 @@ create table if not exists public.vault_users (
   constraint vault_users_vault_id_unique unique (vault_id),
   constraint vault_users_auth_hash_format check (auth_hash ~ '^[A-Za-z0-9_-]{43}$'),
   constraint vault_users_salt_format check (auth_salt ~ '^[A-Za-z0-9_-]{22}$'),
+  constraint vault_users_recovery_hash_format check (recovery_auth_hash ~ '^[A-Za-z0-9_-]{43}$'),
+  constraint vault_users_recovery_salt_format check (recovery_salt ~ '^[A-Za-z0-9_-]{22}$'),
+  -- las dos puertas no pueden compartir hash de acceso: si coincidieran,
+  -- probar una probaria la otra
+  constraint vault_users_recovery_distinct check (recovery_auth_hash <> auth_hash),
   -- mismos limites que valida el cliente: un coste manipulado no puede pedir
   -- memoria absurda ni rebajarse hasta volverse inutil
   constraint vault_users_argon2_sane check (
     argon2_t between 1 and 16
     and argon2_m between 8192 and 2097152
     and argon2_p between 1 and 4
+  ),
+  constraint vault_users_recovery_argon2_sane check (
+    recovery_argon2_t between 1 and 16
+    and recovery_argon2_m between 8192 and 2097152
+    and recovery_argon2_p between 1 and 4
   )
 );
 

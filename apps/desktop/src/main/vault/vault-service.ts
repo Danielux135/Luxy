@@ -14,12 +14,15 @@ import {
   ARGON2_PARAMS,
   KEY_BYTES,
   VaultCryptoError,
+  deriveAuthHash,
   deriveSubkey,
   deriveVaultId,
   generateMasterKey,
   generateRecoveryKey,
   isValidRecoveryKey,
+  passwordCredentialsForMasterKey,
   randomBytes,
+  registrationForMasterKey,
   toBase64Url,
   fromBase64Url,
   unwrapMasterKey,
@@ -27,6 +30,8 @@ import {
   wipe,
   wrapMasterKey,
   wrapMasterKeyForDevice,
+  type AccountPasswordCredentials,
+  type AccountRegistration,
   type Argon2Params,
   type KeyDomain,
 } from '@luxy/vault-crypto';
@@ -141,6 +146,21 @@ export class VaultService {
     };
   }
 
+  /**
+   * cuenta a la que pertenece la boveda de este equipo, si esta vinculada.
+   *
+   * se puede leer con la boveda cerrada: no es material criptografico, es la
+   * etiqueta que dice de quien es el archivo.
+   */
+  boundAccount(): { email: string; vaultId: string } | null {
+    try {
+      return this.contents()?.account ?? null;
+    } catch (error) {
+      if (error instanceof VaultFileError) return null;
+      throw error;
+    }
+  }
+
   isUnlocked(): boolean {
     return this.masterKey !== null;
   }
@@ -214,6 +234,221 @@ export class VaultService {
       return { recoveryKey };
     } catch (error) {
       wipe(masterKey);
+      throw error;
+    }
+  }
+
+  /**
+   * abre la boveda con una llave maestra que llega de la cuenta.
+   *
+   * Es el cable que une los dos origenes de la misma llave. El servidor no
+   * guarda la boveda de este equipo: guarda la llave maestra ENVUELTA, y quien
+   * la abre es el cliente. Lo que hace este metodo es adoptar esa llave y
+   * dejar en disco una copia local envuelta con la misma contraseña, para que
+   * el siguiente arranque no dependa de la red.
+   *
+   * El archivo local pasa a ser una CACHE de la cuenta, no otra boveda: su
+   * `vaultId` se deriva de la misma llave, asi que los dos origenes producen
+   * el mismo identificador y la misma memoria descifrable.
+   *
+   * Si ya existia una boveda local de OTRA cuenta, no se pisa: el contenido
+   * cifrado con la llave anterior quedaria ilegible sin aviso.
+   */
+  async adoptAccountKey(input: {
+    masterKey: Uint8Array;
+    /** ausente cuando se entro con la clave de recuperacion: no se conoce */
+    password?: string;
+    /** al registrarse, y al entrar con ella: envoltura local de recuperacion */
+    recoveryKey?: string;
+    account: { email: string; vaultId: string };
+  }): Promise<void> {
+    if (input.masterKey.length !== KEY_BYTES) {
+      throw new VaultError('la llave de la cuenta no es valida');
+    }
+
+    const existing = this.safeContents();
+    if (existing !== null && existing.account !== undefined) {
+      if (existing.account.vaultId !== input.account.vaultId) {
+        throw new VaultError(
+          'este equipo ya guarda la boveda de otra cuenta',
+          `esta vinculado a ${existing.account.email}. Ciérrala y bórrala antes de usar otra.`,
+        );
+      }
+    }
+
+    if (input.password === undefined && input.recoveryKey === undefined) {
+      throw new VaultError('no hay con que guardar la boveda en este equipo');
+    }
+
+    const wraps: unknown[] = [];
+    if (input.password !== undefined) {
+      wraps.push(
+        await wrapMasterKey(input.masterKey, input.password, 'password', this.argon2Params),
+      );
+    }
+    if (input.recoveryKey !== undefined) {
+      wraps.push(
+        await wrapMasterKey(input.masterKey, input.recoveryKey, 'recovery', this.argon2Params),
+      );
+    }
+
+    // se conservan los ajustes y la envoltura de equipo de una cache anterior:
+    // volver a entrar no deberia apagar el desbloqueo rapido ni el auto-cierre
+    let contents = createVaultKeyFile(wraps, input.account);
+    if (existing !== null) {
+      contents = { ...contents, settings: existing.settings };
+      const device = findWrap(existing, 'device');
+      // la envoltura de equipo solo sirve si envuelve ESTA misma llave
+      if (device !== undefined && existing.account?.vaultId === input.account.vaultId) {
+        contents = upsertWrap(contents, device);
+      }
+      const recovery = findWrap(existing, 'recovery');
+      if (recovery !== undefined && input.recoveryKey === undefined) {
+        contents = upsertWrap(contents, recovery);
+      }
+      const password = findWrap(existing, 'password');
+      if (password !== undefined && input.password === undefined) {
+        contents = upsertWrap(contents, password);
+      }
+    }
+    writeVaultKeyFile(this.file, contents);
+    this.adopt(input.masterKey);
+  }
+
+  /**
+   * material con el que registrar en una cuenta la boveda que ya existe aqui.
+   *
+   * La llave maestra no sale: entra la contraseña y sale lo que el servidor
+   * puede guardar sin poder abrirlo. Es lo que permite vincular una boveda
+   * creada antes de que existieran las cuentas sin recifrar su contenido.
+   */
+  async accountRegistration(
+    password: string,
+    recoveryKey: string,
+    params?: Argon2Params,
+  ): Promise<AccountRegistration> {
+    if (this.masterKey === null) {
+      throw new VaultError('abre la boveda antes de vincularla a una cuenta');
+    }
+    assertUsablePassword(password);
+    this.touch();
+    return registrationForMasterKey(
+      this.masterKey,
+      password,
+      recoveryKey,
+      params ?? this.argon2Params,
+    );
+  }
+
+  /**
+   * la puerta de la contraseña, sola, para cambiarla en la cuenta.
+   *
+   * No toca la copia de recuperacion del servidor: la clave que el usuario
+   * guardo en un papel sigue valiendo despues de cambiar la contraseña.
+   */
+  async accountPasswordCredentials(
+    password: string,
+    params?: Argon2Params,
+  ): Promise<AccountPasswordCredentials> {
+    if (this.masterKey === null) throw new VaultError('la boveda esta bloqueada');
+    assertUsablePassword(password);
+    this.touch();
+    return passwordCredentialsForMasterKey(this.masterKey, password, params ?? this.argon2Params);
+  }
+
+  /**
+   * sustituye la envoltura local de recuperacion.
+   *
+   * la usa vincular una boveda anterior a las cuentas: la clave de recuperacion
+   * vieja se mostro una vez y ya no se conoce, asi que para poder subir una
+   * copia de recuperacion al servidor hay que generar una nueva, y las dos
+   * copias —la de aqui y la de alli— tienen que ser de la MISMA clave.
+   */
+  async rewrapLocalRecoveryKey(recoveryKey: string, params?: Argon2Params): Promise<void> {
+    if (this.masterKey === null) throw new VaultError('la boveda esta bloqueada');
+    const contents = this.requireContents();
+    const renewed = await wrapMasterKey(
+      this.masterKey,
+      recoveryKey,
+      'recovery',
+      params ?? this.argon2Params,
+    );
+    writeVaultKeyFile(this.file, upsertWrap(contents, renewed));
+    this.touch();
+  }
+
+  /**
+   * comprueba una contraseña sin cambiar el estado de la boveda.
+   *
+   * Hace falta al vincular una boveda local a una cuenta: la envoltura que
+   * sube tiene que abrirse con la MISMA contraseña que abre este equipo, o el
+   * usuario acabaria con dos contraseñas distintas para la misma boveda sin
+   * saberlo. Tener la boveda abierta no demuestra conocerla, igual que en
+   * `changePassword`.
+   */
+  async verifyPassword(password: string): Promise<boolean> {
+    const contents = this.requireContents();
+    const wrap = findWrap(contents, 'password');
+    if (wrap === undefined) throw new VaultError('esta boveda no se abre con contraseña');
+
+    let candidate: Uint8Array | null = null;
+    try {
+      candidate = await unwrapMasterKey(wrap, password);
+      return true;
+    } catch (error) {
+      if (error instanceof VaultCryptoError) return false;
+      throw error;
+    } finally {
+      wipe(candidate);
+    }
+  }
+
+  /**
+   * prueba de que se conoce una contraseña, sin enviarla.
+   *
+   * Es la segunda vuelta de Argon2id sobre la llave maestra; el servidor la
+   * compara con la que guarda. Sirve para demostrar la contraseña ACTUAL al
+   * cambiarla, que es justo lo que no demuestra tener la boveda abierta.
+   */
+  async accountAuthHash(password: string, params: Argon2Params): Promise<string> {
+    if (this.masterKey === null) throw new VaultError('la boveda esta bloqueada');
+    this.touch();
+    return deriveAuthHash(this.masterKey, password, params);
+  }
+
+  /**
+   * sustituye la envoltura local por otra con la contraseña nueva.
+   *
+   * lo llama la cuenta DESPUES de que el servidor haya aceptado el cambio: si
+   * se hiciera antes, un fallo de red dejaria este equipo abriendo con una
+   * contraseña que ya no vale en ningun otro.
+   */
+  async rewrapLocalPassword(newPassword: string, params?: Argon2Params): Promise<void> {
+    if (this.masterKey === null) throw new VaultError('la boveda esta bloqueada');
+    assertUsablePassword(newPassword);
+    const contents = this.requireContents();
+    const renewed = await wrapMasterKey(
+      this.masterKey,
+      newPassword,
+      'password',
+      params ?? this.argon2Params,
+    );
+    writeVaultKeyFile(this.file, upsertWrap(contents, renewed));
+    this.touch();
+  }
+
+  /** deja constancia de la cuenta en el archivo local, sin tocar las llaves */
+  bindAccount(account: { email: string; vaultId: string }): void {
+    const contents = this.requireContents();
+    writeVaultKeyFile(this.file, { ...contents, account });
+  }
+
+  /** lee el archivo tratando uno dañado como inexistente */
+  private safeContents(): VaultKeyFile | null {
+    try {
+      return this.contents();
+    } catch (error) {
+      if (error instanceof VaultFileError) return null;
       throw error;
     }
   }
@@ -438,6 +673,14 @@ export class VaultService {
   async changePassword(currentPassword: string, newPassword: string): Promise<void> {
     assertUsablePassword(newPassword);
     const contents = this.requireContents();
+    if (contents.account !== undefined) {
+      // cambiarla solo aqui dejaria el equipo abriendo con una contraseña que
+      // el servidor no conoce: desde otro equipo seguiria valiendo la vieja
+      throw new VaultError(
+        'esta boveda pertenece a una cuenta',
+        'cambia la contraseña de la cuenta: se aplica a todos tus equipos',
+      );
+    }
     const wrap = findWrap(contents, 'password');
     if (wrap === undefined) throw new VaultError('esta boveda no se abre con contraseña');
 

@@ -21,6 +21,20 @@ const sealedEnvelopeSchema = z.object({
   ciphertext: base64UrlSchema.min(1),
 });
 
+/**
+ * el sobre de la copia de recuperación.
+ *
+ * Propósito distinto y validado como tal: intercambiarlo con el de contraseña
+ * en la base de datos no cuela, porque el propósito viaja autenticado
+ * (`D-041`), y el servidor tampoco lo acepta por la forma.
+ */
+const recoveryEnvelopeSchema = z.object({
+  version: z.number().int().min(1).max(255),
+  purpose: z.literal('vault.account.recovery'),
+  nonce: base64UrlSchema.length(16),
+  ciphertext: base64UrlSchema.min(1),
+});
+
 const argon2ParamsSchema = z.object({
   t: z.number().int().min(1).max(16),
   m: z.number().int().min(8 * 1024).max(2 * 1024 * 1024),
@@ -44,6 +58,22 @@ export const vaultEmailSchema = z
  */
 export const VAULT_MIN_PASSWORD_LENGTH = 10;
 
+/**
+ * la misma llave maestra envuelta con la clave de recuperación.
+ *
+ * Es lo que hace que olvidar la contraseña no pierda la bóveda **ni siquiera
+ * desde un ordenador nuevo** (`F9.19`). Su coste de Argon2id es más bajo a
+ * propósito: la clave de recuperación no es una contraseña, son ~157 bits al
+ * azar y no hay diccionario que probar (`D-049`).
+ */
+export const vaultRecoverySchema = z.object({
+  authSalt: base64UrlSchema.length(22),
+  argon2Params: argon2ParamsSchema,
+  authHash: base64UrlSchema.length(43),
+  wrappedMasterKey: recoveryEnvelopeSchema,
+});
+export type VaultRecovery = z.infer<typeof vaultRecoverySchema>;
+
 export const vaultRegisterRequestSchema = z.object({
   email: vaultEmailSchema,
   authSalt: base64UrlSchema.length(22),
@@ -51,6 +81,7 @@ export const vaultRegisterRequestSchema = z.object({
   authHash: base64UrlSchema.length(43),
   wrappedMasterKey: sealedEnvelopeSchema,
   vaultId: base64UrlSchema.length(43),
+  recovery: vaultRecoverySchema,
 });
 export type VaultRegisterRequest = z.infer<typeof vaultRegisterRequestSchema>;
 
@@ -63,10 +94,24 @@ export const vaultLoginStartResponseSchema = z.object({
   authSalt: base64UrlSchema.length(22),
   argon2Params: argon2ParamsSchema,
   wrappedMasterKey: sealedEnvelopeSchema,
+  /**
+   * la puerta de la clave de recuperación, con su propia sal y su propio coste.
+   *
+   * Viaja SIEMPRE, también en la respuesta señuelo de un correo que no existe:
+   * omitirla para las cuentas sin recuperación delataría cuáles la tienen.
+   */
+  recovery: vaultRecoverySchema.omit({ authHash: true }),
 });
 export type VaultLoginStartResponse = z.infer<typeof vaultLoginStartResponseSchema>;
 
-/** con la maestra ya abierta en local, el cliente prueba el hash de acceso */
+/**
+ * con la maestra ya abierta en local, el cliente prueba el hash de acceso.
+ *
+ * No dice por qué puerta entró: el servidor compara con los dos hashes que
+ * guarda —el de la contraseña y el de la clave de recuperación— y los dos
+ * prueban lo mismo, que quien llama puede abrir la bóveda. Decirlo sólo daría
+ * al servidor un dato que no necesita.
+ */
 export const vaultLoginFinishRequestSchema = z.object({
   email: vaultEmailSchema,
   authHash: base64UrlSchema.length(43),
@@ -82,7 +127,14 @@ export const vaultSessionResponseSchema = z.object({
 export type VaultSessionResponse = z.infer<typeof vaultSessionResponseSchema>;
 
 export const vaultChangePasswordRequestSchema = z.object({
-  /** prueba la contraseña actual sin enviarla */
+  /**
+   * prueba la contraseña actual sin enviarla.
+   *
+   * vale también el hash de la clave de recuperación: es lo que permite
+   * arreglar de verdad un «he olvidado la contraseña» —entrar con la clave y
+   * elegir una nueva— en vez de dejar al usuario con acceso pero sin poder
+   * cambiarla.
+   */
   currentAuthHash: base64UrlSchema.length(43),
   authSalt: base64UrlSchema.length(22),
   argon2Params: argon2ParamsSchema,

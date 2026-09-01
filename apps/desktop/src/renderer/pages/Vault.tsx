@@ -18,6 +18,9 @@ const AUTO_LOCK_CHOICES = [1, 5, 15, 30, 60, 240, 0] as const;
 
 const MIN_PASSWORD_LENGTH = 10;
 
+/** ocho grupos de cuatro, sin los separadores. Debe coincidir con vault-crypto */
+const RECOVERY_KEY_LENGTH = 32;
+
 export function VaultPage({
   vault,
   summary,
@@ -27,7 +30,9 @@ export function VaultPage({
 }): JSX.Element {
   if (vault.loading) return <Skeleton rows={4} />;
   if (vault.recoveryKey !== null) return <RecoveryKeyPanel vault={vault} />;
-  if (!vault.status.configured) return <CreatePanel vault={vault} />;
+  // sin bóveda en este equipo la puerta es la cuenta, no la contraseña: es lo
+  // que hace que un ordenador nuevo funcione sabiendo sólo la contraseña
+  if (!vault.status.configured) return <AccountPanel vault={vault} />;
   // con la boveda cerrada no se muestra NADA de su contenido: ni la lista de
   // conversaciones, ni cuantas hay. El renderer ni siquiera las tiene.
   if (!vault.status.unlocked) return <UnlockPanel vault={vault} />;
@@ -379,10 +384,190 @@ function MediaTile({
 }
 
 // -----------------------------------------------------------------------------
+// cuenta
+// -----------------------------------------------------------------------------
+
+/**
+ * puerta de entrada cuando este equipo todavia no tiene boveda.
+ *
+ * Crear la cuenta y entrar son la MISMA llave maestra vista desde dos sitios:
+ * al crearla nace aquí y el servidor guarda una copia envuelta que no puede
+ * abrir; al entrar, esa copia vuelve y la abre la contraseña. Por eso un equipo
+ * nuevo necesita sólo el correo y la contraseña, y por eso nadie más —tampoco
+ * el servidor— puede abrir lo que se guarda.
+ */
+function AccountPanel({ vault }: { vault: VaultController }): JSX.Element {
+  const [mode, setMode] = useState<'register' | 'login' | 'recovery' | 'local'>('register');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [repeat, setRepeat] = useState('');
+
+  if (mode === 'local') {
+    return <CreatePanel vault={vault} onUseAccount={() => setMode('register')} />;
+  }
+
+  const registering = mode === 'register';
+  const recovering = mode === 'recovery';
+  // la clave de recuperación no es una contraseña y no se mide igual: son ocho
+  // grupos de cuatro, y se acepta escrita de forma descuidada
+  const minimum = recovering ? RECOVERY_KEY_LENGTH : MIN_PASSWORD_LENGTH;
+  const typed = recovering ? password.replace(/[^A-Za-z0-9]/g, '') : password;
+  const tooShort = typed.length > 0 && typed.length < minimum;
+  const mismatch = registering && repeat.length > 0 && password !== repeat;
+  const canSubmit =
+    email.includes('@') &&
+    typed.length >= minimum &&
+    (!registering || password === repeat) &&
+    !vault.busy;
+
+  const submit = (): void => {
+    const action = registering
+      ? vault.registerAccount(email.trim(), password)
+      : vault.loginAccount(email.trim(), password, recovering ? 'recovery' : 'password');
+    // el secreto deja de estar en memoria del renderer en cuanto se usa
+    void action.then(() => {
+      setPassword('');
+      setRepeat('');
+    });
+  };
+
+  const title = registering
+    ? 'Crear tu cuenta privada'
+    : recovering
+      ? 'Entrar con tu clave de recuperación'
+      : 'Entrar en tu cuenta';
+
+  return (
+    <Panel
+      title={title}
+      actions={
+        <button
+          className="btn btn--quiet"
+          onClick={() => {
+            setMode(registering ? 'login' : 'register');
+            setPassword('');
+            setRepeat('');
+            vault.clearError();
+          }}
+        >
+          {registering ? 'Ya tengo cuenta' : 'Crear una cuenta'}
+        </button>
+      }
+    >
+      <p className="vault-prose">
+        {registering
+          ? 'La llave que cifra tu contenido nace en este equipo. El servidor guarda una copia cerrada con tu contraseña, y por eso puede devolvértela sin poder abrirla: así entras desde otro ordenador sabiendo sólo la contraseña.'
+          : recovering
+            ? 'El servidor guarda una segunda copia de tu llave, cerrada con tu clave de recuperación. Es la que abre la bóveda cuando ya no recuerdas la contraseña, y funciona desde cualquier ordenador. Después podrás elegir una contraseña nueva.'
+            : 'Tu contraseña no viaja. Lo que llega del servidor es tu llave cerrada, y se abre aquí. Si la contraseña es incorrecta no se abre nada, y el servidor ni se entera del intento.'}
+      </p>
+
+      {registering && (
+        <Notice tone="warn">
+          Si olvidas la contraseña y pierdes la clave de recuperación, el
+          contenido no se puede recuperar. Nadie puede restablecerla —tampoco el
+          servidor—: eso es justo lo que hace que nadie más pueda abrirla.
+        </Notice>
+      )}
+
+      <Field label="Correo" hint="Sólo identifica tu cuenta. No se envía nada a esa dirección.">
+        <input
+          type="email"
+          value={email}
+          autoComplete="username"
+          onChange={(event) => setEmail(event.target.value)}
+        />
+      </Field>
+
+      <Field
+        label={recovering ? 'Clave de recuperación' : 'Contraseña'}
+        hint={
+          registering
+            ? `Al menos ${MIN_PASSWORD_LENGTH} caracteres. Una frase de varias palabras es más fácil de recordar y más difícil de adivinar.`
+            : recovering
+              ? 'Ocho grupos de cuatro caracteres. Da igual mayúsculas, guiones o espacios.'
+              : undefined
+        }
+        error={tooShort ? `Todavía faltan ${minimum - typed.length} caracteres` : null}
+      >
+        <input
+          type={recovering ? 'text' : 'password'}
+          value={password}
+          autoComplete={registering ? 'new-password' : recovering ? 'off' : 'current-password'}
+          onChange={(event) => setPassword(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' && canSubmit) submit();
+          }}
+        />
+      </Field>
+
+      {registering && (
+        <Field label="Repite la contraseña" error={mismatch ? 'No coinciden' : null}>
+          <input
+            type="password"
+            value={repeat}
+            autoComplete="new-password"
+            onChange={(event) => setRepeat(event.target.value)}
+          />
+        </Field>
+      )}
+
+      {vault.error !== null && <Notice tone="fault">{vault.error}</Notice>}
+      {vault.hint !== null && <Notice tone="idle">{vault.hint}</Notice>}
+
+      <div className="row">
+        <button className="btn btn--primary" disabled={!canSubmit} onClick={submit}>
+          {vault.busy
+            ? registering
+              ? 'Creando cuenta…'
+              : 'Entrando…'
+            : registering
+              ? 'Crear cuenta'
+              : 'Entrar'}
+        </button>
+        {!registering && (
+          <button
+            className="btn btn--quiet"
+            onClick={() => {
+              setMode(recovering ? 'login' : 'recovery');
+              setPassword('');
+              vault.clearError();
+            }}
+          >
+            {recovering ? 'Usar contraseña' : 'He olvidado la contraseña'}
+          </button>
+        )}
+        <button className="btn btn--quiet" onClick={() => setMode('local')}>
+          Usar sólo en este equipo
+        </button>
+      </div>
+      <p className="field__hint">
+        {registering
+          ? 'Tarda unos segundos a propósito: ese tiempo es lo que encarece adivinar la contraseña a quien se lleve una copia.'
+          : recovering
+            ? 'Esta puerta es inmediata: una clave de recuperación son treinta y dos caracteres al azar, y encarecer cada intento no protege de nada cuando no hay nada que adivinar.'
+            : 'Tarda unos segundos: la llave se abre aquí, y ese coste es el mismo que protege tu contraseña.'}
+      </p>
+      <p className="field__hint">
+        Sin cuenta la bóveda funciona igual, pero sólo en este ordenador: no se
+        sincroniza y no se puede abrir desde otro. Podrás vincularla después sin
+        volver a cifrar nada.
+      </p>
+    </Panel>
+  );
+}
+
+// -----------------------------------------------------------------------------
 // crear
 // -----------------------------------------------------------------------------
 
-function CreatePanel({ vault }: { vault: VaultController }): JSX.Element {
+function CreatePanel({
+  vault,
+  onUseAccount,
+}: {
+  vault: VaultController;
+  onUseAccount: () => void;
+}): JSX.Element {
   const [password, setPassword] = useState('');
   const [repeat, setRepeat] = useState('');
 
@@ -392,10 +577,19 @@ function CreatePanel({ vault }: { vault: VaultController }): JSX.Element {
     password.length >= MIN_PASSWORD_LENGTH && password === repeat && !vault.busy;
 
   return (
-    <Panel title="Crear la bóveda">
+    <Panel
+      title="Crear la bóveda sólo en este equipo"
+      actions={
+        <button className="btn btn--quiet" onClick={onUseAccount}>
+          Usar una cuenta
+        </button>
+      }
+    >
       <p className="vault-prose">
         La bóveda cifra su contenido con una llave que sólo existe en este equipo
-        mientras está abierta. Ni el servidor ni Luxy pueden leerla.
+        mientras está abierta. Ni el servidor ni Luxy pueden leerla. Sin cuenta
+        esa llave no sale de aquí: no hay sincronización, y desde otro ordenador
+        no se puede abrir.
       </p>
       <Notice tone="warn">
         Si olvidas la contraseña y pierdes la clave de recuperación, el contenido
@@ -472,6 +666,15 @@ function RecoveryKeyPanel({ vault }: { vault: VaultController }): JSX.Element {
         fuera de este ordenador: en papel, o en un gestor de contraseñas.
       </p>
 
+      {vault.status.account.email !== null && (
+        <Notice tone="idle">
+          Abre tu bóveda <strong>desde cualquier ordenador</strong>, no sólo
+          desde éste: el servidor guarda una segunda copia de tu llave cerrada
+          con esta clave, y tampoco puede abrirla. Es la única forma de entrar
+          si olvidas la contraseña.
+        </Notice>
+      )}
+
       <label className="check">
         <input
           type="checkbox"
@@ -499,7 +702,12 @@ function RecoveryKeyPanel({ vault }: { vault: VaultController }): JSX.Element {
 // -----------------------------------------------------------------------------
 
 function UnlockPanel({ vault }: { vault: VaultController }): JSX.Element {
-  const [mode, setMode] = useState<'password' | 'recovery'>('password');
+  // tras entrar con la clave de recuperación, este equipo NO tiene envoltura de
+  // contraseña: no se conoce. Ofrecer ese campo primero sería ofrecer lo único
+  // que aquí no funciona.
+  const [mode, setMode] = useState<'password' | 'recovery'>(
+    vault.status.methods.password ? 'password' : 'recovery',
+  );
   const [secret, setSecret] = useState('');
 
   const submit = (): void => {
@@ -515,6 +723,14 @@ function UnlockPanel({ vault }: { vault: VaultController }): JSX.Element {
         El contenido sigue en este equipo, pero está cifrado. Luxy tampoco puede
         leerlo hasta que la abras.
       </p>
+
+      {vault.status.account.email !== null && (
+        <p className="field__hint">
+          Bóveda de <strong>{vault.status.account.email}</strong>. Se abre aquí
+          sin conexión: la llave ya está en este equipo, cerrada con tu
+          contraseña.
+        </p>
+      )}
 
       {vault.hint !== null && <Notice tone="idle">{vault.hint}</Notice>}
 
@@ -581,7 +797,10 @@ function UnlockPanel({ vault }: { vault: VaultController }): JSX.Element {
 // -----------------------------------------------------------------------------
 
 function UnlockedPanel({ vault }: { vault: VaultController }): JSX.Element {
-  const [changing, setChanging] = useState(false);
+  const byRecovery = vault.status.account.openedWithRecoveryKey;
+  // quien acaba de recuperar su cuenta viene justamente a esto: el formulario
+  // ya está abierto en vez de escondido detrás de un botón más
+  const [changing, setChanging] = useState(byRecovery);
   const countdown = formatLockCountdown(vault.status.lockingInMs);
 
   return (
@@ -592,7 +811,12 @@ function UnlockedPanel({ vault }: { vault: VaultController }): JSX.Element {
           <>
             <button
               className="btn btn--quiet"
-              disabled={vault.syncing || vault.busy}
+              disabled={vault.syncing || vault.busy || !vault.status.account.signedIn}
+              title={
+                vault.status.account.signedIn
+                  ? undefined
+                  : 'Sincronizar necesita la sesión de tu cuenta'
+              }
               onClick={() => void vault.sync()}
             >
               {vault.syncing ? 'Sincronizando…' : 'Sincronizar'}
@@ -606,6 +830,17 @@ function UnlockedPanel({ vault }: { vault: VaultController }): JSX.Element {
         <Readout
           items={[
             { label: 'Estado', value: <Tag tone="ok">abierta</Tag> },
+            {
+              label: 'Cuenta',
+              value:
+                vault.status.account.email === null ? (
+                  <Tag tone="idle">sólo en este equipo</Tag>
+                ) : vault.status.account.signedIn ? (
+                  vault.status.account.email
+                ) : (
+                  <Tag tone="warn">sesión caducada</Tag>
+                ),
+            },
             {
               label: 'Bloqueo automático',
               value:
@@ -635,11 +870,9 @@ function UnlockedPanel({ vault }: { vault: VaultController }): JSX.Element {
           </p>
         )}
 
-        <p className="vault-prose">
-          Todavía no hay conversaciones privadas: falta conectar la bóveda con
-          Conversaciones. Lo que ya funciona es crearla, abrirla y cerrarla.
-        </p>
       </Panel>
+
+      <AccountSection vault={vault} />
 
       <Panel title="Ajustes de la bóveda">
         <Field
@@ -692,6 +925,14 @@ function UnlockedPanel({ vault }: { vault: VaultController }): JSX.Element {
           </Notice>
         )}
 
+        {byRecovery && (
+          <Notice tone="warn">
+            Has entrado con tu clave de recuperación, así que este equipo no
+            sabe tu contraseña: hasta que elijas una nueva, la bóveda sólo se
+            vuelve a abrir aquí con la clave. Tu contenido está intacto.
+          </Notice>
+        )}
+
         {changing ? (
           <ChangePasswordForm vault={vault} onDone={() => setChanging(false)} />
         ) : (
@@ -706,6 +947,94 @@ function UnlockedPanel({ vault }: { vault: VaultController }): JSX.Element {
   );
 }
 
+/**
+ * la cuenta, con la boveda ya abierta.
+ *
+ * Tres situaciones distintas, y cada una se arregla de otra forma:
+ *
+ *   - sin cuenta: la boveda vive solo aqui y se puede vincular sin recifrarla;
+ *   - con cuenta y sesion: no hay nada que hacer, salvo salir;
+ *   - con cuenta y sin sesion: lo local sigue funcionando, la sincronizacion no.
+ */
+function AccountSection({ vault }: { vault: VaultController }): JSX.Element {
+  const [email, setEmail] = useState(vault.status.account.email ?? '');
+  const [password, setPassword] = useState('');
+  const linked = vault.status.account.email !== null;
+  const canSubmit = email.includes('@') && password.length >= MIN_PASSWORD_LENGTH && !vault.busy;
+
+  const submit = (): void => {
+    const action = linked
+      ? vault.loginAccount(email.trim(), password)
+      : vault.linkAccount(email.trim(), password);
+    void action.then(() => setPassword(''));
+  };
+
+  if (linked && vault.status.account.signedIn) {
+    return (
+      <Panel title="Tu cuenta">
+        <p className="vault-prose">
+          Esta bóveda pertenece a <strong>{vault.status.account.email}</strong>.
+          Lo que sincronizas viaja cifrado y el servidor no puede leerlo: sólo
+          sabe cuántos registros hay y de quién son.
+        </p>
+        <div className="row">
+          <button
+            className="btn"
+            disabled={vault.busy}
+            onClick={() => void vault.logoutAccount()}
+          >
+            Cerrar sesión
+          </button>
+        </div>
+        <p className="field__hint">
+          Cerrar sesión también cierra la bóveda. Lo cifrado se queda en este
+          ordenador y se vuelve a abrir con la misma contraseña.
+        </p>
+      </Panel>
+    );
+  }
+
+  return (
+    <Panel title={linked ? 'Vuelve a entrar en tu cuenta' : 'Vincular a una cuenta'}>
+      <p className="vault-prose">
+        {linked
+          ? 'Tu sesión ha caducado. La bóveda sigue abriéndose aquí sin conexión; lo que no funciona hasta que entres es sincronizar con tus otros equipos.'
+          : 'Esta bóveda sólo existe en este ordenador. Vincularla sube tu llave cerrada con tu contraseña, sin volver a cifrar nada de lo que ya hay: a partir de ahí podrás abrirla desde otro equipo y sincronizar.'}
+      </p>
+
+      <Field label="Correo">
+        <input
+          type="email"
+          value={email}
+          autoComplete="username"
+          readOnly={linked}
+          onChange={(event) => setEmail(event.target.value)}
+        />
+      </Field>
+      <Field
+        label="Contraseña"
+        hint={linked ? undefined : 'La misma con la que abres esta bóveda.'}
+      >
+        <input
+          type="password"
+          value={password}
+          autoComplete="current-password"
+          onChange={(event) => setPassword(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' && canSubmit) submit();
+          }}
+        />
+      </Field>
+
+      <div className="row">
+        <button className="btn btn--primary" disabled={!canSubmit} onClick={submit}>
+          {vault.busy ? 'Un momento…' : linked ? 'Entrar' : 'Vincular'}
+        </button>
+      </div>
+    </Panel>
+  );
+}
+
 function ChangePasswordForm({
   vault,
   onDone,
@@ -715,17 +1044,25 @@ function ChangePasswordForm({
 }): JSX.Element {
   const [current, setCurrent] = useState('');
   const [next, setNext] = useState('');
+  // quien entró con la clave de recuperación no sabe la contraseña actual: eso
+  // es justo lo que venía a arreglar. Su prueba de «lo que ya sabes» es la
+  // clave con la que acaba de entrar.
+  const byRecovery = vault.status.account.openedWithRecoveryKey;
 
   return (
     <>
       <Field
-        label="Contraseña actual"
-        hint="Se pide aunque la bóveda esté abierta: tenerla abierta no demuestra que la conoces."
+        label={byRecovery ? 'Tu clave de recuperación' : 'Contraseña actual'}
+        hint={
+          byRecovery
+            ? 'La misma con la que acabas de entrar. Seguirá valiendo después del cambio.'
+            : 'Se pide aunque la bóveda esté abierta: tenerla abierta no demuestra que la conoces.'
+        }
       >
         <input
-          type="password"
+          type={byRecovery ? 'text' : 'password'}
           value={current}
-          autoComplete="current-password"
+          autoComplete={byRecovery ? 'off' : 'current-password'}
           onChange={(event) => setCurrent(event.target.value)}
         />
       </Field>

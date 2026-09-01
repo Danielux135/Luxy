@@ -2,22 +2,14 @@
 import { generateShortId } from '@luxy/shared';
 import type { Job, JobOrigin, JobStatus, Machine, PrivateRecord, ProviderId } from '@luxy/shared';
 import { type SupabaseClient, eq, gte, inList } from './supabase.js';
+// una sola definicion de la fila: dos copias se desincronizan en cuanto una
+// columna nueva entra por un lado y no por el otro
+import type { VaultUserRow } from './vault-auth.js';
 
 const VAULT_USER_COLUMNS =
-  'id,email,auth_salt,argon2_t,argon2_m,argon2_p,auth_hash,wrapped_master_key,vault_id,disabled';
-
-interface VaultUserRow {
-  id: string;
-  email: string;
-  auth_salt: string;
-  argon2_t: number;
-  argon2_m: number;
-  argon2_p: number;
-  auth_hash: string;
-  wrapped_master_key: unknown;
-  vault_id: string;
-  disabled: boolean;
-}
+  'id,email,auth_salt,argon2_t,argon2_m,argon2_p,auth_hash,wrapped_master_key,' +
+  'recovery_salt,recovery_argon2_t,recovery_argon2_m,recovery_argon2_p,' +
+  'recovery_auth_hash,recovery_wrapped_master_key,vault_id,disabled';
 
 interface MachineRow {
   id: string;
@@ -669,6 +661,12 @@ export class Repository {
     authHash: string;
     wrappedMasterKey: unknown;
     vaultId: string;
+    recovery: {
+      authSalt: string;
+      argon2Params: { t: number; m: number; p: number };
+      authHash: string;
+      wrappedMasterKey: unknown;
+    };
   }): Promise<{ id: string }> {
     const rows = await this.db.insert<{ id: string }>('vault_users', {
       email: input.email,
@@ -678,6 +676,12 @@ export class Repository {
       argon2_p: input.argon2Params.p,
       auth_hash: input.authHash,
       wrapped_master_key: input.wrappedMasterKey,
+      recovery_salt: input.recovery.authSalt,
+      recovery_argon2_t: input.recovery.argon2Params.t,
+      recovery_argon2_m: input.recovery.argon2Params.m,
+      recovery_argon2_p: input.recovery.argon2Params.p,
+      recovery_auth_hash: input.recovery.authHash,
+      recovery_wrapped_master_key: input.recovery.wrappedMasterKey,
       vault_id: input.vaultId,
     });
     const created = rows[0];

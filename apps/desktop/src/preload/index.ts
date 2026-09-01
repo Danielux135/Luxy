@@ -62,6 +62,10 @@ const bridge: LuxyBridge = {
   requestStudioJobAction: (args: unknown) => ipcRenderer.invoke(IPC_INVOKE.studioJobAction, args),
 
   getVaultStatus: () => ipcRenderer.invoke(IPC_INVOKE.vaultStatus),
+  registerVaultAccount: (args: unknown) => ipcRenderer.invoke(IPC_INVOKE.vaultAccountRegister, args),
+  loginVaultAccount: (args: unknown) => ipcRenderer.invoke(IPC_INVOKE.vaultAccountLogin, args),
+  linkVaultAccount: (args: unknown) => ipcRenderer.invoke(IPC_INVOKE.vaultAccountLink, args),
+  logoutVaultAccount: () => ipcRenderer.invoke(IPC_INVOKE.vaultAccountLogout),
   createVault: (password: string) => ipcRenderer.invoke(IPC_INVOKE.vaultCreate, { password }),
   unlockVault: (args: unknown) => ipcRenderer.invoke(IPC_INVOKE.vaultUnlock, args),
   lockVault: () => ipcRenderer.invoke(IPC_INVOKE.vaultLock),

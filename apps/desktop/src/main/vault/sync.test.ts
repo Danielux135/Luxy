@@ -11,7 +11,6 @@ import { syncVault } from './sync.js';
 const PASSWORD = 'una frase larga de prueba';
 const FAST = { t: 1, m: 8 * 1024, p: 1 } as const;
 const A = '11111111-1111-4111-8111-111111111111';
-const VAULT_ID = 'A'.repeat(43);
 
 function memoryDeviceKeys(): DeviceKeyStore {
   let value: string | undefined;
@@ -40,6 +39,7 @@ interface Recorded {
   url: string;
   method: string;
   body: unknown;
+  authorization: string | null;
 }
 
 /** gateway falso: ni red, ni Supabase */
@@ -51,7 +51,12 @@ function fakeGateway(remote: { conversations?: unknown[]; records?: unknown[] } 
     const href = url.toString();
     const method = init?.method ?? 'GET';
     const body = init?.body === undefined ? null : JSON.parse(String(init.body));
-    calls.push({ url: href, method, body });
+    calls.push({
+      url: href,
+      method,
+      body,
+      authorization: new Headers(init?.headers ?? {}).get('Authorization'),
+    });
 
     if (href.includes('/api/vault/records') && method === 'POST') {
       const records = (body as { records: unknown[] }).records;
@@ -88,10 +93,11 @@ describe('sincronizacion de la boveda', () => {
     rmSync(directory, { recursive: true, force: true });
   });
 
-  const deps = (impl: typeof fetch) => ({
+  const deps = (impl: typeof fetch, onUnauthorized?: () => void) => ({
     gatewayUrl: 'https://gw.example',
-    machineToken: 'token-de-prueba',
+    sessionToken: 'sesion-de-prueba',
     fetchImpl: impl,
+    ...(onUnauthorized === undefined ? {} : { onUnauthorized }),
   });
 
   it('sube lo que hay en este equipo', async () => {
@@ -99,7 +105,7 @@ describe('sincronizacion de la boveda', () => {
     await store.appendTurn(vault, A, turn('dos'));
 
     const gateway = fakeGateway();
-    const result = await syncVault(vault, store, VAULT_ID, deps(gateway.impl));
+    const result = await syncVault(vault, store, deps(gateway.impl));
 
     expect(result.uploaded).toBe(2);
     expect(gateway.stored).toHaveLength(2);
@@ -109,21 +115,25 @@ describe('sincronizacion de la boveda', () => {
     await store.appendTurn(vault, A, turn('un secreto que no debe viajar en claro'));
 
     const gateway = fakeGateway();
-    await syncVault(vault, store, VAULT_ID, deps(gateway.impl));
+    await syncVault(vault, store, deps(gateway.impl));
 
     const subida = gateway.calls.find((call) => call.method === 'POST');
     expect(JSON.stringify(subida?.body)).not.toContain('un secreto que no debe viajar');
     expect(JSON.stringify(subida?.body)).not.toContain('Titulo');
   });
 
-  it('el identificador de boveda viaja, la llave no', async () => {
+  it('autoriza la sesion de la cuenta, no el token de maquina', async () => {
     await store.appendTurn(vault, A, turn('x'));
     const gateway = fakeGateway();
-    await syncVault(vault, store, VAULT_ID, deps(gateway.impl));
+    await syncVault(vault, store, deps(gateway.impl));
 
+    expect(gateway.calls.every((call) => call.authorization === 'Bearer sesion-de-prueba')).toBe(
+      true,
+    );
+    // el identificador de boveda agrupaba pero nunca autorizo: ya no viaja
     const subida = gateway.calls.find((call) => call.method === 'POST');
-    expect((subida?.body as { vaultId: string }).vaultId).toBe(VAULT_ID);
-    // el vaultId se deriva de la maestra pero HKDF no se invierte
+    expect((subida?.body as { vaultId?: string }).vaultId).toBeUndefined();
+    expect(gateway.calls.some((call) => call.url.includes('vaultId='))).toBe(false);
     expect(JSON.stringify(subida?.body)).not.toContain(PASSWORD);
   });
 
@@ -138,7 +148,7 @@ describe('sincronizacion de la boveda', () => {
       conversations: [{ conversationId: A, turnCount: 2, updatedAt: '2026-09-01T10:00:00Z' }],
       records: [ajeno],
     });
-    const result = await syncVault(vault, store, VAULT_ID, deps(gateway.impl));
+    const result = await syncVault(vault, store, deps(gateway.impl));
 
     expect(result.downloaded).toBe(1);
     const turnos = await store.read(vault, A);
@@ -149,7 +159,7 @@ describe('sincronizacion de la boveda', () => {
     const propio = await store.appendTurn(vault, A, turn('ya lo tengo'));
     const gateway = fakeGateway({ records: [propio] });
 
-    const result = await syncVault(vault, store, VAULT_ID, deps(gateway.impl));
+    const result = await syncVault(vault, store, deps(gateway.impl));
     expect(result.downloaded).toBe(0);
     expect((await store.read(vault, A)).length).toBe(1);
   });
@@ -167,7 +177,7 @@ describe('sincronizacion de la boveda', () => {
     const ajeno = await otroStore.appendTurn(otraVault, A, turn('de otra boveda'));
 
     const gateway = fakeGateway({ records: [{ ...ajeno, sequence: 9 }] });
-    const result = await syncVault(vault, store, VAULT_ID, deps(gateway.impl));
+    const result = await syncVault(vault, store, deps(gateway.impl));
 
     // si entrara, cada lectura posterior fallaria sin saber cual es el malo
     expect(result.downloaded).toBe(0);
@@ -179,7 +189,7 @@ describe('sincronizacion de la boveda', () => {
     const gateway = fakeGateway({
       conversations: [{ conversationId: A, turnCount: 0, updatedAt: '2026-09-01T10:00:00Z' }],
     });
-    const result = await syncVault(vault, store, VAULT_ID, deps(gateway.impl));
+    const result = await syncVault(vault, store, deps(gateway.impl));
     // sin unir las dos listas, una conversacion creada en el otro equipo no se
     // descargaria nunca porque aqui no existe
     expect(result.conversations).toBe(1);
@@ -188,7 +198,7 @@ describe('sincronizacion de la boveda', () => {
   it('sube antes de bajar', async () => {
     await store.appendTurn(vault, A, turn('lo mio'));
     const gateway = fakeGateway({ records: [] });
-    await syncVault(vault, store, VAULT_ID, deps(gateway.impl));
+    await syncVault(vault, store, deps(gateway.impl));
 
     const posts = gateway.calls.findIndex((call) => call.method === 'POST');
     const pulls = gateway.calls.findIndex((call) => call.url.includes(`/conversations/${A}`));
@@ -199,22 +209,29 @@ describe('sincronizacion de la boveda', () => {
   it('con la boveda cerrada no sincroniza', async () => {
     vault.lock();
     const gateway = fakeGateway();
-    await expect(syncVault(vault, store, VAULT_ID, deps(gateway.impl))).rejects.toThrow(VaultError);
+    await expect(syncVault(vault, store, deps(gateway.impl))).rejects.toThrow(VaultError);
     expect(gateway.calls).toHaveLength(0);
   });
 
-  it('un 401 explica que hacer', async () => {
+  it('un 401 olvida la sesion y explica que hacer', async () => {
     const impl = (async () => new Response('', { status: 401 })) as unknown as typeof fetch;
-    await expect(syncVault(vault, store, VAULT_ID, deps(impl))).rejects.toMatchObject({
-      hint: expect.stringContaining('registrar esta maquina'),
+    let olvidada = false;
+    await expect(
+      syncVault(vault, store, deps(impl, () => {
+        olvidada = true;
+      })),
+    ).rejects.toMatchObject({
+      hint: expect.stringContaining('vuelve a entrar'),
     });
+    // sin olvidarla, la siguiente accion volveria a fallar con el mismo token
+    expect(olvidada).toBe(true);
   });
 
   it('un fallo del servidor no pierde lo local', async () => {
     await store.appendTurn(vault, A, turn('sigue aqui'));
     const impl = (async () => new Response('', { status: 500 })) as unknown as typeof fetch;
 
-    await expect(syncVault(vault, store, VAULT_ID, deps(impl))).rejects.toThrow();
+    await expect(syncVault(vault, store, deps(impl))).rejects.toThrow();
     expect((await store.read(vault, A)).map((t) => t.text)).toEqual(['sigue aqui']);
   });
 });

@@ -24,6 +24,13 @@ export interface VaultUserRow {
   argon2_p: number;
   auth_hash: string;
   wrapped_master_key: unknown;
+  /** la otra puerta: misma llave, cerrada con la clave de recuperacion */
+  recovery_salt: string;
+  recovery_argon2_t: number;
+  recovery_argon2_m: number;
+  recovery_argon2_p: number;
+  recovery_auth_hash: string;
+  recovery_wrapped_master_key: unknown;
   vault_id: string;
   disabled: boolean;
 }

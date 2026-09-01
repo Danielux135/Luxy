@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { toBase64Url } from '@luxy/vault-crypto';
+import { registrationForMasterKey, toBase64Url } from '@luxy/vault-crypto';
 import {
   changeAccountPassword,
   loginAccount,
@@ -39,7 +39,7 @@ function fakeGateway() {
     if (path === '/api/vault/login/start') {
       const acc = accounts.get(body.email);
       if (acc === undefined) {
-        // señuelo: datos plausibles que no abriran nada
+        // señuelo: datos plausibles que no abriran nada, por las dos puertas
         return Response.json({
           authSalt: 'A'.repeat(22),
           argon2Params: { t: 3, m: 65536, p: 1 },
@@ -49,17 +49,36 @@ function fakeGateway() {
             nonce: 'A'.repeat(16),
             ciphertext: 'AAAA',
           },
+          recovery: {
+            authSalt: 'B'.repeat(22),
+            argon2Params: { t: 1, m: 8192, p: 1 },
+            wrappedMasterKey: {
+              version: 1,
+              purpose: 'vault.account.recovery',
+              nonce: 'B'.repeat(16),
+              ciphertext: 'BBBB',
+            },
+          },
         });
       }
       return Response.json({
         authSalt: acc.authSalt,
         argon2Params: acc.argon2Params,
         wrappedMasterKey: acc.wrappedMasterKey,
+        recovery: {
+          authSalt: acc.recovery.authSalt,
+          argon2Params: acc.recovery.argon2Params,
+          wrappedMasterKey: acc.recovery.wrappedMasterKey,
+        },
       });
     }
     if (path === '/api/vault/login/finish') {
       const acc = accounts.get(body.email);
-      if (acc === undefined || acc.authHash !== body.authHash) {
+      // las dos puertas prueban lo mismo, como en el gateway de verdad
+      const prueba =
+        acc !== undefined &&
+        (acc.authHash === body.authHash || acc.recovery.authHash === body.authHash);
+      if (acc === undefined || !prueba) {
         return new Response('', { status: 401 });
       }
       const token = `session-token-login-${sessions.size}`;
@@ -161,14 +180,15 @@ describe('cambio de contraseña', () => {
     const { session } = await registerAccount(fast(gw.impl), EMAIL, PASSWORD, FAST);
 
     const stored = gw.accounts.get(EMAIL);
-    await changeAccountPassword(
-      fast(gw.impl),
-      session.sessionToken,
+    // la envoltura nueva la construye quien tiene la llave maestra; el cliente
+    // solo la transporta junto a la prueba de la contraseña actual
+    const renewed = await registrationForMasterKey(
       session.masterKey,
-      stored.authHash,
       'contraseña nueva larga',
+      'ABCD-EFGH-JKMN-PQRS-TVWX-YZ23-4567-89AB',
       FAST,
     );
+    await changeAccountPassword(fast(gw.impl), session.sessionToken, stored.authHash, renewed);
 
     // la nueva abre
     const login = await loginAccount(fast(gw.impl), EMAIL, 'contraseña nueva larga');

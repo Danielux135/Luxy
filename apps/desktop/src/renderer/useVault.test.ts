@@ -42,14 +42,24 @@ describe('contrato IPC de la boveda', () => {
       methods: { password: true, recovery: true, device: false },
       autoLockMinutes: 5,
       lockingInMs: 120_000,
+      account: {
+        email: 'daniel@example.com',
+        signedIn: true,
+        expiresAt: null,
+        openedWithRecoveryKey: false,
+      },
       // lo que alguien pudiera intentar colar de vuelta al renderer
       masterKey: 'AAAA',
       salt: 'BBBB',
+      sessionToken: 'CCCC',
     });
     const serialized = JSON.stringify(parsed);
     expect(serialized).not.toContain('AAAA');
     expect(serialized).not.toContain('BBBB');
+    // el token de sesion es una credencial reutilizable: tampoco cruza el IPC
+    expect(serialized).not.toContain('CCCC');
     expect(Object.keys(parsed).sort()).toEqual([
+      'account',
       'autoLockMinutes',
       'configured',
       'lockingInMs',
@@ -91,6 +101,12 @@ describe('contrato IPC de la boveda', () => {
         methods: { password: true, recovery: true, device: false },
         autoLockMinutes: 5,
         lockingInMs: 300_000,
+        account: {
+          email: null,
+          signedIn: false,
+          expiresAt: null,
+          openedWithRecoveryKey: false,
+        },
       },
       recoveryKey: 'ABCD-EFGH-JKMN-PQRS-TVWX-YZ23-4567-89AB',
     });

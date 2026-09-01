@@ -55,6 +55,28 @@ export interface Argon2Params {
   p: number;
 }
 
+/**
+ * coste para la clave de recuperacion, que NO es una contraseña.
+ *
+ * Argon2id es caro porque una contraseña humana tiene poca entropia y hay que
+ * encarecer cada intento. Una clave de recuperacion de Luxy son 32 caracteres
+ * de un alfabeto de 30, generados al azar: ~157 bits. Ni con el coste minimo
+ * hay ataque de diccionario que valga, porque no hay diccionario.
+ *
+ * Cobrar aqui los 2,7 s de `ARGON2_PARAMS` no compraria seguridad y si
+ * doblaria el tiempo de crear una cuenta, que ya paga dos derivaciones. Es el
+ * mismo criterio por el que un gestor de contraseñas trata su «clave secreta»
+ * distinto de la contraseña maestra. Ver `D-049`.
+ *
+ * m esta en el minimo que admite `assertArgon2Params`, no por debajo: la
+ * validacion sigue siendo la misma para todo el mundo.
+ */
+export const RECOVERY_ARGON2_PARAMS = {
+  t: 1,
+  m: 8 * 1024,
+  p: 1,
+} as const;
+
 /** limites defensivos: un archivo manipulado no puede pedir memoria absurda */
 const MAX_MEMORY_KIB = 2 * 1024 * 1024;
 

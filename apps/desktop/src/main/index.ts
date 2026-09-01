@@ -11,6 +11,7 @@ import { AgentController, resolveAgentEntry } from './agent-controller.js';
 import { ConfigStore, configFilePathFor } from './config-store.js';
 import { MACHINE_TOKEN_SECRET, SecretStore, createSafeStorageBackend } from './secure-storage.js';
 import { VaultService } from './vault/vault-service.js';
+import { VaultAccountManager } from './vault/account-manager.js';
 import { vaultFilePathFor } from './vault/key-file.js';
 import {
   PrivateConversationStore,
@@ -18,7 +19,7 @@ import {
 } from './vault/conversation-store.js';
 import { PrivateMediaStore, mediaIndexDirectory } from './vault/media-store.js';
 import { LocalBlobStore, mediaDirectory } from './vault/blob-store.js';
-import { VAULT_DEVICE_SECRET } from '../shared/channels.js';
+import { VAULT_DEVICE_SECRET, VAULT_SESSION_SECRET } from '../shared/channels.js';
 import { registerIpcHandlers, unregisterIpcHandlers } from './ipc/handlers.js';
 import { LuxyTray } from './tray.js';
 import { applyContentSecurityPolicy, createMainWindow, revealWindow } from './windows.js';
@@ -39,6 +40,7 @@ let controller: AgentController | null = null;
 let configStore: ConfigStore | null = null;
 let secretStore: SecretStore | null = null;
 let vault: VaultService | null = null;
+let vaultAccounts: VaultAccountManager | null = null;
 let privateConversations: PrivateConversationStore | null = null;
 let privateMedia: PrivateMediaStore | null = null;
 let autoLockTimer: NodeJS.Timeout | null = null;
@@ -281,6 +283,19 @@ async function bootstrap(): Promise<void> {
     delete: () => store.delete(VAULT_DEVICE_SECRET),
   });
 
+  // la cuenta es el otro origen de la misma llave maestra: en un equipo nuevo
+  // la trae el servidor envuelta, y aqui la abre la contraseña. El token de
+  // sesion se guarda cifrado, como el de maquina.
+  vaultAccounts = new VaultAccountManager(
+    vault,
+    {
+      get: () => store.get(VAULT_SESSION_SECRET),
+      set: (value) => store.set(VAULT_SESSION_SECRET, value),
+      delete: () => store.delete(VAULT_SESSION_SECRET),
+    },
+    { gatewayUrl: () => configStore?.load()?.gatewayUrl ?? null },
+  );
+
   privateConversations = new PrivateConversationStore(conversationsDirectory(luxyConfigDir()));
   privateMedia = new PrivateMediaStore(
     mediaIndexDirectory(luxyConfigDir()),
@@ -314,6 +329,7 @@ async function bootstrap(): Promise<void> {
     configStore,
     secretStore,
     vault,
+    accounts: vaultAccounts,
     privateConversations,
     privateMedia,
     logsDirectory: logsDirectory(),

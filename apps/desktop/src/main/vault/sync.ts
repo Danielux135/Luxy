@@ -1,8 +1,13 @@
 // sincronizacion de la boveda entre equipos.
 //
 // Sube lo que este equipo tiene y no esta en el servidor, y baja lo contrario.
-// Todo lo que viaja va ya cifrado: este modulo no descifra nada salvo para
-// derivar el identificador de boveda, que necesita la llave maestra.
+// Todo lo que viaja va ya cifrado: este modulo no descifra nada; solo comprueba
+// que puede abrir lo que llega antes de guardarlo.
+//
+// Se autentica con la SESION DE LA CUENTA, no con el token de maquina. El
+// gateway decide de quien es cada registro por el usuario de esa sesion, asi
+// que el identificador de boveda ya no viaja: agrupaba, nunca autorizo, y
+// enviarlo invitaba a confundir una cosa con la otra (D-045, D-046).
 //
 // Dos decisiones que ordenan el resto:
 //
@@ -26,9 +31,12 @@ import type { PrivateConversationStore } from './conversation-store.js';
 
 export interface VaultSyncDeps {
   gatewayUrl: string;
-  machineToken: string;
+  /** sesion de la cuenta; caduca, y su caducidad es la que echa a este equipo */
+  sessionToken: string;
   fetchImpl?: typeof fetch;
   signal?: AbortSignal;
+  /** se llama al recibir un 401, para que la sesion guardada deje de usarse */
+  onUnauthorized?: () => void;
 }
 
 export interface VaultSyncResult {
@@ -49,18 +57,25 @@ async function call(
     ...init,
     ...(deps.signal === undefined ? {} : { signal: deps.signal }),
     headers: {
-      Authorization: `Bearer ${deps.machineToken}`,
+      Authorization: `Bearer ${deps.sessionToken}`,
       'Content-Type': 'application/json',
       ...(init.headers ?? {}),
     },
   });
 
   if (!response.ok) {
+    if (response.status === 401) {
+      // la sesion ya no vale: se olvida aqui para que la siguiente accion pida
+      // entrar en vez de volver a fallar con el mismo token
+      deps.onUnauthorized?.();
+      throw new SyncError(
+        'tu sesion ha caducado',
+        'vuelve a entrar con tu correo y contraseña desde Privado',
+      );
+    }
     throw new SyncError(
       `el gateway respondio ${response.status}`,
-      response.status === 401
-        ? 'vuelve a registrar esta maquina desde Ajustes'
-        : 'reintenta mas tarde; lo tuyo sigue guardado en este equipo',
+      'reintenta mas tarde; lo tuyo sigue guardado en este equipo',
     );
   }
   return response.json();
@@ -75,7 +90,6 @@ async function call(
 export async function syncConversation(
   vault: VaultService,
   store: PrivateConversationStore,
-  vaultId: string,
   conversationId: string,
   deps: VaultSyncDeps,
 ): Promise<{ uploaded: number; downloaded: number }> {
@@ -88,7 +102,7 @@ export async function syncConversation(
   if (local.length > 0) {
     const body = await call(deps, '/api/vault/records', {
       method: 'POST',
-      body: JSON.stringify({ vaultId, conversationId, records: local }),
+      body: JSON.stringify({ conversationId, records: local }),
     });
     const parsed = vaultSyncPushResponseSchema.safeParse(body);
     if (!parsed.success) throw new SyncError('el gateway respondio algo inesperado al subir');
@@ -96,10 +110,7 @@ export async function syncConversation(
   }
 
   // 2. bajar lo que este equipo no tiene
-  const remoteBody = await call(
-    deps,
-    `/api/vault/conversations/${conversationId}?vaultId=${encodeURIComponent(vaultId)}`,
-  );
+  const remoteBody = await call(deps, `/api/vault/conversations/${conversationId}`);
   const remote = vaultSyncPullResponseSchema.safeParse(remoteBody);
   if (!remote.success) throw new SyncError('el gateway respondio algo inesperado al descargar');
 
@@ -127,7 +138,6 @@ export async function syncConversation(
 export async function syncVault(
   vault: VaultService,
   store: PrivateConversationStore,
-  vaultId: string,
   deps: VaultSyncDeps,
 ): Promise<VaultSyncResult> {
   if (!vault.isUnlocked()) {
@@ -137,10 +147,7 @@ export async function syncVault(
     );
   }
 
-  const remoteBody = await call(
-    deps,
-    `/api/vault/conversations?vaultId=${encodeURIComponent(vaultId)}`,
-  );
+  const remoteBody = await call(deps, '/api/vault/conversations');
   const remote = vaultSyncListResponseSchema.safeParse(remoteBody);
   if (!remote.success) throw new SyncError('el gateway respondio algo inesperado');
 
@@ -154,7 +161,7 @@ export async function syncVault(
   let uploaded = 0;
   let downloaded = 0;
   for (const conversationId of ids) {
-    const result = await syncConversation(vault, store, vaultId, conversationId, deps);
+    const result = await syncConversation(vault, store, conversationId, deps);
     uploaded += result.uploaded;
     downloaded += result.downloaded;
   }

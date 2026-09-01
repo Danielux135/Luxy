@@ -54,6 +54,20 @@ export const vaultKeyFileSchema = z.object({
     ),
   createdAt: z.string().datetime(),
   /**
+   * cuenta a la que pertenece esta boveda, si esta vinculada.
+   *
+   * No es un secreto y no autoriza nada: es la etiqueta que permite decir de
+   * quien es la boveda de este equipo sin haber iniciado sesion, y detectar que
+   * alguien intenta abrir aqui la boveda de otra cuenta. Opcional porque una
+   * boveda creada antes de existir las cuentas sigue siendo valida.
+   */
+  account: z
+    .object({
+      email: z.string().min(3).max(320),
+      vaultId: z.string().length(43),
+    })
+    .optional(),
+  /**
    * ajustes de la boveda. No son secretos, por eso viven en el mismo archivo.
    *
    * opcional para que una boveda creada antes de existir este campo se siga
@@ -156,11 +170,15 @@ export function removeWrap(contents: VaultKeyFile, method: WrapMethodName): Vaul
   return { ...contents, wraps: contents.wraps.filter((wrap) => wrap.method !== method) };
 }
 
-export function createVaultKeyFile(wraps: unknown[]): VaultKeyFile {
+export function createVaultKeyFile(
+  wraps: unknown[],
+  account?: { email: string; vaultId: string },
+): VaultKeyFile {
   return {
     version: FORMAT_VERSION,
     wraps: wraps.map(toKeyWrapRecord),
     createdAt: new Date().toISOString(),
+    ...(account === undefined ? {} : { account }),
     settings: { autoLockMinutes: DEFAULT_AUTO_LOCK_MINUTES },
   };
 }

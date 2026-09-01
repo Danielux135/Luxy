@@ -11,6 +11,21 @@
 // a ningun sitio.
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+/**
+ * la cuenta, tal y como la ve la interfaz.
+ *
+ * `email` puede existir sin `signedIn`: la bóveda de este equipo pertenece a
+ * una cuenta y su sesión ha caducado. Son dos problemas distintos y se
+ * arreglan de forma distinta, así que se muestran por separado.
+ */
+export interface VaultAccountView {
+  email: string | null;
+  signedIn: boolean;
+  expiresAt: string | null;
+  /** se entró con la clave de recuperación: toca elegir contraseña nueva */
+  openedWithRecoveryKey: boolean;
+}
+
 export interface VaultStatusView {
   configured: boolean;
   unlocked: boolean;
@@ -18,6 +33,7 @@ export interface VaultStatusView {
   /** 0 significa que no se cierra sola */
   autoLockMinutes: number;
   lockingInMs: number | null;
+  account: VaultAccountView;
 }
 
 const CLOSED: VaultStatusView = {
@@ -26,6 +42,7 @@ const CLOSED: VaultStatusView = {
   methods: { password: false, recovery: false, device: false },
   autoLockMinutes: 0,
   lockingInMs: null,
+  account: { email: null, signedIn: false, expiresAt: null, openedWithRecoveryKey: false },
 };
 
 /** cada cuanto se refresca la cuenta atras del bloqueo automatico */
@@ -62,6 +79,17 @@ export interface VaultController {
   hint: string | null;
   /** sólo entre crear la boveda y confirmar que se copio */
   recoveryKey: string | null;
+  /** crea la cuenta: la bóveda de este equipo nace vinculada a ella */
+  registerAccount: (email: string, password: string) => Promise<boolean>;
+  /** entra en una cuenta ya existente y trae su llave a este equipo */
+  loginAccount: (
+    email: string,
+    secret: string,
+    method?: 'password' | 'recovery',
+  ) => Promise<boolean>;
+  /** sube a una cuenta nueva la bóveda que ya existía aquí, sin recifrarla */
+  linkAccount: (email: string, password: string) => Promise<boolean>;
+  logoutAccount: () => Promise<void>;
   create: (password: string) => Promise<boolean>;
   unlock: (method: 'password' | 'recovery' | 'device', secret?: string) => Promise<boolean>;
   lock: () => Promise<void>;
@@ -190,6 +218,58 @@ export function useVault(): VaultController {
     },
     [run],
   );
+
+  const registerAccount = useCallback(
+    async (email: string, password: string): Promise<boolean> => {
+      const value = await run(() => window.luxy.registerVaultAccount({ email, password }));
+      if (value === null) return false;
+      setStatus(value.status);
+      // se muestra una vez. Si el usuario no la copia, deja de existir.
+      setRecoveryKey(value.recoveryKey);
+      return true;
+    },
+    [run],
+  );
+
+  const loginAccount = useCallback(
+    async (
+      email: string,
+      secret: string,
+      method: 'password' | 'recovery' = 'password',
+    ): Promise<boolean> => {
+      const value = await run(() => window.luxy.loginVaultAccount({ email, method, secret }));
+      if (value === null) return false;
+      setStatus(value);
+      void reloadConversations();
+      return true;
+    },
+    [run, reloadConversations],
+  );
+
+  const linkAccount = useCallback(
+    async (email: string, password: string): Promise<boolean> => {
+      const value = await run(() => window.luxy.linkVaultAccount({ email, password }));
+      if (value === null) return false;
+      setStatus(value.status);
+      // la clave nueva se muestra una vez, igual que al crear la cuenta: la
+      // anterior ha dejado de valer y hay que decirlo con el papel delante
+      setRecoveryKey(value.recoveryKey);
+      return true;
+    },
+    [run],
+  );
+
+  const logoutAccount = useCallback(async (): Promise<void> => {
+    const value = await run(() => window.luxy.logoutVaultAccount());
+    if (value === null) return;
+    // salir cierra también la bóveda, y lo descifrado se descarta AQUÍ y no en
+    // el próximo refresco: hasta entonces seguiría en memoria del renderer
+    setStatus(value);
+    setConversations([]);
+    setTurns([]);
+    setMedia([]);
+    setOpenConversationId(null);
+  }, [run]);
 
   const unlock = useCallback(
     async (method: 'password' | 'recovery' | 'device', secret?: string): Promise<boolean> => {
@@ -428,6 +508,10 @@ export function useVault(): VaultController {
     error,
     hint,
     recoveryKey,
+    registerAccount,
+    loginAccount,
+    linkAccount,
+    logoutAccount,
     create,
     unlock,
     lock,
