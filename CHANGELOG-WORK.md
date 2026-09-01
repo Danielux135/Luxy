@@ -1,5 +1,51 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-09-01 16:30 — Claude — F9.14, conversaciones privadas de extremo a extremo
+
+- Estado anterior: `F9.13` cerrado y confirmado a mano.
+- Objetivo: unir la pantalla con el ejecutor. Escribes, el agente responde, y
+  la conversación se guarda cifrada.
+- Archivos creados: `apps/desktop/src/main/vault/conversation-store.ts` y su
+  prueba.
+- Archivos modificados: `apps/agent/src/runtime/host-entry.ts`,
+  `apps/desktop/src/main/agent-controller.ts`, `shared/channels.ts`,
+  `shared/ipc.ts`, `preload/index.ts`, `main/ipc/handlers.ts`, `main/index.ts`,
+  `renderer/useVault.ts`, `renderer/pages/Vault.tsx`, `renderer/App.tsx`,
+  `renderer/styles.css`.
+- **Decisión de privacidad del progreso**: sólo se reenvían eventos de tipo
+  `phase` y `warning`. `provider_output` lleva **texto del modelo**, y
+  reenviarlo como evento lo metería en un camino que puede acabar en un log. El
+  texto vuelve aparte, en la respuesta `local_turn`, que no pasa por eventos.
+  Precio: no hay respuesta en streaming en una conversación privada.
+- `pendingTurns` va aparte de `pending` en el controlador porque la respuesta de
+  un turno no es un `ack`: lleva el texto. Timeout propio de 30 minutos, porque
+  el de 30 segundos de las órdenes normales cortaría a media respuesta.
+- **Almacén local cifrado**: un archivo por conversación en `vault/conversations`,
+  formato JSON por líneas. Añadir un turno es escribir una línea al final, sin
+  releer ni reescribir una conversación de mil mensajes. Una línea corrupta se
+  salta y el resto se conserva; hay prueba que simula un corte a media escritura.
+- El nombre del archivo es el **uuid**, nunca el título: `%APPDATA%` no puede
+  revelar de qué hablas. Y el identificador se valida contra un uuid antes de
+  construir la ruta, así que `../fuera` no es un nombre aceptable.
+- Los registros que escribe son **exactamente** los que `F9.15` subirá al
+  gateway. No es trabajo que se tire después.
+- Al cerrarse la bóveda, el renderer descarta todo lo descifrado que tuviera en
+  memoria: lista, turnos y conversación abierta. No se oculta, deja de existir.
+- Comandos ejecutados:
+  - `npx vitest run apps/desktop/src/main/vault/conversation-store.test.ts` →
+    **14/14**.
+  - `npm run check` → **exit 0**; 106 archivos, 1.874 superadas, 9 omitidas.
+- Riesgos o límites:
+  - **Sin confirmación manual.** No se ha probado una conversación real.
+  - No hay streaming, por la decisión de privacidad de arriba.
+  - La actividad sigue contándose al usar la bóveda criptográficamente; ahora
+    leer una conversación **sí** cuenta, porque descifra. Queda resuelto de
+    hecho, aunque no por un cambio explícito.
+  - Sigue sin sincronizar: es almacenamiento local. Falta `F9.15` y `F9.16`.
+- Estado nuevo: `F9.14` **implemented**, pendiente de prueba manual.
+- Siguiente paso exacto: que Daniel pruebe una conversación privada real.
+  Después, `F9.17` (adaptador de Xavira) para llegar a la primera imagen.
+
 ### 2026-09-01 16:20 — Claude — F9.13 confirmado a mano y bloqueo automático configurable
 
 - **`F9.13` confirmado manualmente por Daniel.** Captura: sección Privado,

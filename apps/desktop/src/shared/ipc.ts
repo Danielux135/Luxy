@@ -204,6 +204,52 @@ export const vaultCreateResultSchema = z.object({
   recoveryKey: z.string(),
 });
 
+const conversationIdSchema = z.string().uuid();
+
+export const vaultConversationSendArgsSchema = z.object({
+  /** null para empezar una conversacion nueva */
+  conversationId: conversationIdSchema.nullable(),
+  /** texto en claro: el usuario lo acaba de escribir en la ventana */
+  message: z.string().min(1).max(200_000),
+  provider: z.string().min(1).max(64),
+  model: z.string().max(128).nullable(),
+  projectAlias: z.string().min(1).max(64),
+});
+
+export const vaultConversationIdArgsSchema = z.object({
+  conversationId: conversationIdSchema,
+});
+
+export const vaultConversationSummarySchema = z.object({
+  conversationId: z.string(),
+  title: z.string(),
+  turns: z.number().int().min(0),
+  updatedAt: z.string(),
+});
+
+export const vaultConversationListResultSchema = z.object({
+  conversations: z.array(vaultConversationSummarySchema),
+});
+
+export const vaultConversationTurnSchema = z.object({
+  sequence: z.number().int().min(0),
+  role: z.enum(['user', 'assistant']),
+  text: z.string(),
+  createdAt: z.string(),
+});
+
+export const vaultConversationReadResultSchema = z.object({
+  conversationId: z.string(),
+  turns: z.array(vaultConversationTurnSchema),
+});
+
+export const vaultConversationSendResultSchema = z.object({
+  conversationId: z.string(),
+  outcome: z.enum(['completed', 'failed', 'cancelled']),
+  turns: z.array(vaultConversationTurnSchema),
+  error: z.string().nullable(),
+});
+
 export const configSaveArgsSchema = z.object({
   /** se valida con storedAgentConfigSchema en el proceso principal */
   config: z.unknown(),
@@ -477,6 +523,16 @@ export interface LuxyBridge {
   ): Promise<IpcResult<z.infer<typeof vaultStatusSchema>>>;
   setVaultDeviceUnlock(enabled: boolean): Promise<IpcResult<z.infer<typeof vaultStatusSchema>>>;
   setVaultAutoLock(minutes: number): Promise<IpcResult<z.infer<typeof vaultStatusSchema>>>;
+  listVaultConversations(): Promise<
+    IpcResult<z.infer<typeof vaultConversationListResultSchema>>
+  >;
+  readVaultConversation(
+    conversationId: string,
+  ): Promise<IpcResult<z.infer<typeof vaultConversationReadResultSchema>>>;
+  sendVaultMessage(
+    args: z.infer<typeof vaultConversationSendArgsSchema>,
+  ): Promise<IpcResult<z.infer<typeof vaultConversationSendResultSchema>>>;
+  deleteVaultConversation(conversationId: string): Promise<IpcResult<{ deleted: boolean }>>;
   /** avisa de que la boveda se cerro sola. devuelve la funcion de baja */
   onVaultLocked(listener: () => void): () => void;
   /** devuelve la funcion de baja; sin ella se acumulan listeners al navegar */

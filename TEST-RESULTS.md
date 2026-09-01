@@ -1,5 +1,14 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-01 — Windows 11 (equipo `oscar`) — F9.14
+
+- `npx vitest run apps/desktop/src/main/vault/conversation-store.test.ts`:
+  **14/14**.
+- **`npm run check`: exit 0.** Suite: **106 archivos, 1.874 superadas, 9
+  omitidas, 0 fallos**.
+- **No confirmado manualmente**: no se ha ejecutado una conversación privada
+  real contra ningún proveedor.
+
 ### 2026-09-01 — Windows 11 (equipo `oscar`) — F9.13 confirmado + bloqueo configurable
 
 - **Confirmado manualmente por Daniel**: la pantalla Privado se ve y funciona.

@@ -31,6 +31,20 @@ const CLOSED: VaultStatusView = {
 /** cada cuanto se refresca la cuenta atras del bloqueo automatico */
 const TICK_MS = 5000;
 
+export interface PrivateTurn {
+  sequence: number;
+  role: 'user' | 'assistant';
+  text: string;
+  createdAt: string;
+}
+
+export interface PrivateConversation {
+  conversationId: string;
+  title: string;
+  turns: number;
+  updatedAt: string;
+}
+
 export interface VaultController {
   status: VaultStatusView;
   loading: boolean;
@@ -45,6 +59,18 @@ export interface VaultController {
   changePassword: (current: string, next: string) => Promise<boolean>;
   setDeviceUnlock: (enabled: boolean) => Promise<boolean>;
   setAutoLock: (minutes: number) => Promise<boolean>;
+  conversations: PrivateConversation[];
+  openConversationId: string | null;
+  turns: PrivateTurn[];
+  sending: boolean;
+  openConversation: (conversationId: string | null) => Promise<void>;
+  send: (input: {
+    message: string;
+    provider: string;
+    model: string | null;
+    projectAlias: string;
+  }) => Promise<boolean>;
+  removeConversation: (conversationId: string) => Promise<void>;
   acknowledgeRecoveryKey: () => void;
   clearError: () => void;
 }
@@ -56,13 +82,31 @@ export function useVault(): VaultController {
   const [error, setError] = useState<string | null>(null);
   const [hint, setHint] = useState<string | null>(null);
   const [recoveryKey, setRecoveryKey] = useState<string | null>(null);
+  const [conversations, setConversations] = useState<PrivateConversation[]>([]);
+  const [openConversationId, setOpenConversationId] = useState<string | null>(null);
+  const [turns, setTurns] = useState<PrivateTurn[]>([]);
+  const [sending, setSending] = useState(false);
   const mounted = useRef(true);
 
   const refresh = useCallback(async (): Promise<void> => {
     const result = await window.luxy.getVaultStatus();
     if (!mounted.current) return;
-    if (result.ok) setStatus(result.value);
+    if (result.ok) {
+      setStatus(result.value);
+      // al cerrarse la boveda se descarta TODO lo descifrado que hubiera en
+      // memoria del renderer. No se oculta: deja de existir aqui.
+      if (!result.value.unlocked) {
+        setConversations([]);
+        setTurns([]);
+        setOpenConversationId(null);
+      }
+    }
     setLoading(false);
+  }, []);
+
+  const reloadConversations = useCallback(async (): Promise<void> => {
+    const result = await window.luxy.listVaultConversations();
+    if (mounted.current && result.ok) setConversations(result.value.conversations);
   }, []);
 
   useEffect(() => {
@@ -122,9 +166,10 @@ export function useVault(): VaultController {
       );
       if (value === null) return false;
       setStatus(value);
+      void reloadConversations();
       return true;
     },
-    [run],
+    [run, reloadConversations],
   );
 
   const lock = useCallback(async (): Promise<void> => {
@@ -165,6 +210,62 @@ export function useVault(): VaultController {
     [run],
   );
 
+  const openConversation = useCallback(
+    async (conversationId: string | null): Promise<void> => {
+      setOpenConversationId(conversationId);
+      if (conversationId === null) {
+        setTurns([]);
+        return;
+      }
+      const result = await window.luxy.readVaultConversation(conversationId);
+      if (mounted.current && result.ok) setTurns(result.value.turns);
+    },
+    [],
+  );
+
+  const send = useCallback(
+    async (input: {
+      message: string;
+      provider: string;
+      model: string | null;
+      projectAlias: string;
+    }): Promise<boolean> => {
+      setSending(true);
+      setError(null);
+      try {
+        const result = await window.luxy.sendVaultMessage({
+          conversationId: openConversationId,
+          ...input,
+        });
+        if (!result.ok) {
+          setError(result.error);
+          setHint(result.hint);
+          return false;
+        }
+        setOpenConversationId(result.value.conversationId);
+        setTurns(result.value.turns);
+        if (result.value.error !== null) setError(result.value.error);
+        await reloadConversations();
+        return result.value.outcome === 'completed';
+      } finally {
+        if (mounted.current) setSending(false);
+      }
+    },
+    [openConversationId, reloadConversations],
+  );
+
+  const removeConversation = useCallback(
+    async (conversationId: string): Promise<void> => {
+      await window.luxy.deleteVaultConversation(conversationId);
+      if (openConversationId === conversationId) {
+        setOpenConversationId(null);
+        setTurns([]);
+      }
+      await reloadConversations();
+    },
+    [openConversationId, reloadConversations],
+  );
+
   return {
     status,
     loading,
@@ -178,6 +279,13 @@ export function useVault(): VaultController {
     changePassword,
     setDeviceUnlock,
     setAutoLock,
+    conversations,
+    openConversationId,
+    turns,
+    sending,
+    openConversation,
+    send,
+    removeConversation,
     acknowledgeRecoveryKey: () => setRecoveryKey(null),
     clearError: () => setError(null),
   };

@@ -12,6 +12,10 @@ import { ConfigStore, configFilePathFor } from './config-store.js';
 import { MACHINE_TOKEN_SECRET, SecretStore, createSafeStorageBackend } from './secure-storage.js';
 import { VaultService } from './vault/vault-service.js';
 import { vaultFilePathFor } from './vault/key-file.js';
+import {
+  PrivateConversationStore,
+  conversationsDirectory,
+} from './vault/conversation-store.js';
 import { VAULT_DEVICE_SECRET } from '../shared/channels.js';
 import { registerIpcHandlers, unregisterIpcHandlers } from './ipc/handlers.js';
 import { LuxyTray } from './tray.js';
@@ -33,6 +37,7 @@ let controller: AgentController | null = null;
 let configStore: ConfigStore | null = null;
 let secretStore: SecretStore | null = null;
 let vault: VaultService | null = null;
+let privateConversations: PrivateConversationStore | null = null;
 let autoLockTimer: NodeJS.Timeout | null = null;
 let captureHost: CaptureHost | null = null;
 const remoteSessions = new SessionHostSlot();
@@ -260,6 +265,8 @@ async function bootstrap(): Promise<void> {
     delete: () => store.delete(VAULT_DEVICE_SECRET),
   });
 
+  privateConversations = new PrivateConversationStore(conversationsDirectory(luxyConfigDir()));
+
   // el bloqueo automatico se comprueba por reloj, no con un temporizador que
   // se dispare una vez: asi una suspension larga del equipo aparece bloqueada
   // al volver, en vez de dejar la boveda abierta toda la noche.
@@ -287,6 +294,7 @@ async function bootstrap(): Promise<void> {
     configStore,
     secretStore,
     vault,
+    privateConversations,
     logsDirectory: logsDirectory(),
     artifactsDirectory: artifactsDirectory(),
     worktreesDirectory: worktreesDirectory(),

@@ -71,6 +71,13 @@ const bridge: LuxyBridge = {
     ipcRenderer.invoke(IPC_INVOKE.vaultDeviceUnlockSet, { enabled }),
   setVaultAutoLock: (minutes: number) =>
     ipcRenderer.invoke(IPC_INVOKE.vaultAutoLockSet, { minutes }),
+  listVaultConversations: () => ipcRenderer.invoke(IPC_INVOKE.vaultConversationList),
+  readVaultConversation: (conversationId: string) =>
+    ipcRenderer.invoke(IPC_INVOKE.vaultConversationRead, { conversationId }),
+  sendVaultMessage: (args: unknown) =>
+    ipcRenderer.invoke(IPC_INVOKE.vaultConversationSend, args),
+  deleteVaultConversation: (conversationId: string) =>
+    ipcRenderer.invoke(IPC_INVOKE.vaultConversationDelete, { conversationId }),
   onVaultLocked: (listener: () => void) => {
     const handler = (): void => listener();
     ipcRenderer.on(IPC_EVENT.vaultLocked, handler);

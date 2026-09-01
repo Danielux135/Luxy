@@ -22,6 +22,14 @@ const STOPPED_STATUS: AgentHostStatus = { runState: 'stopped', agent: null, last
 /** cuanto se espera una respuesta del agente antes de darla por perdida */
 const REQUEST_TIMEOUT_MS = 30_000;
 
+/**
+ * un turno de conversacion puede tardar minutos: el limite de 30 s de las
+ * ordenes normales lo cortaria a media respuesta. El agente ya tiene su propio
+ * timeout por trabajo; este solo evita esperar para siempre si el hijo muere
+ * sin avisar.
+ */
+const LOCAL_TURN_TIMEOUT_MS = 30 * 60_000;
+
 export interface AgentControllerOptions {
   /** ruta del host-entry.js compilado del agente */
   entryPath: string;
@@ -38,6 +46,13 @@ interface Pending {
 }
 
 type HostAck = Extract<HostResponse, { type: 'ack' }>;
+export type LocalTurnResponse = Extract<HostResponse, { type: 'local_turn' }>;
+
+interface PendingTurn {
+  resolve: (response: LocalTurnResponse) => void;
+  reject: (error: Error) => void;
+  timer: ReturnType<typeof setTimeout>;
+}
 
 export class AgentControllerError extends Error {
   constructor(
@@ -52,6 +67,13 @@ export class AgentControllerError extends Error {
 export class AgentController {
   private child: UtilityProcess | null = null;
   private readonly pending = new Map<string, Pending>();
+  /**
+   * turnos privados en vuelo.
+   *
+   * van aparte de `pending` porque su respuesta no es un ack: lleva el texto
+   * de la respuesta, que no puede viajar por el camino de las ordenes normales.
+   */
+  private readonly pendingTurns = new Map<string, PendingTurn>();
   private lastStatus: AgentHostStatus = STOPPED_STATUS;
   private config: AgentConfig | null = null;
   private providerKeys: Record<string, string> = {};
@@ -187,6 +209,14 @@ export class AgentController {
             else waiting.reject(new AgentControllerError(parsed.data.error ?? 'error desconocido'));
             break;
           }
+          case 'local_turn': {
+            const waiting = this.pendingTurns.get(parsed.data.requestId);
+            if (waiting === undefined) break;
+            this.pendingTurns.delete(parsed.data.requestId);
+            clearTimeout(waiting.timer);
+            waiting.resolve(parsed.data);
+            break;
+          }
           case 'event':
             if (parsed.data.event.type === 'status.updated') {
               this.lastStatus = parsed.data.event.status;
@@ -212,6 +242,12 @@ export class AgentController {
           waiting.reject(new AgentControllerError(cause, hintForFailure(this.stderrTail)));
         }
         this.pending.clear();
+        // un turno en vuelo tambien se queda sin nadie que lo responda
+        for (const [, waiting] of this.pendingTurns) {
+          clearTimeout(waiting.timer);
+          waiting.reject(new AgentControllerError(cause, hintForFailure(this.stderrTail)));
+        }
+        this.pendingTurns.clear();
 
         if (!settled) {
           settled = true;
@@ -308,6 +344,46 @@ export class AgentController {
     }
     const response = await this.request({ type: 'approval', requestId: randomUUID(), approval });
     return response.status ?? this.lastStatus;
+  }
+
+  /**
+   * ejecuta un turno privado en el agente.
+   *
+   * El prompt viaja por memoria entre dos procesos de Luxy y la respuesta
+   * vuelve por el mismo sitio. Nada de esto toca la red.
+   */
+  async runLocalTurn(input: {
+    localTurnId: string;
+    provider: string;
+    model: string | null;
+    projectAlias: string;
+    prompt: string;
+  }): Promise<LocalTurnResponse> {
+    const child = this.child;
+    if (child === null) {
+      throw new AgentControllerError('el proceso del agente no esta arrancado');
+    }
+    const requestId = randomUUID();
+
+    return new Promise<LocalTurnResponse>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pendingTurns.delete(requestId);
+        reject(new AgentControllerError('el agente no respondio a tiempo'));
+      }, LOCAL_TURN_TIMEOUT_MS);
+
+      this.pendingTurns.set(requestId, { resolve, reject, timer });
+      child.postMessage({ type: 'run_local_turn', requestId, ...input });
+    });
+  }
+
+  /** cancela un turno privado; conserva lo que el modelo ya habia escrito */
+  async cancelLocalTurn(localTurnId: string): Promise<boolean> {
+    const response = await this.request({
+      type: 'cancel_local_turn',
+      requestId: randomUUID(),
+      localTurnId,
+    });
+    return response.ok;
   }
 
   async prepareWorktree(

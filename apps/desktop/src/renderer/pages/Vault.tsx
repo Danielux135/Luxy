@@ -5,7 +5,8 @@
 // ultima conversacion fue el martes". No es que se oculte: es que el renderer
 // no lo tiene, porque el proceso principal no puede descifrarlo sin la llave.
 import { useState, type JSX } from 'react';
-import { Field, Notice, Panel, Readout, Skeleton, Tag } from '../ui/primitives.js';
+import { Empty, Field, Notice, Panel, Readout, Skeleton, Tag } from '../ui/primitives.js';
+import type { ConfigSummary } from '../useConfig.js';
 import {
   formatAutoLockOption,
   formatLockCountdown,
@@ -17,12 +18,160 @@ const AUTO_LOCK_CHOICES = [1, 5, 15, 30, 60, 240, 0] as const;
 
 const MIN_PASSWORD_LENGTH = 10;
 
-export function VaultPage({ vault }: { vault: VaultController }): JSX.Element {
+export function VaultPage({
+  vault,
+  summary,
+}: {
+  vault: VaultController;
+  summary: ConfigSummary;
+}): JSX.Element {
   if (vault.loading) return <Skeleton rows={4} />;
   if (vault.recoveryKey !== null) return <RecoveryKeyPanel vault={vault} />;
   if (!vault.status.configured) return <CreatePanel vault={vault} />;
+  // con la boveda cerrada no se muestra NADA de su contenido: ni la lista de
+  // conversaciones, ni cuantas hay. El renderer ni siquiera las tiene.
   if (!vault.status.unlocked) return <UnlockPanel vault={vault} />;
-  return <UnlockedPanel vault={vault} />;
+  return (
+    <>
+      <ConversationPanel vault={vault} summary={summary} />
+      <UnlockedPanel vault={vault} />
+    </>
+  );
+}
+
+// -----------------------------------------------------------------------------
+// conversaciones privadas
+// -----------------------------------------------------------------------------
+
+function ConversationPanel({
+  vault,
+  summary,
+}: {
+  vault: VaultController;
+  summary: ConfigSummary;
+}): JSX.Element {
+  const [message, setMessage] = useState('');
+  const projects = Object.keys(summary.config?.projects ?? {});
+  const [project, setProject] = useState(projects[0] ?? '');
+  const providers = ['claude', 'codex', ...(summary.config?.providers.http ?? []).map((p) => p.id)];
+  const [provider, setProvider] = useState(providers[0] ?? 'claude');
+
+  const canSend =
+    message.trim().length > 0 && project.length > 0 && provider.length > 0 && !vault.sending;
+
+  const submit = (): void => {
+    void vault.send({ message: message.trim(), provider, model: null, projectAlias: project }).then(
+      () => setMessage(''),
+    );
+  };
+
+  return (
+    <Panel
+      title="Conversación privada"
+      actions={
+        vault.openConversationId !== null && (
+          <button className="btn btn--quiet" onClick={() => void vault.openConversation(null)}>
+            Nueva
+          </button>
+        )
+      }
+    >
+      {vault.conversations.length > 0 && (
+        <div className="vault-list">
+          {vault.conversations.map((conversation) => (
+            <button
+              key={conversation.conversationId}
+              className="vault-list__item"
+              aria-current={
+                conversation.conversationId === vault.openConversationId ? 'true' : undefined
+              }
+              onClick={() => void vault.openConversation(conversation.conversationId)}
+            >
+              <span className="vault-list__title">{conversation.title}</span>
+              <span className="vault-list__meta">{conversation.turns} turnos</span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {vault.turns.length === 0 ? (
+        <Empty title="Nada todavía">
+          Escribe abajo para empezar. El mensaje se cifra en este equipo antes de
+          guardarse, y la respuesta la genera el proveedor que elijas: él sí ve
+          el texto que le envías.
+        </Empty>
+      ) : (
+        <div className="vault-thread">
+          {vault.turns.map((turn) => (
+            <div key={turn.sequence} className={`vault-turn vault-turn--${turn.role}`}>
+              <span className="vault-turn__who">
+                {turn.role === 'user' ? 'Tú' : 'Respuesta'}
+              </span>
+              <p className="vault-turn__text">{turn.text}</p>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {vault.error !== null && <Notice tone="fault">{vault.error}</Notice>}
+
+      {projects.length === 0 ? (
+        <Notice tone="warn">
+          No hay ningún proyecto configurado en esta máquina. Añade uno en
+          Proyectos: el turno se ejecuta dentro de uno, en solo lectura.
+        </Notice>
+      ) : (
+        <>
+          <div className="row">
+            <Field label="Proveedor">
+              <select value={provider} onChange={(event) => setProvider(event.target.value)}>
+                {providers.map((id) => (
+                  <option key={id} value={id}>
+                    {id}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Proyecto">
+              <select value={project} onChange={(event) => setProject(event.target.value)}>
+                {projects.map((alias) => (
+                  <option key={alias} value={alias}>
+                    {alias}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          </div>
+
+          <textarea
+            className="vault-composer"
+            rows={3}
+            value={message}
+            placeholder="Escribe tu mensaje…"
+            disabled={vault.sending}
+            onChange={(event) => setMessage(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' && (event.ctrlKey || event.metaKey) && canSend) submit();
+            }}
+          />
+          <div className="row">
+            <button className="btn btn--primary" disabled={!canSend} onClick={submit}>
+              {vault.sending ? 'Esperando respuesta…' : 'Enviar'}
+            </button>
+            {vault.openConversationId !== null && (
+              <button
+                className="btn btn--danger"
+                disabled={vault.sending}
+                onClick={() => void vault.removeConversation(vault.openConversationId!)}
+              >
+                Borrar conversación
+              </button>
+            )}
+          </div>
+        </>
+      )}
+    </Panel>
+  );
 }
 
 // -----------------------------------------------------------------------------

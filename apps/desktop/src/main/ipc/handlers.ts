@@ -46,6 +46,8 @@ import {
   stopAgentArgsSchema,
   vaultChangePasswordArgsSchema,
   vaultAutoLockSetArgsSchema,
+  vaultConversationIdArgsSchema,
+  vaultConversationSendArgsSchema,
   vaultDeviceUnlockSetArgsSchema,
   vaultPasswordArgsSchema,
   vaultUnlockArgsSchema,
@@ -59,6 +61,8 @@ import {
 } from '../config-store.js';
 import type { SecretStore } from '../secure-storage.js';
 import { VaultError, type VaultService } from '../vault/vault-service.js';
+import type { PrivateConversationStore } from '../vault/conversation-store.js';
+import { randomUUID } from 'node:crypto';
 import { MACHINE_TOKEN_SECRET, connectionSecretName } from '../../shared/ipc.js';
 import { deleteMigratedFile, inspectEnvFile, readEnvSecrets } from '../migration.js';
 import { readCatalogSnapshot, writeCatalogSnapshot } from '../catalog-store.js';
@@ -76,6 +80,8 @@ export interface HandlerContext {
    * material criptografico: lo unico que devuelven es `status()`.
    */
   vault: VaultService;
+  /** conversaciones privadas cifradas en disco */
+  privateConversations: PrivateConversationStore;
   /** raiz de los artefactos generados; se abre, nunca se sirve por HTTP */
   artifactsDirectory: string;
   /** raiz local a la que deben pertenecer los worktrees que se abran */
@@ -635,6 +641,88 @@ export function registerIpcHandlers(context: HandlerContext): void {
   handle(IPC_INVOKE.vaultAutoLockSet, vaultAutoLockSetArgsSchema, (args) => {
     context.vault.setAutoLockMinutes(args.minutes);
     return context.vault.status();
+  });
+
+  // ---------------------------------------------------------------------------
+  // conversaciones privadas
+  //
+  // Todas exigen la boveda abierta. No es una comprobacion de interfaz: sin la
+  // llave, el proceso principal literalmente no puede descifrar los archivos.
+  // ---------------------------------------------------------------------------
+
+  handle(IPC_INVOKE.vaultConversationList, emptyArgsSchema, async () => ({
+    conversations: await context.privateConversations.list(context.vault),
+  }));
+
+  handle(IPC_INVOKE.vaultConversationRead, vaultConversationIdArgsSchema, async (args) => ({
+    conversationId: args.conversationId,
+    turns: await context.privateConversations.read(context.vault, args.conversationId),
+  }));
+
+  handle(IPC_INVOKE.vaultConversationDelete, vaultConversationIdArgsSchema, (args) => {
+    context.privateConversations.delete(args.conversationId);
+    return { deleted: true };
+  });
+
+  handle(IPC_INVOKE.vaultConversationSend, vaultConversationSendArgsSchema, async (args) => {
+    if (!context.vault.isUnlocked()) {
+      throw new VaultError(
+        'la boveda esta bloqueada',
+        'abrela para poder escribir en una conversacion privada',
+      );
+    }
+    const conversationId = args.conversationId ?? randomUUID();
+    const store = context.privateConversations;
+
+    // el titulo sale del primer mensaje y viaja cifrado con cada turno
+    const existing = await store.read(context.vault, conversationId);
+    const title =
+      existing[0]?.title ??
+      args.message.slice(0, 60).replace(/\s+/g, ' ').trim();
+
+    await store.appendTurn(context.vault, conversationId, {
+      role: 'user',
+      text: args.message,
+      title,
+      provider: args.provider,
+      model: args.model,
+      inputTokens: null,
+      outputTokens: null,
+    });
+
+    // el prompt completo se arma con lo ya descifrado: el agente recibe el hilo
+    // entero, pero por memoria entre procesos, nunca por la red
+    const history = await store.read(context.vault, conversationId);
+    const prompt = history
+      .map((turn) => `${turn.role === 'user' ? 'Usuario' : 'Asistente'}: ${turn.text}`)
+      .join('\n\n');
+
+    const result = await context.controller.runLocalTurn({
+      localTurnId: randomUUID(),
+      provider: args.provider,
+      model: args.model,
+      projectAlias: args.projectAlias,
+      prompt,
+    });
+
+    if (result.outcome !== 'failed' && result.text.length > 0) {
+      await store.appendTurn(context.vault, conversationId, {
+        role: 'assistant',
+        text: result.text,
+        title,
+        provider: args.provider,
+        model: result.executedModel ?? args.model,
+        inputTokens: result.inputTokens,
+        outputTokens: result.outputTokens,
+      });
+    }
+
+    return {
+      conversationId,
+      outcome: result.outcome,
+      turns: await store.read(context.vault, conversationId),
+      error: result.error,
+    };
   });
 }
 

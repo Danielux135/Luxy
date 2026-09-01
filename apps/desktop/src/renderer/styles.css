@@ -1580,3 +1580,68 @@ input[aria-invalid='true'] {
   background: var(--sunk);
   word-break: break-all;
 }
+
+.vault-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+.vault-list__item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.vault-list__item[aria-current='true'] {
+  border-color: var(--accent);
+}
+
+.vault-list__title {
+  font-size: 13px;
+}
+
+.vault-list__meta {
+  font-size: 11px;
+  opacity: 0.6;
+}
+
+.vault-thread {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-bottom: 16px;
+  max-height: 46vh;
+  overflow-y: auto;
+}
+
+.vault-turn__who {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.6;
+}
+
+.vault-turn__text {
+  margin: 4px 0 0;
+  white-space: pre-wrap;
+  line-height: 1.55;
+}
+
+.vault-turn--user .vault-turn__text {
+  opacity: 0.85;
+}
+
+.vault-composer {
+  width: 100%;
+  resize: vertical;
+  margin-bottom: 10px;
+}

@@ -126,6 +126,51 @@ export function startHostEntry(port: ParentPort): void {
         ack(request.requestId, outcome.ok, outcome.ok ? null : outcome.message);
         break;
       }
+      case 'run_local_turn': {
+        // el progreso viaja como evento normal; el TEXTO vuelve aparte, en la
+        // respuesta local_turn, y nunca pasa por la cola ni por el gateway
+        const result = await host.runLocalTurn(
+          {
+            localTurnId: request.localTurnId,
+            provider: request.provider,
+            model: request.model,
+            projectAlias: request.projectAlias,
+            prompt: request.prompt,
+          },
+          (type, message) => {
+            // SOLO fases y avisos. `provider_output` lleva texto del modelo, y
+            // reenviarlo como evento lo metería en un camino que puede acabar
+            // en un log. El texto vuelve aparte, en la respuesta local_turn.
+            if (type !== 'phase' && type !== 'warning') return;
+            send({
+              type: 'event',
+              event: {
+                type: type === 'phase' ? 'job.phase' : 'job.warning',
+                at: new Date().toISOString(),
+                jobId: request.localTurnId,
+                shortId: `LOCAL-${request.localTurnId.slice(0, 8)}`,
+                message,
+              },
+            });
+          },
+        );
+        send({
+          type: 'local_turn',
+          requestId: request.requestId,
+          localTurnId: request.localTurnId,
+          outcome: result.outcome,
+          text: result.text,
+          error: result.error,
+          executedModel: result.executedModel,
+          durationMs: result.durationMs,
+          inputTokens: result.inputTokens,
+          outputTokens: result.outputTokens,
+        });
+        break;
+      }
+      case 'cancel_local_turn':
+        ack(request.requestId, host.cancelLocalTurn(request.localTurnId), null);
+        break;
       case 'shutdown':
         await host.stop('cierre de Luxy');
         ack(request.requestId, true, null);
