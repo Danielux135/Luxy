@@ -121,8 +121,31 @@ llamado `VAULT_DEVICE_KEY` para pisar la llave del equipo. Añadido
 **Pendiente de F9.3**: los canales IPC existen y están validados, pero **ninguna
 pantalla los usa todavía**. La bóveda no es visible ni usable desde Studio.
 
-Siguiente paso exacto: `F9.4` — cifrar en el cliente antes de subir, incluidas
-miniaturas, usando `subkeyFor` y `assertNoPlaintextLeak`.
+### F9.4 — done (Claude, 2026-09-01)
+
+`private-store.ts` es la frontera por la que sale todo lo privado: contenido en
+claro entra, registros que el gateway puede almacenar salen. `sealTurn` y
+`sealMedia` pasan por `assertNoPlaintextLeak()` como último paso, así que el
+guardián ya no es una regla escrita sino una que se ejecuta.
+
+Dentro del cifrado: texto, título, proveedor, modelo, tokens, `mimeType`,
+nombre, prompt, `characterId`, dimensiones y duración. Fuera, como metadato
+asumido: que existe un registro, de qué conversación, su orden, cuándo y cuánto
+ocupa.
+
+Sobre binario nuevo (`sealBlob`) para imágenes y vídeo: coste fijo de 29 bytes
+en vez del 33% que añadiría base64. Miniaturas cifradas con su propia subclave.
+Claves de objeto aleatorias, nunca derivadas del contenido ni del nombre.
+
+31 pruebas nuevas. `npm run check` exit 0: 103 archivos, 1.833 superadas.
+
+**Pendiente**: esto sella y abre, pero **todavía no sube nada**. No hay cliente
+de almacén de objetos, ni endpoints en el gateway, ni migración.
+
+Siguiente paso exacto: `F9.5` — `run_local_turn` en `host-protocol`, para que un
+turno privado se ejecute en la máquina local sin pasar por la cola de Supabase.
+Es el cambio estructural del bloque: hoy el agente sólo recibe trabajo por la
+cola.
 
 ---
 

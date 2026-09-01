@@ -1,5 +1,57 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-09-01 15:12 — Claude — F9.4, cifrado en el cliente
+
+- Estado anterior: `F9.3` cerrado y commiteado (`883e098`).
+- Objetivo: la frontera por la que sale todo lo privado. Contenido en claro
+  entra, registros que el gateway puede almacenar salen.
+- Archivos creados: `packages/vault-crypto/src/blob.ts` y `blob.test.ts`;
+  `packages/shared/src/vault-payloads.ts`;
+  `apps/desktop/src/main/vault/private-store.ts` y `private-store.test.ts`.
+- Archivos modificados: los dos `index.ts` de exportación.
+- **Sobre binario nuevo.** El sobre JSON usa base64, que infla un 33%. Da igual
+  en un mensaje; en un vídeo de 50 MB son 17 MB de más en disco, en la subida y
+  en la descarga. `sealBlob`/`openBlob` devuelven bytes crudos con cabecera de
+  13 bytes y etiqueta de 16: coste fijo de 29 bytes en vez de un porcentaje.
+  Verificado con 100 KB → 100.029 bytes.
+  El propósito **no** se guarda en el blob; lo aporta quien abre y va en los
+  datos autenticados, así que no hay campo que reetiquetar. Es más estrecho que
+  el sobre JSON, no menos.
+- **Qué va dentro del cifrado y qué fuera.** Dentro: texto, título, proveedor,
+  modelo, tokens, `mimeType`, nombre, prompt, `characterId`, dimensiones,
+  duración. Fuera, y asumido como metadato visible: que existe un registro, a
+  qué conversación pertenece, su orden, cuándo y cuánto ocupa.
+  Dejar el proveedor fuera habría revelado a qué API hablas y con qué
+  frecuencia; no hace falta cederlo.
+- **El guardián está conectado de verdad.** `sealTurn` y `sealMedia` pasan por
+  `assertNoPlaintextLeak()` como último paso antes de devolver nada. Da igual
+  cómo se construyera el objeto: si lleva un campo prohibido, no sale.
+- Subclaves separadas por objeto y por dominio: turno, memoria, medio y
+  miniatura tienen la suya. Abrir el historial de una conversación no da acceso
+  a su memoria, y la llave del vídeo no abre su miniatura. Hay pruebas de las
+  dos cosas.
+- La miniatura se cifra con el mismo cuidado que el original. Es el fallo
+  clásico: cifrar `video.mp4` con esmero y dejar un `preview.jpg` legible al
+  lado, que revela lo mismo con menos trabajo.
+- Las claves de objeto son 16 bytes aleatorios en hexadecimal, **no derivadas
+  del contenido ni del nombre**. Una derivada del contenido permitiría saber si
+  dos archivos son iguales mirando el almacén; una derivada del nombre lo
+  revelaría directamente. Prueba: el mismo contenido sellado dos veces produce
+  claves distintas.
+- Un fallo mío que encontró la suite: la expectativa de orden alfabético estaba
+  mal escrita (`content` va antes que `conversationId`). Corregida la prueba, no
+  el código.
+- Comandos ejecutados:
+  - `npx vitest run packages/vault-crypto/src/blob.test.ts` → **11/11**.
+  - `npx vitest run apps/desktop/src/main/vault/private-store.test.ts` → **20/20**.
+  - `npm run check` → **exit 0**; 103 archivos, 1.833 superadas, 9 omitidas.
+- Riesgos o límites: esto sella y abre, pero **todavía no sube nada**. No hay
+  cliente de almacén de objetos, ni endpoints en el gateway, ni migración. El
+  camino de salida existe y está probado; falta enchufarlo.
+- Estado nuevo: `F9.4` **done**.
+- Siguiente paso exacto: `F9.5`, `run_local_turn` en `host-protocol`, para que
+  un turno privado se ejecute local sin pasar por la cola de Supabase.
+
 ### 2026-09-01 15:05 — Claude — F9.3, VaultService y bloqueo
 
 - Estado anterior: `F9.2` cerrado y commiteado (`a6c535d`).

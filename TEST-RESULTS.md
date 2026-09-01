@@ -1,5 +1,14 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-01 — Windows 11 (equipo `oscar`) — F9.4
+
+- `npx vitest run packages/vault-crypto/src/blob.test.ts`: **11/11**.
+- `npx vitest run apps/desktop/src/main/vault/private-store.test.ts`: **20/20**.
+- **`npm run check`: exit 0.** Lint, typecheck y build correctos.
+  Suite: **103 archivos, 1.833 superadas, 9 omitidas, 0 fallos**, 47,80 s.
+- Medición del sobre binario: 100.000 bytes → **100.029** cifrados (13 de
+  cabecera + 16 de etiqueta), frente a los ~137.000 que costaría en base64.
+
 ### 2026-09-01 — Windows 11 (equipo `oscar`) — F9.3
 
 - `npx vitest run apps/desktop/src/main/vault`: **38/38**, 18,07 s.
