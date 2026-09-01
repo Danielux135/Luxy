@@ -1,5 +1,5 @@
 -- =============================================================================
--- Luxy - boveda privada
+-- Luxy - boveda privada con cuentas
 --
 -- Migracion acumulativa. NO modifica 0001-0006.
 -- El enum luxy_job_status NO se toca: un registro de boveda no es un trabajo y
@@ -11,35 +11,130 @@
 -- no existe ninguna columna donde quepa contenido en claro: no hay title, ni
 -- prompt, ni mime_type, ni output_url. No es que se prometa no guardarlos; es
 -- que no hay donde ponerlos.
+--
+-- Ver D-045 (varias personas con cuenta propia) y D-046 (la contraseña
+-- autentica y cifra por caminos separados).
 -- =============================================================================
 
 -- -----------------------------------------------------------------------------
--- de quien es un registro
+-- vault_users: una persona con su parte privada
 --
--- La unica identidad que existe hoy en Luxy es el token de maquina, y eso no
--- sirve para sincronizar: los registros de un portatil no serian visibles desde
--- el de sobremesa.
+-- Aqui esta la pieza que hace que esto funcione sin romper el cifrado.
 --
--- Por eso el propietario es el VAULT_ID: un identificador derivado de la llave
--- maestra con HKDF. Dos equipos que abren la misma boveda derivan el mismo
--- valor sin ponerse de acuerdo y sin que el servidor sepa nada de la llave,
--- porque HKDF no se invierte.
+-- El servidor guarda `auth_hash`: una SEGUNDA vuelta de Argon2id sobre la llave
+-- maestra, usando la contraseña como sal. Sirve para verificar quien eres y no
+-- sirve para nada mas. Recuperar la llave maestra desde ese hash exigiria
+-- invertir Argon2id.
 --
--- LIMITE IMPORTANTE, y esta escrito aqui para que no se olvide: el vault_id
--- AGRUPA, no AUTORIZA. Quien autoriza sigue siendo el token de maquina de 0001.
--- Una maquina con token valido podria pedir los registros de cualquier vault_id
--- que conozca; no podria descifrarlos, pero los tendria. Es aceptable mientras
--- valga D-001 (un solo usuario, sin multi-tenant). Si algun dia entra F9.10
--- (usuarios reales), esto tiene que revisarse ANTES de abrirlo a nadie mas.
+-- Y guarda `wrapped_master_key`: la llave maestra CIFRADA con la contraseña.
+-- El servidor la transporta y no puede abrirla. Es lo que permite entrar desde
+-- un equipo nuevo sabiendo solo la contraseña.
+--
+-- Consecuencia que se asume: el servidor NO puede restablecer una contraseña.
+-- Puede borrar una cuenta, nunca recuperar su contenido. La clave de
+-- recuperacion es la unica red de seguridad real.
 -- -----------------------------------------------------------------------------
+create table if not exists public.vault_users (
+  id                  uuid primary key default gen_random_uuid(),
+  -- siempre en minusculas: dos cuentas que solo difieran en mayusculas serian
+  -- la misma persona equivocandose, no dos personas
+  email               text not null,
+  -- sal de la PRIMERA derivacion, la que produce la llave maestra. El cliente
+  -- la necesita antes de poder iniciar sesion, asi que es publica por diseño.
+  auth_salt           text not null,
+  -- coste de Argon2id con el que se creo esta cuenta. Se guarda para que subir
+  -- el coste por defecto no deje fuera a quien se registro antes.
+  argon2_t            integer not null,
+  argon2_m            integer not null,
+  argon2_p            integer not null,
+  -- segunda vuelta de Argon2id. Es lo unico derivado de la contraseña que el
+  -- servidor llega a ver.
+  auth_hash           text not null,
+  -- llave maestra cifrada con la contraseña; el servidor no puede abrirla
+  wrapped_master_key  jsonb not null,
+  -- identificador de boveda que el cliente deriva por su cuenta. Se guarda para
+  -- que el cliente pueda comprobar, tras entrar, que el servidor le ha dado la
+  -- cuenta correcta y no otra.
+  vault_id            text not null,
+  disabled            boolean not null default false,
+  created_at          timestamptz not null default now(),
+  updated_at          timestamptz not null default now(),
+
+  constraint vault_users_email_lowercase check (email = lower(email)),
+  constraint vault_users_email_format check (email ~ '^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$'),
+  constraint vault_users_email_unique unique (email),
+  constraint vault_users_vault_id_format check (vault_id ~ '^[A-Za-z0-9_-]{43}$'),
+  constraint vault_users_vault_id_unique unique (vault_id),
+  constraint vault_users_auth_hash_format check (auth_hash ~ '^[A-Za-z0-9_-]{43}$'),
+  constraint vault_users_salt_format check (auth_salt ~ '^[A-Za-z0-9_-]{22}$'),
+  -- mismos limites que valida el cliente: un coste manipulado no puede pedir
+  -- memoria absurda ni rebajarse hasta volverse inutil
+  constraint vault_users_argon2_sane check (
+    argon2_t between 1 and 16
+    and argon2_m between 8192 and 2097152
+    and argon2_p between 1 and 4
+  )
+);
+
+drop trigger if exists vault_users_touch on public.vault_users;
+create trigger vault_users_touch
+  before update on public.vault_users
+  for each row execute function luxy_touch_updated_at();
+
+-- -----------------------------------------------------------------------------
+-- vault_sessions: sesiones iniciadas
+--
+-- Solo el HASH del token, nunca el token. Mismo criterio que machine_tokens en
+-- 0001: quien se lleve esta tabla no obtiene credenciales utilizables.
+-- -----------------------------------------------------------------------------
+create table if not exists public.vault_sessions (
+  id          uuid primary key default gen_random_uuid(),
+  user_id     uuid not null references public.vault_users (id) on delete cascade,
+  token_hash  text not null,
+  created_at  timestamptz not null default now(),
+  expires_at  timestamptz not null,
+  revoked_at  timestamptz,
+  -- para que la persona pueda ver desde donde hay sesiones abiertas
+  machine_id  uuid references public.machines (id) on delete set null,
+
+  constraint vault_sessions_token_hash_unique unique (token_hash)
+);
+
+create index if not exists vault_sessions_user_idx
+  on public.vault_sessions (user_id, expires_at desc);
+
+create index if not exists vault_sessions_live_idx
+  on public.vault_sessions (token_hash) where revoked_at is null;
+
+-- -----------------------------------------------------------------------------
+-- vault_conversations
+--
+-- NO tiene titulo: el titulo va cifrado dentro de cada turno. Aqui solo esta lo
+-- que el servidor necesita para responder "que hay" y "que ha cambiado".
+--
+-- El propietario es `owner_user_id`, no el vault_id. Esa es la correccion que
+-- exigio D-045: con varias personas, agrupar no basta, hay que autorizar.
+-- -----------------------------------------------------------------------------
+create table if not exists public.vault_conversations (
+  conversation_id uuid primary key,
+  owner_user_id   uuid not null references public.vault_users (id) on delete cascade,
+  turn_count      integer not null default 0,
+  updated_at      timestamptz not null default now(),
+  created_at      timestamptz not null default now(),
+
+  constraint vault_conversations_turns_positive check (turn_count >= 0)
+);
+
+create index if not exists vault_conversations_sync_idx
+  on public.vault_conversations (owner_user_id, updated_at desc);
 
 -- -----------------------------------------------------------------------------
 -- vault_records: los turnos de una conversacion privada, cifrados
 -- -----------------------------------------------------------------------------
 create table if not exists public.vault_records (
   record_id       uuid primary key,
-  vault_id        text not null,
-  conversation_id uuid not null,
+  owner_user_id   uuid not null references public.vault_users (id) on delete cascade,
+  conversation_id uuid not null references public.vault_conversations (conversation_id) on delete cascade,
   sequence        integer not null,
   -- sobre sellado {version, purpose, nonce, ciphertext}. El servidor valida su
   -- FORMA con Zod antes de aceptarlo, nunca su contenido.
@@ -48,32 +143,29 @@ create table if not exists public.vault_records (
   sealed_memory   jsonb,
   created_at      timestamptz not null default now(),
 
-  constraint vault_records_vault_id_format
-    check (vault_id ~ '^[A-Za-z0-9_-]{43}$'),
   constraint vault_records_sequence_positive check (sequence >= 0),
   -- mismo patron que job_events: reenviar un registro no lo duplica. Sin esto,
   -- un corte de red a mitad de una subida dejaria turnos repetidos.
   constraint vault_records_unique_sequence
-    unique (vault_id, conversation_id, sequence)
+    unique (conversation_id, sequence)
 );
 
 create index if not exists vault_records_conversation_idx
-  on public.vault_records (vault_id, conversation_id, sequence);
+  on public.vault_records (conversation_id, sequence);
 
--- para sincronizar solo lo nuevo desde la ultima vez
 create index if not exists vault_records_sync_idx
-  on public.vault_records (vault_id, created_at desc);
+  on public.vault_records (owner_user_id, created_at desc);
 
 -- -----------------------------------------------------------------------------
 -- vault_media: imagenes y videos privados
 --
--- los BYTES no viven aqui: van al almacen de objetos ya cifrados (F9.16). Esta
--- tabla solo dice donde estan y como abrirlos.
+-- los BYTES no viven aqui: van al almacen de objetos ya cifrados. Esta tabla
+-- solo dice donde estan y como abrirlos.
 -- -----------------------------------------------------------------------------
 create table if not exists public.vault_media (
   media_id              uuid primary key,
-  vault_id              text not null,
-  conversation_id       uuid not null,
+  owner_user_id         uuid not null references public.vault_users (id) on delete cascade,
+  conversation_id       uuid not null references public.vault_conversations (conversation_id) on delete cascade,
   -- clave opaca en el almacen: 32 hex, sin nombre ni extension. Una clave
   -- derivada del contenido dejaria saber si dos archivos son iguales; una
   -- derivada del nombre lo revelaria directamente.
@@ -84,76 +176,47 @@ create table if not exists public.vault_media (
   thumbnail_object_key  text,
   created_at            timestamptz not null default now(),
 
-  constraint vault_media_vault_id_format
-    check (vault_id ~ '^[A-Za-z0-9_-]{43}$'),
   constraint vault_media_object_key_opaque check (object_key ~ '^[0-9a-f]{32}$'),
   constraint vault_media_thumbnail_opaque
     check (thumbnail_object_key is null or thumbnail_object_key ~ '^[0-9a-f]{32}$'),
   constraint vault_media_size_positive check (byte_size > 0),
-  constraint vault_media_object_key_unique unique (vault_id, object_key)
+  -- unica por propietario y no globalmente: dos personas no deben poder
+  -- descubrir que comparten un archivo por un choque de claves
+  constraint vault_media_object_key_unique unique (owner_user_id, object_key)
 );
 
 create index if not exists vault_media_conversation_idx
-  on public.vault_media (vault_id, conversation_id, created_at desc);
-
--- -----------------------------------------------------------------------------
--- vault_conversations: lo minimo para listar sin descargar los turnos
---
--- NO tiene titulo: el titulo va cifrado dentro de cada turno. Aqui solo esta lo
--- que el servidor necesita de verdad para responder "que hay" y "que ha
--- cambiado", y eso ya se asume como metadato visible.
--- -----------------------------------------------------------------------------
-create table if not exists public.vault_conversations (
-  conversation_id uuid primary key,
-  vault_id        text not null,
-  turn_count      integer not null default 0,
-  updated_at      timestamptz not null default now(),
-  created_at      timestamptz not null default now(),
-
-  constraint vault_conversations_vault_id_format
-    check (vault_id ~ '^[A-Za-z0-9_-]{43}$'),
-  constraint vault_conversations_turns_positive check (turn_count >= 0)
-);
-
-create index if not exists vault_conversations_sync_idx
-  on public.vault_conversations (vault_id, updated_at desc);
-
--- borrar una conversacion se lleva sus turnos y sus medios: sin esto, borrarla
--- dejaria ciphertext huerfano ocupando espacio para siempre
-alter table public.vault_records
-  drop constraint if exists vault_records_conversation_fk;
-alter table public.vault_records
-  add constraint vault_records_conversation_fk
-  foreign key (conversation_id) references public.vault_conversations (conversation_id)
-  on delete cascade;
-
-alter table public.vault_media
-  drop constraint if exists vault_media_conversation_fk;
-alter table public.vault_media
-  add constraint vault_media_conversation_fk
-  foreign key (conversation_id) references public.vault_conversations (conversation_id)
-  on delete cascade;
+  on public.vault_media (conversation_id, created_at desc);
 
 -- -----------------------------------------------------------------------------
 -- seguridad: mismas reglas que el resto del esquema
 -- -----------------------------------------------------------------------------
+alter table public.vault_users         enable row level security;
+alter table public.vault_sessions      enable row level security;
 alter table public.vault_records       enable row level security;
 alter table public.vault_media         enable row level security;
 alter table public.vault_conversations enable row level security;
 
--- force: ni siquiera el propietario de la tabla se salta RLS. Estas tres
--- guardan lo mas sensible del sistema, asi que van como machine_tokens.
+-- force: ni siquiera el propietario de la tabla se salta RLS. Estas guardan lo
+-- mas sensible del sistema, asi que van como machine_tokens.
+alter table public.vault_users         force row level security;
+alter table public.vault_sessions      force row level security;
 alter table public.vault_records       force row level security;
 alter table public.vault_media         force row level security;
 alter table public.vault_conversations force row level security;
 
 -- no se crea NINGUNA politica: sin politicas y con RLS activo, nadie que no sea
--- service_role ve una sola fila. El acceso pasa siempre por el gateway.
+-- service_role ve una sola fila. El acceso pasa siempre por el gateway, que es
+-- quien comprueba a que usuario pertenece cada peticion.
+revoke all on public.vault_users         from anon, authenticated;
+revoke all on public.vault_sessions      from anon, authenticated;
 revoke all on public.vault_records       from anon, authenticated;
 revoke all on public.vault_media         from anon, authenticated;
 revoke all on public.vault_conversations from anon, authenticated;
 
 grant select, insert, update, delete on table
+  public.vault_users,
+  public.vault_sessions,
   public.vault_records,
   public.vault_media,
   public.vault_conversations
@@ -202,6 +265,34 @@ create trigger vault_records_touch
   after insert or delete on public.vault_records
   for each row execute function public.luxy_touch_vault_conversation();
 
+-- -----------------------------------------------------------------------------
+-- luxy_expire_vault_sessions: limpia sesiones caducadas
+--
+-- se llama desde el cron que ya existe para luxy_expire_leases. Una sesion
+-- caducada que sigue en la tabla no da acceso, pero acumular millones de filas
+-- muertas acaba costando.
+-- -----------------------------------------------------------------------------
+create or replace function public.luxy_expire_vault_sessions()
+returns integer
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_deleted integer;
+begin
+  delete from public.vault_sessions
+   where expires_at < now() - interval '7 days'
+      or (revoked_at is not null and revoked_at < now() - interval '7 days');
+  get diagnostics v_deleted = row_count;
+  return v_deleted;
+end;
+$$;
+
 revoke all on function public.luxy_touch_vault_conversation()
   from public, anon, authenticated;
+revoke all on function public.luxy_expire_vault_sessions()
+  from public, anon, authenticated;
+
 grant execute on function public.luxy_touch_vault_conversation() to service_role;
+grant execute on function public.luxy_expire_vault_sessions() to service_role;

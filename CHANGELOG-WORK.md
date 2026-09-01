@@ -1,5 +1,51 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-09-01 20:10 — Claude — 0007 rehecha con cuentas de usuario
+
+- Estado anterior: `D-045` y `D-046` registradas; `0007` marcada como «no
+  aplicar».
+- Reescrita `supabase/migrations/0007_luxy_vault.sql` **en el sitio**, no como
+  `0008`: no se ha ejecutado nunca contra un Postgres y `CLAUDE.md` sólo prohíbe
+  modificar una migración **ya aplicada**.
+- Tablas: `vault_users`, `vault_sessions`, `vault_conversations`,
+  `vault_records`, `vault_media`.
+- **El cambio de fondo**: la propiedad pasa de `vault_id` a
+  `owner_user_id uuid not null references vault_users`. Con varias personas,
+  agrupar no basta: hay que autorizar. Hay prueba que falla si alguna de las
+  tres tablas de contenido pierde esa columna.
+- `vault_users` guarda tres cosas y ninguna abre nada:
+  - `auth_hash`, la segunda vuelta de Argon2id. Sirve para verificar quién eres
+    y para nada más;
+  - `wrapped_master_key`, la llave maestra **cifrada**. El servidor la
+    transporta y no puede abrirla. Es lo que permite entrar desde un equipo
+    nuevo sabiendo sólo la contraseña;
+  - `auth_salt` y el coste de Argon2, que son públicos por diseño: el cliente
+    los necesita **antes** de poder iniciar sesión.
+- El coste de Argon2 se guarda **por cuenta**. Subir el coste por defecto no
+  puede dejar fuera a quien se registró antes.
+- `vault_id` sigue existiendo, pero sólo en `vault_users` y con otro propósito:
+  que el cliente compruebe, tras entrar, que el servidor le ha dado **su**
+  cuenta y no otra.
+- `vault_sessions` guarda sólo `token_hash`, nunca el token. Mismo criterio que
+  `machine_tokens` en 0001, y la prueba que ya lo exigía sigue pasando.
+- La clave de objeto de un medio es única **por propietario** y no globalmente:
+  dos personas no deben poder descubrir que comparten un archivo por un choque
+  de claves.
+- `luxy_expire_vault_sessions()` limpia sesiones caducadas. Una sesión caducada
+  que sigue en la tabla no da acceso, pero acumular filas muertas acaba costando.
+- Pruebas nuevas de invariantes: la bóveda **no guarda contraseñas** (sólo
+  hashes) y la llave maestra sólo aparece cifrada; la propiedad es por usuario.
+- `npm run check` → **exit 0**; 114 archivos, 1.974 superadas.
+- **Inconsistencia conocida y deliberada**: el cliente de sincronización y los
+  manejadores del gateway siguen hablando de `vaultId` como si autorizase.
+  Compilan y sus pruebas pasan porque el gateway de prueba es falso, pero
+  **contra el esquema nuevo no funcionarían**. Es el trabajo de `F9.10`:
+  registro, inicio de sesión, sesiones y autorización por usuario.
+  Como la migración no está aplicada, nada está roto en ejecución.
+- Siguiente paso exacto: `F9.10` — endpoints de registro e inicio de sesión en
+  el gateway, y que la sincronización se autorice por usuario en vez de por
+  `vaultId`. Sólo entonces se puede aplicar `0007`.
+
 ### 2026-09-01 20:05 — Claude — multiusuario decidido; 0007 NO se aplica
 
 - Daniel preguntó, antes de aplicar `0007`, si estaba contemplado que haya

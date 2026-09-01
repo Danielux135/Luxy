@@ -67,6 +67,8 @@ describe('migraciones - tablas exigidas', () => {
     'job_events',
     'approvals',
     'provider_usage',
+    'vault_users',
+    'vault_sessions',
     'vault_records',
     'vault_media',
     'vault_conversations',
@@ -108,6 +110,8 @@ describe('migraciones - seguridad', () => {
       'job_events',
       'approvals',
       'provider_usage',
+      'vault_users',
+      'vault_sessions',
       'vault_records',
       'vault_media',
       'vault_conversations',
@@ -150,7 +154,13 @@ describe('migraciones - seguridad', () => {
   });
 
   it('la boveda fuerza RLS, como los tokens de maquina', () => {
-    for (const tabla of ['vault_records', 'vault_media', 'vault_conversations']) {
+    for (const tabla of [
+      'vault_users',
+      'vault_sessions',
+      'vault_records',
+      'vault_media',
+      'vault_conversations',
+    ]) {
       expect(allSql, `falta force row level security en ${tabla}`).toMatch(
         new RegExp(`alter table public\\.${tabla}\\s+force row level security`, 'i'),
       );
@@ -164,6 +174,27 @@ describe('migraciones - seguridad', () => {
     // justo lo que hay que conservar.
     expect(vault!.sql).not.toMatch(/(alter|create|drop)\s+type[\s\S]{0,80}luxy_job_status/i);
     expect(vault!.sql).not.toMatch(/add\s+value[\s\S]{0,40}luxy_job_status/i);
+  });
+
+  it('la boveda no guarda contraseñas, solo hashes', () => {
+    const vault = migrations.find((m) => m.name.includes('vault'));
+    // si apareciera una columna de contraseña, el servidor podria derivar las
+    // llaves de cifrado y el extremo a extremo dejaria de existir (D-046)
+    expect(vault!.sql).not.toMatch(/^\s*password\s+(text|jsonb)/im);
+    expect(vault!.sql).not.toMatch(/^\s*master_key\s+(text|jsonb)/im);
+    // la llave maestra solo puede estar CIFRADA
+    expect(vault!.sql).toMatch(/wrapped_master_key\s+jsonb/i);
+  });
+
+  it('la propiedad de un registro privado es por usuario, no por boveda', () => {
+    const vault = migrations.find((m) => m.name.includes('vault'));
+    // D-045: con varias personas, agrupar no basta; hay que autorizar
+    for (const tabla of ['vault_records', 'vault_media', 'vault_conversations']) {
+      const bloque = vault!.sql.slice(vault!.sql.indexOf(`public.${tabla} (`));
+      expect(bloque.slice(0, 1200), `${tabla} sin owner_user_id`).toMatch(
+        /owner_user_id\s+uuid not null references public\.vault_users/i,
+      );
+    }
   });
 
   it('no contiene ningun secreto real', () => {
