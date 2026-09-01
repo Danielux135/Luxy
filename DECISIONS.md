@@ -713,3 +713,67 @@ visible aparte en `byteSize`, y ocultarlo es una decisión distinta y más cara.
 Lo que **no** se oculta y queda documentado: las marcas de tiempo van en claro,
 así que se ve el ritmo de uso y cuánto tardó el modelo. Redondearlas serviría de
 poco, porque la fecha del propio archivo lo revela igual.
+
+## D-045 — Luxy admite varias personas con cuenta propia
+
+Fecha: 2026-09-01
+
+Estado: aceptada — **matiza `D-001`**
+
+`D-001` decía «no SaaS, no multi-tenant». Daniel decide que Luxy debe admitir
+varias personas, cada una con su parte privada, usando la misma instalación e
+infraestructura. Lo demás de `D-001` sigue vigente: coste cero, sin facturación,
+sin publicación comercial, sin iOS.
+
+Lo que esto obliga a cambiar, y por qué no vale con lo que había:
+
+`F9.6` (migración `0007`) resolvía la propiedad de un registro con el
+`vault_id`, derivado de la llave maestra. En la propia migración quedó escrito
+que ese identificador **agrupa pero no autoriza**: quien autoriza es el token de
+máquina. Con una sola persona eso era aceptable. Con varias, la máquina de una
+podría descargar el ciphertext de otra — no podría leerlo, pero lo tendría.
+
+`0007` **no se aplica** hasta incorporar propiedad y autorización por usuario.
+Se corrige la migración en vez de parchearla con una `0008`, porque todavía no
+se ha ejecutado contra ningún Postgres y `CLAUDE.md` sólo prohíbe modificar una
+migración **ya aplicada**.
+
+`F9.10` y `F9.11` dejan de estar `blocked`.
+
+## D-046 — la contraseña autentica y cifra, pero por caminos separados
+
+Fecha: 2026-09-01
+
+Estado: aceptada, pendiente de implementación
+
+Daniel elige que baste la contraseña para abrir la bóveda en un equipo nuevo,
+en vez de exigir emparejamiento o clave de recuperación. Es el modelo de
+1Password y Bitwarden: la llave envuelta vive en el servidor y se abre en
+cualquier sitio con la contraseña.
+
+El peligro concreto de mezclarlo con el inicio de sesión: si la contraseña, o
+algo directamente derivado de ella, se envía al servidor para autenticar,
+entonces el servidor puede derivar la llave de cifrado. El cifrado extremo a
+extremo dejaría de existir sin que nada lo delatase.
+
+Por eso se derivan **dos valores distintos** de la misma contraseña:
+
+```
+contraseña ──Argon2id(salt)──► llave maestra
+                                 ├── HKDF ──────────────► llaves de cifrado
+                                 └── Argon2id(2ª vuelta) ► hash de acceso
+```
+
+Sólo el **hash de acceso** viaja. El servidor guarda ese hash y la llave
+envuelta, y puede verificar la identidad sin poder abrir nada. Recuperar la
+llave de cifrado desde el hash de acceso exigiría invertir Argon2id.
+
+Consecuencias que se asumen y se documentan:
+
+- una filtración de la base de datos entrega N llaves envueltas, una por
+  persona. **La contraseña más débil de la organización es el objetivo.** Por
+  eso el mínimo de longitud deja de ser una sugerencia y se valida en servidor;
+- el servidor no puede restablecer una contraseña. Puede borrar una cuenta,
+  nunca recuperar su contenido;
+- la clave de recuperación **sigue existiendo** y pasa a ser la única red de
+  seguridad real.

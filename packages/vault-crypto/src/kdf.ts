@@ -147,6 +147,46 @@ export function deriveSubkey(
 }
 
 /**
+ * hash de acceso: lo UNICO derivado de la contraseña que puede ver el servidor.
+ *
+ * El peligro que evita es concreto. Si para autenticarte enviases la contraseña
+ * —o la llave maestra, o algo derivado de ella con una funcion barata— el
+ * servidor podria derivar tus llaves de cifrado. El cifrado extremo a extremo
+ * dejaria de existir sin que nada lo delatase.
+ *
+ * Por eso se aplica una SEGUNDA vuelta de Argon2id sobre la llave maestra,
+ * usando la contraseña como sal. Recuperar la llave maestra a partir de este
+ * hash exigiria invertir Argon2id, que es justo lo que Argon2id no permite.
+ *
+ * Es el mismo esquema que usan los gestores de contraseñas conocidos, y por la
+ * misma razon: poder verificar quien eres sin poder abrir lo que guardas.
+ *
+ * Ver `D-046`.
+ */
+export async function deriveAuthHash(
+  masterKey: Uint8Array,
+  password: string,
+  params: Argon2Params = ARGON2_PARAMS,
+): Promise<string> {
+  if (masterKey.length !== KEY_BYTES) {
+    throw new VaultCryptoError(`la llave maestra debe tener ${KEY_BYTES} bytes`);
+  }
+  if (password.length === 0) throw new VaultCryptoError('la contraseña esta vacia');
+  assertArgon2Params(params);
+
+  // la contraseña hace de sal, invirtiendo los papeles de la primera vuelta:
+  // asi las dos derivaciones no pueden coincidir nunca por accidente
+  const hash = await argon2idAsync(masterKey, utf8(password), {
+    t: params.t,
+    m: params.m,
+    p: params.p,
+    dkLen: KEY_BYTES,
+    asyncTick: 10,
+  });
+  return toBase64Url(hash);
+}
+
+/**
  * identificador publico de la boveda.
  *
  * Existe por un problema concreto: la unica identidad de Luxy es el token de

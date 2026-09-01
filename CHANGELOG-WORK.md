@@ -1,5 +1,43 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-09-01 20:05 — Claude — multiusuario decidido; 0007 NO se aplica
+
+- Daniel preguntó, antes de aplicar `0007`, si estaba contemplado que haya
+  usuarios únicos. **Parcialmente**, y su respuesta cambió la recomendación.
+- Eligió **varias personas, cada una con su cuenta** y **acceso sólo con la
+  contraseña** desde un equipo nuevo.
+- **`0007` no se aplica.** Con una sola persona, el `vault_id` que agrupa pero
+  no autoriza era aceptable; con varias, la máquina de una podría descargar el
+  ciphertext de otra. No lo leería, pero lo tendría.
+- Se corregirá la migración **en vez de parchearla con una `0008`**: todavía no
+  se ha ejecutado contra ningún Postgres, y `CLAUDE.md` sólo prohíbe modificar
+  una migración **ya aplicada**. Que Daniel preguntara antes de aplicarla es lo
+  que permite arreglarlo bien.
+- Decisiones registradas:
+  - **`D-045`** — matiza `D-001`: Luxy admite varias personas con cuenta propia.
+    El resto de `D-001` sigue vigente. `F9.10` y `F9.11` dejan de estar
+    `blocked`.
+  - **`D-046`** — la contraseña autentica y cifra, pero por caminos separados.
+- Sobre el escrow en la nube: Daniel tiene razón en que es el modelo de
+  1Password y Bitwarden, y lo presenté como más exótico de lo que es. Los dos
+  matices que sí quedan escritos: «nadie accederá a la base de datos» es la
+  premisa que falla justo en el escenario contra el que se diseña, y que la base
+  sea local en el futuro no ayuda hoy, que está en Supabase. Con varias personas
+  se amplifica: **la contraseña más débil de la organización es el objetivo.**
+- **El punto crítico y lo implementado hoy**: si la contraseña, o algo derivado
+  de ella con una función barata, se envía al servidor para autenticar, el
+  servidor puede derivar las llaves de cifrado y el extremo a extremo desaparece
+  sin que nada lo delate.
+  `deriveAuthHash()` aplica una **segunda vuelta de Argon2id** sobre la llave
+  maestra usando la contraseña como sal. Se invierten los papeles respecto a la
+  primera derivación, así que las dos no pueden coincidir por accidente.
+- Pruebas nuevas (7), y la que más importa: el hash de acceso **no coincide** ni
+  con la llave maestra, ni con ninguna subclave, ni con el `vault_id`. Si
+  coincidiera, enviarlo al servidor le entregaría material de cifrado.
+- `npm run check` → **exit 0**; 114 archivos, 1.972 superadas.
+- Siguiente paso exacto: rehacer `0007` con `vault_users`, propiedad por usuario
+  y autorización real en el gateway; después ya se puede aplicar.
+
 ### 2026-09-01 20:05 — Claude — cliente de sincronización
 
 - Estado anterior: los endpoints de `F9.15` existían y nadie los llamaba.
