@@ -140,6 +140,52 @@ export const secretNameSchema = z
     'nombre de secreto no admitido',
   );
 
+/**
+ * argumentos de la boveda.
+ *
+ * las contraseñas SI viajan del renderer al main: es la unica direccion posible,
+ * porque el usuario las escribe en la ventana. Lo que jamas viaja de vuelta es
+ * material derivado de ellas. Por eso ninguna respuesta de este bloque contiene
+ * llaves, sales ni sobres, salvo la clave de recuperacion en el momento exacto
+ * de crear la boveda, que se muestra una vez y no se guarda.
+ */
+export const vaultPasswordArgsSchema = z.object({
+  password: z.string().min(1).max(512),
+});
+
+export const vaultUnlockArgsSchema = z.object({
+  method: z.enum(['password', 'recovery', 'device']),
+  /** ausente con 'device': ahi lo aporta el sistema operativo */
+  secret: z.string().min(1).max(512).optional(),
+});
+
+export const vaultChangePasswordArgsSchema = z.object({
+  currentPassword: z.string().min(1).max(512),
+  newPassword: z.string().min(1).max(512),
+});
+
+export const vaultDeviceUnlockSetArgsSchema = z.object({
+  enabled: z.boolean(),
+});
+
+export const vaultStatusSchema = z.object({
+  configured: z.boolean(),
+  unlocked: z.boolean(),
+  methods: z.object({ password: z.boolean(), recovery: z.boolean(), device: z.boolean() }),
+  autoLockMs: z.number().int().min(0),
+  lockingInMs: z.number().int().min(0).nullable(),
+});
+
+/** unica respuesta del bloque que lleva un secreto, y solo al crear */
+export const vaultCreateResultSchema = z.object({
+  status: vaultStatusSchema,
+  /**
+   * se muestra UNA vez y no se guarda en ningun sitio en claro. Si el usuario
+   * no la copia, deja de existir: es intencionado y la interfaz debe decirlo.
+   */
+  recoveryKey: z.string(),
+});
+
 export const configSaveArgsSchema = z.object({
   /** se valida con storedAgentConfigSchema en el proceso principal */
   config: z.unknown(),

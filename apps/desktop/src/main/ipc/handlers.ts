@@ -44,6 +44,10 @@ import {
   secretDeleteArgsSchema,
   secretSetArgsSchema,
   stopAgentArgsSchema,
+  vaultChangePasswordArgsSchema,
+  vaultDeviceUnlockSetArgsSchema,
+  vaultPasswordArgsSchema,
+  vaultUnlockArgsSchema,
   type IpcResult,
 } from '../../shared/ipc.js';
 import type { AgentController } from '../agent-controller.js';
@@ -53,6 +57,7 @@ import {
   type ConfigStore,
 } from '../config-store.js';
 import type { SecretStore } from '../secure-storage.js';
+import { VaultError, type VaultService } from '../vault/vault-service.js';
 import { MACHINE_TOKEN_SECRET, connectionSecretName } from '../../shared/ipc.js';
 import { deleteMigratedFile, inspectEnvFile, readEnvSecrets } from '../migration.js';
 import { readCatalogSnapshot, writeCatalogSnapshot } from '../catalog-store.js';
@@ -63,6 +68,13 @@ export interface HandlerContext {
   configStore: ConfigStore;
   secretStore: SecretStore;
   logsDirectory: string;
+  /**
+   * boveda privada.
+   *
+   * el contexto guarda el SERVICIO, no la llave. Ningun handler puede sacar
+   * material criptografico: lo unico que devuelven es `status()`.
+   */
+  vault: VaultService;
   /** raiz de los artefactos generados; se abre, nunca se sirve por HTTP */
   artifactsDirectory: string;
   /** raiz local a la que deben pertenecer los worktrees que se abran */
@@ -573,6 +585,50 @@ export function registerIpcHandlers(context: HandlerContext): void {
         error: redact(error instanceof Error ? error.message : String(error)),
       };
     }
+  });
+
+  // ---------------------------------------------------------------------------
+  // boveda privada
+  //
+  // ningun handler de este bloque devuelve una llave, una sal ni un sobre. La
+  // unica excepcion es la clave de recuperacion al crear, que se muestra una
+  // vez y no se guarda.
+  // ---------------------------------------------------------------------------
+
+  handle(IPC_INVOKE.vaultStatus, emptyArgsSchema, () => context.vault.status());
+
+  handle(IPC_INVOKE.vaultCreate, vaultPasswordArgsSchema, async (args) => {
+    const { recoveryKey } = await context.vault.create(args.password);
+    return { status: context.vault.status(), recoveryKey };
+  });
+
+  handle(IPC_INVOKE.vaultUnlock, vaultUnlockArgsSchema, async (args) => {
+    if (args.method === 'device') {
+      await context.vault.unlockWithDevice();
+    } else {
+      if (args.secret === undefined) {
+        throw new VaultError('falta la contraseña o la clave de recuperacion');
+      }
+      if (args.method === 'password') await context.vault.unlock(args.secret);
+      else await context.vault.unlockWithRecoveryKey(args.secret);
+    }
+    return context.vault.status();
+  });
+
+  handle(IPC_INVOKE.vaultLock, emptyArgsSchema, () => {
+    context.vault.lock();
+    return context.vault.status();
+  });
+
+  handle(IPC_INVOKE.vaultChangePassword, vaultChangePasswordArgsSchema, async (args) => {
+    await context.vault.changePassword(args.currentPassword, args.newPassword);
+    return context.vault.status();
+  });
+
+  handle(IPC_INVOKE.vaultDeviceUnlockSet, vaultDeviceUnlockSetArgsSchema, async (args) => {
+    if (args.enabled) await context.vault.enableDeviceUnlock();
+    else context.vault.disableDeviceUnlock();
+    return context.vault.status();
   });
 }
 

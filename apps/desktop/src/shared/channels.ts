@@ -43,11 +43,19 @@ export const IPC_INVOKE = {
   studioJobCancel: 'luxy:studio:job:cancel',
   studioJobFeedback: 'luxy:studio:job:feedback',
   studioJobAction: 'luxy:studio:job:action',
+  vaultStatus: 'luxy:vault:status',
+  vaultCreate: 'luxy:vault:create',
+  vaultUnlock: 'luxy:vault:unlock',
+  vaultLock: 'luxy:vault:lock',
+  vaultChangePassword: 'luxy:vault:change-password',
+  vaultDeviceUnlockSet: 'luxy:vault:device-unlock:set',
 } as const;
 
 /** canales de notificacion (main -> renderer) */
 export const IPC_EVENT = {
   agentEvent: 'luxy:agent:event',
+  /** la boveda se cerro sola por inactividad. viaja el hecho, nada mas */
+  vaultLocked: 'luxy:vault:locked',
 } as const;
 
 export type IpcInvokeChannel = (typeof IPC_INVOKE)[keyof typeof IPC_INVOKE];
@@ -78,6 +86,20 @@ export const CAPTURE_CHANNEL = {
  * maneja el NOMBRE, nunca el valor.
  */
 export const MACHINE_TOKEN_SECRET = 'machineToken';
+
+/**
+ * llave con la que el sistema operativo custodia la envoltura "recordar en
+ * este equipo" de la boveda.
+ *
+ * Es un secreto que solo escribe y lee el proceso principal. Esta en
+ * RESERVED_SECRET_NAMES para que nadie pueda apropiarselo declarando un
+ * proveedor HTTP con este mismo apiKeyEnv: sobrescribirlo no lo revelaria,
+ * pero dejaria la boveda sin poder abrirse con el desbloqueo rapido.
+ */
+export const VAULT_DEVICE_SECRET = 'VAULT_DEVICE_KEY';
+
+/** nombres que la interfaz no puede fijar ni reutilizar como apiKeyEnv */
+export const RESERVED_SECRET_NAMES: readonly string[] = [VAULT_DEVICE_SECRET];
 
 export function connectionSecretName(connectionId: string): string {
   return `connection:${connectionId}`;

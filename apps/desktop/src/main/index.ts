@@ -10,6 +10,9 @@ import { resolveStoredConfig } from '@luxy/shared';
 import { AgentController, resolveAgentEntry } from './agent-controller.js';
 import { ConfigStore, configFilePathFor } from './config-store.js';
 import { MACHINE_TOKEN_SECRET, SecretStore, createSafeStorageBackend } from './secure-storage.js';
+import { VaultService } from './vault/vault-service.js';
+import { vaultFilePathFor } from './vault/key-file.js';
+import { VAULT_DEVICE_SECRET } from '../shared/channels.js';
 import { registerIpcHandlers, unregisterIpcHandlers } from './ipc/handlers.js';
 import { LuxyTray } from './tray.js';
 import { applyContentSecurityPolicy, createMainWindow, revealWindow } from './windows.js';
@@ -29,6 +32,8 @@ let tray: LuxyTray | null = null;
 let controller: AgentController | null = null;
 let configStore: ConfigStore | null = null;
 let secretStore: SecretStore | null = null;
+let vault: VaultService | null = null;
+let autoLockTimer: NodeJS.Timeout | null = null;
 let captureHost: CaptureHost | null = null;
 const remoteSessions = new SessionHostSlot();
 /** distingue ocultar la ventana de salir de verdad */
@@ -205,6 +210,20 @@ function refreshTray(status: AgentHostStatus): void {
   tray?.update(status);
 }
 
+/** cada cuanto se comprueba la inactividad de la boveda */
+const VAULT_TICK_MS = 15_000;
+
+/**
+ * avisa al renderer de que la boveda se cerro sola.
+ *
+ * viaja el hecho, nunca el motivo detallado ni nada de su contenido: la
+ * interfaz solo necesita saber que debe volver a la pantalla de desbloqueo.
+ */
+function forwardVaultLock(): void {
+  if (mainWindow === null || mainWindow.isDestroyed()) return;
+  mainWindow.webContents.send(IPC_EVENT.vaultLocked);
+}
+
 async function bootstrap(): Promise<void> {
   // necesario en Windows para que las notificaciones se atribuyan a Luxy
   app.setAppUserModelId('com.luxy.desktop');
@@ -232,6 +251,25 @@ async function bootstrap(): Promise<void> {
     createSafeStorageBackend(safeStorage),
   );
 
+  // la boveda guarda su llave de equipo en el mismo almacen cifrado que el resto
+  // de secretos: en Windows eso es DPAPI, atado a esta cuenta.
+  const store = secretStore;
+  vault = new VaultService(vaultFilePathFor(luxyConfigDir()), {
+    get: () => store.get(VAULT_DEVICE_SECRET),
+    set: (value) => store.set(VAULT_DEVICE_SECRET, value),
+    delete: () => store.delete(VAULT_DEVICE_SECRET),
+  });
+
+  // el bloqueo automatico se comprueba por reloj, no con un temporizador que
+  // se dispare una vez: asi una suspension larga del equipo aparece bloqueada
+  // al volver, en vez de dejar la boveda abierta toda la noche.
+  autoLockTimer = setInterval(() => {
+    if (vault?.tickAutoLock() === true) {
+      log('boveda bloqueada por inactividad');
+      forwardVaultLock();
+    }
+  }, VAULT_TICK_MS);
+
   controller = new AgentController({
     entryPath: resolveAgentEntry({
       isPackaged: app.isPackaged,
@@ -248,6 +286,7 @@ async function bootstrap(): Promise<void> {
     controller,
     configStore,
     secretStore,
+    vault,
     logsDirectory: logsDirectory(),
     artifactsDirectory: artifactsDirectory(),
     worktreesDirectory: worktreesDirectory(),
@@ -314,6 +353,13 @@ function openMainWindow(): void {
 }
 
 async function quitCompletely(): Promise<void> {
+  if (autoLockTimer !== null) {
+    clearInterval(autoLockTimer);
+    autoLockTimer = null;
+  }
+  // al salir se cierra la boveda explicitamente: no se deja la llave viva en
+  // memoria esperando a que el proceso termine de morir
+  vault?.lock();
   if (quitting) return;
   quitting = true;
   try {

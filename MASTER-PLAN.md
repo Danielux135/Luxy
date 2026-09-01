@@ -285,7 +285,7 @@ interfaz: *workspace*, *privacy*, *vault*, *invitado en solo lectura*.
 | F9.0 | Línea base verde en el equipo de trabajo | done (`BUG-GIT-IDENTITY-001`) |
 | F9.1 | `packages/vault-crypto`: Argon2id, HKDF, sobre AES-256-GCM, envoltura X25519 | done |
 | F9.2 | Esquemas Zod del nivel de privacidad, sobres, invitaciones y permisos | done |
-| F9.3 | `VaultService` en el proceso principal: desbloqueo, bloqueo, auto-bloqueo | planned |
+| F9.3 | `VaultService` en el proceso principal: desbloqueo, bloqueo, auto-bloqueo | done |
 | F9.4 | Cifrado en cliente antes de subir, incluidas miniaturas | planned |
 | F9.5 | `run_local_turn` en `host-protocol`: el turno privado no pasa por la cola | planned |
 | F9.6 | Migración de columnas de ciphertext; el enum `luxy_job_status` no se toca | planned |

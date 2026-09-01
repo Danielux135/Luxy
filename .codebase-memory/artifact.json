@@ -1,11 +1,11 @@
 {
     "schema_version": 2,
-    "commit": "524a8da7b4f922d5199d0eea0c246555919ad77f",
-    "indexed_at": "2026-09-01T11:09:09Z",
+    "commit": "a6c535db6db20f2f9a8ad3c85d8b029b6f44ff7b",
+    "indexed_at": "2026-09-01T13:03:23Z",
     "project": "C-Users-oscar-Desktop-Daniel-Luxy",
-    "nodes": 4463,
-    "edges": 14586,
-    "original_size": 17760256,
-    "compressed_size": 3729749,
+    "nodes": 4535,
+    "edges": 14885,
+    "original_size": 18022400,
+    "compressed_size": 3800070,
     "compression_level": 3
 }

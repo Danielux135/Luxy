@@ -1,5 +1,56 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-09-01 15:05 — Claude — F9.3, VaultService y bloqueo
+
+- Estado anterior: `F9.2` cerrado y commiteado (`a6c535d`).
+- Objetivo: el servicio que custodia la llave maestra en el proceso principal.
+- Archivos creados: `apps/desktop/src/main/vault/key-file.ts`,
+  `vault-service.ts` y `vault-service.test.ts`.
+- Archivos modificados: `apps/desktop/src/shared/channels.ts` (canales y
+  `VAULT_DEVICE_SECRET`), `shared/ipc.ts` (contrato), `main/ipc/handlers.ts`
+  (handlers y contexto), `main/index.ts` (arranque y bloqueo automático),
+  `main/config-store.ts` (nombres reservados), `apps/desktop/package.json`.
+- Reglas que impone el servicio:
+  - la llave maestra **nunca se devuelve**. Lo único que sale es
+    `subkeyFor(dominio, contexto)`, una subclave derivada, y sólo dentro del
+    proceso principal;
+  - `status()` es lo único que cruza el IPC. Una prueba enumera sus claves y
+    verifica que no contiene contraseña, clave de recuperación, sales ni sobres;
+  - al bloquear, la llave se sobreescribe y toda derivación posterior falla.
+- Tres decisiones con motivo:
+  1. **El bloqueo automático se comprueba por reloj, no con un temporizador.**
+     Un `setTimeout` no se entera de que el equipo estuvo suspendido: al
+     despertar seguiría pendiente y la bóveda habría quedado abierta toda la
+     noche. Hay prueba que avanza el reloj nueve horas.
+  2. **Cambiar la contraseña exige la actual aunque la bóveda esté abierta.**
+     Tener la sesión abierta no demuestra conocer la contraseña, y quien se
+     siente delante de un equipo desatendido no debería poder cambiarla.
+  3. **Activar el desbloqueo rápido exige la bóveda abierta**: no se puede
+     conceder acceso permanente sin demostrar acceso primero.
+- Una brecha encontrada de paso y cerrada: `isSecretNameAllowedForConfig`
+  permitía al renderer fijar cualquier secreto cuyo nombre apareciese como
+  `apiKeyEnv` de un proveedor HTTP. Bastaba declarar uno llamado
+  `VAULT_DEVICE_KEY` para pisar la llave del equipo — no lo habría revelado,
+  pero habría dejado la bóveda sin desbloqueo rápido. Añadido
+  `RESERVED_SECRET_NAMES`.
+- Un problema de rendimiento que detectó la propia suite: con los parámetros
+  reales de Argon2 el archivo tardaba **252 s** y un caso llegó a 18,2 s con el
+  límite de vitest en 20, es decir, habría sido intermitente en un equipo más
+  lento. `argon2Params` pasa a ser inyectable con el valor real por defecto, y
+  una prueba comprueba que el valor por defecto **sigue siendo el real**, para
+  que acelerar la suite no acabe silenciosamente en producción. El archivo baja
+  a **18 s**.
+- Un detalle de tipos resuelto en la frontera, no con un cast: `vault-crypto`
+  usa `purpose: string` porque no le corresponde conocer el catálogo de Luxy, y
+  `shared` lo estrecha a una lista cerrada. `toKeyWrapRecord()` impone esa lista
+  **en ejecución**, así que un propósito inventado no llega a escribirse.
+- Comandos ejecutados:
+  - `npx vitest run apps/desktop/src/main/vault` → **38/38**, 18,07 s.
+  - `npm run check` → **exit 0**; 101 archivos, 1.802 superadas, 9 omitidas.
+- Estado nuevo: `F9.3` **done**. Falta la interfaz: los canales existen y están
+  validados, pero ninguna pantalla los usa todavía.
+- Siguiente paso exacto: `F9.4`, cifrar en el cliente antes de subir.
+
 ### 2026-09-01 13:10 — Claude — F9.2, contrato de la bóveda
 
 - Estado anterior: `F9.1` cerrado y commiteado (`524a8da`).

@@ -10,7 +10,11 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from '
 import { dirname, join } from 'node:path';
 import { storedAgentConfigSchema } from '@luxy/shared';
 import type { StoredAgentConfig } from '@luxy/shared';
-import { MACHINE_TOKEN_SECRET, connectionSecretName } from '../shared/channels.js';
+import {
+  MACHINE_TOKEN_SECRET,
+  RESERVED_SECRET_NAMES,
+  connectionSecretName,
+} from '../shared/channels.js';
 
 function canonicalEndpoint(value: string): string {
   const url = new URL(value);
@@ -68,6 +72,9 @@ export function isSecretNameAllowedForConfig(
   name: string,
   config: StoredAgentConfig | null,
 ): boolean {
+  // los secretos reservados los gestiona solo el proceso principal. Sin esto,
+  // bastaria declarar un proveedor http con ese apiKeyEnv para pisarlos.
+  if (RESERVED_SECRET_NAMES.includes(name)) return false;
   if (name === MACHINE_TOKEN_SECRET) return true;
   if (config === null) return false;
   if (config.connections.some((connection) => connectionSecretName(connection.id) === name)) {

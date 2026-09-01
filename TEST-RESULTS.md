@@ -1,5 +1,14 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-01 — Windows 11 (equipo `oscar`) — F9.3
+
+- `npx vitest run apps/desktop/src/main/vault`: **38/38**, 18,07 s.
+  Antes de hacer inyectable el coste de Argon2: 37 pruebas en **252,36 s**, con
+  un caso en 18.244 ms sobre un límite de 20.000 ms. Habría sido intermitente
+  en un equipo más lento.
+- **`npm run check`: exit 0.** Lint, typecheck y build correctos.
+  Suite: **101 archivos, 1.802 superadas, 9 omitidas, 0 fallos**, 58,42 s.
+
 ### 2026-09-01 — Windows 11 (equipo `oscar`) — F9.2
 
 - Rama `luxy/f9-1-vault-crypto`, sobre `524a8da`.

@@ -100,9 +100,29 @@ no necesita exponer ningún endpoint público: el agente pregunta y descarga
 directo, y el Gateway no ve el resultado. Sin esto, la premisa de `F9` no se
 sostendría para vídeo. Detalle en `CHANGELOG-WORK.md`.
 
-Siguiente paso exacto: `F9.3` — `VaultService` en el proceso principal de
-Electron. Desbloqueo, bloqueo, auto-bloqueo por inactividad, y la llave maestra
-sólo en memoria del main: nunca al renderer, nunca a disco sin envolver.
+### F9.3 — done (Claude, 2026-09-01)
+
+`VaultService` en el proceso principal. La llave maestra sólo vive en su
+memoria; lo único que sale es `subkeyFor(dominio, contexto)`, y sólo dentro del
+main. `status()` es lo único que cruza el IPC, y una prueba enumera sus claves
+para verificar que no lleva material criptográfico.
+
+El bloqueo automático se comprueba por reloj y no con un temporizador, porque un
+temporizador no se entera de que el equipo estuvo suspendido. Cambiar la
+contraseña exige la actual aunque la bóveda esté abierta.
+
+Cerrada de paso una brecha: el renderer podía fijar cualquier secreto cuyo
+nombre apareciese como `apiKeyEnv`, así que bastaba declarar un proveedor
+llamado `VAULT_DEVICE_KEY` para pisar la llave del equipo. Añadido
+`RESERVED_SECRET_NAMES`.
+
+38 pruebas. `npm run check` exit 0: 101 archivos, 1.802 superadas.
+
+**Pendiente de F9.3**: los canales IPC existen y están validados, pero **ninguna
+pantalla los usa todavía**. La bóveda no es visible ni usable desde Studio.
+
+Siguiente paso exacto: `F9.4` — cifrar en el cliente antes de subir, incluidas
+miniaturas, usando `subkeyFor` y `assertNoPlaintextLeak`.
 
 ---
 
