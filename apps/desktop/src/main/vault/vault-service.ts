@@ -30,6 +30,8 @@ import {
   type KeyDomain,
 } from '@luxy/vault-crypto';
 import {
+  AUTO_LOCK_MINUTES,
+  DEFAULT_AUTO_LOCK_MINUTES,
   createVaultKeyFile,
   findWrap,
   readVaultKeyFile,
@@ -37,6 +39,7 @@ import {
   upsertWrap,
   writeVaultKeyFile,
   VaultFileError,
+  type AutoLockMinutes,
   type VaultKeyFile,
 } from './key-file.js';
 
@@ -69,13 +72,13 @@ export interface VaultStatus {
   unlocked: boolean;
   /** que formas de abrirla hay configuradas */
   methods: { password: boolean; recovery: boolean; device: boolean };
-  autoLockMs: number;
-  /** milisegundos que quedan para el bloqueo automatico; null si esta bloqueada */
+  /** 0 significa que no se cierra sola */
+  autoLockMinutes: number;
+  /** milisegundos que quedan para el bloqueo automatico; null si no aplica */
   lockingInMs: number | null;
 }
 
 export interface VaultServiceOptions {
-  autoLockMs?: number;
   /** inyectable para probar el bloqueo automatico sin esperar de verdad */
   now?: () => number;
   /**
@@ -91,13 +94,9 @@ export interface VaultServiceOptions {
   argon2Params?: Argon2Params;
 }
 
-/** cinco minutos. Se paga en comodidad, no en seguridad del cifrado */
-export const DEFAULT_AUTO_LOCK_MS = 5 * 60 * 1000;
-
 export class VaultService {
   private masterKey: Uint8Array | null = null;
   private lastActivityAt = 0;
-  private readonly autoLockMs: number;
   private readonly now: () => number;
   private readonly argon2Params: Argon2Params;
 
@@ -106,7 +105,6 @@ export class VaultService {
     private readonly deviceKeys: DeviceKeyStore,
     options: VaultServiceOptions = {},
   ) {
-    this.autoLockMs = options.autoLockMs ?? DEFAULT_AUTO_LOCK_MS;
     this.now = options.now ?? (() => Date.now());
     this.argon2Params = options.argon2Params ?? ARGON2_PARAMS;
   }
@@ -137,15 +135,48 @@ export class VaultService {
         recovery: contents !== null && findWrap(contents, 'recovery') !== undefined,
         device: contents !== null && findWrap(contents, 'device') !== undefined,
       },
-      autoLockMs: this.autoLockMs,
-      lockingInMs: this.isUnlocked()
-        ? Math.max(0, this.lastActivityAt + this.autoLockMs - this.now())
-        : null,
+      autoLockMinutes: this.autoLockMinutes(contents),
+      lockingInMs: this.remainingLockMs(contents),
     };
   }
 
   isUnlocked(): boolean {
     return this.masterKey !== null;
+  }
+
+  /** minutos configurados; 0 significa que no se cierra sola */
+  private autoLockMinutes(contents: VaultKeyFile | null): number {
+    return contents?.settings.autoLockMinutes ?? DEFAULT_AUTO_LOCK_MINUTES;
+  }
+
+  private autoLockMs(contents: VaultKeyFile | null): number {
+    return this.autoLockMinutes(contents) * 60_000;
+  }
+
+  private remainingLockMs(contents: VaultKeyFile | null): number | null {
+    if (!this.isUnlocked()) return null;
+    const limit = this.autoLockMs(contents);
+    // sin bloqueo automatico no hay cuenta atras que mostrar
+    if (limit === 0) return null;
+    return Math.max(0, this.lastActivityAt + limit - this.now());
+  }
+
+  /**
+   * cambia el bloqueo automatico.
+   *
+   * exige la boveda abierta: si no, cualquiera que se siente delante podria
+   * desactivarlo y dejarla abierta indefinidamente para la proxima vez.
+   */
+  setAutoLockMinutes(minutes: AutoLockMinutes): void {
+    if (this.masterKey === null) {
+      throw new VaultError('abre la boveda antes de cambiar su bloqueo automatico');
+    }
+    if (!AUTO_LOCK_MINUTES.includes(minutes)) {
+      throw new VaultError('ese valor de bloqueo automatico no esta permitido');
+    }
+    const contents = this.requireContents();
+    writeVaultKeyFile(this.file, { ...contents, settings: { autoLockMinutes: minutes } });
+    this.touch();
   }
 
   // ---------------------------------------------------------------------------
@@ -304,7 +335,16 @@ export class VaultService {
    */
   tickAutoLock(): boolean {
     if (!this.isUnlocked()) return false;
-    if (this.now() - this.lastActivityAt < this.autoLockMs) return false;
+    let contents: VaultKeyFile | null = null;
+    try {
+      contents = this.contents();
+    } catch {
+      // si el archivo no se puede leer se aplica el valor por defecto: quedarse
+      // sin cerrar por un archivo dañado seria el peor fallo posible aqui
+    }
+    const limit = this.autoLockMs(contents);
+    if (limit === 0) return false;
+    if (this.now() - this.lastActivityAt < limit) return false;
     this.lock();
     return true;
   }

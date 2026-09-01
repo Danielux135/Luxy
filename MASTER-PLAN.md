@@ -295,7 +295,7 @@ interfaz: *workspace*, *privacy*, *vault*, *invitado en solo lectura*.
 | F9.10 | Identidad de usuario e invitación por correo | blocked |
 | F9.11 | Transportes del invitado: Studio, visor web, exportación | blocked |
 | F9.12 | `D-039`…, `docs/PRIVACY.md`, `SECURITY.md`, `threat-model.md` | planned |
-| F9.13 | Interfaz de la bóveda en Studio: crear, abrir, cerrar, clave de recuperación | implemented |
+| F9.13 | Interfaz de la bóveda en Studio: crear, abrir, cerrar, clave de recuperación | done |
 | F9.14 | El proceso principal envía `run_local_turn` y muestra el progreso | planned |
 | F9.15 | Endpoints del gateway para registros privados y permisos | planned |
 | F9.16 | Cliente de almacén de objetos para los blobs cifrados | planned |

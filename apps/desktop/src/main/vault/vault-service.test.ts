@@ -4,13 +4,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ARGON2_PARAMS, openText, sealText, toBase64Url } from '@luxy/vault-crypto';
 import {
-  DEFAULT_AUTO_LOCK_MS,
   MIN_PASSWORD_LENGTH,
   VaultError,
   VaultService,
   type DeviceKeyStore,
 } from './vault-service.js';
-import { readVaultKeyFile, vaultFilePathFor } from './key-file.js';
+import { DEFAULT_AUTO_LOCK_MINUTES, readVaultKeyFile, vaultFilePathFor } from './key-file.js';
 
 const PASSWORD = 'una frase larga de prueba';
 
@@ -48,8 +47,8 @@ describe('VaultService', () => {
    */
   const FAST = { t: 1, m: 8 * 1024, p: 1 } as const;
 
-  const service = (autoLockMs = DEFAULT_AUTO_LOCK_MS): VaultService =>
-    new VaultService(file, devices, { autoLockMs, now: () => clock, argon2Params: FAST });
+  const service = (): VaultService =>
+    new VaultService(file, devices, { now: () => clock, argon2Params: FAST });
 
   beforeEach(() => {
     directory = mkdtempSync(join(tmpdir(), 'luxy-vault-'));
@@ -199,8 +198,9 @@ describe('VaultService', () => {
 
   describe('bloqueo automatico', () => {
     it('se cierra sola tras el tiempo de inactividad', async () => {
-      const vault = service(60_000);
+      const vault = service();
       await vault.create(PASSWORD);
+      vault.setAutoLockMinutes(1);
 
       clock += 59_000;
       expect(vault.tickAutoLock()).toBe(false);
@@ -212,8 +212,9 @@ describe('VaultService', () => {
     });
 
     it('la actividad aplaza el cierre', async () => {
-      const vault = service(60_000);
+      const vault = service();
       await vault.create(PASSWORD);
+      vault.setAutoLockMinutes(1);
 
       clock += 50_000;
       vault.touch();
@@ -224,8 +225,9 @@ describe('VaultService', () => {
     });
 
     it('usar la boveda cuenta como actividad', async () => {
-      const vault = service(60_000);
+      const vault = service();
       await vault.create(PASSWORD);
+      vault.setAutoLockMinutes(1);
 
       clock += 50_000;
       vault.subkeyFor('media');
@@ -234,8 +236,9 @@ describe('VaultService', () => {
     });
 
     it('un equipo suspendido mucho tiempo aparece bloqueado al volver', async () => {
-      const vault = service(60_000);
+      const vault = service();
       await vault.create(PASSWORD);
+      vault.setAutoLockMinutes(1);
 
       // se comprueba por reloj, no con temporizador: una suspension larga no
       // puede dejar la boveda abierta toda la noche
@@ -245,12 +248,52 @@ describe('VaultService', () => {
     });
 
     it('sobre una boveda bloqueada no hace nada', () => {
-      expect(service(60_000).tickAutoLock()).toBe(false);
+      expect(service().tickAutoLock()).toBe(false);
+    });
+
+    it('con el valor 0 no se cierra nunca sola', async () => {
+      const vault = service();
+      await vault.create(PASSWORD);
+      vault.setAutoLockMinutes(0);
+
+      // una semana entera sin tocarla
+      clock += 7 * 24 * 60 * 60 * 1000;
+      expect(vault.tickAutoLock()).toBe(false);
+      expect(vault.isUnlocked()).toBe(true);
+      // y no se muestra cuenta atras, porque no la hay
+      expect(vault.status().lockingInMs).toBeNull();
+      expect(vault.status().autoLockMinutes).toBe(0);
+    });
+
+    it('el ajuste sobrevive a cerrar y volver a abrir', async () => {
+      const vault = service();
+      await vault.create(PASSWORD);
+      vault.setAutoLockMinutes(60);
+      vault.lock();
+
+      const otra = service();
+      await otra.unlock(PASSWORD);
+      expect(otra.status().autoLockMinutes).toBe(60);
+    });
+
+    it('no se puede cambiar con la boveda cerrada', async () => {
+      const vault = service();
+      await vault.create(PASSWORD);
+      vault.lock();
+      // si no, cualquiera que se siente delante lo desactivaria para la proxima
+      expect(() => vault.setAutoLockMinutes(0)).toThrow('abre la boveda antes');
+    });
+
+    it('una boveda nueva usa el valor por defecto', async () => {
+      const vault = service();
+      await vault.create(PASSWORD);
+      expect(vault.status().autoLockMinutes).toBe(DEFAULT_AUTO_LOCK_MINUTES);
     });
 
     it('el estado informa de cuanto queda', async () => {
-      const vault = service(60_000);
+      const vault = service();
       await vault.create(PASSWORD);
+      vault.setAutoLockMinutes(1);
       clock += 20_000;
       expect(vault.status().lockingInMs).toBe(40_000);
 
@@ -436,7 +479,7 @@ describe('VaultService', () => {
       expect(serialized).not.toContain('ciphertext');
       expect(serialized).not.toContain('salt');
       expect(Object.keys(vault.status()).sort()).toEqual([
-        'autoLockMs',
+        'autoLockMinutes',
         'configured',
         'lockingInMs',
         'methods',

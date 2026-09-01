@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { formatLockCountdown } from './useVault.js';
+import { formatAutoLockOption, formatLockCountdown } from './useVault.js';
 import {
   vaultChangePasswordArgsSchema,
   vaultCreateResultSchema,
@@ -23,13 +23,24 @@ describe('cuenta atras del bloqueo', () => {
   });
 });
 
+describe('etiquetas del bloqueo automatico', () => {
+  it('minutos, horas y desactivado', () => {
+    expect(formatAutoLockOption(1)).toBe('1 minutos de inactividad');
+    expect(formatAutoLockOption(30)).toBe('30 minutos de inactividad');
+    expect(formatAutoLockOption(60)).toBe('1 hora de inactividad');
+    expect(formatAutoLockOption(240)).toBe('4 horas de inactividad');
+    // el 0 no se muestra como "0 minutos", que seria justo lo contrario
+    expect(formatAutoLockOption(0)).toBe('No cerrarla sola');
+  });
+});
+
 describe('contrato IPC de la boveda', () => {
   it('el estado no admite material criptografico', () => {
     const parsed = vaultStatusSchema.parse({
       configured: true,
       unlocked: true,
       methods: { password: true, recovery: true, device: false },
-      autoLockMs: 300_000,
+      autoLockMinutes: 5,
       lockingInMs: 120_000,
       // lo que alguien pudiera intentar colar de vuelta al renderer
       masterKey: 'AAAA',
@@ -39,7 +50,7 @@ describe('contrato IPC de la boveda', () => {
     expect(serialized).not.toContain('AAAA');
     expect(serialized).not.toContain('BBBB');
     expect(Object.keys(parsed).sort()).toEqual([
-      'autoLockMs',
+      'autoLockMinutes',
       'configured',
       'lockingInMs',
       'methods',
@@ -78,7 +89,7 @@ describe('contrato IPC de la boveda', () => {
         configured: true,
         unlocked: true,
         methods: { password: true, recovery: true, device: false },
-        autoLockMs: 300_000,
+        autoLockMinutes: 5,
         lockingInMs: 300_000,
       },
       recoveryKey: 'ABCD-EFGH-JKMN-PQRS-TVWX-YZ23-4567-89AB',

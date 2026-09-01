@@ -49,6 +49,7 @@ export const IPC_INVOKE = {
   vaultLock: 'luxy:vault:lock',
   vaultChangePassword: 'luxy:vault:change-password',
   vaultDeviceUnlockSet: 'luxy:vault:device-unlock:set',
+  vaultAutoLockSet: 'luxy:vault:auto-lock:set',
 } as const;
 
 /** canales de notificacion (main -> renderer) */

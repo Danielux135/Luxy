@@ -45,6 +45,7 @@ import {
   secretSetArgsSchema,
   stopAgentArgsSchema,
   vaultChangePasswordArgsSchema,
+  vaultAutoLockSetArgsSchema,
   vaultDeviceUnlockSetArgsSchema,
   vaultPasswordArgsSchema,
   vaultUnlockArgsSchema,
@@ -628,6 +629,11 @@ export function registerIpcHandlers(context: HandlerContext): void {
   handle(IPC_INVOKE.vaultDeviceUnlockSet, vaultDeviceUnlockSetArgsSchema, async (args) => {
     if (args.enabled) await context.vault.enableDeviceUnlock();
     else context.vault.disableDeviceUnlock();
+    return context.vault.status();
+  });
+
+  handle(IPC_INVOKE.vaultAutoLockSet, vaultAutoLockSetArgsSchema, (args) => {
+    context.vault.setAutoLockMinutes(args.minutes);
     return context.vault.status();
   });
 }

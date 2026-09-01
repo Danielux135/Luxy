@@ -69,6 +69,8 @@ const bridge: LuxyBridge = {
     ipcRenderer.invoke(IPC_INVOKE.vaultChangePassword, args),
   setVaultDeviceUnlock: (enabled: boolean) =>
     ipcRenderer.invoke(IPC_INVOKE.vaultDeviceUnlockSet, { enabled }),
+  setVaultAutoLock: (minutes: number) =>
+    ipcRenderer.invoke(IPC_INVOKE.vaultAutoLockSet, { minutes }),
   onVaultLocked: (listener: () => void) => {
     const handler = (): void => listener();
     ipcRenderer.on(IPC_EVENT.vaultLocked, handler);

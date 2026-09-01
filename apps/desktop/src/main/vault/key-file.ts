@@ -12,6 +12,19 @@ import { z } from 'zod';
 
 const FORMAT_VERSION = 1;
 
+/**
+ * opciones de bloqueo automatico, en minutos. 0 = no cerrar sola.
+ *
+ * Es una lista cerrada y no un numero libre porque el valor viaja desde el
+ * renderer: un entero arbitrario permitiria pedir un cierre cada 50 ms y dejar
+ * la boveda inservible.
+ */
+export const AUTO_LOCK_MINUTES = [1, 5, 15, 30, 60, 240, 0] as const;
+export type AutoLockMinutes = (typeof AUTO_LOCK_MINUTES)[number];
+
+/** cinco minutos. Es un punto de partida, no una recomendacion */
+export const DEFAULT_AUTO_LOCK_MINUTES = 5;
+
 export class VaultFileError extends Error {
   constructor(
     message: string,
@@ -40,6 +53,27 @@ export const vaultKeyFileSchema = z.object({
       { message: 'hay dos envolturas del mismo metodo' },
     ),
   createdAt: z.string().datetime(),
+  /**
+   * ajustes de la boveda. No son secretos, por eso viven en el mismo archivo.
+   *
+   * opcional para que una boveda creada antes de existir este campo se siga
+   * abriendo: se le aplica el valor por defecto.
+   */
+  settings: z
+    .object({
+      autoLockMinutes: z
+        .union([
+          z.literal(1),
+          z.literal(5),
+          z.literal(15),
+          z.literal(30),
+          z.literal(60),
+          z.literal(240),
+          z.literal(0),
+        ])
+        .default(DEFAULT_AUTO_LOCK_MINUTES),
+    })
+    .default({ autoLockMinutes: DEFAULT_AUTO_LOCK_MINUTES }),
 });
 
 export type VaultKeyFile = z.infer<typeof vaultKeyFileSchema>;
@@ -127,5 +161,6 @@ export function createVaultKeyFile(wraps: unknown[]): VaultKeyFile {
     version: FORMAT_VERSION,
     wraps: wraps.map(toKeyWrapRecord),
     createdAt: new Date().toISOString(),
+    settings: { autoLockMinutes: DEFAULT_AUTO_LOCK_MINUTES },
   };
 }

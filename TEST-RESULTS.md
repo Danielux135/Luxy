@@ -1,5 +1,13 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-01 — Windows 11 (equipo `oscar`) — F9.13 confirmado + bloqueo configurable
+
+- **Confirmado manualmente por Daniel**: la pantalla Privado se ve y funciona.
+  Arrancado con `npm.cmd run desktop:dev` (en PowerShell `npm` a secas falla).
+- `npx vitest run apps/desktop/src/main/vault`: **62/62**.
+- **`npm run check`: exit 0.** Suite: **105 archivos, 1.860 superadas, 9
+  omitidas, 0 fallos**.
+
 ### 2026-09-01 — Windows 11 (equipo `oscar`) — F9.13
 
 - `npx vitest run apps/desktop/src/renderer/useVault.test.ts`: **10/10**.

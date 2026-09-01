@@ -168,11 +168,29 @@ export const vaultDeviceUnlockSetArgsSchema = z.object({
   enabled: z.boolean(),
 });
 
+/**
+ * minutos de inactividad antes del cierre automatico. 0 = no cerrar sola.
+ *
+ * lista cerrada y no un numero libre: el valor llega del renderer, y un entero
+ * arbitrario permitiria pedir un cierre cada 50 ms y dejar la boveda inservible.
+ */
+export const vaultAutoLockSetArgsSchema = z.object({
+  minutes: z.union([
+    z.literal(1),
+    z.literal(5),
+    z.literal(15),
+    z.literal(30),
+    z.literal(60),
+    z.literal(240),
+    z.literal(0),
+  ]),
+});
+
 export const vaultStatusSchema = z.object({
   configured: z.boolean(),
   unlocked: z.boolean(),
   methods: z.object({ password: z.boolean(), recovery: z.boolean(), device: z.boolean() }),
-  autoLockMs: z.number().int().min(0),
+  autoLockMinutes: z.number().int().min(0),
   lockingInMs: z.number().int().min(0).nullable(),
 });
 
@@ -458,6 +476,7 @@ export interface LuxyBridge {
     args: z.infer<typeof vaultChangePasswordArgsSchema>,
   ): Promise<IpcResult<z.infer<typeof vaultStatusSchema>>>;
   setVaultDeviceUnlock(enabled: boolean): Promise<IpcResult<z.infer<typeof vaultStatusSchema>>>;
+  setVaultAutoLock(minutes: number): Promise<IpcResult<z.infer<typeof vaultStatusSchema>>>;
   /** avisa de que la boveda se cerro sola. devuelve la funcion de baja */
   onVaultLocked(listener: () => void): () => void;
   /** devuelve la funcion de baja; sin ella se acumulan listeners al navegar */

@@ -6,7 +6,14 @@
 // no lo tiene, porque el proceso principal no puede descifrarlo sin la llave.
 import { useState, type JSX } from 'react';
 import { Field, Notice, Panel, Readout, Skeleton, Tag } from '../ui/primitives.js';
-import { formatLockCountdown, type VaultController } from '../useVault.js';
+import {
+  formatAutoLockOption,
+  formatLockCountdown,
+  type VaultController,
+} from '../useVault.js';
+
+/** debe coincidir con AUTO_LOCK_MINUTES del proceso principal */
+const AUTO_LOCK_CHOICES = [1, 5, 15, 30, 60, 240, 0] as const;
 
 const MIN_PASSWORD_LENGTH = 10;
 
@@ -239,7 +246,10 @@ function UnlockedPanel({ vault }: { vault: VaultController }): JSX.Element {
             { label: 'Estado', value: <Tag tone="ok">abierta</Tag> },
             {
               label: 'Bloqueo automático',
-              value: countdown ?? `${Math.round(vault.status.autoLockMs / 60_000)} min`,
+              value:
+                vault.status.autoLockMinutes === 0
+                  ? 'desactivado'
+                  : (countdown ?? formatAutoLockOption(vault.status.autoLockMinutes)),
             },
             {
               label: 'Desbloqueo rápido',
@@ -262,6 +272,31 @@ function UnlockedPanel({ vault }: { vault: VaultController }): JSX.Element {
       </Panel>
 
       <Panel title="Ajustes de la bóveda">
+        <Field
+          label="Cerrar la bóveda sola"
+          hint="Se cuenta desde la última vez que se usó la bóveda, no desde el último clic en la ventana."
+        >
+          <select
+            value={vault.status.autoLockMinutes}
+            disabled={vault.busy}
+            onChange={(event) => void vault.setAutoLock(Number(event.target.value))}
+          >
+            {AUTO_LOCK_CHOICES.map((minutes) => (
+              <option key={minutes} value={minutes}>
+                {formatAutoLockOption(minutes)}
+              </option>
+            ))}
+          </select>
+        </Field>
+
+        {vault.status.autoLockMinutes === 0 && !vault.status.methods.device && (
+          <Notice tone="warn">
+            La bóveda quedará abierta hasta que la cierres a mano o salgas de
+            Luxy. Cualquiera que use este ordenador mientras tanto verá su
+            contenido.
+          </Notice>
+        )}
+
         <label className="check">
           <input
             type="checkbox"
@@ -273,9 +308,19 @@ function UnlockedPanel({ vault }: { vault: VaultController }): JSX.Element {
         </label>
         <p className="field__hint">
           Guarda la llave protegida por tu cuenta de Windows, para abrir sin
-          escribir la contraseña. Protege frente a otra cuenta del equipo, no
-          frente a otro programa que corra con la tuya.
+          escribir la contraseña. Protege frente a otra cuenta del equipo y
+          frente a que alguien copie el archivo a otro ordenador. No protege
+          frente a otro programa que corra con tu usuario.
         </p>
+
+        {vault.status.methods.device && vault.status.autoLockMinutes !== 0 && (
+          <Notice tone="warn">
+            Con el desbloqueo rápido activado, cerrar la bóveda sola protege
+            menos: volver a abrirla es un clic, sin escribir nada. Si lo que
+            quieres es que nadie más pueda abrirla en este ordenador, desactiva
+            el desbloqueo rápido.
+          </Notice>
+        )}
 
         {changing ? (
           <ChangePasswordForm vault={vault} onDone={() => setChanging(false)} />

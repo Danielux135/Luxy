@@ -1,5 +1,49 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-09-01 16:20 — Claude — F9.13 confirmado a mano y bloqueo automático configurable
+
+- **`F9.13` confirmado manualmente por Daniel.** Captura: sección Privado,
+  bóveda abierta, estado, cuenta atrás y ajustes. Pasa de `implemented` a
+  `done`. Es la primera vez que este código se ejecuta de verdad.
+- Un fallo mío al indicarle cómo arrancar: le di `npm run desktop:dev` y
+  PowerShell lo rechazó por su política de ejecución. **Ya estaba documentado**
+  en `docs/ARRANQUE-ORDENADOR-NUEVO.md`, trampa nº 2: en PowerShell hay que usar
+  `npm.cmd`. `CLAUDE.md` manda leer ese archivo cuando el equipo es un clon
+  nuevo, y yo sabía que lo era. No hubo que cambiar nada del sistema.
+- Daniel preguntó dos cosas que destaparon un problema real:
+  1. Leyó «se cerrará sola en 2 min» como si el límite fuese 2 minutos. Era el
+     tiempo **restante** de 5. La interfaz no distinguía una cosa de otra.
+  2. Preguntó qué implica «Recordar en este equipo». Al explicarlo quedó claro
+     que ese ajuste y el bloqueo automático **se contradicen** y la pantalla no
+     lo decía.
+- Además, los 5 minutos eran una constante que elegí yo. No hay ninguna razón
+  para que lo decida quien escribe el código.
+- Cambios:
+  - `AUTO_LOCK_MINUTES` como **lista cerrada** (1, 5, 15, 30, 60, 240, 0). No es
+    un entero libre porque el valor llega del renderer: uno arbitrario dejaría
+    pedir un cierre cada 50 ms y volver la bóveda inservible.
+  - el ajuste vive en `vault.json`, en `settings`, y es **opcional** para que
+    una bóveda creada antes de que existiera el campo se siga abriendo.
+  - `setAutoLockMinutes()` exige la bóveda **abierta**: si no, cualquiera que se
+    siente delante podría desactivarlo y dejarla abierta para la próxima vez.
+  - `0` = no cerrarla sola, con aviso explícito en pantalla.
+  - aviso nuevo cuando el desbloqueo rápido está activo **y** hay cierre
+    automático: reabrir es un clic, así que el cierre protege mucho menos.
+  - el texto del desbloqueo rápido ahora dice también de qué **sí** protege:
+    otra cuenta de Windows y que alguien copie el archivo a otro ordenador.
+  - `status()` expone `autoLockMinutes` en vez de `autoLockMs`, para que la
+    interfaz no tenga que dividir ni redondear.
+- Límite que sigue abierto y conviene no perder de vista: la actividad se cuenta
+  al **usar la bóveda criptográficamente**, no al mover el ratón. Hoy no se nota
+  porque no hay nada que descifrar, pero con conversaciones reales leer una
+  larga sin escribir podría cerrarla a media lectura. Se resolverá en `F9.14`,
+  cuando exista actividad real que contar.
+- Comandos ejecutados:
+  - `npx vitest run apps/desktop/src/main/vault` → **62/62**.
+  - `npm run check` → **exit 0**; 105 archivos, 1.860 superadas, 9 omitidas.
+- Estado nuevo: `F9.13` **done, confirmado manualmente**.
+- Siguiente paso exacto: `F9.14`.
+
 ### 2026-09-01 15:50 — Claude — F9.13, interfaz de la bóveda
 
 - Estado anterior: `F9.5` cerrado; plan corregido con `F9.13`–`F9.17`.

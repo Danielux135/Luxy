@@ -15,7 +15,8 @@ export interface VaultStatusView {
   configured: boolean;
   unlocked: boolean;
   methods: { password: boolean; recovery: boolean; device: boolean };
-  autoLockMs: number;
+  /** 0 significa que no se cierra sola */
+  autoLockMinutes: number;
   lockingInMs: number | null;
 }
 
@@ -23,7 +24,7 @@ const CLOSED: VaultStatusView = {
   configured: false,
   unlocked: false,
   methods: { password: false, recovery: false, device: false },
-  autoLockMs: 0,
+  autoLockMinutes: 0,
   lockingInMs: null,
 };
 
@@ -43,6 +44,7 @@ export interface VaultController {
   lock: () => Promise<void>;
   changePassword: (current: string, next: string) => Promise<boolean>;
   setDeviceUnlock: (enabled: boolean) => Promise<boolean>;
+  setAutoLock: (minutes: number) => Promise<boolean>;
   acknowledgeRecoveryKey: () => void;
   clearError: () => void;
 }
@@ -153,6 +155,16 @@ export function useVault(): VaultController {
     [run],
   );
 
+  const setAutoLock = useCallback(
+    async (minutes: number): Promise<boolean> => {
+      const value = await run(() => window.luxy.setVaultAutoLock(minutes));
+      if (value === null) return false;
+      setStatus(value);
+      return true;
+    },
+    [run],
+  );
+
   return {
     status,
     loading,
@@ -165,9 +177,18 @@ export function useVault(): VaultController {
     lock,
     changePassword,
     setDeviceUnlock,
+    setAutoLock,
     acknowledgeRecoveryKey: () => setRecoveryKey(null),
     clearError: () => setError(null),
   };
+}
+
+/** etiqueta legible de cada opcion de bloqueo automatico */
+export function formatAutoLockOption(minutes: number): string {
+  if (minutes === 0) return 'No cerrarla sola';
+  if (minutes < 60) return `${minutes} minutos de inactividad`;
+  const hours = minutes / 60;
+  return hours === 1 ? '1 hora de inactividad' : `${hours} horas de inactividad`;
 }
 
 /** texto del tiempo restante antes del bloqueo automatico */
