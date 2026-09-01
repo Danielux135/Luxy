@@ -59,6 +59,7 @@ export const IPC_INVOKE = {
   vaultMediaRead: 'luxy:vault:media:read',
   vaultMediaGenerate: 'luxy:vault:media:generate',
   vaultCharacterCreate: 'luxy:vault:character:create',
+  vaultSync: 'luxy:vault:sync',
 } as const;
 
 /** canales de notificacion (main -> renderer) */

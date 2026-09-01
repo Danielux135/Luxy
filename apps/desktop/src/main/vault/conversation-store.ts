@@ -71,6 +71,42 @@ export class PrivateConversationStore {
     return records.sort((a, b) => a.sequence - b.sequence);
   }
 
+  /**
+   * registros tal y como estan en disco, sin descifrar.
+   *
+   * Es lo que se sube al servidor: ya viene cifrado y no hace falta abrirlo
+   * para transportarlo. La bóveda no interviene aqui.
+   */
+  rawRecords(conversationId: string): PrivateRecord[] {
+    return this.readRecords(conversationId);
+  }
+
+  /** identificadores de las conversaciones que existen en este equipo */
+  listConversationIds(): string[] {
+    if (!existsSync(this.directory)) return [];
+    return readdirSync(this.directory)
+      .filter((entry) => entry.endsWith('.jsonl'))
+      .map((entry) => entry.slice(0, -'.jsonl'.length))
+      .filter((id) => CONVERSATION_ID.test(id));
+  }
+
+  /**
+   * comprueba que un registro descargado se puede abrir con esta boveda.
+   *
+   * Se llama ANTES de guardarlo. Un registro de otra boveda o corrupto que
+   * entrase en el archivo local haria fallar cada lectura posterior sin que se
+   * supiera cual es el malo.
+   */
+  async verifyRecord(vault: VaultService, record: PrivateRecord): Promise<void> {
+    await openTurn(vault, record);
+  }
+
+  /** guarda un registro ya sellado que viene de otro equipo */
+  appendRaw(conversationId: string, record: PrivateRecord): void {
+    mkdirSync(this.directory, { recursive: true });
+    appendFileSync(fileFor(this.directory, conversationId), `${JSON.stringify(record)}\n`, 'utf8');
+  }
+
   /** añade un turno ya sellado. la boveda debe estar abierta */
   async appendTurn(
     vault: VaultService,

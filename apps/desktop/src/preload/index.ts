@@ -86,6 +86,7 @@ const bridge: LuxyBridge = {
   generateVaultMedia: (args: unknown) => ipcRenderer.invoke(IPC_INVOKE.vaultMediaGenerate, args),
   createVaultCharacter: (args: unknown) =>
     ipcRenderer.invoke(IPC_INVOKE.vaultCharacterCreate, args),
+  syncVault: () => ipcRenderer.invoke(IPC_INVOKE.vaultSync),
   onVaultLocked: (listener: () => void) => {
     const handler = (): void => listener();
     ipcRenderer.on(IPC_EVENT.vaultLocked, handler);

@@ -71,6 +71,7 @@ import type { SecretStore } from '../secure-storage.js';
 import { VaultError, type VaultService } from '../vault/vault-service.js';
 import type { PrivateConversationStore } from '../vault/conversation-store.js';
 import type { PrivateMediaStore } from '../vault/media-store.js';
+import { syncVault } from '../vault/sync.js';
 import { randomUUID } from 'node:crypto';
 import {
   MACHINE_TOKEN_SECRET,
@@ -783,6 +784,32 @@ export function registerIpcHandlers(context: HandlerContext): void {
     }
     return { baseUrl: 'https://api.xavira.ai', apiKey, signal };
   };
+
+  /**
+   * sincroniza la boveda con el gateway.
+   *
+   * Sube ciphertext y baja ciphertext. El identificador de boveda se deriva
+   * aqui, en el proceso principal: el renderer no lo ve, porque aunque no
+   * revele la llave sigue siendo un dato que agrupa todo lo tuyo.
+   */
+  handle(IPC_INVOKE.vaultSync, emptyArgsSchema, async () => {
+    if (!context.vault.isUnlocked()) throw new VaultError('la boveda esta bloqueada');
+    const stored = context.configStore.load();
+    if (stored === null) throw new VaultError('Luxy no esta configurado en esta maquina');
+
+    const machineToken = context.secretStore.get(MACHINE_TOKEN_SECRET) ?? stored.machineToken;
+    if (machineToken === undefined) {
+      throw new VaultError(
+        'falta el token de maquina',
+        'vuelve a registrar esta instalacion desde Ajustes',
+      );
+    }
+
+    return syncVault(context.vault, context.privateConversations, context.vault.vaultId(), {
+      gatewayUrl: stored.gatewayUrl,
+      machineToken,
+    });
+  });
 
   handle(IPC_INVOKE.vaultCharacterCreate, vaultCharacterCreateArgsSchema, async (args) => {
     if (!context.vault.isUnlocked()) throw new VaultError('la boveda esta bloqueada');

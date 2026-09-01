@@ -1,5 +1,43 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-09-01 20:05 — Claude — cliente de sincronización
+
+- Estado anterior: los endpoints de `F9.15` existían y nadie los llamaba.
+- Archivos creados: `apps/desktop/src/main/vault/sync.ts` y su prueba.
+- Archivos modificados: `conversation-store.ts` (`rawRecords`,
+  `listConversationIds`, `verifyRecord`, `appendRaw`), `vault-service.ts`
+  (`vaultId()`), canales, contrato, preload, handlers, hook y pantalla.
+- **No hay resolución de conflictos, y no hace falta.** Un turno es inmutable y
+  su identidad es (conversación, secuencia): dos equipos no pueden escribir
+  cosas distintas en la misma ranura. Lo peor posible es que dos generen el
+  turno 5 a la vez, y el servidor se queda con el primero por su clave única.
+- **Se sube antes de bajar.** Si el proceso se corta a medias, lo que se pierde
+  es trabajo ajeno que se volverá a bajar, no trabajo propio que sólo existía
+  aquí. Hay prueba que comprueba el orden de las llamadas.
+- **Un registro descargado se verifica antes de guardarse**: se comprueba que
+  esta bóveda puede abrirlo. Si entrase uno de otra bóveda o corrupto, cada
+  lectura posterior fallaría sin que se supiera cuál es el malo. Hay prueba que
+  crea una segunda bóveda de verdad y comprueba que su registro se descarta.
+- **La unión de listas local y remota**: sin eso, una conversación creada en el
+  otro equipo no se descargaría nunca porque aquí no existe. Con prueba.
+- El `vaultId` se deriva **en el proceso principal** y no cruza el IPC. Aunque
+  no revele la llave, sigue siendo el dato que agrupa todo lo tuyo.
+- Se sincroniza **por conversación** y no de golpe, para que un fallo a mitad
+  deje el resto sincronizado en vez de dejarlo todo a medias.
+- Comandos:
+  - `npx vitest run apps/desktop/src/main/vault/sync.test.ts` → **12/12**.
+  - `npm run check` → **exit 0**; 113 archivos, 1.965 superadas.
+- Riesgos o límites:
+  - **la migración 0007 no está aplicada**, así que sincronizar contra el
+    Supabase real fallará hasta que se aplique. `LOCAL-ACTIONS` debería
+    recogerlo cuando Daniel decida hacerlo.
+  - **los medios no se sincronizan**: sólo turnos. Los blobs siguen siendo
+    locales, porque el almacén remoto (`F9.16` remoto) no existe.
+  - sincronización **manual**, con un botón. No hay automática ni periódica.
+  - sin prueba contra un gateway real: el gateway de las pruebas es falso.
+- Siguiente paso exacto: aplicar `0007` y probar la sincronización real, o
+  `F9.12` (documentación de privacidad).
+
 ### 2026-09-01 19:50 — Claude — generación de imagen y vídeo conectada
 
 - Estado anterior: el adaptador `xavira.ts` existía con 22 pruebas pero nadie lo

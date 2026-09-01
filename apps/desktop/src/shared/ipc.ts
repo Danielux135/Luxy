@@ -320,6 +320,12 @@ export const vaultCharacterCreateResultSchema = z.object({
   characterId: z.string(),
 });
 
+export const vaultSyncResultSchema = z.object({
+  uploaded: z.number().int().min(0),
+  downloaded: z.number().int().min(0),
+  conversations: z.number().int().min(0),
+});
+
 export const configSaveArgsSchema = z.object({
   /** se valida con storedAgentConfigSchema en el proceso principal */
   config: z.unknown(),
@@ -618,6 +624,7 @@ export interface LuxyBridge {
   createVaultCharacter(
     args: z.infer<typeof vaultCharacterCreateArgsSchema>,
   ): Promise<IpcResult<z.infer<typeof vaultCharacterCreateResultSchema>>>;
+  syncVault(): Promise<IpcResult<z.infer<typeof vaultSyncResultSchema>>>;
   /** avisa de que la boveda se cerro sola. devuelve la funcion de baja */
   onVaultLocked(listener: () => void): () => void;
   /** devuelve la funcion de baja; sin ella se acumulan listeners al navegar */

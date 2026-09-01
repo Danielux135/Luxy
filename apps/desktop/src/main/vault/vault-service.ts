@@ -15,6 +15,7 @@ import {
   KEY_BYTES,
   VaultCryptoError,
   deriveSubkey,
+  deriveVaultId,
   generateMasterKey,
   generateRecoveryKey,
   isValidRecoveryKey,
@@ -360,6 +361,24 @@ export class VaultService {
    * puede llegar desde ella a otras subclaves ni a la maestra: HKDF no se
    * invierte. Y esto sigue siendo del proceso principal: no cruza el IPC.
    */
+  /**
+   * identificador publico de esta boveda.
+   *
+   * Es lo unico derivado de la llave maestra que SI puede salir del equipo: se
+   * obtiene con HKDF, que no se invierte, asi que el servidor puede agruparlo
+   * sin aprender nada de la llave. Ver `deriveVaultId`.
+   *
+   * Exige la boveda abierta, como todo lo demas: sin llave no hay identificador
+   * que derivar.
+   */
+  vaultId(): string {
+    if (this.masterKey === null) {
+      throw new VaultError('la boveda esta bloqueada');
+    }
+    this.touch();
+    return deriveVaultId(this.masterKey);
+  }
+
   subkeyFor(domain: KeyDomain, context = ''): Uint8Array {
     if (this.masterKey === null) {
       throw new VaultError(

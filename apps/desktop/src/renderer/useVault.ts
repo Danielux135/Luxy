@@ -93,6 +93,9 @@ export interface VaultController {
     kind: 'image' | 'video';
   }) => Promise<boolean>;
   createCharacter: (traits: Record<string, string>) => Promise<string | null>;
+  syncing: boolean;
+  lastSync: { uploaded: number; downloaded: number } | null;
+  sync: () => Promise<void>;
   acknowledgeRecoveryKey: () => void;
   clearError: () => void;
 }
@@ -112,6 +115,8 @@ export function useVault(): VaultController {
   const [attaching, setAttaching] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [lastCost, setLastCost] = useState<number | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  const [lastSync, setLastSync] = useState<{ uploaded: number; downloaded: number } | null>(null);
   const mounted = useRef(true);
 
   const refresh = useCallback(async (): Promise<void> => {
@@ -396,6 +401,26 @@ export function useVault(): VaultController {
     [],
   );
 
+  const sync = useCallback(async (): Promise<void> => {
+    setSyncing(true);
+    setError(null);
+    setHint(null);
+    try {
+      const result = await window.luxy.syncVault();
+      if (!result.ok) {
+        setError(result.error);
+        setHint(result.hint);
+        return;
+      }
+      setLastSync({ uploaded: result.value.uploaded, downloaded: result.value.downloaded });
+      // lo descargado puede incluir conversaciones que aqui no existian
+      await reloadConversations();
+      if (openConversationId !== null) await openConversation(openConversationId);
+    } finally {
+      if (mounted.current) setSyncing(false);
+    }
+  }, [reloadConversations, openConversation, openConversationId]);
+
   return {
     status,
     loading,
@@ -424,6 +449,9 @@ export function useVault(): VaultController {
     lastCost,
     generateMedia,
     createCharacter,
+    syncing,
+    lastSync,
+    sync,
     acknowledgeRecoveryKey: () => setRecoveryKey(null),
     clearError: () => setError(null),
   };

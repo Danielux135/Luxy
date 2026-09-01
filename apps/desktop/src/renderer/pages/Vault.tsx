@@ -589,9 +589,18 @@ function UnlockedPanel({ vault }: { vault: VaultController }): JSX.Element {
       <Panel
         title="Bóveda abierta"
         actions={
-          <button className="btn" disabled={vault.busy} onClick={() => void vault.lock()}>
-            Cerrar ahora
-          </button>
+          <>
+            <button
+              className="btn btn--quiet"
+              disabled={vault.syncing || vault.busy}
+              onClick={() => void vault.sync()}
+            >
+              {vault.syncing ? 'Sincronizando…' : 'Sincronizar'}
+            </button>
+            <button className="btn" disabled={vault.busy} onClick={() => void vault.lock()}>
+              Cerrar ahora
+            </button>
+          </>
         }
       >
         <Readout
@@ -617,6 +626,14 @@ function UnlockedPanel({ vault }: { vault: VaultController }): JSX.Element {
 
         {vault.hint !== null && <Notice tone="ok">{vault.hint}</Notice>}
         {vault.error !== null && <Notice tone="fault">{vault.error}</Notice>}
+
+        {vault.lastSync !== null && (
+          <p className="field__hint">
+            Última sincronización: {vault.lastSync.uploaded} subidos,{' '}
+            {vault.lastSync.downloaded} descargados. Lo que viaja va cifrado; el
+            servidor no puede leerlo.
+          </p>
+        )}
 
         <p className="vault-prose">
           Todavía no hay conversaciones privadas: falta conectar la bóveda con
