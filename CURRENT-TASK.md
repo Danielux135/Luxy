@@ -177,11 +177,70 @@ El camino hasta la primera imagen privada **no es el orden numérico**:
 `F9.13` → `F9.14` → `F9.17` da una imagen privada guardada sólo en local;
 `F9.6` → `F9.15` → `F9.16` añade la sincronización entre equipos.
 
-Siguiente paso exacto: decisión de Daniel entre dos órdenes válidos.
-`F9.6` (migración) sigue el orden numérico y deja la base lista para el
-transporte. `F9.13` (interfaz) llega antes a algo que se puede usar y ver.
-Recomendado: `F9.13`, porque cierra el hueco que motivó esta corrección y
-convierte cinco pasos ya hechos en algo comprobable a mano.
+Daniel eligió `F9.13`.
+
+### F9.13 — done, confirmado a mano (2026-09-01)
+
+Sección **Privado** en Studio: crear, abrir, cerrar y ajustar la bóveda. Con la
+bóveda cerrada no se muestra nada de su contenido, y el indicador de la barra
+es un punto y nunca un recuento, porque un número ya diría cuántas hay.
+Daniel lo vio funcionando.
+
+Después, a raíz de sus preguntas: el cierre automático pasa a ser configurable
+(1, 5, 15, 30, 60, 240 minutos o nunca) porque los 5 minutos eran una constante
+que elegí yo; y la pantalla avisa de que «recordar en este equipo» y «cerrar
+sola» se contradicen, cosa que antes callaba.
+
+### F9.14 — done, confirmado a mano (2026-09-01)
+
+Conversaciones privadas de extremo a extremo. Escribes, el agente responde sin
+pasar por la cola, y todo queda cifrado en `vault/conversations/<uuid>.jsonl`.
+
+Daniel pegó el archivo real: sin texto, sin título, sin proveedor, sin modelo, y
+los cuatro nonces distintos. **Pero al medirlo apareció una fuga**: AES-GCM no
+rellena, así que el tamaño del sobre revelaba el del mensaje y con eso se
+reconstruía la forma de la conversación. Añadido `padding.ts`: el texto se
+rellena a múltiplos de 256 bytes, con marca `LXP1` para que lo guardado antes
+se siga abriendo.
+
+Precio asumido y documentado: **no hay streaming** en una conversación privada.
+
+### F9.8 — done (2026-09-01)
+
+Era la condición dura antes de usar la bóveda con contenido real, y ya está
+levantada. La fuga grave: `devTools` no estaba configurado y su valor por
+defecto es `true`, así que con la bóveda abierta cualquiera podía pulsar
+Ctrl+Shift+I en la aplicación instalada y leer las conversaciones descifradas
+**sin la contraseña**. Además: volcados de fallo redirigidos y nunca enviados, y
+una prueba que fija que un turno privado no dispara notificaciones.
+
+### F9.17 — implemented, sin verificar contra la API real (2026-09-01)
+
+Adaptador de generación de imagen y vídeo. Usa **sondeo y no `callback_url`**,
+aunque la API lo ofrezca: un callback exigiría una URL pública y el contenido
+pasaría por el gateway. Hay prueba de que la petición nunca lo incluye.
+
+Una prueba encontró que `redact()` no tapaba la clave de API, porque llega por
+parámetro sin pasar por el registro de secretos: añadido `stripKey()`.
+
+**No se ha llamado a la API real ni una vez**, y el adaptador **no está
+cableado**: ninguna parte de Luxy lo llama. Por eso no está en `done`.
+
+### Estado real a 2026-09-01
+
+Hecho y confirmado a mano: `F9.0`–`F9.5`, `F9.8`, `F9.13`, `F9.14`.
+Hecho sin verificar contra el exterior: `F9.17`.
+Pendiente: `F9.6`, `F9.7`, `F9.9`, `F9.12`, `F9.15`, `F9.16`.
+Bloqueado por `D-001`: `F9.10`, `F9.11`.
+
+Lo que YA se puede usar: crear la bóveda, abrirla, cerrarla, conversar en
+privado y que se guarde cifrado en este equipo.
+Lo que NO: sincronizar entre equipos, y generar imágenes o vídeo.
+
+Siguiente paso exacto: `F9.15` — endpoints del gateway para registros privados.
+Es lo que convierte el almacén local de `F9.14` en sincronización real, y los
+registros que ya se escriben son exactamente los que hay que subir, así que no
+hay formato que rehacer. Requiere antes `F9.6`, la migración.
 
 ---
 

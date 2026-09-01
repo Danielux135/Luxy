@@ -1,5 +1,43 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-09-01 17:15 — Claude — sincronización documental atrasada
+
+- Motivo: Daniel preguntó si todo el plan seguía documentado. Al comprobarlo,
+  **no del todo**.
+- Estado encontrado:
+  - `MASTER-PLAN.md`: al día, las 18 filas correctas.
+  - `CHANGELOG-WORK.md` y `TEST-RESULTS.md`: al día, con entrada por cada paso.
+  - **`CURRENT-TASK.md`: se había quedado en `F9.5`.** Le faltaban `F9.13`,
+    `F9.14`, `F9.8`, `F9.17`, el bloqueo automático configurable y el relleno.
+    Su «siguiente paso exacto» decía «decisión de Daniel entre dos órdenes
+    válidos», cierto cinco pasos atrás.
+  - **`DECISIONS.md`: le faltaban tres decisiones** que sólo vivían en el
+    changelog.
+- Por qué importa: `CURRENT-TASK.md` es el archivo que lee otra IA para saber
+  dónde estamos. Si Codex cogiera el relevo ahora, creería que lo último cerrado
+  fue `F9.5` y que el siguiente paso es una decisión que Daniel ya tomó.
+- Causa: mantuve `CURRENT-TASK` al día en `F9.1`–`F9.5`, y al acelerar el ritmo
+  empecé a actualizar sólo `MASTER-PLAN`, `CHANGELOG` y `TEST-RESULTS`. El
+  archivo cuya función es la coordinación es justo el que se degrada cuando uno
+  va con la cabeza metida en el código.
+- Archivos modificados: `CURRENT-TASK.md` (estado real de los diez pasos y
+  siguiente paso exacto), `DECISIONS.md` (`D-042`, `D-043`, `D-044`).
+- Decisiones registradas, elegidas porque son las que alguien «arreglaría» sin
+  saber por qué estaban así:
+  - **`D-042`**: el contenido privado se pide sondeando, nunca por callback.
+    Si un proveedor exigiera callback, la respuesta no es enrutarlo por el
+    gateway: es no usar ese proveedor para contenido privado.
+  - **`D-043`**: una conversación privada no tiene streaming. El coste es
+    visible y se aceptó a cambio de que el registro de eventos no pueda ser una
+    copia de la conversación. Recuperarlo exige un canal aparte, no «activar»
+    `provider_output`.
+  - **`D-044`**: el contenido se rellena para que su tamaño no lo delate, con
+    los números medidos del archivo real de Daniel.
+- `npm run check` → **exit 0**; 109 archivos, 1.910 superadas, 9 omitidas.
+- Estado nuevo: documentación de continuidad sincronizada. Sin cambios de código.
+- Siguiente paso exacto: `F9.6` (migración) y luego `F9.15` (endpoints), que es
+  lo que convierte el almacén local en sincronización real.
+
 ### 2026-09-01 17:05 — Claude — F9.8, higiene de caminos laterales
 
 - Estado anterior: `F9.17` implementado. `F9.8` era el único paso marcado como

@@ -645,3 +645,71 @@ convencer a una versión futura de aplicar las reglas más débiles de la actual
 Los errores de descifrado **no distinguen** entre llave incorrecta, propósito
 equivocado y dato alterado. Distinguirlos daría información útil a quien pruebe
 llaves.
+
+## D-042 — el contenido privado se pide sondeando, nunca por callback
+
+Fecha: 2026-09-01
+
+Estado: aceptada, implementada en `apps/agent/src/providers/xavira.ts`
+
+El proveedor de imagen y vídeo ofrece `callback_url`: publica el resultado en
+una URL tuya en cuanto está listo. Es más eficiente que sondear y **no se usa**.
+
+Un callback exige una URL pública donde recibir el resultado, y la única que
+tiene Luxy es el Worker de Cloudflare. El contenido pasaría por el gateway, que
+es exactamente lo que la Fase 9 existe para impedir. Sondear cuesta unas
+peticiones de más y mantiene la premisa intacta.
+
+Es la misma razón por la que el agente sondea la cola en vez de exponer un
+puerto (`docs/decisions/0001`). Hay una prueba que verifica que la petición de
+vídeo **nunca** incluye `callback_url`: si alguien lo añade para optimizar, la
+suite lo dice.
+
+Si algún día un proveedor **exigiera** callback, la respuesta no es enrutarlo
+por el gateway: es no usar ese proveedor para contenido privado.
+
+## D-043 — una conversación privada no tiene respuesta en streaming
+
+Fecha: 2026-09-01
+
+Estado: aceptada, implementada
+
+En una conversación normal el progreso viaja como eventos del agente, incluido
+`provider_output`, que lleva el texto que el modelo va generando. Ese camino
+alimenta la interfaz y también puede acabar en un registro.
+
+En un turno privado sólo se reenvían eventos `phase` y `warning`. El texto
+vuelve aparte, en la respuesta `local_turn`, que no pasa por eventos.
+
+El coste es real y visible: **el texto aparece de golpe al terminar, no palabra
+a palabra**. Se aceptó a cambio de que el registro de eventos no pueda
+convertirse en una copia de la conversación.
+
+Recuperar el streaming es posible, pero exige un canal aparte que no toque el
+registro. No se hace "activando" `provider_output`.
+
+## D-044 — el contenido cifrado se rellena para que su tamaño no lo delate
+
+Fecha: 2026-09-01
+
+Estado: aceptada, implementada en `packages/vault-crypto/src/padding.ts`
+
+AES-GCM no rellena: el texto cifrado mide lo mismo que el original. Medido sobre
+un archivo real de dos intercambios: 204, 223, 200 y 306 bytes, es decir unos
+38, 57, 34 y 140 caracteres. Con eso se reconstruye la **forma** de una
+conversación —pregunta corta, respuesta larga, silencio— sin descifrar nada. En
+un historial de meses, esa forma dice bastante.
+
+El texto se rellena a múltiplos de 256 bytes antes de sellarse. El bloque
+esconde la diferencia entre un «hola» y un párrafo, que es donde más se nota, y
+el coste nunca supera un bloque por mensaje.
+
+Formato: `'LXP1' + longitud real + datos + ceros`. La marca permite distinguir
+contenido rellenado del anterior, así que lo guardado antes se sigue abriendo.
+
+Se rellena **sólo el texto**. El tamaño de un blob de imagen o vídeo ya es
+visible aparte en `byteSize`, y ocultarlo es una decisión distinta y más cara.
+
+Lo que **no** se oculta y queda documentado: las marcas de tiempo van en claro,
+así que se ve el ritmo de uso y cuánto tardó el modelo. Redondearlas serviría de
+poco, porque la fecha del propio archivo lo revela igual.
