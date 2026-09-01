@@ -1,5 +1,43 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-09-01 16:45 — Claude — F9.14 confirmado y relleno contra la fuga de longitud
+
+- **`F9.14` confirmado manualmente por Daniel.** Pegó el contenido real de
+  `vault/conversations/<uuid>.jsonl` tras dos intercambios. Comprobado sobre ese
+  archivo:
+  - no aparece el texto, ni el título, ni el proveedor, ni el modelo;
+  - los cuatro nonces son **distintos** (repetir un nonce en GCM es catastrófico);
+  - los cuatro textos cifrados son distintos.
+  Pasa de `implemented` a `done`.
+- **Fuga encontrada al medir ese archivo real**: AES-GCM no rellena, así que el
+  tamaño del sobre revela el del mensaje. Medido: 204, 223, 200 y 306 bytes,
+  es decir ~38, ~57, ~34 y ~140 caracteres. Con eso se reconstruye la **forma**
+  de una conversación —pregunta corta, respuesta larga— sin descifrar nada. En
+  un historial de meses, esa forma dice bastante.
+- Arreglado con `packages/vault-crypto/src/padding.ts`: el contenido se rellena
+  a múltiplos de 256 bytes antes de sellarse. Dos mensajes de 30 y 200
+  caracteres producen ahora sobres **idénticos en tamaño**, y hay prueba que lo
+  comprueba comparando longitudes.
+- Formato: `'LXP1' + longitud real (4 bytes BE) + datos + ceros`. La marca al
+  principio permite distinguir contenido rellenado del anterior, así que **las
+  conversaciones que Daniel ya creó se siguen abriendo**: `unpad` devuelve tal
+  cual lo que no lleva marca. Hay prueba de esa compatibilidad.
+- Elección del bloque: 256 bytes esconde la diferencia entre un «hola» y un
+  párrafo, que es donde más se nota, y el coste nunca supera un bloque por
+  mensaje, ni siquiera en uno de 100.000 caracteres. Hay prueba de las dos cosas.
+- **Fuga que NO se arregla y queda documentada**: las marcas de tiempo van en
+  claro (`14:33:21`, `14:33:29`…), así que se ve el ritmo de uso y cuánto tardó
+  el modelo. Redondearlas no serviría de mucho: la fecha del propio archivo la
+  revela igual.
+- El relleno se aplica sólo a `sealText`, es decir a texto: turnos, memoria y
+  metadatos de medios. El tamaño de un blob de imagen o vídeo ya es visible
+  aparte, en `byteSize`, y ocultarlo es una decisión distinta y más cara.
+- Comandos ejecutados:
+  - `npx vitest run packages/vault-crypto` → **91/91**.
+  - `npm run check` → **exit 0**; 107 archivos, 1.883 superadas, 9 omitidas.
+- Estado nuevo: `F9.14` **done, confirmado manualmente**.
+- Siguiente paso exacto: `F9.17`, adaptador de Xavira.
+
 ### 2026-09-01 16:30 — Claude — F9.14, conversaciones privadas de extremo a extremo
 
 - Estado anterior: `F9.13` cerrado y confirmado a mano.

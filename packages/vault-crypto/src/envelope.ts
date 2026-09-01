@@ -5,6 +5,7 @@
 // o de los AAD, el descifrado FALLA en vez de devolver basura. De ahi que todo
 // el paquete se apoye en el.
 import { VaultCryptoError, concat, fromBase64Url, randomBytes, toBase64Url, utf8 } from './bytes.js';
+import { pad, unpad } from './padding.js';
 
 /**
  * version del formato de sobre.
@@ -159,19 +160,26 @@ export async function open(
   }
 }
 
-/** azucar para el caso mas comun: sellar y abrir texto */
+/**
+ * sella texto, RELLENADO.
+ *
+ * el relleno es lo que impide que el tamaño del sobre revele el tamaño del
+ * mensaje. Sin el, un historial cifrado sigue mostrando su forma: pregunta
+ * corta, respuesta larga, silencio. Ver padding.ts.
+ */
 export async function sealText(
   key: Uint8Array,
   purpose: string,
   text: string,
 ): Promise<SealedEnvelope> {
-  return seal(key, purpose, utf8(text));
+  return seal(key, purpose, pad(utf8(text)));
 }
 
+/** abre texto sellado. `unpad` devuelve tal cual lo guardado antes del relleno */
 export async function openText(
   key: Uint8Array,
   purpose: string,
   envelope: SealedEnvelope,
 ): Promise<string> {
-  return new TextDecoder().decode(await open(key, purpose, envelope));
+  return new TextDecoder().decode(unpad(await open(key, purpose, envelope)));
 }

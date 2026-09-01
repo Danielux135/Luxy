@@ -25,6 +25,7 @@
 export * from './bytes.js';
 export * from './envelope.js';
 export * from './blob.js';
+export * from './padding.js';
 export * from './kdf.js';
 export * from './master-key.js';
 export * from './recipient.js';

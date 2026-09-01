@@ -1,5 +1,16 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-01 — Windows 11 (equipo `oscar`) — F9.14 confirmado + relleno
+
+- **Confirmado manualmente por Daniel** sobre el archivo real de una
+  conversación de dos intercambios: sin texto, sin título, sin proveedor, sin
+  modelo, y los cuatro nonces distintos.
+- Fuga medida en ese archivo antes del arreglo: 204 / 223 / 200 / 306 bytes
+  cifrados, que corresponden a ~38 / ~57 / ~34 / ~140 caracteres.
+- `npx vitest run packages/vault-crypto`: **91/91**.
+- **`npm run check`: exit 0.** Suite: **107 archivos, 1.883 superadas, 9
+  omitidas, 0 fallos**.
+
 ### 2026-09-01 — Windows 11 (equipo `oscar`) — F9.14
 
 - `npx vitest run apps/desktop/src/main/vault/conversation-store.test.ts`:
