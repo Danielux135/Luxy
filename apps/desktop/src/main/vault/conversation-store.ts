@@ -12,7 +12,7 @@
 // aleatorio. Nunca el titulo: `%APPDATA%` no puede revelar de que hablas.
 import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
-import { privateRecordSchema, type PrivateRecord } from '@luxy/shared';
+import { privateRecordSchema, type ConversationMemory, type PrivateRecord } from '@luxy/shared';
 import { openTurn, sealTurn, type SealTurnInput } from './private-store.js';
 import { VaultError, type VaultService } from './vault-service.js';
 
@@ -139,6 +139,28 @@ export class PrivateConversationStore {
       });
     }
     return summaries.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  }
+
+  /**
+   * ultima memoria valida de la conversacion.
+   *
+   * Se busca hacia atras y se devuelve la PRIMERA que haya: si el ultimo turno
+   * no aporto memoria valida, la anterior sigue siendo buena. Devolver null
+   * porque el ultimo turno fallo seria olvidar toda la conversacion por un
+   * tropiezo (`D-019`).
+   */
+  async latestMemory(
+    vault: VaultService,
+    conversationId: string,
+  ): Promise<ConversationMemory | null> {
+    const records = this.readRecords(conversationId);
+    for (let index = records.length - 1; index >= 0; index -= 1) {
+      const record = records[index]!;
+      if (record.sealedMemory === null) continue;
+      const opened = await openTurn(vault, record);
+      if (opened.memory !== null) return opened.memory.memory;
+    }
+    return null;
   }
 
   /** borra una conversacion. no hay papelera: es lo que se espera aqui */

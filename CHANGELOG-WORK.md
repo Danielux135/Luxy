@@ -1,5 +1,42 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-09-01 19:30 — Claude — memoria acumulativa en conversaciones privadas
+
+- Problema: cada turno reenviaba el hilo entero. Con veinte turnos eso
+  multiplica coste y latencia y acaba chocando con el límite de contexto.
+- **No inventé un formato nuevo.** `conversationMemorySchema`,
+  `CONVERSATION_MEMORY_INSTRUCTION` y `parseConversationMemoryResponse` ya
+  existían para las conversaciones normales. `vaultMemoryPayloadSchema` pasa a
+  envolver ese mismo esquema: dos formas de memoria según dónde viva sería
+  garantizar que divergen, y obligaría a escribir dos veces el prompt.
+- Archivos creados: `packages/shared/src/vault-prompt.ts` y su prueba.
+- Archivos modificados: `vault-payloads.ts`, `conversation-store.ts`
+  (`latestMemory`), `main/ipc/handlers.ts`.
+- `buildVaultPrompt` es **puro** y vive en shared: sin disco, sin red, sin
+  reloj. Así cada caso límite se prueba sin montar una bóveda, que es justo
+  donde se esconden los errores de este tipo de código.
+- Decisiones con motivo:
+  - **8 turnos recientes** literales; lo anterior va en la memoria. Deja ver el
+    hilo inmediato —a qué se refiere el usuario cuando dice «eso»— sin
+    arrastrarlo todo;
+  - si se omiten turnos y **todavía no hay memoria**, se avisa al modelo
+    explícitamente. Un modelo que no sabe que le falta contexto se inventa la
+    parte que falta con toda naturalidad;
+  - **si un turno no aporta memoria válida se conserva la anterior** (`D-019`).
+    `latestMemory` busca hacia atrás y devuelve la primera válida: devolver null
+    porque el último turno falló sería olvidar la conversación por un tropiezo;
+  - la memoria viaja **dentro** de la respuesta y se separa antes de guardar: el
+    turno guarda sólo el texto visible, sin el bloque técnico;
+  - memoria, turnos y mensaje van marcados como **DATOS**, igual que en el
+    prompt de tareas. No elimina la inyección de prompt, la encuadra.
+- Medido en prueba: con 40 turnos de 2.000 caracteres, el prompt con memoria
+  ocupa **menos de un tercio** del hilo entero.
+- Comandos: `npm run check` → **exit 0**; 112 archivos, 1.953 superadas.
+- Límite: la memoria la produce el propio modelo. Un modelo que ignore la
+  instrucción no la generará, y entonces se conserva la anterior — correcto,
+  pero significa que la calidad de la memoria depende del proveedor.
+- Siguiente paso exacto: cablear la generación de imagen.
+
 ### 2026-09-01 17:50 — Claude — medios conectados a la interfaz
 
 - Estado anterior: `F9.16` local implementado pero sin nadie que lo llamara.

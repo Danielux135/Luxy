@@ -8,6 +8,7 @@
 // Cada carga lleva `v`. Un turno sellado hoy tiene que poder abrirse con una
 // version futura de Luxy, y para eso hay que saber con que version se escribio.
 import { z } from 'zod';
+import { conversationMemorySchema } from './schemas.js';
 
 export const VAULT_PAYLOAD_VERSION = 1;
 
@@ -34,13 +35,17 @@ export const vaultTurnPayloadSchema = z.object({
 });
 export type VaultTurnPayload = z.infer<typeof vaultTurnPayloadSchema>;
 
-/** memoria estructurada de la conversacion, sellada aparte del turno */
+/**
+ * memoria estructurada de la conversacion, sellada aparte del turno.
+ *
+ * Envuelve `conversationMemorySchema`, el MISMO formato que usa Luxy en las
+ * conversaciones normales. Tener dos formas de memoria segun donde viva seria
+ * garantizar que divergen, y ademas obligaria a escribir dos veces el prompt
+ * que la produce.
+ */
 export const vaultMemoryPayloadSchema = z.object({
   v: payloadVersionSchema,
-  summary: z.string().max(20_000).default(''),
-  facts: z.array(z.string().max(2000)).max(200).default([]),
-  decisions: z.array(z.string().max(2000)).max(200).default([]),
-  lessons: z.array(z.string().max(2000)).max(200).default([]),
+  memory: conversationMemorySchema,
 });
 export type VaultMemoryPayload = z.infer<typeof vaultMemoryPayloadSchema>;
 

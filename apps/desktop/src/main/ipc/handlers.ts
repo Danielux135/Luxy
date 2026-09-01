@@ -8,6 +8,8 @@ import { readFileSync, existsSync, mkdirSync, realpathSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 import type { z } from 'zod';
 import {
+  buildVaultPrompt,
+  parseConversationMemoryResponse,
   redact,
   storedAgentConfigSchema,
   secretRegistry,
@@ -797,12 +799,18 @@ export function registerIpcHandlers(context: HandlerContext): void {
       outputTokens: null,
     });
 
-    // el prompt completo se arma con lo ya descifrado: el agente recibe el hilo
-    // entero, pero por memoria entre procesos, nunca por la red
+    // el prompt se arma con la memoria acumulativa mas los ultimos turnos, no
+    // con el hilo entero. Si no, cada mensaje de una conversacion larga volveria
+    // a enviarlo todo y el coste y la latencia crecerian sin techo hasta chocar
+    // con el limite de contexto del modelo.
     const history = await store.read(context.vault, conversationId);
-    const prompt = history
-      .map((turn) => `${turn.role === 'user' ? 'Usuario' : 'Asistente'}: ${turn.text}`)
-      .join('\n\n');
+    const memory = await store.latestMemory(context.vault, conversationId);
+    const prompt = buildVaultPrompt({
+      memory,
+      // el ultimo es el que se acaba de guardar: va aparte como mensaje nuevo
+      turns: history.slice(0, -1).map((turn) => ({ role: turn.role, text: turn.text })),
+      message: args.message,
+    });
 
     const result = await context.controller.runLocalTurn({
       localTurnId: randomUUID(),
@@ -813,15 +821,25 @@ export function registerIpcHandlers(context: HandlerContext): void {
     });
 
     if (result.outcome !== 'failed' && result.text.length > 0) {
-      await store.appendTurn(context.vault, conversationId, {
-        role: 'assistant',
-        text: result.text,
-        title,
-        provider: args.provider,
-        model: result.executedModel ?? args.model,
-        inputTokens: result.inputTokens,
-        outputTokens: result.outputTokens,
-      });
+      // la memoria viaja DENTRO de la respuesta y se separa aqui: lo que se
+      // guarda como turno es solo el texto visible, sin el bloque tecnico
+      const parsed = parseConversationMemoryResponse(result.text);
+      await store.appendTurn(
+        context.vault,
+        conversationId,
+        {
+          role: 'assistant',
+          text: parsed.visibleText,
+          title,
+          provider: args.provider,
+          model: result.executedModel ?? args.model,
+          inputTokens: result.inputTokens,
+          outputTokens: result.outputTokens,
+        },
+        // sin memoria valida no se guarda ninguna: se conserva la anterior, que
+        // sigue siendo buena. Un turno malo no borra la conversacion (D-019)
+        parsed.memory === null ? undefined : { memory: parsed.memory },
+      );
     }
 
     return {

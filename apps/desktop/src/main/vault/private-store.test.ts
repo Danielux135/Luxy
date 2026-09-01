@@ -99,13 +99,23 @@ describe('cifrado en el cliente', () => {
         conversationId: CONVERSATION,
         sequence: 0,
         turn: turno,
-        memory: { summary: 'resumen privado', facts: ['un hecho'], decisions: [], lessons: [] },
+        memory: {
+          memory: {
+            version: 1 as const,
+            summary: 'resumen privado',
+            facts: ['un hecho'],
+            decisions: [],
+            plan: [],
+            openQuestions: [],
+            lessons: [],
+          },
+        },
       });
 
       expect(JSON.stringify(record)).not.toContain('resumen privado');
       const { memory } = await openTurn(vault, record);
-      expect(memory?.summary).toBe('resumen privado');
-      expect(memory?.facts).toEqual(['un hecho']);
+      expect(memory?.memory.summary).toBe('resumen privado');
+      expect(memory?.memory.facts).toEqual(['un hecho']);
     });
 
     it('sin memoria, el campo queda nulo', async () => {
