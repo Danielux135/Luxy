@@ -777,3 +777,116 @@ Consecuencias que se asumen y se documentan:
   nunca recuperar su contenido;
 - la clave de recuperación **sigue existiendo** y pasa a ser la única red de
   seguridad real.
+
+## D-047 — la cuenta es el origen de la llave; el archivo local es su caché
+
+Fecha: 2026-09-01
+
+Estado: aceptada, implementada
+
+`D-046` dejó dos orígenes de la misma llave maestra sin unir: el archivo
+`vault.json` de este equipo y la llave envuelta que guarda el servidor. Los dos
+funcionaban, ninguno sabía del otro, y esa era la avería que impedía usar la
+bóveda desde un segundo ordenador.
+
+Se unen así: **crear la cuenta y entrar producen la llave; el archivo local la
+guarda envuelta con la misma contraseña**. `VaultService.adoptAccountKey()` es
+el único punto por donde una llave de fuera entra en la bóveda. El
+identificador de bóveda se deriva de la llave, así que los dos caminos producen
+el mismo, y lo escrito en un equipo se lee en el otro.
+
+Consecuencias que se asumen:
+
+- **el archivo local deja de ser una segunda bóveda y pasa a ser una caché.**
+  Abrirla sigue funcionando sin red, que es lo que hace que Luxy arranque en un
+  avión, pero la fuente de verdad de la contraseña es el servidor;
+- **cambiar la contraseña de una bóveda de cuenta no puede hacerse sólo aquí.**
+  Primero el servidor, después la envoltura local; si el orden se invirtiera, un
+  fallo de red dejaría este equipo abriendo con una contraseña que ningún otro
+  reconoce. `VaultService.changePassword()` se niega a tocar una bóveda
+  vinculada;
+- **un equipo guarda la bóveda de una sola cuenta.** Registrar o entrar con otra
+  se rechaza antes de llamar al servidor: pisar el archivo dejaría ilegible, sin
+  aviso, todo lo cifrado con la llave anterior;
+- ~~la clave de recuperación sólo abre en el equipo donde se creó~~. **Cerrado
+  por `F9.19` el mismo día**: el servidor guarda también la copia de
+  recuperación, y la clave abre desde cualquier ordenador. Ver `D-049`;
+- **una bóveda sin cuenta sigue siendo válida.** Es lo que ya existe en el
+  equipo de Daniel. Vincularla sube la MISMA llave envuelta, sin recifrar nada,
+  y exige la contraseña que la abre para no acabar con dos contraseñas
+  distintas para la misma bóveda.
+
+## D-048 — sincronizar autoriza por sesión de cuenta, nunca por token de máquina
+
+Fecha: 2026-09-01
+
+Estado: aceptada, implementada
+
+El cliente de sincronización se autenticaba con el token de máquina y mandaba el
+`vaultId` en el cuerpo y en la query. Con la propiedad por usuario que introdujo
+`D-045`, eso era incoherente: el token de máquina identifica un ordenador, no a
+una persona, y dos personas pueden compartir ordenador sin compartir bóveda.
+
+A partir de aquí, `Authorization` lleva el **token de sesión de la cuenta**, y
+el `vaultId` **deja de viajar**: el gateway decide de quién es cada registro por
+el usuario de esa sesión. En el contrato pasa a ser opcional —un cliente viejo
+puede seguir mandándolo y se ignora— porque agrupaba, nunca autorizó, y
+enviarlo invitaba a confundir una cosa con la otra.
+
+Consecuencias que se asumen:
+
+- **la sesión caduca y con ella la sincronización.** La bóveda se sigue abriendo
+  sin conexión con la caché local; lo que deja de funcionar es sincronizar,
+  hasta que se vuelva a entrar. La interfaz distingue «cerrada» de «sin sesión»
+  porque se arreglan de forma distinta;
+- **un 401 borra la sesión guardada** en vez de reintentar con el mismo token;
+- el token de sesión vive en el almacén cifrado del sistema (DPAPI) como
+  `VAULT_ACCOUNT_SESSION`, nunca en `config.json`, y **no cruza el IPC**: el
+  renderer no lo necesita, y dárselo sería darle una credencial reutilizable.
+
+## D-049 — la clave de recuperación no se trata como una contraseña
+
+Fecha: 2026-09-01
+
+Estado: aceptada, implementada
+
+`F9.19` guarda en el servidor una segunda copia de la llave maestra, cerrada con
+la clave de recuperación, para que abra desde cualquier ordenador y no sólo
+desde el que creó la bóveda. Al hacerlo aparece la pregunta de con qué coste de
+Argon2id derivarla.
+
+La respuesta es que **no es la misma pregunta que con una contraseña**. Argon2id
+es caro porque una contraseña humana tiene poca entropía y hay que encarecer
+cada intento de un diccionario. Una clave de recuperación de Luxy son 32
+caracteres de un alfabeto de 30, generados con rechazo de módulo: ~157 bits. No
+hay diccionario que probar, así que encarecer cada intento no compra seguridad;
+sólo doblaría el tiempo de crear una cuenta, que ya paga dos derivaciones.
+
+Por eso `RECOVERY_ARGON2_PARAMS` usa `t=1, m=8 MiB, p=1` —el mínimo que admite
+la validación, no por debajo— frente a los `t=3, m=64 MiB` de la contraseña. Es
+el mismo criterio por el que un gestor de contraseñas trata su «clave secreta»
+distinto de la contraseña maestra.
+
+Lo que va con esto:
+
+- **propósito distinto** (`vault.account.recovery`), no el mismo con otra sal.
+  El propósito viaja autenticado (`D-041`), así que intercambiar los dos sobres
+  en la base de datos no cuela, y el esquema tampoco lo acepta por la forma;
+- **hash de acceso propio**, y el servidor acepta cualquiera de los dos como
+  prueba, al entrar y al cambiar la contraseña. Sin lo segundo, quien recupera
+  su cuenta tendría acceso pero no podría elegir una contraseña nueva, que es
+  exactamente a lo que venía. Una restricción de la migración impide que los dos
+  hashes coincidan;
+- **cambiar la contraseña no toca la copia de recuperación.** El papel que el
+  usuario guardó en un cajón sigue valiendo después del cambio;
+- **el señuelo de un correo inexistente también trae la puerta de recuperación.**
+  Omitirla diría que esa cuenta no existe, que es justo lo que el señuelo evita
+  decir;
+- **vincular una bóveda anterior a las cuentas genera una clave nueva** y la
+  anterior deja de valer. La vieja se mostró una sola vez y no se guardó, así
+  que no hay forma de subir una copia cerrada con ella; sin clave nueva, esa
+  cuenta se quedaría sin red de seguridad.
+
+Lo que se asume: quien tenga la clave de recuperación abre la bóveda desde
+cualquier sitio, sin saber la contraseña. Es lo que se pedía, y es la razón de
+que la interfaz insista en guardarla fuera del ordenador.

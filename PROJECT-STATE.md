@@ -1,6 +1,43 @@
 # Luxy — estado canónico del proyecto
 
-Última actualización: **2026-09-01 — F9-VAULT-001, punto de retoma**
+Última actualización: **2026-09-01 — F9.18 y F9.19, la bóveda en varios equipos**
+
+La bóveda privada ya se puede usar en **más de un ordenador**. Era la avería
+central del bloque: el archivo local y la llave envuelta del servidor eran dos
+orígenes de la misma llave maestra que nadie unía. Ahora la **cuenta es el
+origen** y el archivo local su **caché** (`D-047`), y sincronizar autoriza por
+**sesión de cuenta**, no por token de máquina (`D-048`).
+
+Lo que esto añade en Studio: pantalla de crear cuenta / entrar / salir, la
+opción de usar la bóveda sólo en este equipo, y la de **vincular** después una
+bóveda que ya existiera —como la de Daniel— sin recifrar nada.
+
+`F9.19` cierra la otra mitad: la **clave de recuperación abre desde cualquier
+ordenador**. El servidor guarda una segunda copia de la llave cerrada con ella,
+con propósito y hash de acceso propios, y tampoco puede abrirla (`D-049`).
+Olvidar la contraseña ya no es perder la bóveda ni aunque cambies de equipo. Las
+columnas entraron en `0007` **antes** de aplicarla, así que no hace falta una
+migración aparte.
+
+`npm run check` verde: **117 archivos, 2.030 pruebas superadas, 9 omitidas**.
+Sin commit, push, deploy ni migración aplicada.
+
+Lo que hay que tener presente antes de seguir: **nada de esto se ha ejecutado
+contra Supabase ni contra el gateway real.** La autorización cruzada entre
+usuarios sólo se confirma con Postgres delante, y la generación de imagen y
+vídeo de Xavira nunca ha hecho una llamada de verdad. Es `LA-031`, ya
+**desbloqueada** y ahora la única acción que bloquea lo demás.
+
+Lo que falta, por orden de cuánto se nota al usarlo: `F9.20` (instrucciones
+fijas por conversación — el campo existe en el prompt y **nada lo rellena**),
+la primera llamada real a Xavira, `F9.21` (un vídeo de más de 20 MB se guarda
+pero no se previsualiza), los medios que no se sincronizan (`F9.16` remoto), y
+`F9.12` (documentación de privacidad). Sin streaming es deliberado (`D-043`),
+no un olvido. El detalle, con tamaños y causas, en `CURRENT-TASK.md`.
+
+---
+
+Última actualización anterior: **2026-09-01 — F9-VAULT-001, punto de retoma**
 
 Capacidad nueva, en rama aislada `luxy/f9-1-vault-crypto` (25 commits sobre
 `main` @ `00a9cc1`, sin push): **bóveda privada cifrada**. Una sección
@@ -17,13 +54,11 @@ diez puntos a tener en cuenta y el siguiente paso exacto— vive en
 `CURRENT-TASK.md`, sección `F9-VAULT-001`, bajo «PUNTO DE RETOMA». Quien
 retome debe leerlo entero antes de tocar nada.
 
-Lo más importante para no equivocarse: hay **dos orígenes de la misma llave
-maestra que aún no están unidos** —el vault local (`vault.json`, lo que funciona
-hoy) y el vault de cuenta (`account-client` + gateway, recién implementado)—, y
-**la migración `0007` NO debe aplicarse todavía** porque dejaría tablas que nada
-usa. Se aplica después de unir la cuenta con la interfaz.
+> El aviso de este bloque —«dos orígenes de la misma llave maestra sin unir»—
+> **ya no está vigente**: los unió `F9.18`, arriba. Lo demás del bloque sí lo
+> está.
 
-Decisiones nuevas del bloque: `D-039` a `D-046`. `D-045` matiza `D-001`: Luxy
+Decisiones nuevas del bloque: `D-039` a `D-048`. `D-045` matiza `D-001`: Luxy
 admite varias personas con cuenta propia; el resto de `D-001` (coste cero, sin
 facturación) sigue vigente.
 

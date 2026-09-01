@@ -35,9 +35,22 @@ Luxy ya no depende de ella; los commits manuales de Daniel sí.
 
 ## F9-VAULT-001 — conversaciones privadas cifradas y sincronizadas
 
-Estado: **en curso, punto de retoma del 2026-09-01.** Rama aislada
-`luxy/f9-1-vault-crypto`, 25 commits sobre `main` @ `00a9cc1`. Árbol limpio.
-`npm run check` verde: 116 archivos, 1.997 pruebas superadas, 9 omitidas.
+Estado: **en curso, punto de retoma del 2026-09-01 (tras `F9.18` y `F9.19`).**
+Rama aislada `luxy/f9-1-vault-crypto` sobre `main` @ `00a9cc1`. `npm run check`
+verde: 117 archivos, 2.030 pruebas superadas, 9 omitidas.
+
+**Todo el camino crítico de código está cerrado.** Lo que queda es de tres
+tipos, y conviene no confundirlos:
+
+| tipo | qué es | quién |
+| --- | --- | --- |
+| **ejecución** | aplicar `0007`, desplegar el gateway, clave de Xavira, probar con dos equipos | Daniel (`LA-031`) |
+| **piezas pendientes** | `F9.20` instrucciones fijas · `F9.21` vídeo grande · `F9.9` puente Telegram · `F9.11` invitado · `F9.16` remoto | IA |
+| **deuda de documentación** | `F9.12`: `docs/PRIVACY.md`, `SECURITY.md`, modelo de amenazas | IA |
+
+Nada de lo implementado ha hablado con Supabase, con el gateway real ni con la
+API de Xavira. Es la advertencia que más veces se ha repetido en este bloque y
+sigue siendo cierta.
 
 > **PUNTO DE RETOMA — leer esto entero antes de tocar nada.** Debajo, cada paso
 > `F9.x` conserva su bloque de cierre como historial; esta cabecera es el estado
@@ -59,6 +72,46 @@ conversar, ver el `.jsonl` cifrado):
 - adjuntar y **generar** imágenes/vídeo (adaptador de Xavira conectado), cifrado
   en `vault\media\<hex>.bin`.
 
+Añadido después, **implementado y probado con mocks pero sin ejecutar de verdad**:
+
+- **cuenta**: crear, entrar, salir, y usar la bóveda sólo en este equipo sin
+  cuenta. Un ordenador nuevo funciona sabiendo el correo y la contraseña;
+- **recuperación**: la clave de recuperación abre desde cualquier ordenador, y
+  desde ahí se elige contraseña nueva;
+- **vincular** una bóveda anterior a las cuentas, sin recifrar su contenido;
+- **sincronización** de turnos entre equipos, autorizada por sesión de cuenta.
+
+### Lo que falta, con nombre y tamaño
+
+Ordenado por lo que más se nota al usarlo:
+
+1. **`F9.20` — instrucciones fijas por conversación.** `buildVaultPrompt` acepta
+   un campo `instructions` y **nada lo rellena**: no está en
+   `vaultConversationSendArgsSchema`, no se guarda con la conversación y no hay
+   dónde escribirlo. Sin él, el contexto de una conversación depende de
+   rescribirlo o de sobrevivir a la memoria acumulativa, que resume y por tanto
+   pierde matices a propósito. Es lo más barato que queda con efecto visible:
+   campo en el esquema, guardarlo cifrado con la conversación, pasarlo al
+   prompt, y un sitio donde editarlo.
+2. **La API de Xavira nunca se ha llamado de verdad** (`F9.17`). El contrato
+   viene de su documentación pública; la primera llamada real puede desmentir
+   nombres de campo, códigos o formato de error. Necesita la clave en Conexiones
+   (`VAULT_MEDIA_API_KEY`, reservada) y una generación de prueba. Es `LA-031`.
+3. **`F9.21` — vídeo grande sin previsualizar.** Se genera y se guarda cifrado,
+   pero el tope de 20 MB del IPC impide verlo. Falta un protocolo de Electron
+   que sirva el flujo descifrado.
+4. **Los medios no se sincronizan** (`F9.16` remoto). Sólo viajan los turnos; el
+   almacén remoto de objetos no existe.
+5. **Sin streaming** (`D-043`). Cada respuesta aparece entera al terminar. Es
+   deliberado, no un olvido: cambiarlo sería revisar la decisión, no completar
+   un paso.
+6. **`F9.12` — documentación de privacidad.** `docs/PRIVACY.md`, `SECURITY.md` y
+   el modelo de amenazas siguen sin escribirse. Es la deuda que más cara sale a
+   quien llegue nuevo.
+7. **`F9.9`** (puente de Telegram por conversación) y **`F9.11`** (invitar a un
+   tercero) siguen sin empezar. Ya no están bloqueados por `D-001`: lo matizó
+   `D-045`.
+
 ### Arquitectura de claves (la que hay que respetar)
 
 ```
@@ -71,18 +124,34 @@ contraseña ──Argon2id(sal)──► llave maestra (256b, sólo en RAM del m
 `ARGON2_PARAMS`: t=3, m=64 MiB, p=1 (~2,7 s medidos; ver `D-040`). Guardados por
 envoltura y por cuenta, nunca leídos de la constante al abrir.
 
+La misma llave maestra tiene **dos puertas** en el servidor, con sal, coste,
+propósito y hash de acceso propios: la contraseña y la clave de recuperación.
+La segunda usa `RECOVERY_ARGON2_PARAMS` (t=1, m=8 MiB) porque no es una
+contraseña sino ~157 bits al azar, y encarecer cada intento no compra nada sin
+diccionario que probar (`D-049`).
+
 ### El estado que NO es intuitivo, y es lo primero a entender
 
-Hay **DOS orígenes de la misma llave maestra que todavía no están unidos**:
+Hasta `F9.18` había **dos orígenes de la misma llave maestra sin unir**. **Ya
+están unidos** (`D-047`), y así es como funciona ahora:
 
-1. **vault local** (`vault-service.ts` + `vault.json`): la bóveda que funciona
-   hoy. La llave maestra sale de un archivo en el disco de este equipo.
-2. **vault de cuenta** (`account-client.ts` + gateway): registro/login que
-   `F9.10` acaba de implementar. La llave maestra sale del `wrapped_master_key`
-   que devuelve el servidor tras probar el hash de acceso.
+- la **cuenta es el origen**. Crear una cuenta genera la llave aquí; entrar en
+  ella la trae envuelta del servidor y la abre la contraseña. `vaultId` y
+  subclaves salen iguales por los dos caminos, y una prueba lo comprueba
+  comparando dos equipos;
+- el archivo local `vault.json` es la **caché** de esa llave: la misma, envuelta
+  con la misma contraseña, para arrancar sin red. Ya no es una segunda bóveda;
+- `VaultService.adoptAccountKey()` es el **único** punto por donde una llave de
+  fuera entra en la bóveda. La llave maestra sigue sin salir nunca: lo que sale
+  son sobres y hashes construidos con ella dentro;
+- una bóveda **sin cuenta** sigue siendo válida —es la que tiene Daniel hoy— y
+  se puede **vincular** después sin recifrar nada, con la contraseña que ya la
+  abre;
+- un equipo guarda la bóveda de **una sola cuenta**. Registrar o entrar con otra
+  se corta antes de llamar al servidor.
 
-**Los dos existen, los dos están probados, y NADIE los une todavía.** Ésa es la
-tarea de retoma. Ver la sección «Siguiente paso» al final.
+Lo que sigue sin ejecutarse: **nada de esto ha hablado con Supabase ni con el
+gateway real**. Ver el punto 2 de la lista de abajo.
 
 ### Estado por paso
 
@@ -101,18 +170,20 @@ tarea de retoma. Ver la sección «Siguiente paso» al final.
 | F9.16 | almacén de medios (local) | done; remoto no existe |
 | F9.17 | adaptador Xavira + generación | implemented; **sin llamada real** |
 | memoria | memoria acumulativa | done |
-| F9.10 | cuentas de usuario | **implemented (3 capas de lógica); SIN UI ni ejecución real** |
+| F9.10 | cuentas de usuario | **implemented (3 capas de lógica); sin ejecución real** |
+| F9.18 | interfaz de cuenta y unión de los dos orígenes de la llave | done; sin ejecución real |
+| F9.19 | recuperación desde un equipo nuevo | done; sin ejecución real |
 | F9.9 | puente Telegram por conversación | planned |
 | F9.11 | transportes del invitado | planned |
 | F9.12 | documentación de privacidad | planned |
 
 ### Lo que hay que tener en cuenta, sin suavizar
 
-1. **La migración `0007` NO está aplicada** contra ningún Postgres, y **NO debe
-   aplicarse todavía**: primero hay que unir el vault de cuenta con la UI, porque
-   aplicarla ahora deja tablas que nada usa. Cuando se aplique, es acción de
-   Daniel (SQL Editor de Supabase), y antes hay que confirmar contra qué proyecto
-   apunta el gateway (trampa 3 de `docs/ARRANQUE-ORDENADOR-NUEVO.md`).
+1. **La migración `0007` NO está aplicada** contra ningún Postgres, y ya está
+   **completa**: `F9.19` metió sus seis columnas antes de aplicarla, así que no
+   hace falta una migración aparte. Aplicarla es acción de Daniel (`LA-031`), y
+   antes hay que confirmar contra qué proyecto apunta el gateway (trampa 3 de
+   `docs/ARRANQUE-ORDENADOR-NUEVO.md`).
 2. **Nada del gateway ni de las cuentas se ha ejecutado contra Supabase real.**
    Todo son mocks: gateway falso, cliente falso. Incluida la autorización cruzada
    entre usuarios de `withVaultAuth`, que sólo se confirma con Postgres delante.
@@ -123,57 +194,127 @@ tarea de retoma. Ver la sección «Siguiente paso» al final.
    de su documentación pública. La primera llamada de verdad puede desmentir
    nombres de campo o formato de error. La clave va en `SecretStore` como
    `VAULT_MEDIA_API_KEY` (reservada), la pone Daniel en Conexiones.
-5. **La sincronización aún se autentica con el token de máquina, no con la sesión
-   de cuenta.** Con `0007` nueva (propiedad por `owner_user_id`), el cliente de
-   sync (`sync.ts`) y su handler quedaron desalineados a propósito: compilan y
-   pasan pruebas con mocks, pero **contra el esquema nuevo no funcionan**. Es
-   parte del cable que falta.
+5. **La sincronización ya se autentica con la sesión de cuenta** (`D-048`), y el
+   `vaultId` dejó de viajar. Lo que queda de esto: la sesión **caduca** (30 días)
+   y entonces sincronizar deja de funcionar hasta volver a entrar, aunque la
+   bóveda se siga abriendo sin conexión. La interfaz lo distingue; no se ha
+   probado con un gateway real devolviendo un 401 de verdad.
 6. **Vídeo grande**: se genera y guarda, pero no se previsualiza (tope de 20 MB
    del IPC). Falta un protocolo de Electron que sirva el flujo descifrado.
 7. **Medios no se sincronizan**: sólo turnos. El almacén remoto (`F9.16` remoto,
    p.ej. R2) no existe.
 8. **Sin streaming** en conversaciones privadas (`D-043`), a propósito.
 9. **`git config --global` de este equipo sigue sin configurar** (`LA-030`).
-10. Límites de diseño que van a `docs/PRIVACY.md` (`F9.12`, pendiente): el
-    proveedor de IA ve el prompt; Telegram no puede leer ciphertext; DPAPI no
-    protege de otro proceso de la misma cuenta; una filtración de la BD entrega N
-    llaves envueltas y la contraseña más débil de la organización es el objetivo;
-    el servidor no puede restablecer una contraseña; revocar un permiso no
-    recupera lo ya descifrado; las migraciones nunca se han probado en Postgres.
+10. **La clave de recuperación ya abre desde cualquier ordenador** (`F9.19`).
+    Lo que hay que saber de ella: entrar con la clave deja el equipo **sin
+    envoltura de contraseña** hasta que se elija una nueva, y vincular una
+    bóveda anterior a las cuentas **genera una clave nueva** que invalida la
+    anterior. Las dos cosas las dice la interfaz.
+11. **Un equipo guarda la bóveda de UNA cuenta.** Registrar o entrar con otra se
+    rechaza antes de llamar al servidor: pisar `vault.json` dejaría ilegible, sin
+    aviso, todo lo cifrado con la llave anterior. Para cambiar de cuenta en un
+    equipo hay que borrar esa bóveda a mano; **no hay botón para eso**, y es un
+    hueco conocido.
+12. **Salir de la cuenta no borra nada.** Cierra la bóveda y olvida la sesión; lo
+    cifrado se queda en el equipo y vuelve a abrirse con la misma contraseña.
+13. **El token de sesión vive en `SecretStore`** como `VAULT_ACCOUNT_SESSION`
+    (reservado, DPAPI) y **no cruza el IPC**. Una prueba enumera las claves del
+    estado que ve el renderer para que no se cuele.
+14. **`changePassword` de una bóveda de cuenta no se puede hacer sólo en local**:
+    `VaultService` lo rechaza. Primero el servidor, después la envoltura local; al
+    revés, un fallo de red dejaría este equipo con una contraseña que ningún otro
+    reconoce.
+15. **`instructions` de `buildVaultPrompt` es código muerto hoy** (`F9.20`).
+    Quien lo lea puede creer que hay contexto persistente por conversación: no lo
+    hay, nadie rellena ese campo.
+16. Límites de diseño que van a `docs/PRIVACY.md` (`F9.12`, pendiente): el
+    proveedor de IA ve el prompt en claro —la bóveda protege el almacenamiento y
+    el transporte propio de Luxy, no lo que un tercero recibe porque el usuario
+    decide enviárselo—; Telegram no puede leer ciphertext; DPAPI no protege de
+    otro proceso de la misma cuenta; una filtración de la BD entrega N llaves
+    envueltas y la contraseña más débil de la organización es el objetivo; quien
+    tenga una clave de recuperación abre esa bóveda desde cualquier sitio; el
+    servidor no puede restablecer una contraseña; revocar un permiso no recupera
+    lo ya descifrado; las migraciones nunca se han probado en Postgres.
 
 ### Decisiones que rigen este bloque
 
 `D-039` (contraseña envuelve, no cifra) · `D-040` (coste Argon2 medido) · `D-041`
 (propósito autenticado) · `D-042` (sondeo, nunca callback) · `D-043` (sin
 streaming) · `D-044` (relleno de longitud) · `D-045` (multiusuario, matiza
-`D-001`) · `D-046` (auth y cifrado por caminos separados).
+`D-001`) · `D-046` (auth y cifrado por caminos separados) · `D-047` (la cuenta
+es el origen de la llave; el archivo local es su caché) · `D-048` (sincronizar
+autoriza por sesión de cuenta) · `D-049` (la clave de recuperación no se trata
+como una contraseña).
 
 ### Siguiente paso exacto (para quien retome)
 
-**Unir el vault de cuenta con la interfaz.** En concreto, y en este orden:
+Los tres sub-pasos de `F9.18` —pantalla de cuenta, unir los dos orígenes de la
+llave, sincronizar por sesión— y la recuperación desde otro equipo (`F9.19`)
+están **hechos**. Todo el camino crítico de código está cerrado; lo que queda
+es ejecutar y documentar.
 
-1. **Pantalla de cuenta** en Studio (renderer): registro (correo + contraseña +
-   clave de recuperación), login (correo + contraseña), logout. Cuando no hay
-   sesión, la sección Privado pide entrar; el resto de Luxy sigue usable sin
-   loguearse. Ésa es la experiencia que pidió Daniel.
-2. **Unir los dos orígenes de la llave maestra.** Decisión de diseño abierta:
-   lo más limpio es que crear/abrir la bóveda pase SIEMPRE por la cuenta
-   (`account-client`), y que el vault local (`vault.json`) quede como caché de la
-   sesión para no volver a llamar al servidor en cada arranque. `VaultService`
-   tendría que aceptar una llave maestra que le llega de fuera (de la cuenta) en
-   vez de sólo generarla/leerla del archivo. Esto es lo que hace que un equipo
-   nuevo funcione sólo con la contraseña.
-3. **Sincronización por sesión de cuenta:** el handler `syncVault` del main
-   (`ipc/handlers.ts`) y `sync.ts` deben usar el `sessionToken` de la cuenta como
-   `Authorization`, y quitar el `vaultId` del cuerpo/query (la autorización ya la
-   da la sesión). El gateway ya lo espera así.
-4. **Sólo entonces**: aplicar `0007`, desplegar el gateway, y probar registro →
-   login desde un segundo equipo → sincronización real. Registrar todo en
-   `LOCAL-ACTIONS.md`.
+1. **`LA-031`, la única acción de Daniel que bloquea lo demás**: confirmar el
+   proyecto de Supabase, aplicar `0007` (ya completa), desplegar el gateway,
+   poner la clave de Xavira y probar de verdad. Lo que sólo se puede confirmar
+   ahí: que un usuario no puede leer los registros de otro (`withVaultAuth`),
+   que la bóveda que Daniel ya tiene se vincula sin perder nada, y que el
+   contrato del adaptador de Xavira coincide con la API real.
 
-Después quedan `F9.9` (puente Telegram), `F9.11` (invitar a un tercero) y `F9.12`
-(documentación de privacidad). `F9.12` es barata y cierra deuda: conviene hacerla
-en cuanto la UI de cuenta esté, porque es la que explica todo esto a quien llegue.
+2. **`F9.20`, instrucciones fijas por conversación.** La pieza más barata que
+   queda con efecto visible, y la única que se puede hacer sin esperar a
+   `LA-031`. Ver la lista «Lo que falta» de arriba.
+
+3. **`F9.12`, documentación de privacidad.** Es barata y cierra deuda: es la que
+   explica todo esto a quien llegue. Tiene cuatro límites nuevos que contar:
+   entrar con la clave de recuperación deja el equipo sin contraseña hasta que
+   se elija una; salir de la cuenta no borra lo cifrado de este equipo; quien
+   tenga la clave de recuperación abre la bóveda desde cualquier sitio; y un
+   equipo guarda la bóveda de una sola cuenta.
+
+Después quedan `F9.21` (vídeo grande), `F9.16` remoto (medios entre equipos),
+`F9.9` (puente Telegram) y `F9.11` (invitar a un tercero).
+
+### F9.19 — done (Claude, 2026-09-01, sin commit)
+
+La clave de recuperación abre la bóveda **desde cualquier ordenador**, no sólo
+desde el que la creó. El servidor guarda una segunda copia de la llave maestra
+cerrada con ella, con propósito y hash de acceso propios, y tampoco puede
+abrirla. Detalle en `CHANGELOG-WORK.md` y `D-049`.
+
+Tres consecuencias que la interfaz dice y conviene no olvidar:
+
+- entrar con la clave deja este equipo **sin envoltura de contraseña** —no se
+  conoce— hasta que se elija una nueva. El formulario aparece ya desplegado, y
+  la prueba que pide es la clave, no la contraseña olvidada;
+- **cambiar la contraseña no invalida la clave de recuperación.** El papel del
+  cajón sigue valiendo;
+- **vincular** una bóveda anterior a las cuentas genera una clave **nueva** y la
+  anterior deja de valer.
+
+`npm run check` exit 0: 117 archivos, 2.030 superadas, 9 omitidas.
+
+### F9.18 — done (Claude, 2026-09-01, sin commit)
+
+La avería que impedía usar la bóveda en un segundo ordenador, cerrada. Detalle
+completo en `CHANGELOG-WORK.md`; lo esencial:
+
+- **`AccountPanel`** en `Vault.tsx` es la puerta cuando el equipo no tiene
+  bóveda: crear cuenta / entrar, y «usar sólo en este equipo» para quien no
+  quiera cuenta. **`AccountSection`**, con la bóveda abierta, enseña la cuenta,
+  deja salir y ofrece **vincular** una bóveda local anterior.
+- **`VaultAccountManager`** (`vault/account-manager.ts`) es el cable: pide la
+  llave al cliente de cuentas, se la entrega a `VaultService` y no conserva
+  copia. Guarda la sesión en el almacén cifrado (`VAULT_ACCOUNT_SESSION`) y no
+  la deja cruzar el IPC.
+- **`sync.ts`** se autentica con el token de sesión; el `vaultId` dejó de viajar.
+- De paso: la clave de recuperación que devolvía `createAccount` **no envolvía
+  nada**; ahora envuelve la copia local. Que no abra desde un equipo nuevo es la
+  limitación que queda como `F9.19`.
+
+`npm run check` exit 0: 117 archivos, 2.015 superadas, 9 omitidas. Nada
+ejecutado contra Supabase ni contra el gateway real, y no confirmado a mano en
+Studio.
 
 ### F9.1 — done (Claude, 2026-09-01, sin commit)
 

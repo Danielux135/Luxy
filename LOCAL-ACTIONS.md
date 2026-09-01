@@ -1,15 +1,53 @@
 # Luxy — acciones locales de Daniel
 
+## LA-032 — publicar la rama de la bóveda
+
+Estado: `pending` — 2026-09-01. **Commits hechos; el push falta.**
+
+Daniel pidió «haz commit y push». Es la autorización que exige `CLAUDE.md` para
+publicar; queda registrada aquí porque no se generaliza a la próxima vez.
+
+**Hecho:** dos commits en `luxy/f9-1-vault-crypto`, árbol limpio.
+
+- `76511e2` — `feat: la boveda se abre desde cualquier equipo con la cuenta`
+- `d7c57e8` — `docs: estado de la fase 9 tras unir la cuenta con la boveda`
+
+Llevan la identidad `Daniel <danielux135@gmail.com>` pasada con `git -c`, porque
+este equipo sigue sin identidad global (`LA-030`). No se escribió configuración
+global: eso sigue siendo decisión de Daniel.
+
+**Falta el push.** `git push` fue **denegado por el sistema de permisos de la
+sesión de IA, sin mostrar diálogo**, exactamente igual que en `LA-028` y
+`LA-030`. No es que falte autorización de Daniel: la dio. Hay que ejecutarlo
+desde una terminal fuera de la sesión:
+
+```powershell
+git push -u origin luxy/f9-1-vault-crypto
+```
+
+Sobre lo que se publica: **no se toca `main`** y no hay merge; la rama sigue
+aislada, como todo el bloque `F9`. Es código y documentación, ningún secreto —
+`vault.json`, `config.json`, `.env*` y `wrangler.toml` no están versionados, y
+los `.example` sólo llevan valores `PENDIENTE_...`.
+
+Publicar no despliega nada. El gateway sigue sin `wrangler deploy` y la
+migración `0007` sigue sin aplicarse: eso es `LA-031`, y sigue pendiente.
+
 ## LA-031 — aplicar 0007, desplegar el gateway y probar la bóveda real
 
-Estado: `blocked` — abierta el 2026-09-01. **NO ejecutar todavía.**
+Estado: `pending` — abierta el 2026-09-01, **desbloqueada el 2026-09-01** por
+`F9.18`.
 
-Estas acciones cierran la bóveda de punta a punta, pero **sólo tienen sentido
-después** de que exista la interfaz de cuenta y el vault de cuenta esté unido a
-la UI (ver `CURRENT-TASK.md`, «Siguiente paso exacto»). Aplicar la migración o
-desplegar antes deja infraestructura que nada usa.
+Lo que la bloqueaba era que no existía la interfaz de cuenta y que el vault de
+cuenta no estaba unido a la bóveda local. **Ya lo está** (`D-047`, `D-048`): la
+pantalla de cuenta existe, entrar trae la llave, y sincronizar autoriza por
+sesión. Las tablas de `0007` ya tienen quien las use.
 
-Cuando llegue el momento, en este orden:
+La migración ya está **completa**: `F9.19` metió sus seis columnas de
+recuperación antes de aplicarla, que era la decisión que quedaba pendiente. A
+partir de que se aplique, `0007` no se toca más.
+
+En este orden:
 
 1. **Confirmar contra qué proyecto de Supabase apunta el gateway** antes de
    nada. Ya pasó una vez: el Worker apuntaba a un proyecto y el SQL Editor a
@@ -37,9 +75,23 @@ Cuando llegue el momento, en este orden:
    neutro, para confirmar que el contrato del adaptador (nombres de campo, 201
    vs 202, sondeo, formato de error) coincide con la API de verdad.
 
-5. **Probar el flujo de cuenta**: registrar una cuenta, entrar desde un segundo
-   equipo con sólo la contraseña, y sincronizar. Verificar que en el `.jsonl`
-   local y en Supabase no hay texto legible.
+5. **Probar el flujo de cuenta**: registrar una cuenta desde Privado, entrar
+   desde un segundo equipo con sólo el correo y la contraseña, y sincronizar.
+   Verificar que en el `.jsonl` local y en Supabase no hay texto legible.
+
+   Lo que hay que mirar con atención, porque nunca se ha ejecutado de verdad:
+
+   - que `withVaultAuth` **no** deja a un usuario leer los registros de otro.
+     Con dos cuentas registradas, sincronizar desde una no puede traer nada de
+     la otra. Es lo único que sólo se confirma con Postgres delante;
+   - que la bóveda de Daniel, creada **antes** de que existieran las cuentas, se
+     vincula con «Vincular a una cuenta» sin perder nada de lo ya cifrado.
+     **Guardar la clave de recuperación nueva que sale ahí**: la anterior deja
+     de valer;
+   - que la clave de recuperación entra desde el segundo equipo sin saber la
+     contraseña, y que después se puede elegir una nueva;
+   - que cambiar la contraseña desde un equipo echa al otro, y que el otro
+     vuelve a entrar con la nueva.
 
 Registrar cada paso y su resultado real aquí abajo cuando se hagan.
 

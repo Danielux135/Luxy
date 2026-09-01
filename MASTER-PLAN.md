@@ -293,11 +293,11 @@ interfaz: *workspace*, *privacy*, *vault*, *invitado en solo lectura*.
 | F9.3 | `VaultService` en el proceso principal: desbloqueo, bloqueo, auto-bloqueo | done |
 | F9.4 | Cifrado en cliente antes de subir, incluidas miniaturas | done |
 | F9.5 | `run_local_turn` en `host-protocol`: el turno privado no pasa por la cola | done |
-| F9.6 | Migración de columnas de ciphertext; el enum `luxy_job_status` no se toca | implemented (NO aplicar: se rehace por D-045) |
-| F9.7 | Sincronización entre equipos por emparejamiento y recovery key | planned |
+| F9.6 | Migración de columnas de ciphertext; el enum `luxy_job_status` no se toca | implemented (completa; **sin aplicar**, `LA-031`) |
+| F9.7 | Sincronización entre equipos, autorizada por sesión de cuenta | implemented (con mocks; sin gateway real) |
 | F9.8 | Higiene de logs, cachés, miniaturas y notificaciones | done |
 | F9.9 | Puente explícito por conversación, apagado por defecto | planned |
-| F9.10 | Identidad de usuario e invitación por correo | implemented (lógica; sin UI ni ejecución real) |
+| F9.10 | Identidad de usuario e invitación por correo | implemented (cuenta con UI; invitación **no**) |
 | F9.11 | Transportes del invitado: Studio, visor web, exportación | planned |
 | F9.12 | `D-039`…, `docs/PRIVACY.md`, `SECURITY.md`, `threat-model.md` | planned |
 | F9.13 | Interfaz de la bóveda en Studio: crear, abrir, cerrar, clave de recuperación | done |
@@ -305,9 +305,37 @@ interfaz: *workspace*, *privacy*, *vault*, *invitado en solo lectura*.
 | F9.15 | Endpoints del gateway para registros privados y permisos | implemented (con cliente) |
 | F9.16 | Cliente de almacén de objetos para los blobs cifrados | implemented (sólo local) |
 | F9.17 | Adaptador de Xavira: personajes, imagen, vídeo, sondeo y descarga | implemented (conectado; sin llamada real) |
+| F9.18 | Interfaz de cuenta y unión de los dos orígenes de la llave maestra | done |
+| F9.19 | Recuperación de la cuenta desde un equipo nuevo (envoltura de recuperación en servidor) | done |
+| F9.20 | Instrucciones fijas por conversación: contexto persistente cifrado con ella | planned |
+| F9.21 | Protocolo de Electron para servir medios grandes descifrados (vídeo > 20 MB) | planned |
 
-`F9.10` y `F9.11` están `blocked`: contradicen `D-001` («no multi-tenant») y
-necesitan una decisión nueva que lo matice. El resto no depende de ella.
+`F9.18` cierra la avería que impedía usar la bóveda en un segundo ordenador:
+el archivo local y la llave envuelta del servidor eran dos orígenes de la misma
+llave maestra que nadie unía. Ahora la cuenta es el origen y el archivo local su
+caché (`D-047`), y sincronizar autoriza por sesión de cuenta (`D-048`).
+
+`F9.19` cierra la limitación que `F9.18` había dejado escrita en la propia
+pantalla: la clave de recuperación abre ahora **desde cualquier ordenador**,
+porque el servidor guarda también la copia de la llave cerrada con ella. Se hizo
+en el mismo día, y a tiempo: las columnas entraron en `0007` **antes** de
+aplicarla, así que no hace falta una migración aparte. Ver `D-049`.
+
+`F9.20` sale de un hueco detectado al revisar el estado el 2026-09-01:
+`buildVaultPrompt` acepta un campo `instructions` —instrucciones fijas que
+acompañan a cada turno de una conversación— y **nada lo rellena**. No está en el
+esquema del IPC, no se guarda con la conversación y no hay dónde escribirlo. Sin
+él, todo el contexto de una conversación tiene que rescribirse en cada mensaje o
+depender de que sobreviva a la memoria acumulativa, que resume y por tanto
+pierde matices a propósito. Es la pieza más barata que queda con efecto visible.
+
+`F9.21` sale del tope de 20 MB del IPC: un vídeo generado se guarda cifrado y
+**no se puede previsualizar**. Hace falta un protocolo de Electron que sirva el
+flujo descifrado sin pasarlo entero por un mensaje.
+
+`D-001` ya no bloquea `F9.10` ni `F9.11`: lo matizó `D-045`. De `F9.10` queda
+sólo la parte de invitación por correo; la cuenta de usuario está hecha y con
+interfaz (`F9.18`).
 
 ### Corrección del plan — 2026-09-01
 

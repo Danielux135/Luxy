@@ -1,5 +1,155 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-09-01 22:50 — Claude — cierre documental de F9.18 y F9.19, y commit
+
+Daniel pidio documentar el estado completo —lo hecho, lo que falta y lo que hay
+que tener en cuenta— y autorizo **explicitamente commit y push** de la rama.
+
+- **`MASTER-PLAN.md`**: la tabla de la Fase 9 estaba desfasada en tres filas y
+  se corrige con lo que hay de verdad: `F9.6` ya no dice «NO aplicar» (la
+  migracion esta **completa**, solo sin aplicar), `F9.7` pasa de `planned` a
+  implementada con mocks, y `F9.10` deja de decir «sin UI» porque la cuenta ya
+  la tiene. Dos filas nuevas: **`F9.20`** (instrucciones fijas por conversacion)
+  y **`F9.21`** (protocolo de Electron para medios grandes).
+- **`F9.20` sale de un hueco encontrado al revisar el estado**, no de una idea
+  nueva: `buildVaultPrompt` acepta un campo `instructions` y **nadie lo
+  rellena**. No esta en `vaultConversationSendArgsSchema`, no se guarda con la
+  conversacion y no hay donde escribirlo. Quien lea el codigo puede creer que
+  hay contexto persistente por conversacion; no lo hay.
+- **`CURRENT-TASK.md`**: cabecera nueva que separa lo que queda en tres tipos
+  —ejecucion (Daniel), piezas pendientes (IA) y deuda de documentacion—, una
+  seccion **«Lo que falta, con nombre y tamaño»** ordenada por cuanto se nota, y
+  cinco avisos nuevos en la lista de «tener en cuenta»: un equipo guarda la
+  boveda de UNA cuenta y **no hay boton para borrarla**; salir no borra nada; el
+  token de sesion no cruza el IPC; `changePassword` de una boveda de cuenta se
+  rechaza en local a proposito; y el campo `instructions` es codigo muerto hoy.
+- **`PROJECT-STATE.md`**: resumen de lo que falta con punteros.
+- Sin cambios de codigo. `npm run check` exit 0: 117 archivos, 2.030 superadas,
+  9 omitidas.
+
+Commits hechos (`76511e2` codigo, `d7c57e8` documentacion). **El push lo denego
+el sistema de permisos de la sesion**, igual que en `LA-028` y `LA-030`: no
+falta autorizacion de Daniel, hay que lanzarlo desde una terminal fuera de la
+sesion. Registrado en `LOCAL-ACTIONS.md` como `LA-032`, en `pending`.
+
+### 2026-09-01 22:20 — Claude — F9.19: la clave de recuperacion abre desde cualquier equipo
+
+Daniel lo pidio explicitamente al leer la limitacion de `F9.18`. Hecho antes de
+aplicar `0007`, que es lo que permitia meter las columnas sin una migracion
+aparte. Sin commit, push, deploy ni migracion aplicada.
+
+**El problema que se cierra.** La clave de recuperacion se generaba, se mostraba
+una vez, y solo envolvia una copia LOCAL. Desde un ordenador nuevo no servia de
+nada: el servidor no tenia ninguna copia cerrada con ella, asi que «he olvidado
+la contraseña» seguia siendo «he perdido la boveda» en cuanto cambiabas de
+equipo.
+
+**Lo que hay ahora.** La llave maestra se envuelve DOS veces, con dos secretos
+independientes y **dos propositos distintos** (`vault.account.masterkey` y
+`vault.account.recovery`), y las dos copias viven en el servidor. Son la misma
+llave por dos puertas, no dos bovedas.
+
+- `supabase/migrations/0007_luxy_vault.sql`: seis columnas nuevas en
+  `vault_users` con sus restricciones, incluida una que **impide que los dos
+  hashes de acceso coincidan**.
+- `packages/vault-crypto/src/account.ts`: `recoveryForMasterKey`,
+  `openAccountWithRecoveryKey` y `passwordCredentialsForMasterKey` (la puerta de
+  la contraseña sola, que es lo que sustituye un cambio de contraseña **sin
+  tocar la copia de recuperacion**).
+- `RECOVERY_ARGON2_PARAMS` en `kdf.ts`: coste bajo a proposito. La clave de
+  recuperacion no es una contraseña —~157 bits al azar— y encarecer cada intento
+  no compra nada cuando no hay diccionario que probar (`D-049`).
+- Gateway: `login/start` entrega **las dos puertas siempre**, tambien en la
+  respuesta señuelo de un correo inexistente; `login/finish` y `password`
+  aceptan **cualquiera de los dos hashes** como prueba.
+- Escritorio: `login(email, secreto, 'password' | 'recovery')`. Entrando con la
+  clave, la cache local guarda la envoltura de recuperacion y **no** la de
+  contraseña: no se conoce. La sesion recuerda por que puerta se entro.
+- Interfaz: «He olvidado la contraseña» en la pantalla de cuenta; con la boveda
+  ya abierta, un aviso de que este equipo aun no sabe la contraseña y el
+  formulario de cambiarla **ya desplegado**, pidiendo la clave de recuperacion
+  como prueba en vez de una contraseña que por definicion no se recuerda.
+- Vincular una boveda anterior a las cuentas genera una clave de recuperacion
+  **nueva** y la anterior deja de valer: la vieja no se guardo en ningun sitio,
+  asi que no habia forma de cerrar con ella una copia para el servidor.
+  Se muestra una vez, igual que al crear la cuenta.
+
+Tambien de paso: `VaultUserRow` estaba duplicada en `repository.ts` y en
+`vault-auth.ts`. Con columnas nuevas eso se desincroniza el primer dia, asi que
+ahora hay una sola definicion.
+
+Pruebas nuevas: siete en `account-manager.test.ts` —recuperar en un segundo
+equipo da la MISMA subclave, la clave se acepta escrita de forma descuidada, el
+equipo recuperado no guarda contraseña, se puede elegir una nueva con la clave
+como prueba, y cambiar la contraseña **no** invalida la clave— mas seis en
+`account.test.ts` y dos en `handlers/vault.test.ts` (el señuelo trae las dos
+puertas; los sobres cruzados no cuelan).
+
+**`npm run check` exit 0: 117 archivos, 2.030 superadas, 9 omitidas.**
+
+Sigue sin ejecutarse nada contra Supabase ni el gateway real: eso es `LA-031`.
+
+### 2026-09-01 21:30 — Claude — F9.18: la cuenta y la boveda, unidas
+
+Los tres sub-pasos que dejaba `CURRENT-TASK.md`, hechos en ese orden. Sin
+commit, sin push, sin deploy y sin migracion aplicada.
+
+**1. Pantalla de cuenta** (`apps/desktop/src/renderer/pages/Vault.tsx`,
+`useVault.ts`). Sin boveda en este equipo, la puerta ya no es «crear
+contraseña» sino `AccountPanel`: crear cuenta / entrar, con «usar solo en este
+equipo» como salida para quien no quiera cuenta. Con la boveda abierta,
+`AccountSection` enseña la cuenta, deja salir, y ofrece **vincular** una boveda
+local que existiera desde antes. La pantalla distingue «cerrada» de «sin
+sesion»: son problemas distintos y se arreglan distinto.
+
+**2. Los dos origenes de la llave, unidos.** `VaultService.adoptAccountKey()`
+es el unico punto por donde entra una llave maestra de fuera: adopta la de la
+cuenta y deja en disco la misma llave envuelta con la misma contraseña. El
+archivo local deja de ser una segunda boveda y pasa a ser **cache** (`D-047`).
+La prueba que lo sostiene compara subclaves entre dos equipos: `subkeyFor` da
+lo mismo tras registrar en uno y entrar en otro.
+
+- `VaultAccountManager` (`account-manager.ts`, nuevo) es el cable: llama al
+  cliente de cuentas, entrega la llave a `VaultService` y no conserva copia.
+  Guarda la sesion en el almacen cifrado (`VAULT_ACCOUNT_SESSION`, reservado) y
+  **no la deja cruzar el IPC**.
+- `VaultService` gana `adoptAccountKey`, `accountRegistration`,
+  `accountAuthHash`, `verifyPassword`, `rewrapLocalPassword`, `bindAccount` y
+  `boundAccount`. **La llave maestra sigue sin salir**: lo que sale son sobres y
+  hashes construidos con ella dentro.
+- `changePassword` de una boveda vinculada se **rechaza** en local: primero el
+  servidor, despues la envoltura local. Al reves, un fallo de red dejaria este
+  equipo con una contraseña que ningun otro reconoce.
+- `registrationForMasterKey` en `@luxy/vault-crypto` permite registrar una llave
+  que YA existe: es lo que hace posible vincular sin recifrar nada.
+- Un equipo guarda la boveda de **una sola cuenta**; registrar o entrar con otra
+  se corta **antes de la red**, para no dejar una cuenta huerfana en el servidor.
+
+**3. Sincronizacion por sesion** (`vault/sync.ts`, `ipc/handlers.ts`). El
+`Authorization` lleva el token de sesion y el `vaultId` **deja de viajar**: la
+autorizacion es el usuario de la sesion (`D-048`). Un 401 olvida la sesion en
+vez de reintentar con el mismo token. En `packages/shared/src/vault.ts` el
+`vaultId` de los dos esquemas de sincronizacion pasa a **opcional**, y el
+gateway lo ignora en vez de rechazarlo.
+
+Correcciones hechas de paso, porque eran del mismo cable:
+
+- la clave de recuperacion que devolvia `createAccount` **no abria nada**: se
+  generaba y no envolvia ninguna copia de la llave. Ahora envuelve la copia
+  local, asi que abre en el equipo donde se creo. Que **no** abra desde un
+  equipo nuevo es una limitacion real, esta escrita en la propia pantalla y
+  queda como `F9.19`;
+- salir de la cuenta descarta lo descifrado del renderer en ese momento, no en
+  el siguiente refresco.
+
+Pruebas: `account-manager.test.ts` nuevo (18), `sync.test.ts` reescrito para la
+sesion, `account-client.test.ts` y `useVault.test.ts` ajustados al contrato
+nuevo. **`npm run check` exit 0: 117 archivos, 2.015 superadas, 9 omitidas.**
+
+Sigue sin ejecutarse nada contra Supabase real: `0007` no aplicada, rutas
+`/api/vault/*` sin desplegar. Eso es `LA-031`, y ahora ya no esta bloqueada por
+falta de interfaz.
+
 ### 2026-09-01 20:45 — Claude — checkpoint de continuidad de F9-VAULT-001
 
 - Daniel pidió documentar todo para retomar desde aquí. Sin cambios de código.

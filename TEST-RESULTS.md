@@ -1,5 +1,45 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-01 — Windows 11 (equipo `oscar`) — F9.19 (recuperación desde otro equipo)
+
+- **`npm run check`: exit 0.** Suite: **117 archivos, 2.030 superadas, 9
+  omitidas, 0 fallos**.
+- Quince pruebas nuevas. La que sostiene la función: registrar en un equipo,
+  entrar en otro **con la clave de recuperación y nada más**, y obtener la misma
+  subclave (`subkeyFor('conversation', 'c1')`) y el mismo `vaultId`.
+- También se prueba, con gateway falso: que la clave se acepta escrita en
+  minúsculas y con espacios; que la de otra cuenta no abre; que el equipo
+  recuperado **no** guarda envoltura de contraseña, porque no se conoce; que se
+  puede elegir contraseña nueva usando la clave como prueba, y que después entra
+  por la puerta normal desde un tercer equipo; que **cambiar la contraseña no
+  invalida la clave de recuperación**; y que el sobre de recuperación no se
+  puede hacer pasar por el de contraseña ni al revés.
+- **Nada ejecutado contra Supabase ni contra el gateway real.** Las seis
+  columnas nuevas de `0007` sólo se han validado de forma estructural, como el
+  resto de la migración.
+
+### 2026-09-01 — Windows 11 (equipo `oscar`) — F9.18 (cuenta y bóveda unidas)
+
+- **`npm run check`: exit 0.** Suite: **117 archivos, 2.015 superadas, 9
+  omitidas, 0 fallos**.
+- Archivo nuevo: `account-manager.test.ts` (18). Reescritos o ajustados al
+  contrato nuevo: `sync.test.ts`, `account-client.test.ts`, `useVault.test.ts`.
+- La prueba que sostiene el bloque entero: registrar en un equipo y entrar en
+  otro produce **la misma subclave** (`subkeyFor('conversation', 'c1')`) y el
+  mismo `vaultId`. Sin esa igualdad, lo escrito en un equipo sería ilegible en
+  el otro.
+- También se prueba, con gateway falso: que la caché local abre **sin volver a
+  llamar al servidor**, que la sesión sobrevive a reiniciar la aplicación y
+  caduca sola, que salir revoca en el servidor y cierra la bóveda, que un 401
+  olvida la sesión, que vincular una bóveda local **no recifra nada** y exige la
+  contraseña que la abre, y que un equipo no puede acabar guardando la bóveda de
+  dos cuentas.
+- **Nada ejecutado contra Supabase ni contra el gateway real.** Todo con
+  `fetch` falso. La migración `0007` sigue sin aplicarse y `/api/vault/*` sigue
+  sin desplegar: eso es `LA-031`.
+- **No confirmado a mano**: no se ha abierto Studio para registrar una cuenta ni
+  para entrar desde un segundo ordenador.
+
 ### 2026-09-01 — Windows 11 (equipo `oscar`) — F9.10
 
 - Tres archivos de prueba nuevos: `account.test.ts` (10), la ampliación de
