@@ -18,6 +18,7 @@ import {
   conversationsDirectory,
 } from './vault/conversation-store.js';
 import { PrivateMediaStore, mediaIndexDirectory } from './vault/media-store.js';
+import { VaultCharacterStore, charactersFilePath } from './vault/character-store.js';
 import { LocalBlobStore, mediaDirectory } from './vault/blob-store.js';
 import { VAULT_DEVICE_SECRET, VAULT_SESSION_SECRET } from '../shared/channels.js';
 import { registerIpcHandlers, unregisterIpcHandlers } from './ipc/handlers.js';
@@ -41,6 +42,7 @@ let configStore: ConfigStore | null = null;
 let secretStore: SecretStore | null = null;
 let vault: VaultService | null = null;
 let vaultAccounts: VaultAccountManager | null = null;
+let vaultCharacters: VaultCharacterStore | null = null;
 let privateConversations: PrivateConversationStore | null = null;
 let privateMedia: PrivateMediaStore | null = null;
 let autoLockTimer: NodeJS.Timeout | null = null;
@@ -297,6 +299,7 @@ async function bootstrap(): Promise<void> {
   );
 
   privateConversations = new PrivateConversationStore(conversationsDirectory(luxyConfigDir()));
+  vaultCharacters = new VaultCharacterStore(charactersFilePath(luxyConfigDir()));
   privateMedia = new PrivateMediaStore(
     mediaIndexDirectory(luxyConfigDir()),
     new LocalBlobStore(mediaDirectory(luxyConfigDir())),
@@ -330,6 +333,7 @@ async function bootstrap(): Promise<void> {
     secretStore,
     vault,
     accounts: vaultAccounts,
+    characters: vaultCharacters,
     privateConversations,
     privateMedia,
     logsDirectory: logsDirectory(),

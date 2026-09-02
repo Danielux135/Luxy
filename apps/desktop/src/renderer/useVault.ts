@@ -18,6 +18,15 @@ import { useCallback, useEffect, useRef, useState } from 'react';
  * una cuenta y su sesión ha caducado. Son dos problemas distintos y se
  * arreglan de forma distinta, así que se muestran por separado.
  */
+/** un personaje guardado. Crearlo cuesta créditos: por eso se guarda */
+export interface VaultCharacterView {
+  characterId: string;
+  modelId: string;
+  description: string;
+  label: string;
+  createdAt: string;
+}
+
 export interface VaultAccountView {
   email: string | null;
   signedIn: boolean;
@@ -148,12 +157,17 @@ export interface VaultController {
    * diálogo, cifra la imagen en la conversación y la envía en el cuerpo de la
    * petición: no se publica en ninguna parte y el renderer nunca ve los bytes.
    */
+  /** personajes guardados en la bóveda; la API no sabe listarlos */
+  characters: VaultCharacterView[];
   createCharacter: (input: {
     modelId: 'realistic-sharp-v1' | 'anime-pure-v1';
     traits: Record<string, string>;
     scene: string;
     sfw: boolean;
+    label: string;
+    description: string;
   }) => Promise<string | null>;
+  forgetCharacter: (characterId: string) => Promise<void>;
   syncing: boolean;
   lastSync: {
     uploaded: number;
@@ -180,6 +194,7 @@ export function useVault(): VaultController {
   const [instructions, setInstructions] = useState<string | null>(null);
   const [characterId, setCharacterId] = useState<string | null>(null);
   const [characterDescription, setCharacterDescription] = useState<string | null>(null);
+  const [characters, setCharacters] = useState<VaultCharacterView[]>([]);
   const [lastImage, setLastImage] = useState<VaultController['lastImage']>(null);
   const [sending, setSending] = useState(false);
   const [media, setMedia] = useState<PrivateMediaItem[]>([]);
@@ -206,6 +221,11 @@ export function useVault(): VaultController {
       }
     }
     setLoading(false);
+  }, []);
+
+  const reloadCharacters = useCallback(async (): Promise<void> => {
+    const result = await window.luxy.listVaultCharacters();
+    if (mounted.current && result.ok) setCharacters(result.value.characters);
   }, []);
 
   const reloadConversations = useCallback(async (): Promise<void> => {
@@ -285,9 +305,10 @@ export function useVault(): VaultController {
       if (value === null) return false;
       setStatus(value);
       void reloadConversations();
+      void reloadCharacters();
       return true;
     },
-    [run, reloadConversations],
+    [run, reloadConversations, reloadCharacters],
   );
 
   const linkAccount = useCallback(
@@ -340,9 +361,10 @@ export function useVault(): VaultController {
       if (value === null) return false;
       setStatus(value);
       void reloadConversations();
+      void reloadCharacters();
       return true;
     },
-    [run, reloadConversations],
+    [run, reloadConversations, reloadCharacters],
   );
 
   const lock = useCallback(async (): Promise<void> => {
@@ -559,6 +581,8 @@ export function useVault(): VaultController {
       traits: Record<string, string>;
       scene: string;
       sfw: boolean;
+      label: string;
+      description: string;
     }): Promise<string | null> => {
       setError(null);
       setHint(null);
@@ -568,11 +592,18 @@ export function useVault(): VaultController {
         setHint(result.hint);
         return null;
       }
-      setHint('Personaje creado. Pégalo en «Personaje de esta conversación».');
+      // llega ya guardado: crearlo cuesta créditos y el identificador sólo se
+      // devuelve una vez
+      setCharacters(result.value.characters);
       return result.value.characterId;
     },
     [],
   );
+
+  const forgetCharacter = useCallback(async (characterId: string): Promise<void> => {
+    const result = await window.luxy.forgetVaultCharacter({ characterId });
+    if (result.ok) setCharacters(result.value.characters);
+  }, []);
 
   const sync = useCallback(async (): Promise<void> => {
     setSyncing(true);
@@ -625,6 +656,8 @@ export function useVault(): VaultController {
     instructions,
     characterId,
     characterDescription,
+    characters,
+    forgetCharacter,
     lastImage,
     sending,
     openConversation,

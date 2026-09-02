@@ -56,6 +56,7 @@ import {
   vaultMediaReadArgsSchema,
   vaultMediaGenerateArgsSchema,
   vaultCharacterCreateArgsSchema,
+  vaultCharacterForgetArgsSchema,
   VAULT_PREVIEW_MAX_BYTES,
   vaultAccountArgsSchema,
   vaultAccountLoginArgsSchema,
@@ -75,6 +76,7 @@ import {
 import type { SecretStore } from '../secure-storage.js';
 import { VaultError, type VaultService } from '../vault/vault-service.js';
 import type { VaultAccountManager } from '../vault/account-manager.js';
+import type { VaultCharacterStore } from '../vault/character-store.js';
 import type { PrivateConversationStore } from '../vault/conversation-store.js';
 import type { PrivateMediaStore } from '../vault/media-store.js';
 import { syncVault } from '../vault/sync.js';
@@ -128,6 +130,13 @@ export interface HandlerContext {
    * en un equipo nuevo. Guarda el token de sesion; no lo entrega al renderer.
    */
   accounts: VaultAccountManager;
+  /**
+   * personajes del proveedor de imagenes.
+   *
+   * Crear uno cuesta creditos y su identificador solo se devuelve una vez: se
+   * guarda aqui en cuanto llega, porque la API no tiene forma de listarlos.
+   */
+  characters: VaultCharacterStore;
   /** conversaciones privadas cifradas en disco */
   privateConversations: PrivateConversationStore;
   /** imagenes y videos privados, cifrados en disco */
@@ -928,17 +937,39 @@ export function registerIpcHandlers(context: HandlerContext): void {
           traits: args.traits,
           ...(args.scene.trim().length === 0 ? {} : { scene: args.scene.trim() }),
           sfw: args.sfw,
+          ...(args.label.trim().length === 0 ? {} : { name: args.label.trim() }),
         },
         mediaProviderOptions(controller.signal),
       );
+
+      // se guarda AQUI MISMO, antes de devolver nada. Crear un personaje cuesta
+      // creditos, su identificador solo llega una vez y la API no sabe
+      // listarlos: si no se guarda en este instante, se paga y se pierde
+      const characters = await context.characters.add(context.vault, {
+        characterId,
+        modelId: args.modelId,
+        description: args.description,
+        label: args.label.trim(),
+        createdAt: new Date().toISOString(),
+      });
+
       // los rasgos elegidos no se registran: describen a una persona
       context.log('personaje creado', { modelId: args.modelId });
-      return { characterId };
+      return { characterId, characters };
     } catch (error) {
       if (error instanceof XaviraError) throw new VaultError(error.message, error.hint);
       throw error;
     }
   });
+
+  handle(IPC_INVOKE.vaultCharacterList, emptyArgsSchema, async () => ({
+    characters: await context.characters.list(context.vault),
+  }));
+
+  /** olvida un personaje aqui. En el proveedor sigue existiendo */
+  handle(IPC_INVOKE.vaultCharacterForget, vaultCharacterForgetArgsSchema, async (args) => ({
+    characters: await context.characters.remove(context.vault, args.characterId),
+  }));
 
   /**
    * genera un medio y lo guarda cifrado en la conversacion.

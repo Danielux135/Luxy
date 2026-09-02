@@ -573,6 +573,7 @@ function GeneratePanel({
   const [kind, setKind] = useState<'image' | 'video'>('image');
   const [creating, setCreating] = useState(false);
   const [created, setCreated] = useState<string | null>(null);
+  const [label, setLabel] = useState('');
 
   const disabled = vault.openConversationId === null;
   const canGenerate =
@@ -605,6 +606,46 @@ function GeneratePanel({
           value={characterId}
           placeholder="identificador del personaje"
           onChange={(event) => setCharacterId(event.target.value)}
+        />
+      </Field>
+
+      {vault.characters.length > 0 && (
+        <>
+          <div className="vault-list">
+            {vault.characters.map((character) => (
+              <button
+                key={character.characterId}
+                className="vault-list__item"
+                aria-current={character.characterId === characterId ? 'true' : undefined}
+                onClick={() => {
+                  setCharacterId(character.characterId);
+                  onCharacterReady(character.characterId, character.description);
+                }}
+              >
+                <span className="vault-list__title">
+                  {character.label.length > 0 ? character.label : 'Sin nombre'}
+                </span>
+                <span className="vault-list__meta">{character.modelId}</span>
+              </button>
+            ))}
+          </div>
+          <p className="field__hint">
+            Tus personajes guardados. Pulsa uno para usarlo en esta conversación;
+            se guardan aquí porque el proveedor <strong>no sabe listarlos</strong>
+            y crearlos cuesta créditos.
+          </p>
+        </>
+      )}
+
+      <Field
+        label="Nombre del personaje"
+        hint="Sólo para reconocerlo en tu lista y en el panel del proveedor."
+      >
+        <input
+          value={label}
+          disabled={creating}
+          placeholder="Luxy"
+          onChange={(event) => setLabel(event.target.value)}
         />
       </Field>
 
@@ -695,7 +736,14 @@ function GeneratePanel({
           onClick={() => {
             setCreating(true);
             void vault
-              .createCharacter({ modelId, traits, scene, sfw })
+              .createCharacter({
+                modelId,
+                traits,
+                scene,
+                sfw,
+                label: label.trim(),
+                description: describeCharacter(traits, scene),
+              })
               .then((id) => {
                 if (id === null) return;
                 setCharacterId(id);

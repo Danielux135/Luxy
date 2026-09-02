@@ -450,6 +450,10 @@ export const vaultCharacterCreateArgsSchema = z.object({
   scene: z.string().max(1000).default(''),
   /** avatar base vestido; sólo afecta al avatar inicial, no a cada generación */
   sfw: z.boolean().default(false),
+  /** etiqueta para reconocerlo en la lista; también viaja al proveedor */
+  label: z.string().max(100).default(''),
+  /** quién es, en texto, para el modelo que escribe */
+  description: z.string().max(2000).default(''),
 });
 
 export const vaultMediaGenerateResultSchema = z.object({
@@ -460,8 +464,33 @@ export const vaultMediaGenerateResultSchema = z.object({
   costCredits: z.number().nullable(),
 });
 
+/**
+ * un personaje guardado en la bóveda.
+ *
+ * Se guarda porque crearlo **cuesta créditos** y su identificador sólo se
+ * devuelve una vez: la API no tiene forma de listarlos, así que uno que no se
+ * guarde aquí no se recupera de ninguna manera.
+ */
+export const vaultCharacterSummarySchema = z.object({
+  characterId: z.string(),
+  modelId: z.string(),
+  description: z.string(),
+  label: z.string(),
+  createdAt: z.string(),
+});
+
+export const vaultCharacterListResultSchema = z.object({
+  characters: z.array(vaultCharacterSummarySchema),
+});
+
 export const vaultCharacterCreateResultSchema = z.object({
   characterId: z.string(),
+  /** la lista completa, ya con el nuevo: la interfaz no vuelve a preguntar */
+  characters: z.array(vaultCharacterSummarySchema),
+});
+
+export const vaultCharacterForgetArgsSchema = z.object({
+  characterId: z.string().min(1).max(128),
 });
 
 export const vaultSyncResultSchema = z.object({
@@ -797,6 +826,11 @@ export interface LuxyBridge {
   createVaultCharacter(
     args: z.infer<typeof vaultCharacterCreateArgsSchema>,
   ): Promise<IpcResult<z.infer<typeof vaultCharacterCreateResultSchema>>>;
+  /** personajes guardados en la bóveda; no los sirve la API, no los tiene */
+  listVaultCharacters(): Promise<IpcResult<z.infer<typeof vaultCharacterListResultSchema>>>;
+  forgetVaultCharacter(
+    args: z.infer<typeof vaultCharacterForgetArgsSchema>,
+  ): Promise<IpcResult<z.infer<typeof vaultCharacterListResultSchema>>>;
   syncVault(): Promise<IpcResult<z.infer<typeof vaultSyncResultSchema>>>;
   /** avisa de que la boveda se cerro sola. devuelve la funcion de baja */
   onVaultLocked(listener: () => void): () => void;

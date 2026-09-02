@@ -312,6 +312,7 @@ interfaz: *workspace*, *privacy*, *vault*, *invitado en solo lectura*.
 | F9.22 | El modelo pide una imagen dentro de la conversación y se genera sola | done (sin llamada real) |
 | F9.23 | Imagen de referencia del personaje | **retirada**: la API la eliminó (`D-053`) |
 | F9.24 | Personaje por rasgos del enum cerrado del proveedor | done (contrato corregido con llamadas reales) |
+| F9.25 | Personajes guardados en la bóveda; la API no sabe listarlos | done (local; sin sincronizar) |
 
 `F9.18` cierra la avería que impedía usar la bóveda en un segundo ordenador:
 el archivo local y la llave envuelta del servidor eran dos orígenes de la misma

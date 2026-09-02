@@ -1,5 +1,36 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-09-02 03:40 — Claude — los personajes se guardan: crearlos cuesta creditos
+
+Daniel perdio el identificador del personaje que acababa de pagar. Luxy solo lo
+guardaba si enviabas un mensaje justo despues, porque viajaba dentro del turno
+cifrado. Si cerrabas la pantalla, el personaje quedaba **pagado y perdido**.
+
+Peor: **la API no sabe listarlos**. Sus endpoints son crear, modificar
+(`PATCH /v1/characters/:id`) y sondear generaciones; no hay ningun
+`GET /v1/characters`. Y `GET /v1/generations/:id` devuelve estado, URL y coste,
+**pero no el `character_id`**, asi que desde el panel del proveedor tampoco se
+recupera por API.
+
+- `character-store.ts` (nuevo): lista cifrada en `vault/characters.json`, con el
+  dominio de clave `identity`. Un personaje describe a alguien, asi que va
+  cifrado como todo lo demas;
+- **se guarda en cuanto la API lo devuelve**, antes de devolver nada al
+  renderer. Es lo unico que impide pagar por un identificador y perderlo;
+- escritura atomica: un corte a medias aqui significaria perder identificadores
+  pagados;
+- la pantalla muestra **la lista de tus personajes**; pulsar uno lo asigna a la
+  conversacion. Se acabo copiar un uuid a mano;
+- se manda tambien `name` al proveedor, para que su panel sea legible;
+- se puede olvidar uno de la lista. En el proveedor sigue existiendo.
+
+Es LOCAL: todavia no se sincroniza entre equipos. Anotado.
+
+Nueve pruebas. La que importa: crear el personaje, **cerrar y reabrir la
+boveda**, y que siga ahi —que es exactamente el caso que se perdia—.
+
+**`npm run check` exit 0: 120 archivos, 2.079 superadas, 9 omitidas.**
+
 ### 2026-09-02 03:10 — Claude — el modelo no sabia a quien encarnaba, y por que
 
 Daniel creo el personaje —gasto una creacion, el avatar aparece en la web del
