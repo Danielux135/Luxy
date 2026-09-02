@@ -17,6 +17,7 @@ import {
   configSaveArgsSchema,
   secretNameSchema,
   vaultCharacterImportArgsSchema,
+  vaultMediaAttachArgsSchema,
   worktreeOpenFolderArgsSchema,
   studioJobActionArgsSchema,
   studioJobsListArgsSchema,
@@ -104,6 +105,21 @@ describe('validacion de argumentos', () => {
         false,
       );
     }
+  });
+
+  it('el pie de foto de un adjunto es opcional y acotado', () => {
+    // es lo unico que el modelo llega a saber de un archivo que no genero el:
+    // no lo ve, no lo abre y no tiene ojos
+    expect(
+      vaultMediaAttachArgsSchema.parse({ conversationId: '4d609d37-8f3e-4558-ae82-538eb6385dda' })
+        .caption,
+    ).toBe('');
+    expect(
+      vaultMediaAttachArgsSchema.safeParse({
+        conversationId: '4d609d37-8f3e-4558-ae82-538eb6385dda',
+        caption: 'x'.repeat(501),
+      }).success,
+    ).toBe(false);
   });
 
   it('acota la longitud de los textos que llegan del renderer', () => {

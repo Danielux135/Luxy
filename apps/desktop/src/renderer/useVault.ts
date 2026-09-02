@@ -84,6 +84,29 @@ export interface PrivateMediaItem {
   previewable: boolean;
 }
 
+export interface VaultComposer {
+  /** proveedor elegido; `null` mientras no se haya elegido ninguno */
+  provider: string | null;
+  /** proyecto elegido; `null` mientras no se haya elegido ninguno */
+  project: string | null;
+  message: string;
+  /** `null` mientras no se editen: enviar sin tocarlas conserva las guardadas */
+  instructions: string | null;
+  characterId: string | null;
+  characterDescription: string | null;
+  /** pie de foto que acompañara al proximo adjunto */
+  caption: string;
+}
+
+/** lo que se borra al cambiar de conversacion; el resto son preferencias */
+const EMPTY_DRAFT = {
+  message: '',
+  instructions: null,
+  characterId: null,
+  characterDescription: null,
+  caption: '',
+} satisfies Omit<VaultComposer, 'provider' | 'project'>;
+
 export interface VaultController {
   status: VaultStatusView;
   loading: boolean;
@@ -128,6 +151,17 @@ export interface VaultController {
    * interfaz pueda decir por qué no hay imagen: callarse parece un cuelgue.
    */
   lastImage: { mediaId: string | null; costCredits: number | null; error: string | null } | null;
+  /**
+   * lo que hay escrito y todavia no se ha enviado.
+   *
+   * Vive AQUI y no en la pantalla a proposito. Estaba en estado del componente,
+   * asi que cambiar de pestaña desmontaba la pagina y se perdia todo: las
+   * instrucciones a medio escribir desaparecian sin haberse guardado nunca, y
+   * el proveedor volvia al primero de la lista, con lo que se acababa enviando
+   * a un modelo que no era el elegido.
+   */
+  composer: VaultComposer;
+  setComposer: (patch: Partial<VaultComposer>) => void;
   sending: boolean;
   openConversation: (conversationId: string | null) => Promise<void>;
   send: (input: {
@@ -143,7 +177,8 @@ export interface VaultController {
   removeConversation: (conversationId: string) => Promise<void>;
   media: PrivateMediaItem[];
   attaching: boolean;
-  attachMedia: () => Promise<void>;
+  /** el pie de foto es lo unico que el modelo llega a saber del archivo */
+  attachMedia: (caption: string) => Promise<void>;
   openMedia: (mediaId: string) => Promise<string | null>;
   generating: boolean;
   /** créditos declarados por el proveedor en la última generación */
@@ -208,6 +243,11 @@ export function useVault(): VaultController {
   const [characters, setCharacters] = useState<VaultCharacterView[]>([]);
   const [lastImage, setLastImage] = useState<VaultController['lastImage']>(null);
   const [sending, setSending] = useState(false);
+  const [composer, setComposerState] = useState<VaultComposer>({
+    provider: null,
+    project: null,
+    ...EMPTY_DRAFT,
+  });
   const [media, setMedia] = useState<PrivateMediaItem[]>([]);
   const [attaching, setAttaching] = useState(false);
   const [generating, setGenerating] = useState(false);
@@ -416,9 +456,16 @@ export function useVault(): VaultController {
     [run],
   );
 
+  const setComposer = useCallback((patch: Partial<VaultComposer>): void => {
+    setComposerState((previous) => ({ ...previous, ...patch }));
+  }, []);
+
   const openConversation = useCallback(
     async (conversationId: string | null): Promise<void> => {
       setOpenConversationId(conversationId);
+      // los borradores pertenecen a la conversacion en la que se escribieron;
+      // el proveedor y el proyecto son preferencias y se conservan
+      setComposerState((previous) => ({ ...previous, ...EMPTY_DRAFT }));
       if (conversationId === null) {
         setTurns([]);
         // una conversación nueva empieza sin instrucciones: arrastrar las de la
@@ -451,7 +498,7 @@ export function useVault(): VaultController {
     if (mounted.current && result.ok) setMedia(result.value.media);
   }, [openConversationId]);
 
-  const attachMedia = useCallback(async (): Promise<void> => {
+  const attachMedia = useCallback(async (caption: string): Promise<void> => {
     if (openConversationId === null) {
       setError('abre o empieza una conversacion antes de adjuntar');
       return;
@@ -459,7 +506,7 @@ export function useVault(): VaultController {
     setAttaching(true);
     setError(null);
     try {
-      const result = await window.luxy.attachVaultMedia(openConversationId);
+      const result = await window.luxy.attachVaultMedia(openConversationId, caption);
       if (!result.ok) {
         setError(result.error);
         setHint(result.hint);
@@ -705,6 +752,8 @@ export function useVault(): VaultController {
     removeConversation,
     media,
     attaching,
+    composer,
+    setComposer,
     attachMedia,
     openMedia,
     generating,

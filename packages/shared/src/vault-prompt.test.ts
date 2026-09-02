@@ -108,9 +108,41 @@ describe('prompt de conversacion privada', () => {
 
     expect(prompt).toContain('roleplay ficticio y consentido entre adultos');
     expect(prompt).toContain('personas adultas (18+)');
-    expect(prompt).toContain('Trata como canon los hechos que el usuario establece');
-    expect(prompt).toContain('No inventes otra ropa');
-    expect(prompt).toContain('no inventes una negativa fuera de rol');
+    expect(prompt).toContain('Trata como canon los HECHOS que el usuario establece');
+    expect(prompt).toContain('no inventes otra ropa');
+  });
+
+  it('el canon cubre los hechos, no las reacciones del personaje', () => {
+    // la version anterior decia «no inventes una negativa» sin mas matiz que
+    // «fuera de rol», y un modelo complaciente lo leia como «no digas que no»:
+    // el personaje aceptaba todo, incluidas dos ofertas expresas de parar
+    const prompt = buildVaultPrompt({
+      memory: null,
+      turns: [],
+      message: 'x',
+      character: 'Lia',
+    });
+
+    expect(prompt).toContain('las REACCIONES del personaje son suyas');
+    expect(prompt).toContain('El personaje tiene voluntad y estado propios');
+    expect(prompt).toContain('salir del personaje para negarte, no que el');
+    expect(prompt).toContain('aceptarlo es una respuesta valida');
+  });
+
+  it('no impone tono: cuanto se resiste lo deciden las instrucciones del usuario', () => {
+    // permitir que se niegue NO es pedirle que se niegue. Si esto se convierte
+    // en una orden, cambia el roleplay de todas las conversaciones sin que
+    // nadie lo haya pedido, que es justo lo que no debe hacer el prompt global
+    const prompt = buildVaultPrompt({
+      memory: null,
+      turns: [],
+      message: 'x',
+      character: 'Lia',
+    });
+
+    expect(prompt).toContain('Aqui solo se dice que puede, no que deba');
+    expect(prompt).toContain('lo fijan su descripcion y las instrucciones de la');
+    expect(prompt).not.toContain('se mas suave');
   });
 
   it('sin personaje ni instrucciones no se le manda encarnar nada', () => {

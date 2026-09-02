@@ -10,6 +10,7 @@ import {
   retryAfterMs,
   CHARACTER_MODELS,
   CHARACTER_TRAITS,
+  MAX_NEGATIVE_CHARS,
   MAX_SCENE_CHARS,
 } from './xavira.js';
 
@@ -475,6 +476,40 @@ describe('errores', () => {
     expect(error.status).toBe(502);
     expect(error.code).toBeNull();
     expect(error.message).toContain('502');
+  });
+
+  it('lo que no debe salir viaja en el negativo, nunca en el prompt', async () => {
+    // su documentacion insiste: el prompt positivo no tiene el concepto de «no»
+    // y nombrar algo para excluirlo lo invoca
+    const { impl, calls } = fakeFetch([{ status: 201, body: { generation_id: 'g', status: 'completed' } }]);
+    await generateImage(
+      { characterId: 'per-1', prompt: 'p', negativePromptAppend: '2girls, camera' },
+      options(impl),
+    );
+    expect(calls[0]?.body).toEqual({
+      character_id: 'per-1',
+      prompt: 'p',
+      negative_prompt_append: '2girls, camera',
+    });
+  });
+
+  it('el negativo se acota al tope que documenta la API', async () => {
+    const { impl, calls } = fakeFetch([{ status: 201, body: { generation_id: 'g', status: 'completed' } }]);
+    await generateImage(
+      { characterId: 'per-1', prompt: 'p', negativePromptAppend: 'x'.repeat(MAX_NEGATIVE_CHARS + 50) },
+      options(impl),
+    );
+    const body = calls[0]?.body as { negative_prompt_append: string };
+    expect(body.negative_prompt_append.length).toBe(MAX_NEGATIVE_CHARS);
+  });
+
+  it('un video acepta el mismo negativo', async () => {
+    const { impl, calls } = fakeFetch([{ status: 202, body: { generation_id: 'g', status: 'pending' } }]);
+    await generateVideo(
+      { characterId: 'per-1', negativePromptAppend: '2girls' },
+      options(impl),
+    );
+    expect(calls[0]?.body).toEqual({ character_id: 'per-1', negative_prompt_append: '2girls' });
   });
 
   it('la clave nunca aparece en el mensaje de error', async () => {

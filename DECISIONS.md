@@ -1132,3 +1132,64 @@ La separación queda explícita:
 Esto corrige el contrato de Luxy. No promete que un proveedor externo vaya a
 ignorar sus propias reglas; por eso la ejecución real se registra aparte como
 `LA-034`.
+
+## D-056 — un personaje puede negarse; el prompt global no decide cuanto
+
+Fecha: 2026-09-02
+
+Estado: aceptada, implementada
+
+`D-055` arreglo que el modelo rompiera el personaje para negarse, y lo hizo con
+esta linea: «Conserva los limites expresos del personaje, pero no inventes una
+negativa fuera de rol». El matiz que importaba era «fuera de rol», y es
+justamente el que se pierde. Un modelo complaciente —y una descripcion de
+personaje sin limites expresos, que es el caso normal— lo lee como «no digas
+que no». En una conversacion real el personaje ignoro dos ofertas expresas de
+parar y convirtio las dos en escalada.
+
+La separacion queda explicita:
+
+- el canon cubre los HECHOS que el usuario establece sobre la escena; las
+  REACCIONES del personaje son suyas;
+- el personaje puede dudar, frenar, pedir una pausa o negarse **dentro** del
+  rol, y cansarse sin que el cansancio se le pase al primer contacto. Lo
+  prohibido sigue siendo salir del personaje para negarse;
+- un ofrecimiento de parar del usuario es real, no una prueba de resistencia.
+
+Y una regla sobre el propio prompt global, que es la mitad menos obvia de esta
+decision: **abre la posibilidad, no impone el tono**. Cuanto se resiste un
+personaje, cuanta iniciativa lleva y cuanto escala son gusto del usuario y viven
+en su descripcion y en las instrucciones de la conversacion, que son suyas y por
+conversacion. Meterlo en el prompt global cambiaria el roleplay de todas las
+conversaciones sin que nadie lo pida. Una prueba lo fija: el bloque dice «puede»
+y nunca «debe».
+
+## D-057 — el prompt de imagen se escribe en ingles y solo con el personaje
+
+Fecha: 2026-09-02
+
+Estado: aceptada, implementada
+
+Una generacion real devolvio al personaje correcto, con la pose correcta, mas
+una segunda mujer que nadie habia pedido y una camara de fotos en la mano. Las
+tres cosas se explican sin culpar al generador:
+
+- la documentacion del proveedor exige **ingles**; en otro idioma la escena
+  llega sin traducir y devuelve otra cosa. Nuestra instruccion estaba en español
+  y no lo decia, asi que el modelo escribia el prompt en español;
+- la identidad ya la codifica el personaje. Si el prompt describe a alguien mas
+  —el usuario incluido—, sale en la imagen;
+- el usuario habia pedido «que me enseñes en foto»; el modelo lo traslado al
+  prompt y el emparejador de poses del proveedor lo resolvio como `selfie`, que
+  es una de sus claves. De ahi la camara.
+
+Se corrige en el origen (la instruccion prohibe mencionar a nadie mas y
+cualquier camara, movil, espejo o selfie, y pide ingles) y se refuerza en el
+adaptador con `negative_prompt_append`, que es donde el proveedor dice que va lo
+que no debe salir: el prompt positivo no tiene el concepto de «no» y nombrar
+algo para excluirlo lo invoca.
+
+**No se fuerza `pose: "none"`.** Quitaria el emparejador entero, que es lo que
+hace que una peticion corta y explicita rinda; y desde 2026-08-18 el propio
+emparejador sabe responder «ninguna de estas». El estilo del prompt lo decide el
+modelo del personaje: etiquetas para anime, prosa para realista.

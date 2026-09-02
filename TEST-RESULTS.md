@@ -1,5 +1,28 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-02 — Windows 11 (equipo `oscar`) — VAULT-ROLEPLAY-001
+
+- **`npm run lint`, `npm run typecheck`, `npm test` y `npm run build`: los
+  cuatro exit 0.** Suite: **122 archivos, 2.127 superadas, 9 omitidas, 0
+  fallos** (antes: 2.116).
+- Tres pruebas existentes se reescribieron porque afirmaban sobre el texto
+  literal del prompt anterior, que ha cambiado a proposito. No se debilito
+  ninguna: dos ganaron aserciones.
+- Pruebas nuevas: el canon cubre hechos y no reacciones; el bloque global dice
+  «puede» y nunca «debe» (fija que no impone tono); no se ofrece una imagen que
+  nadie ha pedido; el prompt del generador se pide en ingles; se prohiben la
+  segunda persona y las camaras; el estilo sigue al modelo del personaje; el
+  negativo cubre `2girls`, `camera` y `selfie`; el negativo viaja en su campo y
+  se acota al tope de la API, tambien en video; el pie de foto es opcional y
+  acotado.
+- Sin red ni creditos: `xavira.test.ts` sigue mockeando el transporte y su
+  prueba «ninguna prueba de este archivo usa fetch de verdad» sigue verde.
+- **No verificado en pantalla.** El compositor levantado a `useVault` no tiene
+  prueba automatica: el renderer no tiene banco de pruebas de componentes, y el
+  fallo era de colocacion del estado, que ninguna prueba unitaria habria
+  detectado. Y un cambio de prompt fija lo que se envia, nunca como responde un
+  proveedor concreto. Ver `LA-037`.
+
 ### 2026-09-02 — Windows 11 (equipo `oscar`) — BUG-VAULT-CHARACTER-001
 
 - **`npm run lint`, `npm run typecheck`, `npm test` y `npm run build`: los

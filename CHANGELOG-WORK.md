@@ -1,5 +1,47 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-09-02 21:30 — Claude — VAULT-ROLEPLAY-001
+
+- Origen: revision de una conversacion privada real aportada por Daniel. Cinco
+  sintomas, cinco causas distintas, ninguna del modelo portandose raro.
+- (1) Estado que se perdia: `provider` y los borradores vivian en estado del
+  componente `ConversationPanel`. Cambiar de pestaña desmontaba la pagina, se
+  perdian las instrucciones a medio escribir —de ahi «no se guardan»— y el
+  proveedor volvia al primero de la lista, con lo que se enviaba a Claude sin
+  querer. Subido a `useVault` como `composer` + `setComposer`; los borradores se
+  limpian al cambiar de conversacion, el proveedor y el proyecto se conservan.
+- (2) Prompt de imagen: ahora se pide en INGLES, solo con el personaje a solas y
+  sin camaras, moviles ni selfies; el estilo sigue al modelo (etiquetas para
+  anime, prosa para realista). Ademas se manda `negative_prompt_append` en
+  imagen y video. Ver `D-057`.
+- (3) Imagenes no pedidas: la instruccion empujaba a usar el bloque y no decia
+  en ningun sitio que no lo usara por iniciativa propia. Añadido, con el matiz
+  de que un momento dramatico no es una peticion.
+- (4) Adjuntar: el archivo se guardaba con `prompt: null`, asi que el modelo
+  solo veia el nombre del fichero. Ahora hay pie de foto opcional (500 chars)
+  que va a ese mismo campo — el que rellenaria despues un describidor
+  automatico.
+- (5) Personaje demasiado complaciente: el prompt global decia «no inventes una
+  negativa» y un modelo complaciente lo leia como «no digas que no». Ver
+  `D-056`. Importante: el bloque global abre la posibilidad y NO impone tono;
+  cuanto se resiste lo deciden la descripcion y las instrucciones del usuario.
+- Archivos modificados: `packages/shared/src/vault-prompt.ts`,
+  `packages/shared/src/vault-image-request.ts`,
+  `apps/agent/src/providers/xavira.ts`, `apps/desktop/src/main/ipc/handlers.ts`,
+  `apps/desktop/src/renderer/useVault.ts`,
+  `apps/desktop/src/renderer/pages/Vault.tsx`,
+  `apps/desktop/src/renderer/styles.css`, `apps/desktop/src/shared/ipc.ts`,
+  `apps/desktop/src/preload/index.ts`.
+- Pruebas: 15 nuevas o reescritas. `npm run lint`, `npm run typecheck`,
+  `npm test` y `npm run build`: los cuatro exit 0. Suite: **122 archivos, 2.127
+  superadas, 9 omitidas, 0 fallos**.
+- Riesgo: el punto 1 no tiene prueba automatica —el renderer no tiene banco de
+  pruebas de componentes— y los cambios de prompt fijan el contrato que se
+  envia, no como responde un proveedor concreto. Nada de esto esta visto en
+  pantalla todavia.
+- Siguiente paso exacto: `LA-037` — probarlo en la aplicacion y ajustar las
+  instrucciones del personaje, que es donde vive el tono.
+
 ### 2026-09-02 17:10 — Claude — BUG-VAULT-CHARACTER-001
 
 - Sintoma: en una conversacion privada, al pedir una foto nueva, la pantalla

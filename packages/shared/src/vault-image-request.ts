@@ -80,7 +80,43 @@ export interface VaultImageOnFile {
   description: string;
 }
 
-export function buildVaultImageInstruction(available: VaultImageOnFile[] = []): string {
+/**
+ * como quiere el generador que se le escriba el prompt.
+ *
+ * No es cosmetico: los modelos de anime rinden peor con prosa y los realistas
+ * peor con etiquetas sueltas, segun la documentacion del proveedor. Se expresa
+ * asi, y no con el identificador del modelo, para que este modulo siga sin
+ * saber nada de ningun proveedor concreto.
+ */
+export type VaultImagePromptStyle = 'prose' | 'tags';
+
+/**
+ * negativo que se manda SIEMPRE con una imagen de una conversacion.
+ *
+ * Sale de tres fallos observados en una generacion real: aparecio una segunda
+ * mujer que no habia pedido nadie, y el personaje sostenia una camara porque el
+ * usuario habia dicho «mandame una foto» y el emparejador de poses del
+ * proveedor lo entendio como un selfie. La instruccion de arriba lo ataca en el
+ * origen; esto es el cinturon por si el modelo se despista.
+ */
+export const VAULT_IMAGE_NEGATIVE = [
+  '2girls',
+  'multiple girls',
+  '2boys',
+  'multiple people',
+  'another person',
+  'camera',
+  'holding camera',
+  'holding phone',
+  'smartphone',
+  'selfie',
+  'taking a photo',
+].join(', ');
+
+export function buildVaultImageInstruction(
+  available: VaultImageOnFile[] = [],
+  style: VaultImagePromptStyle = 'prose',
+): string {
   const lines = [
     'Puedes enseñar UNA imagen por respuesta, y tienes dos formas de hacerlo.',
     '',
@@ -90,15 +126,33 @@ export function buildVaultImageInstruction(available: VaultImageOnFile[] = []): 
     `   ${VAULT_IMAGE_OPEN}{"mediaId":"<id de la lista de abajo>"}${VAULT_IMAGE_CLOSE}`,
     '',
     'b) GENERAR una nueva. Cuesta creditos y tarda, asi que solo cuando pidan algo que aun',
-    '   no existe. En `prompt` va una descripcion visual de la escena, solo lo que se ve;',
-    '   no copies el mensaje del usuario:',
-    `   ${VAULT_IMAGE_OPEN}{"prompt":"descripcion visual de la escena","kind":"image"}${VAULT_IMAGE_CLOSE}`,
+    '   no existe:',
+    `   ${VAULT_IMAGE_OPEN}{"prompt":"<descripcion en INGLES>","kind":"image"}${VAULT_IMAGE_CLOSE}`,
+    '',
+    'CUANDO escribir el bloque: SOLO si el usuario pide ver, recibir o volver a ver una imagen.',
+    'Nunca por iniciativa propia. Un momento intenso, una promesa o un buen final de escena NO son',
+    'una peticion: si no te la han pedido, no la mandes.',
+    'Cuando SI te la pidan y haya una opcion que encaje:',
+    '   responde primero en personaje y despues escribe el bloque;',
+    '   no alegues que no puedes adjuntar archivos;',
+    '   no prometas enviarla sin incluirlo.',
+    '',
+    'COMO escribir `prompt`, que es lo que recibe el generador de imagenes:',
+    '- EN INGLES, siempre. En cualquier otro idioma el generador ignora la escena y devuelve otra',
+    '  cosa. Escribe la respuesta en el idioma de la conversacion y solo este campo en ingles.',
+    '- Solo aparece EL PERSONAJE, a solas. Nunca describas al usuario, sus manos, su cuerpo ni a',
+    '  ninguna otra persona: si mencionas a alguien mas, sale en la imagen.',
+    '- Nada de camaras, moviles, espejos, selfies ni el acto de fotografiar, aunque el usuario haya',
+    '  dicho «mandame una foto». Eso pone una camara en la imagen.',
+    '- Solo lo que se ve: pose, ropa, expresion, luz, lugar. Sin dialogo, sin lo que siente, sin',
+    '  contar lo que pasa antes o despues. No copies el mensaje del usuario.',
+    style === 'tags'
+      ? '- Etiquetas cortas separadas por comas, sin frases: "sitting on a bed, blue dress, blushing,'
+      : '- Frases cortas separadas por comas: "sitting on the edge of the bed, wearing a blue dress,',
+    style === 'tags' ? '  looking at viewer, warm light".' : '  warm evening light, candid".',
     '',
     'El bloque va al final de tu respuesta, antes del bloque de memoria. No puedes adjuntar',
-    'archivos de ninguna otra forma: si no escribes el bloque, no se enseña nada. Si no hace',
-    'falta ninguna imagen, no lo escribas. Cuando el usuario pida ver, recibir o volver a ver',
-    'una imagen y haya una opcion que encaje, responde primero en personaje y escribe el bloque:',
-    'no alegues que no puedes adjuntar archivos y no prometas enviarla sin incluirlo.',
+    'archivos de ninguna otra forma.',
   ];
 
   if (available.length > 0) {

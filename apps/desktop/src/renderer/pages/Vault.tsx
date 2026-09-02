@@ -67,14 +67,17 @@ function ConversationPanel({
   summary: ConfigSummary;
   providers: string[];
 }): JSX.Element {
-  const [message, setMessage] = useState('');
-  // `null` mientras no se edite: enviar sin tocarlas conserva las guardadas
-  const [draftInstructions, setDraftInstructions] = useState<string | null>(null);
-  const [draftCharacter, setDraftCharacter] = useState<string | null>(null);
-  const [draftDescription, setDraftDescription] = useState<string | null>(null);
   const projects = Object.keys(summary.config?.projects ?? {});
-  const [project, setProject] = useState(projects[0] ?? '');
-  const [provider, setProvider] = useState(providers[0] ?? 'claude');
+  // el compositor vive en el controlador, no aquí: esta página se desmonta al
+  // cambiar de pestaña y con ella se perdía el proveedor elegido y todo lo
+  // escrito sin enviar
+  const { composer } = vault;
+  const { message, instructions: draftInstructions, characterId: draftCharacter } = composer;
+  const draftDescription = composer.characterDescription;
+  // `null` significa «no ha elegido»: entonces vale el primero de la lista,
+  // pero una elección suya se conserva aunque la lista cambie de orden
+  const project = composer.project ?? projects[0] ?? '';
+  const provider = composer.provider ?? providers[0] ?? 'claude';
 
   const canSend =
     message.trim().length > 0 && project.length > 0 && provider.length > 0 && !vault.sending;
@@ -91,12 +94,14 @@ function ConversationPanel({
         characterDescription: draftDescription,
       })
       .then(() => {
-        setMessage('');
         // ya están guardados con el turno: los borradores dejan de ser
         // necesarios y el panel vuelve a leer lo que hay de verdad
-        setDraftInstructions(null);
-        setDraftCharacter(null);
-        setDraftDescription(null);
+        vault.setComposer({
+          message: '',
+          instructions: null,
+          characterId: null,
+          characterDescription: null,
+        });
       });
   };
 
@@ -155,9 +160,9 @@ function ConversationPanel({
       <InstructionsPanel
         vault={vault}
         draft={draftInstructions}
-        onChange={setDraftInstructions}
+        onChange={(value) => vault.setComposer({ instructions: value })}
         draftCharacter={draftCharacter}
-        onCharacterChange={setDraftCharacter}
+        onCharacterChange={(value) => vault.setComposer({ characterId: value })}
       />
 
       <GeneratePanel
@@ -166,8 +171,7 @@ function ConversationPanel({
         onCharacterReady={(id, description) => {
           // se adopta directamente: copiar un uuid a mano entre dos campos de
           // la misma pantalla era un paso que no aportaba nada
-          setDraftCharacter(id);
-          setDraftDescription(description);
+          vault.setComposer({ characterId: id, characterDescription: description });
         }}
       />
 
@@ -189,7 +193,10 @@ function ConversationPanel({
         <>
           <div className="row">
             <Field label="Proveedor">
-              <select value={provider} onChange={(event) => setProvider(event.target.value)}>
+              <select
+                value={provider}
+                onChange={(event) => vault.setComposer({ provider: event.target.value })}
+              >
                 {providers.map((id) => (
                   <option key={id} value={id}>
                     {id}
@@ -198,7 +205,10 @@ function ConversationPanel({
               </select>
             </Field>
             <Field label="Proyecto">
-              <select value={project} onChange={(event) => setProject(event.target.value)}>
+              <select
+                value={project}
+                onChange={(event) => vault.setComposer({ project: event.target.value })}
+              >
                 {projects.map((alias) => (
                   <option key={alias} value={alias}>
                     {alias}
@@ -214,7 +224,7 @@ function ConversationPanel({
             value={message}
             placeholder="Escribe tu mensaje…"
             disabled={vault.sending}
-            onChange={(event) => setMessage(event.target.value)}
+            onChange={(event) => vault.setComposer({ message: event.target.value })}
             onKeyDown={(event) => {
               if (event.key === 'Enter' && (event.ctrlKey || event.metaKey) && canSend) submit();
             }}
@@ -223,10 +233,21 @@ function ConversationPanel({
             <button className="btn btn--primary" disabled={!canSend} onClick={submit}>
               {vault.sending ? 'Esperando respuesta…' : 'Enviar'}
             </button>
+            <input
+              className="vault-caption"
+              value={composer.caption}
+              placeholder="Qué se ve en lo que vas a adjuntar…"
+              disabled={vault.attaching || vault.openConversationId === null}
+              onChange={(event) => vault.setComposer({ caption: event.target.value })}
+            />
             <button
               className="btn"
               disabled={vault.attaching || vault.openConversationId === null}
-              onClick={() => void vault.attachMedia()}
+              onClick={() => {
+                void vault.attachMedia(composer.caption).then(() => {
+                  vault.setComposer({ caption: '' });
+                });
+              }}
               title={
                 vault.openConversationId === null
                   ? 'Envía un mensaje primero para crear la conversación'

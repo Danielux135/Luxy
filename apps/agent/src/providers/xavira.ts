@@ -343,6 +343,9 @@ export type CharacterTraits = Partial<Record<CharacterTraitField, string>>;
 /** tope de `scene`, segun su documentacion */
 export const MAX_SCENE_CHARS = 1000;
 
+/** tope de `negative_prompt_append`, segun su documentacion */
+export const MAX_NEGATIVE_CHARS = 1000;
+
 export interface CreateCharacterRequest {
   /**
    * modelo del personaje. OBLIGATORIO: sin el, la API responde 400
@@ -404,6 +407,15 @@ export interface ImageRequest {
   hiresFix?: '1.25x' | '1.5x';
   pose?: string;
   rawPrompt?: boolean;
+  /**
+   * se suma a los negativos de la casa; no los reemplaza.
+   *
+   * Aqui viaja lo que NO debe salir en la imagen. Su documentacion insiste en
+   * que lo que se quiere excluir va en este campo y nunca en `prompt`, porque
+   * el prompt positivo no tiene el concepto de «no» y nombrar algo para
+   * negarlo lo invoca.
+   */
+  negativePromptAppend?: string;
 }
 
 /**
@@ -425,6 +437,9 @@ export async function generateImage(
       ...(request.hiresFix === undefined ? {} : { hires_fix: request.hiresFix }),
       ...(request.pose === undefined ? {} : { pose: request.pose }),
       ...(request.rawPrompt === undefined ? {} : { raw_prompt: request.rawPrompt }),
+      ...(request.negativePromptAppend === undefined
+        ? {}
+        : { negative_prompt_append: request.negativePromptAppend.slice(0, MAX_NEGATIVE_CHARS) }),
     }),
   });
 
@@ -439,6 +454,8 @@ export interface VideoRequest {
   fromGenerationId?: string;
   prompt?: string;
   duration?: '5s' | '10s';
+  /** mismo criterio que en imagen: lo que no debe salir va aqui */
+  negativePromptAppend?: string;
 }
 
 /** pide un video. siempre vuelve pendiente */
@@ -456,6 +473,9 @@ export async function generateVideo(
         : { generation_id: request.fromGenerationId }),
       ...(request.prompt === undefined ? {} : { prompt: request.prompt }),
       ...(request.duration === undefined ? {} : { duration: request.duration }),
+      ...(request.negativePromptAppend === undefined
+        ? {}
+        : { negative_prompt_append: request.negativePromptAppend.slice(0, MAX_NEGATIVE_CHARS) }),
     }),
   });
 

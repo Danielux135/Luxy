@@ -1,6 +1,27 @@
 # Luxy — estado canónico del proyecto
 
-Última actualización: **2026-09-02 — BUG-VAULT-CHARACTER-001, un identificador de personaje que nadie comprobaba**
+Última actualización: **2026-09-02 — VAULT-ROLEPLAY-001, cinco fallos de la conversación privada**
+
+Revisión de una conversación real: cinco síntomas con cinco causas distintas y
+ninguna del modelo. El proveedor elegido y las instrucciones a medio escribir
+vivían en estado del componente y se perdían al cambiar de pestaña. El prompt
+del generador de imágenes iba en español, describía a más de una persona y
+mencionaba fotos, de donde salían la segunda mujer y la cámara. La instrucción
+empujaba a enviar imágenes y no prohibía hacerlo sin que las pidieran. Adjuntar
+guardaba el archivo sin ninguna descripción. Y el prompt global decía «no
+inventes una negativa», que un modelo complaciente lee como «no digas que no».
+
+Dos decisiones nuevas: `D-056` —el personaje puede negarse dentro del rol, y el
+prompt global abre la posibilidad sin imponer el tono, que pertenece a las
+instrucciones del usuario— y `D-057` —el prompt de imagen se escribe en inglés,
+solo con el personaje, y lo que no debe salir viaja en el negativo—.
+
+`npm run check` verde: **122 archivos, 2.127 pruebas superadas, 9 omitidas**.
+Pendiente `LA-037`: nada de esto está visto en pantalla todavía.
+
+---
+
+Última actualización anterior: **2026-09-02 — BUG-VAULT-CHARACTER-001, un identificador de personaje que nadie comprobaba**
 
 Una conversación privada podía quedarse fijada a un `character_id` que la bóveda
 no conoce. El campo acepta texto libre, nadie lo verificaba, y el único que lo

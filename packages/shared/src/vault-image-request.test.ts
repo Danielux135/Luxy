@@ -7,6 +7,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   VAULT_IMAGE_CLOSE,
+  VAULT_IMAGE_NEGATIVE,
   VAULT_IMAGE_OPEN,
   buildVaultImageInstruction,
   parseVaultImageRequest,
@@ -149,12 +150,55 @@ describe('la herramienta solo se ofrece cuando existe', () => {
   it('la instruccion pide describir la escena, no repetir al usuario', () => {
     // sin esto el modelo reenvia el mensaje del usuario como prompt, que casi
     // nunca describe una imagen
-    expect(buildVaultImageInstruction()).toContain('descripcion visual');
+    expect(buildVaultImageInstruction()).toContain('No copies el mensaje del usuario');
+  });
+
+  it('no se ofrece enviar una imagen que nadie ha pedido', () => {
+    // paso de verdad: mando dos fotos sin que se las pidieran, una de ellas en
+    // un momento dramatico de la escena. La instruccion empujaba a usar el
+    // bloque y no decia en ningun sitio que no lo usara por su cuenta
+    const instruction = buildVaultImageInstruction();
+    expect(instruction).toContain('SOLO si el usuario pide ver, recibir o volver a ver una imagen');
+    expect(instruction).toContain('Nunca por iniciativa propia');
+    expect(instruction).toContain('si no te la han pedido, no la mandes');
+  });
+
+  it('el prompt del generador se pide en ingles', () => {
+    // su documentacion es explicita: en otro idioma el generador ignora la
+    // escena. La instruccion estaba escrita en español y no lo decia
+    const instruction = buildVaultImageInstruction();
+    expect(instruction).toContain('EN INGLES');
+    expect(instruction).toContain('solo este campo en ingles');
+  });
+
+  it('prohibe la segunda persona y las camaras, que fue lo que salio en la imagen', () => {
+    // una generacion real devolvio al personaje correcto con una mujer de mas
+    // en el encuadre y una camara en la mano: el usuario habia dicho «mandame
+    // una foto» y eso acaba emparejando con la pose «selfie» del proveedor
+    const instruction = buildVaultImageInstruction();
+    expect(instruction).toContain('Solo aparece EL PERSONAJE, a solas');
+    expect(instruction).toContain('si mencionas a alguien mas, sale en la imagen');
+    expect(instruction).toContain('Nada de camaras, moviles, espejos, selfies');
+  });
+
+  it('el estilo del prompt sigue al modelo del personaje', () => {
+    // los modelos de anime rinden peor con prosa y al reves, segun su doc
+    expect(buildVaultImageInstruction([], 'tags')).toContain('Etiquetas cortas separadas por comas');
+    expect(buildVaultImageInstruction([], 'prose')).toContain('Frases cortas separadas por comas');
+    expect(buildVaultImageInstruction([], 'tags')).not.toContain('Frases cortas');
+  });
+
+  it('el negativo cubre la segunda persona y la camara', () => {
+    // cinturon por si el modelo se despista: la instruccion lo ataca en el
+    // origen, esto lo tapa en el generador
+    for (const termino of ['2girls', 'multiple people', 'camera', 'selfie', 'holding phone']) {
+      expect(VAULT_IMAGE_NEGATIVE).toContain(termino);
+    }
   });
 
   it('una peticion de foto exige el bloque y una respuesta en personaje', () => {
     const instruction = buildVaultImageInstruction();
-    expect(instruction).toContain('responde primero en personaje');
+    expect(instruction).toContain('responde primero en personaje y despues escribe el bloque');
     expect(instruction).toContain('no alegues que no puedes adjuntar archivos');
     expect(instruction).toContain('no prometas enviarla sin incluirlo');
   });

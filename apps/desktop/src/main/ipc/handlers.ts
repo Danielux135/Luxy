@@ -16,6 +16,7 @@ import {
   secretRegistry,
   buildCatalogSnapshot,
   isPathInside,
+  VAULT_IMAGE_NEGATIVE,
 } from '@luxy/shared';
 import { detectEnvironment } from '@luxy/agent/dist/detect.js';
 import { GatewayClient } from '@luxy/agent/dist/gateway-client.js';
@@ -870,10 +871,13 @@ export function registerIpcHandlers(context: HandlerContext): void {
     let attached = 0;
     for (const filePath of picked.filePaths) {
       const bytes = new Uint8Array(readFileSync(filePath));
+      const caption = args.caption.trim();
       await context.privateMedia.add(context.vault, args.conversationId, bytes, {
         mimeType: mimeTypeFor(filePath),
         displayName: basename(filePath),
-        prompt: null,
+        // el pie de foto es lo unico que el modelo puede saber de un archivo
+        // que no ha generado el: no lo ve, no lo abre y no tiene ojos
+        prompt: caption.length === 0 ? null : caption,
         width: null,
         height: null,
         durationMs: null,
@@ -1096,11 +1100,22 @@ export function registerIpcHandlers(context: HandlerContext): void {
     try {
       const started =
         args.kind === 'image'
-          ? await generateImage({ characterId: args.characterId, prompt: args.prompt }, options)
+          ? await generateImage(
+              {
+                characterId: args.characterId,
+                prompt: args.prompt,
+                // lo que NO debe salir. Va aqui y nunca en el prompt: el
+                // positivo no tiene el concepto de «no» y nombrar algo para
+                // negarlo lo invoca
+                negativePromptAppend: VAULT_IMAGE_NEGATIVE,
+              },
+              options,
+            )
           : await generateVideo(
               {
                 characterId: args.characterId,
                 prompt: args.prompt,
+                negativePromptAppend: VAULT_IMAGE_NEGATIVE,
                 ...(args.fromGenerationId === undefined
                   ? {}
                   : { fromGenerationId: args.fromGenerationId }),
@@ -1313,6 +1328,9 @@ export function registerIpcHandlers(context: HandlerContext): void {
           : characterDescription,
       canGenerateImage,
       existingImages,
+      // los modelos de anime rinden peor con prosa y los realistas peor con
+      // etiquetas sueltas: lo dice la documentacion del proveedor
+      imagePromptStyle: character?.modelId === 'anime-pure-v1' ? 'tags' : 'prose',
     });
 
     // ni el texto ni los rasgos: solo si el turno pudo ofrecer imagenes y

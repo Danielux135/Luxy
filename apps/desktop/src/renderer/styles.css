@@ -1646,6 +1646,12 @@ input[aria-invalid='true'] {
   margin-bottom: 10px;
 }
 
+/* pie de foto del proximo adjunto: comparte fila con el boton que lo usa */
+.vault-caption {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+
 .vault-media {
   display: flex;
   flex-direction: column;

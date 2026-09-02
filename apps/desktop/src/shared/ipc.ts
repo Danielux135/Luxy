@@ -370,6 +370,15 @@ export const VAULT_PREVIEW_MAX_BYTES = 20 * 1024 * 1024;
 
 export const vaultMediaAttachArgsSchema = z.object({
   conversationId: conversationIdSchema,
+  /**
+   * que hay en el archivo, escrito por el usuario.
+   *
+   * Sin esto, adjuntar solo servia para guardar: el modelo veia el nombre del
+   * fichero y nada mas, asi que no podia comentar la imagen ni tenerla en
+   * cuenta. Va al mismo campo que la descripcion de una imagen generada, que es
+   * el que despues leeria un describidor automatico.
+   */
+  caption: z.string().max(500).default(''),
 });
 
 export const vaultMediaListArgsSchema = z.object({
@@ -856,6 +865,7 @@ export interface LuxyBridge {
   deleteVaultConversation(conversationId: string): Promise<IpcResult<{ deleted: boolean }>>;
   attachVaultMedia(
     conversationId: string,
+    caption: string,
   ): Promise<IpcResult<{ attached: number }>>;
   listVaultMedia(
     conversationId: string,

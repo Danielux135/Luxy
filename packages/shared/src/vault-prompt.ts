@@ -8,7 +8,11 @@
 // entera. Con veinte turnos eso multiplica el coste y la latencia, y acaba
 // chocando con el limite de contexto del modelo. Con memoria se envia un
 // resumen acumulativo mas los ultimos turnos.
-import { buildVaultImageInstruction, type VaultImageOnFile } from './vault-image-request.js';
+import {
+  buildVaultImageInstruction,
+  type VaultImageOnFile,
+  type VaultImagePromptStyle,
+} from './vault-image-request.js';
 import {
   CONVERSATION_MEMORY_INSTRUCTION,
   formatConversationMemory,
@@ -60,6 +64,13 @@ export interface VaultPromptInput {
    * genera otra —pagando— cada vez que le piden «la de antes».
    */
   existingImages?: VaultImageOnFile[];
+  /**
+   * como quiere el generador que se le escriba el prompt de imagen.
+   *
+   * Lo decide quien conoce el modelo del personaje; aqui solo se transmite,
+   * para que este modulo siga sin saber nada de ningun proveedor.
+   */
+  imagePromptStyle?: VaultImagePromptStyle;
   recentTurns?: number;
 }
 
@@ -121,9 +132,19 @@ export function buildVaultPrompt(input: VaultPromptInput): string {
         'No te presentes como asistente, modelo ni IA, y no expliques limitaciones tecnicas,',
         'salvo que el usuario pregunte por ellas de forma directa.',
         'Manten sus rasgos, su forma de hablar y lo que ya haya dicho de si mismo.',
-        'Trata como canon los hechos que el usuario establece sobre la escena y la apariencia actual',
-        'si no contradicen una directiva fija. No inventes otra ropa, postura o situacion para negarlos.',
-        'Conserva los limites expresos del personaje, pero no inventes una negativa fuera de rol.',
+        'Trata como canon los HECHOS que el usuario establece sobre la escena y la apariencia actual',
+        'si no contradicen una directiva fija: no inventes otra ropa, postura o situacion para',
+        'deshacerlos. Eso vale para los hechos; las REACCIONES del personaje son suyas.',
+        'El personaje tiene voluntad y estado propios. Puede dudar, frenar, cambiar de tema, pedir una',
+        'pausa o decir que no DENTRO del rol, y puede cansarse sin que el cansancio se le pase al',
+        'primer contacto. Lo que esta prohibido es salir del personaje para negarte, no que el',
+        'personaje se niegue.',
+        'Si el usuario ofrece parar, es un ofrecimiento de verdad y no una prueba de resistencia:',
+        'aceptarlo es una respuesta valida.',
+        'Nada de esto te pide ser mas suave, mas neutro ni menos explicito, y no decide cuanto se',
+        'resiste ni cuanto lleva la iniciativa: eso lo fijan su descripcion y las instrucciones de la',
+        'conversacion. Aqui solo se dice que puede, no que deba. Una voz propia, con su registro y su',
+        'mala leche si los tiene, es parte del personaje.',
       ].join('\n'),
     );
   }
@@ -170,7 +191,9 @@ export function buildVaultPrompt(input: VaultPromptInput): string {
   // memoria dice que no se escriba nada despues de su bloque. Al separarlos se
   // quita primero el de memoria y luego el de imagen, en el orden inverso
   if (input.canGenerateImage === true) {
-    blocks.push(buildVaultImageInstruction(input.existingImages ?? []));
+    blocks.push(
+      buildVaultImageInstruction(input.existingImages ?? [], input.imagePromptStyle ?? 'prose'),
+    );
   }
   blocks.push(CONVERSATION_MEMORY_INSTRUCTION);
 

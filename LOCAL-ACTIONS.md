@@ -1,5 +1,47 @@
 # Luxy — acciones locales de Daniel
 
+## LA-037 — probar el roleplay y ajustar el tono, que es tuyo
+
+Estado: `pending` — abierta el 2026-09-02.
+
+Los cinco arreglos de `VAULT-ROLEPLAY-001` estan implementados y probados, pero
+**ninguno esta visto en pantalla**. Reconstruye (`rebuild-and-start-luxy.bat`) y
+comprueba:
+
+1. Elige un proveedor, cambia de pestaña y vuelve: debe seguir el que elegiste.
+   Escribe instrucciones sin enviar, cambia de pestaña y vuelve: deben seguir
+   ahi.
+2. Adjunta una imagen con pie de foto y preguntale por ella: ahora sabe que es.
+3. Pidele una foto: no debe salir nadie mas en el encuadre ni ninguna camara.
+4. Ofrecele parar: ahora **puede** aceptar. Si no lo hace nunca, el tono se
+   ajusta abajo, no en el codigo.
+
+### Donde vive el tono
+
+El prompt global solo abre la posibilidad de que el personaje se niegue (`D-056`).
+Cuanto se resiste, cuanta iniciativa lleva y cuanto escala lo decides tu en
+**Instrucciones de la conversacion**, que son por conversacion. Los adjetivos
+sueltos («dulce, timida») el modelo los convierte en narracion —orejas rojas— y
+no en conducta; las reglas si las ejecuta. Punto de partida para pegar y
+ajustar:
+
+```
+No nombras un acto explicito antes que el; respondes a lo que el nombra.
+No llevas la iniciativa dos turnos seguidos.
+Te cansas, y el cansancio no se te pasa porque te toque.
+Hay algo que quieres que no es el, y a veces gana.
+No terminas siempre invitandole a seguir.
+```
+
+Quita, añade o invierte lo que quieras: eso es exactamente lo que el codigo ya
+no decide por ti. Si te gusta como habla ahora —deslenguada, con su «cabron»—,
+esa parte no la toca nada de esto: el prompt protege la voz propia y solo quita
+el «si» automatico.
+
+Y si prefieres que la descripcion refleje a la que te ha salido en vez de la que
+escribiste, cambiala: hoy dice «dulce, inocente, timida» y lo que juega es otra
+cosa. Manda lo que hace, no lo que pone.
+
 ## LA-036 — recuperar el personaje y rotar la clave del proveedor
 
 Estado: `pending` — abierta el 2026-09-02.

@@ -1,5 +1,38 @@
 # Luxy — tarea activa
 
+## VAULT-ROLEPLAY-001 — cinco fallos de la conversacion privada
+
+Estado: **`done` — Claude, 2026-09-02. Sin commit al abrir este bloque.**
+Queda `LA-037`, que es probarlo y ajustar el tono: trabajo de Daniel.
+
+Salidos de revisar una conversacion real. Cinco sintomas, cinco causas:
+
+1. **El proveedor y los borradores se perdian al cambiar de pestaña.** Vivian en
+   estado de `ConversationPanel`, que se desmonta al navegar. De ahi que las
+   instrucciones «no se guardasen» —nunca llegaban a enviarse— y que el
+   proveedor volviera a Claude. Subidos a `useVault` como `composer`.
+2. **El prompt de imagen.** En español (su API exige ingles), describiendo a mas
+   de una persona y mencionando fotos: de ahi la segunda mujer y la camara, que
+   es la pose `selfie` del proveedor. Corregido en la instruccion y reforzado
+   con `negative_prompt_append`. `D-057`.
+3. **Imagenes no pedidas.** La instruccion empujaba a usar el bloque sin
+   prohibir la iniciativa propia.
+4. **Adjuntar no servia de nada.** Se guardaba sin descripcion; ahora hay pie de
+   foto, al mismo campo que rellenaria un describidor automatico.
+5. **El personaje decia que si a todo.** «No inventes una negativa» leido como
+   «no digas que no». `D-056`.
+
+Lo importante de `D-056`, que se pidio explicitamente: **el prompt global abre
+la posibilidad y no impone tono.** Cuanto se resiste el personaje pertenece a su
+descripcion y a las instrucciones de la conversacion, que son del usuario. Una
+prueba fija que el bloque dice «puede» y nunca «debe».
+
+`npm run check` en verde: 122 archivos, 2.127 superadas, 9 omitidas.
+
+**Nada visto en pantalla.** Ver `LA-037`.
+
+---
+
 ## BUG-VAULT-CHARACTER-001 — un personaje que la boveda no conoce
 
 Estado: **`done` — Claude, 2026-09-02. Sin commit.** Queda `LA-036`, que es
