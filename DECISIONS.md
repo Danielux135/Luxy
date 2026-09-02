@@ -890,3 +890,45 @@ Lo que va con esto:
 Lo que se asume: quien tenga la clave de recuperación abre la bóveda desde
 cualquier sitio, sin saber la contraseña. Es lo que se pedía, y es la razón de
 que la interfaz insista en guardarla fuera del ordenador.
+
+## D-050 — los bytes de los medios van a Supabase Storage, no a R2
+
+Fecha: 2026-09-01
+
+Estado: aceptada, implementada
+
+Sincronizar imágenes y vídeos entre equipos necesita un sitio donde dejar los
+bytes cifrados: no caben en una columna `jsonb`, y meter un vídeo de decenas de
+megas en Postgres es mala idea por donde se mire. La tabla `vault_media` de
+`0007` ya estaba escrita para eso — guarda dónde está cada archivo, no el
+archivo.
+
+Se elige **un bucket privado de Supabase Storage**, y no R2, por una razón
+práctica: el gateway **ya tiene** `SUPABASE_URL` y `SUPABASE_SERVICE_ROLE_KEY`.
+R2 habría exigido un binding nuevo en `wrangler.toml` —que ni siquiera se
+versiona, así que sería una pieza de configuración invisible en el repositorio—
+y un despliegue distinto, a cambio de nada que se note desde Luxy.
+
+Cómo queda:
+
+- el bucket es **privado y sin políticas**, igual que las tablas `vault_*`. Con
+  RLS activo sobre `storage.objects` y cero políticas, sólo `service_role` llega
+  a un archivo. El acceso pasa siempre por el gateway;
+- la ruta es `<bucket>/<id de usuario>/<clave opaca>`. El identificador de
+  usuario va **delante** para que la propiedad esté también en la ruta, no sólo
+  en la tabla. Aun así, **quien autoriza es la tabla**: descargar comprueba en
+  `vault_media` que el objeto es de quien lo pide, porque la autorización se
+  decide donde está registrada la propiedad y no en cómo se construye una ruta;
+- **los bytes suben antes que el registro**, y el gateway rechaza un registro
+  cuyos bytes no estén. Al revés, el otro equipo vería un archivo que no puede
+  abrir. Si se corta a medias queda un huérfano, que una limpieza recoge;
+- todos los objetos son `application/octet-stream`. Declarar el tipo real diría
+  si es un vídeo o una imagen sin abrir nada;
+- **tope de 90 MB por objeto** (`VAULT_MAX_OBJECT_BYTES`), por el límite del
+  cuerpo de una petición a un Worker. Un archivo más grande **se salta y se
+  cuenta**, y la sincronización sigue: perder el resto por un vídeo enorme sería
+  peor negocio que dejarlo en el equipo donde se creó. La interfaz lo dice.
+
+Lo que se asume: borrar una conversación borra sus filas en cascada, pero **los
+objetos del almacén quedan huérfanos**. No rompen nada y no son legibles; hace
+falta una limpieza que todavía no existe.

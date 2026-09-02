@@ -169,3 +169,68 @@ describe('conversaciones privadas en disco', () => {
     expect(await vacio.list(vault)).toEqual([]);
   });
 });
+
+describe('instrucciones fijas de la conversacion', () => {
+  let directory: string;
+  let vault: VaultService;
+  let store: PrivateConversationStore;
+
+  beforeEach(async () => {
+    directory = mkdtempSync(join(tmpdir(), 'luxy-instr-'));
+    vault = new VaultService(vaultFilePathFor(directory), memoryDeviceKeys(), {
+      argon2Params: FAST,
+    });
+    await vault.create(PASSWORD);
+    store = new PrivateConversationStore(conversationsDirectory(directory));
+  });
+
+  afterEach(() => {
+    rmSync(directory, { recursive: true, force: true });
+  });
+
+  it('sin instrucciones no hay instrucciones', async () => {
+    await store.appendTurn(vault, A, turn('hola'));
+    expect(await store.latestInstructions(vault, A)).toBeNull();
+  });
+
+  it('valen las del ultimo turno que las llevaba', async () => {
+    await store.appendTurn(vault, A, { ...turn('uno'), instructions: 'responde en gallego' });
+    // un turno que no las toca NO las borra: solo significa que no las cambio
+    await store.appendTurn(vault, A, turn('dos'));
+    expect(await store.latestInstructions(vault, A)).toBe('responde en gallego');
+  });
+
+  it('la ultima gana', async () => {
+    await store.appendTurn(vault, A, { ...turn('uno'), instructions: 'la primera' });
+    await store.appendTurn(vault, A, { ...turn('dos'), instructions: 'la segunda' });
+    expect(await store.latestInstructions(vault, A)).toBe('la segunda');
+  });
+
+  it('una cadena vacia las borra, y se distingue de no tocarlas', async () => {
+    await store.appendTurn(vault, A, { ...turn('uno'), instructions: 'algo' });
+    await store.appendTurn(vault, A, { ...turn('dos'), instructions: '' });
+    // sin esta distincion no habria forma de volver atras una vez puestas
+    expect(await store.latestInstructions(vault, A)).toBeNull();
+  });
+
+  it('no salen en claro en el archivo', async () => {
+    await store.appendTurn(vault, A, {
+      ...turn('hola'),
+      instructions: 'un contexto que no debe verse en disco',
+    });
+    const file = join(conversationsDirectory(directory), `${A}.jsonl`);
+    expect(readFileSync(file, 'utf8')).not.toContain('un contexto que no debe verse');
+  });
+
+  it('con la boveda cerrada no se pueden leer', async () => {
+    await store.appendTurn(vault, A, { ...turn('uno'), instructions: 'secreto' });
+    vault.lock();
+    await expect(store.latestInstructions(vault, A)).rejects.toThrow(VaultError);
+  });
+
+  it('cada conversacion tiene las suyas', async () => {
+    await store.appendTurn(vault, A, { ...turn('uno'), instructions: 'las de A' });
+    await store.appendTurn(vault, B, turn('uno'));
+    expect(await store.latestInstructions(vault, B)).toBeNull();
+  });
+});

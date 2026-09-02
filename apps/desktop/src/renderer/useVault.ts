@@ -99,6 +99,8 @@ export interface VaultController {
   conversations: PrivateConversation[];
   openConversationId: string | null;
   turns: PrivateTurn[];
+  /** instrucciones fijas de la conversación abierta; null si no tiene */
+  instructions: string | null;
   sending: boolean;
   openConversation: (conversationId: string | null) => Promise<void>;
   send: (input: {
@@ -106,6 +108,8 @@ export interface VaultController {
     provider: string;
     model: string | null;
     projectAlias: string;
+    /** null conserva las que hubiera; cadena vacía las borra */
+    instructions: string | null;
   }) => Promise<boolean>;
   removeConversation: (conversationId: string) => Promise<void>;
   media: PrivateMediaItem[];
@@ -122,7 +126,13 @@ export interface VaultController {
   }) => Promise<boolean>;
   createCharacter: (traits: Record<string, string>) => Promise<string | null>;
   syncing: boolean;
-  lastSync: { uploaded: number; downloaded: number } | null;
+  lastSync: {
+    uploaded: number;
+    downloaded: number;
+    mediaUploaded: number;
+    mediaDownloaded: number;
+    mediaSkipped: number;
+  } | null;
   sync: () => Promise<void>;
   acknowledgeRecoveryKey: () => void;
   clearError: () => void;
@@ -138,13 +148,14 @@ export function useVault(): VaultController {
   const [conversations, setConversations] = useState<PrivateConversation[]>([]);
   const [openConversationId, setOpenConversationId] = useState<string | null>(null);
   const [turns, setTurns] = useState<PrivateTurn[]>([]);
+  const [instructions, setInstructions] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [media, setMedia] = useState<PrivateMediaItem[]>([]);
   const [attaching, setAttaching] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [lastCost, setLastCost] = useState<number | null>(null);
   const [syncing, setSyncing] = useState(false);
-  const [lastSync, setLastSync] = useState<{ uploaded: number; downloaded: number } | null>(null);
+  const [lastSync, setLastSync] = useState<VaultController['lastSync']>(null);
   const mounted = useRef(true);
 
   const refresh = useCallback(async (): Promise<void> => {
@@ -158,6 +169,7 @@ export function useVault(): VaultController {
         setConversations([]);
         setTurns([]);
         setMedia([]);
+        setInstructions(null);
         setOpenConversationId(null);
       }
     }
@@ -268,6 +280,7 @@ export function useVault(): VaultController {
     setConversations([]);
     setTurns([]);
     setMedia([]);
+    setInstructions(null);
     setOpenConversationId(null);
   }, [run]);
 
@@ -327,10 +340,16 @@ export function useVault(): VaultController {
       setOpenConversationId(conversationId);
       if (conversationId === null) {
         setTurns([]);
+        // una conversación nueva empieza sin instrucciones: arrastrar las de la
+        // anterior las aplicaría sin que nadie las haya escrito aquí
+        setInstructions(null);
         return;
       }
       const result = await window.luxy.readVaultConversation(conversationId);
-      if (mounted.current && result.ok) setTurns(result.value.turns);
+      if (mounted.current && result.ok) {
+        setTurns(result.value.turns);
+        setInstructions(result.value.instructions);
+      }
       const mediaResult = await window.luxy.listVaultMedia(conversationId);
       if (mounted.current && mediaResult.ok) setMedia(mediaResult.value.media);
     },
@@ -392,6 +411,7 @@ export function useVault(): VaultController {
       provider: string;
       model: string | null;
       projectAlias: string;
+      instructions: string | null;
     }): Promise<boolean> => {
       setSending(true);
       setError(null);
@@ -407,6 +427,7 @@ export function useVault(): VaultController {
         }
         setOpenConversationId(result.value.conversationId);
         setTurns(result.value.turns);
+        setInstructions(result.value.instructions);
         if (result.value.error !== null) setError(result.value.error);
         await reloadConversations();
         return result.value.outcome === 'completed';
@@ -492,7 +513,13 @@ export function useVault(): VaultController {
         setHint(result.hint);
         return;
       }
-      setLastSync({ uploaded: result.value.uploaded, downloaded: result.value.downloaded });
+      setLastSync({
+        uploaded: result.value.uploaded,
+        downloaded: result.value.downloaded,
+        mediaUploaded: result.value.mediaUploaded,
+        mediaDownloaded: result.value.mediaDownloaded,
+        mediaSkipped: result.value.mediaSkipped,
+      });
       // lo descargado puede incluir conversaciones que aqui no existian
       await reloadConversations();
       if (openConversationId !== null) await openConversation(openConversationId);
@@ -521,6 +548,7 @@ export function useVault(): VaultController {
     conversations,
     openConversationId,
     turns,
+    instructions,
     sending,
     openConversation,
     send,

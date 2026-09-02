@@ -33,6 +33,17 @@ export class Router<D> {
     return this.add('POST', pattern, handler);
   }
 
+  /**
+   * PUT existe solo para subir los bytes de un objeto de la boveda.
+   *
+   * El resto de la API usa POST incluso para acciones que sustituyen algo,
+   * porque describen operaciones y no recursos. Aqui si hay un recurso —un
+   * objeto con una clave— y subirlo dos veces tiene que dar el mismo resultado.
+   */
+  put(pattern: string, handler: RouteHandler<D>): this {
+    return this.add('PUT', pattern, handler);
+  }
+
   /** busca la ruta que encaja y devuelve el manejador con sus parametros */
   match(
     method: string,

@@ -1,5 +1,55 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-09-01 23:40 — Claude — F9.20 y F9.16 remoto: contexto fijo y medios que viajan
+
+Daniel aplico `0007` durante esta sesion (las cinco tablas con `rowsecurity =
+true`) y pidio avanzar en paralelo con las dos piezas que no dependian de ello.
+
+**F9.20 — instrucciones fijas por conversacion.** El campo `instructions` de
+`buildVaultPrompt` existia y **nadie lo rellenaba**. Ahora se escribe en la
+propia conversacion, acompaña a cada turno y se guarda cifrado.
+
+- van DENTRO del sobre del turno y no en un campo propio del registro. Dos
+  razones: guardarlas con el turno deja ver que instrucciones regian cuando se
+  genero cada respuesta, en vez de dejar solo las de hoy y hacer que el
+  historial mienta sobre su origen; y el servidor no ve un campo nuevo, asi que
+  **no hacia falta una columna en `vault_records`** — que era imposible, porque
+  `0007` se estaba aplicando en ese momento;
+- `null` significa «no las toques» y conserva las que hubiera; una cadena vacia
+  SI las borra. Sin esa distincion no habria forma de volver atras;
+- solo se vuelven a sellar cuando cambian, para no engordar el archivo repitiendo
+  lo mismo en cada turno.
+
+**F9.16 remoto — los medios ya se sincronizan.** Era la media verdad que quedaba:
+los turnos viajaban y las imagenes y videos no.
+
+- **Supabase Storage y no R2** (`D-050`): el gateway ya tiene la URL y la service
+  role key. R2 habria exigido un binding en `wrangler.toml`, que ni se versiona.
+  El bucket es privado, sin politicas, y lo crea la migracion **`0008`**;
+- rutas nuevas: listar medios, subir y bajar bytes, y registrar. **Los bytes van
+  antes que el registro** y el gateway rechaza un registro cuyos bytes no esten:
+  al reves, el otro equipo veria un archivo que no puede abrir;
+- descargar comprueba en `vault_media` que el objeto es de quien lo pide. La ruta
+  ya separa por usuario, pero la autorizacion se decide donde esta registrada la
+  propiedad, no en como se construye una ruta;
+- tope de 90 MB por objeto, por el limite del cuerpo de un Worker. Lo que no
+  cabe **se salta, se cuenta y la sincronizacion sigue**;
+- lo que llega se comprueba que se puede ABRIR antes de entrar en el indice,
+  igual que en las conversaciones.
+
+**Rasgos del personaje.** El boton «Crear personaje nuevo» mandaba `{}`. Ahora
+hay donde escribir rasgos, uno por linea; lo que no encaja se ignora en vez de
+inventarse una clave, porque un rasgo mal formado viajaria al proveedor tal cual.
+
+Pruebas nuevas: `media-sync.test.ts` (9) y siete de instrucciones en
+`conversation-store.test.ts`. La que sostiene el bloque: un archivo generado en
+un equipo se **descifra** en el otro; contar bajadas no demuestra nada.
+
+**`npm run check` exit 0: 118 archivos, 2.046 superadas, 9 omitidas.**
+
+Falta ejecutar contra el gateway real: `0008` sin aplicar y `/api/vault/*` sin
+desplegar.
+
 ### 2026-09-01 22:50 — Claude — cierre documental de F9.18 y F9.19, y commit
 
 Daniel pidio documentar el estado completo —lo hecho, lo que falta y lo que hay

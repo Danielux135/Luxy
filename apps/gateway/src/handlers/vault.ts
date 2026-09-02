@@ -11,12 +11,15 @@
 // guardando lo que no debe el dia que alguien cambia el cliente.
 import {
   assertNoPlaintextLeak,
+  VAULT_MAX_OBJECT_BYTES,
+  vaultMediaPushRequestSchema,
   vaultChangePasswordRequestSchema,
   vaultLoginFinishRequestSchema,
   vaultLoginStartRequestSchema,
   vaultRegisterRequestSchema,
   vaultSyncPullQuerySchema,
   vaultSyncPushRequestSchema,
+  type PrivateMedia,
   type PrivateRecord,
 } from '@luxy/shared';
 import type { ApiDeps } from './api.js';
@@ -25,6 +28,7 @@ import { hashToken } from '../auth.js';
 import { AuthError } from '../auth.js';
 import { describeError } from '../logger.js';
 import { getVaultAuthLimiter } from '../ratelimit.js';
+import { ObjectStoreError } from '../object-store.js';
 import {
   VAULT_SESSION_TTL_MS,
   authenticateVaultUser,
@@ -40,6 +44,28 @@ interface VaultRecordRow {
   content: unknown;
   sealed_memory: unknown;
   created_at: string;
+}
+
+interface VaultMediaRow {
+  media_id: string;
+  conversation_id: string;
+  object_key: string;
+  byte_size: number;
+  content: unknown;
+  thumbnail_object_key: string | null;
+  created_at: string;
+}
+
+function toPrivateMedia(row: VaultMediaRow): PrivateMedia {
+  return {
+    mediaId: row.media_id,
+    conversationId: row.conversation_id,
+    objectKey: row.object_key,
+    byteSize: row.byte_size,
+    content: row.content as PrivateMedia['content'],
+    thumbnailObjectKey: row.thumbnail_object_key,
+    createdAt: row.created_at,
+  };
 }
 
 function toPrivateRecord(row: VaultRecordRow): PrivateRecord {
@@ -286,6 +312,115 @@ export const handleVaultPull = withVaultAuth(async (request, deps, user, params)
 
   const rows = await deps.repo.listVaultRecords(user.id, conversationId, limit);
   return json({ records: rows.map(toPrivateRecord) });
+});
+
+// -----------------------------------------------------------------------------
+// medios: los metadatos van a la tabla, los bytes al almacen de objetos
+// -----------------------------------------------------------------------------
+
+/**
+ * lista los medios del usuario.
+ *
+ * Devuelve los registros tal cual: metadatos cifrados y claves opacas. El
+ * cliente decide cuales le faltan sin que el servidor sepa que hay dentro.
+ */
+export const handleVaultMediaList = withVaultAuth(async (request, deps, user) => {
+  const conversationId = new URL(request.url).searchParams.get('conversationId');
+  const rows = await deps.repo.listVaultMedia(user.id, conversationId ?? undefined);
+  return json({ media: rows.map(toPrivateMedia) });
+});
+
+/**
+ * sube los BYTES de un objeto.
+ *
+ * Va antes que el registro y por separado a proposito: si se corta aqui queda
+ * un huerfano que una limpieza recoge, en vez de una fila que apunta a algo que
+ * no existe y que solo se descubre meses despues al abrir la imagen.
+ *
+ * El cuerpo es opaco para el gateway. No se valida su contenido porque no se
+ * puede: es ciphertext.
+ */
+export const handleVaultMediaUpload = withVaultAuth(async (request, deps, user, params) => {
+  const objectKey = params.objectKey;
+  if (objectKey === undefined || !/^[0-9a-f]{32}$/.test(objectKey)) {
+    return errorResponse('la clave del objeto no es valida', 422);
+  }
+
+  const declared = Number(request.headers.get('Content-Length') ?? '0');
+  if (declared > VAULT_MAX_OBJECT_BYTES) {
+    return errorResponse('ese archivo es demasiado grande para sincronizarlo', 413);
+  }
+
+  const bytes = await request.arrayBuffer();
+  if (bytes.byteLength === 0) return errorResponse('el archivo esta vacio', 422);
+  if (bytes.byteLength > VAULT_MAX_OBJECT_BYTES) {
+    return errorResponse('ese archivo es demasiado grande para sincronizarlo', 413);
+  }
+
+  try {
+    await deps.objects.put(user.id, objectKey, bytes);
+  } catch (error) {
+    if (error instanceof ObjectStoreError) return errorResponse(error.message, error.status);
+    deps.logger.error('fallo guardando un objeto de boveda', describeError(error));
+    return errorResponse('no se pudo guardar el archivo', 502);
+  }
+
+  // ni la clave ni el tamaño exacto: solo que hubo una subida y de quien
+  deps.logger.info('objeto de boveda almacenado', { userId: user.id });
+  return json({ stored: true });
+});
+
+/** crea el registro de un medio cuyos bytes ya estan subidos */
+export const handleVaultMediaPush = withVaultAuth(async (request, deps, user) => {
+  const body = await readBody(request, vaultMediaPushRequestSchema);
+  if (!body.ok) return body.response;
+
+  try {
+    assertNoPlaintextLeak(body.data.media);
+  } catch (error) {
+    return errorResponse(
+      error instanceof Error ? error.message : 'el registro lleva contenido en claro',
+      422,
+    );
+  }
+
+  // el registro no puede existir sin sus bytes: al reves, la interfaz del otro
+  // equipo enseñaria un archivo que no se puede abrir
+  const present = await deps.objects
+    .get(user.id, body.data.media.objectKey)
+    .then(() => true)
+    .catch(() => false);
+  if (!present) return errorResponse('sube el archivo antes de registrarlo', 409);
+
+  await deps.repo.ensureVaultConversation(user.id, body.data.media.conversationId);
+  const stored = await deps.repo.insertVaultMedia(user.id, body.data.media);
+  return json({ stored, skipped: stored === 0 ? 1 : 0 });
+});
+
+/** descarga los bytes de un objeto propio */
+export const handleVaultMediaDownload = withVaultAuth(async (_request, deps, user, params) => {
+  const objectKey = params.objectKey;
+  if (objectKey === undefined || !/^[0-9a-f]{32}$/.test(objectKey)) {
+    return errorResponse('la clave del objeto no es valida', 422);
+  }
+
+  // se comprueba en la TABLA que el objeto es suyo antes de tocar el almacen:
+  // la ruta ya separa por usuario, pero la autorizacion se decide donde esta
+  // registrada la propiedad, no en como se construye una ruta
+  const owned = await deps.repo.findVaultMediaObject(user.id, objectKey);
+  if (owned === null) return errorResponse('ese archivo no existe', 404);
+
+  try {
+    const bytes = await deps.objects.get(user.id, objectKey);
+    return new Response(bytes, {
+      status: 200,
+      headers: { 'Content-Type': 'application/octet-stream' },
+    });
+  } catch (error) {
+    if (error instanceof ObjectStoreError) return errorResponse(error.message, error.status);
+    deps.logger.error('fallo leyendo un objeto de boveda', describeError(error));
+    return errorResponse('no se pudo leer el archivo', 502);
+  }
 });
 
 export const handleVaultDelete = withVaultAuth(async (_request, deps, user, params) => {

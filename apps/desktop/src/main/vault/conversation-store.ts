@@ -199,6 +199,30 @@ export class PrivateConversationStore {
     return null;
   }
 
+  /**
+   * instrucciones fijas en vigor, leidas del ultimo turno que las llevaba.
+   *
+   * Mismo criterio que `latestMemory`: se busca hacia atras y vale la primera
+   * que aparezca. Un turno que no las llevaba no significa que se hayan
+   * borrado; significa que ese turno no las cambio.
+   *
+   * Para quitarlas de verdad se guarda una cadena vacia, que si se distingue de
+   * «no las toque». Sin esa distincion no habria forma de volver atras.
+   */
+  async latestInstructions(
+    vault: VaultService,
+    conversationId: string,
+  ): Promise<string | null> {
+    const records = this.readRecords(conversationId);
+    for (let index = records.length - 1; index >= 0; index -= 1) {
+      const record = records[index]!;
+      const opened = await openTurn(vault, record);
+      if (opened.turn.instructions === null) continue;
+      return opened.turn.instructions.length === 0 ? null : opened.turn.instructions;
+    }
+    return null;
+  }
+
   /** borra una conversacion. no hay papelera: es lo que se espera aqui */
   delete(conversationId: string): void {
     const file = fileFor(this.directory, conversationId);

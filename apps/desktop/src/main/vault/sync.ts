@@ -28,6 +28,8 @@ import {
 } from '@luxy/shared';
 import { VaultError, type VaultService } from './vault-service.js';
 import type { PrivateConversationStore } from './conversation-store.js';
+import type { PrivateMediaStore } from './media-store.js';
+import { syncMedia } from './media-sync.js';
 
 export interface VaultSyncDeps {
   gatewayUrl: string;
@@ -43,6 +45,11 @@ export interface VaultSyncResult {
   uploaded: number;
   downloaded: number;
   conversations: number;
+  /** imagenes y videos, contados aparte: son otro tipo de trabajo y otro coste */
+  mediaUploaded: number;
+  mediaDownloaded: number;
+  /** medios que no caben en una peticion y se quedan en su equipo */
+  mediaSkipped: number;
 }
 
 class SyncError extends VaultError {}
@@ -139,6 +146,12 @@ export async function syncVault(
   vault: VaultService,
   store: PrivateConversationStore,
   deps: VaultSyncDeps,
+  /**
+   * almacen de medios. Opcional a proposito: sincronizar turnos no depende de
+   * tener medios, y quien solo quiera probar la parte de texto no deberia
+   * arrastrar el almacen de objetos.
+   */
+  media?: PrivateMediaStore,
 ): Promise<VaultSyncResult> {
   if (!vault.isUnlocked()) {
     throw new VaultError(
@@ -166,7 +179,21 @@ export async function syncVault(
     downloaded += result.downloaded;
   }
 
-  return { uploaded, downloaded, conversations: ids.size };
+  // los medios van DESPUES de los turnos: si algo falla aqui, lo que ya se
+  // subio de la conversacion sigue subido y el reintento solo repite esto
+  const mediaResult =
+    media === undefined
+      ? { uploaded: 0, downloaded: 0, skipped: 0 }
+      : await syncMedia(vault, media, deps);
+
+  return {
+    uploaded,
+    downloaded,
+    conversations: ids.size,
+    mediaUploaded: mediaResult.uploaded,
+    mediaDownloaded: mediaResult.downloaded,
+    mediaSkipped: mediaResult.skipped,
+  };
 }
 
 export type { PrivateRecord };

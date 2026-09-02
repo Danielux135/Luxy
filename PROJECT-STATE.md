@@ -28,12 +28,17 @@ usuarios sólo se confirma con Postgres delante, y la generación de imagen y
 vídeo de Xavira nunca ha hecho una llamada de verdad. Es `LA-031`, ya
 **desbloqueada** y ahora la única acción que bloquea lo demás.
 
-Lo que falta, por orden de cuánto se nota al usarlo: `F9.20` (instrucciones
-fijas por conversación — el campo existe en el prompt y **nada lo rellena**),
-la primera llamada real a Xavira, `F9.21` (un vídeo de más de 20 MB se guarda
-pero no se previsualiza), los medios que no se sincronizan (`F9.16` remoto), y
-`F9.12` (documentación de privacidad). Sin streaming es deliberado (`D-043`),
-no un olvido. El detalle, con tamaños y causas, en `CURRENT-TASK.md`.
+Actualización del mismo día: **`0007` ya está aplicada** (las cinco tablas con
+`rowsecurity = true`), y se cierran dos piezas más — `F9.20`, instrucciones
+fijas por conversación, y `F9.16` remoto, **los medios ya viajan entre equipos**
+(bucket privado de Supabase Storage, `D-050`). `npm run check` exit 0: 118
+archivos, 2.046 superadas, 9 omitidas.
+
+Lo que falta, por orden: la primera llamada real a la API de generación,
+aplicar `0008` y desplegar el gateway, `F9.21` (un vídeo de más de 20 MB se
+guarda pero no se previsualiza), la limpieza de objetos huérfanos y `F9.12`
+(documentación de privacidad). Sin streaming es deliberado (`D-043`), no un
+olvido. El detalle, con tamaños y causas, en `CURRENT-TASK.md`.
 
 ---
 

@@ -31,6 +31,21 @@ export const vaultTurnPayloadSchema = z.object({
   model: z.string().max(128).nullable().default(null),
   inputTokens: z.number().int().min(0).nullable().default(null),
   outputTokens: z.number().int().min(0).nullable().default(null),
+  /**
+   * instrucciones fijas que gobernaban la conversacion en ESTE turno.
+   *
+   * Van dentro del sobre del turno, y no en un campo propio del registro, por
+   * dos razones. La primera es de diseño: guardarlas con el turno deja ver que
+   * instrucciones estaban en vigor cuando se genero cada respuesta, en vez de
+   * dejar solo las de hoy y hacer que el historial mienta sobre su propio
+   * origen. La segunda es practica: el servidor no ve un campo nuevo, asi que
+   * esto no añade una columna a `vault_records` ni cambia lo que el gateway
+   * valida.
+   *
+   * El coste es duplicarlas en cada turno. Son unos cientos de bytes cifrados;
+   * a cambio, la ultima vale como estado actual sin indice aparte.
+   */
+  instructions: z.string().max(8000).nullable().default(null),
   createdAt: z.string().datetime(),
 });
 export type VaultTurnPayload = z.infer<typeof vaultTurnPayloadSchema>;

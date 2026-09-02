@@ -1,5 +1,28 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-01 — Windows 11 (equipo `oscar`) — F9.20 y F9.16 remoto
+
+- **`npm run check`: exit 0.** Suite: **118 archivos, 2.046 superadas, 9
+  omitidas, 0 fallos**.
+- Archivo nuevo: `media-sync.test.ts` (9). Siete pruebas más de instrucciones en
+  `conversation-store.test.ts`.
+- La prueba que sostiene la sincronización de medios: un archivo guardado en un
+  equipo se sube, se baja en otro almacén con la misma llave maestra y **se
+  descifra con los mismos bytes**. Contar subidas y bajadas no demostraría nada.
+- También se prueba: que lo que viaja no lleva el nombre, el prompt ni el
+  `mimeType` en claro; que los bytes suben **antes** que el registro; que no se
+  vuelve a subir lo ya subido; que un archivo por encima del tope se salta sin
+  impedir que suba el resto; que un registro de otra bóveda no entra en el
+  índice; que un 401 olvida la sesión; y que si falta el bucket en Supabase el
+  error lo dice en vez de hablar de un 404 genérico.
+- De instrucciones: valen las del último turno que las llevaba, la última gana,
+  una cadena vacía las borra y se distingue de no tocarlas, no salen en claro en
+  el `.jsonl`, y con la bóveda cerrada no se pueden leer.
+- **Nada ejecutado contra el gateway real ni contra Supabase Storage.** La
+  migración `0008` no está aplicada y `/api/vault/*` sigue sin desplegar.
+- Nota de entorno: Daniel aplicó `0007` durante esta sesión. La comprobación de
+  RLS devolvió las cinco tablas `vault_*` con `rowsecurity = true`.
+
 ### 2026-09-01 — Windows 11 (equipo `oscar`) — F9.19 (recuperación desde otro equipo)
 
 - **`npm run check`: exit 0.** Suite: **117 archivos, 2.030 superadas, 9

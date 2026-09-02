@@ -252,6 +252,14 @@ export const vaultConversationSendArgsSchema = z.object({
   provider: z.string().min(1).max(64),
   model: z.string().max(128).nullable(),
   projectAlias: z.string().min(1).max(64),
+  /**
+   * instrucciones fijas de la conversacion, tal y como estan en la ventana.
+   *
+   * `null` significa «no las toques»: se conservan las que ya hubiera. Una
+   * cadena vacia SI las borra. Sin esa distincion no habria forma de quitarlas
+   * una vez puestas.
+   */
+  instructions: z.string().max(8000).nullable().default(null),
 });
 
 export const vaultConversationIdArgsSchema = z.object({
@@ -279,12 +287,15 @@ export const vaultConversationTurnSchema = z.object({
 export const vaultConversationReadResultSchema = z.object({
   conversationId: z.string(),
   turns: z.array(vaultConversationTurnSchema),
+  /** las que estan en vigor; texto en claro, porque el main ya las descifro */
+  instructions: z.string().nullable(),
 });
 
 export const vaultConversationSendResultSchema = z.object({
   conversationId: z.string(),
   outcome: z.enum(['completed', 'failed', 'cancelled']),
   turns: z.array(vaultConversationTurnSchema),
+  instructions: z.string().nullable(),
   error: z.string().nullable(),
 });
 
@@ -362,6 +373,11 @@ export const vaultSyncResultSchema = z.object({
   uploaded: z.number().int().min(0),
   downloaded: z.number().int().min(0),
   conversations: z.number().int().min(0),
+  /** imagenes y videos, aparte: son otro tipo de trabajo y otro coste */
+  mediaUploaded: z.number().int().min(0),
+  mediaDownloaded: z.number().int().min(0),
+  /** demasiado grandes para una peticion; se quedan en su equipo */
+  mediaSkipped: z.number().int().min(0),
 });
 
 export const configSaveArgsSchema = z.object({

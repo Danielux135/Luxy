@@ -63,9 +63,24 @@ En este orden:
    otro (trampa 3 de `docs/ARRANQUE-ORDENADOR-NUEVO.md`). El log del Worker trae
    `supabaseHost`.
 
-2. **Aplicar `supabase/migrations/0007_luxy_vault.sql`** en el SQL Editor de ese
-   proyecto. Es aditiva: sólo `create table if not exists`, no toca datos ni el
-   enum `luxy_job_status`. Comprobación después:
+2. **Aplicar `supabase/migrations/0007_luxy_vault.sql`** — **HECHO el
+   2026-09-01.** La comprobación devolvió las cinco tablas `vault_*` con
+   `rowsecurity = true`, que es exactamente lo que tenía que salir.
+
+2b. **Aplicar `supabase/migrations/0008_luxy_vault_media_bucket.sql`** —
+   pendiente. Crea el bucket privado `vault-media` donde van los bytes cifrados
+   de imágenes y vídeos (`D-050`). Sin él, sincronizar medios falla con «falta
+   crear el almacén de medios en Supabase»; el texto sigue funcionando.
+   Comprobación después:
+
+   ```sql
+   select id, public from storage.buckets where id = 'vault-media';
+   ```
+
+   Debe salir una fila con `public = false`. Si sale `true`, PARAR: cualquiera
+   con la URL podría descargar el ciphertext.
+
+   Referencia de la comprobación de RLS del paso 2:
 
    ```sql
    select tablename, rowsecurity from pg_tables

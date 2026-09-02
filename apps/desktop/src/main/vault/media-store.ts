@@ -8,7 +8,14 @@
 // queda un archivo huerfano —recuperable con una limpieza— en vez de un
 // registro que apunta a algo que no existe, que es un error que solo aparece
 // meses despues cuando intentas abrir la imagen.
-import { appendFileSync, existsSync, mkdirSync, readFileSync, unlinkSync } from 'node:fs';
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  unlinkSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { privateMediaSchema, type PrivateMedia, type VaultMediaPayload } from '@luxy/shared';
 import { openMedia, openMediaMetadata, openMediaThumbnail, sealMedia } from './private-store.js';
@@ -96,6 +103,67 @@ export class PrivateMediaStore {
       byteSize: sealed.record.byteSize,
       hasThumbnail: sealed.record.thumbnailObjectKey !== null,
     };
+  }
+
+  /**
+   * registros tal cual estan en disco, sin descifrar.
+   *
+   * Los usa la sincronizacion, que no necesita —ni debe— abrir nada para
+   * decidir que falta a cada lado. Es el equivalente de `rawRecords` en las
+   * conversaciones.
+   */
+  rawRecords(conversationId: string): PrivateMedia[] {
+    return this.readRecords(conversationId);
+  }
+
+  /** conversaciones con medios en este equipo */
+  listConversationIds(): string[] {
+    if (!existsSync(this.indexDirectory)) return [];
+    return readdirSync(this.indexDirectory)
+      .filter((entry) => entry.endsWith('.jsonl'))
+      .map((entry) => entry.slice(0, -'.jsonl'.length))
+      .filter((id) => CONVERSATION_ID.test(id));
+  }
+
+  /** bytes cifrados de un objeto, para subirlos tal cual */
+  async rawBlob(objectKey: string): Promise<Uint8Array> {
+    return this.blobs.get(objectKey);
+  }
+
+  async hasBlob(objectKey: string): Promise<boolean> {
+    return this.blobs.has(objectKey);
+  }
+
+  /**
+   * guarda un medio descargado de otro equipo.
+   *
+   * Se comprueba que los metadatos SE PUEDEN ABRIR antes de escribir nada. Un
+   * registro de otra boveda o corrupto que entrase en el indice haria fallar
+   * cada lectura posterior sin que se supiera cual es el malo, igual que en las
+   * conversaciones.
+   *
+   * Los bytes primero y el registro despues: un huerfano se limpia, un registro
+   * que apunta a bytes que no estan no se detecta hasta que alguien lo abre.
+   */
+  async acceptRemote(
+    vault: VaultService,
+    record: PrivateMedia,
+    blob: Uint8Array,
+    thumbnailBlob: Uint8Array | null,
+  ): Promise<void> {
+    await openMediaMetadata(vault, record);
+
+    await this.blobs.put(record.objectKey, blob);
+    if (thumbnailBlob !== null && record.thumbnailObjectKey !== null) {
+      await this.blobs.put(record.thumbnailObjectKey, thumbnailBlob);
+    }
+
+    mkdirSync(this.indexDirectory, { recursive: true });
+    appendFileSync(
+      this.indexFile(record.conversationId),
+      `${JSON.stringify(record)}\n`,
+      'utf8',
+    );
   }
 
   /** metadatos descifrados de los medios de una conversacion, sin los bytes */

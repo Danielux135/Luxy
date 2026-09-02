@@ -56,6 +56,8 @@ function ConversationPanel({
   summary: ConfigSummary;
 }): JSX.Element {
   const [message, setMessage] = useState('');
+  // `null` mientras no se edite: enviar sin tocarlas conserva las guardadas
+  const [draftInstructions, setDraftInstructions] = useState<string | null>(null);
   const projects = Object.keys(summary.config?.projects ?? {});
   const [project, setProject] = useState(projects[0] ?? '');
   const providers = ['claude', 'codex', ...(summary.config?.providers.http ?? []).map((p) => p.id)];
@@ -65,9 +67,20 @@ function ConversationPanel({
     message.trim().length > 0 && project.length > 0 && provider.length > 0 && !vault.sending;
 
   const submit = (): void => {
-    void vault.send({ message: message.trim(), provider, model: null, projectAlias: project }).then(
-      () => setMessage(''),
-    );
+    void vault
+      .send({
+        message: message.trim(),
+        provider,
+        model: null,
+        projectAlias: project,
+        instructions: draftInstructions,
+      })
+      .then(() => {
+        setMessage('');
+        // ya están guardadas con el turno: el borrador deja de ser necesario y
+        // el panel vuelve a leer lo que hay de verdad
+        setDraftInstructions(null);
+      });
   };
 
   return (
@@ -119,6 +132,12 @@ function ConversationPanel({
       )}
 
       {vault.media.length > 0 && <MediaStrip vault={vault} />}
+
+      <InstructionsPanel
+        vault={vault}
+        draft={draftInstructions}
+        onChange={setDraftInstructions}
+      />
 
       <GeneratePanel vault={vault} />
 
@@ -196,6 +215,88 @@ function ConversationPanel({
 }
 
 /**
+ * convierte «clave: valor» por linea en el mapa que espera el proveedor.
+ *
+ * Es deliberadamente tonto: sin claves, sin valores vacios y sin lineas que no
+ * lleven dos puntos. Lo que no encaja se ignora en vez de inventarse una clave,
+ * porque un rasgo mal formado viajaria al proveedor tal cual.
+ */
+export function parseTraits(text: string): Record<string, string> {
+  const traits: Record<string, string> = {};
+  for (const line of text.split(/\r?\n/)) {
+    const separator = line.indexOf(':');
+    if (separator === -1) continue;
+    const key = line.slice(0, separator).trim().slice(0, 64);
+    const value = line.slice(separator + 1).trim().slice(0, 120);
+    if (key.length === 0 || value.length === 0) continue;
+    traits[key] = value;
+  }
+  return traits;
+}
+
+/**
+ * instrucciones fijas de la conversacion.
+ *
+ * Acompañan a cada turno sin que haya que rescribirlas, y sin depender de que
+ * sobrevivan a la memoria acumulativa, que resume y por tanto pierde matices a
+ * proposito. Se guardan cifradas con el turno, asi que el historial conserva
+ * cuales regian cada respuesta.
+ *
+ * `draft === null` significa «no las he tocado»: al enviar se conservan las
+ * guardadas. Vaciarlas y enviar SI las borra, que es la unica forma de volver
+ * atras una vez puestas.
+ */
+function InstructionsPanel({
+  vault,
+  draft,
+  onChange,
+}: {
+  vault: VaultController;
+  draft: string | null;
+  onChange: (value: string | null) => void;
+}): JSX.Element {
+  const saved = vault.instructions ?? '';
+  const value = draft ?? saved;
+  const pending = draft !== null && draft !== saved;
+
+  return (
+    <details className="vault-generate" open={saved.length > 0}>
+      <summary>
+        Instrucciones de la conversación
+        {saved.length > 0 && !pending && ' · activas'}
+        {pending && ' · se aplicarán al enviar'}
+      </summary>
+
+      <Field
+        label="Contexto fijo"
+        hint="Acompaña a cada mensaje de esta conversación. No hace falta repetirlo, y se guarda cifrado como el resto."
+      >
+        <textarea
+          rows={4}
+          value={value}
+          placeholder="Cómo quieres que responda, qué debe tener en cuenta, qué evitar…"
+          disabled={vault.sending}
+          onChange={(event) => onChange(event.target.value)}
+        />
+      </Field>
+
+      {pending && (
+        <p className="field__hint">
+          Se guardan con el próximo mensaje que envíes; no hay un botón aparte
+          porque no hacen nada por sí solas.
+        </p>
+      )}
+      {pending && value.length === 0 && (
+        <Notice tone="warn">
+          Al enviar vacías se borran las que había. Los turnos anteriores
+          conservan las suyas: lo que cambia es de aquí en adelante.
+        </Notice>
+      )}
+    </details>
+  );
+}
+
+/**
  * generacion de imagen y video.
  *
  * El personaje es obligatorio porque el proveedor lo exige para generar: es lo
@@ -204,6 +305,7 @@ function ConversationPanel({
  */
 function GeneratePanel({ vault }: { vault: VaultController }): JSX.Element {
   const [characterId, setCharacterId] = useState('');
+  const [traits, setTraits] = useState('');
   const [prompt, setPrompt] = useState('');
   const [kind, setKind] = useState<'image' | 'video'>('image');
   const [creating, setCreating] = useState(false);
@@ -234,6 +336,19 @@ function GeneratePanel({ vault }: { vault: VaultController }): JSX.Element {
         />
       </Field>
 
+      <Field
+        label="Rasgos del personaje nuevo"
+        hint="Uno por línea, con dos puntos: pelo: castaño. Se envían sólo al crearlo; sin rasgos, el proveedor elige por ti."
+      >
+        <textarea
+          rows={3}
+          value={traits}
+          placeholder={'pelo: castaño\nojos: verdes\nedad: adulta'}
+          disabled={creating}
+          onChange={(event) => setTraits(event.target.value)}
+        />
+      </Field>
+
       <div className="row">
         <button
           className="btn btn--quiet"
@@ -241,7 +356,7 @@ function GeneratePanel({ vault }: { vault: VaultController }): JSX.Element {
           onClick={() => {
             setCreating(true);
             void vault
-              .createCharacter({})
+              .createCharacter(parseTraits(traits))
               .then((id) => {
                 if (id !== null) setCharacterId(id);
               })
@@ -251,6 +366,10 @@ function GeneratePanel({ vault }: { vault: VaultController }): JSX.Element {
           {creating ? 'Creando…' : 'Crear personaje nuevo'}
         </button>
       </div>
+      <p className="field__hint">
+        El identificador vive en el proveedor, no aquí: guárdalo si quieres
+        reutilizar el mismo personaje en otra conversación.
+      </p>
 
       <Field label="Descripción">
         <textarea
@@ -863,11 +982,21 @@ function UnlockedPanel({ vault }: { vault: VaultController }): JSX.Element {
         {vault.error !== null && <Notice tone="fault">{vault.error}</Notice>}
 
         {vault.lastSync !== null && (
-          <p className="field__hint">
-            Última sincronización: {vault.lastSync.uploaded} subidos,{' '}
-            {vault.lastSync.downloaded} descargados. Lo que viaja va cifrado; el
-            servidor no puede leerlo.
-          </p>
+          <>
+            <p className="field__hint">
+              Última sincronización: {vault.lastSync.uploaded} turnos subidos,{' '}
+              {vault.lastSync.downloaded} descargados; {vault.lastSync.mediaUploaded}{' '}
+              archivos subidos, {vault.lastSync.mediaDownloaded} descargados. Lo
+              que viaja va cifrado; el servidor no puede leerlo.
+            </p>
+            {vault.lastSync.mediaSkipped > 0 && (
+              <Notice tone="warn">
+                {vault.lastSync.mediaSkipped} archivo(s) son demasiado grandes
+                para sincronizarlos y se quedan en el equipo donde se crearon.
+                El resto sí ha viajado.
+              </Notice>
+            )}
+          </>
         )}
 
       </Panel>

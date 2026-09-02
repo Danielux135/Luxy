@@ -85,30 +85,31 @@ Añadido después, **implementado y probado con mocks pero sin ejecutar de verda
 
 Ordenado por lo que más se nota al usarlo:
 
-1. **`F9.20` — instrucciones fijas por conversación.** `buildVaultPrompt` acepta
-   un campo `instructions` y **nada lo rellena**: no está en
-   `vaultConversationSendArgsSchema`, no se guarda con la conversación y no hay
-   dónde escribirlo. Sin él, el contexto de una conversación depende de
-   rescribirlo o de sobrevivir a la memoria acumulativa, que resume y por tanto
-   pierde matices a propósito. Es lo más barato que queda con efecto visible:
-   campo en el esquema, guardarlo cifrado con la conversación, pasarlo al
-   prompt, y un sitio donde editarlo.
-2. **La API de Xavira nunca se ha llamado de verdad** (`F9.17`). El contrato
+1. **La API de Xavira nunca se ha llamado de verdad** (`F9.17`). El contrato
    viene de su documentación pública; la primera llamada real puede desmentir
    nombres de campo, códigos o formato de error. Necesita la clave en Conexiones
    (`VAULT_MEDIA_API_KEY`, reservada) y una generación de prueba. Es `LA-031`.
+2. **Falta aplicar `0008` y desplegar el gateway.** El código de la
+   sincronización de medios está hecho y probado con dobles, pero sin el bucket
+   `vault-media` el gateway responde «falta crear el almacén de medios». El
+   texto sí sincroniza sin eso.
 3. **`F9.21` — vídeo grande sin previsualizar.** Se genera y se guarda cifrado,
    pero el tope de 20 MB del IPC impide verlo. Falta un protocolo de Electron
-   que sirva el flujo descifrado.
-4. **Los medios no se sincronizan** (`F9.16` remoto). Sólo viajan los turnos; el
-   almacén remoto de objetos no existe.
-5. **Sin streaming** (`D-043`). Cada respuesta aparece entera al terminar. Es
+   que sirva el flujo descifrado. Ojo: **sincronizar y previsualizar tienen
+   topes distintos** — 90 MB para viajar, 20 MB para verlo.
+4. **Un archivo de más de 90 MB no se sincroniza.** Se salta, se cuenta y la
+   interfaz lo dice; se queda en el equipo donde se creó. Es el límite del
+   cuerpo de una petición a un Worker (`D-050`).
+5. **Los objetos huérfanos no se limpian.** Borrar una conversación borra sus
+   filas en cascada, pero los bytes se quedan en el almacén. No rompen nada y no
+   son legibles; falta una limpieza.
+6. **Sin streaming** (`D-043`). Cada respuesta aparece entera al terminar. Es
    deliberado, no un olvido: cambiarlo sería revisar la decisión, no completar
    un paso.
-6. **`F9.12` — documentación de privacidad.** `docs/PRIVACY.md`, `SECURITY.md` y
+7. **`F9.12` — documentación de privacidad.** `docs/PRIVACY.md`, `SECURITY.md` y
    el modelo de amenazas siguen sin escribirse. Es la deuda que más cara sale a
    quien llegue nuevo.
-7. **`F9.9`** (puente de Telegram por conversación) y **`F9.11`** (invitar a un
+8. **`F9.9`** (puente de Telegram por conversación) y **`F9.11`** (invitar a un
    tercero) siguen sin empezar. Ya no están bloqueados por `D-001`: lo matizó
    `D-045`.
 
@@ -173,17 +174,19 @@ gateway real**. Ver el punto 2 de la lista de abajo.
 | F9.10 | cuentas de usuario | **implemented (3 capas de lógica); sin ejecución real** |
 | F9.18 | interfaz de cuenta y unión de los dos orígenes de la llave | done; sin ejecución real |
 | F9.19 | recuperación desde un equipo nuevo | done; sin ejecución real |
+| F9.20 | instrucciones fijas por conversación | done |
+| F9.16 remoto | los medios viajan entre equipos | done; falta `0008` y desplegar |
 | F9.9 | puente Telegram por conversación | planned |
 | F9.11 | transportes del invitado | planned |
 | F9.12 | documentación de privacidad | planned |
 
 ### Lo que hay que tener en cuenta, sin suavizar
 
-1. **La migración `0007` NO está aplicada** contra ningún Postgres, y ya está
-   **completa**: `F9.19` metió sus seis columnas antes de aplicarla, así que no
-   hace falta una migración aparte. Aplicarla es acción de Daniel (`LA-031`), y
-   antes hay que confirmar contra qué proyecto apunta el gateway (trampa 3 de
-   `docs/ARRANQUE-ORDENADOR-NUEVO.md`).
+1. **`0007` YA ESTÁ APLICADA** (2026-09-01, por Daniel): las cinco tablas
+   `vault_*` con `rowsecurity = true`. A partir de aquí **no se toca**. Lo que
+   queda es `0008`, que crea el bucket privado de los medios (`LA-031`, paso 2b).
+   Sigue pendiente confirmar que el gateway apunta a ese mismo proyecto (trampa
+   3 de `docs/ARRANQUE-ORDENADOR-NUEVO.md`).
 2. **Nada del gateway ni de las cuentas se ha ejecutado contra Supabase real.**
    Todo son mocks: gateway falso, cliente falso. Incluida la autorización cruzada
    entre usuarios de `withVaultAuth`, que sólo se confirma con Postgres delante.
@@ -224,9 +227,10 @@ gateway real**. Ver el punto 2 de la lista de abajo.
     `VaultService` lo rechaza. Primero el servidor, después la envoltura local; al
     revés, un fallo de red dejaría este equipo con una contraseña que ningún otro
     reconoce.
-15. **`instructions` de `buildVaultPrompt` es código muerto hoy** (`F9.20`).
-    Quien lo lea puede creer que hay contexto persistente por conversación: no lo
-    hay, nadie rellena ese campo.
+15. **Las instrucciones fijas viven dentro del sobre del turno**, no en un campo
+    del registro (`F9.20`). Consecuencia práctica: cambiarlas escribe un turno
+    nuevo, y los turnos anteriores conservan las suyas. Es lo que hace que el
+    historial no mienta sobre qué las gobernaba.
 16. Límites de diseño que van a `docs/PRIVACY.md` (`F9.12`, pendiente): el
     proveedor de IA ve el prompt en claro —la bóveda protege el almacenamiento y
     el transporte propio de Luxy, no lo que un tercero recibe porque el usuario
@@ -245,7 +249,7 @@ streaming) · `D-044` (relleno de longitud) · `D-045` (multiusuario, matiza
 `D-001`) · `D-046` (auth y cifrado por caminos separados) · `D-047` (la cuenta
 es el origen de la llave; el archivo local es su caché) · `D-048` (sincronizar
 autoriza por sesión de cuenta) · `D-049` (la clave de recuperación no se trata
-como una contraseña).
+como una contraseña) · `D-050` (los bytes de los medios van a Supabase Storage).
 
 ### Siguiente paso exacto (para quien retome)
 
@@ -254,16 +258,15 @@ llave, sincronizar por sesión— y la recuperación desde otro equipo (`F9.19`)
 están **hechos**. Todo el camino crítico de código está cerrado; lo que queda
 es ejecutar y documentar.
 
-1. **`LA-031`, la única acción de Daniel que bloquea lo demás**: confirmar el
-   proyecto de Supabase, aplicar `0007` (ya completa), desplegar el gateway,
-   poner la clave de Xavira y probar de verdad. Lo que sólo se puede confirmar
+1. **`LA-031`, la única acción de Daniel que bloquea lo demás.** `0007` ya está
+   aplicada; quedan `0008` (bucket de medios), desplegar el gateway, poner la
+   clave de Xavira y probar de verdad. Lo que sólo se puede confirmar
    ahí: que un usuario no puede leer los registros de otro (`withVaultAuth`),
    que la bóveda que Daniel ya tiene se vincula sin perder nada, y que el
    contrato del adaptador de Xavira coincide con la API real.
 
-2. **`F9.20`, instrucciones fijas por conversación.** La pieza más barata que
-   queda con efecto visible, y la única que se puede hacer sin esperar a
-   `LA-031`. Ver la lista «Lo que falta» de arriba.
+2. **`F9.21`, vídeo grande sin previsualizar.** Es lo único de interfaz que
+   queda con efecto visible, y no depende de `LA-031`.
 
 3. **`F9.12`, documentación de privacidad.** Es barata y cierra deuda: es la que
    explica todo esto a quien llegue. Tiene cuatro límites nuevos que contar:
@@ -272,8 +275,25 @@ es ejecutar y documentar.
    tenga la clave de recuperación abre la bóveda desde cualquier sitio; y un
    equipo guarda la bóveda de una sola cuenta.
 
-Después quedan `F9.21` (vídeo grande), `F9.16` remoto (medios entre equipos),
-`F9.9` (puente Telegram) y `F9.11` (invitar a un tercero).
+Después quedan la limpieza de objetos huérfanos, `F9.9` (puente Telegram) y
+`F9.11` (invitar a un tercero).
+
+### F9.20 y F9.16 remoto — done (Claude, 2026-09-01, sin commit)
+
+**Instrucciones fijas por conversación.** Se escriben en la propia conversación,
+acompañan a cada turno y se guardan cifradas **dentro del sobre del turno**, no
+en un campo del registro: así el historial conserva cuáles regían cada respuesta,
+y —lo que decidió el cómo— no hacía falta una columna nueva en `vault_records`,
+que era imposible porque `0007` se estaba aplicando en ese momento.
+
+**Los medios ya se sincronizan** (`D-050`). Los bytes van a un bucket privado de
+Supabase Storage, que crea la migración `0008`. Suben antes que el registro, y
+el gateway rechaza un registro cuyos bytes no estén: al revés, el otro equipo
+vería un archivo que no puede abrir. Lo que pasa de 90 MB se salta y se cuenta.
+
+**Rasgos del personaje**: el botón mandaba `{}`; ahora hay dónde escribirlos.
+
+`npm run check` exit 0: 118 archivos, 2.046 superadas, 9 omitidas.
 
 ### F9.19 — done (Claude, 2026-09-01, sin commit)
 

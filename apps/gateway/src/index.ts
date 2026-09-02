@@ -16,6 +16,7 @@ import {
   handleRevokeDevice,
 } from './handlers/remote.js';
 import { RemoteRepository } from './remote-repository.js';
+import { VaultObjectStore } from './object-store.js';
 import {
   handleRegister,
   handleHeartbeat,
@@ -49,6 +50,10 @@ import {
   handleVaultLoginFinish,
   handleVaultLoginStart,
   handleVaultLogout,
+  handleVaultMediaDownload,
+  handleVaultMediaList,
+  handleVaultMediaPush,
+  handleVaultMediaUpload,
   handleVaultPull,
   handleVaultPush,
   handleVaultRegister,
@@ -118,6 +123,18 @@ const router = new Router<Deps>()
   .get('/api/vault/conversations/:conversationId', (request, deps, params) =>
     handleVaultPull(request, deps, params),
   )
+  .get('/api/vault/media', (request, deps, params) =>
+    handleVaultMediaList(request, deps, params),
+  )
+  .post('/api/vault/media', (request, deps, params) =>
+    handleVaultMediaPush(request, deps, params),
+  )
+  .put('/api/vault/media/objects/:objectKey', (request, deps, params) =>
+    handleVaultMediaUpload(request, deps, params),
+  )
+  .get('/api/vault/media/objects/:objectKey', (request, deps, params) =>
+    handleVaultMediaDownload(request, deps, params),
+  )
   .post('/api/vault/conversations/:conversationId/delete', (request, deps, params) =>
     handleVaultDelete(request, deps, params),
   )
@@ -163,6 +180,7 @@ function buildDeps(env: Env, requestId: string): Deps {
     db,
     repo: new Repository(db),
     remote: new RemoteRepository(db),
+    objects: new VaultObjectStore(config),
     telegram: new TelegramClient(config.TELEGRAM_BOT_TOKEN),
     logger,
   };

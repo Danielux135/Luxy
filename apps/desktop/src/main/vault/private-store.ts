@@ -61,7 +61,15 @@ function guard<T>(record: T): T {
 export interface SealTurnInput {
   conversationId: string;
   sequence: number;
-  turn: Omit<VaultTurnPayload, 'v' | 'createdAt'> & { createdAt?: string };
+  /**
+   * `instructions` es opcional aqui aunque el payload lo exija: un turno sin
+   * instrucciones fijas es lo normal, y obligar a escribir `instructions: null`
+   * en cada llamada solo conseguiria que alguien lo rellene por costumbre.
+   */
+  turn: Omit<VaultTurnPayload, 'v' | 'createdAt' | 'instructions'> & {
+    createdAt?: string;
+    instructions?: string | null;
+  };
   memory?: Omit<VaultMemoryPayload, 'v'>;
 }
 

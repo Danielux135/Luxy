@@ -303,11 +303,11 @@ interfaz: *workspace*, *privacy*, *vault*, *invitado en solo lectura*.
 | F9.13 | Interfaz de la bóveda en Studio: crear, abrir, cerrar, clave de recuperación | done |
 | F9.14 | El proceso principal envía `run_local_turn` y muestra el progreso | done |
 | F9.15 | Endpoints del gateway para registros privados y permisos | implemented (con cliente) |
-| F9.16 | Cliente de almacén de objetos para los blobs cifrados | implemented (sólo local) |
+| F9.16 | Cliente de almacén de objetos para los blobs cifrados | implemented (local y remoto) |
 | F9.17 | Adaptador de Xavira: personajes, imagen, vídeo, sondeo y descarga | implemented (conectado; sin llamada real) |
 | F9.18 | Interfaz de cuenta y unión de los dos orígenes de la llave maestra | done |
 | F9.19 | Recuperación de la cuenta desde un equipo nuevo (envoltura de recuperación en servidor) | done |
-| F9.20 | Instrucciones fijas por conversación: contexto persistente cifrado con ella | planned |
+| F9.20 | Instrucciones fijas por conversación: contexto persistente cifrado con ella | done |
 | F9.21 | Protocolo de Electron para servir medios grandes descifrados (vídeo > 20 MB) | planned |
 
 `F9.18` cierra la avería que impedía usar la bóveda en un segundo ordenador:
@@ -320,6 +320,12 @@ pantalla: la clave de recuperación abre ahora **desde cualquier ordenador**,
 porque el servidor guarda también la copia de la llave cerrada con ella. Se hizo
 en el mismo día, y a tiempo: las columnas entraron en `0007` **antes** de
 aplicarla, así que no hace falta una migración aparte. Ver `D-049`.
+
+`F9.16` remoto se cierra el 2026-09-01: los medios ya viajan. Los bytes van a
+un bucket privado de **Supabase Storage** —y no a R2— porque el gateway ya tiene
+la URL y la service role key de ese proyecto; R2 habría exigido un binding nuevo
+en `wrangler.toml`, que ni siquiera se versiona. El bucket lo crea la migración
+`0008`. Ver `D-050`.
 
 `F9.20` sale de un hueco detectado al revisar el estado el 2026-09-01:
 `buildVaultPrompt` acepta un campo `instructions` —instrucciones fijas que

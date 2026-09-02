@@ -752,6 +752,10 @@ export function registerIpcHandlers(context: HandlerContext): void {
   }));
 
   handle(IPC_INVOKE.vaultConversationRead, vaultConversationIdArgsSchema, async (args) => ({
+    instructions: await context.privateConversations.latestInstructions(
+      context.vault,
+      args.conversationId,
+    ),
     conversationId: args.conversationId,
     turns: await context.privateConversations.read(context.vault, args.conversationId),
   }));
@@ -858,11 +862,16 @@ export function registerIpcHandlers(context: HandlerContext): void {
     // autoriza la SESION DE LA CUENTA, no el token de maquina: el gateway
     // decide de quien es cada registro por el usuario de esa sesion, y dos
     // personas pueden compartir una maquina sin compartir boveda (D-045)
-    return syncVault(context.vault, context.privateConversations, {
-      gatewayUrl: stored.gatewayUrl,
-      sessionToken: context.accounts.sessionToken(),
-      onUnauthorized: () => context.accounts.forgetSession(),
-    });
+    return syncVault(
+      context.vault,
+      context.privateConversations,
+      {
+        gatewayUrl: stored.gatewayUrl,
+        sessionToken: context.accounts.sessionToken(),
+        onUnauthorized: () => context.accounts.forgetSession(),
+      },
+      context.privateMedia,
+    );
   });
 
   handle(IPC_INVOKE.vaultCharacterCreate, vaultCharacterCreateArgsSchema, async (args) => {
@@ -986,6 +995,13 @@ export function registerIpcHandlers(context: HandlerContext): void {
       existing[0]?.title ??
       args.message.slice(0, 60).replace(/\s+/g, ' ').trim();
 
+    // instrucciones fijas: `null` significa «no las toques» y conserva las que
+    // hubiera; una cadena vacia si las borra. Se sellan con el turno del
+    // usuario, asi que el historial guarda cuales regian cada respuesta.
+    const previousInstructions = await store.latestInstructions(context.vault, conversationId);
+    const instructions = args.instructions === null ? previousInstructions : args.instructions;
+    const changed = args.instructions !== null && args.instructions !== (previousInstructions ?? '');
+
     await store.appendTurn(context.vault, conversationId, {
       role: 'user',
       text: args.message,
@@ -994,6 +1010,9 @@ export function registerIpcHandlers(context: HandlerContext): void {
       model: args.model,
       inputTokens: null,
       outputTokens: null,
+      // solo se vuelven a sellar cuando cambian: repetirlas en cada turno
+      // engordaria el archivo sin decir nada nuevo
+      ...(changed ? { instructions: args.instructions } : {}),
     });
 
     // el prompt se arma con la memoria acumulativa mas los ultimos turnos, no
@@ -1007,6 +1026,7 @@ export function registerIpcHandlers(context: HandlerContext): void {
       // el ultimo es el que se acaba de guardar: va aparte como mensaje nuevo
       turns: history.slice(0, -1).map((turn) => ({ role: turn.role, text: turn.text })),
       message: args.message,
+      instructions: instructions === null || instructions.length === 0 ? null : instructions,
     });
 
     const result = await context.controller.runLocalTurn({
@@ -1043,6 +1063,7 @@ export function registerIpcHandlers(context: HandlerContext): void {
       conversationId,
       outcome: result.outcome,
       turns: await store.read(context.vault, conversationId),
+      instructions: await store.latestInstructions(context.vault, conversationId),
       error: result.error,
     };
   });

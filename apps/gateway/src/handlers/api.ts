@@ -34,6 +34,7 @@ import {
 } from '../auth.js';
 import { getMachineLimiter } from '../ratelimit.js';
 import type { SupabaseClient } from '../supabase.js';
+import type { VaultObjectStore } from '../object-store.js';
 
 export interface ApiDeps {
   config: GatewayConfig;
@@ -41,6 +42,8 @@ export interface ApiDeps {
   /** tablas de control remoto; separadas de repo por ciclo de vida propio */
   remote: RemoteRepository;
   db: SupabaseClient;
+  /** bytes cifrados de imagenes y videos; el gateway los mueve, no los lee */
+  objects: VaultObjectStore;
   telegram: TelegramClient;
   logger: Logger;
 }

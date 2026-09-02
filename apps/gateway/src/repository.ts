@@ -1,10 +1,28 @@
 // acceso a datos: traduce entre las filas de postgres y los tipos compartidos
 import { generateShortId } from '@luxy/shared';
-import type { Job, JobOrigin, JobStatus, Machine, PrivateRecord, ProviderId } from '@luxy/shared';
+import type {
+  Job,
+  JobOrigin,
+  JobStatus,
+  Machine,
+  PrivateMedia,
+  PrivateRecord,
+  ProviderId,
+} from '@luxy/shared';
 import { type SupabaseClient, eq, gte, inList } from './supabase.js';
 // una sola definicion de la fila: dos copias se desincronizan en cuanto una
 // columna nueva entra por un lado y no por el otro
 import type { VaultUserRow } from './vault-auth.js';
+
+interface VaultMediaRow {
+  media_id: string;
+  conversation_id: string;
+  object_key: string;
+  byte_size: number;
+  content: unknown;
+  thumbnail_object_key: string | null;
+  created_at: string;
+}
 
 const VAULT_USER_COLUMNS =
   'id,email,auth_salt,argon2_t,argon2_m,argon2_p,auth_hash,wrapped_master_key,' +
@@ -781,6 +799,57 @@ export class Repository {
       order: 'updated_at.desc',
       limit: query.limit,
     });
+  }
+
+  // --- medios ---
+
+  async listVaultMedia(
+    ownerUserId: string,
+    conversationId?: string,
+  ): Promise<VaultMediaRow[]> {
+    return this.db.select('vault_media', {
+      columns:
+        'media_id,conversation_id,object_key,byte_size,content,thumbnail_object_key,created_at',
+      // el filtro por usuario es la autorizacion, igual que en los registros
+      filters: {
+        owner_user_id: eq(ownerUserId),
+        ...(conversationId === undefined ? {} : { conversation_id: eq(conversationId) }),
+      },
+      order: 'created_at.desc',
+      limit: 500,
+    });
+  }
+
+  async findVaultMediaObject(
+    ownerUserId: string,
+    objectKey: string,
+  ): Promise<{ object_key: string } | null> {
+    return this.db.selectOne('vault_media', {
+      columns: 'object_key',
+      filters: { owner_user_id: eq(ownerUserId), object_key: eq(objectKey) },
+    });
+  }
+
+  /**
+   * inserta un medio si no estaba.
+   *
+   * idempotente por (propietario, clave de objeto): reenviar una subida cortada
+   * no duplica la fila ni falla.
+   */
+  async insertVaultMedia(ownerUserId: string, media: PrivateMedia): Promise<number> {
+    const inserted = await this.db
+      .insert<{ media_id: string }>('vault_media?on_conflict=owner_user_id,object_key', {
+        media_id: media.mediaId,
+        owner_user_id: ownerUserId,
+        conversation_id: media.conversationId,
+        object_key: media.objectKey,
+        byte_size: media.byteSize,
+        content: media.content,
+        thumbnail_object_key: media.thumbnailObjectKey,
+        created_at: media.createdAt,
+      })
+      .catch(() => [] as { media_id: string }[]);
+    return inserted.length;
   }
 
   async listVaultRecords(

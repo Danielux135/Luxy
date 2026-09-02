@@ -343,6 +343,31 @@ export const vaultSyncPushResponseSchema = z.object({
   skipped: z.number().int().min(0),
 });
 
+/**
+ * tope de un objeto que viaja al almacen remoto.
+ *
+ * Es el limite del cuerpo de una peticion a un Worker de Cloudflare. Un video
+ * mas grande se queda en el equipo donde se genero, y la interfaz lo dice: es
+ * preferible a un fallo a mitad de subida que nadie sabe interpretar.
+ */
+export const VAULT_MAX_OBJECT_BYTES = 90 * 1024 * 1024;
+
+/** los medios de una boveda, con sus metadatos cifrados y sin los bytes */
+export const vaultMediaListResponseSchema = z.object({
+  media: z.array(privateMediaSchema),
+});
+
+/**
+ * alta de un medio.
+ *
+ * los BYTES no van aqui: se suben aparte, a
+ * `/api/vault/media/objects/:objectKey`, y este registro se crea despues. Ese
+ * orden deja huerfanos recuperables en vez de registros que apuntan a nada.
+ */
+export const vaultMediaPushRequestSchema = z.object({
+  media: privateMediaSchema,
+});
+
 export type VaultSyncPushRequest = z.infer<typeof vaultSyncPushRequestSchema>;
 export type VaultSyncPullQuery = z.infer<typeof vaultSyncPullQuerySchema>;
 export type VaultSyncConversation = z.infer<typeof vaultSyncConversationSchema>;
