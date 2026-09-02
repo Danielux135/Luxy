@@ -1,5 +1,27 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-02 — estado consolidado de la sesión
+
+- **`npm run check`: exit 0.** Suite: **120 archivos, 2.088 superadas, 9
+  omitidas, 0 fallos**.
+- Archivos de prueba nuevos en la sesión: `account-manager.test.ts` (25),
+  `media-sync.test.ts` (9), `character-store.test.ts` (11),
+  `vault-image-request.test.ts` (20). Más las ampliaciones de
+  `conversation-store.test.ts`, `vault-prompt.test.ts` y `xavira.test.ts`.
+- **Verificado contra servicios reales:**
+  - `0007` aplicada: cinco tablas `vault_*` con `rowsecurity = true`;
+  - `0008` aplicada: bucket `vault-media` con `public = false`;
+  - gateway desplegado y respondiendo: `/health` → 200 `configured: true`;
+  - `POST /api/vault/login/start` con correo inexistente → 200 con señuelo, lo
+    que demuestra que el gateway habla con el Supabase donde están las tablas;
+  - vincular la bóveda local a una cuenta e iniciar sesión, en la aplicación;
+  - crear un personaje y generar su avatar en la API de generación.
+- **NO verificado, y es lo único de seguridad que queda:** que un usuario no
+  pueda leer los registros de otro (`withVaultAuth`). Necesita una segunda
+  cuenta real. Tampoco se ha sincronizado entre dos equipos. Es `LA-033`.
+- Las pruebas siguen sin gastar créditos ni llamar a ninguna API: todo con
+  dobles. Las llamadas reales las hizo Daniel desde la aplicación.
+
 ### 2026-09-02 — segunda llamada real: la API retira las fotos de referencia
 
 - `POST /v1/characters` devolvió **400 `reference_image_unsupported`**:

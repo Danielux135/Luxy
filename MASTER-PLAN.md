@@ -313,6 +313,9 @@ interfaz: *workspace*, *privacy*, *vault*, *invitado en solo lectura*.
 | F9.23 | Imagen de referencia del personaje | **retirada**: la API la eliminó (`D-053`) |
 | F9.24 | Personaje por rasgos del enum cerrado del proveedor | done (contrato corregido con llamadas reales) |
 | F9.25 | Personajes guardados en la bóveda; la API no sabe listarlos | done (local; sin sincronizar) |
+| F9.26 | El modelo reenvía una imagen existente en vez de generar otra | done |
+| F9.27 | Sincronizar los personajes entre equipos | planned |
+| F9.28 | `PATCH /v1/characters/:id`: cambiar rasgos sin pagar otra creación | planned |
 
 `F9.18` cierra la avería que impedía usar la bóveda en un segundo ordenador:
 el archivo local y la llave envuelta del servidor eran dos orígenes de la misma
@@ -324,6 +327,21 @@ pantalla: la clave de recuperación abre ahora **desde cualquier ordenador**,
 porque el servidor guarda también la copia de la llave cerrada con ella. Se hizo
 en el mismo día, y a tiempo: las columnas entraron en `0007` **antes** de
 aplicarla, así que no hace falta una migración aparte. Ver `D-049`.
+
+**Estado global de la Fase 9 al 2026-09-02: la infraestructura está ejecutada.**
+`0007` y `0008` aplicadas, gateway desplegado, cuenta vinculada, personajes e
+imágenes creados contra la API real. Lo que queda es `F9.12` (documentación),
+`F9.21`, `F9.27`, `F9.28`, la limpieza de huérfanos, `F9.9` y `F9.11`; más
+`LA-033`, la prueba con dos equipos y dos cuentas, que es lo único de seguridad
+sin verificar.
+
+`F9.26` sale de un coste real: pedir «mándame otra vez la de antes» generaba una
+imagen nueva —pagando— y encima distinta, porque el modelo sólo sabía generar.
+Ahora el bloque admite `mediaId` para reenviar lo que ya existe, gratis.
+
+`F9.27` es la limitación más visible que queda: los personajes viven cifrados en
+`vault/characters.json`, **sólo en local**. En un segundo equipo hay que darlos
+de alta a mano, y la API del proveedor no sabe listarlos.
 
 `F9.16` remoto se cierra el 2026-09-01: los medios ya viajan. Los bytes van a
 un bucket privado de **Supabase Storage** —y no a R2— porque el gateway ya tiene

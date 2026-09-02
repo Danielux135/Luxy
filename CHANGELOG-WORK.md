@@ -1,5 +1,37 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-09-02 05:00 — Claude — pasada de documentacion de toda la sesion
+
+Daniel pidio documentar todo lo relevante. Sin cambios de codigo.
+
+Lo que ha cambiado de verdad en el estado del proyecto, y por eso habia mucho
+que corregir en los documentos: **la Fase 9 dejo de ser codigo probado con
+dobles**. `0007` y `0008` aplicadas, gateway desplegado, cuenta vinculada,
+personajes creados e imagenes generadas **contra los servicios reales**.
+
+- **`CURRENT-TASK.md`**: cabecera nueva con una tabla de que esta ejecutado de
+  verdad y que sigue sin probarse; seccion **«Lo que la API de generacion nos
+  enseño, y no estaba en su documentacion»**, con las cinco suposiciones que
+  desmintio y los tres hallazgos utiles; lista de pendientes reordenada —los
+  personajes sin sincronizar y `PATCH /v1/characters/:id` sin conectar suben a
+  los primeros puestos—; cinco avisos nuevos (la foto de perfil es una copia en
+  la conversacion, una conexion SI ejecuta turnos, los modelos no se consultan
+  solos, la clave de imagenes va en Privado); y una tabla que resume los diez
+  fallos de la sesion con su causa, porque casi todos comparten una: **una pieza
+  existia y nadie la conectaba**;
+- **`LOCAL-ACTIONS.md`**: `LA-031` pasa a `done` con lo que se ejecuto y como se
+  verifico —incluida la forma barata de descartar la trampa 3, que es mirar si
+  `login/start` devuelve el señuelo o un 500—, mas las notas de PowerShell 5.1 y
+  del `wrangler.toml` que este clon no tenia. `LA-032` se **reabre**: 13 commits
+  nuevos sin publicar. `LA-033` nueva: probar con dos equipos y dos cuentas, que
+  es lo unico de seguridad sin verificar;
+- **`PROJECT-STATE.md`**: resumen del estado real y los dos avisos que mas caros
+  salen —el contrato de la API y que las instrucciones del usuario son ordenes—;
+- **`MASTER-PLAN.md`** y **`TEST-RESULTS.md`** al dia.
+
+Sin ejecutar nada nuevo. `npm run check` sigue en exit 0: 120 archivos, 2.088
+superadas, 9 omitidas.
+
 ### 2026-09-02 04:10 — Claude — dar de alta un personaje que ya existe, y su avatar
 
 Dos huecos que salieron al intentar reutilizar el personaje ya pagado.

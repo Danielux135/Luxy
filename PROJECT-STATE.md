@@ -1,6 +1,40 @@
 # Luxy — estado canónico del proyecto
 
-Última actualización: **2026-09-01 — F9.18 y F9.19, la bóveda en varios equipos**
+Última actualización: **2026-09-02 — la bóveda privada, funcionando de verdad**
+
+La sección **Privado** dejó de ser código probado con dobles: la migración
+`0007` y la `0008` están **aplicadas**, el gateway está **desplegado**
+(`luxy-gateway`, versión `44aee3d5`), y contra los servicios reales ya funcionan
+vincular la bóveda a una cuenta, iniciar sesión, crear personajes y generar
+imágenes.
+
+Lo que la sección hace hoy: conversaciones privadas cifradas que se ejecutan en
+la máquina local, con memoria acumulativa, **instrucciones fijas** y un
+**personaje** que el modelo encarna; el modelo puede **pedir una imagen** —
+generarla, que cuesta créditos, o **reenviar** una que ya existe, gratis—; y
+todo ello se sincroniza entre equipos, turnos y medios, autorizado por sesión de
+cuenta.
+
+`npm run check` verde: **120 archivos, 2.088 pruebas superadas, 9 omitidas**.
+Trece commits sin publicar en `luxy/f9-1-vault-crypto`.
+
+**Lo que NO está verificado, y es lo único de seguridad que queda:** que un
+usuario no pueda leer los registros de otro (`withVaultAuth`). Necesita una
+segunda cuenta real; es `LA-033`, junto con la sincronización entre dos equipos.
+
+Dos cosas que conviene saber antes de tocar nada:
+
+1. **La API de generación corrigió el contrato dos veces**, y ninguna de las dos
+   estaba en su documentación pública. La lección quedó escrita: ese contrato se
+   corrige con lo que la API responde, no con lo que se supone. El detalle, en
+   `CURRENT-TASK.md`.
+2. **Las instrucciones que escribe el usuario son órdenes, no datos** (`D-054`).
+   Enviarlas marcadas «(DATOS)» hacía que el modelo las tuviera en cuenta sin
+   obedecerlas, que es justo lo contrario de lo que pide quien las escribe.
+
+---
+
+Última actualización anterior: **2026-09-01 — F9.18 y F9.19, la bóveda en varios equipos**
 
 La bóveda privada ya se puede usar en **más de un ordenador**. Era la avería
 central del bloque: el archivo local y la llave envuelta del servidor eran dos

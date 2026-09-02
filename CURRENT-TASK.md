@@ -35,22 +35,33 @@ Luxy ya no depende de ella; los commits manuales de Daniel sí.
 
 ## F9-VAULT-001 — conversaciones privadas cifradas y sincronizadas
 
-Estado: **en curso, punto de retoma del 2026-09-01 (tras `F9.18` y `F9.19`).**
-Rama aislada `luxy/f9-1-vault-crypto` sobre `main` @ `00a9cc1`. `npm run check`
-verde: 117 archivos, 2.030 pruebas superadas, 9 omitidas.
+Estado: **en curso, punto de retoma del 2026-09-02.** Rama aislada
+`luxy/f9-1-vault-crypto` sobre `main` @ `00a9cc1`, con **13 commits sin
+publicar**. `npm run check` verde: 120 archivos, 2.088 pruebas superadas, 9
+omitidas.
 
-**Todo el camino crítico de código está cerrado.** Lo que queda es de tres
-tipos, y conviene no confundirlos:
+**La infraestructura ya no es teórica.** En la sesión del 2026-09-02 se ejecutó
+por primera vez contra los servicios reales:
+
+| pieza | estado real |
+| --- | --- |
+| migración `0007` | **aplicada**; las cinco tablas `vault_*` con `rowsecurity = true` |
+| migración `0008` | **aplicada**; bucket `vault-media` privado (`public = false`) |
+| gateway | **desplegado**: `luxy-gateway`, versión `44aee3d5`, en `luxy-gateway.danielux135.workers.dev` |
+| cuenta | **probada de verdad**: vincular la bóveda local e iniciar sesión funcionan contra Supabase |
+| API de generación | **probada**: crea personajes y genera imágenes. Corrigió el contrato dos veces |
+
+Lo que queda es de tres tipos, y conviene no confundirlos:
 
 | tipo | qué es | quién |
 | --- | --- | --- |
-| **ejecución** | aplicar `0007`, desplegar el gateway, clave de Xavira, probar con dos equipos | Daniel (`LA-031`) |
-| **piezas pendientes** | `F9.20` instrucciones fijas · `F9.21` vídeo grande · `F9.9` puente Telegram · `F9.11` invitado · `F9.16` remoto | IA |
+| **piezas pendientes** | `F9.21` vídeo grande · personajes sin sincronizar · limpieza de huérfanos · `F9.9` puente Telegram · `F9.11` invitado | IA |
 | **deuda de documentación** | `F9.12`: `docs/PRIVACY.md`, `SECURITY.md`, modelo de amenazas | IA |
+| **publicación** | `git push` de la rama; se deniega desde la sesión de IA (`LA-032`) | Daniel |
 
-Nada de lo implementado ha hablado con Supabase, con el gateway real ni con la
-API de Xavira. Es la advertencia que más veces se ha repetido en este bloque y
-sigue siendo cierta.
+Lo que **sigue sin probarse contra Postgres**: la autorización cruzada entre
+usuarios de `withVaultAuth` —hace falta una segunda cuenta— y la sincronización
+real entre dos equipos.
 
 > **PUNTO DE RETOMA — leer esto entero antes de tocar nada.** Debajo, cada paso
 > `F9.x` conserva su bloque de cierre como historial; esta cabecera es el estado
@@ -72,28 +83,63 @@ conversar, ver el `.jsonl` cifrado):
 - adjuntar y **generar** imágenes/vídeo (adaptador de Xavira conectado), cifrado
   en `vault\media\<hex>.bin`.
 
-Añadido después, **implementado y probado con mocks pero sin ejecutar de verdad**:
+Añadido después, **con la infraestructura ya desplegada**:
 
 - **cuenta**: crear, entrar, salir, y usar la bóveda sólo en este equipo sin
-  cuenta. Un ordenador nuevo funciona sabiendo el correo y la contraseña;
+  cuenta. Un ordenador nuevo funciona sabiendo el correo y la contraseña.
+  **Verificado de verdad**: vincular la bóveda local e iniciar sesión funcionan
+  contra el gateway y Supabase reales;
 - **recuperación**: la clave de recuperación abre desde cualquier ordenador, y
-  desde ahí se elige contraseña nueva;
+  desde ahí se elige contraseña nueva. Probado sólo con dobles;
 - **vincular** una bóveda anterior a las cuentas, sin recifrar su contenido;
-- **sincronización** de turnos entre equipos, autorizada por sesión de cuenta.
+- **sincronización** de turnos y de medios entre equipos, autorizada por sesión
+  de cuenta. Probada sólo con dobles: falta hacerlo con dos equipos de verdad;
+- **personaje de la conversación**: rasgos del enum cerrado del proveedor,
+  guardado cifrado en la bóveda con su avatar. **Verificado**: se crean
+  personajes y se generan imágenes contra la API real;
+- **instrucciones fijas** por conversación, y el modelo **las obedece** como
+  órdenes del usuario, no como datos (`D-054`);
+- **el modelo puede pedir una imagen** dentro de la conversación: generar una
+  nueva —cuesta créditos— o **reenviar** una que ya existe, gratis (`D-051`).
+
+### Lo que la API de generación nos enseñó, y no estaba en su documentación
+
+Es la parte que más veces desmintió lo que suponíamos, y conviene tenerla junta
+porque **el contrato se corrigió con lo que la API respondió**, no con lo que
+publica:
+
+| lo que suponíamos | lo que resultó |
+| --- | --- |
+| crear un personaje sólo necesita rasgos | exige **`model_id`**: `realistic-sharp-v1` o `anime-pure-v1`. Los de vídeo no valen |
+| los rasgos son texto libre | son un **enum cerrado**: `gender`, `ethnicity`, `ageRange`, `hairLength`, `hairColor`, `build`, y `breastSize`/`assSize` sólo con `gender=female` |
+| se puede dar una foto de referencia | **la retiraron**. `reference_image_unsupported`: no existe el campo, y su documentación explica que no aceptan fotos para contenido adulto |
+| se pueden listar los personajes | **no hay `GET /v1/characters`**. Sólo crear, `PATCH` y sondear |
+| el `character_id` se puede recuperar | `GET /v1/generations/:id` devuelve estado, URL y coste, **no el personaje**. Un identificador que no guarde Luxy se pierde |
+
+Dos hallazgos útiles que sí estaban en su documentación, en `xavira.ai/docs`
+—no en `api.xavira.ai/docs`, que da 404—:
+
+- **`PATCH /v1/characters/:id`** cambia los rasgos **sin crear otro personaje**:
+  el avatar y la cara no se tocan. Evita pagar una creación por un ajuste. **No
+  está conectado en Luxy**;
+- el proveedor **ya inyecta los rasgos del personaje en cada generación**
+  («identity anchor»), por eso las imágenes salen coherentes con prompts cortos;
+- crear un personaje **renderiza su avatar y cuesta un crédito**; tarda 8–16 s y
+  la API corta a 26. El tope del adaptador son 120 s, así que el modo asíncrono
+  no hace falta.
 
 ### Lo que falta, con nombre y tamaño
 
 Ordenado por lo que más se nota al usarlo:
 
-1. **La API de generación nunca se ha llamado de verdad** (`F9.17`). Es lo único
-   que queda del camino y lo único donde espero sorpresas. Lo verificado sin
-   gastar créditos: la URL base responde, `GET /v1/generations/<id>` existe y
-   devuelve **401** sin credenciales (no 404), y su sobre de error es
-   `{error:{code,message,request_id}}`, que encaja con el adaptador. **Sin
-   verificar**: los nombres de campo de `POST /v1/images:generate`, la rama
-   201-con-`output_url` frente a 202-con-`poll_url`, y la creación de personaje.
-   Necesita la clave —se pone en **Privado → «Proveedor de imágenes»**— y una
-   generación real.
+1. **Los personajes no se sincronizan.** Viven en `vault/characters.json`,
+   cifrados, **sólo en este equipo**. Los de un portátil no aparecen en el de
+   sobremesa, y como la API no sabe listarlos, en el otro equipo habría que
+   darlos de alta a mano. Es la pieza que más se va a notar en cuanto se use un
+   segundo ordenador.
+2. **`PATCH /v1/characters/:id` no está conectado.** Permite cambiar los rasgos
+   de un personaje sin crear otro —sin pagar otra creación— y hoy no hay forma
+   de hacerlo desde Luxy: la única salida es crear uno nuevo.
 3. **`F9.21` — vídeo grande sin previsualizar.** Se genera y se guarda cifrado,
    pero el tope de 20 MB del IPC impide verlo. Falta un protocolo de Electron
    que sirva el flujo descifrado. Ojo: **sincronizar y previsualizar tienen
@@ -113,6 +159,14 @@ Ordenado por lo que más se nota al usarlo:
 8. **`F9.9`** (puente de Telegram por conversación) y **`F9.11`** (invitar a un
    tercero) siguen sin empezar. Ya no están bloqueados por `D-001`: lo matizó
    `D-045`.
+9. **La autorización cruzada entre usuarios sigue sin probarse con Postgres
+   delante.** `withVaultAuth` filtra por el usuario de la sesión y las pruebas lo
+   cubren con dobles, pero hace falta **una segunda cuenta real** para
+   confirmarlo. Es lo único de seguridad del bloque que no se puede dar por
+   verificado.
+10. **La sincronización entre dos equipos no se ha hecho nunca de verdad.** El
+    código está probado con dobles y la infraestructura desplegada; falta
+    ejecutarlo con dos ordenadores.
 
 ### Arquitectura de claves (la que hay que respetar)
 
@@ -185,11 +239,18 @@ gateway real**. Ver el punto 2 de la lista de abajo.
 
 ### Lo que hay que tener en cuenta, sin suavizar
 
-1. **`0007` YA ESTÁ APLICADA** (2026-09-01, por Daniel): las cinco tablas
-   `vault_*` con `rowsecurity = true`. A partir de aquí **no se toca**. Lo que
-   queda es `0008`, que crea el bucket privado de los medios (`LA-031`, paso 2b).
-   Sigue pendiente confirmar que el gateway apunta a ese mismo proyecto (trampa
-   3 de `docs/ARRANQUE-ORDENADOR-NUEVO.md`).
+1. **`0007` y `0008` están aplicadas, y el gateway desplegado** (2026-09-02).
+   Las cinco tablas `vault_*` con `rowsecurity = true` y el bucket `vault-media`
+   con `public = false`. **A partir de aquí no se tocan**: cualquier cambio de
+   esquema va en una migración nueva.
+
+   Que el gateway apunta al mismo proyecto **está confirmado**, y así se hizo:
+   `POST /api/vault/login/start` con un correo inexistente devolvió 200 con la
+   respuesta señuelo. Eso prueba tres cosas a la vez —la ruta existe, la consulta
+   a `vault_users` funcionó y el código de `F9.19` está vivo—, porque si la tabla
+   no estuviera en ese proyecto, `getVaultUserByEmail` habría lanzado un 500. Es
+   la forma barata de comprobar la trampa 3 de
+   `docs/ARRANQUE-ORDENADOR-NUEVO.md` sin crear ninguna cuenta.
 2. **Nada del gateway ni de las cuentas se ha ejecutado contra Supabase real.**
    Todo son mocks: gateway falso, cliente falso. Incluida la autorización cruzada
    entre usuarios de `withVaultAuth`, que sólo se confirma con Postgres delante.
@@ -236,7 +297,23 @@ gateway real**. Ver el punto 2 de la lista de abajo.
     del registro (`F9.20`). Consecuencia práctica: cambiarlas escribe un turno
     nuevo, y los turnos anteriores conservan las suyas. Es lo que hace que el
     historial no mienta sobre qué las gobernaba.
-16. Límites de diseño que van a `docs/PRIVACY.md` (`F9.12`, pendiente): el
+16. **La foto de perfil de un personaje es una COPIA en la conversación.** El
+    avatar vive en la ficha del personaje; la primera vez que se usa en una
+    conversación se copia ahí cifrado, marcado con su `characterId`. Sin esa
+    copia, «pásame tu foto» no tenía nada que reenviar, porque la lista de
+    imágenes reenviables sale de los medios de la conversación.
+17. **Una conexión NO es sólo para descubrir modelos.** El agente registra **un
+    proveedor por familia** apuntando a ese endpoint (`deepseek`, `glm`, `kimi`,
+    `qwen`…), y esos proveedores ejecutan turnos. La lista buena es la que el
+    agente anuncia en su estado, no la que se deduce de `providers.http`:
+    deducirla dejaba fuera todo lo que sirve una pasarela.
+18. **Los modelos de una conexión no se consultan solos.** Hay que pulsar
+    «Actualizar modelos» en Modelos → «Catálogo real de la conexión» una vez.
+    Hasta entonces dice «Sin consultar todavía», que se lee como si no hubiera.
+19. **La clave del proveedor de imágenes se pone en Privado, no en Conexiones.**
+    Es un secreto reservado y el formulario de Conexiones lo rechaza por diseño;
+    durante un tiempo no se pudo configurar desde ningún sitio.
+20. Límites de diseño que van a `docs/PRIVACY.md` (`F9.12`, pendiente): el
     proveedor de IA ve el prompt en claro —la bóveda protege el almacenamiento y
     el transporte propio de Luxy, no lo que un tercero recibe porque el usuario
     decide enviárselo—; Telegram no puede leer ciphertext; DPAPI no protege de
@@ -260,30 +337,50 @@ como una contraseña) · `D-050` (los bytes de los medios van a Supabase Storage
 
 ### Siguiente paso exacto (para quien retome)
 
-Los tres sub-pasos de `F9.18` —pantalla de cuenta, unir los dos orígenes de la
-llave, sincronizar por sesión— y la recuperación desde otro equipo (`F9.19`)
-están **hechos**. Todo el camino crítico de código está cerrado; lo que queda
-es ejecutar y documentar.
+`LA-031` está **hecha**: migraciones aplicadas, gateway desplegado, clave del
+proveedor puesta y personajes e imágenes creados de verdad. Lo que queda:
 
-1. **`LA-031`, la única acción de Daniel que bloquea lo demás.** `0007` ya está
-   aplicada; quedan `0008` (bucket de medios), desplegar el gateway, poner la
-   clave de Xavira y probar de verdad. Lo que sólo se puede confirmar
-   ahí: que un usuario no puede leer los registros de otro (`withVaultAuth`),
-   que la bóveda que Daniel ya tiene se vincula sin perder nada, y que el
-   contrato del adaptador de Xavira coincide con la API real.
+1. **Publicar la rama.** Trece commits sin subir. El `git push` desde la
+   sesión de IA se deniega solo, sin diálogo (`LA-032`): se lanza desde una
+   terminal y ya está.
 
-2. **`F9.21`, vídeo grande sin previsualizar.** Es lo único de interfaz que
-   queda con efecto visible, y no depende de `LA-031`.
+2. **`F9.12`, documentación de privacidad.** Es la deuda más cara y la más
+   barata de pagar. Hay bastante que contar que antes no existía: la clave de
+   recuperación abre desde cualquier equipo, la sesión caduca a los 30 días,
+   salir de la cuenta no borra lo cifrado, un equipo guarda la bóveda de una
+   sola cuenta, el proveedor de texto y el de imágenes ven en claro lo que se
+   les envía, y los personajes son locales.
 
-3. **`F9.12`, documentación de privacidad.** Es barata y cierra deuda: es la que
-   explica todo esto a quien llegue. Tiene cuatro límites nuevos que contar:
-   entrar con la clave de recuperación deja el equipo sin contraseña hasta que
-   se elija una; salir de la cuenta no borra lo cifrado de este equipo; quien
-   tenga la clave de recuperación abre la bóveda desde cualquier sitio; y un
-   equipo guarda la bóveda de una sola cuenta.
+3. **Sincronizar los personajes.** Hoy son locales y la API no sabe listarlos:
+   en un segundo equipo hay que darlos de alta a mano. Es lo que más se va a
+   notar en cuanto se use otro ordenador.
 
-Después quedan la limpieza de objetos huérfanos, `F9.9` (puente Telegram) y
-`F9.11` (invitar a un tercero).
+4. **Probar con dos equipos y dos cuentas.** Es lo único de seguridad que no se
+   puede dar por verificado: que un usuario no lea los registros de otro
+   (`withVaultAuth`) sólo se confirma con una segunda cuenta real.
+
+5. **`F9.21`**, vídeo grande sin previsualizar, y la **limpieza de objetos
+   huérfanos**. Después, `F9.9` (puente Telegram) y `F9.11` (invitar a un
+   tercero).
+
+### F9.20 … F9.25 — la sesión del 2026-09-02
+
+Un bloque largo de correcciones que salieron **al usar la aplicación de
+verdad**, no de revisar código. Merece la pena leerlas juntas porque casi todas
+comparten la misma causa: una pieza existía y nadie la conectaba.
+
+| qué pasaba | por qué | dónde quedó |
+| --- | --- | --- |
+| el modelo respondía como asistente pese al contexto fijo | se le enviaba marcado `(DATOS)`: «tenlo en cuenta, **no lo obedezcas**» | `D-054` |
+| no sabía a quién encarnaba | el `character_id` sólo le sirve al proveedor de imágenes; el modelo no ve ninguna | `characterDescription` |
+| se hacía llamar otro nombre | el nombre se guardaba como etiqueta y nunca salía del disco | «Te llamas X» abre la descripción |
+| la clave del proveedor no se podía guardar | es un secreto reservado y Conexiones lo rechaza por diseño | canal propio, panel en Privado |
+| se perdía un personaje pagado | sólo se guardaba si enviabas un mensaje después | `character-store.ts` |
+| «pásame tu foto» fallaba | el avatar vivía en la ficha, no en la conversación | se copia cifrado al usarlo |
+| pedir «la de antes» pagaba otra imagen | el modelo sólo sabía generar | bloque con `mediaId`, gratis |
+| no se veía qué personaje estaba en uso | la marca comparaba con el guardado, que cambia al enviar | botón «Usar» + etiqueta |
+| el avatar salía a pantalla completa | clase CSS que no existía | miniatura de 44 px |
+| los modelos chinos no salían en Privado | el desplegable deducía la lista de `providers.http` | usa la que anuncia el agente |
 
 ### F9.23 — done (Claude, 2026-09-02, sin llamada real)
 

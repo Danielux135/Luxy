@@ -1,8 +1,36 @@
 # Luxy — acciones locales de Daniel
 
+## LA-033 — probar la bóveda con dos equipos y dos cuentas
+
+Estado: `pending` — abierta el 2026-09-02.
+
+Es lo único de seguridad del bloque `F9` que **no se puede dar por verificado**.
+Todo lo demás ya se ejecutó contra los servicios reales (`LA-031`), pero estas
+dos cosas necesitan una segunda máquina y una segunda cuenta:
+
+1. **Que un usuario no lea los registros de otro.** `withVaultAuth` filtra por
+   el usuario de la sesión y las pruebas lo cubren con dobles, pero eso sólo se
+   confirma con Postgres delante. Registra una segunda cuenta, crea contenido en
+   las dos y comprueba que sincronizar desde una **no trae nada** de la otra.
+
+2. **La sincronización entre dos equipos.** Entrar en el segundo ordenador con
+   sólo el correo y la contraseña, sincronizar, y verificar que las
+   conversaciones y las imágenes aparecen y **se descifran**. Mira también el
+   recuento de medios: el texto y los archivos se cuentan por separado.
+
+Lo que ya se sabe y conviene no confundir con un fallo:
+
+- **los personajes no se sincronizan**: son locales. En el segundo equipo habrá
+  que darlos de alta a mano, y la API del proveedor no sabe listarlos;
+- **un archivo de más de 90 MB no viaja**: se salta, se cuenta y la interfaz lo
+  dice;
+- **la sesión caduca a los 30 días**; entonces la bóveda se sigue abriendo sin
+  conexión pero sincronizar pide volver a entrar.
+
 ## LA-032 — publicar la rama de la bóveda
 
-Estado: `done` — 2026-09-01. Commits hechos y **rama publicada**.
+Estado: `pending` — reabierta el 2026-09-02. La rama se publicó el 2026-09-01 y
+desde entonces hay **13 commits nuevos sin subir**.
 
 Daniel pidió «haz commit y push». Es la autorización que exige `CLAUDE.md` para
 publicar; queda registrada aquí porque no se generaliza a la próxima vez.
@@ -39,12 +67,56 @@ aislada, como todo el bloque `F9`. Es código y documentación, ningún secreto 
 `vault.json`, `config.json`, `.env*` y `wrangler.toml` no están versionados, y
 los `.example` sólo llevan valores `PENDIENTE_...`.
 
-Publicar no despliega nada. El gateway sigue sin `wrangler deploy` y la
-migración `0007` sigue sin aplicarse: eso es `LA-031`, y sigue pendiente.
+Publicar no despliega nada; el despliegue se hizo aparte y está en `LA-031`.
+
+**Reabierta el 2026-09-02:** desde aquel push hay **13 commits nuevos sin
+publicar** (de `feat: contexto fijo por conversacion…` a `fix: la conversacion
+privada ofrece los proveedores que el agente tiene de verdad`). Sigue valiendo
+todo lo de arriba, incluido el patrón: el push se deniega desde la sesión y se
+lanza desde una terminal.
+
+```powershell
+git push
+```
 
 ## LA-031 — aplicar 0007, desplegar el gateway y probar la bóveda real
 
-Estado: `pending` — abierta el 2026-09-01, **desbloqueada el 2026-09-01** por
+Estado: `done` — **2026-09-02**. Los cuatro primeros pasos ejecutados y
+verificados; queda sólo la prueba con dos equipos y dos cuentas, que se recoge
+abajo como `LA-033`.
+
+**Lo que se hizo, en orden:**
+
+1. `0007` aplicada. Comprobación de RLS: las cinco tablas `vault_*` con
+   `rowsecurity = true`.
+2. `0008` aplicada. `select id, public from storage.buckets where id =
+   'vault-media'` → una fila con `public = false`.
+3. Gateway desplegado desde este equipo: `luxy-gateway`, versión `44aee3d5`, en
+   `https://luxy-gateway.danielux135.workers.dev`, con el cron de leases cada
+   minuto. Se volvió a cargar `SUPABASE_URL` con `wrangler secret put` para
+   descartar la trampa 3, y después se confirmó de forma barata: `/health` →
+   200 con `configured: true`, y `POST /api/vault/login/start` con un correo
+   inexistente → 200 con la respuesta señuelo. Eso prueba que la ruta existe y
+   que **la consulta a `vault_users` funcionó**; si la tabla no estuviera en ese
+   proyecto habría dado 500.
+4. Clave del proveedor de imágenes guardada (en **Privado**, no en Conexiones),
+   personaje creado y avatar generado. La API corrigió el contrato dos veces por
+   el camino; está recogido en `CURRENT-TASK.md` y en `D-053`.
+
+**Notas de ejecución que ahorran tiempo la próxima vez:**
+
+- este ordenador es un clon nuevo y **no tenía `apps/gateway/wrangler.toml`**
+  (está en `.gitignore`). Se copia del `.example` antes de desplegar;
+- la terminal es **PowerShell 5.1**: `&&` no vale como separador, y la política
+  de ejecución de scripts está en `Restricted`, así que `npx` falla. Se usan los
+  atajos `.cmd`:
+
+  ```powershell
+  cd apps\gateway
+  ..\..\node_modules\.bin\wrangler.cmd deploy
+  ```
+
+Estado anterior: `pending` — abierta el 2026-09-01, **desbloqueada** por
 `F9.18`.
 
 Lo que la bloqueaba era que no existía la interfaz de cuenta y que el vault de
