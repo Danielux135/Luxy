@@ -316,6 +316,7 @@ interfaz: *workspace*, *privacy*, *vault*, *invitado en solo lectura*.
 | F9.26 | El modelo reenvía una imagen existente en vez de generar otra | done |
 | F9.27 | Sincronizar los personajes entre equipos | planned |
 | F9.28 | `PATCH /v1/characters/:id`: cambiar rasgos sin pagar otra creación | planned |
+| F9.29 | Roleplay privado: directivas sin degradar, canon adulto y petición de medios | done (sin prueba con modelo real) |
 
 `F9.18` cierra la avería que impedía usar la bóveda en un segundo ordenador:
 el archivo local y la llave envuelta del servidor eran dos orígenes de la misma

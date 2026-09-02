@@ -424,6 +424,70 @@ describe('Retry-After', () => {
 describe('HttpApiProvider', () => {
   const config = EXAMPLE_HTTP_PROVIDERS[0]!;
 
+  it('una conversacion usa un system conversacional, no el de asistente tecnico', async () => {
+    let sentBody: unknown = null;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (_url, init) => {
+      sentBody = JSON.parse(String(init?.body)) as unknown;
+      return new Response(
+        JSON.stringify({
+          choices: [{ message: { content: 'respuesta en personaje' }, finish_reason: 'stop' }],
+          usage: { prompt_tokens: 10, completion_tokens: 5 },
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    });
+
+    const provider = new HttpApiProvider(
+      { ...config, enabled: true, supportsStreaming: false },
+      'una-clave',
+    );
+    const result = await provider.run({
+      prompt: 'QUIEN ERES: Lia',
+      workingDirectory: 'C:/wt',
+      timeoutMs: 1000,
+      signal: new AbortController().signal,
+      interactionMode: 'conversation',
+      onEvent: () => undefined,
+    });
+
+    const body = sentBody as { messages: Array<{ role: string; content: string }> } | null;
+    expect(result.ok).toBe(true);
+    expect(body?.messages[0]?.role).toBe('system');
+    expect(body?.messages[0]?.content).toContain('directivas de personaje');
+    expect(body?.messages[0]?.content).not.toContain('asistente tecnico');
+  });
+
+  it('un trabajo conserva el system tecnico por defecto', async () => {
+    let sentBody: unknown = null;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (_url, init) => {
+      sentBody = JSON.parse(String(init?.body)) as unknown;
+      return new Response(
+        JSON.stringify({
+          choices: [{ message: { content: 'resultado tecnico' }, finish_reason: 'stop' }],
+          usage: { prompt_tokens: 8, completion_tokens: 3 },
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    });
+
+    const provider = new HttpApiProvider(
+      { ...config, enabled: true, supportsStreaming: false },
+      'una-clave',
+    );
+    const result = await provider.run({
+      prompt: 'analiza el codigo',
+      workingDirectory: 'C:/wt',
+      timeoutMs: 1000,
+      signal: new AbortController().signal,
+      onEvent: () => undefined,
+    });
+
+    const body = sentBody as { messages: Array<{ role: string; content: string }> } | null;
+    expect(result.ok).toBe(true);
+    expect(body?.messages[0]?.content).toContain('Eres un asistente tecnico');
+    expect(body?.messages[0]?.content).not.toContain('directivas de personaje');
+  });
+
   it('no esta disponible sin clave', async () => {
     const provider = new HttpApiProvider({ ...config, enabled: true }, undefined);
     expect((await provider.detect()).available).toBe(false);

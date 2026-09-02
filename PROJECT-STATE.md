@@ -1,6 +1,25 @@
 # Luxy — estado canónico del proyecto
 
-Última actualización: **2026-09-02 — la bóveda privada, funcionando de verdad**
+Última actualización: **2026-09-02 — F9.29, el roleplay ya no compite con un asistente técnico**
+
+Corregida la causa estructural del personaje que salía del rol. El prompt
+privado sí ordenaba encarnar al personaje, pero el ejecutor envolvía después el
+bloque entero como datos y las conexiones HTTP añadían un `system` de asistente
+técnico. Ahora el turno privado conserva las directivas como órdenes, los HTTP
+reciben modo conversacional y el prompt fija ficción consentida entre adultos,
+canon de escena y el uso obligatorio de `LUXY_IMAGEN` cuando corresponde.
+
+`npm run check` verde: **120 archivos, 2.093 pruebas superadas, 9 omitidas**.
+F9.29 queda sin commit ni push. Falta confirmarlo con un modelo real (`LA-034`):
+las pruebas demuestran qué contrato se envía, no que todo proveedor lo seguirá.
+
+Al abrir el paso, `HEAD` y `origin/luxy/f9-1-vault-crypto` ya coincidían en
+`296fe9a`; las menciones a «13 commits sin publicar» eran documentación atrasada
+y se han corregido.
+
+---
+
+Última actualización anterior: **2026-09-02 — la bóveda privada, funcionando de verdad**
 
 La sección **Privado** dejó de ser código probado con dobles: la migración
 `0007` y la `0008` están **aplicadas**, el gateway está **desplegado**
@@ -15,8 +34,9 @@ generarla, que cuesta créditos, o **reenviar** una que ya existe, gratis—; y
 todo ello se sincroniza entre equipos, turnos y medios, autorizado por sesión de
 cuenta.
 
-`npm run check` verde: **120 archivos, 2.088 pruebas superadas, 9 omitidas**.
-Trece commits sin publicar en `luxy/f9-1-vault-crypto`.
+`npm run check` verde en ese checkpoint: **120 archivos, 2.088 pruebas
+superadas, 9 omitidas**. Ese bloque se publicó después; ver la actualización
+superior para el estado actual.
 
 **Lo que NO está verificado, y es lo único de seguridad que queda:** que un
 usuario no pueda leer los registros de otro (`withVaultAuth`). Necesita una

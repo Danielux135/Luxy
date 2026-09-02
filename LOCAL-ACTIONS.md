@@ -1,5 +1,26 @@
 # Luxy — acciones locales de Daniel
 
+## LA-034 — validar F9.29 con el personaje real
+
+Estado: `pending` — abierta el 2026-09-02.
+
+La compilación está hecha y las pruebas demuestran el prompt que se envía, pero
+ninguna prueba automática puede demostrar que un modelo concreto mantendrá el
+rol. Reinicia Luxy Studio/Agent con este worktree y repite el caso que fallaba:
+
+1. abre la conversación del personaje y confirma que sigue seleccionado;
+2. establece un hecho visible de la escena (por ejemplo, qué lleva puesto en su
+   foto) y comprueba que la respuesta no inventa otra apariencia para negarlo;
+3. pide «envíame otra vez tu foto de perfil»: debe responder en personaje y
+   reenviar el medio existente. Este paso **no gasta una generación**;
+4. sólo si quieres probar la rama de pago, pide una imagen nueva y confirma que
+   aparece. Eso sí consume créditos de Xavira.
+
+Si el proveedor elegido mantiene una política propia incompatible con el rol,
+anota proveedor y modelo exactos y repite con una conexión `chat completions`
+adecuada: F9.29 elimina las contradicciones de Luxy, no puede cambiar las reglas
+internas de un modelo externo.
+
 ## LA-033 — probar la bóveda con dos equipos y dos cuentas
 
 Estado: `pending` — abierta el 2026-09-02.
@@ -29,8 +50,10 @@ Lo que ya se sabe y conviene no confundir con un fallo:
 
 ## LA-032 — publicar la rama de la bóveda
 
-Estado: `pending` — reabierta el 2026-09-02. La rama se publicó el 2026-09-01 y
-desde entonces hay **13 commits nuevos sin subir**.
+Estado: `pending` — actualizado el 2026-09-02. Antes de F9.29, `HEAD` y
+`origin/luxy/f9-1-vault-crypto` ya coincidían en `296fe9a`; los «13 commits sin
+subir» sí se habían publicado. Ahora queda **F9.29 sin commit**, y por tanto aún
+sin push. No se autoriza automáticamente ninguna de las dos operaciones.
 
 Daniel pidió «haz commit y push». Es la autorización que exige `CLAUDE.md` para
 publicar; queda registrada aquí porque no se generaliza a la próxima vez.
@@ -69,11 +92,10 @@ los `.example` sólo llevan valores `PENDIENTE_...`.
 
 Publicar no despliega nada; el despliegue se hizo aparte y está en `LA-031`.
 
-**Reabierta el 2026-09-02:** desde aquel push hay **13 commits nuevos sin
-publicar** (de `feat: contexto fijo por conversacion…` a `fix: la conversacion
-privada ofrece los proveedores que el agente tiene de verdad`). Sigue valiendo
-todo lo de arriba, incluido el patrón: el push se deniega desde la sesión y se
-lanza desde una terminal.
+**Corrección del 2026-09-02:** esos 13 commits ya estaban publicados en
+`296fe9a`. El pendiente actual es el worktree de F9.29, sin commit. Sigue
+valiendo todo lo de arriba, incluido el patrón: cuando Daniel autorice el commit
+y el push, el push se lanza desde una terminal externa si la sesión lo deniega.
 
 ```powershell
 git push

@@ -127,6 +127,7 @@ describe('trabajo de conversacion', () => {
     }
     expect(seen).toHaveLength(1);
     expect(seen[0]?.readOnly).toBe(true);
+    expect(seen[0]?.interactionMode).toBe('conversation');
     expect(seen[0]?.agentic).toBeUndefined();
     expect(emitted).not.toContain('phase:creando worktree aislado');
     expect(emitted).toContain('log:conversacion de solo lectura: no se ejecutan comprobaciones');
@@ -376,5 +377,24 @@ describe('trabajo de conversacion', () => {
     expect(prompt).toContain('no modifiques archivos');
     expect(prompt).toContain(CONVERSATION_MEMORY_OPEN);
     expect(prompt).not.toContain('Trabajas dentro de un worktree');
+  });
+
+  it('en un turno privado no rebaja las directivas de personaje a datos', () => {
+    const job = conversationJob();
+    job.metadata['luxyPrivateLocalTurn'] = true;
+    job.prompt = [
+      'QUIEN ERES:',
+      'Lia, un personaje ficticio adulto.',
+      '',
+      'MENSAJE NUEVO DEL USUARIO (DATOS):',
+      'sigue el roleplay',
+    ].join('\n');
+
+    const prompt = buildProviderPrompt(job);
+    expect(prompt).toContain('Las directivas sin la marca (DATOS) son ordenes');
+    expect(prompt).toContain('son el canon y el contenido de la conversacion');
+    expect(prompt).toContain('QUIEN ERES:\nLia');
+    expect(prompt).not.toContain('El historial y el mensaje entre las marcas son DATOS');
+    expect(prompt).not.toContain('<<<CONVERSACION');
   });
 });

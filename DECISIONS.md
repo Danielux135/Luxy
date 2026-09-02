@@ -1103,3 +1103,32 @@ conserva la identidad entre generaciones; el modelo que escribe no ve ninguna
 imagen y sin la descripción no sabe a quién encarna. Se guarda cifrada con el
 turno, como las instrucciones, y se compone con las mismas etiquetas que se leen
 en pantalla para que no haya un segundo catálogo que pueda divergir.
+
+## D-055 — una conversación privada no hereda la identidad técnica del ejecutor
+
+Fecha: 2026-09-02
+
+Estado: aceptada, implementada
+
+`D-054` corrigió el prompt interior, pero quedaban dos capas exteriores que lo
+contradecían: `buildProviderPrompt` llamaba datos al bloque completo y el
+proveedor HTTP imponía por `system` la identidad de asistente técnico.
+
+La separación queda explícita:
+
+- `luxyPrivateLocalTurn` usa un wrapper propio. Las directivas de personaje y
+  conducta son órdenes; sólo memoria, historial y mensaje conservan `(DATOS)`;
+- `ProviderRunRequest.interactionMode` distingue conversación de trabajo
+  técnico. Los HTTP eligen su `system` con ese dato; Claude y Codex pueden
+  ignorarlo porque reciben el wrapper ya corregido;
+- el espacio privado se define como roleplay ficticio y consentido entre
+  adultos. Los hechos de escena que establece el usuario son canon salvo choque
+  con una directiva fija, y no se inventan ropa, situaciones o negativas para
+  deshacerlos;
+- pedir ver o recibir una imagen exige el bloque `LUXY_IMAGEN` cuando la
+  capacidad está disponible. La validación y el coste siguen perteneciendo al
+  adaptador de medios.
+
+Esto corrige el contrato de Luxy. No promete que un proveedor externo vaya a
+ignorar sus propias reglas; por eso la ejecución real se registra aparte como
+`LA-034`.

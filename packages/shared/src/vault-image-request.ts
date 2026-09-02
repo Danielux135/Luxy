@@ -96,7 +96,9 @@ export function buildVaultImageInstruction(available: VaultImageOnFile[] = []): 
     '',
     'El bloque va al final de tu respuesta, antes del bloque de memoria. No puedes adjuntar',
     'archivos de ninguna otra forma: si no escribes el bloque, no se enseña nada. Si no hace',
-    'falta ninguna imagen, no lo escribas.',
+    'falta ninguna imagen, no lo escribas. Cuando el usuario pida ver, recibir o volver a ver',
+    'una imagen y haya una opcion que encaje, responde primero en personaje y escribe el bloque:',
+    'no alegues que no puedes adjuntar archivos y no prometas enviarla sin incluirlo.',
   ];
 
   if (available.length > 0) {

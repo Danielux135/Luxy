@@ -1,5 +1,65 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-09-02 14:56 — Codex — F9.29
+
+- Estado anterior: `buildVaultPrompt` ordenaba encarnar al personaje, pero el
+  wrapper posterior llamaba datos al bloque completo y el `system` HTTP imponía
+  una identidad técnica.
+- Objetivo: sostener roleplay ficticio consentido entre adultos, conservar el
+  canon de escena y ejecutar las peticiones de medios en vez de salir del rol.
+- Hipótesis o causa demostrada: confirmada en las dos capas de mayor prioridad;
+  no era una carencia del personaje ni del adaptador de Xavira.
+- Archivos leídos: documentación canónica; `vault-prompt.ts`,
+  `vault-image-request.ts`, `job-runner.ts`, `local-turn.ts`,
+  `http-provider.ts`, `handlers.ts`, tipos y pruebas relacionadas.
+- Archivos modificados: `packages/shared/src/types.ts`, `vault-prompt.ts` y su
+  prueba, `vault-image-request.ts` y su prueba; `apps/agent/src/job-runner.ts`,
+  `conversation-job.test.ts`, `providers/http-provider.ts` y
+  `providers/providers.test.ts`; documentación de continuidad.
+- Comandos ejecutados: dos focalizadas, dos `npm run check`, `git diff --check`,
+  estado/diff de Git y comprobación de cobertura del índice sobre los nueve
+  archivos de código/prueba.
+- Resultado real: wrapper privado propio; `interactionMode` propagado;
+  `system` HTTP conversacional separado del técnico; contrato adulto/canon de
+  escena; instrucción de imagen que exige respuesta en personaje y bloque.
+- Pruebas: la primera focalizada dejó **118/119** por la frase ambigua registrada
+  en la entrada anterior. Tras corregirla, focalizada **120/120**. Puerta final
+  **exit 0: 120 archivos, 2.093 superadas, 9 omitidas**; lint, tipos y build
+  también verdes.
+- Decisiones: `D-055`.
+- Riesgos o límites: cero llamadas reales; el contrato enviado está verificado,
+  el comportamiento del modelo se confirma manualmente en `LA-034`.
+- Estado nuevo: `done`, sin commit, push, deploy ni migración.
+- Siguiente paso exacto: reiniciar Studio/Agent y ejecutar `LA-034`; primero
+  reenviar el avatar ya guardado, que no gasta una generación.
+
+### 2026-09-02 13:20 — Codex — F9.29 (en curso)
+
+- Estado anterior: rama limpia en `296fe9a`; roleplay real salía del personaje
+  y no emitía `LUXY_IMAGEN` al pedir una foto.
+- Objetivo: eliminar las instrucciones de mayor prioridad que convertían el
+  prompt privado en datos de un asistente técnico.
+- Hipótesis o causa demostrada: `buildProviderPrompt` rebajaba todo el prompt a
+  datos y el `system` HTTP fijaba una identidad técnica, pese a `D-054`.
+- Archivos leídos: `vault-prompt.ts`, `vault-image-request.ts`,
+  `job-runner.ts`, `http-provider.ts`, sus pruebas y documentación F9.
+- Archivos modificados hasta ahora: `CURRENT-TASK.md`, `types.ts`,
+  `vault-prompt.ts`, `vault-image-request.ts`, `job-runner.ts`,
+  `http-provider.ts` y cuatro archivos de prueba.
+- Comando ejecutado: `npm test -- packages/shared/src/vault-prompt.test.ts
+  packages/shared/src/vault-image-request.test.ts
+  apps/agent/src/conversation-job.test.ts
+  apps/agent/src/providers/providers.test.ts`.
+- Resultado real: **118 pruebas superadas, 1 fallida**. La prueba nueva detectó
+  que el `system` conversacional aún contenía literalmente «asistente técnico»
+  dentro de una negación. Se elimina esa identidad por completo y se repite.
+- Riesgos o límites: no se ha llamado a ningún modelo ni proveedor real; una
+  prueba de prompt demuestra el contrato enviado, no el comportamiento futuro
+  de cada modelo.
+- Estado nuevo: `in_progress`.
+- Siguiente paso exacto: quitar la frase ambigua y repetir las cuatro pruebas
+  focalizadas.
+
 ### 2026-09-02 05:00 — Claude — pasada de documentacion de toda la sesion
 
 Daniel pidio documentar todo lo relevante. Sin cambios de codigo.

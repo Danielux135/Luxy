@@ -98,6 +98,21 @@ describe('prompt de conversacion privada', () => {
     expect(prompt).not.toContain('QUIEN ERES (DATOS)');
   });
 
+  it('fija el contrato adulto y conserva como canon la escena establecida', () => {
+    const prompt = buildVaultPrompt({
+      memory: null,
+      turns: [],
+      message: 'en tu foto de perfil no llevas ropa',
+      character: 'Lia, japonesa, 22 años, coqueta y segura de si misma.',
+    });
+
+    expect(prompt).toContain('roleplay ficticio y consentido entre adultos');
+    expect(prompt).toContain('personas adultas (18+)');
+    expect(prompt).toContain('Trata como canon los hechos que el usuario establece');
+    expect(prompt).toContain('No inventes otra ropa');
+    expect(prompt).toContain('no inventes una negativa fuera de rol');
+  });
+
   it('sin personaje ni instrucciones no se le manda encarnar nada', () => {
     const prompt = buildVaultPrompt({ memory: null, turns: [], message: 'x' });
     expect(prompt).not.toContain('QUIEN ERES');

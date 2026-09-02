@@ -110,6 +110,12 @@ Dos invariantes que dependen de esto:
 
 ## Flujo
 
+En un turno privado local, `ProviderRunRequest.interactionMode` es
+`conversation`: las conexiones HTTP usan un `system` conversacional y el
+wrapper conserva como órdenes las directivas de personaje. Memoria, historial y
+mensaje siguen siendo datos/canon. No volver a imponer la identidad de asistente
+técnico sobre ese camino (`D-055`).
+
 ```
 Studio/Telegram → Cloudflare Worker → Supabase → (polling) → agente local → CLI/API → Studio/Telegram
 ```

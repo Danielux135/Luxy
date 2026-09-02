@@ -191,6 +191,12 @@ mismo identificador de conversación y turno. El proveedor añade un bloque
 en metadata y Studio lo reenvia en turnos posteriores. El feedback del usuario
 alimenta recomendaciones explicitas; nunca cambia el proveedor silenciosamente.
 
+Las conversaciones privadas locales llevan `interactionMode: conversation` al
+proveedor. Sus directivas de personaje y conducta son órdenes; memoria,
+historial y mensaje son datos/canon. No se debe volver a envolver el prompt
+privado completo como datos ni imponerle el `system` de asistente técnico
+(`D-055`).
+
 **Una respuesta tiene seis finales posibles**, no dos: `completed`, `truncated`,
 `interrupted`, `timed_out`, `cancelled` y `failed`. Los decide
 `classifyResponseOutcome` (`packages/shared/src/response-outcome.ts`) a partir

@@ -36,9 +36,9 @@ Luxy ya no depende de ella; los commits manuales de Daniel sí.
 ## F9-VAULT-001 — conversaciones privadas cifradas y sincronizadas
 
 Estado: **en curso, punto de retoma del 2026-09-02.** Rama aislada
-`luxy/f9-1-vault-crypto` sobre `main` @ `00a9cc1`, con **13 commits sin
-publicar**. `npm run check` verde: 120 archivos, 2.088 pruebas superadas, 9
-omitidas.
+`luxy/f9-1-vault-crypto` sobre `main` @ `00a9cc1`. El remoto y `HEAD` coincidían
+en `296fe9a` al abrir `F9.29`; este subpaso queda sin commit. `npm run check`
+verde: 120 archivos, 2.093 pruebas superadas, 9 omitidas.
 
 **La infraestructura ya no es teórica.** En la sesión del 2026-09-02 se ejecutó
 por primera vez contra los servicios reales:
@@ -62,6 +62,62 @@ Lo que queda es de tres tipos, y conviene no confundirlos:
 Lo que **sigue sin probarse contra Postgres**: la autorización cruzada entre
 usuarios de `withVaultAuth` —hace falta una segunda cuenta— y la sincronización
 real entre dos equipos.
+
+### F9.29 — roleplay privado coherente con personaje, escena y medios
+
+Estado: **`done` — Codex, 2026-09-02. Sin commit.**
+
+Incidencia observada en una conversación real: el personaje empieza encarnando
+su ficha, pero ante detalles adultos de la escena contradice el avatar y sale
+del rol; cuando se le pide una imagen disponible o nueva, responde con una
+negativa de texto en vez de emitir el bloque `LUXY_IMAGEN`.
+
+Causa demostrada en el código: `buildVaultPrompt` ya manda el personaje y las
+instrucciones como directivas (`D-054`), pero `buildProviderPrompt` envuelve
+después **todo** el prompt como «DATOS de la conversación». En conexiones HTTP
+hay una segunda contradicción de mayor prioridad: el `system` fija «Eres un
+asistente técnico» y vuelve a decir que el mensaje es dato. El modelo recibe a
+la vez «encarna al personaje» y «eres un asistente técnico».
+
+Hipótesis y criterio de aceptación:
+
+- el turno local privado conserva las directivas de personaje como órdenes y
+  sólo trata memoria, historial y mensaje como datos;
+- los proveedores HTTP reciben un `system` conversacional en conversaciones y
+  mantienen el técnico en trabajos/evaluaciones;
+- el contrato privado declara que todos los personajes son ficticios y adultos,
+  que el roleplay consentido puede ser adulto, y que los hechos establecidos en
+  la escena no se contradicen por inventar una realidad alternativa;
+- si se pide enseñar o enviar una imagen y la capacidad existe, el modelo debe
+  responder en personaje y emitir un único bloque `LUXY_IMAGEN`; el proveedor de
+  medios sigue validando y ejecutando la generación;
+- pruebas focalizadas verdes y después `npm run lint`, `npm run typecheck`,
+  `npm test` y `npm run build`, todos sin red ni créditos.
+
+Discrepancia al retomar: la rama real está limpia y `HEAD` `296fe9a` coincide
+con `origin/luxy/f9-1-vault-crypto`; la cabecera y `LA-032` aún dicen «13 commits
+sin publicar». Corregido al cerrar este subpaso, sin commit ni push.
+
+Implementado y verificado:
+
+- el envoltorio de `buildProviderPrompt` distingue el turno local privado: ya
+  no rebaja sus directivas a datos ni duplica la instrucción de memoria;
+- `ProviderRunRequest.interactionMode` permite que las conexiones HTTP usen un
+  `system` conversacional; trabajos y evaluaciones conservan el técnico;
+- el prompt fija el contrato de ficción consentida entre adultos, la continuidad
+  del canon de escena y que no se inventen ropa, situación o negativas fuera de
+  personaje para contradecir lo ya establecido;
+- la instrucción de medios exige responder en personaje y emitir
+  `LUXY_IMAGEN` cuando se pide una imagen disponible o nueva;
+- primera prueba focalizada: 118 verdes y 1 fallo por una frase ambigua dentro
+  de una negación; corregida. Prueba focalizada final: **120/120**;
+- `npm run check`: **exit 0 — 120 archivos, 2.093 superadas, 9 omitidas**.
+
+Siguiente paso exacto: `LA-034`, reiniciar Studio con esta compilación y repetir
+el diálogo que reprodujo el fallo. Primero reenviar la foto de perfil existente
+(sin gastar una generación); generar una nueva sólo si Daniel decide consumir
+el crédito. Las pruebas fijan el contrato enviado, pero el comportamiento de un
+modelo real sólo se confirma con esa ejecución.
 
 > **PUNTO DE RETOMA — leer esto entero antes de tocar nada.** Debajo, cada paso
 > `F9.x` conserva su bloque de cierre como historial; esta cabecera es el estado
@@ -321,7 +377,8 @@ gateway real**. Ver el punto 2 de la lista de abajo.
     envueltas y la contraseña más débil de la organización es el objetivo; quien
     tenga una clave de recuperación abre esa bóveda desde cualquier sitio; el
     servidor no puede restablecer una contraseña; revocar un permiso no recupera
-    lo ya descifrado; las migraciones nunca se han probado en Postgres.
+    lo ya descifrado; la separación real entre dos usuarios aún no se ha probado
+    con una segunda cuenta.
 
 ### Decisiones que rigen este bloque
 
@@ -333,16 +390,18 @@ es el origen de la llave; el archivo local es su caché) · `D-048` (sincronizar
 autoriza por sesión de cuenta) · `D-049` (la clave de recuperación no se trata
 como una contraseña) · `D-050` (los bytes de los medios van a Supabase Storage) ·
 `D-051` (el modelo pide la imagen con un bloque, no con una herramienta) ·
-`D-052` (la imagen de referencia viaja en el cuerpo, no por una URL pública).
+`D-052` (revertida: la API retiró la imagen de referencia) · `D-053` (personaje
+por enum cerrado) · `D-054` (las instrucciones del usuario son órdenes) ·
+`D-055` (una conversación privada no hereda la identidad técnica del ejecutor).
 
 ### Siguiente paso exacto (para quien retome)
 
 `LA-031` está **hecha**: migraciones aplicadas, gateway desplegado, clave del
 proveedor puesta y personajes e imágenes creados de verdad. Lo que queda:
 
-1. **Publicar la rama.** Trece commits sin subir. El `git push` desde la
-   sesión de IA se deniega solo, sin diálogo (`LA-032`): se lanza desde una
-   terminal y ya está.
+1. **Validar F9.29 con el personaje real (`LA-034`).** Reiniciar Studio/Agent y
+   repetir el caso. Primero pedir que reenvíe la foto de perfil existente, que
+   no consume una generación. El contrato está verificado; el proveedor real no.
 
 2. **`F9.12`, documentación de privacidad.** Es la deuda más cara y la más
    barata de pagar. Hay bastante que contar que antes no existía: la clave de
@@ -362,6 +421,10 @@ proveedor puesta y personajes e imágenes creados de verdad. Lo que queda:
 5. **`F9.21`**, vídeo grande sin previsualizar, y la **limpieza de objetos
    huérfanos**. Después, `F9.9` (puente Telegram) y `F9.11` (invitar a un
    tercero).
+
+6. **Commit y publicación de F9.29**, sólo cuando Daniel lo autorice. Antes de
+   este paso la rama ya estaba publicada hasta `296fe9a`; el pendiente actual
+   es exclusivamente el diff sin commit que se deja ahora (`LA-032`).
 
 ### F9.20 … F9.25 — la sesión del 2026-09-02
 

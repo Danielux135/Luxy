@@ -1,5 +1,21 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-02 — Windows 11 (equipo `oscar`) — F9.29
+
+- Primera focalizada: **118 superadas, 1 fallida**. La aserción detectó que el
+  nuevo `system` conversacional aún escribía «asistente técnico» dentro de una
+  negación. Se quitó la identidad por completo en vez de debilitar la prueba.
+- Focalizada final (`vault-prompt`, `vault-image-request`, `conversation-job`,
+  `providers`): **120/120**, sin red ni llamadas reales.
+- **`npm run check`: exit 0.** Lint, typecheck, suite y build en verde; suite:
+  **120 archivos, 2.093 superadas, 9 omitidas, 0 fallos**.
+- Pruebas nuevas: contrato adulto y canon de escena; petición de imagen con
+  respuesta en personaje y bloque obligatorio; wrapper privado que no convierte
+  las directivas en datos; propagación de `interactionMode`; selección separada
+  de los `system` conversacional y técnico en HTTP.
+- No se invocó Claude, Codex, ninguna conexión HTTP ni Xavira. La conducta real
+  queda pendiente de `LA-034`.
+
 ### 2026-09-02 — estado consolidado de la sesión
 
 - **`npm run check`: exit 0.** Suite: **120 archivos, 2.088 superadas, 9

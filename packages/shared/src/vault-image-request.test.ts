@@ -152,6 +152,13 @@ describe('la herramienta solo se ofrece cuando existe', () => {
     expect(buildVaultImageInstruction()).toContain('descripcion visual');
   });
 
+  it('una peticion de foto exige el bloque y una respuesta en personaje', () => {
+    const instruction = buildVaultImageInstruction();
+    expect(instruction).toContain('responde primero en personaje');
+    expect(instruction).toContain('no alegues que no puedes adjuntar archivos');
+    expect(instruction).toContain('no prometas enviarla sin incluirlo');
+  });
+
   it('sin imagenes previas no se le ofrece reenviar ninguna', () => {
     expect(buildVaultImageInstruction()).not.toContain('IMAGENES QUE YA EXISTEN');
   });

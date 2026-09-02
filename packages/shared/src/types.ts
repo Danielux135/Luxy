@@ -230,6 +230,15 @@ export interface ProviderRunRequest {
   signal: AbortSignal;
   /** impide que una conversacion pueda modificar el proyecto asociado */
   readOnly?: boolean;
+  /**
+   * contexto que necesita el proveedor para elegir su instruccion de sistema.
+   *
+   * Una conversacion no es una tarea tecnica: forzar ahi la identidad de
+   * "asistente tecnico" contradice cualquier personaje configurado dentro del
+   * prompt. Es opcional para que proveedores que no usan system prompts puedan
+   * ignorarlo y para conservar compatibilidad con llamadas antiguas.
+   */
+  interactionMode?: 'technical' | 'conversation';
   /** callback incremental para reportar progreso al gateway */
   onEvent: (event: ProviderStreamEvent) => void;
   /** identificador de modelo opcional que sobrescribe el de la configuracion */
