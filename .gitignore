@@ -37,3 +37,6 @@ logs/
 
 # scripts de medicion contra la API real: se ejecutan a mano, no se versionan
 *.test-manual.mts
+
+# politicas WDAC generadas en esta maquina: no forman parte del producto
+.local-policies/
