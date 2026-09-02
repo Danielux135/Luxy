@@ -321,11 +321,20 @@ function ImageOutcome({
       </Notice>
     );
   }
+  // reenviar una que ya existía no cuesta créditos, y decirlo importa: es la
+  // diferencia entre pagar por una foto nueva y volver a enseñar la de antes
+  if (image.costCredits === null) {
+    return (
+      <Notice tone="ok">
+        Te ha reenviado una imagen que ya tenía, sin gastar créditos. Está abajo,
+        con el resto de archivos.
+      </Notice>
+    );
+  }
   return (
     <Notice tone="ok">
-      Imagen generada y cifrada en esta conversación
-      {image.costCredits !== null && ` · ${image.costCredits} créditos`}. Aparece
-      abajo, con el resto de archivos.
+      Imagen generada y cifrada en esta conversación · {image.costCredits}{' '}
+      créditos. Aparece abajo, con el resto de archivos.
     </Notice>
   );
 }
@@ -590,7 +599,7 @@ function CharacterAvatar({
   }, [vault, characterId]);
 
   if (dataUrl === null) return null;
-  return <img className="vault-media__thumb" src={dataUrl} alt="" />;
+  return <img className="vault-character__avatar" src={dataUrl} alt="" />;
 }
 
 /**
@@ -779,26 +788,37 @@ function GeneratePanel({
         <>
           <div className="vault-list">
             {vault.characters.map((character) => (
-              <button
+              <div
                 key={character.characterId}
-                className="vault-list__item"
-                aria-current={character.characterId === characterId ? 'true' : undefined}
-                onClick={() => {
-                  setCharacterId(character.characterId);
-                  onCharacterReady(character.characterId, character.description);
-                }}
+                className="vault-list__item vault-list__item--character"
+                aria-current={character.characterId === vault.characterId ? 'true' : undefined}
               >
                 {character.avatarObjectKey !== null && (
                   <CharacterAvatar vault={vault} characterId={character.characterId} />
                 )}
-                <span className="vault-list__title">
-                  {character.label.length > 0 ? character.label : 'Sin nombre'}
-                  {character.characterId === vault.characterId ? ' · en uso' : ''}
-                </span>
-                <span className="vault-list__meta">
-                  {character.modelId === 'anime-pure-v1' ? 'anime' : 'realista'}
-                </span>
-              </button>
+                <button
+                  className="vault-character__pick"
+                  onClick={() => {
+                    setCharacterId(character.characterId);
+                    onCharacterReady(character.characterId, character.description);
+                  }}
+                >
+                  <span className="vault-list__title">
+                    {character.label.length > 0 ? character.label : 'Sin nombre'}
+                    {character.characterId === vault.characterId ? ' · en uso' : ''}
+                  </span>
+                  <span className="vault-list__meta">
+                    {character.modelId === 'anime-pure-v1' ? 'anime' : 'realista'}
+                  </span>
+                </button>
+                <button
+                  className="vault-character__forget"
+                  title="Olvidar aquí. En el proveedor sigue existiendo."
+                  onClick={() => void vault.forgetCharacter(character.characterId)}
+                >
+                  ×
+                </button>
+              </div>
             ))}
           </div>
           <p className="field__hint">

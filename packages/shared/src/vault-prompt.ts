@@ -8,7 +8,7 @@
 // entera. Con veinte turnos eso multiplica el coste y la latencia, y acaba
 // chocando con el limite de contexto del modelo. Con memoria se envia un
 // resumen acumulativo mas los ultimos turnos.
-import { buildVaultImageInstruction } from './vault-image-request.js';
+import { buildVaultImageInstruction, type VaultImageOnFile } from './vault-image-request.js';
 import {
   CONVERSATION_MEMORY_INSTRUCTION,
   formatConversationMemory,
@@ -53,6 +53,13 @@ export interface VaultPromptInput {
    * vea una promesa incumplida en cada turno.
    */
   canGenerateImage?: boolean;
+  /**
+   * imagenes que ya existen en esta conversacion.
+   *
+   * Sin esta lista el modelo no puede reenviar nada: no sabe que hay, asi que
+   * genera otra —pagando— cada vez que le piden «la de antes».
+   */
+  existingImages?: VaultImageOnFile[];
   recentTurns?: number;
 }
 
@@ -156,7 +163,9 @@ export function buildVaultPrompt(input: VaultPromptInput): string {
   // el orden importa: la imagen ANTES que la memoria, porque la instruccion de
   // memoria dice que no se escriba nada despues de su bloque. Al separarlos se
   // quita primero el de memoria y luego el de imagen, en el orden inverso
-  if (input.canGenerateImage === true) blocks.push(buildVaultImageInstruction());
+  if (input.canGenerateImage === true) {
+    blocks.push(buildVaultImageInstruction(input.existingImages ?? []));
+  }
   blocks.push(CONVERSATION_MEMORY_INSTRUCTION);
 
   return blocks.join('\n\n');

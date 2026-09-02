@@ -74,6 +74,24 @@ describe('peticion de imagen del modelo', () => {
     expect(parsed.request).toBeNull();
   });
 
+  it('reenviar una imagen existente no lleva prompt', () => {
+    const parsed = parseVaultImageRequest(bloque('{"mediaId":"med-1"}'));
+    // generar cuesta creditos; reenviar lo que ya se hizo no cuesta nada
+    expect(parsed.status).toBe('structured');
+    expect(parsed.request?.mediaId).toBe('med-1');
+    expect(parsed.request?.prompt).toBeUndefined();
+  });
+
+  it('pedir las dos cosas a la vez se rechaza', () => {
+    const parsed = parseVaultImageRequest(bloque('{"prompt":"algo","mediaId":"med-1"}'));
+    // con las dos no se sabe si quiere generar o reenviar
+    expect(parsed.status).toBe('invalid');
+  });
+
+  it('un bloque sin ninguna de las dos no pide nada', () => {
+    expect(parseVaultImageRequest(bloque('{"kind":"image"}')).status).toBe('invalid');
+  });
+
   it('un kind inventado no se acepta', () => {
     const parsed = parseVaultImageRequest(bloque('{"prompt":"algo","kind":"gif"}'));
     expect(parsed.status).toBe('invalid');
@@ -132,5 +150,21 @@ describe('la herramienta solo se ofrece cuando existe', () => {
     // sin esto el modelo reenvia el mensaje del usuario como prompt, que casi
     // nunca describe una imagen
     expect(buildVaultImageInstruction()).toContain('descripcion visual');
+  });
+
+  it('sin imagenes previas no se le ofrece reenviar ninguna', () => {
+    expect(buildVaultImageInstruction()).not.toContain('IMAGENES QUE YA EXISTEN');
+  });
+
+  it('con imagenes previas se las lista para que las reenvie', () => {
+    const texto = buildVaultImageInstruction([
+      { mediaId: 'med-1', description: 'de pie junto a la ventana' },
+      { mediaId: 'med-2', description: '' },
+    ]);
+    // sin la lista no puede reenviar nada: genera otra, pagando, cada vez que
+    // le piden «la de antes»
+    expect(texto).toContain('med-1: de pie junto a la ventana');
+    expect(texto).toContain('med-2: sin descripcion');
+    expect(texto).toContain('gratis');
   });
 });

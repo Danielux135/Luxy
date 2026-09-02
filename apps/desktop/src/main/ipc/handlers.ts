@@ -1233,6 +1233,14 @@ export function registerIpcHandlers(context: HandlerContext): void {
           ? null
           : characterDescription,
       canGenerateImage,
+      // sin esta lista el modelo no puede reenviar nada: no sabe que hay, asi
+      // que genera otra —pagando— cada vez que le piden «la de antes»
+      existingImages: canGenerateImage
+        ? (await context.privateMedia.list(context.vault, conversationId)).map((item) => ({
+            mediaId: item.mediaId,
+            description: item.metadata.prompt ?? item.metadata.displayName ?? '',
+          }))
+        : [],
     });
 
     const result = await context.controller.runLocalTurn({
@@ -1260,7 +1268,21 @@ export function registerIpcHandlers(context: HandlerContext): void {
       // inverso al del prompt: la memoria va la ultima, asi que sale la primera
       const imageRequest = parseVaultImageRequest(parsed.visibleText);
 
-      if (imageRequest.request !== null && canGenerateImage && characterId !== null) {
+      if (imageRequest.request?.mediaId !== undefined) {
+        // reenviar lo que ya existe: gratis e inmediato. Se comprueba que sea
+        // de ESTA conversacion, porque el identificador lo escribe el modelo y
+        // podria inventarse uno de otra
+        const known = await context.privateMedia.list(context.vault, conversationId);
+        const found = known.find((item) => item.mediaId === imageRequest.request?.mediaId);
+        image =
+          found === undefined
+            ? { mediaId: null, costCredits: null, error: 'esa imagen no existe en esta conversacion' }
+            : { mediaId: found.mediaId, costCredits: null, error: null };
+      } else if (
+        imageRequest.request?.prompt !== undefined &&
+        canGenerateImage &&
+        characterId !== null
+      ) {
         try {
           const generated = await generatePrivateMedia({
             conversationId,

@@ -27,10 +27,24 @@ export const VAULT_IMAGE_CLOSE = '</LUXY_IMAGEN>';
  * conversacion. Esa es la razon de que esto exista y no baste con reenviar el
  * mensaje del usuario, que casi nunca describe una imagen.
  */
-export const vaultImageRequestSchema = z.object({
-  prompt: z.string().min(1).max(2000),
-  kind: z.enum(['image', 'video']).default('image'),
-});
+export const vaultImageRequestSchema = z
+  .object({
+    prompt: z.string().min(1).max(2000).optional(),
+    kind: z.enum(['image', 'video']).default('image'),
+    /**
+     * reenviar una imagen que YA existe en la conversacion, en vez de generar.
+     *
+     * Generar cuesta creditos y tarda; volver a enseñar algo que ya se hizo no
+     * cuesta nada. Sin esta via, pedir «mandame otra vez la de antes» acababa
+     * pagando una imagen nueva y ademas distinta.
+     */
+    mediaId: z.string().max(128).optional(),
+  })
+  // una cosa o la otra: con las dos no se sabe que se quiere, y sin ninguna no
+  // se esta pidiendo nada
+  .refine((value) => (value.prompt === undefined) !== (value.mediaId === undefined), {
+    message: 'indica `prompt` para generar o `mediaId` para reenviar, no las dos',
+  });
 export type VaultImageRequest = z.infer<typeof vaultImageRequestSchema>;
 
 /**
@@ -60,18 +74,44 @@ export interface ParsedVaultImageRequest {
  * El limite de una por respuesta no es estetico: cada generacion cuesta
  * creditos, y sin tope un modelo entusiasta los gasta en un turno.
  */
-export function buildVaultImageInstruction(): string {
-  return [
-    'Puedes generar UNA imagen del personaje cuando el usuario la pida o cuando aporte algo.',
-    'No puedes adjuntar ni recuperar archivos: lo unico que puedes hacer es generar una imagen',
-    'nueva con este bloque. Si te piden una foto tuya, generala en vez de decir que no puedes.',
-    'Para hacerlo, añade este bloque al final de tu respuesta, antes del bloque de memoria.',
-    'Escribe en `prompt` una descripcion visual de la escena, no el mensaje del usuario.',
-    'Describe solo lo que se ve. Si no hace falta ninguna imagen, no escribas el bloque.',
-    VAULT_IMAGE_OPEN,
-    '{"prompt":"descripcion visual de la escena","kind":"image"}',
-    VAULT_IMAGE_CLOSE,
-  ].join('\n');
+/** lo que el modelo necesita saber de una imagen ya guardada para reenviarla */
+export interface VaultImageOnFile {
+  mediaId: string;
+  description: string;
+}
+
+export function buildVaultImageInstruction(available: VaultImageOnFile[] = []): string {
+  const lines = [
+    'Puedes enseñar UNA imagen por respuesta, y tienes dos formas de hacerlo.',
+    '',
+    'a) REENVIAR una que ya existe en esta conversacion. Es gratis e inmediato, y es lo que',
+    '   hay que hacer cuando el usuario pide «otra vez esa», «la de antes» o «tu foto» y ya',
+    '   hay alguna que encaje:',
+    `   ${VAULT_IMAGE_OPEN}{"mediaId":"<id de la lista de abajo>"}${VAULT_IMAGE_CLOSE}`,
+    '',
+    'b) GENERAR una nueva. Cuesta creditos y tarda, asi que solo cuando pidan algo que aun',
+    '   no existe. En `prompt` va una descripcion visual de la escena, solo lo que se ve;',
+    '   no copies el mensaje del usuario:',
+    `   ${VAULT_IMAGE_OPEN}{"prompt":"descripcion visual de la escena","kind":"image"}${VAULT_IMAGE_CLOSE}`,
+    '',
+    'El bloque va al final de tu respuesta, antes del bloque de memoria. No puedes adjuntar',
+    'archivos de ninguna otra forma: si no escribes el bloque, no se enseña nada. Si no hace',
+    'falta ninguna imagen, no lo escribas.',
+  ];
+
+  if (available.length > 0) {
+    lines.push(
+      '',
+      'IMAGENES QUE YA EXISTEN AQUI (su id sirve para reenviarlas):',
+      ...available.map((image) => {
+        const description =
+          image.description.trim().length === 0 ? 'sin descripcion' : image.description.trim();
+        return `- ${image.mediaId}: ${description}`;
+      }),
+    );
+  }
+
+  return lines.join('\n');
 }
 
 /** separa el bloque del texto visible. Nunca lanza: una peticion mala no rompe el turno */
