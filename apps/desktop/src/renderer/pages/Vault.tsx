@@ -151,6 +151,7 @@ function ConversationPanel({
 
       <GeneratePanel
         vault={vault}
+        activeCharacterId={draftCharacter ?? vault.characterId}
         onCharacterReady={(id, description) => {
           // se adopta directamente: copiar un uuid a mano entre dos campos de
           // la misma pantalla era un paso que no aportaba nada
@@ -403,13 +404,14 @@ function InstructionsPanel({
           onChange={(event) => onCharacterChange(event.target.value)}
         />
       </Field>
-      {vault.characterId !== null && (
+      {characterValue.length > 0 && (
         <p className="field__hint">
           <Tag tone="ok">
-            {vault.characters.find((c) => c.characterId === vault.characterId)?.label ??
+            {vault.characters.find((c) => c.characterId === characterValue)?.label ??
               'personaje asignado'}
           </Tag>{' '}
-          es quien responde en esta conversación.
+          es quien responde en esta conversación
+          {characterValue !== (vault.characterId ?? '') && ' · se fija al enviar'}.
         </p>
       )}
       {vault.characterDescription !== null && (
@@ -722,9 +724,18 @@ function ImportCharacterForm({
  */
 function GeneratePanel({
   vault,
+  activeCharacterId,
   onCharacterReady,
 }: {
   vault: VaultController;
+  /**
+   * el elegido AHORA, aunque todavia no se haya enviado ningun mensaje.
+   *
+   * Sin esto, pulsar un personaje no cambiaba nada en pantalla —la marca solo
+   * aparecia al enviar— y no habia forma de saber si la seleccion habia
+   * funcionado.
+   */
+  activeCharacterId: string | null;
   onCharacterReady: (characterId: string, description: string) => void;
 }): JSX.Element {
   const [characterId, setCharacterId] = useState('');
@@ -791,7 +802,7 @@ function GeneratePanel({
               <div
                 key={character.characterId}
                 className="vault-list__item vault-list__item--character"
-                aria-current={character.characterId === vault.characterId ? 'true' : undefined}
+                aria-current={character.characterId === activeCharacterId ? 'true' : undefined}
               >
                 {character.avatarObjectKey !== null && (
                   <CharacterAvatar vault={vault} characterId={character.characterId} />
@@ -805,12 +816,24 @@ function GeneratePanel({
                 >
                   <span className="vault-list__title">
                     {character.label.length > 0 ? character.label : 'Sin nombre'}
-                    {character.characterId === vault.characterId ? ' · en uso' : ''}
                   </span>
                   <span className="vault-list__meta">
                     {character.modelId === 'anime-pure-v1' ? 'anime' : 'realista'}
                   </span>
                 </button>
+                {character.characterId === activeCharacterId ? (
+                  <Tag tone="ok">en uso</Tag>
+                ) : (
+                  <button
+                    className="btn btn--quiet"
+                    onClick={() => {
+                      setCharacterId(character.characterId);
+                      onCharacterReady(character.characterId, character.description);
+                    }}
+                  >
+                    Usar
+                  </button>
+                )}
                 <button
                   className="vault-character__forget"
                   title="Olvidar aquí. En el proveedor sigue existiendo."
@@ -822,9 +845,10 @@ function GeneratePanel({
             ))}
           </div>
           <p className="field__hint">
-            Tus personajes guardados. Pulsa uno para usarlo en esta conversación;
-            se guardan aquí porque el proveedor <strong>no sabe listarlos</strong>
-            y crearlos cuesta créditos.
+            Tus personajes guardados. Pulsa <strong>Usar</strong> para que sea
+            quien responda en esta conversación: queda fijado al enviar el
+            próximo mensaje. Se guardan aquí porque el proveedor{' '}
+            <strong>no sabe listarlos</strong> y crearlos cuesta créditos.
           </p>
         </>
       )}
