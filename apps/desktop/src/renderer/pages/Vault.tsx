@@ -358,7 +358,7 @@ function InstructionsPanel({
       </summary>
 
       <Field
-        label="Contexto fijo"
+        label="Cómo debe comportarse"
         hint="Acompaña a cada mensaje de esta conversación. No hace falta repetirlo, y se guarda cifrado como el resto."
       >
         <textarea
@@ -394,6 +394,15 @@ function InstructionsPanel({
           onChange={(event) => onCharacterChange(event.target.value)}
         />
       </Field>
+      {vault.characterId !== null && (
+        <p className="field__hint">
+          <Tag tone="ok">
+            {vault.characters.find((c) => c.characterId === vault.characterId)?.label ??
+              'personaje asignado'}
+          </Tag>{' '}
+          es quien responde en esta conversación.
+        </p>
+      )}
       {vault.characterDescription !== null && (
         <p className="field__hint">
           El modelo sabe que es: <em>{vault.characterDescription}</em>
@@ -508,7 +517,11 @@ const TRAIT_CATALOG: Record<string, { label: string; values: [string, string][] 
  * Se compone con las MISMAS etiquetas que se leen en pantalla: no hay un
  * segundo catalogo que pueda divergir.
  */
-export function describeCharacter(traits: Record<string, string>, scene: string): string {
+export function describeCharacter(
+  label: string,
+  traits: Record<string, string>,
+  scene: string,
+): string {
   const partes: string[] = [];
   for (const [field, entry] of Object.entries(TRAIT_CATALOG)) {
     const raw = traits[field];
@@ -516,9 +529,12 @@ export function describeCharacter(traits: Record<string, string>, scene: string)
     const label = entry.values.find(([value]) => value === raw)?.[1] ?? raw;
     partes.push(`${entry.label.toLowerCase()}: ${label}`);
   }
+  // el nombre va PRIMERO y forma parte de quien es: sin el, el modelo se
+  // inventa uno y la conversacion siguiente ya no cuadra con la anterior
+  const nombre = label.trim().length === 0 ? '' : `Te llamas ${label.trim()}. `;
   const rasgos = partes.length === 0 ? '' : `Rasgos: ${partes.join(', ')}.`;
   const extra = scene.trim().length === 0 ? '' : ` Detalles: ${scene.trim()}.`;
-  return `${rasgos}${extra}`.trim();
+  return `${nombre}${rasgos}${extra}`.trim();
 }
 
 /** un rasgo del enum cerrado. «Sin especificar» lo deja fuera de la peticion */
@@ -549,6 +565,35 @@ function TraitField({
 }
 
 /**
+ * avatar de un personaje, descifrado al vuelo.
+ *
+ * No se cachea a proposito: mantenerlo en el estado del renderer lo dejaria
+ * vivo despues de cerrar la boveda, que es justo lo que la boveda evita.
+ */
+function CharacterAvatar({
+  vault,
+  characterId,
+}: {
+  vault: VaultController;
+  characterId: string;
+}): JSX.Element | null {
+  const [dataUrl, setDataUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    let vivo = true;
+    void vault.readCharacterAvatar(characterId).then((value) => {
+      if (vivo) setDataUrl(value);
+    });
+    return () => {
+      vivo = false;
+    };
+  }, [vault, characterId]);
+
+  if (dataUrl === null) return null;
+  return <img className="vault-media__thumb" src={dataUrl} alt="" />;
+}
+
+/**
  * dar de alta un personaje que ya existe en el proveedor.
  *
  * Existe porque la API **no sabe listar personajes**: quien tenga un
@@ -566,6 +611,9 @@ function ImportCharacterForm({
   const [label, setLabel] = useState('');
   const [description, setDescription] = useState('');
   const [avatarUrl, setAvatarUrl] = useState('');
+  const [modelId, setModelId] = useState<'realistic-sharp-v1' | 'anime-pure-v1'>(
+    'realistic-sharp-v1',
+  );
   const [busy, setBusy] = useState(false);
 
   return (
@@ -585,7 +633,22 @@ function ImportCharacterForm({
         <input value={label} disabled={busy} onChange={(event) => setLabel(event.target.value)} />
       </Field>
       <Field
-        label="Quién es"
+        label="Estilo con el que se creó"
+        hint="Tiene que coincidir con el que usaste al crearlo; aquí sólo se anota, no lo cambia."
+      >
+        <select
+          value={modelId}
+          disabled={busy}
+          onChange={(event) =>
+            setModelId(event.target.value as 'realistic-sharp-v1' | 'anime-pure-v1')
+          }
+        >
+          <option value="realistic-sharp-v1">Realista</option>
+          <option value="anime-pure-v1">Anime</option>
+        </select>
+      </Field>
+      <Field
+        label="Quién es (lo lee el modelo)"
         hint="Lo lee el modelo para encarnarlo. Sin esto responderá como un asistente."
       >
         <textarea
@@ -615,9 +678,12 @@ function ImportCharacterForm({
             void vault
               .importCharacter({
                 characterId: characterId.trim(),
-                modelId: 'realistic-sharp-v1',
+                modelId,
                 label: label.trim(),
-                description: description.trim(),
+                description:
+                  label.trim().length === 0
+                    ? description.trim()
+                    : `Te llamas ${label.trim()}. ${description.trim()}`.trim(),
                 avatarUrl: avatarUrl.trim(),
               })
               .then((ok) => {
@@ -722,10 +788,16 @@ function GeneratePanel({
                   onCharacterReady(character.characterId, character.description);
                 }}
               >
+                {character.avatarObjectKey !== null && (
+                  <CharacterAvatar vault={vault} characterId={character.characterId} />
+                )}
                 <span className="vault-list__title">
                   {character.label.length > 0 ? character.label : 'Sin nombre'}
+                  {character.characterId === vault.characterId ? ' · en uso' : ''}
                 </span>
-                <span className="vault-list__meta">{character.modelId}</span>
+                <span className="vault-list__meta">
+                  {character.modelId === 'anime-pure-v1' ? 'anime' : 'realista'}
+                </span>
               </button>
             ))}
           </div>
@@ -807,7 +879,7 @@ function GeneratePanel({
       </p>
 
       <Field
-        label="Descripción del personaje"
+        label="Aspecto, en inglés (para las imágenes)"
         hint="En inglés: es lo que pide su documentación. Aquí va lo que los rasgos no cubren. Pasa por la moderación del proveedor."
       >
         <textarea
@@ -842,7 +914,7 @@ function GeneratePanel({
                 scene,
                 sfw,
                 label: label.trim(),
-                description: describeCharacter(traits, scene),
+                description: describeCharacter(label, traits, scene),
               })
               .then((id) => {
                 if (id === null) return;
@@ -850,7 +922,7 @@ function GeneratePanel({
                 setCreated(id);
                 // el modelo no ve imagenes: sin una descripcion en texto no
                 // sabe a quien encarna, por muy bien que salga el avatar
-                onCharacterReady(id, describeCharacter(traits, scene));
+                onCharacterReady(id, describeCharacter(label, traits, scene));
               })
               .finally(() => setCreating(false));
           }}
@@ -869,7 +941,10 @@ function GeneratePanel({
         su avatar y <strong>consume créditos</strong>.
       </p>
 
-      <Field label="Descripción">
+      <Field
+        label="Qué quieres ver en la imagen"
+        hint="Sólo para esta generación. La apariencia ya la fija el personaje."
+      >
         <textarea
           rows={2}
           value={prompt}

@@ -63,6 +63,8 @@ export interface ParsedVaultImageRequest {
 export function buildVaultImageInstruction(): string {
   return [
     'Puedes generar UNA imagen del personaje cuando el usuario la pida o cuando aporte algo.',
+    'No puedes adjuntar ni recuperar archivos: lo unico que puedes hacer es generar una imagen',
+    'nueva con este bloque. Si te piden una foto tuya, generala en vez de decir que no puedes.',
     'Para hacerlo, añade este bloque al final de tu respuesta, antes del bloque de memoria.',
     'Escribe en `prompt` una descripcion visual de la escena, no el mensaje del usuario.',
     'Describe solo lo que se ve. Si no hace falta ninguna imagen, no escribas el bloque.',
