@@ -94,7 +94,9 @@ En este orden:
 3. **Desplegar el gateway** (`wrangler deploy` desde `apps/gateway`) para que las
    rutas `/api/vault/*` existan en producción. Requiere autorización explícita.
 
-4. **Registrar la API de Xavira**: guardar la clave en Conexiones como
+4. **Registrar la API de generación**: guardar la clave en **Privado →
+   «Proveedor de imágenes»** (no en Conexiones: ese formulario rechaza los
+   nombres reservados) como
    `VAULT_MEDIA_API_KEY`, y hacer UNA generación real de prueba con un prompt
    neutro, para confirmar que el contrato del adaptador (nombres de campo, 201
    vs 202, sondeo, formato de error) coincide con la API de verdad.

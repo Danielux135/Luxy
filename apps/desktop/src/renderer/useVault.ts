@@ -34,6 +34,8 @@ export interface VaultStatusView {
   autoLockMinutes: number;
   lockingInMs: number | null;
   account: VaultAccountView;
+  /** hay clave guardada del proveedor de imágenes; nunca la clave */
+  mediaProviderConfigured: boolean;
 }
 
 const CLOSED: VaultStatusView = {
@@ -43,6 +45,7 @@ const CLOSED: VaultStatusView = {
   autoLockMinutes: 0,
   lockingInMs: null,
   account: { email: null, signedIn: false, expiresAt: null, openedWithRecoveryKey: false },
+  mediaProviderConfigured: false,
 };
 
 /** cada cuanto se refresca la cuenta atras del bloqueo automatico */
@@ -90,6 +93,9 @@ export interface VaultController {
   /** sube a una cuenta nueva la bóveda que ya existía aquí, sin recifrarla */
   linkAccount: (email: string, password: string) => Promise<boolean>;
   logoutAccount: () => Promise<void>;
+  /** guarda la clave del proveedor de imágenes; el nombre lo pone el main */
+  setMediaKey: (apiKey: string) => Promise<boolean>;
+  deleteMediaKey: () => Promise<void>;
   create: (password: string) => Promise<boolean>;
   unlock: (method: 'password' | 'recovery' | 'device', secret?: string) => Promise<boolean>;
   lock: () => Promise<void>;
@@ -294,6 +300,22 @@ export function useVault(): VaultController {
     setMedia([]);
     setInstructions(null);
     setOpenConversationId(null);
+  }, [run]);
+
+  const setMediaKey = useCallback(
+    async (apiKey: string): Promise<boolean> => {
+      const value = await run(() => window.luxy.setVaultMediaKey({ apiKey }));
+      if (value === null) return false;
+      setStatus(value);
+      setHint('Clave guardada. Ya puedes pedir imágenes dentro de una conversación.');
+      return true;
+    },
+    [run],
+  );
+
+  const deleteMediaKey = useCallback(async (): Promise<void> => {
+    const value = await run(() => window.luxy.deleteVaultMediaKey());
+    if (value !== null) setStatus(value);
   }, [run]);
 
   const unlock = useCallback(
@@ -563,6 +585,8 @@ export function useVault(): VaultController {
     loginAccount,
     linkAccount,
     logoutAccount,
+    setMediaKey,
+    deleteMediaKey,
     create,
     unlock,
     lock,

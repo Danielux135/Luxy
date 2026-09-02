@@ -92,7 +92,8 @@ Ordenado por lo que más se nota al usarlo:
    `{error:{code,message,request_id}}`, que encaja con el adaptador. **Sin
    verificar**: los nombres de campo de `POST /v1/images:generate`, la rama
    201-con-`output_url` frente a 202-con-`poll_url`, y la creación de personaje.
-   Necesita la clave en Conexiones (`VAULT_MEDIA_API_KEY`) y una generación.
+   Necesita la clave —se pone en **Privado → «Proveedor de imágenes»**— y una
+   generación real.
 3. **`F9.21` — vídeo grande sin previsualizar.** Se genera y se guarda cifrado,
    pero el tope de 20 MB del IPC impide verlo. Falta un protocolo de Electron
    que sirva el flujo descifrado. Ojo: **sincronizar y previsualizar tienen
@@ -197,7 +198,9 @@ gateway real**. Ver el punto 2 de la lista de abajo.
 4. **La generación de Xavira nunca ha llamado a la API real.** El contrato viene
    de su documentación pública. La primera llamada de verdad puede desmentir
    nombres de campo o formato de error. La clave va en `SecretStore` como
-   `VAULT_MEDIA_API_KEY` (reservada), la pone Daniel en Conexiones.
+   `VAULT_MEDIA_API_KEY` (reservada). **Se pone en Privado, no en Conexiones**:
+   el formulario de Conexiones rechaza los nombres reservados por diseño, así
+   que durante un tiempo esta clave no se pudo configurar desde ningún sitio.
 5. **La sincronización ya se autentica con la sesión de cuenta** (`D-048`), y el
    `vaultId` dejó de viajar. Lo que queda de esto: la sesión **caduca** (30 días)
    y entonces sincronizar deja de funcionar hasta volver a entrar, aunque la

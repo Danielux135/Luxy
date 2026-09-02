@@ -48,6 +48,7 @@ describe('contrato IPC de la boveda', () => {
         expiresAt: null,
         openedWithRecoveryKey: false,
       },
+      mediaProviderConfigured: true,
       // lo que alguien pudiera intentar colar de vuelta al renderer
       masterKey: 'AAAA',
       salt: 'BBBB',
@@ -63,6 +64,7 @@ describe('contrato IPC de la boveda', () => {
       'autoLockMinutes',
       'configured',
       'lockingInMs',
+      'mediaProviderConfigured',
       'methods',
       'unlocked',
     ]);
@@ -107,6 +109,7 @@ describe('contrato IPC de la boveda', () => {
           expiresAt: null,
           openedWithRecoveryKey: false,
         },
+        mediaProviderConfigured: false,
       },
       recoveryKey: 'ABCD-EFGH-JKMN-PQRS-TVWX-YZ23-4567-89AB',
     });

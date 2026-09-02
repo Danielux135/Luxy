@@ -222,6 +222,70 @@ function ConversationPanel({
 }
 
 /**
+ * clave del proveedor de imagenes.
+ *
+ * Vive aqui y no en Conexiones a proposito. Conexiones gestiona las pasarelas
+ * de texto, y su formulario **rechaza** este nombre: es un secreto reservado,
+ * precisamente para que nadie pueda apropiarselo declarando un proveedor con
+ * ese `apiKeyEnv`. Ponerlo aqui, en la seccion que lo usa, evita esa colision y
+ * ademas lo deja donde el usuario lo va a buscar.
+ *
+ * La clave cruza el IPC en una sola direccion —el usuario la escribe en esta
+ * ventana— y no vuelve nunca: lo unico que sale del main es si hay una guardada.
+ */
+function MediaKeyPanel({ vault }: { vault: VaultController }): JSX.Element {
+  const [apiKey, setApiKey] = useState('');
+  const configured = vault.status.mediaProviderConfigured;
+
+  return (
+    <Panel
+      title="Proveedor de imágenes"
+      actions={configured ? <Tag tone="ok">clave guardada</Tag> : <Tag tone="idle">sin clave</Tag>}
+    >
+      <p className="vault-prose">
+        Sin clave, Luxy no ofrece generar imágenes: ni en el panel de abajo ni
+        dentro de una conversación. Se guarda cifrada con tu cuenta de Windows y
+        no vuelve a mostrarse.
+      </p>
+
+      <Field
+        label={configured ? 'Sustituir la clave' : 'Clave del proveedor'}
+        hint="Se envía sólo al proveedor de imágenes. Ni el gateway ni Supabase la ven."
+      >
+        <input
+          type="password"
+          value={apiKey}
+          autoComplete="off"
+          placeholder={configured ? 'Introduce una nueva para sustituirla' : 'Pega la clave'}
+          onChange={(event) => setApiKey(event.target.value)}
+        />
+      </Field>
+
+      <div className="row">
+        <button
+          className="btn btn--primary"
+          disabled={apiKey.length === 0 || vault.busy}
+          onClick={() => {
+            void vault.setMediaKey(apiKey).then(() => setApiKey(''));
+          }}
+        >
+          Guardar clave
+        </button>
+        {configured && (
+          <button
+            className="btn btn--danger"
+            disabled={vault.busy}
+            onClick={() => void vault.deleteMediaKey()}
+          >
+            Borrar
+          </button>
+        )}
+      </div>
+    </Panel>
+  );
+}
+
+/**
  * convierte «clave: valor» por linea en el mapa que espera el proveedor.
  *
  * Es deliberadamente tonto: sin claves, sin valores vacios y sin lineas que no
@@ -375,6 +439,14 @@ function GeneratePanel({ vault }: { vault: VaultController }): JSX.Element {
         <Notice tone="idle">
           Envía un mensaje primero: lo generado se guarda dentro de una
           conversación.
+        </Notice>
+      )}
+
+      {!vault.status.mediaProviderConfigured && (
+        <Notice tone="warn">
+          Falta la clave del proveedor de imágenes. Está más abajo, en
+          «Proveedor de imágenes»: sin ella no se puede generar nada, ni aquí ni
+          desde la conversación.
         </Notice>
       )}
 
@@ -1053,6 +1125,8 @@ function UnlockedPanel({ vault }: { vault: VaultController }): JSX.Element {
         )}
 
       </Panel>
+
+      <MediaKeyPanel vault={vault} />
 
       <AccountSection vault={vault} />
 

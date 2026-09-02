@@ -63,6 +63,8 @@ export const IPC_INVOKE = {
   vaultMediaRead: 'luxy:vault:media:read',
   vaultMediaGenerate: 'luxy:vault:media:generate',
   vaultCharacterCreate: 'luxy:vault:character:create',
+  vaultMediaKeySet: 'luxy:vault:media-key:set',
+  vaultMediaKeyDelete: 'luxy:vault:media-key:delete',
   vaultSync: 'luxy:vault:sync',
 } as const;
 

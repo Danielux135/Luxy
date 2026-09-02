@@ -59,6 +59,7 @@ import {
   VAULT_PREVIEW_MAX_BYTES,
   vaultAccountArgsSchema,
   vaultAccountLoginArgsSchema,
+  vaultMediaKeyArgsSchema,
   vaultDeviceUnlockSetArgsSchema,
   vaultPasswordArgsSchema,
   vaultUnlockArgsSchema,
@@ -661,6 +662,7 @@ export function registerIpcHandlers(context: HandlerContext): void {
   const vaultStatus = (): z.infer<typeof vaultStatusSchema> => ({
     ...context.vault.status(),
     account: context.accounts.status(),
+    mediaProviderConfigured: context.secretStore.get(VAULT_MEDIA_API_SECRET) !== undefined,
   });
 
   handle(IPC_INVOKE.vaultStatus, emptyArgsSchema, () => vaultStatus());
@@ -688,6 +690,30 @@ export function registerIpcHandlers(context: HandlerContext): void {
 
   handle(IPC_INVOKE.vaultAccountLogout, emptyArgsSchema, async () => {
     await context.accounts.logout();
+    return vaultStatus();
+  });
+
+  /**
+   * guarda la clave del proveedor de imagenes.
+   *
+   * No pasa por `secretSet` porque ese canal exige que el nombre pertenezca a
+   * la configuracion, y este secreto esta RESERVADO justo para que nadie se lo
+   * apropie declarando un proveedor con ese `apiKeyEnv`. Aqui el nombre no
+   * viaja por el IPC: lo pone esta linea, asi que el renderer no puede elegir
+   * que secreto escribe.
+   */
+  handle(IPC_INVOKE.vaultMediaKeySet, vaultMediaKeyArgsSchema, async (args) => {
+    context.secretStore.set(VAULT_MEDIA_API_SECRET, args.apiKey);
+    // el nombre si, el valor nunca
+    context.log('clave del proveedor de imagenes guardada');
+    await context.reconfigureAgent();
+    return vaultStatus();
+  });
+
+  handle(IPC_INVOKE.vaultMediaKeyDelete, emptyArgsSchema, async () => {
+    context.secretStore.delete(VAULT_MEDIA_API_SECRET);
+    context.log('clave del proveedor de imagenes borrada');
+    await context.reconfigureAgent();
     return vaultStatus();
   });
 

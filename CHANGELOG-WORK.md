@@ -1,5 +1,32 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-09-02 01:10 — Claude — BUG: la clave del proveedor de imagenes no se podia guardar
+
+Daniel abrio Studio para probar y no encontro donde poner la clave. **No estaba
+en ningun sitio.**
+
+`VAULT_MEDIA_API_KEY` esta en `RESERVED_SECRET_NAMES`, e
+`isSecretNameAllowedForConfig` rechaza los reservados: es la proteccion que
+impide apropiarse de un secreto del proceso principal declarando un proveedor
+HTTP con ese `apiKeyEnv`. La proteccion es correcta; lo que faltaba era una via
+legitima. `F9.17` estaba, en la practica, inutilizable.
+
+Yo lo empeore: llevo varias respuestas diciendo «ponla en Conexiones», y la
+documentacion del repo decia lo mismo (`CURRENT-TASK.md`, `LOCAL-ACTIONS.md`).
+Era falso desde que se escribio.
+
+- canales nuevos `vaultMediaKeySet` y `vaultMediaKeyDelete`. **El nombre del
+  secreto no viaja por el IPC**: lo pone el proceso principal, asi que el
+  renderer sigue sin poder elegir que secreto escribe y la proteccion original
+  no se toca;
+- `vaultStatus` gana `mediaProviderConfigured`: solo el hecho, nunca la clave;
+- panel «Proveedor de imagenes» en Privado, que es donde se usa y donde el
+  usuario la busca. El panel de generacion avisa cuando falta, en vez de dejar
+  que se descubra al pulsar y no recibir nada;
+- corregidas las dos menciones falsas en la documentacion.
+
+`npm run check` exit 0: 119 archivos, 2.060 superadas, 9 omitidas.
+
 ### 2026-09-02 00:30 — Claude — F9.22: pedir una imagen dentro de la conversacion
 
 Daniel queria probar el flujo entero: pedirle una imagen al personaje dentro de

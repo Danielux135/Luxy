@@ -206,6 +206,27 @@ export const vaultStatusSchema = z.object({
   autoLockMinutes: z.number().int().min(0),
   lockingInMs: z.number().int().min(0).nullable(),
   account: vaultAccountStatusSchema,
+  /**
+   * hay clave guardada del proveedor de imagenes.
+   *
+   * Solo el hecho, nunca la clave. Es lo que permite a la interfaz decir «falta
+   * la clave» en vez de dejar que el usuario descubra el fallo cuando pida una
+   * imagen y no llegue.
+   */
+  mediaProviderConfigured: z.boolean(),
+});
+
+/**
+ * clave del proveedor de imagenes.
+ *
+ * Va por un canal propio y no por `secretSet` a proposito: ese canal exige que
+ * el nombre pertenezca a la configuracion, y este secreto esta RESERVADO
+ * precisamente para que nadie pueda apropiarselo declarando un proveedor con
+ * ese `apiKeyEnv`. Aqui el nombre no viaja: lo pone el proceso principal, asi
+ * que el renderer no puede elegir que secreto escribe.
+ */
+export const vaultMediaKeyArgsSchema = z.object({
+  apiKey: z.string().min(1).max(512),
 });
 
 /**
@@ -686,6 +707,11 @@ export interface LuxyBridge {
     args: z.infer<typeof vaultAccountArgsSchema>,
   ): Promise<IpcResult<z.infer<typeof vaultCreateResultSchema>>>;
   logoutVaultAccount(): Promise<IpcResult<z.infer<typeof vaultStatusSchema>>>;
+  /** guarda la clave del proveedor de imagenes; el nombre lo pone el main */
+  setVaultMediaKey(
+    args: z.infer<typeof vaultMediaKeyArgsSchema>,
+  ): Promise<IpcResult<z.infer<typeof vaultStatusSchema>>>;
+  deleteVaultMediaKey(): Promise<IpcResult<z.infer<typeof vaultStatusSchema>>>;
   createVault(password: string): Promise<IpcResult<z.infer<typeof vaultCreateResultSchema>>>;
   unlockVault(
     args: z.infer<typeof vaultUnlockArgsSchema>,
