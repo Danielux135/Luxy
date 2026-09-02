@@ -24,9 +24,18 @@ const RECOVERY_KEY_LENGTH = 32;
 export function VaultPage({
   vault,
   summary,
+  providers,
 }: {
   vault: VaultController;
   summary: ConfigSummary;
+  /**
+   * proveedores que el agente tiene EN MARCHA, tal y como los anuncia.
+   *
+   * No se deducen de la configuracion: una conexion registra un proveedor por
+   * familia de modelos, asi que mirar solo `providers.http` dejaba fuera todo
+   * lo que sirve una pasarela —que es justo lo que estaba pasando—.
+   */
+  providers: string[];
 }): JSX.Element {
   if (vault.loading) return <Skeleton rows={4} />;
   if (vault.recoveryKey !== null) return <RecoveryKeyPanel vault={vault} />;
@@ -38,7 +47,7 @@ export function VaultPage({
   if (!vault.status.unlocked) return <UnlockPanel vault={vault} />;
   return (
     <>
-      <ConversationPanel vault={vault} summary={summary} />
+      <ConversationPanel vault={vault} summary={summary} providers={providers} />
       <UnlockedPanel vault={vault} />
     </>
   );
@@ -51,9 +60,11 @@ export function VaultPage({
 function ConversationPanel({
   vault,
   summary,
+  providers,
 }: {
   vault: VaultController;
   summary: ConfigSummary;
+  providers: string[];
 }): JSX.Element {
   const [message, setMessage] = useState('');
   // `null` mientras no se edite: enviar sin tocarlas conserva las guardadas
@@ -62,7 +73,6 @@ function ConversationPanel({
   const [draftDescription, setDraftDescription] = useState<string | null>(null);
   const projects = Object.keys(summary.config?.projects ?? {});
   const [project, setProject] = useState(projects[0] ?? '');
-  const providers = ['claude', 'codex', ...(summary.config?.providers.http ?? []).map((p) => p.id)];
   const [provider, setProvider] = useState(providers[0] ?? 'claude');
 
   const canSend =
@@ -161,6 +171,13 @@ function ConversationPanel({
       />
 
       {vault.error !== null && <Notice tone="fault">{vault.error}</Notice>}
+
+      {providers.length === 0 && (
+        <Notice tone="warn">
+          El agente todavía no anuncia ningún proveedor. Arráncalo desde Inicio;
+          si ya está en marcha, comprueba que la conexión tenga clave guardada.
+        </Notice>
+      )}
 
       {projects.length === 0 ? (
         <Notice tone="warn">

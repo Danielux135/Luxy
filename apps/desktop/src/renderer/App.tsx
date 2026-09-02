@@ -148,7 +148,13 @@ export function App(): JSX.Element {
         )}
         {seccion === 'modelos' && <ModelsPage summary={summary} />}
         {seccion === 'laboratorio' && <LaboratoryPage summary={summary} />}
-        {seccion === 'privado' && <VaultPage vault={vault} summary={summary} />}
+        {seccion === 'privado' && (
+          <VaultPage
+            vault={vault}
+            summary={summary}
+            providers={status.agent?.providers ?? []}
+          />
+        )}
         {seccion === 'registros' && <LogsPage />}
         {seccion === 'ajustes' && (
           <SettingsPage
