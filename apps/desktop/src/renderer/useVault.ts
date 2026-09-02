@@ -145,10 +145,11 @@ export interface VaultController {
    * diálogo, cifra la imagen en la conversación y la envía en el cuerpo de la
    * petición: no se publica en ninguna parte y el renderer nunca ve los bytes.
    */
-  createCharacter: (
-    traits: Record<string, string>,
-    withReferenceImage?: boolean,
-  ) => Promise<string | null>;
+  createCharacter: (input: {
+    modelId: 'realistic-sharp-v1' | 'anime-pure-v1';
+    traits: Record<string, string>;
+    withReferenceImage?: boolean;
+  }) => Promise<string | null>;
   syncing: boolean;
   lastSync: {
     uploaded: number;
@@ -544,21 +545,28 @@ export function useVault(): VaultController {
   );
 
   const createCharacter = useCallback(
-    async (
-      traits: Record<string, string>,
-      withReferenceImage = false,
-    ): Promise<string | null> => {
+    async (input: {
+      modelId: 'realistic-sharp-v1' | 'anime-pure-v1';
+      traits: Record<string, string>;
+      withReferenceImage?: boolean;
+    }): Promise<string | null> => {
       setError(null);
       setHint(null);
       const result = await window.luxy.createVaultCharacter({
-        traits,
-        withReferenceImage,
+        modelId: input.modelId,
+        traits: input.traits,
+        withReferenceImage: input.withReferenceImage ?? false,
         conversationId: openConversationId,
       });
       if (!result.ok) {
         setError(result.error);
         setHint(result.hint);
         return null;
+      }
+      // el proceso principal pudo abrir la conversación para guardar la
+      // referencia: se adopta para que el primer mensaje caiga en la misma
+      if (result.value.conversationId !== null) {
+        setOpenConversationId(result.value.conversationId);
       }
       if (result.value.referenceImage) {
         setHint('Personaje creado con tu imagen de referencia, guardada cifrada aquí.');

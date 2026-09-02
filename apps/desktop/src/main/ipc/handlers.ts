@@ -919,13 +919,13 @@ export function registerIpcHandlers(context: HandlerContext): void {
     if (!context.vault.isUnlocked()) throw new VaultError('la boveda esta bloqueada');
 
     let referenceImage: { bytes: Uint8Array; mimeType: string } | undefined;
+    // preparar el personaje ANTES de escribir el primer mensaje es lo normal:
+    // se elige la foto y luego se empieza a hablar. Si no hay conversacion
+    // abierta se abre una aqui, porque la referencia tiene que guardarse en
+    // algun sitio, y el renderer adopta este identificador
+    let conversationId = args.conversationId;
     if (args.withReferenceImage) {
-      if (args.conversationId === null) {
-        throw new VaultError(
-          'envia un mensaje primero',
-          'la imagen de referencia se guarda dentro de una conversacion',
-        );
-      }
+      conversationId ??= randomUUID();
       const window = context.getMainWindow();
       if (window === null) throw new VaultError('no hay ventana desde la que elegir un archivo');
 
@@ -947,7 +947,7 @@ export function registerIpcHandlers(context: HandlerContext): void {
 
       // se cifra en la boveda ANTES de salir hacia el proveedor: si la llamada
       // falla, la referencia ya esta guardada y no hay que volver a elegirla
-      await context.privateMedia.add(context.vault, args.conversationId, bytes, {
+      await context.privateMedia.add(context.vault, conversationId, bytes, {
         mimeType,
         displayName: basename(filePath),
         prompt: null,
@@ -964,14 +964,22 @@ export function registerIpcHandlers(context: HandlerContext): void {
     try {
       const characterId = await createCharacter(
         {
+          modelId: args.modelId,
           traits: args.traits,
           ...(referenceImage === undefined ? {} : { referenceImage }),
         },
         mediaProviderOptions(controller.signal),
       );
       // ni la ruta, ni el nombre, ni los bytes
-      context.log('personaje creado', { conReferencia: referenceImage !== undefined });
-      return { characterId, referenceImage: referenceImage !== undefined };
+      context.log('personaje creado', {
+        modelId: args.modelId,
+        conReferencia: referenceImage !== undefined,
+      });
+      return {
+        characterId,
+        referenceImage: referenceImage !== undefined,
+        conversationId,
+      };
     } catch (error) {
       if (error instanceof XaviraError) throw new VaultError(error.message, error.hint);
       throw error;

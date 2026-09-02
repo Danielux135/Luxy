@@ -404,6 +404,9 @@ function InstructionsPanel({
 function GeneratePanel({ vault }: { vault: VaultController }): JSX.Element {
   const [characterId, setCharacterId] = useState('');
   const [traits, setTraits] = useState('');
+  const [modelId, setModelId] = useState<'realistic-sharp-v1' | 'anime-pure-v1'>(
+    'realistic-sharp-v1',
+  );
   const [prompt, setPrompt] = useState('');
   const [kind, setKind] = useState<'image' | 'video'>('image');
   const [creating, setCreating] = useState(false);
@@ -443,6 +446,22 @@ function GeneratePanel({ vault }: { vault: VaultController }): JSX.Element {
       </Field>
 
       <Field
+        label="Estilo del personaje"
+        hint="Lo decide la API al crearlo y no se puede cambiar después: gobierna el aspecto de todo lo que genere."
+      >
+        <select
+          value={modelId}
+          disabled={creating}
+          onChange={(event) =>
+            setModelId(event.target.value as 'realistic-sharp-v1' | 'anime-pure-v1')
+          }
+        >
+          <option value="realistic-sharp-v1">Realista</option>
+          <option value="anime-pure-v1">Anime</option>
+        </select>
+      </Field>
+
+      <Field
         label="Rasgos del personaje nuevo"
         hint="Uno por línea, con dos puntos: pelo: castaño. Se envían sólo al crearlo; sin rasgos, el proveedor elige por ti."
       >
@@ -462,7 +481,7 @@ function GeneratePanel({ vault }: { vault: VaultController }): JSX.Element {
           onClick={() => {
             setCreating(true);
             void vault
-              .createCharacter(parseTraits(traits))
+              .createCharacter({ modelId, traits: parseTraits(traits) })
               .then((id) => {
                 if (id !== null) setCharacterId(id);
               })
@@ -473,14 +492,11 @@ function GeneratePanel({ vault }: { vault: VaultController }): JSX.Element {
         </button>
         <button
           className="btn btn--quiet"
-          disabled={creating || disabled}
-          title={
-            disabled ? 'Envía un mensaje primero: la referencia se guarda en la conversación' : undefined
-          }
+          disabled={creating}
           onClick={() => {
             setCreating(true);
             void vault
-              .createCharacter(parseTraits(traits), true)
+              .createCharacter({ modelId, traits: parseTraits(traits), withReferenceImage: true })
               .then((id) => {
                 if (id !== null) setCharacterId(id);
               })

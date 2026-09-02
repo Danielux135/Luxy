@@ -1,5 +1,19 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-02 — primera llamada real a la API de generación
+
+- **Falló, y era información valiosa.** `POST /v1/characters` devolvió **400
+  `invalid_model_id`**: exige un `model_id` que el adaptador no enviaba, y la
+  documentación pública de la que salió el contrato no lo mencionaba. Valores
+  que la propia API nombró: `realistic-sharp-v1`, `anime-pure-v1`; los modelos
+  de vídeo no valen para crear un personaje; `anime-v1` y `anime-sharp-v1` son
+  alias antiguos.
+- Corregido y cubierto con tres pruebas. **`npm run check`: exit 0 — 120
+  archivos, 2.075 superadas, 9 omitidas.**
+- **Sigue sin saberse**: si `images:generate` también exige `model_id`, y si el
+  `data:` URI de la imagen de referencia se acepta en `reference_image_url`. Se
+  sabrá en la siguiente llamada real.
+
 ### 2026-09-02 — Windows 11 (equipo `oscar`) — F9.23 y arreglo de la clave de medios
 
 - **`npm run check`: exit 0.** Suite: **120 archivos, 2.072 superadas, 9

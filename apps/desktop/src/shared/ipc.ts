@@ -399,6 +399,11 @@ export const vaultMediaGenerateArgsSchema = z.object({
 });
 
 export const vaultCharacterCreateArgsSchema = z.object({
+  /**
+   * modelo del personaje. Obligatorio para la API, y no se puede cambiar
+   * después: decide el aspecto de todo lo que genere ese personaje.
+   */
+  modelId: z.enum(['realistic-sharp-v1', 'anime-pure-v1']).default('realistic-sharp-v1'),
   traits: z.record(z.string().max(64), z.string().max(120)).default({}),
   /**
    * pedir una imagen de referencia antes de crear el personaje.
@@ -425,6 +430,15 @@ export const vaultCharacterCreateResultSchema = z.object({
   characterId: z.string(),
   /** se usó una imagen de referencia; queda guardada cifrada en la conversación */
   referenceImage: z.boolean(),
+  /**
+   * conversación donde quedó guardada la referencia.
+   *
+   * Puede ser una que el proceso principal acaba de abrir: se puede preparar el
+   * personaje **antes** de escribir el primer mensaje, y la referencia tiene que
+   * guardarse en algún sitio. El renderer adopta este identificador para que el
+   * mensaje siguiente caiga en la misma conversación.
+   */
+  conversationId: z.string().nullable(),
 });
 
 export const vaultSyncResultSchema = z.object({

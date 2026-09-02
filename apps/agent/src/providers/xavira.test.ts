@@ -9,6 +9,7 @@ import {
   readGeneration,
   retryAfterMs,
   toDataUri,
+  CHARACTER_MODELS,
   MAX_REFERENCE_IMAGE_BYTES,
 } from './xavira.js';
 
@@ -57,7 +58,7 @@ const options = (impl: typeof fetch) => ({
 describe('personajes', () => {
   it('crea uno y devuelve su identificador', async () => {
     const { impl, calls } = fakeFetch([{ status: 201, body: { character_id: 'per-1' } }]);
-    const id = await createCharacter({ traits: { pelo: 'largo' } }, options(impl));
+    const id = await createCharacter({ modelId: 'realistic-sharp-v1', traits: { pelo: 'largo' } }, options(impl));
 
     expect(id).toBe('per-1');
     expect(calls[0]?.url).toBe('https://api.xavira.ai/v1/characters');
@@ -67,7 +68,27 @@ describe('personajes', () => {
 
   it('rechaza una respuesta con otra forma', async () => {
     const { impl } = fakeFetch([{ status: 201, body: { id: 'per-1' } }]);
-    await expect(createCharacter({}, options(impl))).rejects.toThrow('no tiene el formato esperado');
+    await expect(createCharacter({ modelId: 'realistic-sharp-v1' }, options(impl))).rejects.toThrow('no tiene el formato esperado');
+  });
+});
+
+describe('modelo del personaje', () => {
+  it('se manda SIEMPRE: sin el, la API responde 400 invalid_model_id', async () => {
+    const { impl, calls } = fakeFetch([{ status: 201, body: { character_id: 'per-1' } }]);
+    await createCharacter({ modelId: 'realistic-sharp-v1' }, options(impl));
+    // lo aprendimos de la propia API el 2026-09-02, no de su documentacion
+    expect((calls[0]?.body as { model_id: string }).model_id).toBe('realistic-sharp-v1');
+  });
+
+  it('el catalogo conocido son los dos que la API nombro', () => {
+    expect([...CHARACTER_MODELS]).toEqual(['realistic-sharp-v1', 'anime-pure-v1']);
+  });
+
+  it('no se filtra en local: un modelo nuevo de la API debe poder mandarse', async () => {
+    const { impl, calls } = fakeFetch([{ status: 201, body: { character_id: 'per-1' } }]);
+    await createCharacter({ modelId: 'modelo-que-aun-no-existe' }, options(impl));
+    // si es invalido, el error de la API lo explica mejor que una lista nuestra
+    expect((calls[0]?.body as { model_id: string }).model_id).toBe('modelo-que-aun-no-existe');
   });
 });
 
@@ -77,7 +98,7 @@ describe('imagen de referencia', () => {
   it('viaja EN EL CUERPO, no como una direccion publica', async () => {
     const { impl, calls } = fakeFetch([{ status: 201, body: { character_id: 'per-1' } }]);
     await createCharacter(
-      { referenceImage: { bytes: png, mimeType: 'image/png' } },
+      { modelId: 'realistic-sharp-v1', referenceImage: { bytes: png, mimeType: 'image/png' } },
       options(impl),
     );
 
@@ -94,7 +115,7 @@ describe('imagen de referencia', () => {
 
   it('sin referencia no se manda el campo', async () => {
     const { impl, calls } = fakeFetch([{ status: 201, body: { character_id: 'per-1' } }]);
-    await createCharacter({ traits: { pelo: 'largo' } }, options(impl));
+    await createCharacter({ modelId: 'realistic-sharp-v1', traits: { pelo: 'largo' } }, options(impl));
     expect(calls[0]?.body).not.toHaveProperty('reference_image_url');
   });
 
@@ -102,6 +123,7 @@ describe('imagen de referencia', () => {
     const { impl, calls } = fakeFetch([{ status: 201, body: { character_id: 'per-1' } }]);
     await createCharacter(
       {
+        modelId: 'anime-pure-v1',
         referenceImage: { bytes: png, mimeType: 'image/png' },
         referenceImageUrl: 'https://example.com/foto.png',
       },
@@ -116,7 +138,10 @@ describe('imagen de referencia', () => {
     const { impl, calls } = fakeFetch([{ status: 201, body: { character_id: 'per-1' } }]);
     const enorme = new Uint8Array(MAX_REFERENCE_IMAGE_BYTES + 1);
     await expect(
-      createCharacter({ referenceImage: { bytes: enorme, mimeType: 'image/png' } }, options(impl)),
+      createCharacter(
+        { modelId: 'realistic-sharp-v1', referenceImage: { bytes: enorme, mimeType: 'image/png' } },
+        options(impl),
+      ),
     ).rejects.toThrow('demasiado grande');
     expect(calls).toHaveLength(0);
   });
@@ -125,7 +150,7 @@ describe('imagen de referencia', () => {
     const { impl } = fakeFetch([{ status: 201, body: { character_id: 'per-1' } }]);
     await expect(
       createCharacter(
-        { referenceImage: { bytes: png, mimeType: 'application/pdf' } },
+        { modelId: 'realistic-sharp-v1', referenceImage: { bytes: png, mimeType: 'application/pdf' } },
         options(impl),
       ),
     ).rejects.toThrow('no es una imagen');
@@ -405,7 +430,7 @@ describe('sin red real', () => {
     const spy = vi.spyOn(globalThis, 'fetch');
     try {
       const { impl } = fakeFetch([{ status: 201, body: { character_id: 'c' } }]);
-      await createCharacter({}, options(impl));
+      await createCharacter({ modelId: 'realistic-sharp-v1' }, options(impl));
       expect(spy).not.toHaveBeenCalled();
     } finally {
       spy.mockRestore();

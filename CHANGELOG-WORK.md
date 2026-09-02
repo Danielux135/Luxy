@@ -1,5 +1,47 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-09-02 02:10 — Claude — la API real corrige el contrato: falta `model_id`
+
+**Primera llamada de verdad a la API de generacion.** Fallo, y nos dio justo lo
+que llevabamos toda la sesion sin poder saber:
+
+```
+400 {"error":{"code":"invalid_model_id","message":"model_id must be one of:
+realistic-sharp-v1, anime-pure-v1 (video models are not valid for character
+creation; anime-v1 and anime-sharp-v1 are accepted as legacy aliases of
+anime-pure-v1)"}}
+```
+
+`POST /v1/characters` **exige `model_id`** y el adaptador no lo mandaba. La
+documentacion publica de la que salio el contrato no lo mencionaba. Es
+exactamente el riesgo que estaba anotado desde `F9.17`.
+
+- `CreateCharacterRequest.modelId` pasa a ser **obligatorio** y viaja como
+  `model_id`. `CHARACTER_MODELS` recoge los dos que la API nombro, con nota de
+  que salen de su error y no de su documentacion;
+- **la lista NO se impone en el adaptador**: si la API añade un modelo, mandarlo
+  debe funcionar sin tocar codigo, y si es invalido su propio error lo explica
+  mejor que una comprobacion nuestra. El desplegable de la interfaz si se limita
+  a los dos conocidos;
+- selector «Estilo del personaje» (Realista / Anime) en la pantalla, con el
+  aviso de que **no se puede cambiar despues**.
+
+Segundo fallo, este de diseño mio: **«Crear desde una foto» estaba deshabilitado**
+hasta enviar un mensaje, porque la referencia se guarda dentro de una
+conversacion. Pero preparar el personaje ANTES de escribir es lo normal. Ahora,
+si no hay conversacion abierta, el proceso principal abre una para guardar la
+referencia y devuelve su identificador; el renderer lo adopta y el primer
+mensaje cae en la misma.
+
+Tres pruebas nuevas, incluida la del fallo real: `model_id` viaja siempre.
+
+**`npm run check` exit 0: 120 archivos, 2.075 superadas, 9 omitidas.**
+
+Lo que sigue sin saberse: si `images:generate` tambien exige `model_id`, y si el
+`data:` URI de la referencia se acepta. Las dos se sabran en la siguiente
+llamada real. No se añaden campos por si acaso: el contrato se corrige con lo
+que la API dice, no con lo que suponemos.
+
 ### 2026-09-02 01:40 — Claude — F9.23: imagen de referencia del personaje
 
 Daniel pregunto si se podia dar una foto para que el personaje se pareciera. El

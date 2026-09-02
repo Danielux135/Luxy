@@ -179,7 +179,28 @@ function hintForStatus(status: number): string | null {
  */
 export const MAX_REFERENCE_IMAGE_BYTES = 6 * 1024 * 1024;
 
+/**
+ * modelos validos para crear un personaje.
+ *
+ * NO salen de la documentacion: los dijo la propia API al rechazar una
+ * peticion sin `model_id`, el 2026-09-02. Su mensaje, literal, fue que
+ * `model_id` debe ser uno de `realistic-sharp-v1` o `anime-pure-v1`, que los
+ * modelos de video **no valen** para crear un personaje, y que `anime-v1` y
+ * `anime-sharp-v1` se aceptan como alias antiguos de `anime-pure-v1`.
+ *
+ * Se dejan aqui los dos canonicos. La lista no se impone en esta capa: si la
+ * API añade uno, mandarlo debe funcionar sin tocar el adaptador, y si es
+ * invalido su propio error lo explica mejor que cualquier comprobacion local.
+ */
+export const CHARACTER_MODELS = ['realistic-sharp-v1', 'anime-pure-v1'] as const;
+export type CharacterModel = (typeof CHARACTER_MODELS)[number];
+
 export interface CreateCharacterRequest {
+  /**
+   * modelo del personaje. OBLIGATORIO: sin el, la API responde 400
+   * `invalid_model_id`. Decide el aspecto y no se puede cambiar despues.
+   */
+  modelId: string;
   traits?: Record<string, string>;
   /**
    * imagen de referencia EN LINEA, dentro del cuerpo de la peticion.
@@ -243,6 +264,7 @@ export async function createCharacter(
   const { body } = await call(options, '/v1/characters', {
     method: 'POST',
     body: JSON.stringify({
+      model_id: request.modelId,
       ...(request.traits === undefined ? {} : { traits: request.traits }),
       ...(reference === undefined ? {} : { reference_image_url: reference }),
     }),
