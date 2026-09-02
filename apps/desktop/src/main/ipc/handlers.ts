@@ -1194,6 +1194,41 @@ export function registerIpcHandlers(context: HandlerContext): void {
       args.characterDescription !== null &&
       args.characterDescription !== (previousDescription ?? '');
 
+    // el avatar del personaje se copia a la conversacion la primera vez que se
+    // usa aqui. Vive en la ficha del personaje, que es de otro sitio: sin esta
+    // copia, «pasame tu foto de perfil» no tenia NADA que reenviar, y el modelo
+    // respondia —con razon— que no podia recuperar ninguna.
+    if (characterId !== null && characterId.length > 0) {
+      const known = await context.privateMedia.list(context.vault, conversationId);
+      const yaEsta = known.some((item) => item.metadata.characterId === characterId);
+      if (!yaEsta) {
+        const character = (await context.characters.list(context.vault)).find(
+          (entry) => entry.characterId === characterId,
+        );
+        if (character?.avatarObjectKey != null) {
+          try {
+            const bytes = await context.characters.readAvatar(
+              context.vault,
+              character.avatarObjectKey,
+            );
+            await context.privateMedia.add(context.vault, conversationId, bytes, {
+              mimeType: 'image/webp',
+              displayName: 'foto de perfil',
+              prompt: 'su foto de perfil',
+              width: null,
+              height: null,
+              durationMs: null,
+              characterId,
+              provider: 'xavira',
+              model: null,
+            });
+          } catch {
+            // sin avatar se sigue: no vale perder el turno por una foto
+          }
+        }
+      }
+    }
+
     // solo se le ofrece generar si de verdad se puede: sin personaje o sin
     // clave, ofrecerselo garantiza una promesa incumplida en cada turno
     const canGenerateImage =
@@ -1222,6 +1257,15 @@ export function registerIpcHandlers(context: HandlerContext): void {
     // con el limite de contexto del modelo.
     const history = await store.read(context.vault, conversationId);
     const memory = await store.latestMemory(context.vault, conversationId);
+
+    // sin esta lista el modelo no puede reenviar nada: no sabe que hay, asi que
+    // genera otra —pagando— cada vez que le piden «la de antes»
+    const existingImages = canGenerateImage
+      ? (await context.privateMedia.list(context.vault, conversationId)).map((item) => ({
+          mediaId: item.mediaId,
+          description: item.metadata.prompt ?? item.metadata.displayName ?? '',
+        }))
+      : [];
     const prompt = buildVaultPrompt({
       memory,
       // el ultimo es el que se acaba de guardar: va aparte como mensaje nuevo
@@ -1233,14 +1277,16 @@ export function registerIpcHandlers(context: HandlerContext): void {
           ? null
           : characterDescription,
       canGenerateImage,
-      // sin esta lista el modelo no puede reenviar nada: no sabe que hay, asi
-      // que genera otra —pagando— cada vez que le piden «la de antes»
-      existingImages: canGenerateImage
-        ? (await context.privateMedia.list(context.vault, conversationId)).map((item) => ({
-            mediaId: item.mediaId,
-            description: item.metadata.prompt ?? item.metadata.displayName ?? '',
-          }))
-        : [],
+      existingImages,
+    });
+
+    // ni el texto ni los rasgos: solo si el turno pudo ofrecer imagenes y
+    // cuantas habia para reenviar. Sin esto habia que adivinar por que el
+    // modelo decia que no podia
+    context.log('turno privado', {
+      conPersonaje: characterId !== null && characterId.length > 0,
+      puedeGenerar: canGenerateImage,
+      imagenesDisponibles: existingImages.length,
     });
 
     const result = await context.controller.runLocalTurn({
