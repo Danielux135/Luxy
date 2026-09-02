@@ -31,25 +31,25 @@ function registry(options: { served?: string[]; hasApiKey?: boolean } = {}): Mod
 describe('router de modelos', () => {
   it('respeta el modelo pedido explicitamente', () => {
     const decision = routeModel(registry(), { prompt: 'haz algo', explicitAlias: 'kimi' });
-    expect(decision.model?.definition.apiModel).toBe('Kimi-K2.6');
+    expect(decision.model?.definition.apiModel).toBe('kimi-k3');
     expect(decision.reason).toContain('explicitamente');
     expect(decision.substituted).toBeNull();
   });
 
   it('un alias sin version usa el predeterminado de la familia', () => {
     const decision = routeModel(registry(), { prompt: 'haz algo', explicitAlias: 'qwen' });
-    expect(decision.model?.definition.apiModel).toBe('Qwen3.6-27B');
+    expect(decision.model?.definition.apiModel).toBe('Qwen3.8-27B');
   });
 
   it('si el modelo pedido no esta disponible, sustituye Y lo explica', () => {
     // esta conexion no sirve Kimi
-    const sinKimi = registry({ served: SERVED.filter((m) => m !== 'Kimi-K2.6') });
+    const sinKimi = registry({ served: SERVED.filter((m) => m !== 'kimi-k3') });
     const decision = routeModel(sinKimi, { prompt: 'arregla el bug', explicitAlias: 'kimi' });
 
     expect(decision.model).not.toBeNull();
-    expect(decision.model?.definition.apiModel).not.toBe('Kimi-K2.6');
+    expect(decision.model?.definition.apiModel).not.toBe('kimi-k3');
     // criterio 29: una sustitucion nunca es silenciosa
-    expect(decision.substituted?.requested).toBe('Kimi K2.6');
+    expect(decision.substituted?.requested).toBe('Kimi K3');
     expect(decision.substituted?.because).toContain('no sirve el modelo');
   });
 

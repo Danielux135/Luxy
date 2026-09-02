@@ -147,6 +147,87 @@ Trabajo acordado y no empezado: `F5-VAULT-001`, conversaciones privadas
 cifradas en cliente y sincronizadas, con la infraestructura viendo sólo
 ciphertext. Diseño y pasos en `CURRENT-TASK.md`.
 
+Actualización 2026-08-31 — `LUX-BHM8` demostró que el guard de `tool_calls`
+alcanzaba por error el lector SSE del bucle agentic. Se movió a la ruta de
+consulta de solo texto: Kimi K3 agentic ya entrega sus llamadas al ejecutor
+confinado y devuelve sus resultados al modelo en la siguiente vuelta.
+
+Actualización 2026-08-31 — `LUX-SKA7` confirma que Kimi K3 ya usa herramientas
+reales: ejecutó `list_files` y `write_file` en su worktree aislado. El fallo
+posterior fue `fetch failed` sin HTTP, y se detectó que la ruta agentic sólo
+reintentaba 429. Ahora también reintenta cortes de red y errores HTTP
+recuperables, sin reejecutar herramientas ya terminadas. Sigue experimental
+hasta completar manualmente el reintento de ese trabajo.
+
+Última actualización: **2026-08-31 — máquina registrada y agente iniciado**
+
+Daniel completó OAuth de Wrangler y la cuenta correcta administra
+`luxy-gateway`; el secreto existe por nombre y su rotación está autorizada, pero
+se pospone hasta poder consumirlo. `CiTool` identifica Smart App Control
+`VerifiedAndReputableDesktop` en enforcement, y Electron 43.2.0 está sin firma.
+No se desactivó ninguna protección. Los dos suplementos creados por App Control
+Wizard quedaron vacíos y no se instalaron. El bloqueo operativo vigente no era
+Code Integrity: `ELECTRON_RUN_AS_NODE=1` hacía que el ejecutable funcionara como
+Node. Al eliminarlo sólo del proceso de desarrollo, Luxy abrió correctamente.
+El secreto de registro ya se rotó, se consumió una vez y se retiró del
+portapapeles. La máquina `portatil-oscar` quedó registrada con ID
+`6f34d4b8-5927-43ee-a0d0-360ac54f3c01`: existe `config.json`, el token no está
+en claro y `secrets.enc` cifrado existe. Tras reiniciar Desktop sin
+`ELECTRON_RUN_AS_NODE`, el proceso informó `agente listo`. No se aplicó ninguna
+política de App Control ni se relajó protección alguna; ver `LA-031`.
+
+El catálogo inicial de API China también se actualizó a los 19 modelos actuales:
+retira versiones ya ausentes y añade GLM 4.5 Air, Kimi K3, Qwen 3.8 27B,
+SenseNova 6.8 Flash Lite y SenseNova U1.5 Lite. Las capacidades de las versiones
+nuevas continúan sin verificar salvo las que ya tenían evidencia; no se ejecutó
+ninguna API real para asumir contratos.
+
+Corrección operativa posterior: un trabajo de Kimi K3 podía terminar con
+`finish_reason=tool_calls`, cero texto visible y ninguna herramienta autorizada,
+pero la ruta de consulta lo marcaba como completado. Ahora esa respuesta termina
+como fallo explícito, preserva el diagnóstico y no ejecuta herramientas sin un
+contrato agentic verificado. El trabajo histórico no se reescribe porque no hizo
+cambios; los trabajos nuevos ya usan la corrección.
+
+Kimi K3 queda habilitado únicamente como experimento agentic solicitado por
+Daniel: la traza real confirmó `tool_calls`, pero aún no existe una ejecución
+completa que valide el contrato. Recibe sólo el ejecutor ya confinado al
+worktree, con los límites y prohibiciones habituales. Un primer trabajo nuevo
+debe confirmar que crea archivos y registra sus llamadas antes de marcarlo como
+verificado.
+
+Última actualización: **2026-08-31 — reintento de alta aún bloqueado**
+
+El Gateway real sigue sano y configurado. Desktop recompila, pero Windows
+repite el rechazo de Electron con `spawn UNKNOWN`, eventos 3033/3077 y la misma
+Policy ID empresarial. Wrangler está instalado pero sin sesión Cloudflare y no
+hay certificado local de firma de código. Continúan ausentes el secreto de
+registro, `config.json` y `secrets.enc`; no se creó una identidad parcial ni se
+dejó un token en claro. Próximo punto de decisión y acciones: `LA-031`.
+
+Última actualización: **2026-08-28 — alta de este ordenador bloqueada fuera de Luxy**
+
+El onboarding ya conserva y muestra la `machineId` real devuelta por Gateway y
+propone un nombre desde el hostname. La implementación pasa lint, typecheck,
+1.662 pruebas y build. Este perfil sigue sin registrarse: falta
+`MACHINE_REGISTRATION_SECRET` y Windows Code Integrity exige nivel de firma
+empresarial para ejecutar Electron (eventos 3033/3077, Policy ID
+`{0283ac0f-fff1-49ae-ada1-8a933130cad6}`). No se fabricó ninguna ID, no se
+guardó token en claro y la app no quedó abierta. Pasos externos: `LA-031`.
+
+Última actualización: **2026-08-28 — F2.4-T1 implementada y verificada**
+
+El estado Git real corrige el siguiente paso antiguo de `F4.9`: `main` y
+`origin/main` ya contienen `00a9cc1 feat: añade proveedores HTTP configurables`.
+La publicación y validación manual permanecen separadas en `LA-029`; no se han
+ejecutado en este relevo. El desarrollo continúa en el worktree aislado
+`luxy/f2-4-conversation-library`. Studio ya permite renombrar, archivar,
+restaurar y buscar conversaciones sin migración ni sondeo adicional. El cambio
+está conectado desde Zod/Gateway hasta IPC y renderer y pasa lint, typecheck,
+1.655 pruebas y build. Permanece sin commit, push, deploy ni prueba manual; esas
+acciones requieren revisión o autorización y la validación local está en
+`LA-030`.
+
 Última actualización: **2026-08-27 — F4.9-DYNAMIC-HTTP-PROVIDERS**
 
 Luxy Studio ya permite añadir, editar, activar, desactivar y eliminar proveedores

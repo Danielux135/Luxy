@@ -1,6 +1,39 @@
 # Luxy — plan maestro
 
-Última actualización: **2026-08-21**
+Actualización 2026-08-31 — Kimi K3 experimental corrige el guard SSE: un
+contexto agentic recibe y ejecuta `tool_calls`; una consulta sin contexto sigue
+rechazándolos de forma segura.
+
+Actualización 2026-08-31 — `KIMI-K3-RETRY-001` cubre los cortes transitorios de
+transporte entre vueltas agentic de Kimi K3. `LUX-SKA7` ya validó ejecución
+confinada de herramientas; queda reintentar su trabajo para validar el cierre
+real, sin abrir permisos, rutas ni operaciones nuevas.
+
+Última actualización: **2026-08-31**
+
+`OPS-REGISTRATION-001` está completada operativamente: Gateway sano, Wrangler
+autenticado, secreto temporal rotado y consumido una sola vez, y Desktop
+reiniciado con el agente listo. La máquina `portatil-oscar` conserva la ID
+`6f34d4b8-5927-43ee-a0d0-360ac54f3c01`; la configuración no contiene token en
+claro y su almacén cifrado existe. Los dos XML de App Control Wizard quedaron
+vacíos y no se desplegaron; el fallo operativo real era `ELECTRON_RUN_AS_NODE=1`,
+retirado sólo del lanzamiento de desarrollo. No cambia el alcance ni el orden de
+las fases del producto.
+
+`CATALOG-REFRESH-001` está completada dentro de esta continuidad: el catálogo
+estático de API China refleja los 19 modelos mostrados por Daniel el 2026-08-31,
+pero el contrato operativo seguirá sometido a la sincronización segura de
+`/v1/models` y a verificaciones explícitas, sin inferir herramientas o precios.
+
+`BUG-EMPTY-TOOL-CALL-001` está resuelto: un `tool_calls` recibido en una
+consulta sin contrato agentic ya no se interpreta como éxito vacío. Luxy lo
+marca como fallo sin reintento y no ejecuta herramientas que el catálogo no haya
+verificado.
+
+`KIMI-K3-EXPERIMENT-001` está en curso por petición explícita de Daniel. Kimi
+K3 recibe el mismo ejecutor confinado que los modelos agentic, pero sigue
+marcado experimental hasta verificar una tarea real completa con herramientas y
+diff. No habilita publicación, push ni salida del worktree.
 
 `LUXY-CONSOLIDATION-001` cerró la fila `CONSOLIDATE-WORKTREES-001` de la
 tabla siguiente: los ocho worktrees quedaron en una sola línea canónica
@@ -93,7 +126,7 @@ Backlog:
 | F2.1  | Resolver respuestas largas y memoria contaminada | in_progress |
 | F2.2  | Continuar una respuesta truncada/interrumpida    | implemented |
 | F2.3  | Guardar código/documentos como artefactos        | implemented |
-| F2.4  | Renombrar, archivar y buscar conversaciones      | planned     |
+| F2.4  | Renombrar, archivar y buscar conversaciones      | implemented |
 | F2.5  | Regenerar, editar y ramificar turnos             | planned     |
 | F2.6  | Adjuntar archivos, imágenes y fragmentos         | planned     |
 | F2.7  | Exportar y copiar conversaciones                 | planned     |

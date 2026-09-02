@@ -718,6 +718,17 @@ export const studioJobFeedbackRequestSchema = z.object({
   rating: z.enum(['helpful', 'not_helpful']),
 });
 
+/** cambios de biblioteca que no alteran ni reejecutan la conversacion */
+export const studioConversationUpdateRequestSchema = z
+  .object({
+    conversationId: z.string().uuid(),
+    title: z.string().trim().min(1).max(120).optional(),
+    archived: z.boolean().optional(),
+  })
+  .refine((value) => value.title !== undefined || value.archived !== undefined, {
+    message: 'indica un titulo o el estado de archivo',
+  });
+
 export const studioJobSchema = z.object({
   id: z.string().uuid(),
   shortId: z.string().min(1).max(32),
@@ -774,11 +785,13 @@ export const studioJobActionResponseSchema = z.object({
 });
 
 export const studioJobFeedbackResponseSchema = z.object({ job: studioJobSchema });
+export const studioConversationUpdateResponseSchema = z.object({ job: studioJobSchema });
 
 export type StudioJobCreateRequest = z.infer<typeof studioJobCreateRequestSchema>;
 export type StudioJobAction = z.infer<typeof studioJobActionSchema>;
 export type StudioJobActionRequest = z.infer<typeof studioJobActionRequestSchema>;
 export type StudioJobFeedbackRequest = z.infer<typeof studioJobFeedbackRequestSchema>;
+export type StudioConversationUpdateRequest = z.infer<typeof studioConversationUpdateRequestSchema>;
 export type StudioJob = z.infer<typeof studioJobSchema>;
 export type StudioJobEvent = z.infer<typeof studioJobEventSchema>;
 export type StudioMachine = z.infer<typeof studioMachineSchema>;

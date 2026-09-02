@@ -6,6 +6,7 @@ import {
   claimResponseSchema,
   jobControlResponseSchema,
   heartbeatResponseSchema,
+  studioConversationUpdateResponseSchema,
   studioJobActionResponseSchema,
   studioJobFeedbackResponseSchema,
   studioJobResponseSchema,
@@ -22,6 +23,7 @@ import type {
   JobFailRequest,
   JobCancelledRequest,
   StudioJob,
+  StudioConversationUpdateRequest,
   StudioJobActionRequest,
   StudioJobCreateRequest,
   StudioJobFeedbackRequest,
@@ -237,6 +239,19 @@ export class GatewayClient {
       payload,
     );
     return studioJobFeedbackResponseSchema.parse(raw).job;
+  }
+
+  /** cambia la ficha de una conversacion sin invocar al proveedor */
+  async updateStudioConversation(
+    jobId: string,
+    payload: StudioConversationUpdateRequest,
+  ): Promise<StudioJob> {
+    const raw = await this.request(
+      'POST',
+      `/api/studio/jobs/${encodeURIComponent(jobId)}/conversation`,
+      payload,
+    );
+    return studioConversationUpdateResponseSchema.parse(raw).job;
   }
 
   /** aplica o descarta los cambios a traves de la maquina que posee el worktree */

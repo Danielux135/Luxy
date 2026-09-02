@@ -36,6 +36,7 @@ import {
 } from './handlers/api.js';
 import {
   handleStudioJobCancel,
+  handleStudioConversationUpdate,
   handleStudioJobAction,
   handleStudioJobCreate,
   handleStudioJobDetail,
@@ -106,6 +107,9 @@ const router = new Router<Deps>()
   )
   .post('/api/studio/jobs/:jobId/feedback', (request, deps, params) =>
     handleStudioJobFeedback(request, deps, params),
+  )
+  .post('/api/studio/jobs/:jobId/conversation', (request, deps, params) =>
+    handleStudioConversationUpdate(request, deps, params),
   )
   // cuentas de boveda: registro y login no exigen sesion previa
   .post('/api/vault/register', (request, deps) => handleVaultRegister(request, deps))

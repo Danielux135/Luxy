@@ -45,11 +45,11 @@ describe('elegir el modelo', () => {
   });
 
   it('/batch_<alias de modelo> fija el apiModel EXACTO', () => {
-    // el mismo vocabulario que las tareas normales: si /kimi_k26 existe,
-    // /batch_kimi_k26 tambien, sin una segunda tabla que mantener
-    const normal = resolveTaskTarget('kimi_k26');
-    expect(resolveTaskTarget('batch_kimi_k26')).toEqual(normal);
-    expect(resolveTaskTarget('batch_kimi_k26').model).toBe('Kimi-K2.6');
+    // el mismo vocabulario que las tareas normales: si /kimi_k3 existe,
+    // /batch_kimi_k3 tambien, sin una segunda tabla que mantener
+    const normal = resolveTaskTarget('kimi_k3');
+    expect(resolveTaskTarget('batch_kimi_k3')).toEqual(normal);
+    expect(resolveTaskTarget('batch_kimi_k3').model).toBe('kimi-k3');
   });
 
   it('todos los alias de modelo tienen su version por lotes', () => {

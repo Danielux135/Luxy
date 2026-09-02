@@ -21,6 +21,7 @@ import {
   conversationTitleFrom,
   formatConversationCount,
   formatTurnCount,
+  filterConversationLibrary,
   groupConversations,
   groupConversationTurns,
   latestConversationMemory,
@@ -80,6 +81,47 @@ describe('contrato local de Conversaciones', () => {
       'Mas reciente',
       'Primera conversacion',
     ]);
+  });
+
+  it('resuelve renombrado y archivo por la revision de biblioteca', () => {
+    const first = job();
+    const updated = job({
+      id: crypto.randomUUID(),
+      metadata: {
+        ...first.metadata,
+        conversationTitle: 'Nombre elegido',
+        conversationArchivedAt: '2026-08-03T12:00:00.000Z',
+        conversationLibraryUpdatedAt: '2026-08-03T12:00:00.000Z',
+      },
+    });
+
+    expect(groupConversations([first, updated])[0]).toMatchObject({
+      title: 'Nombre elegido',
+      archivedAt: '2026-08-03T12:00:00.000Z',
+    });
+  });
+
+  it('busca sin distinguir acentos en titulo, preguntas y respuestas cargadas', () => {
+    const active = groupConversations([
+      job({
+        resultSummary: 'La solución usa una cola persistente.',
+        metadata: { ...job().metadata, conversationTitle: 'Arquitectura' },
+      }),
+    ])[0]!;
+    const archived = groupConversations([
+      job({
+        metadata: {
+          ...job().metadata,
+          conversationId: '33333333-3333-4333-8333-333333333333',
+          conversationTitle: 'Antigua',
+          conversationArchivedAt: '2026-08-03T12:00:00.000Z',
+        },
+      }),
+    ])[0]!;
+
+    expect(filterConversationLibrary([active, archived], 'solucion', false)).toEqual([active]);
+    expect(filterConversationLibrary([active, archived], 'antigua', false)).toEqual([]);
+    expect(filterConversationLibrary([active, archived], '', true)).toEqual([archived]);
   });
 
   it('une las dos respuestas de una comparacion en un unico turno', () => {

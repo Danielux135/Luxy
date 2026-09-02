@@ -208,10 +208,9 @@ describe('alias de modelo en telegram', () => {
   });
 
   it('un alias explicito fija el apiModel EXACTO', () => {
-    expect(task('/kimi_k26 proyecto tarea').model).toBe('Kimi-K2.6');
-    expect(task('/qwen_36 proyecto tarea').model).toBe('Qwen3.6-27B');
+    expect(task('/kimi_k3 proyecto tarea').model).toBe('kimi-k3');
+    expect(task('/qwen_38 proyecto tarea').model).toBe('Qwen3.8-27B');
     expect(task('/kat_v25 proyecto tarea').model).toBe('kat-coder-pro-v2.5');
-    expect(task('/step_35_2603 proyecto tarea').model).toBe('step-3.5-flash-2603');
     expect(task('/deepseek_flash proyecto tarea').model).toBe('DeepSeek-V4-Flash');
   });
 
@@ -223,7 +222,7 @@ describe('alias de modelo en telegram', () => {
   });
 
   it('cada alias lleva a su familia correcta', () => {
-    expect(task('/glm_51 proyecto tarea').provider).toBe('glm');
+    expect(task('/glm_45_air proyecto tarea').provider).toBe('glm');
     expect(task('/minimax_m3 proyecto tarea').provider).toBe('minimax');
     expect(task('/step_37 proyecto tarea').provider).toBe('step');
   });

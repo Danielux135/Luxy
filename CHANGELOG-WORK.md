@@ -1636,6 +1636,349 @@ guardarse en claro; por eso `outputUrl` ya está en `FORBIDDEN_PLAINTEXT_FIELDS`
 - Siguiente paso exacto: abrir `F9-VAULT-001` y empezar por `F9.1`
   (`packages/vault-crypto`) en rama aislada.
 
+### 2026-08-31 11:29 — Codex — KIMI-K3-RETRY-001
+
+- Estado anterior: `LUX-SKA7` creó su worktree y completó `list_files` y
+  `write_file`, pero la siguiente vuelta de Kimi K3 terminó tras quince minutos
+  con `fetch failed` y un solo intento.
+- Causa demostrada: `runAgentic` sólo reintentaba HTTP 429. Un error de red no
+  tiene `status`, por lo que se clasificaba erróneamente como definitivo.
+- Archivos modificados: `apps/agent/src/providers/http-provider.ts` y
+  `apps/agent/src/providers/providers.test.ts`, además de esta continuidad.
+- Cambio: una vuelta agentic reintenta red, 408, 429 y 5xx recuperables, pero
+  no cancelaciones ni 504/524. Las herramientas no se repiten porque el bucle
+  sólo las ejecuta tras recibir una respuesta completa.
+- Pruebas: focalizadas 118/118; lint, typecheck, suite 97 archivos con
+  1.667/9 omitidas, build y `git diff --check` correctos.
+- Riesgo y siguiente paso: el contrato de Kimi sigue experimental hasta pulsar
+  **Reintentar trabajo** sobre `LUX-SKA7` con Desktop reiniciado.
+
+### 2026-08-31 11:01 — Codex — KIMI-K3-EXPERIMENT-001, corrección SSE
+
+- `LUX-BHM8` era una prueba nueva. El guard de `tool_calls` estaba en
+  `consumeStream`, función compartida por consulta y bucle agentic, y por eso
+  bloqueaba Kimi antes de ejecutar la primera herramienta.
+- El guard se movió a `readStream`, exclusivo de consulta. El flujo agentic
+  ahora entrega la llamada al ejecutor confinado y hace una segunda vuelta.
+- Nueva regresión HTTP nativa: ejecuta `write_file` y termina con texto;
+  focalizadas 116/116, puerta completa 1.665/9 omitidas, build y diff correctos.
+- Siguiente paso: una prueba pequeña nueva de Kimi K3 desde Studio.
+
+### 2026-08-31 10:48 — Codex — KIMI-K3-EXPERIMENT-001
+
+- Petición: Daniel quiere probar Kimi K3 después de que `LUX-A9K9` devolviera
+  `tool_calls` reales sin que Luxy tuviera un ejecutor concedido.
+- Cambio: `kimi-k3` usa experimentalmente herramientas nativas y el ejecutor
+  confinado al worktree, con la lista de herramientas, límites y prohibiciones
+  ya aplicados a los modelos agentic. Conserva `contractVerified: false` y una
+  nota explícita hasta validar un ciclo completo.
+- Seguridad: no se infiere una integración verificada, no se relajan rutas,
+  permisos, push ni despliegue. El nuevo guard de tool calls sigue rechazando
+  cualquier consulta sin contexto agentic.
+- Pruebas: focalizadas 140/140; lint, typecheck, suite 1.664/9 omitidas, build
+  y `git diff --check` correctos. Desktop reiniciado y agente listo.
+- Estado: `KIMI-K3-EXPERIMENT-001` `in_progress` hasta la prueba manual
+  `LA-032`.
+
+### 2026-08-31 10:43 — Codex — BUG-EMPTY-TOOL-CALL-001
+
+- Evidencia: `LUX-A9K9` acabó con HTTP 200 y `finish_reason=tool_calls`, pero
+  cero caracteres, cero herramientas ejecutadas y ningún cambio local. La UI
+  mostraba `completed` porque `HttpApiProvider` descartaba `toolCalls` al tomar
+  la ruta de consulta sin contexto agentic.
+- Cambio: la ruta HTTP, transmitida y no transmitida, convierte ahora cualquier
+  `tool_calls` inesperado en un fallo no reintentable. El error explica que no
+  se ejecutó ninguna herramienta ni se hicieron cambios; no se habilita Kimi K3
+  como agentic por inferencia de esa única respuesta.
+- Pruebas: nueva reproducción SSE con el mismo final y consumo; focalizadas
+  82/82 y puerta final lint, typecheck, suite 1.663/9 omitidas, build y
+  `git diff --check` correctos.
+- Estado: `BUG-EMPTY-TOOL-CALL-001` `done`. El trabajo histórico no se altera;
+  los nuevos ya quedan `failed` con diagnóstico útil.
+- Siguiente paso: reiniciar Desktop y crear un trabajo nuevo sólo con un modelo
+  cuyo contrato agentic esté verificado, o verificar Kimi K3 de forma separada.
+
+### 2026-08-31 09:46 — Codex — OPS-REGISTRATION-001, cierre operativo
+
+- Estado anterior: el onboarding ya podía abrirse, el secreto temporal estaba
+  disponible sólo en el portapapeles y aún faltaba comprobar el alta local.
+- Resultado: Gateway registró `portatil-oscar` con ID
+  `6f34d4b8-5927-43ee-a0d0-360ac54f3c01`. La comprobación posterior confirmó
+  `config.json`, una conexión, un proyecto y `secrets.enc`; no existe
+  `machineToken` en claro.
+- Seguridad: el contenido cifrado no se leyó ni se imprimió. El secreto de
+  registro se retiró del portapapeles después de usarlo. No se aplicó ningún
+  XML/CIP ni se desactivó ninguna protección.
+- Arranque: se cerró sólo el árbol Electron del worktree previamente verificado
+  y se reinició sin `ELECTRON_RUN_AS_NODE`; Vite/main/preload compilaron y
+  Desktop escribió `agente listo`.
+- Validación: la puerta automatizada anterior sigue en verde (lint, typecheck,
+  1.662 pruebas, build y `git diff --check`); esta acción no modificó código de
+  producto ni consumió APIs reales.
+- Estado nuevo: `OPS-REGISTRATION-001` queda completada operativamente.
+- Siguiente paso exacto: comprobar la barra de estado de Luxy y configurar una
+  clave de proveedor sólo cuando Daniel decida qué API China quiere usar.
+
+### 2026-08-31 09:39 — Codex — CATALOG-REFRESH-001
+
+- Estado anterior: el catálogo manual aún contenía 23 modelos de la lectura del
+  2026-08-11 y versiones que Daniel ya no ve en la conexión actual.
+- Objetivo: alinear el catálogo inicial con las 19 fichas actuales aportadas por
+  Daniel, sin declarar capacidades que no se hayan comprobado por API.
+- Evidencia: las capturas muestran los 19 modelos; las dos etiquetas truncadas
+  se contrastaron con las fichas oficiales de SenseNova como
+  `sensenova-6.8-flash-lite` y `sensenova-u1.5-lite`.
+- Archivos modificados: catálogo compartido, pruebas de catálogo/router/alias y
+  resolución del agente; documentación de continuidad.
+- Cambio: se retiraron GLM 5.1/5.2, Kimi K2.6, hy3, Qwen 3.6, SenseNova 6.7/U1
+  Fast y Step 3.5; se añadieron GLM 4.5 Air, Kimi K3, Qwen 3.8 y SenseNova 6.8/
+  U1.5. Alias explícitos pasan a `_45_air`, `_k3` y `_38`.
+- Seguridad: las versiones nuevas se marcan sin contrato verificado y sin
+  herramientas del agente; U1.5 se clasifica como imagen sin capacidades
+  operativas inventadas. No hubo llamadas reales ni claves en los archivos.
+- Pruebas: focalizadas 182/182; puerta final lint, typecheck, suite 1.662
+  superadas/9 omitidas y build correctos; `git diff --check` correcto.
+- Estado nuevo: `CATALOG-REFRESH-001` `done`; `OPS-REGISTRATION-001` sigue en
+  curso en el onboarding abierto.
+- Siguiente paso exacto: Daniel completa el alta; después Codex limpia el
+  secreto del portapapeles, verifica config/DPAPI y reinicia Desktop para cargar
+  el catálogo reconstruido.
+
+### 2026-08-31 09:02 — Codex — OPS-REGISTRATION-001, arranque y secreto temporal
+
+- Estado anterior: dos políticas de App Control Wizard con reglas aparentemente
+  creadas en la interfaz, pero XML vacíos sin hashes; no se desplegó ninguna.
+- Objetivo: comprobar si Electron podía ejecutar Luxy sin relajar Code Integrity
+  y dejar el alta lista para su confirmación visible.
+- Causa demostrada: el entorno tenía `ELECTRON_RUN_AS_NODE=1`; el error de
+  importación de `BrowserWindow` reproducía que Electron arrancaba como Node.
+- Archivos leídos: salida de arranque, XML de las políticas y configuración de
+  entorno no secreta.
+- Archivos modificados: documentación de continuidad. No se modificó código de
+  producto ni la política de Windows.
+- Comandos ejecutados: desarrollo de Desktop con y sin la variable; la segunda
+  ejecución compila main/preload, inicia Vite y abre Electron. Rotación remota
+  autorizada con Wrangler, sin emitir el valor del secreto.
+- Resultado real: Luxy está abierto en onboarding. El secreto se rotó, llegó a
+  `luxy-gateway` y sólo se conserva temporalmente en el portapapeles para que
+  Daniel lo pegue en la interfaz.
+- Decisiones: no aplicar ningún `.cip` vacío; no desactivar Smart App Control;
+  el secreto no se guarda en config, documentación, terminal ni repositorio.
+- Riesgos o límites: falta confirmar el alta, comprobar ID/token DPAPI y
+  eliminar el secreto temporal del portapapeles después de usarlo.
+- Estado nuevo: `OPS-REGISTRATION-001` `in_progress`.
+- Siguiente paso exacto: Daniel pulsa **Comprobar** con URL+secreto en Luxy y
+  Codex verifica la respuesta antes de confirmar **Registrar máquina**.
+
+### 2026-08-31 08:45 — Codex — OPS-REGISTRATION-001, validación del suplemento
+
+- Estado anterior: App Control Wizard ya estaba instalado y Daniel creó una
+  política suplementaria por `Folder Scan` para Electron 43.2.0.
+- Objetivo: verificar el artefacto antes de modificar Code Integrity.
+- Causa demostrada: el XML creado conserva la base correcta y un Policy ID
+  nuevo, pero `FileRules`, `Signers` y las reglas de producto están vacíos. El
+  asistente mostró un `.cip`, aunque el fichero no existe junto al XML.
+- Archivos leídos: XML generado, script firmado `CreateScannedPolicy.ps1`,
+  documentación oficial y ensamblado de App Control Wizard.
+- Archivos modificados: documentación de continuidad; el XML vacío queda sin
+  convertir ni desplegar para conservar la evidencia.
+- Comandos ejecutados: inspección estructural de XML y del paquete oficial;
+  prueba de carga del ensamblado. El módulo incluido requiere .NET 8 y no carga
+  desde el PowerShell 5.1 instalado.
+- Resultado real: no hay permiso efectivo para Electron y no cambió ninguna
+  política del sistema. La prueba siguiente y mínima será una regla explícita
+  `File Hash` para `electron.exe`, revisada antes de cualquier conversión.
+- Decisiones: no desplegar un XML vacío, no instalar herramientas adicionales,
+  no desactivar Smart App Control ni rotar el secreto antes de abrir Luxy.
+- Riesgos o límites: una regla hash caduca al actualizar Electron; se añadirá el
+  mínimo necesario según los eventos de Code Integrity.
+- Estado nuevo: `OPS-REGISTRATION-001` `in_progress`.
+- Siguiente paso exacto: Daniel crea la regla explícita indicada en `LA-031` y
+  Codex valida que el XML contenga hashes.
+
+### 2026-08-31 08:28 — Codex — OPS-REGISTRATION-001, autorización administrativa
+
+- Autorización: Daniel se identifica como administrador y autoriza continuar
+  con login Cloudflare, rotación del secreto y diagnóstico de la política.
+- Cambio externo realizado: OAuth de Wrangler completado por Daniel en el
+  navegador; la credencial local quedó en el almacén de Wrangler. `whoami`
+  confirma la cuenta que administra `luxy-gateway`; `secret list` confirma por
+  nombre `MACHINE_REGISTRATION_SECRET` sin revelar su valor.
+- Diagnóstico elevado: `CiTool -lp -json` identifica la política aplicada
+  `VerifiedAndReputableDesktop`, ID
+  `{0283ac0f-fff1-49ae-ada1-8a933130cad6}`, firmada y en enforcement. Es Smart
+  App Control/Code Integrity, no Defender Antivirus.
+- Firma: `electron.exe` de Electron 43.2.0 está sin firma. La política base
+  admite suplementos, pero el equipo no tiene los cmdlets `ConfigCI`; una regla
+  por ruta escribible se descartó. Microsoft ofrece App Control Wizard para
+  crear una regla por hash exacta.
+- Decisiones: no apagar antivirus ni Smart App Control; no usar bypass de
+  PowerShell; no improvisar XML de seguridad; no rotar aún el secreto porque
+  Luxy sigue sin poder consumir y cifrar el token.
+- Limpieza: el script diagnóstico temporal se eliminó y el JSON de políticas se
+  retiró del portapapeles. No quedaron artefactos temporales en el worktree.
+- Bloqueo actual: Daniel debe instalar App Control Wizard desde la fuente
+  oficial `https://aka.ms/appcontrolwizard`; la apertura automática fue
+  rechazada por el entorno de Codex. Después se crea/despliega el suplemento por
+  hash, se abre Luxy y sólo entonces se rota y consume el secreto.
+- Operaciones no realizadas: cambio de política, rotación, registro, UUID/token,
+  deploy, migración, commit ni push.
+
+### 2026-08-31 08:15 — Codex — OPS-REGISTRATION-001, reintento solicitado
+
+- Objetivo: completar el alta real de `DESKTOP-VM5J5GT` a petición de Daniel.
+- Comandos ejecutados: comprobación Git y de configuración; Codebase Memory
+  Verify Tier 2 sobre wizard, onboarding, IPC, `SecretStore` y alta de Gateway;
+  `/health` real; build de desarrollo e intento de abrir Electron; consulta de
+  Code Integrity; `wrangler whoami`; inventario de certificados de firma.
+- Resultado real: Gateway accesible y configurado. Siguen sin existir
+  `config.json`, `secrets.enc`, `.dev.vars` ni una variable de entorno con
+  `MACHINE_REGISTRATION_SECRET`. Wrangler 4.114.0 está instalado, pero la cuenta
+  no está autenticada.
+- Arranque: Electron volvió a ser rechazado a las 08:13 con eventos 3033/3077
+  y Policy ID `{0283ac0f-fff1-49ae-ada1-8a933130cad6}`. No hay certificado de
+  firma de código utilizable en `CurrentUser\\My` ni `LocalMachine\\My`.
+- Decisión de seguridad: no usar el wizard antiguo, porque guarda el token en
+  `config.json`; no fabricar un `secrets.enc` incompatible ni registrar una
+  máquina cuyo token no pueda conservarse; no iniciar sesión en Cloudflare ni
+  rotar secretos sin autorización específica.
+- Archivos modificados: sólo los seis documentos obligatorios de continuidad.
+- Operaciones no realizadas: registro, UUID/token, cambio de credenciales,
+  cambio de política, deploy, migración, commit ni push.
+- Estado nuevo: permanece `blocked`; `LA-031` contiene las dos acciones externas
+  necesarias y el siguiente punto de decisión.
+
+### 2026-08-28 12:01 — Codex — OPS-REGISTRATION-001, cierre bloqueado
+
+- Estado anterior: onboarding sin perfil local y con la UUID devuelta por el
+  alta descartada por el renderer.
+- Cambio: `AppInfo` publica sólo el hostname no secreto; Setup propone un nombre
+  válido, conserva la UUID de Gateway en la configuración y la muestra; Ajustes
+  permite consultarla después; dos pruebas puras cubren nombre e ID y el contrato
+  IPC incorpora hostname.
+- Archivos modificados: `ipc.ts`/pruebas, handler main, `Setup.tsx`/prueba,
+  `System.tsx` y documentación obligatoria. Se conserva todo F2.4-T1 previo en
+  el mismo worktree sin commit.
+- Comandos ejecutados: pruebas dirigidas 35/35; typecheck; build completo;
+  puerta final lint/typecheck/test/build; `/health` real; intento de listar
+  secrets con Wrangler; dos intentos controlados de abrir Electron; consulta de
+  Code Integrity; estado/diff Git.
+- Resultado real: puerta final exit 0, 97 archivos, 1.662 pruebas pasadas, 9
+  omitidas y builds correctos. Gateway `status: ok`, `configured: true`.
+- Fallos conservados: Wrangler no puede autenticarse sin
+  `CLOUDFLARE_API_TOKEN`; el valor de un secret nunca sería legible de todos
+  modos. Electron fue rechazado por nivel de firma empresarial, confirmado por
+  eventos 3033/3077 y Policy ID
+  `{0283ac0f-fff1-49ae-ada1-8a933130cad6}`.
+- Seguridad: no se inventó UUID/token, no se leyó ni imprimió ningún secreto,
+  no se rotó producción y `config.json`/`secrets.enc` siguen sin existir.
+- Operaciones no realizadas: registro, API de proveedor, deploy, migración,
+  commit, push ni cambio de política de Windows.
+- Estado nuevo: código de identificación verificado; alta/arranque bloqueados
+  por secreto ausente y política empresarial externa.
+- Siguiente paso exacto: Daniel/administrador completa `LA-031`; después Codex
+  puede comprobar la UUID, DPAPI, heartbeat, herramientas y proyecto reales.
+
+### 2026-08-28 11:53 — Codex — OPS-REGISTRATION-001, inicio
+
+- Estado anterior: F2.4-T1 implementada y verificada, sin commit; este perfil de
+  Windows no estaba configurado como máquina Luxy.
+- Objetivo: registrar y abrir Luxy hasta donde permitan las credenciales
+  disponibles, conservar la ID devuelta y entregar el resto como pasos manuales
+  concretos.
+- Hipótesis o causa demostrada: no hay `config.json`, `secrets.enc`,
+  `.dev.vars`, `.env.providers` ni variable `MACHINE_REGISTRATION_SECRET`. El
+  Gateway público sí responde configurado. Sin el secreto, el servidor no puede
+  emitir la UUID/token; el código actual además descarta la UUID después del IPC.
+- Archivos leídos: documentación obligatoria; `Setup.tsx`, contratos de config e
+  IPC, handler main, `SecretStore`, arranque de Desktop, cliente y wizard del
+  agente, handler/auth/repositorio de alta en Gateway.
+- Archivos modificados: `CURRENT-TASK.md` y este registro.
+- Comandos ejecutados: Codebase Memory Verify Tier 2 (proyecto, estado, búsqueda,
+  trazas, snippets y cobertura); auditoría local sin revelar valores; `/health`
+  real del Gateway; detección de rutas de herramientas y perfil Luxy.
+- Resultado real: hostname `DESKTOP-VM5J5GT`; nombre propuesto
+  `oscar-desktop-vm5j5gt`; alta todavía no enviada por falta del secreto
+  temporal.
+- Decisiones: nunca fabricar una ID ni escribir un token a mano; usar la UUID
+  real de Gateway y mantener el token en DPAPI/`SecretStore`.
+- Riesgos o límites: `rtk`, npm y Git no están en `PATH`; las instalaciones de
+  npm/Git se invocan por ruta conocida. No hay Claude/Codex CLI detectables.
+- Estado nuevo: `OPS-REGISTRATION-001` en curso.
+- Siguiente paso exacto: persistir y mostrar `machineId`, probar, reconstruir y
+  abrir Luxy en el onboarding.
+
+### 2026-08-28 11:30 — Codex — F2.4-T1, cierre
+
+- Estado anterior: biblioteca de conversaciones en curso sobre
+  `luxy/f2-4-conversation-library`, sin código de producto al abrir el paso.
+- Cambio: contrato Zod y endpoint autenticado para renombrar/archivar; cliente
+  Gateway e IPC completo; resolución de la revisión de biblioteca en metadata;
+  búsqueda local sin acentos por título, pregunta y respuesta; vistas de
+  activas/archivadas, restauración y bloqueo de nuevos turnos mientras esté
+  archivada.
+- Archivos modificados: esquemas shared; handler/ruta/pruebas de Gateway;
+  cliente del agente; canales, IPC, preload y handler main de Desktop; lógica,
+  hook, página y pruebas de Conversaciones; prueba de worktree; seis documentos
+  obligatorios de continuidad.
+- Comandos ejecutados: Codebase Memory Tier 2 (proyecto/generación, búsqueda,
+  trazas, snippets y cobertura), lectura de fuente, `npm install
+  --ignore-scripts`, pruebas dirigidas, Prettier acotado, `npm run lint`, `npm
+  run typecheck`, tres diagnósticos de suite completa y la puerta final de lint,
+  tipos, suite y build; comprobaciones Git de status, diff y diff-check.
+- Resultado real: renombrar y archivar persisten únicamente metadata del
+  trabajo elegido y verifican autor/conversación; restaurar escribe estado
+  activo; la búsqueda sólo usa el historial ya recibido; un título renombrado
+  se reutiliza al enviar el turno siguiente. Sin migración ni polling nuevo.
+- Pruebas: puerta final exit 0; 96 archivos, 1.655 pasadas, 14 omitidas, 0
+  fallos. Build correcto en `remote-crypto`, `remote-protocol`, `shared`,
+  `agent`, `desktop` y `gateway`.
+- Incidencias: el entorno no expone `rtk`, `npm` ni `git` en `PATH`; se usaron
+  las instalaciones locales conocidas. Las dos primeras suites completas
+  aislaron esa carencia y una prueba de repositorio huérfano que dependía de la
+  identidad Git global; la prueba ahora configura nombre/correo sólo en su repo
+  temporal. `npm install --ignore-scripts` volvió a informar las 12
+  vulnerabilidades ya registradas en `LA-027`; no se ejecutó `audit fix`.
+- Decisiones: metadata aditiva y compatible con historiales antiguos; archivo
+  reversible; sin servicio de búsqueda, nueva tabla ni reordenación artificial
+  del historial.
+- Operaciones no realizadas: ninguna API real, automatización de navegador,
+  migración, deploy, commit ni push.
+- Estado nuevo: `F2.4-T1` implementada y verificada, pendiente de revisión y
+  commit opcional autorizado.
+- Siguiente paso exacto: revisar el diff; si Daniel autoriza el commit, crearlo
+  en la rama aislada. Publicación/rebuild/smoke manual: `LA-030`; después `F2.5`.
+
+### 2026-08-28 11:13 — Codex — F2.4-T1, inicio
+
+- Estado anterior: `F4.9-DYNAMIC-HTTP-PROVIDERS` estaba cerrado, pero la
+  documentación aún pedía integrar su rama.
+- Objetivo: reconciliar el checkpoint y comenzar la biblioteca de
+  conversaciones —renombrar, archivar y buscar— sin migración ni servicios
+  nuevos.
+- Hipótesis o causa demostrada: `git status`, ramas y log demuestran que `main`
+  y `origin/main` ya coinciden en `00a9cc1`; la integración ocurrió fuera del
+  relevo documental. `LA-029` sólo conserva publicación, reconstrucción y prueba
+  manual.
+- Archivos leídos: documentación obligatoria completa, `CLAUDE.md` e
+  instrucciones de Codebase Memory.
+- Archivos modificados: `CURRENT-TASK.md`, `PROJECT-STATE.md`,
+  `MASTER-PLAN.md`, `LOCAL-ACTIONS.md` y este registro, dentro del worktree
+  aislado nuevo.
+- Comandos ejecutados: consultas de proyecto/estado del grafo; comprobaciones
+  Git de estado, diff, ramas, log y worktrees; creación de
+  `luxy/f2-4-conversation-library` desde `main` @ `00a9cc1`.
+- Resultado real: discrepancia reconciliada y `F2.4-T1` marcado `in_progress`.
+- Pruebas: todavía no aplican; no se ha editado código de producto.
+- Decisiones: persistir en metadata y evitar migración mientras el contrato
+  existente sea suficiente; ninguna publicación ni API real sin autorización.
+- Riesgos o límites: `rtk` y los comandos habituales de Git no están en el
+  `PATH` de esta sesión; Git se resolvió desde su ruta instalada. Los artefactos
+  de `.codebase-memory/` de la copia principal permanecen intactos.
+- Estado nuevo: `F2.4-T1` en curso.
+- Siguiente paso exacto: trazar metadata, carga de historial y mutaciones de
+  Conversaciones con evidencia Tier 2 antes de editar código.
+
 ### 2026-08-27 10:49 — Codex — F4.9-DYNAMIC-HTTP-PROVIDERS, cierre
 
 - Estado anterior: el runtime aceptaba entradas escritas a mano en

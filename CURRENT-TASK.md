@@ -778,6 +778,214 @@ Siguiente paso exacto: el cliente de sincronización que use los endpoints de
 privacidad, que sigue pendiente y es la que explica todo esto a quien llegue
 después.
 
+Actualización 2026-08-31 — corrección SSE: el rechazo de `tool_calls` queda en
+`readStream` (solo consulta), no en `consumeStream` compartido. La regresión
+ejecuta `write_file` con el bucle agentic y confirma una segunda vuelta final.
+
+## KIMI-K3-RETRY-001 — recuperación de cortes de red
+
+Estado: **`implemented` — Codex, 2026-08-31; validación manual pendiente**
+
+`LUX-SKA7` confirmó un ciclo agentic real: ejecutó `list_files` y `write_file`
+en un worktree aislado, y la siguiente vuelta terminó con `fetch failed` tras
+quince minutos. La causa demostrada fue que `runAgentic` sólo reintentaba 429.
+Ahora reintenta red, 408, 429 y 5xx recuperables sin repetir herramientas ya
+terminadas. Siguiente paso: reiniciar Desktop y pulsar **Reintentar trabajo**
+en `LUX-SKA7`; sigue experimental hasta que cierre una prueba real.
+
+## OPS-REGISTRATION-001 — alta y arranque de este ordenador
+
+Estado: **`done` — Codex, 2026-08-31**
+
+Objetivo: dejar este perfil de Windows preparado para registrar el agente,
+conservar y mostrar la ID que devuelve Gateway, reconstruir y abrir Luxy, y
+separar con precisión lo automatizable de lo que exige un secreto de Daniel.
+
+Resultado operativo de cierre:
+
+- la máquina `portatil-oscar` está registrada en Gateway con ID
+  `6f34d4b8-5927-43ee-a0d0-360ac54f3c01`;
+- `config.json` contiene la configuración no secreta, sin `machineToken`; el
+  archivo `secrets.enc` cifrado existe y no se ha leído ni impreso;
+- se conservaron una conexión y un proyecto configurados; el secreto temporal
+  se retiró del portapapeles tras consumirlo;
+- Desktop se reinició retirando `ELECTRON_RUN_AS_NODE` sólo de ese proceso y
+  confirmó `agente listo`.
+
+Estado real de partida:
+
+- no existen `%APPDATA%\Luxy\config.json` ni `secrets.enc` para este usuario;
+- el Gateway desplegado responde `/health` con `status: ok` y `configured:
+  true`;
+- no existe `MACHINE_REGISTRATION_SECRET` en el entorno, `.dev.vars` ni otra
+  fuente local conocida, por lo que todavía no se puede obtener una UUID ni un
+  token válidos;
+- el hostname real es `DESKTOP-VM5J5GT`; el nombre sugerido es
+  `oscar-desktop-vm5j5gt`;
+- Node, npm y Git existen en rutas instaladas pero no están en `PATH`; Claude,
+  Codex CLI y `rtk` no aparecen en las ubicaciones habituales;
+- el cambio continúa en el worktree aislado
+  `luxy/f2-4-conversation-library`, que conserva F2.4-T1 sin commit.
+
+Criterios de aceptación:
+
+1. La ID devuelta por el alta se guarda en `config.json` y se muestra en el
+   onboarding sin tratarla como secreto.
+2. El token permanece únicamente en `SecretStore` cifrado y el secreto temporal
+   de registro se descarta.
+3. Luxy se reconstruye y abre en la pantalla correcta para completar el alta.
+4. Se documenta exactamente qué debe introducir Daniel y qué comprobar después.
+5. Los cambios tienen pruebas y pasan lint, typecheck, suite y build.
+
+Resultado implementado y verificado:
+
+- el onboarding propone `desktop-vm5j5gt` a partir del hostname real;
+- la UUID devuelta por Gateway se conserva en `config.json` y aparece tanto en
+  el onboarding como en Ajustes;
+- el token continúa exclusivamente en `SecretStore` cifrado y el secreto
+  temporal se descarta;
+- el Gateway público responde correctamente y su URL quedó copiada en el
+  portapapeles;
+- lint, typecheck, 1.662 pruebas y build completo terminan con exit 0.
+
+Bloqueos externos demostrados:
+
+1. No existe una copia accesible de `MACHINE_REGISTRATION_SECRET`; sin ella el
+   Gateway rechaza el alta antes de crear/devolver la UUID.
+2. Windows Code Integrity bloquea el `electron.exe` no firmado del worktree con
+   eventos 3033/3077 y Policy ID
+   `{0283ac0f-fff1-49ae-ada1-8a933130cad6}`. No hay una instalación aprobada de
+   Luxy en este equipo.
+
+Reintento del 2026-08-31:
+
+- Gateway sano y configurado; Desktop recompila main/preload, pero Electron
+  vuelve a fallar con `spawn UNKNOWN` y nuevos eventos 3033/3077 a las 08:13;
+- Wrangler 4.114.0 ya tiene sesión Cloudflare autenticada por Daniel y acceso
+  verificado al Worker `luxy-gateway`;
+- no hay certificado de firma de código utilizable en el usuario o la máquina;
+- el wizard de terminal antiguo no se usa porque guardaría el token en claro en
+  `config.json`, contrario al criterio de aceptación 2.
+- `CiTool` confirma Smart App Control `VerifiedAndReputableDesktop` en
+  enforcement; la base admite suplementos. App Control Wizard 2.8.0.0 ya está
+  instalado, pero su primera regla de tipo `Folder Scan` produjo un XML
+  suplementario sin `FileRules` ni hashes, por lo que no se desplegó.
+
+Siguiente paso exacto: desde la pantalla principal comprobar visualmente que la
+barra de estado muestra el agente conectado y, si hiciera falta, pulsar
+**Iniciar agente**. La comprobación de un trabajo real con una API China queda
+separada hasta disponer de una clave válida y consentimiento explícito para
+consumirla.
+
+---
+
+## BUG-EMPTY-TOOL-CALL-001 — no completar una tarea sin texto ni cambios
+
+Estado: **`done` — Codex, 2026-08-31**
+
+Evidencia real: el trabajo `LUX-A9K9` solicitó Kimi K3 y recibió HTTP 200,
+`finish_reason=tool_calls`, 452/2.263 tokens y cero caracteres visibles. El
+modelo devolvió llamadas de herramienta, pero `kimi-k3` todavía no declara un
+contrato agentic verificado, así que Luxy no ejecutó ninguna; la ruta de solo
+texto descartaba esas llamadas y devolvía incorrectamente `completed`.
+
+Corrección: `HttpApiProvider` rechaza cualquier `tool_calls` en una consulta sin
+contexto agentic, tanto en SSE como sin streaming. El fallo no se reintenta,
+conserva el diagnóstico de transporte y explica que no se ejecutó ninguna
+herramienta ni se hicieron cambios. Kimi K3 no recibe herramientas hasta que su
+contrato se compruebe de forma explícita.
+
+Validación: reproducción nueva en `providers.test.ts`; lint, typecheck, suite
+completa, build y `git diff --check` correctos. El trabajo histórico no se
+reescribe porque su estado remoto ya fue cerrado y no hubo archivos que
+conservar.
+
+---
+
+## KIMI-K3-EXPERIMENT-001 — verificar ejecución agentic real
+
+Estado: **`in_progress` — Daniel/Codex, 2026-08-31**
+
+Daniel pidió probar Kimi K3 después de observar su `tool_calls` real. El
+catálogo lo habilita temporalmente con herramientas nativas y ejecutor confinado
+al worktree, pero conserva `contractVerified: false` y la nota
+`EXPERIMENTAL_TOOL_CALLING_2026-08-31` hasta obtener evidencia completa.
+
+Siguiente paso exacto: crear desde Studio un trabajo nuevo con **Kimi K3** y una
+tarea pequeña que escriba un archivo dentro de su worktree. Debe terminar con
+una o más herramientas registradas y un diff no vacío; si no, Codex conservará
+el fallo y retirará la capacidad experimental.
+
+Actualización 2026-08-31:
+
+- los dos XML creados por App Control Wizard se comprobaron vacíos; no se
+  desplegó ninguno;
+- el fallo reproducible actual era `ELECTRON_RUN_AS_NODE=1` en el entorno, que
+  hacía que Electron arrancase como Node y fallase al importar `BrowserWindow`;
+- al retirar esa variable sólo del proceso de desarrollo, Desktop arrancó y el
+  onboarding quedó disponible;
+- el secreto de registro se rotó con autorización ya concedida, se subió al
+  Worker y se dejó sólo en el portapapeles de Windows para este onboarding.
+- `CATALOG-REFRESH-001` queda `done`: el catálogo inicial se ajustó a los 19
+  modelos actuales que Daniel mostró el 2026-08-31, con IDs exactos, alias
+  actualizados y capacidades conservadoras hasta comprobar cada contrato.
+
+---
+
+## F2.4-T1 — biblioteca de conversaciones
+
+Estado: **`done` — Codex, 2026-08-28**
+
+Objetivo: permitir renombrar, archivar y buscar conversaciones desde Studio,
+reutilizando la cola y la metadata existentes, sin migración ni sondeo nuevo.
+
+Estado real de partida:
+
+- `main` y `origin/main` coinciden en `00a9cc1`, que ya integra
+  `F4.9-DYNAMIC-HTTP-PROVIDERS`; la integración que este archivo aún marcaba
+  como siguiente paso ocurrió fuera del relevo documental;
+- `LA-029` continúa pendiente únicamente para publicar Gateway, reconstruir y
+  validar manualmente; no se ejecutará sin autorización explícita;
+- el trabajo nuevo vive en el worktree aislado
+  `luxy/f2-4-conversation-library`, basado en `main` @ `00a9cc1`;
+- los cambios locales de `.codebase-memory/` en la copia principal son el ruido
+  regenerable ya documentado y se preservan.
+
+Criterios de aceptación:
+
+1. Un título explícito de conversación se valida y persiste sin reescribir los
+   prompts ni respuestas guardados.
+2. Archivar oculta la conversación de la vista activa y existe una forma clara
+   de consultar y restaurar las archivadas.
+3. La búsqueda filtra por título y contenido visible ya cargado, sin introducir
+   polling ni enviar texto privado a un servicio nuevo.
+4. Metadata antigua sigue siendo legible y las acciones se acotan al mismo
+   usuario y conversación.
+5. No hay migración, deploy, API real, commit ni push automáticos.
+6. Lint, typecheck, suite y build terminan en verde con pruebas de lo nuevo.
+
+Resultado verificado:
+
+- renombrado y archivo persistentes en metadata de la conversación, autorizados
+  contra la máquina creadora y sin modificar prompts ni respuestas;
+- vistas Activas/Archivadas, restauración y búsqueda local por título,
+  preguntas y respuestas ya cargadas;
+- el título elegido se conserva en turnos posteriores y una conversación
+  archivada no admite nuevos envíos hasta restaurarla;
+- contratos Zod, Gateway, cliente, IPC, preload, hook y renderer conectados sin
+  migración ni polling nuevo;
+- una prueba histórica de worktrees ya no depende de la identidad Git global;
+- `npm run lint`, `npm run typecheck`, `npm test` y `npm run build`: exit 0;
+  96 archivos, 1.655 pruebas superadas y 14 omitidas.
+
+No ejecutado: API real, automatización de navegador, migración, deploy, commit
+ni push. El trabajo permanece sin commit en
+`luxy/f2-4-conversation-library`.
+
+Siguiente paso exacto: revisar el diff y, si Daniel lo aprueba, crear el commit
+local de `F2.4-T1`; la publicación/reconstrucción y validación manual quedan en
+`LA-030`. Después, el siguiente bloque planificado es `F2.5`.
+
 ---
 
 ## F4.9-DYNAMIC-HTTP-PROVIDERS — proveedores HTTP configurables desde Studio

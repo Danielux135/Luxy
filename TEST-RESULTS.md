@@ -354,6 +354,182 @@
   omisiones por herramientas ausentes en este ordenador, más las 2 pruebas
   nuevas. No es una regresión.
 
+### 2026-08-31 — Windows 11 — KIMI-K3-RETRY-001
+
+- `LUX-SKA7` ejecutó realmente `list_files` y `write_file`; su siguiente vuelta
+  acabó en `fetch failed` tras quince minutos. Era una red sin estado HTTP y la
+  ruta agentic sólo reintentaba 429.
+- Nueva regresión: recibe `tool_calls`, escribe una vez, el siguiente `fetch`
+  falla, se reintenta y termina. Confirma tres peticiones HTTP, una herramienta
+  y texto final: **118 pruebas focalizadas superadas**.
+- Puerta completa: lint, typecheck, suite de **97 archivos con 1.667 pruebas
+  superadas y 9 omitidas**, build y `git diff --check` correctos.
+- No se consumió una API real para la corrección. La validación pendiente es
+  reintentar manualmente `LUX-SKA7` ya con Desktop reconstruido.
+
+### 2026-08-31 — Windows 11 — corrección SSE de KIMI-K3-EXPERIMENT-001
+
+- `LUX-BHM8` reveló que el guard de consulta alcanzaba el bucle agentic. La
+  regresión simula `write_file`, comprueba su ejecución, una segunda llamada y
+  texto final.
+- Pruebas dirigidas: **116 superadas**. Puerta completa: lint, typecheck,
+  **97 archivos, 1.665 pruebas superadas y 9 omitidas**, build y diff correctos.
+- No se consumió una API real para la corrección; Desktop reiniciado y agente
+  listo.
+
+### 2026-08-31 — Windows 11 — KIMI-K3-EXPERIMENT-001
+
+- La traza real de `LUX-A9K9` demostró que Kimi K3 emite `tool_calls`; se
+  habilitó de forma experimental con ejecutor ya confinado, sin declararlo
+  verificado hasta una tarea completa.
+- Pruebas focalizadas de catálogo, bucle agentic y proveedor: **140 pruebas
+  superadas**.
+- Puerta completa: lint, typecheck, suite de **97 archivos con 1.664 pruebas
+  superadas y 9 omitidas**, build y `git diff --check` correctos.
+- No se consumió ninguna API real para esta modificación. La siguiente llamada
+  es manual desde Studio y queda documentada en `LA-032`.
+
+### 2026-08-31 — Windows 11 — BUG-EMPTY-TOOL-CALL-001
+
+- Reproducción añadida: un SSE con `finish_reason=tool_calls`, 452 tokens de
+  entrada, 2.263 de salida y cero texto visible falla si el trabajo no recibió
+  un contexto agentic. El diagnóstico sigue registrando el final real.
+- `apps/agent/src/providers/providers.test.ts` y
+  `apps/agent/src/conversation-job.test.ts`: **82 pruebas superadas**.
+- Puerta completa: lint, typecheck, suite de **97 archivos con 1.663 pruebas
+  superadas y 9 omitidas**, build y `git diff --check` correctos.
+- No se llamó a ninguna API real durante las pruebas. El trabajo de Kimi que
+  reveló el caso no se modificó ni se reintentó.
+
+### 2026-08-31 — Windows 11 — cierre de OPS-REGISTRATION-001
+
+- Alta real comprobada sin exponer secretos: `config.json` existe, contiene una
+  ID y nombre de máquina, una conexión y un proyecto; no tiene la propiedad
+  `machineToken`.
+- `secrets.enc` existe y tiene contenido cifrado; no se leyó ni se volcó su
+  contenido. El secreto de registro se sustituyó por un espacio en el
+  portapapeles tras el alta.
+- Se reinició el proceso de desarrollo retirando sólo
+  `ELECTRON_RUN_AS_NODE`; `electron-vite` reconstruyó main/preload y el proceso
+  principal confirmó `agente listo`.
+- La puerta completa anterior permanece válida: lint, typecheck, suite de 97
+  archivos con 1.662 pruebas superadas y 9 omitidas, build y `git diff --check`
+  correctos. No se consumió ninguna API China en esta comprobación.
+
+### 2026-08-31 — Windows 11 — diagnóstico administrativo de Code Integrity
+
+- Wrangler OAuth: login correcto; cuenta y Worker `luxy-gateway` verificados.
+  El listado remoto contiene `MACHINE_REGISTRATION_SECRET`; ningún valor de
+  secret es legible mediante Cloudflare.
+- `CiTool -lp -json` elevado: `VerifiedAndReputableDesktop` está firmada,
+  autorizada y en enforcement; su ID coincide con los eventos 3033/3077.
+- `Get-AuthenticodeSignature`: el `electron.exe` local está `NotSigned`.
+- La política base permite suplementos. El host no ofrece `ConfigCI`, por lo que
+  no se generó ni desplegó una política manual sin una herramienta validada.
+- No se apagó Defender/Smart App Control, no se empleó bypass y no se rotó el
+  secreto. El registro real sigue pendiente.
+
+### 2026-08-31 — Windows 11 — validación de App Control Wizard
+
+- App Control Wizard 2.8.0.0 generó un XML suplementario con base
+  `{0283ac0f-fff1-49ae-ada1-8a933130cad6}` y Policy ID
+  `{EDCB2C55-DEDC-4742-A9A1-28AE5E32854F}`.
+- Inspección del XML generado tras `Folder Scan` de Electron: `<FileRules />`,
+  `<Signers />` y reglas de producto vacías. No contiene hashes ni permisos
+  efectivos para Electron.
+- El `.cip` que mostró el asistente no se encontró junto al XML. No se ejecutó
+  conversión, instalación ni reinicio de la política.
+- Diagnóstico del host: el módulo de Code Integrity incluido por el Wizard usa
+  .NET 8 y no puede cargarse desde PowerShell 5.1; no se instaló software ni se
+  usó un bypass. Siguiente comprobación: `File Hash` explícito sobre
+  `electron.exe`.
+
+### 2026-08-31 — Windows 11 — arranque real de Desktop
+
+- Se comprobó `ELECTRON_RUN_AS_NODE=1` en el entorno. Con esa variable,
+  `npm run dev --workspace @luxy/desktop` compila pero falla al importar
+  `BrowserWindow`, porque Electron se ejecuta como Node.
+- Al retirar la variable sólo de ese proceso, `electron-vite dev` compiló main y
+  preload, levantó Vite en `http://localhost:5173` y arrancó Electron sin error
+  durante más de 35 segundos; el onboarding quedó visible.
+- `wrangler secret put MACHINE_REGISTRATION_SECRET --name luxy-gateway` terminó
+  correctamente. El valor aleatorio de 32 bytes se escribió directamente al
+  proceso y al portapapeles de Windows, sin imprimirse ni guardarse en archivos.
+- No se aplicó un XML/CIP, no se desactivó protección alguna y el alta aún no se
+  ha confirmado desde la interfaz.
+
+### 2026-08-31 — Windows 11 — CATALOG-REFRESH-001
+
+- Catálogo de API China actualizado a los 19 modelos mostrados por Daniel:
+  19 entradas exactas, cuatro retiros de versiones antiguas y cinco versiones
+  nuevas; `sensenova-u1.5-lite` queda como imagen sin capacidades inventadas.
+- Pruebas focalizadas tras reconstruir `@luxy/shared`: **5 archivos, 182
+  pruebas superadas**. La primera ejecución detectó que Agent usaba la
+  compilación anterior de Shared; al reconstruir, pasó sin cambiar producción.
+- Puerta final: `npm run lint`, `npm run typecheck`, `npm test` y `npm run
+  build` terminaron con exit 0; **97 archivos, 1.662 pruebas superadas, 9
+  omitidas**. `git diff --check` también pasó.
+- No se llamó a `/v1/models`, no se consumieron tokens ni se añadieron claves.
+
+### 2026-08-31 — Windows 11 — OPS-REGISTRATION-001, reintento real
+
+- Gateway real: `GET /health` devuelve `status: ok` y `configured: true`.
+- Desktop: `npm run dev --workspace @luxy/desktop` compila main y preload, pero
+  termina con `spawn UNKNOWN` al crear Electron.
+- Evidencia de sistema del mismo intento: Code Integrity 3033/3077 a las 08:13,
+  Policy ID `{0283ac0f-fff1-49ae-ada1-8a933130cad6}`; el binario no satisface el
+  nivel de firma empresarial.
+- Configuración: `config.json` y `secrets.enc` siguen sin existir. No hay secreto
+  de registro en el entorno ni `.dev.vars` local.
+- Cloudflare: Wrangler 4.114.0 responde, pero `whoami` confirma que no hay sesión
+  autenticada. No se inició login ni se cambió ningún secret.
+- Firma local: ningún certificado de código disponible con clave privada en los
+  almacenes personal del usuario o de la máquina.
+- No se ejecutó el alta y no se generó, imprimió ni guardó UUID/token alguno.
+
+### 2026-08-28 — Windows 11 — OPS-REGISTRATION-001
+
+- Pruebas dirigidas: `Setup.test.ts` + `ipc.test.ts`, **35/35**.
+- Puerta final:
+  - `npm run lint`: exit 0;
+  - `npm run typecheck`: exit 0;
+  - `npm test`: **97 archivos, 1.662 pruebas superadas, 9 omitidas, 0 fallos**;
+  - `npm run build`: exit 0 en los seis workspaces.
+- Build de Desktop generado correctamente; incluye hostname no secreto, ID
+  persistente/visible y el onboarding de F2.4-T1.
+- Smoke de arranque: **bloqueado antes de ejecutar código de Luxy**. Windows
+  Code Integrity registra eventos 3033/3077: `electron.exe` no satisface el
+  nivel de firma empresarial (Policy ID
+  `{0283ac0f-fff1-49ae-ada1-8a933130cad6}`). No hay proceso o ventana restante.
+- Gateway real: `/health` responde `status: ok`, `configured: true`.
+- Registro real: no ejecutado; falta `MACHINE_REGISTRATION_SECRET`, por lo que
+  no existe todavía UUID ni token para este ordenador.
+
+### 2026-08-28 — Windows 11 — F2.4-T1
+
+- Worktree: `luxy/f2-4-conversation-library`, base `main` @ `00a9cc1`.
+- Instalación local: `npm install --ignore-scripts`, 495 paquetes; no se
+  ejecutaron scripts de dependencias. NPM volvió a informar las 12
+  vulnerabilidades abiertas en `LA-027`; no se aplicó ninguna corrección.
+- Pruebas dirigidas: `conversation.test.ts` + `studio.test.ts`, **78/78**.
+- Puerta final:
+  - `npm run lint`: exit 0;
+  - `npm run typecheck`: exit 0;
+  - `npm test`: **96 archivos, 1.655 pruebas superadas, 14 omitidas, 0 fallos**;
+  - `npm run build`: exit 0 en `remote-crypto`, `remote-protocol`, `shared`,
+    `agent`, `desktop` y `gateway`.
+- Pruebas nuevas: revisión de título/archivo en metadata, búsqueda sin acentos
+  sobre título/pregunta/respuesta, archivo/restauración y autorización de la
+  mutación de biblioteca.
+- Corrección de infraestructura de prueba: el repositorio huérfano temporal
+  configura su propia identidad Git; ya no depende del perfil global de la
+  máquina.
+- Diagnósticos previos, no ocultados: una ejecución falló porque `git` no estaba
+  en `PATH`; otra dejó sólo el commit huérfano fallando por identidad global.
+  Tras corregir el entorno de proceso y aislar el fixture, la puerta final pasó.
+- `git diff --check`: correcto. Prettier acotado a los archivos modificados.
+- No se ejecutó navegador, API real, migración, deploy, commit ni push.
+
 ### 2026-08-27 — Windows 11 — F4.9-DYNAMIC-HTTP-PROVIDERS
 
 - Worktree: `luxy/f4-9-dynamic-http-providers`, base `main` @ `2ae1291`.

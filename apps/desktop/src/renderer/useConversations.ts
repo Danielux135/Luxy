@@ -36,6 +36,11 @@ export interface SendConversationRequest {
   continuesJobId?: string | null;
 }
 
+export interface ConversationLibraryUpdate {
+  title?: string;
+  archived?: boolean;
+}
+
 export function replaceConversationJob(jobs: StudioJob[], updated: StudioJob): StudioJob[] {
   return jobs.map((job) => (job.id === updated.id ? updated : job));
 }
@@ -68,6 +73,10 @@ export function useConversations(projectScope: string | null = null): {
   send: (request: SendConversationRequest) => Promise<boolean>;
   cancel: (jobId: string) => Promise<void>;
   rate: (jobId: string, rating: 'helpful' | 'not_helpful') => Promise<void>;
+  updateConversation: (
+    conversationId: string,
+    update: ConversationLibraryUpdate,
+  ) => Promise<boolean>;
   reload: () => Promise<void>;
 } {
   const [machines, setMachines] = useState<StudioMachine[]>([]);
@@ -282,8 +291,7 @@ export function useConversations(projectScope: string | null = null): {
         const existingJobs = jobsRef.current.filter(
           (job) => parseConversationMetadata(job)?.conversationId === conversationId,
         );
-        const existingTitle =
-          existingJobs.map(parseConversationMetadata).find((item) => item !== null)?.title ?? null;
+        const existingTitle = groupConversations(existingJobs)[0]?.title ?? null;
         const title = existingTitle ?? conversationTitleFrom(request.message);
         const projectJobs = jobsRef.current.filter(
           (job) => job.projectAlias === request.projectAlias,
@@ -423,6 +431,47 @@ export function useConversations(projectScope: string | null = null): {
     [],
   );
 
+  const updateConversation = useCallback(
+    async (conversationId: string, update: ConversationLibraryUpdate): Promise<boolean> => {
+      const conversation = groupConversations(jobsRef.current).find(
+        (item) => item.id === conversationId,
+      );
+      const latestJob = conversation?.jobs.at(-1);
+      if (latestJob === undefined) return false;
+
+      setBusy(true);
+      setError(null);
+      try {
+        const result = await window.luxy.updateStudioConversation({
+          jobId: latestJob.id,
+          conversationId,
+          ...(update.title === undefined ? {} : { title: update.title.trim() }),
+          ...(update.archived === undefined ? {} : { archived: update.archived }),
+        });
+        if (!result.ok) {
+          setError(result.error);
+          return false;
+        }
+
+        const updated = result.value.job;
+        setJobs((current) => {
+          const next = replaceConversationJob(current, updated);
+          jobsRef.current = next;
+          return next;
+        });
+        setDetails((current) => {
+          const next = replaceConversationDetail(current, updated);
+          detailsRef.current = next;
+          return next;
+        });
+        return true;
+      } finally {
+        setBusy(false);
+      }
+    },
+    [],
+  );
+
   return {
     machines,
     conversations,
@@ -440,6 +489,7 @@ export function useConversations(projectScope: string | null = null): {
     send,
     cancel,
     rate,
+    updateConversation,
     reload,
   };
 }

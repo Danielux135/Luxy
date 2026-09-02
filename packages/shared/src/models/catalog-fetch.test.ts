@@ -176,7 +176,7 @@ describe('diagnostico de precios', () => {
   });
 });
 
-describe('familias de los 23 modelos reales', () => {
+describe('familias de los 19 modelos actuales', () => {
   it('agrupa los que la primera lectura dejo en "otros"', () => {
     // los 22 de la lectura del 2026-08-07: 14 caian en "otros" porque step,
     // minimax y sensenova no estaban contemplados
@@ -185,8 +185,7 @@ describe('familias de los 23 modelos reales', () => {
     expect(guessModelFamily('stepaudio-2.5-tts')).toBe('step-media');
     expect(guessModelFamily('step-image-edit-2')).toBe('step-media');
     expect(guessModelFamily('MiniMax-M3')).toBe('minimax');
-    expect(guessModelFamily('sensenova-u1-fast')).toBe('sensenova');
-    expect(guessModelFamily('hy3')).toBe('otros');
+    expect(guessModelFamily('sensenova-u1.5-lite')).toBe('sensenova');
     expect(guessModelFamily('auto')).toBe('router');
   });
 
@@ -195,18 +194,14 @@ describe('familias de los 23 modelos reales', () => {
       'auto',
       'DeepSeek-V4-Flash',
       'DeepSeek-V4-Pro',
-      'glm-5.1',
-      'glm-5.2',
+      'glm-4.5-air',
       'kat-coder-pro-v2.5',
-      'Kimi-K2.6',
+      'kimi-k3',
       'MiniMax-M3',
-      'hy3',
       'Qwen3-Embedding-8B',
-      'Qwen3.6-27B',
-      'sensenova-6.7-flash-lite',
-      'sensenova-u1-fast',
-      'step-3.5-flash',
-      'step-3.5-flash-2603',
+      'Qwen3.8-27B',
+      'sensenova-6.8-flash-lite',
+      'sensenova-u1.5-lite',
       'step-3.7-flash',
       'step-explore',
       'step-image-edit-2',
@@ -216,8 +211,8 @@ describe('familias de los 23 modelos reales', () => {
       'stepaudio-2.5-realtime',
       'stepaudio-2.5-tts',
     ];
-    expect(REALES).toHaveLength(23);
-    for (const modelo of REALES.filter((item) => item !== 'hy3')) {
+    expect(REALES).toHaveLength(19);
+    for (const modelo of REALES) {
       expect(guessModelFamily(modelo)).not.toBe('otros');
     }
   });

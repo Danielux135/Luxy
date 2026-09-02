@@ -14,23 +14,19 @@ import {
 
 const CATALOG = buildDefaultCatalog();
 
-/** apiModel que la conexion devolvio en /v1/models el 2026-08-11 */
+/** catalogo activo que Daniel reviso el 2026-08-31 */
 const SERVED_BY_CONNECTION = [
   'auto',
   'DeepSeek-V4-Flash',
   'DeepSeek-V4-Pro',
-  'glm-5.1',
-  'glm-5.2',
+  'glm-4.5-air',
   'kat-coder-pro-v2.5',
-  'Kimi-K2.6',
+  'kimi-k3',
   'MiniMax-M3',
-  'hy3',
   'Qwen3-Embedding-8B',
-  'Qwen3.6-27B',
-  'sensenova-6.7-flash-lite',
-  'sensenova-u1-fast',
-  'step-3.5-flash',
-  'step-3.5-flash-2603',
+  'Qwen3.8-27B',
+  'sensenova-6.8-flash-lite',
+  'sensenova-u1.5-lite',
   'step-3.7-flash',
   'step-explore',
   'stepaudio-2.5-asr',
@@ -84,11 +80,11 @@ describe('catalogo inicial', () => {
     const exactos = CATALOG.map((model) => model.apiModel);
     // mayusculas, puntos y guiones tal cual los devuelve la API
     expect(exactos).toContain('DeepSeek-V4-Pro');
-    expect(exactos).toContain('Kimi-K2.6');
-    expect(exactos).toContain('Qwen3.6-27B');
+    expect(exactos).toContain('kimi-k3');
+    expect(exactos).toContain('Qwen3.8-27B');
     expect(exactos).toContain('MiniMax-M3');
     expect(exactos).toContain('kat-coder-pro-v2.5');
-    expect(exactos).toContain('glm-5.2');
+    expect(exactos).toContain('glm-4.5-air');
   });
 
   it('solo contiene modelos que la conexion sirve de verdad', () => {
@@ -99,13 +95,13 @@ describe('catalogo inicial', () => {
 
   it('la lectura real sustituye el catalogo operativo completo', () => {
     const detected = buildCatalogForConnection(DEFAULT_CONNECTION_ID, [
-      'hy3',
-      'Qwen3.6-27B',
+      'kimi-k3',
+      'Qwen3.8-27B',
       'modelo-recien-publicado',
     ]);
     expect(detected.map((model) => model.apiModel)).toEqual([
-      'hy3',
-      'Qwen3.6-27B',
+      'kimi-k3',
+      'Qwen3.8-27B',
       'modelo-recien-publicado',
     ]);
     expect(detected.map((model) => model.apiModel)).not.toContain('Qwen3.5-397B-A17B');
@@ -131,24 +127,39 @@ describe('catalogo inicial', () => {
     });
   });
 
-  it('no contiene los dos modelos que la conexion no sirve', () => {
+  it('retira los modelos que ya no aparecen en el catalogo activo', () => {
     const apiModels = CATALOG.map((model) => model.apiModel);
-    for (const ausente of ['kat-coder-pro-v2', 'MiniMax-M2.7']) {
+    for (const ausente of [
+      'glm-5.1',
+      'glm-5.2',
+      'Kimi-K2.6',
+      'hy3',
+      'Qwen3.6-27B',
+      'sensenova-6.7-flash-lite',
+      'sensenova-u1-fast',
+      'step-3.5-flash',
+      'step-3.5-flash-2603',
+    ]) {
       expect(apiModels).not.toContain(ausente);
     }
   });
 
-  it('incluye los modelos que la conexion sirve y faltaban en la lista original', () => {
+  it('incluye las versiones nuevas mostradas por la conexion', () => {
     const apiModels = CATALOG.map((model) => model.apiModel);
-    expect(apiModels).toContain('glm-5.1');
+    expect(apiModels).toContain('glm-4.5-air');
     expect(apiModels).toContain('auto');
     expect(apiModels).toContain('step-explore');
-    expect(apiModels).toContain('sensenova-6.7-flash-lite');
-    expect(apiModels).toContain('sensenova-u1-fast');
+    expect(apiModels).toContain('sensenova-6.8-flash-lite');
+    expect(apiModels).toContain('sensenova-u1.5-lite');
   });
 
-  it('los tres modelos nuevos no inventan capacidades ni herramientas', () => {
-    for (const apiModel of ['step-explore', 'sensenova-6.7-flash-lite', 'sensenova-u1-fast']) {
+  it('las versiones nuevas no inventan capacidades ni herramientas', () => {
+    for (const apiModel of [
+      'glm-4.5-air',
+      'Qwen3.8-27B',
+      'sensenova-6.8-flash-lite',
+      'step-explore',
+    ]) {
       const model = CATALOG.find((entry) => entry.apiModel === apiModel);
       expect(model?.capabilities).toEqual(['text']);
       expect(model?.agentic).toBe(false);
@@ -156,6 +167,18 @@ describe('catalogo inicial', () => {
       expect(model?.supportsNativeTools).toBeNull();
       expect(model?.metadata['contractVerified']).toBe(false);
     }
+    expect(CATALOG.find((entry) => entry.apiModel === 'sensenova-u1.5-lite')?.category).toBe(
+      'image',
+    );
+  });
+
+  it('habilita Kimi K3 de forma experimental y confinada para verificar tool calling', () => {
+    const kimi = CATALOG.find((entry) => entry.apiModel === 'kimi-k3');
+    expect(kimi?.agentic).toBe(true);
+    expect(kimi?.supportsNativeTools).toBe(true);
+    expect(kimi?.allowedTools.length).toBeGreaterThan(0);
+    expect(kimi?.metadata['contractVerified']).toBe(false);
+    expect(kimi?.metadata['note']).toBe('EXPERIMENTAL_TOOL_CALLING_2026-08-31');
   });
 
   it('cada familia tiene como mucho un predeterminado', () => {
@@ -203,19 +226,18 @@ describe('resolucion de alias', () => {
   });
 
   it('los alias sin version apuntan al predeterminado de su familia', () => {
-    expect(registry.resolveAlias('glm')?.apiModel).toBe('glm-5.2');
+    expect(registry.resolveAlias('glm')?.apiModel).toBe('glm-4.5-air');
     expect(registry.resolveAlias('kat')?.apiModel).toBe('kat-coder-pro-v2.5');
     expect(registry.resolveAlias('minimax')?.apiModel).toBe('MiniMax-M3');
-    expect(registry.resolveAlias('qwen')?.apiModel).toBe('Qwen3.6-27B');
+    expect(registry.resolveAlias('qwen')?.apiModel).toBe('Qwen3.8-27B');
     expect(registry.resolveAlias('step')?.apiModel).toBe('step-3.7-flash');
-    expect(registry.resolveAlias('kimi')?.apiModel).toBe('Kimi-K2.6');
+    expect(registry.resolveAlias('kimi')?.apiModel).toBe('kimi-k3');
   });
 
   it('los alias explicitos apuntan siempre al modelo concreto', () => {
-    expect(registry.resolveAlias('glm_51')?.apiModel).toBe('glm-5.1');
-    expect(registry.resolveAlias('glm_52')?.apiModel).toBe('glm-5.2');
-    expect(registry.resolveAlias('qwen_36')?.apiModel).toBe('Qwen3.6-27B');
-    expect(registry.resolveAlias('step_35_2603')?.apiModel).toBe('step-3.5-flash-2603');
+    expect(registry.resolveAlias('glm_45_air')?.apiModel).toBe('glm-4.5-air');
+    expect(registry.resolveAlias('qwen_38')?.apiModel).toBe('Qwen3.8-27B');
+    expect(registry.resolveAlias('kimi_k3')?.apiModel).toBe('kimi-k3');
   });
 
   it('los alias de audio e imagen apuntan a su modelo', () => {
@@ -343,7 +365,7 @@ describe('disponibilidad', () => {
       ],
     });
     expect(registry.listUsable()).toHaveLength(0);
-    expect(registry.resolve('glm-5.2')?.unavailableReason).toContain('desactivada');
+    expect(registry.resolve('glm-4.5-air')?.unavailableReason).toContain('desactivada');
   });
 
   it('solo los modelos de texto son agentic', () => {
@@ -395,27 +417,24 @@ describe('disponibilidad', () => {
     }
   });
 
-  it('los modelos con tool calling verificado son los que respondieron', () => {
-    const conTools = CATALOG.filter((model) => model.supportsNativeTools === true).map(
+  it('separa los modelos verificados del experimento de Kimi K3', () => {
+    const conToolsVerificados = CATALOG.filter(
+      (model) => model.supportsNativeTools === true && model.metadata['contractVerified'] === true,
+    ).map(
       (model) => model.apiModel,
     );
-    expect(conTools).toEqual([
+    expect(conToolsVerificados).toEqual([
       'DeepSeek-V4-Pro',
       'DeepSeek-V4-Flash',
-      'glm-5.2',
-      'glm-5.1',
-      // kat-coder-pro-v2.5 no esta: la cuenta no tiene acceso, asi que su
-      // soporte de herramientas sigue siendo DESCONOCIDO, no verificado
-      'Kimi-K2.6',
       'MiniMax-M3',
       'step-3.7-flash',
-      'step-3.5-flash-2603',
     ]);
+    expect(CATALOG.find((model) => model.apiModel === 'kimi-k3')?.supportsNativeTools).toBe(true);
   });
 
-  it('los modelos lentos quedan marcados como lentos, no como caidos', () => {
+  it('los modelos lentos que siguen presentes quedan marcados como lentos, no como caidos', () => {
     // una primera medida con 45 s los dio por muertos: responden, pero tardan
-    for (const apiModel of ['glm-5.2', 'MiniMax-M3', 'DeepSeek-V4-Pro']) {
+    for (const apiModel of ['MiniMax-M3', 'DeepSeek-V4-Pro']) {
       const model = CATALOG.find((entry) => entry.apiModel === apiModel);
       expect(model?.supportsNativeTools).toBe(true);
       expect(model?.metadata['slowResponse']).toBe(true);
@@ -423,10 +442,9 @@ describe('disponibilidad', () => {
     }
   });
 
-  it('el modelo sin acceso queda anotado, no borrado', () => {
+  it('el modelo de codigo actual no recibe un contrato inventado', () => {
     const kat = CATALOG.find((model) => model.apiModel === 'kat-coder-pro-v2.5');
-    expect(kat?.metadata['note']).toContain('rechazo el acceso');
-    // rechazo en menos de 1 s: no es lentitud, es permiso
-    expect(kat?.metadata['slowResponse']).toBeUndefined();
+    expect(kat?.metadata['contractVerified']).toBe(false);
+    expect(kat?.allowedTools).toEqual([]);
   });
 });

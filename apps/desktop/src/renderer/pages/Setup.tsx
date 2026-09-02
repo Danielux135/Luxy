@@ -23,6 +23,24 @@ interface ToolPresence {
   path: string | null;
 }
 
+export function suggestedMachineName(hostname: string): string {
+  const normalized = hostname
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 48)
+    .replace(/-$/g, '');
+  return normalized.length > 0 ? normalized : 'equipo';
+}
+
+export function configWithRegisteredMachine(
+  config: StoredAgentConfig,
+  machineId: string | null,
+): StoredAgentConfig {
+  return machineId === null ? config : { ...config, machineId };
+}
+
 export function SetupPage({
   summary,
   onSave,
@@ -44,6 +62,7 @@ export function SetupPage({
   const [registrationSecret, setRegistrationSecret] = useState('');
   const [gatewayState, setGatewayState] = useState<string | null>(null);
   const [registered, setRegistered] = useState(summary.secrets.configured['machineToken'] === true);
+  const [machineId, setMachineId] = useState<string | null>(summary.config?.machineId ?? null);
 
   // paso 2
   const [tools, setTools] = useState<Record<string, ToolPresence> | null>(null);
@@ -72,6 +91,16 @@ export function SetupPage({
   useEffect(() => {
     if (step === 1 && tools === null) void detectar();
   }, [step, tools, detectar]);
+
+  useEffect(() => {
+    if (summary.config?.machineName !== undefined) return;
+    void window.luxy.getAppInfo().then((result) => {
+      if (!result.ok) return;
+      setMachineName((current) =>
+        current.length > 0 ? current : suggestedMachineName(result.value.hostname),
+      );
+    });
+  }, [summary.config?.machineName]);
 
   // ---------------------------------------------------------------------------
 
@@ -107,7 +136,8 @@ export function SetupPage({
     // el secreto de registro no vuelve a hacer falta: se olvida en el acto
     setRegistrationSecret('');
     setRegistered(true);
-    await onSave(buildConfig());
+    setMachineId(result.value.machineId);
+    await onSave(configWithRegisteredMachine(buildConfig(), result.value.machineId));
   };
 
   const guardarClave = async (): Promise<void> => {
@@ -259,6 +289,11 @@ export function SetupPage({
                 </button>
                 {registered && <Tag tone="ok">registrada</Tag>}
               </div>
+              {machineId !== null && (
+                <Notice tone="ok">
+                  ID de máquina: <span className="mono">{machineId}</span>
+                </Notice>
+              )}
             </>
           )}
 
@@ -434,6 +469,9 @@ export function SetupPage({
                     <div className="list__main">
                       <div className="list__name">Maquina</div>
                       <div className="list__meta mono">{machineName || 'sin nombre'}</div>
+                      <div className="list__meta mono">
+                        ID: {machineId ?? 'pendiente de registro'}
+                      </div>
                     </div>
                     <Tag tone={registered ? 'ok' : 'fault'}>
                       {registered ? 'registrada' : 'sin registrar'}

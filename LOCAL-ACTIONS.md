@@ -239,12 +239,160 @@ git config --global user.email "danielux135@gmail.com"
 Comprobación: `git config --list --show-origin | grep user.` debe mostrar las
 dos entradas con origen en el `.gitconfig` global.
 
+Actualización `LA-032`: `LUX-SKA7` ya es la prueba nueva que confirma
+`list_files` y `write_file`. Tras el reinicio de Desktop con `KIMI-K3-RETRY-001`,
+pulsa **Reintentar trabajo** en ese mismo registro: debe reutilizar su worktree
+y, si hay otro corte transitorio, mostrar `conexion con el proveedor
+interrumpida` y reintentarlo antes de fallar.
+
+Actualización `LA-032`: `LUX-BHM8` fue una prueba nueva y reveló un defecto SSE
+local, ya corregido. Crear ahora un trabajo nuevo con Kimi K3; debe registrar
+`herramienta write_file` y `write_file: hecho` antes del resultado final.
+
+## LA-031 — permitir Luxy y registrar `DESKTOP-VM5J5GT`
+
+Estado: `done` — cerrada el 2026-08-31. Desktop registró `portatil-oscar` con
+la ID `6f34d4b8-5927-43ee-a0d0-360ac54f3c01`; `config.json` no contiene token
+en claro, `secrets.enc` cifrado existe, el secreto temporal se retiró del
+portapapeles y el reinicio confirmó `agente listo`.
+
+Revalidado el 2026-08-31: el Gateway continúa sano; Wrangler está instalado
+y ya autenticado por Daniel en la cuenta correcta; Electron vuelve a quedar
+bloqueado por la misma política; no existe certificado local de firma de
+código. El wizard de terminal antiguo no es una alternativa aceptable porque
+escribe el token en `config.json`.
+
+`CiTool` confirma que la política es Smart App Control
+`VerifiedAndReputableDesktop`, en enforcement. No se debe apagar Defender ni
+Smart App Control. La política admite suplementos; la salida acotada es una
+regla por hash para los nueve binarios nativos exactos de Electron 43.2.0.
+
+App Control Wizard 2.8.0.0 ya está instalado. La primera creación, mediante
+`Folder Scan` sobre `node_modules\\electron\\dist`, produjo el XML
+`Luxy-Electron-43.2.0.xml`, pero éste contiene `<FileRules />`: no hay hashes,
+así que no se convirtió ni desplegó el `.cip` anunciado por el asistente.
+
+Paso manual inmediato: desde la pantalla actual, volver a **Home → Policy
+Creator** y crear la misma política suplementaria, pero con **+ Add Custom
+Rule → File Hash → Allow → Usermode Rule**, seleccionando exactamente
+`node_modules\\electron\\dist\\electron.exe`. Antes de pulsar cualquier
+despliegue, volver a Codex para inspeccionar que el XML contiene una regla hash.
+Si está presente, se aplicará la política mínima y se añadirán más binarios sólo
+si los eventos de Code Integrity los reclaman.
+
+Actualización 2026-08-31: no continuar con esa política. Las dos pruebas de
+Wizard produjeron XML vacíos y el error real de inicio era
+`ELECTRON_RUN_AS_NODE=1`, no Code Integrity. Codex ya abrió Desktop retirando
+esa variable sólo de la sesión. También rotó el secreto autorizado y lo dejó en
+el portapapeles de Windows; no está en este documento ni en el repositorio.
+
+No queda ninguna acción administrativa de App Control ni de registro. La prueba
+real de una API China queda pendiente de que Daniel configure una clave válida y
+autorice su consumo.
+
+## LA-032 — prueba real y acotada de Kimi K3
+
+Estado: `in_progress` — abierta el 2026-08-31 por petición de Daniel.
+
+En **Trabajos**, crear un trabajo nuevo con el modelo **Kimi K3** y pedir una
+edición pequeña, por ejemplo crear `kimi-prueba.txt` con una línea dentro del
+worktree. Revisar que el detalle muestre una herramienta ejecutada, un diff y
+archivos modificados. No reintentar `LUX-A9K9`: no cambió archivos y ya consumió
+su llamada. Si Kimi no completa el ciclo, devolver el detalle a Codex; no activar
+ningún permiso adicional ni realizar push.
+
+El catálogo de 19 modelos se ha reconstruido y verificado, pero la ventana de
+Luxy que ya está abierta conserva la compilación anterior. Tras completar el
+onboarding, Codex la reiniciará sin `ELECTRON_RUN_AS_NODE` para mostrar el
+catálogo nuevo; no hace falta volver a pegar el secreto.
+
+### 1. Conseguir un secreto temporal de registro
+
+El Gateway correcto es:
+
+```text
+https://luxy-gateway.danielux135.workers.dev
+```
+
+No hay una copia local de `MACHINE_REGISTRATION_SECRET` y Cloudflare no permite
+leer el valor guardado. Daniel puede usar el que ya conoce o, si lo administra,
+rotarlo desde Cloudflare para el Worker `luxy-gateway`. Alternativa desde una
+terminal interactiva autenticada:
+
+```powershell
+npx wrangler login
+npx wrangler secret put MACHINE_REGISTRATION_SECRET --name luxy-gateway
+```
+
+Esto modifica configuración de producción: Codex no lo ejecutó. Elegir un valor
+aleatorio largo, introducirlo directamente en Cloudflare y después en Luxy; no
+pegarlo en el chat ni guardarlo en el repositorio.
+
+Daniel autorizó la rotación y completó `npx wrangler login` el 2026-08-31. Codex
+la deja deliberadamente pendiente hasta que Electron pueda abrir: así el nuevo
+secreto se genera, se introduce en Luxy y se descarta en una sola sesión.
+
+### 2. Autorizar una compilación firmada
+
+Windows rechazó el Electron de desarrollo por nivel de firma empresarial. La
+evidencia que debe recibir el administrador es:
+
+- Code Integrity, eventos `3033` y `3077`;
+- Policy ID `{0283ac0f-fff1-49ae-ada1-8a933130cad6}`;
+- ejecutable bloqueado: `node_modules\electron\dist\electron.exe` del worktree.
+
+La solución durable es firmar el paquete de Luxy con un certificado confiado
+por esa política y autorizar su publisher. Una regla hash para el Electron
+actual sirve sólo como desbloqueo de desarrollo y caducará al cambiar el
+binario. No desactivar Code Integrity ni usar un bypass.
+
+### 3. Completar el onboarding
+
+Cuando el binario esté permitido:
+
+1. abrir Luxy desde este worktree; el nombre propuesto será
+   `desktop-vm5j5gt` (se puede cambiar por `oscar-desktop-vm5j5gt`);
+2. pegar la URL anterior y el secreto temporal; pulsar **Comprobar** y después
+   **Registrar máquina**;
+3. copiar la UUID que aparecerá como **ID de máquina**; también quedará en
+   `%APPDATA%\Luxy\config.json`, mientras el token irá cifrado a `secrets.enc`;
+4. en Herramientas deben aparecer Node, npm y Git. Claude Code, Codex CLI y
+   `rtk` no están detectados actualmente;
+5. se puede omitir la API HTTP si aún no hay clave;
+6. añadir como proyecto `luxy` la carpeta
+   `C:\Users\oscar\Desktop\Daniel\Luxy` y mantener `allowPush: false`;
+7. terminar el asistente y comprobar en Inicio: agente en marcha, Gateway
+   conectado y máquina online.
+
+Después de esos pasos, volver a pedir a Codex que verifique sin exponer valores:
+existencia de config, `machineId`, token cifrado, heartbeat, herramientas y
+proyecto anunciado.
+
+## LA-030 — integrar y validar la biblioteca de conversaciones
+
+Estado: `pending` — abierta el 2026-08-28. La implementación y la batería
+automatizada están completas; no hay commit, publicación ni prueba visual.
+
+1. Revisar el diff de `luxy/f2-4-conversation-library` y autorizar, si procede,
+   el commit local de `F2.4-T1`.
+2. Integrar esa rama en `main` por el flujo que Daniel elija.
+3. Autorizar y publicar Gateway, porque se añade
+   `POST /api/studio/jobs/:jobId/conversation`.
+4. Reconstruir y arrancar Desktop/agente desde la línea integrada.
+5. En Conversaciones, comprobar con datos reales: renombrar, buscar por una
+   frase de una respuesta, archivar, abrir la vista Archivadas, restaurar y
+   enviar un turno posterior conservando el título.
+
+No hace falta migración. La validación automatizada no llamó a proveedores ni
+alteró conversaciones reales.
+
 ## LA-029 — publicar y validar proveedores HTTP dinámicos
 
-Estado: `pending` — abierta el 2026-08-27. El commit local ya fue autorizado y
-creado; falta integrarlo antes de publicar.
+Estado: `pending` — abierta el 2026-08-27, actualizada el 2026-08-28. El commit
+local ya fue autorizado, creado e integrado en `main`/`origin/main` como
+`00a9cc1`; falta publicar y validar.
 
-1. Integrar la rama `luxy/f4-9-dynamic-http-providers` en `main`.
+1. Integración completada: `main` y `origin/main` apuntan a `00a9cc1`.
 2. Autorizar y ejecutar la publicación del Gateway, porque cambia el contrato de
    proveedores que Studio recibe.
 3. Reconstruir y arrancar Desktop/agente desde la línea integrada.

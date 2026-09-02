@@ -1,11 +1,9 @@
 // catalogo inicial de modelos.
 //
-// PROCEDENCIA: la lista se verifico contra GET /v1/models de la conexion el
-// 2026-07-28 y se reconcilio con una lectura nueva el 2026-08-07. Solo contiene
-// modelos que la conexion ha declarado servir. `kat-coder-pro-v2` y
-// `MiniMax-M2.7` siguen fuera; la lectura nueva incorporo `step-explore` y dos
-// SenseNova. Que aparezcan en /v1/models no verifica herramientas, limites ni
-// otras capacidades: esos contratos se marcan aparte.
+// PROCEDENCIA: Daniel reviso el catalogo activo de la conexion el 2026-08-31.
+// Solo contiene los 19 identificadores mostrados entonces. La lista de pantalla
+// no verifica herramientas, limites ni otras capacidades: esos contratos se
+// marcan aparte y no se deducen de la ficha comercial.
 //
 // El campo apiModel es EXACTO: no se normaliza ni se corrigen mayusculas.
 import {
@@ -47,7 +45,7 @@ const TOOLS_OK = { contractVerified: true, toolCallingCheckedAt: '2026-07-28' } 
 /**
  * responde y admite tool calling, pero MUY despacio.
  *
- * medido el 2026-07-28: glm-5.2 ~120 s y MiniMax-M3 ~150-240 s para una
+ * medido el 2026-07-28: varios modelos de la conexion tardaban 120-240 s en una
  * peticion trivial. No estan caidos; hay que darles margen. Una primera
  * comprobacion con 45 s los dio por muertos, que era un error de la medida.
  */
@@ -55,15 +53,6 @@ const TOOLS_OK_SLOW = {
   contractVerified: true,
   toolCallingCheckedAt: '2026-07-28',
   slowResponse: true,
-} as const;
-
-/**
- * la cuenta no tiene acceso a este modelo.
- * comprobado dos veces el 2026-07-28: HTTP 400 en menos de 1 s, no es lentitud.
- */
-const NO_ACCESS = {
-  contractVerified: false,
-  note: 'la conexion rechazo el acceso el 2026-07-28',
 } as const;
 
 const RAW_CATALOG = [
@@ -101,56 +90,45 @@ const RAW_CATALOG = [
     allowedTools: ALL_TOOLS,
   },
   {
-    id: 'glm-5.2',
-    supportsNativeTools: true,
-    // tarda unos 120 s en responder: es lento, no esta caido
-    metadata: { ...TOOLS_OK_SLOW, observedLatencyMs: 120_000 },
-    apiModel: 'glm-5.2',
-    displayName: 'GLM 5.2',
+    id: 'glm-4.5-air',
+    metadata: UNVERIFIED,
+    apiModel: 'glm-4.5-air',
+    displayName: 'GLM 4.5 Air',
     family: 'glm',
     category: 'text',
-    capabilities: ['text', 'reasoning', 'coding', 'agent_tools'],
-    telegramAliases: ['glm', 'glm_52'],
+    capabilities: ['text'],
+    telegramAliases: ['glm', 'glm_45_air'],
     defaultForFamily: true,
-    agentic: true,
-    allowedTools: ALL_TOOLS,
-  },
-  {
-    id: 'glm-5.1',
-    supportsNativeTools: true,
-    metadata: TOOLS_OK,
-    apiModel: 'glm-5.1',
-    displayName: 'GLM 5.1',
-    family: 'glm',
-    category: 'text',
-    capabilities: ['text', 'coding', 'agent_tools'],
-    telegramAliases: ['glm_51'],
-    agentic: true,
-    allowedTools: ALL_TOOLS,
   },
   {
     id: 'kat-coder-pro-v2.5',
-    metadata: NO_ACCESS,
+    metadata: UNVERIFIED,
     apiModel: 'kat-coder-pro-v2.5',
     displayName: 'KAT Coder Pro v2.5',
     family: 'kat',
     category: 'text',
-    capabilities: ['text', 'coding', 'agent_tools'],
+    capabilities: ['text'],
     telegramAliases: ['kat', 'kat_v25'],
     defaultForFamily: true,
-    agentic: true,
-    allowedTools: ALL_TOOLS,
   },
   {
-    id: 'kimi-k2.6',
+    id: 'kimi-k3',
+    // LUX-A9K9 (2026-08-31) recibio un tool_calls nativo de Kimi K3. Daniel
+    // pidio probarlo de forma controlada: se le concede el ejecutor confinado
+    // del worktree, pero el contrato sigue marcado experimental hasta que una
+    // tarea real complete al menos una llamada valida de principio a fin.
     supportsNativeTools: true,
-    metadata: TOOLS_OK,
-    apiModel: 'Kimi-K2.6',
-    displayName: 'Kimi K2.6',
+    metadata: {
+      ...UNVERIFIED,
+      note: 'EXPERIMENTAL_TOOL_CALLING_2026-08-31',
+      toolCallingCheckedAt: '2026-08-31',
+    },
+    apiModel: 'kimi-k3',
+    displayName: 'Kimi K3',
     family: 'kimi',
     category: 'text',
-    capabilities: ['text', 'reasoning', 'coding', 'long_context', 'agent_tools'],
-    telegramAliases: ['kimi', 'kimi_k26'],
+    capabilities: ['text', 'coding', 'agent_tools'],
+    telegramAliases: ['kimi', 'kimi_k3'],
     defaultForFamily: true,
     agentic: true,
     allowedTools: ALL_TOOLS,
@@ -171,19 +149,6 @@ const RAW_CATALOG = [
     allowedTools: ALL_TOOLS,
   },
   {
-    id: 'hy3',
-    metadata: {
-      ...UNVERIFIED,
-      note: 'servido por la conexion el 2026-08-11; capacidades pendientes',
-    },
-    apiModel: 'hy3',
-    displayName: 'hy3',
-    family: 'other',
-    category: 'text',
-    capabilities: ['text'],
-    telegramAliases: [],
-  },
-  {
     id: 'qwen3-embedding-8b',
     metadata: {
       ...UNVERIFIED,
@@ -197,17 +162,17 @@ const RAW_CATALOG = [
     telegramAliases: [],
   },
   {
-    id: 'qwen3.6-27b',
+    id: 'qwen3.8-27b',
     metadata: {
       ...UNVERIFIED,
       note: 'servido por la conexion el 2026-08-11; capacidades pendientes',
     },
-    apiModel: 'Qwen3.6-27B',
-    displayName: 'Qwen3.6 27B',
+    apiModel: 'Qwen3.8-27B',
+    displayName: 'Qwen3.8 27B',
     family: 'qwen',
     category: 'text',
     capabilities: ['text'],
-    telegramAliases: ['qwen', 'qwen_36'],
+    telegramAliases: ['qwen', 'qwen_38'],
     defaultForFamily: true,
   },
   {
@@ -225,33 +190,6 @@ const RAW_CATALOG = [
     allowedTools: ALL_TOOLS,
   },
   {
-    id: 'step-3.5-flash',
-    // comprobado: no devuelve tool_calls, emite <tool_call> en el texto
-    supportsNativeTools: false,
-    metadata: { contractVerified: true, toolCallingCheckedAt: '2026-07-28', toolStyle: 'xml' },
-    apiModel: 'step-3.5-flash',
-    displayName: 'Step 3.5 Flash',
-    family: 'step',
-    category: 'text',
-    capabilities: ['text', 'fast', 'documentation'],
-    telegramAliases: ['step_35'],
-    agentic: true,
-    allowedTools: ALL_TOOLS,
-  },
-  {
-    id: 'step-3.5-flash-2603',
-    supportsNativeTools: true,
-    metadata: TOOLS_OK,
-    apiModel: 'step-3.5-flash-2603',
-    displayName: 'Step 3.5 Flash 2603',
-    family: 'step',
-    category: 'text',
-    capabilities: ['text', 'fast', 'documentation'],
-    telegramAliases: ['step_35_2603'],
-    agentic: true,
-    allowedTools: ALL_TOOLS,
-  },
-  {
     id: 'step-explore',
     apiModel: 'step-explore',
     displayName: 'Step Explore',
@@ -265,9 +203,9 @@ const RAW_CATALOG = [
     },
   },
   {
-    id: 'sensenova-6.7-flash-lite',
-    apiModel: 'sensenova-6.7-flash-lite',
-    displayName: 'SenseNova 6.7 Flash Lite',
+    id: 'sensenova-6.8-flash-lite',
+    apiModel: 'sensenova-6.8-flash-lite',
+    displayName: 'SenseNova 6.8 Flash Lite',
     family: 'sensenova',
     category: 'text',
     capabilities: ['text'],
@@ -278,12 +216,12 @@ const RAW_CATALOG = [
     },
   },
   {
-    id: 'sensenova-u1-fast',
-    apiModel: 'sensenova-u1-fast',
-    displayName: 'SenseNova U1 Fast',
+    id: 'sensenova-u1.5-lite',
+    apiModel: 'sensenova-u1.5-lite',
+    displayName: 'SenseNova U1.5 Lite',
     family: 'sensenova',
-    category: 'text',
-    capabilities: ['text'],
+    category: 'image',
+    capabilities: [],
     telegramAliases: [],
     metadata: {
       ...UNVERIFIED,
