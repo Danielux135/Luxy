@@ -906,59 +906,15 @@ export function registerIpcHandlers(context: HandlerContext): void {
   });
 
   /**
-   * crea un personaje, opcionalmente a partir de una imagen de referencia.
+   * crea un personaje a partir de una combinacion de rasgos.
    *
-   * La imagen NO se publica en ninguna parte: viaja en el cuerpo de la
-   * peticion como `data:` URI. Es el mismo criterio por el que el adaptador
-   * sondea en vez de usar un callback — Luxy no expone nada publico.
-   *
-   * Se guarda ademas cifrada en la conversacion, para que quede con ella y se
-   * sincronice como el resto. El renderer nunca ve los bytes ni la ruta.
+   * El proveedor NO admite fotos de referencia: las retiro a proposito, y su
+   * documentacion explica por que —subir fotos para generar contenido adulto
+   * crea una exposicion legal que no aceptan—. Toda la identidad sale de los
+   * rasgos y de `scene`, y no hay forma de rodearlo ni se va a buscar.
    */
   handle(IPC_INVOKE.vaultCharacterCreate, vaultCharacterCreateArgsSchema, async (args) => {
     if (!context.vault.isUnlocked()) throw new VaultError('la boveda esta bloqueada');
-
-    let referenceImage: { bytes: Uint8Array; mimeType: string } | undefined;
-    // preparar el personaje ANTES de escribir el primer mensaje es lo normal:
-    // se elige la foto y luego se empieza a hablar. Si no hay conversacion
-    // abierta se abre una aqui, porque la referencia tiene que guardarse en
-    // algun sitio, y el renderer adopta este identificador
-    let conversationId = args.conversationId;
-    if (args.withReferenceImage) {
-      conversationId ??= randomUUID();
-      const window = context.getMainWindow();
-      if (window === null) throw new VaultError('no hay ventana desde la que elegir un archivo');
-
-      const picked = await dialog.showOpenDialog(window, {
-        title: 'Elige la imagen de referencia',
-        properties: ['openFile'],
-        filters: [{ name: 'Imagenes', extensions: ['png', 'jpg', 'jpeg', 'webp'] }],
-      });
-      const filePath = picked.canceled ? undefined : picked.filePaths[0];
-      if (filePath === undefined) {
-        // cancelar no crea un personaje sin referencia a escondidas: se pidio
-        // una, y crear otra cosa sin decirlo seria peor que no crear nada
-        throw new VaultError('no se eligio ninguna imagen de referencia');
-      }
-
-      const bytes = new Uint8Array(readFileSync(filePath));
-      const mimeType = mimeTypeFor(filePath);
-      referenceImage = { bytes, mimeType };
-
-      // se cifra en la boveda ANTES de salir hacia el proveedor: si la llamada
-      // falla, la referencia ya esta guardada y no hay que volver a elegirla
-      await context.privateMedia.add(context.vault, conversationId, bytes, {
-        mimeType,
-        displayName: basename(filePath),
-        prompt: null,
-        width: null,
-        height: null,
-        durationMs: null,
-        characterId: null,
-        provider: null,
-        model: null,
-      });
-    }
 
     const controller = new AbortController();
     try {
@@ -966,35 +922,20 @@ export function registerIpcHandlers(context: HandlerContext): void {
         {
           modelId: args.modelId,
           traits: args.traits,
-          ...(referenceImage === undefined ? {} : { referenceImage }),
+          ...(args.scene.trim().length === 0 ? {} : { scene: args.scene.trim() }),
+          sfw: args.sfw,
         },
         mediaProviderOptions(controller.signal),
       );
-      // ni la ruta, ni el nombre, ni los bytes
-      context.log('personaje creado', {
-        modelId: args.modelId,
-        conReferencia: referenceImage !== undefined,
-      });
-      return {
-        characterId,
-        referenceImage: referenceImage !== undefined,
-        conversationId,
-      };
+      // los rasgos elegidos no se registran: describen a una persona
+      context.log('personaje creado', { modelId: args.modelId });
+      return { characterId };
     } catch (error) {
       if (error instanceof XaviraError) throw new VaultError(error.message, error.hint);
       throw error;
     }
   });
 
-  /**
-   * genera una imagen o un video y lo guarda cifrado.
-   *
-   * Limite que conviene tener presente al leer esto: el prompt sale de este
-   * equipo hacia el proveedor, y **el proveedor lo ve**. La boveda protege lo
-   * que Luxy guarda y transporta, no lo que un tercero recibe porque el usuario
-   * decidio enviarselo. Se guarda cifrado junto al medio, pero eso no lo retira
-   * de los registros del proveedor.
-   */
   /**
    * genera un medio y lo guarda cifrado en la conversacion.
    *

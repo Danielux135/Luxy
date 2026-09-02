@@ -404,18 +404,43 @@ export const vaultCharacterCreateArgsSchema = z.object({
    * después: decide el aspecto de todo lo que genere ese personaje.
    */
   modelId: z.enum(['realistic-sharp-v1', 'anime-pure-v1']).default('realistic-sharp-v1'),
-  traits: z.record(z.string().max(64), z.string().max(120)).default({}),
   /**
-   * pedir una imagen de referencia antes de crear el personaje.
+   * rasgos del enum CERRADO que publica el proveedor.
    *
-   * El renderer NO manda la imagen: manda la intencion. El proceso principal
-   * abre el diálogo, lee el archivo, lo cifra en la bóveda y lo envía en el
-   * cuerpo de la petición. Así el renderer nunca toca los bytes y la ruta del
-   * archivo tampoco cruza el IPC.
+   * No es texto libre: la API rechaza cualquier valor que no esté en su lista.
+   * Se validan aquí para que un renderer alterado no pueda mandar otra cosa, y
+   * porque un valor inventado se explica mucho mejor antes de salir a la red.
    */
-  withReferenceImage: z.boolean().default(false),
-  /** dónde guardar la referencia cifrada; obligatorio si se pide una */
-  conversationId: conversationIdSchema.nullable().default(null),
+  traits: z
+    .object({
+      gender: z.enum(['female', 'male']),
+      ethnicity: z.enum([
+        'white',
+        'black',
+        'hispanic',
+        'middle-eastern',
+        'indian',
+        'east-asian',
+        'south-east-asian',
+      ]),
+      ageRange: z.enum(['18-22', '21-22', '23-29', '30-39', '40-plus']),
+      hairLength: z.enum(['short', 'medium', 'long']),
+      hairColor: z.enum(['black', 'brown', 'blonde', 'red', 'auburn', 'grey', 'white']),
+      build: z.enum(['petite', 'slim', 'athletic', 'curvy', 'voluptuous']),
+      /** sólo aplican con gender=female; la API los ignora en male */
+      breastSize: z.enum(['small', 'medium', 'large', 'very-large', 'huge']).optional(),
+      assSize: z.enum(['small', 'medium', 'large', 'very-large', 'huge']).optional(),
+    })
+    .partial()
+    .default({}),
+  /**
+   * lo que los rasgos no cubren: ojos, pecas, ropa, luz, pose, escenario.
+   *
+   * En inglés, según su documentación, y pasa por su moderación.
+   */
+  scene: z.string().max(1000).default(''),
+  /** avatar base vestido; sólo afecta al avatar inicial, no a cada generación */
+  sfw: z.boolean().default(false),
 });
 
 export const vaultMediaGenerateResultSchema = z.object({
@@ -428,17 +453,6 @@ export const vaultMediaGenerateResultSchema = z.object({
 
 export const vaultCharacterCreateResultSchema = z.object({
   characterId: z.string(),
-  /** se usó una imagen de referencia; queda guardada cifrada en la conversación */
-  referenceImage: z.boolean(),
-  /**
-   * conversación donde quedó guardada la referencia.
-   *
-   * Puede ser una que el proceso principal acaba de abrir: se puede preparar el
-   * personaje **antes** de escribir el primer mensaje, y la referencia tiene que
-   * guardarse en algún sitio. El renderer adopta este identificador para que el
-   * mensaje siguiente caiga en la misma conversación.
-   */
-  conversationId: z.string().nullable(),
 });
 
 export const vaultSyncResultSchema = z.object({

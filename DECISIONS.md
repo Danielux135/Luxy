@@ -1015,8 +1015,57 @@ igual que ve el prompt. La bóveda protege el almacenamiento y el transporte
 propios de Luxy, no lo que el usuario decide enviar a un tercero. La interfaz lo
 dice donde se elige la foto.
 
-Riesgo abierto: **no está verificado que la API acepte un `data:` URI en ese
-campo.** El contrato salió de su documentación pública y el nombre sugiere que
-espera una dirección de verdad. Si lo rechaza, se verá en la primera llamada por
-el mensaje de error, y la alternativa sería publicar la imagen (`opción 2`) o un
-endpoint de subida, si existe.
+> **REVERTIDA el 2026-09-02, el mismo día.** La API respondió
+> `reference_image_unsupported`: *«Reference-image upload has been removed.
+> Create characters by passing `traits`»*. No es que el `data:` URI no valga —
+> **el campo ya no existe**. Su documentación lo explica: subir fotos para
+> generar contenido adulto crea una exposición legal (imágenes íntimas no
+> consentidas) que no aceptan, y toda la identidad sale de los rasgos y del
+> prompt. La «opción 2» —publicar la imagen— tampoco existe, porque no hay
+> campo al que mandarla. El código de la referencia se retiró; lo que queda de
+> esta decisión es el registro de por qué no se puede. Ver `D-053`.
+
+## D-053 — el personaje se define por rasgos de un enum cerrado
+
+Fecha: 2026-09-02
+
+Estado: aceptada, implementada
+
+Dos llamadas reales seguidas corrigieron lo que habíamos supuesto de la API de
+generación, y las dos correcciones apuntan al mismo sitio: **el personaje no se
+describe con texto libre ni con una foto.**
+
+1. `POST /v1/characters` exige **`model_id`** (`realistic-sharp-v1` o
+   `anime-pure-v1`; los modelos de vídeo no valen). Ver `D-052`, ya revertida en
+   su parte de imagen.
+2. La imagen de referencia **fue retirada de la API**. Su documentación lo dice
+   sin rodeos: subir fotos para generar contenido adulto crea una exposición
+   legal —imágenes íntimas no consentidas— que no aceptan en la plataforma. No
+   hay forma de rodearlo, y no se va a buscar ninguna.
+3. Los rasgos son un **enum cerrado**: `gender`, `ethnicity`, `ageRange`,
+   `hairLength`, `hairColor`, `build`, y `breastSize` / `assSize` sólo cuando
+   `gender=female`. Su documentación justifica el enum: evita inyección de
+   prompt a través de los rasgos y da una salida predecible.
+
+Cómo queda Luxy:
+
+- **la interfaz ofrece listas, no un campo de texto.** Un formulario libre
+  garantizaba un 400 por cada valor inventado;
+- los valores del enum **viajan sin traducir**. Sólo se traduce la etiqueta que
+  se lee en pantalla: traducir un valor sería inventarse otro;
+- lo que los rasgos no cubren —ojos, pecas, ropa, luz, pose, escenario— va en
+  `scene`, texto libre en inglés, y se **recorta a 1000 caracteres** antes de
+  salir en vez de dejar que la API lo rechace;
+- `sfw` genera el avatar inicial vestido. Sólo afecta al avatar, no a cada
+  generación;
+- se mantiene `wait` en su valor por defecto: la API tarda 8–16 s y corta a 26,
+  muy por debajo del tope de 120 s del adaptador. El modo asíncrono existe para
+  proxies con timeouts cortos, y aquí el proceso principal habla directamente
+  con la API;
+- **crear un personaje genera su avatar y consume créditos.** La interfaz lo
+  dice antes de pulsar.
+
+La lección, que ya estaba anotada como riesgo desde `F9.17` y ahora tiene dos
+pruebas: **el contrato de esta API se corrige con lo que ella responde, no con
+lo que dice su documentación pública ni con lo que suponemos.** No se añaden
+campos «por si acaso»; se añaden cuando un error los nombra.

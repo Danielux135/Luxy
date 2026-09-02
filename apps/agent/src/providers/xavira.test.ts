@@ -8,9 +8,9 @@ import {
   generateVideo,
   readGeneration,
   retryAfterMs,
-  toDataUri,
   CHARACTER_MODELS,
-  MAX_REFERENCE_IMAGE_BYTES,
+  CHARACTER_TRAITS,
+  MAX_SCENE_CHARS,
 } from './xavira.js';
 
 const KEY = 'xav_live_clave_de_prueba';
@@ -92,79 +92,50 @@ describe('modelo del personaje', () => {
   });
 });
 
-describe('imagen de referencia', () => {
-  const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
-
-  it('viaja EN EL CUERPO, no como una direccion publica', async () => {
-    const { impl, calls } = fakeFetch([{ status: 201, body: { character_id: 'per-1' } }]);
-    await createCharacter(
-      { modelId: 'realistic-sharp-v1', referenceImage: { bytes: png, mimeType: 'image/png' } },
-      options(impl),
-    );
-
-    const enviado = (calls[0]?.body as { reference_image_url: string }).reference_image_url;
-    // esto es lo que hace que la foto no quede accesible para nadie mas: no hay
-    // ninguna direccion desde la que descargarla
-    expect(enviado.startsWith('data:image/png;base64,')).toBe(true);
-    expect(enviado).not.toContain('http');
-    // y los bytes llegan enteros
-    expect(enviado.slice('data:image/png;base64,'.length)).toBe(
-      Buffer.from(png).toString('base64'),
-    );
-  });
-
-  it('sin referencia no se manda el campo', async () => {
-    const { impl, calls } = fakeFetch([{ status: 201, body: { character_id: 'per-1' } }]);
-    await createCharacter({ modelId: 'realistic-sharp-v1', traits: { pelo: 'largo' } }, options(impl));
-    expect(calls[0]?.body).not.toHaveProperty('reference_image_url');
-  });
-
-  it('la de en linea manda sobre la publica', async () => {
+describe('rasgos y escena', () => {
+  it('los rasgos viajan tal cual, sin traducir', async () => {
     const { impl, calls } = fakeFetch([{ status: 201, body: { character_id: 'per-1' } }]);
     await createCharacter(
       {
-        modelId: 'anime-pure-v1',
-        referenceImage: { bytes: png, mimeType: 'image/png' },
-        referenceImageUrl: 'https://example.com/foto.png',
+        modelId: 'realistic-sharp-v1',
+        traits: { gender: 'female', ethnicity: 'hispanic', hairColor: 'blonde' },
       },
       options(impl),
     );
-    // dar las dos significa que no se quiere publicar nada
-    const enviado = (calls[0]?.body as { reference_image_url: string }).reference_image_url;
-    expect(enviado.startsWith('data:')).toBe(true);
+    // el enum es del proveedor: traducir un valor seria inventarse otro
+    expect((calls[0]?.body as { traits: unknown }).traits).toEqual({
+      gender: 'female',
+      ethnicity: 'hispanic',
+      hairColor: 'blonde',
+    });
   });
 
-  it('una imagen enorme se rechaza antes de tocar la red', async () => {
+  it('el catalogo es el que publica el proveedor', () => {
+    expect([...CHARACTER_TRAITS.gender]).toEqual(['female', 'male']);
+    expect([...CHARACTER_TRAITS.ageRange]).toEqual(['18-22', '21-22', '23-29', '30-39', '40-plus']);
+    // los adultos son lo unico que ofrece, y eso no se toca desde aqui
+    expect(CHARACTER_TRAITS.ageRange.some((value) => value.startsWith('1') && value !== '18-22')).toBe(
+      false,
+    );
+  });
+
+  it('la escena se recorta al tope de la API en vez de que lo rechace', async () => {
     const { impl, calls } = fakeFetch([{ status: 201, body: { character_id: 'per-1' } }]);
-    const enorme = new Uint8Array(MAX_REFERENCE_IMAGE_BYTES + 1);
-    await expect(
-      createCharacter(
-        { modelId: 'realistic-sharp-v1', referenceImage: { bytes: enorme, mimeType: 'image/png' } },
-        options(impl),
-      ),
-    ).rejects.toThrow('demasiado grande');
-    expect(calls).toHaveLength(0);
+    await createCharacter(
+      { modelId: 'realistic-sharp-v1', scene: 'x'.repeat(MAX_SCENE_CHARS + 500) },
+      options(impl),
+    );
+    expect((calls[0]?.body as { scene: string }).scene).toHaveLength(MAX_SCENE_CHARS);
   });
 
-  it('lo que no es una imagen se rechaza', async () => {
-    const { impl } = fakeFetch([{ status: 201, body: { character_id: 'per-1' } }]);
-    await expect(
-      createCharacter(
-        { modelId: 'realistic-sharp-v1', referenceImage: { bytes: png, mimeType: 'application/pdf' } },
-        options(impl),
-      ),
-    ).rejects.toThrow('no es una imagen');
-  });
-
-  it('una imagen vacia se rechaza', () => {
-    expect(() => toDataUri(new Uint8Array(), 'image/png')).toThrow('vacia');
-  });
-
-  it('convierte sin desbordar la pila con archivos grandes', () => {
-    // `String.fromCharCode(...bytes)` con megas de datos revienta por el numero
-    // de argumentos: por eso se hace por trozos
-    const grande = new Uint8Array(400_000).fill(65);
-    expect(() => toDataUri(grande, 'image/png')).not.toThrow();
+  it('lo que no se aporta no se manda', async () => {
+    const { impl, calls } = fakeFetch([{ status: 201, body: { character_id: 'per-1' } }]);
+    await createCharacter({ modelId: 'realistic-sharp-v1' }, options(impl));
+    const body = calls[0]?.body as Record<string, unknown>;
+    expect(body).not.toHaveProperty('scene');
+    expect(body).not.toHaveProperty('sfw');
+    // el proveedor RETIRO las fotos de referencia: no queda rastro del campo
+    expect(body).not.toHaveProperty('reference_image_url');
   });
 });
 

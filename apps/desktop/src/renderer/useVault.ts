@@ -148,7 +148,8 @@ export interface VaultController {
   createCharacter: (input: {
     modelId: 'realistic-sharp-v1' | 'anime-pure-v1';
     traits: Record<string, string>;
-    withReferenceImage?: boolean;
+    scene: string;
+    sfw: boolean;
   }) => Promise<string | null>;
   syncing: boolean;
   lastSync: {
@@ -548,33 +549,21 @@ export function useVault(): VaultController {
     async (input: {
       modelId: 'realistic-sharp-v1' | 'anime-pure-v1';
       traits: Record<string, string>;
-      withReferenceImage?: boolean;
+      scene: string;
+      sfw: boolean;
     }): Promise<string | null> => {
       setError(null);
       setHint(null);
-      const result = await window.luxy.createVaultCharacter({
-        modelId: input.modelId,
-        traits: input.traits,
-        withReferenceImage: input.withReferenceImage ?? false,
-        conversationId: openConversationId,
-      });
+      const result = await window.luxy.createVaultCharacter(input);
       if (!result.ok) {
         setError(result.error);
         setHint(result.hint);
         return null;
       }
-      // el proceso principal pudo abrir la conversación para guardar la
-      // referencia: se adopta para que el primer mensaje caiga en la misma
-      if (result.value.conversationId !== null) {
-        setOpenConversationId(result.value.conversationId);
-      }
-      if (result.value.referenceImage) {
-        setHint('Personaje creado con tu imagen de referencia, guardada cifrada aquí.');
-        await reloadMedia();
-      }
+      setHint('Personaje creado. Pégalo en «Personaje de esta conversación».');
       return result.value.characterId;
     },
-    [openConversationId, reloadMedia],
+    [],
   );
 
   const sync = useCallback(async (): Promise<void> => {

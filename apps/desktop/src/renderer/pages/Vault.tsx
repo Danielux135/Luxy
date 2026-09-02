@@ -7,7 +7,6 @@
 import { useEffect, useState, type JSX } from 'react';
 import { Empty, Field, Notice, Panel, Readout, Skeleton, Tag } from '../ui/primitives.js';
 import type { ConfigSummary } from '../useConfig.js';
-import { parseTraits } from '../character-traits.js';
 import {
   formatAutoLockOption,
   formatLockCountdown,
@@ -395,6 +394,121 @@ function InstructionsPanel({
 }
 
 /**
+ * catalogo de rasgos, con su etiqueta en español.
+ *
+ * Las CLAVES y los VALORES son los del proveedor y no se traducen: viajan tal
+ * cual y su enum es cerrado. Lo unico traducido es lo que se lee en pantalla.
+ */
+const TRAIT_CATALOG: Record<string, { label: string; values: [string, string][] }> = {
+  gender: {
+    label: 'Género',
+    values: [
+      ['female', 'mujer'],
+      ['male', 'hombre'],
+    ],
+  },
+  ethnicity: {
+    label: 'Etnia',
+    values: [
+      ['white', 'blanca'],
+      ['black', 'negra'],
+      ['hispanic', 'hispana'],
+      ['middle-eastern', 'de Oriente Medio'],
+      ['indian', 'india'],
+      ['east-asian', 'asiática oriental'],
+      ['south-east-asian', 'del sudeste asiático'],
+    ],
+  },
+  ageRange: {
+    label: 'Edad',
+    values: [
+      ['18-22', '18-22'],
+      ['21-22', '21-22'],
+      ['23-29', '23-29'],
+      ['30-39', '30-39'],
+      ['40-plus', '40 o más'],
+    ],
+  },
+  hairLength: {
+    label: 'Largo del pelo',
+    values: [
+      ['short', 'corto'],
+      ['medium', 'medio'],
+      ['long', 'largo'],
+    ],
+  },
+  hairColor: {
+    label: 'Color del pelo',
+    values: [
+      ['black', 'negro'],
+      ['brown', 'castaño'],
+      ['blonde', 'rubio'],
+      ['red', 'pelirrojo'],
+      ['auburn', 'castaño rojizo'],
+      ['grey', 'gris'],
+      ['white', 'blanco'],
+    ],
+  },
+  build: {
+    label: 'Complexión',
+    values: [
+      ['petite', 'menuda'],
+      ['slim', 'delgada'],
+      ['athletic', 'atlética'],
+      ['curvy', 'con curvas'],
+      ['voluptuous', 'voluptuosa'],
+    ],
+  },
+  breastSize: {
+    label: 'Pecho',
+    values: [
+      ['small', 'pequeño'],
+      ['medium', 'mediano'],
+      ['large', 'grande'],
+      ['very-large', 'muy grande'],
+      ['huge', 'enorme'],
+    ],
+  },
+  assSize: {
+    label: 'Trasero',
+    values: [
+      ['small', 'pequeño'],
+      ['medium', 'mediano'],
+      ['large', 'grande'],
+      ['very-large', 'muy grande'],
+      ['huge', 'enorme'],
+    ],
+  },
+};
+
+/** un rasgo del enum cerrado. «Sin especificar» lo deja fuera de la peticion */
+function TraitField({
+  field,
+  value,
+  disabled,
+  onChange,
+}: {
+  field: string;
+  value: string;
+  disabled: boolean;
+  onChange: (value: string) => void;
+}): JSX.Element {
+  const entry = TRAIT_CATALOG[field]!;
+  return (
+    <Field label={entry.label}>
+      <select value={value} disabled={disabled} onChange={(event) => onChange(event.target.value)}>
+        <option value="">Sin especificar</option>
+        {entry.values.map(([raw, label]) => (
+          <option key={raw} value={raw}>
+            {label}
+          </option>
+        ))}
+      </select>
+    </Field>
+  );
+}
+
+/**
  * generacion de imagen y video.
  *
  * El personaje es obligatorio porque el proveedor lo exige para generar: es lo
@@ -403,7 +517,9 @@ function InstructionsPanel({
  */
 function GeneratePanel({ vault }: { vault: VaultController }): JSX.Element {
   const [characterId, setCharacterId] = useState('');
-  const [traits, setTraits] = useState('');
+  const [traits, setTraits] = useState<Record<string, string>>({});
+  const [scene, setScene] = useState('');
+  const [sfw, setSfw] = useState(false);
   const [modelId, setModelId] = useState<'realistic-sharp-v1' | 'anime-pure-v1'>(
     'realistic-sharp-v1',
   );
@@ -461,18 +577,69 @@ function GeneratePanel({ vault }: { vault: VaultController }): JSX.Element {
         </select>
       </Field>
 
+      <div className="row">
+        {(['gender', 'ethnicity', 'ageRange'] as const).map((field) => (
+          <TraitField
+            key={field}
+            field={field}
+            value={traits[field] ?? ''}
+            disabled={creating}
+            onChange={(value) => setTraits({ ...traits, [field]: value })}
+          />
+        ))}
+      </div>
+      <div className="row">
+        {(['hairLength', 'hairColor', 'build'] as const).map((field) => (
+          <TraitField
+            key={field}
+            field={field}
+            value={traits[field] ?? ''}
+            disabled={creating}
+            onChange={(value) => setTraits({ ...traits, [field]: value })}
+          />
+        ))}
+      </div>
+      {traits.gender === 'female' && (
+        <div className="row">
+          {(['breastSize', 'assSize'] as const).map((field) => (
+            <TraitField
+              key={field}
+              field={field}
+              value={traits[field] ?? ''}
+              disabled={creating}
+              onChange={(value) => setTraits({ ...traits, [field]: value })}
+            />
+          ))}
+        </div>
+      )}
+      <p className="field__hint">
+        El proveedor sólo acepta esta lista cerrada de rasgos; no admite texto
+        libre aquí. Lo demás —ojos, pecas, ropa, luz, pose, escenario— va en la
+        descripción de abajo.
+      </p>
+
       <Field
-        label="Rasgos del personaje nuevo"
-        hint="Uno por línea, con dos puntos: pelo: castaño. Se envían sólo al crearlo; sin rasgos, el proveedor elige por ti."
+        label="Descripción del personaje"
+        hint="En inglés: es lo que pide su documentación. Aquí va lo que los rasgos no cubren. Pasa por la moderación del proveedor."
       >
         <textarea
-          rows={3}
-          value={traits}
-          placeholder={'pelo: castaño\nojos: verdes\nedad: adulta'}
+          rows={2}
+          value={scene}
           disabled={creating}
-          onChange={(event) => setTraits(event.target.value)}
+          placeholder="green eyes, freckles, wearing a crew-neck sweater and jeans"
+          onChange={(event) => setScene(event.target.value)}
         />
       </Field>
+
+      <label className="check">
+        <input
+          type="checkbox"
+          checked={sfw}
+          disabled={creating}
+          onChange={(event) => setSfw(event.target.checked)}
+        />
+        Avatar inicial vestido
+      </label>
 
       <div className="row">
         <button
@@ -481,40 +648,20 @@ function GeneratePanel({ vault }: { vault: VaultController }): JSX.Element {
           onClick={() => {
             setCreating(true);
             void vault
-              .createCharacter({ modelId, traits: parseTraits(traits) })
+              .createCharacter({ modelId, traits, scene, sfw })
               .then((id) => {
                 if (id !== null) setCharacterId(id);
               })
               .finally(() => setCreating(false));
           }}
         >
-          {creating ? 'Creando…' : 'Crear personaje nuevo'}
-        </button>
-        <button
-          className="btn btn--quiet"
-          disabled={creating}
-          onClick={() => {
-            setCreating(true);
-            void vault
-              .createCharacter({ modelId, traits: parseTraits(traits), withReferenceImage: true })
-              .then((id) => {
-                if (id !== null) setCharacterId(id);
-              })
-              .finally(() => setCreating(false));
-          }}
-        >
-          {creating ? 'Creando…' : 'Crear desde una foto'}
+          {creating ? 'Creando… (tarda unos segundos)' : 'Crear personaje'}
         </button>
       </div>
       <p className="field__hint">
         El identificador vive en el proveedor, no aquí: guárdalo si quieres
-        reutilizar el mismo personaje en otra conversación.
-      </p>
-      <p className="field__hint">
-        La foto de referencia <strong>no se publica en ningún sitio</strong>:
-        viaja dentro de la petición y se guarda cifrada en esta conversación.
-        Lo que sí ocurre, y no se puede evitar, es que el proveedor la ve —igual
-        que ve el texto que le envías.
+        reutilizar el mismo personaje en otra conversación. Crear un personaje
+        genera su avatar y <strong>consume créditos</strong>.
       </p>
 
       <Field label="Descripción">

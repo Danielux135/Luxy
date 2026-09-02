@@ -1,5 +1,52 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-09-02 02:40 — Claude — la API retira las fotos de referencia; el personaje va por rasgos
+
+Segunda llamada real, segunda correccion del contrato. Esta tumba `F9.23`
+entero, y es la respuesta correcta.
+
+```
+400 reference_image_unsupported — "Reference-image upload has been removed.
+Create characters by passing `traits` (closed-enum trait combo)."
+```
+
+No es que el `data:` URI no valga: **el campo ya no existe**. Su documentacion
+—leida hoy en `xavira.ai/docs`, que es donde estaba de verdad; `api.xavira.ai/docs`
+da 404— lo explica sin rodeos: subir fotos para generar contenido adulto crea
+una exposicion legal (imagenes intimas no consentidas) que no aceptan, y toda la
+identidad sale de los rasgos y del prompt. **La «opcion 2» tampoco existe**,
+porque no hay campo al que mandar una URL. No hay nada que rodear.
+
+Retirado todo el camino de la referencia: `toDataUri`, el limite de 6 MB, el
+dialogo, la copia cifrada, el boton y `character-traits.ts` (los rasgos escritos
+a mano murieron con el enum cerrado).
+
+Lo que hay ahora, leido de su tabla de rasgos:
+
+- **enum cerrado**: `gender`, `ethnicity`, `ageRange`, `hairLength`,
+  `hairColor`, `build`, y `breastSize` / `assSize` solo con `gender=female`. Su
+  documentacion justifica el enum: evita inyeccion de prompt por los rasgos;
+- la interfaz ofrece **listas, no texto libre**. Un formulario libre garantizaba
+  un 400 por cada valor inventado;
+- los valores **viajan sin traducir**; solo se traduce la etiqueta de pantalla,
+  porque traducir un valor seria inventarse otro;
+- **`scene`**: texto libre en ingles para lo que los rasgos no cubren —ojos,
+  pecas, ropa, luz, pose, escenario—, recortado a 1000 caracteres antes de salir
+  en vez de dejar que la API lo rechace;
+- **`sfw`** para el avatar inicial vestido;
+- `wait` se queda en su valor por defecto: la API tarda 8-16 s y corta a 26, muy
+  por debajo del tope de 120 s del adaptador;
+- avisado en pantalla que **crear un personaje genera su avatar y gasta
+  creditos**.
+
+Cuatro pruebas nuevas de rasgos y escena; retiradas las siete de la referencia.
+
+**`npm run check` exit 0: 119 archivos, 2.067 superadas, 9 omitidas.**
+
+La leccion, ya anotada como riesgo desde `F9.17` y ahora con dos pruebas: **el
+contrato de esta API se corrige con lo que ella responde**, no con su
+documentacion publica ni con lo que suponemos. No se añaden campos por si acaso.
+
 ### 2026-09-02 02:10 — Claude — la API real corrige el contrato: falta `model_id`
 
 **Primera llamada de verdad a la API de generacion.** Fallo, y nos dio justo lo

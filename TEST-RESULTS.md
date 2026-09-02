@@ -1,5 +1,20 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-02 — segunda llamada real: la API retira las fotos de referencia
+
+- `POST /v1/characters` devolvió **400 `reference_image_unsupported`**:
+  *«Reference-image upload has been removed. Create characters by passing
+  `traits` (closed-enum trait combo)»*. El campo no existe; no es un problema de
+  formato.
+- Documentación real encontrada en **`https://xavira.ai/docs`** (200);
+  `https://api.xavira.ai/docs` devuelve 404. De ahí sale la tabla de rasgos y el
+  resto del contrato de creación de personaje.
+- Retirado el camino de la referencia; el personaje se define por el enum
+  cerrado. **`npm run check`: exit 0 — 119 archivos, 2.067 superadas, 9
+  omitidas.**
+- **Sigue sin saberse**: si `images:generate` exige `model_id`, y cómo se
+  comporta la generación real. Se sabrá en la siguiente llamada.
+
 ### 2026-09-02 — primera llamada real a la API de generación
 
 - **Falló, y era información valiosa.** `POST /v1/characters` devolvió **400

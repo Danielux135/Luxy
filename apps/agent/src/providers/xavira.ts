@@ -172,28 +172,57 @@ function hintForStatus(status: number): string | null {
 // -----------------------------------------------------------------------------
 
 /**
- * tope de la imagen de referencia, antes de codificarla.
- *
- * base64 la engorda un tercio, y viaja dentro de un JSON. Un archivo grande no
- * da mejor parecido: da una peticion enorme y un fallo dificil de leer.
- */
-export const MAX_REFERENCE_IMAGE_BYTES = 6 * 1024 * 1024;
-
-/**
  * modelos validos para crear un personaje.
  *
- * NO salen de la documentacion: los dijo la propia API al rechazar una
- * peticion sin `model_id`, el 2026-09-02. Su mensaje, literal, fue que
- * `model_id` debe ser uno de `realistic-sharp-v1` o `anime-pure-v1`, que los
- * modelos de video **no valen** para crear un personaje, y que `anime-v1` y
- * `anime-sharp-v1` se aceptan como alias antiguos de `anime-pure-v1`.
+ * NO salen de su documentacion: los dijo la propia API al rechazar una peticion
+ * sin `model_id`, el 2026-09-02. Los modelos de video **no valen** para crear un
+ * personaje, y `anime-v1` / `anime-sharp-v1` son alias antiguos de
+ * `anime-pure-v1`.
  *
- * Se dejan aqui los dos canonicos. La lista no se impone en esta capa: si la
- * API añade uno, mandarlo debe funcionar sin tocar el adaptador, y si es
- * invalido su propio error lo explica mejor que cualquier comprobacion local.
+ * La lista no se impone en esta capa: si la API añade uno, mandarlo debe
+ * funcionar sin tocar el adaptador, y si es invalido su propio error lo explica
+ * mejor que cualquier comprobacion local.
  */
 export const CHARACTER_MODELS = ['realistic-sharp-v1', 'anime-pure-v1'] as const;
 export type CharacterModel = (typeof CHARACTER_MODELS)[number];
+
+/**
+ * rasgos de un personaje. Enum CERRADO, tal y como lo publica la API.
+ *
+ * No es texto libre y no es cosa nuestra: la API rechaza cualquier valor que no
+ * este aqui. Su documentacion lo justifica —evita inyeccion de prompt a traves
+ * de los rasgos y da una salida predecible—, y para nosotros significa que la
+ * interfaz debe ofrecer listas, no un campo donde escribir.
+ *
+ * Leido de su documentacion publica el 2026-09-02, despues de que la API
+ * rechazara nuestros rasgos escritos a mano.
+ */
+export const CHARACTER_TRAITS = {
+  gender: ['female', 'male'],
+  ethnicity: [
+    'white',
+    'black',
+    'hispanic',
+    'middle-eastern',
+    'indian',
+    'east-asian',
+    'south-east-asian',
+  ],
+  ageRange: ['18-22', '21-22', '23-29', '30-39', '40-plus'],
+  hairLength: ['short', 'medium', 'long'],
+  hairColor: ['black', 'brown', 'blonde', 'red', 'auburn', 'grey', 'white'],
+  build: ['petite', 'slim', 'athletic', 'curvy', 'voluptuous'],
+  /** solo aplica con gender=female; se ignora en male */
+  breastSize: ['small', 'medium', 'large', 'very-large', 'huge'],
+  /** solo aplica con gender=female; independiente de `build` */
+  assSize: ['small', 'medium', 'large', 'very-large', 'huge'],
+} as const;
+
+export type CharacterTraitField = keyof typeof CHARACTER_TRAITS;
+export type CharacterTraits = Partial<Record<CharacterTraitField, string>>;
+
+/** tope de `scene`, segun su documentacion */
+export const MAX_SCENE_CHARS = 1000;
 
 export interface CreateCharacterRequest {
   /**
@@ -201,52 +230,18 @@ export interface CreateCharacterRequest {
    * `invalid_model_id`. Decide el aspecto y no se puede cambiar despues.
    */
   modelId: string;
-  traits?: Record<string, string>;
+  /** combinacion de rasgos del enum cerrado */
+  traits?: CharacterTraits;
   /**
-   * imagen de referencia EN LINEA, dentro del cuerpo de la peticion.
-   *
-   * Es la unica forma de dar un parecido sin alojar la foto en ninguna parte.
-   * El campo de la API se llama `reference_image_url` y espera una URL, pero un
-   * `data:` URI TAMBIEN es una URL: asi el proveedor recibe la imagen sin que
-   * exista una direccion publica desde la que cualquiera pueda descargarla.
-   *
-   * Es el mismo criterio que hace que aqui se sondee en vez de usar
-   * `callback_url`: Luxy no expone nada publico.
-   *
-   * Lo que NO evita, y hay que decirlo: el proveedor ve la imagen en claro.
-   * Igual que ve el prompt.
+   * descripcion libre de lo que los rasgos NO cubren: color de ojos, pecas,
+   * ropa, luz, pose, escenario. En ingles, segun su documentacion, y pasa por
+   * su moderacion.
    */
-  referenceImage?: { bytes: Uint8Array; mimeType: string };
-  /**
-   * referencia por URL publica.
-   *
-   * Alternativa a `referenceImage` para cuando la imagen ya esta publicada y se
-   * asume. Si se dan las dos, manda la de en linea.
-   */
-  referenceImageUrl?: string;
-}
-
-/** `data:` URI a partir de bytes. No toca disco ni deja copia sin cifrar */
-export function toDataUri(bytes: Uint8Array, mimeType: string): string {
-  if (bytes.length === 0) throw new XaviraError('la imagen de referencia esta vacia');
-  if (bytes.length > MAX_REFERENCE_IMAGE_BYTES) {
-    throw new XaviraError(
-      'la imagen de referencia es demasiado grande',
-      null,
-      'usa una de menos de 6 MB: no mejora el parecido y la peticion falla',
-    );
-  }
-  if (!/^image\/[a-z0-9.+-]+$/i.test(mimeType)) {
-    throw new XaviraError('la imagen de referencia no es una imagen');
-  }
-
-  // se construye en trozos: `String.fromCharCode(...bytes)` con megas de datos
-  // revienta la pila por el numero de argumentos
-  let binary = '';
-  for (let index = 0; index < bytes.length; index += 8192) {
-    binary += String.fromCharCode(...bytes.subarray(index, index + 8192));
-  }
-  return `data:${mimeType};base64,${btoa(binary)}`;
+  scene?: string;
+  /** avatar base vestido. Solo afecta al avatar inicial, no a cada generacion */
+  sfw?: boolean;
+  /** etiqueta para el panel del proveedor; no la ve el modelo */
+  name?: string;
 }
 
 /** crea un personaje persistente y devuelve su identificador */
@@ -254,19 +249,18 @@ export async function createCharacter(
   request: CreateCharacterRequest,
   options: XaviraOptions,
 ): Promise<string> {
-  // la de en linea manda sobre la publica: si alguien aporta las dos, la
-  // intencion es no publicar nada
-  const reference =
-    request.referenceImage !== undefined
-      ? toDataUri(request.referenceImage.bytes, request.referenceImage.mimeType)
-      : request.referenceImageUrl;
-
+  // `wait` se deja en su valor por defecto (true): la API tarda 8-16 s en
+  // renderizar el avatar y lo corta a 26, muy por debajo de nuestro tope de
+  // 120 s. El modo asincrono existe para proxies con timeouts cortos, que aqui
+  // no hay: el proceso principal habla directamente con la API.
   const { body } = await call(options, '/v1/characters', {
     method: 'POST',
     body: JSON.stringify({
       model_id: request.modelId,
       ...(request.traits === undefined ? {} : { traits: request.traits }),
-      ...(reference === undefined ? {} : { reference_image_url: reference }),
+      ...(request.scene === undefined ? {} : { scene: request.scene.slice(0, MAX_SCENE_CHARS) }),
+      ...(request.sfw === undefined ? {} : { sfw: request.sfw }),
+      ...(request.name === undefined ? {} : { name: request.name }),
     }),
   });
 
