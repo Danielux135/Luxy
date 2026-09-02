@@ -288,6 +288,13 @@ export const vaultConversationSendArgsSchema = z.object({
    * cadena vacia lo quita.
    */
   characterId: z.string().max(128).nullable().default(null),
+  /**
+   * quién es el personaje, en texto, para el modelo.
+   *
+   * El identificador de arriba sólo le sirve al proveedor de imágenes. El
+   * modelo que escribe no ve ninguna imagen: sin esto no sabe a quién encarna.
+   */
+  characterDescription: z.string().max(2000).nullable().default(null),
 });
 
 export const vaultConversationIdArgsSchema = z.object({
@@ -318,6 +325,7 @@ export const vaultConversationReadResultSchema = z.object({
   /** las que estan en vigor; texto en claro, porque el main ya las descifro */
   instructions: z.string().nullable(),
   characterId: z.string().nullable(),
+  characterDescription: z.string().nullable(),
 });
 
 export const vaultConversationSendResultSchema = z.object({
@@ -326,6 +334,7 @@ export const vaultConversationSendResultSchema = z.object({
   turns: z.array(vaultConversationTurnSchema),
   instructions: z.string().nullable(),
   characterId: z.string().nullable(),
+  characterDescription: z.string().nullable(),
   /**
    * la imagen que el modelo pidio en este turno, si pidio alguna.
    *

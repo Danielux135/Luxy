@@ -787,6 +787,10 @@ export function registerIpcHandlers(context: HandlerContext): void {
       context.vault,
       args.conversationId,
     ),
+    characterDescription: await context.privateConversations.latestCharacterDescription(
+      context.vault,
+      args.conversationId,
+    ),
     conversationId: args.conversationId,
     turns: await context.privateConversations.read(context.vault, args.conversationId),
   }));
@@ -1075,6 +1079,18 @@ export function registerIpcHandlers(context: HandlerContext): void {
     const characterChanged =
       args.characterId !== null && args.characterId !== (previousCharacter ?? '');
 
+    // quien es el personaje, para el MODELO. El identificador de arriba solo le
+    // sirve al proveedor de imagenes; el modelo no ve ninguna imagen
+    const previousDescription = await store.latestCharacterDescription(
+      context.vault,
+      conversationId,
+    );
+    const characterDescription =
+      args.characterDescription === null ? previousDescription : args.characterDescription;
+    const descriptionChanged =
+      args.characterDescription !== null &&
+      args.characterDescription !== (previousDescription ?? '');
+
     // solo se le ofrece generar si de verdad se puede: sin personaje o sin
     // clave, ofrecerselo garantiza una promesa incumplida en cada turno
     const canGenerateImage =
@@ -1094,6 +1110,7 @@ export function registerIpcHandlers(context: HandlerContext): void {
       // engordaria el archivo sin decir nada nuevo
       ...(changed ? { instructions: args.instructions } : {}),
       ...(characterChanged ? { characterId: args.characterId } : {}),
+      ...(descriptionChanged ? { characterDescription: args.characterDescription } : {}),
     });
 
     // el prompt se arma con la memoria acumulativa mas los ultimos turnos, no
@@ -1108,6 +1125,10 @@ export function registerIpcHandlers(context: HandlerContext): void {
       turns: history.slice(0, -1).map((turn) => ({ role: turn.role, text: turn.text })),
       message: args.message,
       instructions: instructions === null || instructions.length === 0 ? null : instructions,
+      character:
+        characterDescription === null || characterDescription.length === 0
+          ? null
+          : characterDescription,
       canGenerateImage,
     });
 
@@ -1193,6 +1214,7 @@ export function registerIpcHandlers(context: HandlerContext): void {
       turns: await store.read(context.vault, conversationId),
       instructions: await store.latestInstructions(context.vault, conversationId),
       characterId: await store.latestCharacterId(context.vault, conversationId),
+      characterDescription: await store.latestCharacterDescription(context.vault, conversationId),
       image,
       error: result.error,
     };

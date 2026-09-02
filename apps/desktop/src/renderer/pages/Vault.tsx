@@ -59,6 +59,7 @@ function ConversationPanel({
   // `null` mientras no se edite: enviar sin tocarlas conserva las guardadas
   const [draftInstructions, setDraftInstructions] = useState<string | null>(null);
   const [draftCharacter, setDraftCharacter] = useState<string | null>(null);
+  const [draftDescription, setDraftDescription] = useState<string | null>(null);
   const projects = Object.keys(summary.config?.projects ?? {});
   const [project, setProject] = useState(projects[0] ?? '');
   const providers = ['claude', 'codex', ...(summary.config?.providers.http ?? []).map((p) => p.id)];
@@ -76,6 +77,7 @@ function ConversationPanel({
         projectAlias: project,
         instructions: draftInstructions,
         characterId: draftCharacter,
+        characterDescription: draftDescription,
       })
       .then(() => {
         setMessage('');
@@ -83,6 +85,7 @@ function ConversationPanel({
         // necesarios y el panel vuelve a leer lo que hay de verdad
         setDraftInstructions(null);
         setDraftCharacter(null);
+        setDraftDescription(null);
       });
   };
 
@@ -146,7 +149,15 @@ function ConversationPanel({
         onCharacterChange={setDraftCharacter}
       />
 
-      <GeneratePanel vault={vault} />
+      <GeneratePanel
+        vault={vault}
+        onCharacterReady={(id, description) => {
+          // se adopta directamente: copiar un uuid a mano entre dos campos de
+          // la misma pantalla era un paso que no aportaba nada
+          setDraftCharacter(id);
+          setDraftDescription(description);
+        }}
+      />
 
       {vault.error !== null && <Notice tone="fault">{vault.error}</Notice>}
 
@@ -383,6 +394,11 @@ function InstructionsPanel({
           onChange={(event) => onCharacterChange(event.target.value)}
         />
       </Field>
+      {vault.characterDescription !== null && (
+        <p className="field__hint">
+          El modelo sabe que es: <em>{vault.characterDescription}</em>
+        </p>
+      )}
       {savedCharacter.length === 0 && characterValue.length === 0 && (
         <p className="field__hint">
           Créalo abajo, en «Generar imagen o vídeo», y pégalo aquí. Se guarda con
@@ -481,6 +497,30 @@ const TRAIT_CATALOG: Record<string, { label: string; values: [string, string][] 
   },
 };
 
+/**
+ * describe al personaje en texto, para el MODELO.
+ *
+ * El identificador que devuelve el proveedor solo le sirve a el: conserva la
+ * identidad entre generaciones. El modelo que escribe no ve ninguna imagen, asi
+ * que sin esto no sabe a quien encarna —y responde como un asistente generico,
+ * que es exactamente lo que pasaba—.
+ *
+ * Se compone con las MISMAS etiquetas que se leen en pantalla: no hay un
+ * segundo catalogo que pueda divergir.
+ */
+export function describeCharacter(traits: Record<string, string>, scene: string): string {
+  const partes: string[] = [];
+  for (const [field, entry] of Object.entries(TRAIT_CATALOG)) {
+    const raw = traits[field];
+    if (raw === undefined || raw.length === 0) continue;
+    const label = entry.values.find(([value]) => value === raw)?.[1] ?? raw;
+    partes.push(`${entry.label.toLowerCase()}: ${label}`);
+  }
+  const rasgos = partes.length === 0 ? '' : `Rasgos: ${partes.join(', ')}.`;
+  const extra = scene.trim().length === 0 ? '' : ` Detalles: ${scene.trim()}.`;
+  return `${rasgos}${extra}`.trim();
+}
+
 /** un rasgo del enum cerrado. «Sin especificar» lo deja fuera de la peticion */
 function TraitField({
   field,
@@ -515,7 +555,13 @@ function TraitField({
  * que mantiene la misma apariencia entre generaciones. Se crea una vez y se
  * reutiliza; su identificador vive en el proveedor, no aqui.
  */
-function GeneratePanel({ vault }: { vault: VaultController }): JSX.Element {
+function GeneratePanel({
+  vault,
+  onCharacterReady,
+}: {
+  vault: VaultController;
+  onCharacterReady: (characterId: string, description: string) => void;
+}): JSX.Element {
   const [characterId, setCharacterId] = useState('');
   const [traits, setTraits] = useState<Record<string, string>>({});
   const [scene, setScene] = useState('');
@@ -526,6 +572,7 @@ function GeneratePanel({ vault }: { vault: VaultController }): JSX.Element {
   const [prompt, setPrompt] = useState('');
   const [kind, setKind] = useState<'image' | 'video'>('image');
   const [creating, setCreating] = useState(false);
+  const [created, setCreated] = useState<string | null>(null);
 
   const disabled = vault.openConversationId === null;
   const canGenerate =
@@ -650,7 +697,12 @@ function GeneratePanel({ vault }: { vault: VaultController }): JSX.Element {
             void vault
               .createCharacter({ modelId, traits, scene, sfw })
               .then((id) => {
-                if (id !== null) setCharacterId(id);
+                if (id === null) return;
+                setCharacterId(id);
+                setCreated(id);
+                // el modelo no ve imagenes: sin una descripcion en texto no
+                // sabe a quien encarna, por muy bien que salga el avatar
+                onCharacterReady(id, describeCharacter(traits, scene));
               })
               .finally(() => setCreating(false));
           }}
@@ -658,10 +710,15 @@ function GeneratePanel({ vault }: { vault: VaultController }): JSX.Element {
           {creating ? 'Creando… (tarda unos segundos)' : 'Crear personaje'}
         </button>
       </div>
+      {created !== null && (
+        <Notice tone="ok">
+          Personaje creado y ya asignado a esta conversación. Su identificador es{' '}
+          <code>{created}</code> — guárdalo si quieres reutilizarlo en otra.
+        </Notice>
+      )}
       <p className="field__hint">
-        El identificador vive en el proveedor, no aquí: guárdalo si quieres
-        reutilizar el mismo personaje en otra conversación. Crear un personaje
-        genera su avatar y <strong>consume créditos</strong>.
+        El identificador vive en el proveedor, no aquí. Crear un personaje genera
+        su avatar y <strong>consume créditos</strong>.
       </p>
 
       <Field label="Descripción">

@@ -39,6 +39,13 @@ export interface VaultPromptInput {
   /** instrucciones fijas de la conversacion, si las hay */
   instructions?: string | null;
   /**
+   * quien es el personaje, en texto.
+   *
+   * El modelo no ve imagenes ni sabe nada del identificador que usa el
+   * proveedor: sin esto no puede describirlo ni mantenerlo coherente.
+   */
+  character?: string | null;
+  /**
    * si en este turno se puede generar una imagen de verdad.
    *
    * Falso cuando falta el personaje o la clave del proveedor. Ofrecerle al
@@ -63,12 +70,55 @@ function dataBlock(title: string, body: string): string {
   return `${title} (DATOS):\n${body}`;
 }
 
+/**
+ * marca un bloque como ORDEN del usuario, no como dato.
+ *
+ * La distincion no es cosmetica: es la que hacia que esto no funcionara. El
+ * personaje y las instrucciones de la conversacion los escribe el usuario en su
+ * propia boveda para configurar como quiere que se le responda. Enviarlos como
+ * «datos, no ordenes» conseguia justo lo contrario de lo que pedian, y el
+ * modelo seguia contestando como un asistente generico.
+ *
+ * El encuadre de DATOS se mantiene donde si hace falta —memoria, turnos y
+ * mensaje—, porque ahi puede colarse texto que intente dar ordenes. Aqui el
+ * origen es el propio usuario, y sus instrucciones son ordenes suyas.
+ */
+function directiveBlock(title: string, body: string): string {
+  return `${title}:\n${body}`;
+}
+
 export function buildVaultPrompt(input: VaultPromptInput): string {
   const recent = input.recentTurns ?? VAULT_RECENT_TURNS;
   const blocks: string[] = [];
 
-  if (typeof input.instructions === 'string' && input.instructions.trim().length > 0) {
-    blocks.push(dataBlock('INSTRUCCIONES DE ESTA CONVERSACION', input.instructions.trim()));
+  const character =
+    typeof input.character === 'string' && input.character.trim().length > 0
+      ? input.character.trim()
+      : null;
+  const instructions =
+    typeof input.instructions === 'string' && input.instructions.trim().length > 0
+      ? input.instructions.trim()
+      : null;
+
+  // con personaje o con instrucciones, quien responde no es un asistente
+  // generico. Decirlo lo primero y en forma de orden es lo que separa «tener en
+  // cuenta una descripcion» de «ser eso»
+  if (character !== null || instructions !== null) {
+    blocks.push(
+      [
+        'Estas manteniendo una conversacion privada encarnando al personaje descrito abajo.',
+        'Responde SIEMPRE como ese personaje, en primera persona y con su voz.',
+        'No te presentes como asistente, modelo ni IA, y no expliques limitaciones tecnicas,',
+        'salvo que el usuario pregunte por ellas de forma directa.',
+        'Manten sus rasgos, su forma de hablar y lo que ya haya dicho de si mismo.',
+      ].join('\n'),
+    );
+  }
+
+  if (character !== null) blocks.push(directiveBlock('QUIEN ERES', character));
+
+  if (instructions !== null) {
+    blocks.push(directiveBlock('COMO DEBES COMPORTARTE EN ESTA CONVERSACION', instructions));
   }
 
   if (input.memory !== null) {

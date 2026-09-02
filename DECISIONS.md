@@ -1069,3 +1069,37 @@ La lección, que ya estaba anotada como riesgo desde `F9.17` y ahora tiene dos
 pruebas: **el contrato de esta API se corrige con lo que ella responde, no con
 lo que dice su documentación pública ni con lo que suponemos.** No se añaden
 campos «por si acaso»; se añaden cuando un error los nombra.
+
+## D-054 — las instrucciones del usuario son órdenes, no datos
+
+Fecha: 2026-09-02
+
+Estado: aceptada, implementada
+
+`buildVaultPrompt` marcaba **todo** con `(DATOS)`, con el comentario «el texto
+del usuario y la memoria son contenido a tener en cuenta, no órdenes que el
+modelo deba obedecer». Ese encuadre es correcto para la memoria, los turnos y el
+mensaje: ahí puede colarse texto que intente dar órdenes.
+
+Aplicado a las **instrucciones de la conversación** era exactamente lo contrario
+de lo que pide quien las escribe. Daniel puso una descripción de personaje en
+«Contexto fijo» y el modelo siguió presentándose como asistente virtual: estaba
+haciendo lo que se le decía —tenerlo en cuenta como dato, no obedecerlo—.
+
+A partir de aquí:
+
+- **el personaje y las instrucciones viajan como directiva**, sin la etiqueta de
+  datos, bajo «QUIEN ERES» y «CÓMO DEBES COMPORTARTE EN ESTA CONVERSACIÓN». Su
+  origen es el propio usuario configurando su bóveda, no contenido de terceros;
+- cuando hay personaje o instrucciones, el prompt **abre** ordenando encarnarlo:
+  responder en primera persona, con su voz, sin presentarse como asistente ni
+  explicar limitaciones técnicas salvo pregunta directa;
+- **la memoria, los turnos y el mensaje siguen siendo `(DATOS)`.** Una prueba lo
+  fija, porque es la parte donde el encuadre sí protege.
+
+Además, el personaje necesita una **descripción en texto** aparte de su
+identificador. El identificador sólo le sirve al proveedor de imágenes, que
+conserva la identidad entre generaciones; el modelo que escribe no ve ninguna
+imagen y sin la descripción no sabe a quién encarna. Se guarda cifrada con el
+turno, como las instrucciones, y se compone con las mismas etiquetas que se leen
+en pantalla para que no haya un segundo catálogo que pueda divergir.

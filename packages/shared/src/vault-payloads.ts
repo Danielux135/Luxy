@@ -56,6 +56,18 @@ export const vaultTurnPayloadSchema = z.object({
    * conversaciones comparten personaje ya dice algo.
    */
   characterId: z.string().max(128).nullable().default(null),
+  /**
+   * quien es el personaje, en texto, para el MODELO.
+   *
+   * El identificador de arriba solo le sirve al proveedor de imagenes: el
+   * conserva la identidad entre generaciones. Pero el modelo que escribe no ve
+   * ninguna imagen y no sabe nada de ese identificador, asi que sin esto no
+   * puede describir al personaje ni componer una escena coherente con el.
+   *
+   * Se guarda con el turno, cifrado, por la misma razon que las instrucciones:
+   * describe a alguien.
+   */
+  characterDescription: z.string().max(2000).nullable().default(null),
   createdAt: z.string().datetime(),
 });
 export type VaultTurnPayload = z.infer<typeof vaultTurnPayloadSchema>;

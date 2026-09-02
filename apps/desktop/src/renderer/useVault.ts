@@ -109,6 +109,8 @@ export interface VaultController {
   instructions: string | null;
   /** personaje que gobierna las imágenes de la conversación abierta */
   characterId: string | null;
+  /** quién es ese personaje, en texto: es lo que lee el modelo */
+  characterDescription: string | null;
   /**
    * qué pasó con la imagen del último turno.
    *
@@ -126,6 +128,7 @@ export interface VaultController {
     /** null conserva las que hubiera; cadena vacía las borra */
     instructions: string | null;
     characterId: string | null;
+    characterDescription: string | null;
   }) => Promise<boolean>;
   removeConversation: (conversationId: string) => Promise<void>;
   media: PrivateMediaItem[];
@@ -176,6 +179,7 @@ export function useVault(): VaultController {
   const [turns, setTurns] = useState<PrivateTurn[]>([]);
   const [instructions, setInstructions] = useState<string | null>(null);
   const [characterId, setCharacterId] = useState<string | null>(null);
+  const [characterDescription, setCharacterDescription] = useState<string | null>(null);
   const [lastImage, setLastImage] = useState<VaultController['lastImage']>(null);
   const [sending, setSending] = useState(false);
   const [media, setMedia] = useState<PrivateMediaItem[]>([]);
@@ -388,6 +392,7 @@ export function useVault(): VaultController {
         // anterior las aplicaría sin que nadie las haya escrito aquí
         setInstructions(null);
         setCharacterId(null);
+        setCharacterDescription(null);
         setLastImage(null);
         return;
       }
@@ -396,6 +401,7 @@ export function useVault(): VaultController {
         setTurns(result.value.turns);
         setInstructions(result.value.instructions);
         setCharacterId(result.value.characterId);
+        setCharacterDescription(result.value.characterDescription);
       }
       // el resultado de una imagen pertenece al turno que la pidio, no a la
       // conversacion: al cambiar de hilo deja de tener sentido
@@ -463,6 +469,7 @@ export function useVault(): VaultController {
       projectAlias: string;
       instructions: string | null;
       characterId: string | null;
+      characterDescription: string | null;
     }): Promise<boolean> => {
       setSending(true);
       setError(null);
@@ -480,6 +487,7 @@ export function useVault(): VaultController {
         setTurns(result.value.turns);
         setInstructions(result.value.instructions);
         setCharacterId(result.value.characterId);
+        setCharacterDescription(result.value.characterDescription);
         setLastImage(result.value.image);
         // lo generado en este turno se guarda contra la conversacion: recargar
         // los medios es lo que hace que la imagen aparezca sin recargar nada
@@ -616,6 +624,7 @@ export function useVault(): VaultController {
     turns,
     instructions,
     characterId,
+    characterDescription,
     lastImage,
     sending,
     openConversation,

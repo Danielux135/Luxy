@@ -243,6 +243,28 @@ export class PrivateConversationStore {
     return null;
   }
 
+  /**
+   * descripcion del personaje en vigor, para el modelo.
+   *
+   * Mismo criterio que `latestCharacterId`, y va aparte porque son dos cosas
+   * distintas: el identificador lo usa el proveedor de imagenes; esta
+   * descripcion la lee el modelo, que no ve ninguna imagen.
+   */
+  async latestCharacterDescription(
+    vault: VaultService,
+    conversationId: string,
+  ): Promise<string | null> {
+    const records = this.readRecords(conversationId);
+    for (let index = records.length - 1; index >= 0; index -= 1) {
+      const opened = await openTurn(vault, records[index]!);
+      if (opened.turn.characterDescription === null) continue;
+      return opened.turn.characterDescription.length === 0
+        ? null
+        : opened.turn.characterDescription;
+    }
+    return null;
+  }
+
   /** borra una conversacion. no hay papelera: es lo que se espera aqui */
   delete(conversationId: string): void {
     const file = fileFor(this.directory, conversationId);
