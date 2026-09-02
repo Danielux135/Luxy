@@ -1,6 +1,29 @@
 # Luxy — estado canónico del proyecto
 
-Última actualización: **2026-09-02 — F9.29, el roleplay ya no compite con un asistente técnico**
+Última actualización: **2026-09-02 — BUG-VAULT-CHARACTER-001, un identificador de personaje que nadie comprobaba**
+
+Una conversación privada podía quedarse fijada a un `character_id` que la bóveda
+no conoce. El campo acepta texto libre, nadie lo verificaba, y el único que lo
+desmentía era el proveedor —con un `404 character_not_found` volcado como JSON
+crudo— al final del turno, con la respuesta ya escrita y la foto ya prometida.
+
+Corregido en tres capas: `xavira.ts` traduce `error.code` a un mensaje y una
+pista accionables y conserva `code` y `requestId`; `imageBlockReason`, en
+`apps/desktop/src/shared/`, exige que el personaje esté en la bóveda y la usan
+tanto el proceso principal como la pantalla; el alta manual exige el UUID del
+proveedor.
+
+El personaje perdido se recuperó sin gastar créditos consultando
+`GET /v1/generations/{id}` del avatar, que devuelve el `character_id`.
+
+`npm run check` verde: **122 archivos, 2.116 pruebas superadas, 9 omitidas**.
+Sin commit. Pendiente `LA-036`: darlo de alta en Studio, rotar la clave del
+proveedor y ver el aviso nuevo en pantalla.
+
+---
+
+Última actualización anterior: **2026-09-02 — F9.29, el roleplay ya no compite con un asistente técnico**
+
 
 Corregida la causa estructural del personaje que salía del rol. El prompt
 privado sí ordenaba encarnar al personaje, pero el ejecutor envolvía después el

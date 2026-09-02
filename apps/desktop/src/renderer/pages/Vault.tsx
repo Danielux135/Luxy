@@ -12,6 +12,7 @@ import {
   formatLockCountdown,
   type VaultController,
 } from '../useVault.js';
+import { imageBlockReason } from '../../shared/vault-image-capability.js';
 
 /** debe coincidir con AUTO_LOCK_MINUTES del proceso principal */
 const AUTO_LOCK_CHOICES = [1, 5, 15, 30, 60, 240, 0] as const;
@@ -375,6 +376,16 @@ function InstructionsPanel({
   const pending = draft !== null && draft !== saved;
   const savedCharacter = vault.characterId ?? '';
   const characterValue = draftCharacter ?? savedCharacter;
+  // el campo acepta cualquier cadena, así que hay que decir si esa de ahí
+  // corresponde a alguien. Sin esto, un identificador inventado se anunciaba
+  // igual que uno bueno y solo el proveedor lo desmentía, un turno después.
+  // La regla es la misma que aplica el proceso principal al armar el prompt
+  const knownCharacter = vault.characters.find((c) => c.characterId === characterValue);
+  const imageBlock = imageBlockReason({
+    characterId: characterValue,
+    characterInVault: knownCharacter !== undefined,
+    hasApiKey: vault.status.mediaProviderConfigured,
+  });
 
   return (
     <details className="vault-generate" open={saved.length > 0}>
@@ -421,15 +432,22 @@ function InstructionsPanel({
           onChange={(event) => onCharacterChange(event.target.value)}
         />
       </Field>
-      {characterValue.length > 0 && (
+      {characterValue.length > 0 && knownCharacter !== undefined && (
         <p className="field__hint">
           <Tag tone="ok">
-            {vault.characters.find((c) => c.characterId === characterValue)?.label ??
-              'personaje asignado'}
+            {knownCharacter.label.length > 0 ? knownCharacter.label : 'personaje asignado'}
           </Tag>{' '}
           es quien responde en esta conversación
           {characterValue !== (vault.characterId ?? '') && ' · se fija al enviar'}.
         </p>
+      )}
+      {imageBlock === 'personaje-desconocido' && (
+        <Notice tone="warn">
+          Ese identificador no está en la bóveda de este equipo. Mientras siga así,
+          esta conversación no podrá generar ni reenviar imágenes, y no se le
+          ofrecerá hacerlo. Dalo de alta en Personajes, con su identificador del
+          proveedor, o elige uno de la lista.
+        </Notice>
       )}
       {vault.characterDescription !== null && (
         <p className="field__hint">

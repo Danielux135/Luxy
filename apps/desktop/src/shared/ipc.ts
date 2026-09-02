@@ -507,7 +507,16 @@ export const vaultCharacterForgetArgsSchema = z.object({
  * cuesta créditos.
  */
 export const vaultCharacterImportArgsSchema = z.object({
-  characterId: z.string().min(1).max(128),
+  /**
+   * identificador del proveedor, que es un UUID: asi lo declara su API y asi lo
+   * exige al generar. Validarlo al pegar convierte un 404 de tres pantallas
+   * despues en un aviso inmediato. No atrapa un UUID equivocado —para eso esta
+   * el aviso de «no esta en la boveda»—, pero si todo lo que se copia de una
+   * URL y no es un identificador.
+   */
+  characterId: z
+    .string()
+    .uuid('el identificador del personaje es el UUID que devuelve el proveedor'),
   modelId: z.enum(['realistic-sharp-v1', 'anime-pure-v1']).default('realistic-sharp-v1'),
   label: z.string().max(100).default(''),
   description: z.string().max(2000).default(''),

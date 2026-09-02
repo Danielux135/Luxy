@@ -99,6 +99,23 @@ import {
 import { deleteMigratedFile, inspectEnvFile, readEnvSecrets } from '../migration.js';
 import { readCatalogSnapshot, writeCatalogSnapshot } from '../catalog-store.js';
 import { resolveWorktreeDirectory } from '../worktree-directory.js';
+import {
+  imageBlockReason,
+  type ImageBlockReason,
+} from '../../shared/vault-image-capability.js';
+
+/**
+ * que decirle al usuario cuando la imagen que pidio el modelo no se puede
+ * generar. Cada motivo se arregla en un sitio distinto, asi que cada uno tiene
+ * su frase: la anterior mandaba a Conexiones incluso cuando la clave estaba
+ * bien y lo que fallaba era el identificador del personaje.
+ */
+const IMAGE_BLOCK_MESSAGES: Record<ImageBlockReason, string> = {
+  'sin-personaje': 'elige un personaje para esta conversacion antes de pedir imagenes',
+  'personaje-desconocido':
+    'el personaje de esta conversacion no esta en la boveda de este equipo: dalo de alta con su identificador o elige otro',
+  'sin-clave': 'falta la clave del proveedor de imagenes en Conexiones',
+};
 
 /** tipo declarado por la extension del archivo elegido en el dialogo */
 function mimeTypeFor(filePath: string): string {
@@ -1208,43 +1225,51 @@ export function registerIpcHandlers(context: HandlerContext): void {
     // usa aqui. Vive en la ficha del personaje, que es de otro sitio: sin esta
     // copia, «pasame tu foto de perfil» no tenia NADA que reenviar, y el modelo
     // respondia —con razon— que no podia recuperar ninguna.
-    if (characterId !== null && characterId.length > 0) {
+    // el personaje tiene que estar EN LA BOVEDA, no solo escrito en el campo.
+    // El identificador lo teclea el usuario y nadie lo comprobaba: uno que no
+    // esta aqui no tiene avatar que reenviar, no sirve para generar y el
+    // proveedor solo lo desmiente al final, cuando ella ya prometio la foto.
+    const character =
+      characterId === null || characterId.length === 0
+        ? undefined
+        : (await context.characters.list(context.vault)).find(
+            (entry) => entry.characterId === characterId,
+          );
+
+    if (character !== undefined && character.avatarObjectKey !== null) {
       const known = await context.privateMedia.list(context.vault, conversationId);
-      const yaEsta = known.some((item) => item.metadata.characterId === characterId);
+      const yaEsta = known.some((item) => item.metadata.characterId === character.characterId);
       if (!yaEsta) {
-        const character = (await context.characters.list(context.vault)).find(
-          (entry) => entry.characterId === characterId,
-        );
-        if (character?.avatarObjectKey != null) {
-          try {
-            const bytes = await context.characters.readAvatar(
-              context.vault,
-              character.avatarObjectKey,
-            );
-            await context.privateMedia.add(context.vault, conversationId, bytes, {
-              mimeType: 'image/webp',
-              displayName: 'foto de perfil',
-              prompt: 'su foto de perfil',
-              width: null,
-              height: null,
-              durationMs: null,
-              characterId,
-              provider: 'xavira',
-              model: null,
-            });
-          } catch {
-            // sin avatar se sigue: no vale perder el turno por una foto
-          }
+        try {
+          const bytes = await context.characters.readAvatar(
+            context.vault,
+            character.avatarObjectKey,
+          );
+          await context.privateMedia.add(context.vault, conversationId, bytes, {
+            mimeType: 'image/webp',
+            displayName: 'foto de perfil',
+            prompt: 'su foto de perfil',
+            width: null,
+            height: null,
+            durationMs: null,
+            characterId: character.characterId,
+            provider: 'xavira',
+            model: null,
+          });
+        } catch {
+          // sin avatar se sigue: no vale perder el turno por una foto
         }
       }
     }
 
-    // solo se le ofrece generar si de verdad se puede: sin personaje o sin
-    // clave, ofrecerselo garantiza una promesa incumplida en cada turno
-    const canGenerateImage =
-      characterId !== null &&
-      characterId.length > 0 &&
-      context.secretStore.get(VAULT_MEDIA_API_SECRET) !== undefined;
+    // solo se le ofrece generar si de verdad se puede: sin personaje conocido o
+    // sin clave, ofrecerselo garantiza una promesa incumplida en cada turno
+    const imageBlock = imageBlockReason({
+      characterId,
+      characterInVault: character !== undefined,
+      hasApiKey: context.secretStore.get(VAULT_MEDIA_API_SECRET) !== undefined,
+    });
+    const canGenerateImage = imageBlock === null;
 
     await store.appendTurn(context.vault, conversationId, {
       role: 'user',
@@ -1295,6 +1320,9 @@ export function registerIpcHandlers(context: HandlerContext): void {
     // modelo decia que no podia
     context.log('turno privado', {
       conPersonaje: characterId !== null && characterId.length > 0,
+      // la diferencia entre estos dos es exactamente el fallo que costo una
+      // tarde: un personaje fijado que la boveda no conoce
+      personajeEnBoveda: character !== undefined,
       puedeGenerar: canGenerateImage,
       imagenesDisponibles: existingImages.length,
     });
@@ -1337,12 +1365,12 @@ export function registerIpcHandlers(context: HandlerContext): void {
       } else if (
         imageRequest.request?.prompt !== undefined &&
         canGenerateImage &&
-        characterId !== null
+        character !== undefined
       ) {
         try {
           const generated = await generatePrivateMedia({
             conversationId,
-            characterId,
+            characterId: character.characterId,
             prompt: imageRequest.request.prompt,
             kind: imageRequest.request.kind,
           });
@@ -1364,10 +1392,9 @@ export function registerIpcHandlers(context: HandlerContext): void {
         image = {
           mediaId: null,
           costCredits: null,
-          error:
-            characterId === null || characterId.length === 0
-              ? 'elige un personaje para esta conversacion antes de pedir imagenes'
-              : 'falta la clave del proveedor de imagenes en Conexiones',
+          // tres motivos distintos con tres arreglos distintos: mezclarlos
+          // mandaba a mirar la clave cuando el problema era el identificador
+          error: IMAGE_BLOCK_MESSAGES[imageBlock ?? 'sin-personaje'],
         };
       }
 

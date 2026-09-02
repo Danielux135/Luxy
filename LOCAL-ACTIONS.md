@@ -1,5 +1,35 @@
 # Luxy — acciones locales de Daniel
 
+## LA-036 — recuperar el personaje y rotar la clave del proveedor
+
+Estado: `pending` — abierta el 2026-09-02.
+
+El `character_id` real se recupero consultando la generacion del avatar. En
+Studio, por este orden:
+
+1. **Personajes → dar de alta uno existente**, con
+   `83cc7f03-5eb3-4d03-833f-56dfbe80cd7d`, modelo `anime-pure-v1` y la
+   descripcion del personaje. **Pega tambien la URL del avatar**:
+   `https://pub-202d3c54d6e442d592b80751c50c9c78.r2.dev/xavira/characters/1788339037320_4a1e227d-89b6-4393-8fe5-cbff8f95ed4c.webp`
+   El avatar que ya hay cifrado pertenece a la ficha del personaje falso, asi
+   que sin esto la ficha nueva se queda sin ninguno y la conversacion no tiene
+   «foto de perfil» que reenviar. La URL es publica y no cuesta creditos.
+2. En la conversacion, **Instrucciones de la conversacion** → cambiar el
+   identificador viejo por el nuevo. Se fija al enviar el siguiente mensaje y la
+   conversacion se conserva entera.
+3. **Olvidar** el personaje falso (`4a1e227d-...`), para que no vuelva a
+   colarse en ninguna conversacion.
+4. **Rotar la clave del proveedor**: revocar `xav_live_4uub...` en su pagina de
+   Profile, mintar otra y guardarla en Conexiones. La vieja paso por el chat y
+   por el historial de PowerShell de este equipo.
+5. Reconstruir y abrir Studio para ver el aviso nuevo: con un identificador que
+   no este en la boveda, el panel debe avisar **antes** de enviar y la
+   conversacion no debe ofrecer imagenes.
+
+Los rasgos originales, por si hiciera falta rehacerlo: `1girl, solo, young
+adult, asian, light skin, medium hair, brown hair, petite, slim body, small
+breasts, blue eyes`.
+
 ## LA-035 — publicar la consolidacion de ramas
 
 Estado: `pending` — abierta el 2026-09-02.

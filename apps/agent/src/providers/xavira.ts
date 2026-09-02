@@ -24,6 +24,15 @@ export class XaviraError extends Error {
     message: string,
     readonly status: number | null = null,
     readonly hint: string | null = null,
+    /**
+     * `error.code` de la API cuando lo trae.
+     *
+     * Es lo unico estable de un error suyo: su propia documentacion pide
+     * decidir por el codigo y nunca por el mensaje.
+     */
+    readonly code: string | null = null,
+    /** referencia con la que su soporte puede buscar esa llamada exacta */
+    readonly requestId: string | null = null,
   ) {
     super(message);
     this.name = 'XaviraError';
@@ -108,6 +117,94 @@ function retryAfterMs(response: Response): number | null {
   return Math.min(seconds, 60) * 1000;
 }
 
+/**
+ * cuerpo de error de la API, tal y como lo documenta.
+ *
+ * Se valida en vez de leerse a mano porque un error tambien es entrada externa,
+ * y porque el unico campo del que depende la interfaz es `error.code`.
+ */
+const errorBodySchema = z.object({
+  error: z
+    .object({
+      code: z.string().max(64).optional(),
+      message: z.string().max(2000).optional(),
+    })
+    .optional(),
+  request_id: z.string().max(64).optional(),
+});
+
+function parseJson(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * traduce un error de la API a algo que se pueda hacer.
+ *
+ * Antes el cuerpo crudo llegaba entero a la pantalla: un JSON con el
+ * `request_id` repetido dos veces que no le dice a nadie que revisar. El caso
+ * que lo motivo fue un `character_not_found`, que ademas es ambiguo a
+ * proposito —la API responde igual para un identificador inventado y para uno
+ * de otra cuenta, y su documentacion dice que no distingue—, asi que el aviso
+ * tiene que mandar a mirar las dos cosas.
+ *
+ * Se mapea por `error.code`, que es lo estable. Sin codigo conocido se conserva
+ * el texto original: un mensaje raro suyo explica mas que un «error» generico.
+ */
+function describeError(
+  status: number,
+  code: string | null,
+  apiMessage: string | null,
+): { message: string; hint: string | null } {
+  switch (code) {
+    case 'character_not_found':
+      return {
+        message: 'ese personaje no existe para la clave configurada',
+        hint: 'revisa su identificador; la API responde igual cuando el personaje es de otra cuenta, asi que comprueba tambien la clave en Conexiones',
+      };
+    case 'character_pending':
+      return {
+        message: 'el personaje todavia se esta creando',
+        hint: 'su avatar sigue generandose; espera unos segundos y vuelve a intentarlo',
+      };
+    case 'generation_not_found':
+      return {
+        message: 'esa generacion no existe para la clave configurada',
+        hint: null,
+      };
+    case 'moderation_blocked':
+      // su documentacion pide enseñar el motivo tal cual: es lo unico que
+      // explica que parte de la peticion sobra
+      return {
+        message: `la moderacion del proveedor bloqueo la peticion${apiMessage === null ? '' : `: ${apiMessage}`}`,
+        hint: 'no se ha cobrado ningun credito',
+      };
+    case 'insufficient_credits':
+      return {
+        message: 'la cuenta se quedo sin creditos',
+        hint: 'recarga creditos en el panel del proveedor antes de volver a pedir',
+      };
+    case 'unauthorized':
+      return {
+        message: 'la clave del proveedor de imagenes no vale',
+        hint: 'comprueba la clave en Conexiones; puede estar revocada',
+      };
+    case 'rate_limited':
+      return {
+        message: 'demasiadas peticiones seguidas',
+        hint: 'espera un momento y vuelve a intentarlo',
+      };
+    default:
+      return {
+        message: `la API respondio ${status}${apiMessage === null ? '' : `: ${apiMessage}`}`,
+        hint: hintForStatus(status),
+      };
+  }
+}
+
 async function call(
   options: XaviraOptions,
   path: string,
@@ -132,12 +229,26 @@ async function call(
 
     if (!response.ok) {
       const text = await response.text().catch(() => '');
+      const parsed = errorBodySchema.safeParse(parseJson(text));
+      const code = parsed.success ? (parsed.data.error?.code ?? null) : null;
+      const requestId = parsed.success ? (parsed.data.request_id ?? null) : null;
+      const apiMessage = parsed.success
+        ? (parsed.data.error?.message ?? null)
+        : text.slice(0, 300);
+
+      const described = describeError(response.status, code, apiMessage);
+      // la referencia va en el mensaje porque es lo unico que convierte «fallo»
+      // en algo que su soporte pueda buscar
+      const reference = requestId === null ? '' : ` (referencia ${requestId})`;
+
       throw new XaviraError(
         // dos capas: la clave propia de esta llamada y el resto de secretos
         // que el proceso tenga registrados
-        redact(stripKey(`la API respondio ${response.status}: ${text.slice(0, 300)}`, options.apiKey)),
+        redact(stripKey(`${described.message}${reference}`, options.apiKey)),
         response.status,
-        hintForStatus(response.status),
+        described.hint,
+        code,
+        requestId,
       );
     }
     return { response, body: await response.json() };

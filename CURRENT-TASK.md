@@ -1,5 +1,41 @@
 # Luxy — tarea activa
 
+## BUG-VAULT-CHARACTER-001 — un personaje que la boveda no conoce
+
+Estado: **`done` — Claude, 2026-09-02. Sin commit.** Queda `LA-036`, que es
+trabajo de Daniel en la aplicacion, no codigo.
+
+Pedir una foto nueva en una conversacion privada devolvia el JSON crudo de la
+API. El identificador del personaje era falso: se creo el personaje el 02/09 a
+las 08:50:37 UTC, Luxy no guardo su `character_id` —eso ya se arreglo en su dia—
+y despues se dio de alta a mano el UUID que aparece en la ruta del avatar, que
+no identifica a nadie.
+
+Recuperado con `GET /v1/generations/036edeab-bbc6-46b5-8047-7f91faf49883`, que
+devuelve `character_id` y no cuesta creditos. El bueno es
+**`83cc7f03-5eb3-4d03-833f-56dfbe80cd7d`**, modelo `anime-pure-v1`.
+
+Lo que se corrigio en el codigo, que es lo que convirtio un dato equivocado en
+un misterio:
+
+1. `xavira.ts` traduce `error.code` a un mensaje y una pista accionables, y
+   conserva `code` y `requestId`. El 404 dice ahora que revise el identificador
+   **y** la clave, porque la API responde igual para un personaje inventado y
+   para uno de otra cuenta, y su documentacion dice que no distingue.
+2. `imageBlockReason` (`apps/desktop/src/shared/vault-image-capability.ts`)
+   decide si se puede generar. Exige que el personaje este en la boveda, no solo
+   que el campo tenga texto. La usan el proceso principal y la pantalla: escrita
+   dos veces, una de las dos se queda atras.
+3. El alta manual exige el UUID del proveedor. No atrapa un UUID equivocado
+   —para eso esta el aviso—, pero si todo lo que se copia de una URL.
+
+`npm run check` en verde: 122 archivos, 2.116 superadas, 9 omitidas.
+
+**No visto en pantalla.** Las pruebas fijan la regla; nadie ha abierto Studio
+todavia. Ver `LA-036`.
+
+---
+
 ## BUG-GIT-IDENTITY-001 — identidad de Git de respaldo al confirmar un worktree
 
 Estado: **`done` — Claude, 2026-09-01. Sin commit.**

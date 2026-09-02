@@ -1,5 +1,23 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-02 — Windows 11 (equipo `oscar`) — BUG-VAULT-CHARACTER-001
+
+- **`npm run lint`, `npm run typecheck`, `npm test` y `npm run build`: los
+  cuatro exit 0.** Suite: **122 archivos, 2.116 superadas, 9 omitidas, 0
+  fallos** (antes: 120 archivos, 2.093 superadas).
+- Pruebas nuevas: seis en `vault-image-capability.test.ts` (orden de los
+  motivos: un personaje desconocido se dice antes que una clave que falta,
+  porque arreglar la clave no arreglaria nada); cinco en `xavira.test.ts`
+  (`character_not_found` explicado y sin JSON crudo, `request_id` conservado,
+  moderacion mostrada tal cual, codigo desconocido que conserva el texto
+  original, cuerpo que no es JSON); una en `ipc.test.ts` (el alta manual exige
+  UUID y rechaza justo lo que se pego aquel dia).
+- Sin red y sin creditos: `xavira.test.ts` sigue mockeando el transporte y su
+  prueba «ninguna prueba de este archivo usa fetch de verdad» sigue en verde.
+- **No verificado en pantalla.** El aviso nuevo de Vault.tsx y los tres mensajes
+  de `handlers.ts` estan implementados y cubiertos por la regla que usan, pero
+  la aplicacion no se ha reconstruido ni abierto: ver `LA-036`.
+
 ### 2026-09-02 — Windows 11 (equipo `oscar`) — F9.29
 
 - Primera focalizada: **118 superadas, 1 fallida**. La aserción detectó que el

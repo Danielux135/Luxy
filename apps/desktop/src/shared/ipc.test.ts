@@ -16,6 +16,7 @@ import {
   connectionTestArgsSchema,
   configSaveArgsSchema,
   secretNameSchema,
+  vaultCharacterImportArgsSchema,
   worktreeOpenFolderArgsSchema,
   studioJobActionArgsSchema,
   studioJobsListArgsSchema,
@@ -81,6 +82,28 @@ describe('validacion de argumentos', () => {
     expect(studioJobsListArgsSchema.safeParse({ projectAlias: '../otro' }).success).toBe(false);
     expect(studioJobsListArgsSchema.safeParse({ limit: 101, offset: 0 }).success).toBe(false);
     expect(studioJobsListArgsSchema.safeParse({ limit: 100, offset: -1 }).success).toBe(false);
+  });
+
+  it('el alta manual de un personaje exige el UUID del proveedor', () => {
+    // lo que motivo la comprobacion: se dio de alta un identificador sacado de
+    // la ruta de la URL del avatar, y el fallo no aparecio hasta tres pantallas
+    // despues, dentro de una conversacion y con la foto ya prometida
+    expect(
+      vaultCharacterImportArgsSchema.safeParse({
+        characterId: '83cc7f03-5eb3-4d03-833f-56dfbe80cd7d',
+      }).success,
+    ).toBe(true);
+
+    for (const invalido of [
+      '1788339037320_4a1e227d-89b6-4393-8fe5-cbff8f95ed4c',
+      'https://pub-abc.r2.dev/xavira/characters/x.webp',
+      '036edeab',
+      '',
+    ]) {
+      expect(vaultCharacterImportArgsSchema.safeParse({ characterId: invalido }).success).toBe(
+        false,
+      );
+    }
   });
 
   it('acota la longitud de los textos que llegan del renderer', () => {

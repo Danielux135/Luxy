@@ -376,9 +376,112 @@ describe('errores', () => {
     }
   });
 
+  it('un personaje que la API no reconoce se explica, no se vuelca', async () => {
+    // el cuerpo real del 2026-09-02, que llegaba entero a la pantalla
+    const { impl } = fakeFetch([
+      {
+        status: 404,
+        body: {
+          error: {
+            code: 'character_not_found',
+            message: 'character 4a1e227d-89b6-4393-8fe5-cbff8f95ed4c does not exist',
+            request_id: '01M1H6ZJWYMBF771AWEBERJMK5',
+          },
+          request_id: '01M1H6ZJWYMBF771AWEBERJMK5',
+        },
+      },
+    ]);
+
+    const error = await generateImage({ characterId: 'c', prompt: 'p' }, options(impl)).catch(
+      (e: unknown) => e as XaviraError,
+    );
+
+    expect(error.code).toBe('character_not_found');
+    expect(error.status).toBe(404);
+    expect(error.message).toContain('ese personaje no existe para la clave configurada');
+    // la API responde igual para un identificador inventado y para uno de otra
+    // cuenta, asi que el aviso tiene que mandar a mirar las dos cosas
+    expect(error.hint).toContain('identificador');
+    expect(error.hint).toContain('Conexiones');
+    // y nada de JSON crudo delante del usuario
+    expect(error.message).not.toContain('does not exist');
+    expect(error.message).not.toContain('{');
+  });
+
+  it('conserva la referencia con la que se puede preguntar a su soporte', async () => {
+    const { impl } = fakeFetch([
+      {
+        status: 404,
+        body: {
+          error: { code: 'character_not_found' },
+          request_id: '01M1H6ZJWYMBF771AWEBERJMK5',
+        },
+      },
+    ]);
+
+    const error = await generateImage({ characterId: 'c', prompt: 'p' }, options(impl)).catch(
+      (e: unknown) => e as XaviraError,
+    );
+
+    expect(error.requestId).toBe('01M1H6ZJWYMBF771AWEBERJMK5');
+    expect(error.message).toContain('01M1H6ZJWYMBF771AWEBERJMK5');
+  });
+
+  it('un bloqueo de moderacion enseña el motivo tal cual', async () => {
+    // su documentacion lo pide: es lo unico que dice que parte del texto sobra
+    const { impl } = fakeFetch([
+      {
+        status: 422,
+        body: {
+          error: {
+            code: 'moderation_blocked',
+            message: 'Blocked: prompt contains restricted content (category=minors)',
+          },
+        },
+      },
+    ]);
+
+    const error = await generateImage({ characterId: 'c', prompt: 'p' }, options(impl)).catch(
+      (e: unknown) => e as XaviraError,
+    );
+
+    expect(error.message).toContain('category=minors');
+    expect(error.hint).toContain('credito');
+  });
+
+  it('un codigo que no conocemos conserva el texto original de la API', async () => {
+    // inventarse una traduccion para algo nuevo diria menos que su propio texto
+    const { impl } = fakeFetch([
+      { status: 418, body: { error: { code: 'codigo_futuro', message: 'algo nuevo' } } },
+    ]);
+
+    const error = await generateImage({ characterId: 'c', prompt: 'p' }, options(impl)).catch(
+      (e: unknown) => e as XaviraError,
+    );
+
+    expect(error.message).toContain('418');
+    expect(error.message).toContain('algo nuevo');
+    expect(error.code).toBe('codigo_futuro');
+  });
+
+  it('un cuerpo que no es JSON no rompe el manejo del error', async () => {
+    const impl = (async () =>
+      new Response('<html>502 Bad Gateway</html>', { status: 502 })) as unknown as typeof fetch;
+
+    const error = await generateImage({ characterId: 'c', prompt: 'p' }, options(impl)).catch(
+      (e: unknown) => e as XaviraError,
+    );
+
+    expect(error.status).toBe(502);
+    expect(error.code).toBeNull();
+    expect(error.message).toContain('502');
+  });
+
   it('la clave nunca aparece en el mensaje de error', async () => {
     // un cuerpo de error que repitiera la clave la filtraria al log
-    const { impl } = fakeFetch([{ status: 400, body: { message: `clave ${KEY} invalida` } }]);
+    const { impl } = fakeFetch([
+      { status: 400, body: { error: { message: `clave ${KEY} invalida` } } },
+    ]);
     const error = await generateImage({ characterId: 'c', prompt: 'p' }, options(impl)).catch(
       (e: unknown) => e as XaviraError,
     );

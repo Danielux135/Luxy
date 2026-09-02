@@ -1,5 +1,37 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-09-02 17:10 — Claude — BUG-VAULT-CHARACTER-001
+
+- Sintoma: en una conversacion privada, al pedir una foto nueva, la pantalla
+  volcaba el JSON crudo de la API —`404 {"error":{"code":"character_not_found"
+  ...}}` con el `request_id` repetido dos veces— y el texto se guardaba igual.
+- Causa real, confirmada contra la API con la clave del usuario: el personaje se
+  creo el 02/09 a las 08:50:37 UTC y Luxy no guardo su `character_id`; despues
+  se dio de alta a mano un UUID sacado de la ruta del avatar
+  (`.../characters/1788339037320_4a1e227d-...webp`), que no es ningun personaje.
+  `GET /v1/generations/036edeab-bbc6-46b5-8047-7f91faf49883` devolvio el real:
+  `83cc7f03-5eb3-4d03-833f-56dfbe80cd7d`. Ningun credito gastado.
+- Fallos propios que convirtieron un identificador equivocado en un misterio:
+  `hintForStatus` no cubria el 404, `canGenerateImage` solo miraba que el campo
+  no estuviera vacio, y el alta manual aceptaba cualquier cadena.
+- Archivos modificados: `apps/agent/src/providers/xavira.ts` (mapeo de
+  `error.code` a mensaje y pista, `code` y `requestId` en `XaviraError`),
+  `apps/desktop/src/shared/vault-image-capability.ts` (nuevo, regla compartida),
+  `apps/desktop/src/main/ipc/handlers.ts` (el personaje debe estar en la boveda;
+  tres mensajes distintos; `personajeEnBoveda` en el log),
+  `apps/desktop/src/renderer/pages/Vault.tsx` (aviso antes de enviar),
+  `apps/desktop/src/shared/ipc.ts` (el alta manual exige UUID).
+- Pruebas: 3 archivos nuevos o ampliados, 12 pruebas nuevas.
+  `npm run lint`, `npm run typecheck`, `npm test` y `npm run build`: los cuatro
+  exit 0. Suite: **122 archivos, 2.116 superadas, 9 omitidas, 0 fallos**.
+- Riesgo: el cambio de `handlers.ts` no tiene prueba propia —ese archivo no
+  tiene banco de pruebas, necesita Electron—; lo que si esta cubierto es la
+  regla que ahora usa, extraida a `vault-image-capability.ts`. La pantalla no se
+  ha abierto todavia: esta implementado y comprobado por pruebas, no visto.
+- Siguiente paso exacto: `LA-036` — dar de alta `83cc7f03-...` en Personajes,
+  cambiar el identificador de la conversacion, borrar el personaje falso y rotar
+  la clave `xav_live_4uub...`, que paso por el chat.
+
 ### 2026-09-02 15:30 — Claude — GIT-CONSOLIDACION-001
 
 - Estado anterior: siete ramas (`main`, `luxy/f9-1-vault-crypto`,
