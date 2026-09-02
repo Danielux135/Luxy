@@ -2,7 +2,7 @@
 
 ## LA-032 — publicar la rama de la bóveda
 
-Estado: `pending` — 2026-09-01. **Commits hechos; el push falta.**
+Estado: `done` — 2026-09-01. Commits hechos y **rama publicada**.
 
 Daniel pidió «haz commit y push». Es la autorización que exige `CLAUDE.md` para
 publicar; queda registrada aquí porque no se generaliza a la próxima vez.
@@ -16,14 +16,23 @@ Llevan la identidad `Daniel <danielux135@gmail.com>` pasada con `git -c`, porque
 este equipo sigue sin identidad global (`LA-030`). No se escribió configuración
 global: eso sigue siendo decisión de Daniel.
 
-**Falta el push.** `git push` fue **denegado por el sistema de permisos de la
-sesión de IA, sin mostrar diálogo**, exactamente igual que en `LA-028` y
-`LA-030`. No es que falte autorización de Daniel: la dio. Hay que ejecutarlo
+**El push lo hizo Daniel a mano.** `git push` desde la sesión de IA fue
+**denegado por el sistema de permisos, sin mostrar diálogo**, exactamente igual
+que en `LA-028` y `LA-030`; no faltaba su autorización, la había dado. Lo lanzó
 desde una terminal fuera de la sesión:
 
 ```powershell
 git push -u origin luxy/f9-1-vault-crypto
 ```
+
+Verificado después contra el remoto: `origin/luxy/f9-1-vault-crypto` está en
+`b12a5ec`, el mismo HEAD local; `origin/main` sigue en `00a9cc1`, sin tocar; y
+ningún archivo sensible (`.env`, `.dev.vars`, `wrangler.toml`, `config.json`,
+`vault.json`) aparece rastreado en ningún commit de la rama.
+
+**Patrón que conviene recordar:** el `git push` de esta sesión de IA se deniega
+solo, sin diálogo. No hay que insistir ni buscar el fallo en la autorización:
+se lanza desde una terminal y ya está.
 
 Sobre lo que se publica: **no se toca `main`** y no hay merge; la rama sigue
 aislada, como todo el bloque `F9`. Es código y documentación, ningún secreto —
