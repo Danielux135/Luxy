@@ -330,6 +330,13 @@ export const vaultConversationReadResultSchema = z.object({
   instructions: z.string().nullable(),
   characterId: z.string().nullable(),
   characterDescription: z.string().nullable(),
+  /**
+   * proveedor del ultimo turno; `null` en una conversacion sin turnos.
+   *
+   * La pantalla lo preselecciona al abrirla. Sin esto el proveedor vivia solo
+   * en memoria de la ventana y un reinicio lo devolvia al primero de la lista.
+   */
+  provider: z.string().nullable(),
 });
 
 export const vaultConversationSendResultSchema = z.object({
@@ -339,6 +346,8 @@ export const vaultConversationSendResultSchema = z.object({
   instructions: z.string().nullable(),
   characterId: z.string().nullable(),
   characterDescription: z.string().nullable(),
+  /** proveedor con el que se respondio; queda fijado para la conversacion */
+  provider: z.string().nullable(),
   /**
    * la imagen que el modelo pidio en este turno, si pidio alguna.
    *

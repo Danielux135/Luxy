@@ -463,8 +463,9 @@ export function useVault(): VaultController {
   const openConversation = useCallback(
     async (conversationId: string | null): Promise<void> => {
       setOpenConversationId(conversationId);
-      // los borradores pertenecen a la conversacion en la que se escribieron;
-      // el proveedor y el proyecto son preferencias y se conservan
+      // los borradores pertenecen a la conversacion en la que se escribieron.
+      // El proyecto es preferencia y se conserva; el proveedor lo trae la propia
+      // conversacion unas lineas mas abajo, porque pertenece a ella
       setComposerState((previous) => ({ ...previous, ...EMPTY_DRAFT }));
       if (conversationId === null) {
         setTurns([]);
@@ -482,6 +483,12 @@ export function useVault(): VaultController {
         setInstructions(result.value.instructions);
         setCharacterId(result.value.characterId);
         setCharacterDescription(result.value.characterDescription);
+        // el proveedor pertenece a la conversacion, no a la ventana: viene
+        // sellado con su ultimo turno y por eso sobrevive a reiniciar Studio.
+        // Sin turnos todavia se conserva el que estuviera elegido
+        if (result.value.provider !== null) {
+          setComposerState((previous) => ({ ...previous, provider: result.value.provider }));
+        }
       }
       // el resultado de una imagen pertenece al turno que la pidio, no a la
       // conversacion: al cambiar de hilo deja de tener sentido
@@ -568,6 +575,9 @@ export function useVault(): VaultController {
         setInstructions(result.value.instructions);
         setCharacterId(result.value.characterId);
         setCharacterDescription(result.value.characterDescription);
+        if (result.value.provider !== null) {
+          setComposerState((previous) => ({ ...previous, provider: result.value.provider }));
+        }
         setLastImage(result.value.image);
         // lo generado en este turno se guarda contra la conversacion: recargar
         // los medios es lo que hace que la imagen aparezca sin recargar nada

@@ -172,6 +172,11 @@ export function buildVaultImageInstruction(
       'Esa linea es TODO lo que sabes de cada imagen: NO las ves. Puedes comentarlas y darlas por',
       'ciertas, pero no añadas ningun detalle visual que no este escrito ahi —colores, formas,',
       'gestos, ropa, que hay al fondo—. Si te falta algo para responder, preguntalo; no lo supongas.',
+      // sin esto el arreglo dura un turno: el detalle inventado entra en la
+      // memoria acumulativa, vuelve marcado como hecho y desde ahi genera mas
+      'Esta lista MANDA sobre la memoria. Si recuerdas un detalle de una imagen que no aparece en su',
+      'linea, no lo des por visto: pudo inventarlo un turno anterior. La memoria recuerda lo que se',
+      'dijo, no lo que se vio.',
     );
   }
 

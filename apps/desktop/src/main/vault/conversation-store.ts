@@ -224,6 +224,28 @@ export class PrivateConversationStore {
   }
 
   /**
+   * proveedor con el que se hablo por ultima vez en esta conversacion.
+   *
+   * Mismo criterio que los demas `latest*`: hacia atras y vale el primero que
+   * aparezca. Existe porque el proveedor vivia solo en memoria de la ventana:
+   * al reiniciar Studio volvia al primero de la lista, y una conversacion de
+   * roleplay acababa enviada a un modelo que la rechaza. El dato ya se sellaba
+   * con cada turno; lo unico que faltaba era leerlo.
+   */
+  async latestProvider(
+    vault: VaultService,
+    conversationId: string,
+  ): Promise<string | null> {
+    const records = this.readRecords(conversationId);
+    for (let index = records.length - 1; index >= 0; index -= 1) {
+      const opened = await openTurn(vault, records[index]!);
+      if (opened.turn.provider === null) continue;
+      return opened.turn.provider.length === 0 ? null : opened.turn.provider;
+    }
+    return null;
+  }
+
+  /**
    * personaje en vigor, leido del ultimo turno que lo llevaba.
    *
    * Mismo criterio que `latestInstructions`: hacia atras y vale el primero que

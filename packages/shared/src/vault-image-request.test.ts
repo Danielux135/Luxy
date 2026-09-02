@@ -217,6 +217,20 @@ describe('la herramienta solo se ofrece cuando existe', () => {
     expect(instruction).toContain('preguntalo; no lo supongas');
   });
 
+  it('la lista manda sobre la memoria, porque la memoria se contamina', () => {
+    // paso de verdad, y es el mecanismo importante: el detalle inventado en un
+    // turno («una oreja doblada») entro en la memoria acumulativa, volvio
+    // marcado como hecho y en el turno siguiente genero mas —ojos amarillos,
+    // la cola enroscada—. Una alucinacion que llega a la memoria se blanquea
+    const instruction = buildVaultImageInstruction([
+      { mediaId: 'med-1', description: 'gata blanca con manchas marrones y negras' },
+    ]);
+
+    expect(instruction).toContain('Esta lista MANDA sobre la memoria');
+    expect(instruction).toContain('no lo des por visto');
+    expect(instruction).toContain('La memoria recuerda lo que se');
+  });
+
   it('sin imagenes que listar no se le advierte de nada', () => {
     // la advertencia acompaña a la lista: sin lista no hay nada que inventar y
     // solo seria ruido en el prompt

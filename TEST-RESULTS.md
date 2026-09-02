@@ -1,5 +1,24 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-02 — dos fallos mas, encontrados probando en la aplicacion
+
+- **El proveedor no sobrevivia al reinicio.** El arreglo anterior lo subio a
+  `useVault`, que vive lo que vive la ventana: cerrar Studio lo perdia igual. El
+  dato ya se sellaba con cada turno en la boveda y nunca se leia de vuelta.
+  Añadido `latestProvider` en `conversation-store.ts`, devuelto al abrir y al
+  enviar, y preseleccionado en la pantalla: el proveedor pasa a ser propiedad de
+  la conversacion, como las instrucciones y el personaje.
+- **Una alucinacion entra en la memoria y se convierte en hecho.** El detalle
+  inventado del turno anterior («una oreja doblada») viajo a la memoria
+  acumulativa, volvio marcado como hecho y en el turno siguiente genero mas:
+  ojos amarillos, la cola enroscada. La advertencia añadida antes no bastaba
+  porque solo hablaba de la lista, y la memoria decia lo contrario. Ahora la
+  lista MANDA sobre la memoria de forma explicita.
+- **`npm run check`: exit 0. 122 archivos, 2.130 superadas, 9 omitidas.**
+- **Sin verificar:** que el proveedor sobreviva de verdad a un reinicio, y que
+  la memoria ya contaminada de esa conversacion se pueda corregir. El texto
+  nuevo evita que se contamine mas; no limpia lo que ya hay dentro.
+
 ### 2026-09-02 — comprobacion manual en la aplicacion — D-056
 
 Primera evidencia real del cambio de prompt, aportada por Daniel tras reiniciar

@@ -831,6 +831,10 @@ export function registerIpcHandlers(context: HandlerContext): void {
     ),
     conversationId: args.conversationId,
     turns: await context.privateConversations.read(context.vault, args.conversationId),
+    provider: await context.privateConversations.latestProvider(
+      context.vault,
+      args.conversationId,
+    ),
   }));
 
   handle(IPC_INVOKE.vaultConversationDelete, vaultConversationIdArgsSchema, async (args) => {
@@ -1441,6 +1445,7 @@ export function registerIpcHandlers(context: HandlerContext): void {
       instructions: await store.latestInstructions(context.vault, conversationId),
       characterId: await store.latestCharacterId(context.vault, conversationId),
       characterDescription: await store.latestCharacterDescription(context.vault, conversationId),
+      provider: args.provider,
       image,
       error: result.error,
     };
