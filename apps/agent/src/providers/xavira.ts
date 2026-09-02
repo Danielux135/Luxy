@@ -64,6 +64,14 @@ const generationSchema = z.object({
 
 const characterSchema = z.object({
   character_id: z.string().min(1).max(128),
+  /**
+   * avatar base recien generado.
+   *
+   * Se captura porque es lo unico visual que devuelve la creacion, y se pago
+   * con ella. Descartarlo obligaba a generar otra imagen para ver a quien
+   * acabas de crear. Es `null` en la respuesta asincrona, que aun no lo tiene.
+   */
+  avatar_url: z.string().url().nullable().optional(),
 });
 
 export interface Generation {
@@ -244,11 +252,17 @@ export interface CreateCharacterRequest {
   name?: string;
 }
 
-/** crea un personaje persistente y devuelve su identificador */
+export interface CreatedCharacter {
+  characterId: string;
+  /** avatar base; null si la API aun no lo tenia listo */
+  avatarUrl: string | null;
+}
+
+/** crea un personaje persistente y devuelve su identificador y su avatar */
 export async function createCharacter(
   request: CreateCharacterRequest,
   options: XaviraOptions,
-): Promise<string> {
+): Promise<CreatedCharacter> {
   // `wait` se deja en su valor por defecto (true): la API tarda 8-16 s en
   // renderizar el avatar y lo corta a 26, muy por debajo de nuestro tope de
   // 120 s. El modo asincrono existe para proxies con timeouts cortos, que aqui
@@ -266,7 +280,10 @@ export async function createCharacter(
 
   const parsed = characterSchema.safeParse(body);
   if (!parsed.success) throw new XaviraError('la respuesta del personaje no tiene el formato esperado');
-  return parsed.data.character_id;
+  return {
+    characterId: parsed.data.character_id,
+    avatarUrl: parsed.data.avatar_url ?? null,
+  };
 }
 
 export interface ImageRequest {

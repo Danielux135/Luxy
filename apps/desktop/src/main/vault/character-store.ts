@@ -16,8 +16,10 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
-import { openText, sealText, wipe, type SealedEnvelope } from '@luxy/vault-crypto';
+import { openBlob, openText, sealBlob, sealText, wipe, type SealedEnvelope } from '@luxy/vault-crypto';
 import { VaultError, type VaultService } from './vault-service.js';
+import { randomObjectKey } from './private-store.js';
+import type { BlobStore } from './blob-store.js';
 
 export function charactersFilePath(configDirectory: string): string {
   return join(configDirectory, 'vault', 'characters.json');
@@ -32,6 +34,14 @@ export const vaultCharacterSchema = z.object({
   description: z.string().max(2000),
   /** etiqueta que pone el usuario para reconocerlo */
   label: z.string().max(100),
+  /**
+   * avatar base, cifrado en el almacen de objetos.
+   *
+   * Se guarda porque se pago con la creacion y es lo unico visual que la
+   * identifica: sin el habia que generar otra imagen para ver a quien acabas de
+   * crear. `null` si no se pudo descargar.
+   */
+  avatarObjectKey: z.string().regex(/^[0-9a-f]{32}$/).nullable().default(null),
   createdAt: z.string().datetime(),
 });
 export type VaultCharacter = z.infer<typeof vaultCharacterSchema>;
@@ -60,7 +70,38 @@ const listPayloadSchema = z.object({
  * escritura atomica, para que un corte no deje la lista ilegible.
  */
 export class VaultCharacterStore {
-  constructor(private readonly file: string) {}
+  constructor(
+    private readonly file: string,
+    private readonly blobs: BlobStore,
+  ) {}
+
+  /**
+   * guarda el avatar cifrado y devuelve su clave opaca.
+   *
+   * Los bytes entran en claro y salen cifrados aqui dentro, como en el almacen
+   * de medios: en ningun momento existe una copia sin cifrar en disco.
+   */
+  async saveAvatar(vault: VaultService, bytes: Uint8Array): Promise<string> {
+    if (bytes.length === 0) throw new VaultError('el avatar esta vacio');
+    const objectKey = randomObjectKey();
+    const key = vault.subkeyFor('identity', `avatar:${objectKey}`);
+    try {
+      await this.blobs.put(objectKey, await sealBlob(key, 'vault.identity', bytes));
+      return objectKey;
+    } finally {
+      wipe(key);
+    }
+  }
+
+  /** devuelve los bytes descifrados del avatar, en memoria */
+  async readAvatar(vault: VaultService, objectKey: string): Promise<Uint8Array> {
+    const key = vault.subkeyFor('identity', `avatar:${objectKey}`);
+    try {
+      return await openBlob(key, 'vault.identity', await this.blobs.get(objectKey));
+    } finally {
+      wipe(key);
+    }
+  }
 
   async list(vault: VaultService): Promise<VaultCharacter[]> {
     if (!existsSync(this.file)) return [];

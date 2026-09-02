@@ -57,6 +57,7 @@ import {
   vaultMediaGenerateArgsSchema,
   vaultCharacterCreateArgsSchema,
   vaultCharacterForgetArgsSchema,
+  vaultCharacterImportArgsSchema,
   VAULT_PREVIEW_MAX_BYTES,
   vaultAccountArgsSchema,
   vaultAccountLoginArgsSchema,
@@ -931,7 +932,7 @@ export function registerIpcHandlers(context: HandlerContext): void {
 
     const controller = new AbortController();
     try {
-      const characterId = await createCharacter(
+      const created = await createCharacter(
         {
           modelId: args.modelId,
           traits: args.traits,
@@ -942,24 +943,95 @@ export function registerIpcHandlers(context: HandlerContext): void {
         mediaProviderOptions(controller.signal),
       );
 
+      // el avatar se pago con la creacion y es lo unico visual que identifica al
+      // personaje. Se descarga y se cifra aqui; si falla, no se pierde el
+      // personaje por ello: se guarda igual sin avatar
+      let avatarObjectKey: string | null = null;
+      if (created.avatarUrl !== null) {
+        try {
+          const avatar = await downloadOutput(
+            created.avatarUrl,
+            mediaProviderOptions(controller.signal),
+          );
+          avatarObjectKey = await context.characters.saveAvatar(context.vault, avatar.bytes);
+        } catch {
+          // un avatar que no se pudo bajar no vale perder el identificador
+        }
+      }
+
       // se guarda AQUI MISMO, antes de devolver nada. Crear un personaje cuesta
       // creditos, su identificador solo llega una vez y la API no sabe
       // listarlos: si no se guarda en este instante, se paga y se pierde
       const characters = await context.characters.add(context.vault, {
-        characterId,
+        characterId: created.characterId,
         modelId: args.modelId,
         description: args.description,
         label: args.label.trim(),
+        avatarObjectKey,
         createdAt: new Date().toISOString(),
       });
 
       // los rasgos elegidos no se registran: describen a una persona
       context.log('personaje creado', { modelId: args.modelId });
-      return { characterId, characters };
+      return { characterId: created.characterId, characters };
     } catch (error) {
       if (error instanceof XaviraError) throw new VaultError(error.message, error.hint);
       throw error;
     }
+  });
+
+  /**
+   * da de alta un personaje que YA existe en el proveedor.
+   *
+   * Hace falta porque la API no sabe listarlos: quien tenga un identificador de
+   * antes —o lo recupere de la URL de su avatar— no tiene otra via de meterlo
+   * en Luxy, y crear otro cuesta creditos.
+   *
+   * Si se aporta la URL del avatar, se descarga y se cifra aqui. La URL es
+   * publica y ya existia; lo que hace Luxy es traerse una copia propia.
+   */
+  handle(IPC_INVOKE.vaultCharacterImport, vaultCharacterImportArgsSchema, async (args) => {
+    if (!context.vault.isUnlocked()) throw new VaultError('la boveda esta bloqueada');
+
+    let avatarObjectKey: string | null = null;
+    if (args.avatarUrl.length > 0) {
+      const controller = new AbortController();
+      try {
+        const avatar = await downloadOutput(
+          args.avatarUrl,
+          mediaProviderOptions(controller.signal),
+        );
+        avatarObjectKey = await context.characters.saveAvatar(context.vault, avatar.bytes);
+      } catch (error) {
+        // se dice, no se traga: el usuario pego una URL y espera saber si valio
+        if (error instanceof XaviraError) throw new VaultError(error.message, error.hint);
+        throw error;
+      }
+    }
+
+    const characters = await context.characters.add(context.vault, {
+      characterId: args.characterId.trim(),
+      modelId: args.modelId,
+      description: args.description,
+      label: args.label.trim(),
+      avatarObjectKey,
+      createdAt: new Date().toISOString(),
+    });
+    context.log('personaje dado de alta', { modelId: args.modelId });
+    return { characters };
+  });
+
+  /** avatar descifrado, para enseñarlo. Nunca se escribe sin cifrar en disco */
+  handle(IPC_INVOKE.vaultCharacterAvatar, vaultCharacterForgetArgsSchema, async (args) => {
+    const character = (await context.characters.list(context.vault)).find(
+      (entry) => entry.characterId === args.characterId,
+    );
+    if (character?.avatarObjectKey == null) return { dataUrl: null };
+
+    const bytes = await context.characters.readAvatar(context.vault, character.avatarObjectKey);
+    return {
+      dataUrl: `data:image/webp;base64,${Buffer.from(bytes).toString('base64')}`,
+    };
   });
 
   handle(IPC_INVOKE.vaultCharacterList, emptyArgsSchema, async () => ({

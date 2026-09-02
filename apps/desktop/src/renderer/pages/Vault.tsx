@@ -549,6 +549,96 @@ function TraitField({
 }
 
 /**
+ * dar de alta un personaje que ya existe en el proveedor.
+ *
+ * Existe porque la API **no sabe listar personajes**: quien tenga un
+ * identificador de antes —o lo saque de la URL de su avatar— no tiene otra
+ * forma de meterlo en Luxy, y crear otro cuesta creditos.
+ */
+function ImportCharacterForm({
+  vault,
+  onImported,
+}: {
+  vault: VaultController;
+  onImported: () => void;
+}): JSX.Element {
+  const [characterId, setCharacterId] = useState('');
+  const [label, setLabel] = useState('');
+  const [description, setDescription] = useState('');
+  const [avatarUrl, setAvatarUrl] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  return (
+    <>
+      <Field
+        label="Identificador del personaje"
+        hint="Si sólo tienes la URL de su avatar, el identificador es el uuid del nombre del archivo."
+      >
+        <input
+          value={characterId}
+          placeholder="4a1e227d-89b6-4393-8fe5-cbff8f95ed4c"
+          disabled={busy}
+          onChange={(event) => setCharacterId(event.target.value)}
+        />
+      </Field>
+      <Field label="Nombre">
+        <input value={label} disabled={busy} onChange={(event) => setLabel(event.target.value)} />
+      </Field>
+      <Field
+        label="Quién es"
+        hint="Lo lee el modelo para encarnarlo. Sin esto responderá como un asistente."
+      >
+        <textarea
+          rows={2}
+          value={description}
+          disabled={busy}
+          placeholder="Rasgos: género: mujer, edad: 23-29, color del pelo: rubio."
+          onChange={(event) => setDescription(event.target.value)}
+        />
+      </Field>
+      <Field
+        label="URL del avatar (opcional)"
+        hint="Se descarga y se guarda cifrada aquí. La URL ya era pública; Luxy sólo se trae una copia."
+      >
+        <input
+          value={avatarUrl}
+          disabled={busy}
+          onChange={(event) => setAvatarUrl(event.target.value)}
+        />
+      </Field>
+      <div className="row">
+        <button
+          className="btn btn--primary"
+          disabled={busy || characterId.trim().length === 0}
+          onClick={() => {
+            setBusy(true);
+            void vault
+              .importCharacter({
+                characterId: characterId.trim(),
+                modelId: 'realistic-sharp-v1',
+                label: label.trim(),
+                description: description.trim(),
+                avatarUrl: avatarUrl.trim(),
+              })
+              .then((ok) => {
+                if (!ok) return;
+                setCharacterId('');
+                setLabel('');
+                setDescription('');
+                setAvatarUrl('');
+                onImported();
+              })
+              .finally(() => setBusy(false));
+          }}
+        >
+          {busy ? 'Guardando…' : 'Guardar personaje'}
+        </button>
+      </div>
+    </>
+  );
+}
+
+/**
  * generacion de imagen y video.
  *
  * El personaje es obligatorio porque el proveedor lo exige para generar: es lo
@@ -608,6 +698,16 @@ function GeneratePanel({
           onChange={(event) => setCharacterId(event.target.value)}
         />
       </Field>
+
+      <details className="vault-generate">
+        <summary>Ya tengo un personaje</summary>
+        <p className="field__hint">
+          El proveedor no sabe listar personajes, así que uno creado fuera de
+          Luxy —o antes de que se guardaran— hay que darlo de alta a mano. Crear
+          otro costaría créditos.
+        </p>
+        <ImportCharacterForm vault={vault} onImported={() => setCreated(null)} />
+      </details>
 
       {vault.characters.length > 0 && (
         <>

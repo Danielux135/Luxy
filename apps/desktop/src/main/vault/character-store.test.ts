@@ -10,6 +10,7 @@ import { join } from 'node:path';
 import { VaultService, VaultError, type DeviceKeyStore } from './vault-service.js';
 import { vaultFilePathFor } from './key-file.js';
 import { VaultCharacterStore, charactersFilePath } from './character-store.js';
+import { LocalBlobStore, mediaDirectory } from './blob-store.js';
 
 const PASSWORD = 'una frase larga de prueba';
 const FAST = { t: 1, m: 8 * 1024, p: 1 } as const;
@@ -32,6 +33,7 @@ const character = (id: string, label = 'Una') => ({
   modelId: 'anime-pure-v1',
   description: 'Rasgos: género: mujer, color del pelo: rubio.',
   label,
+  avatarObjectKey: null,
   createdAt: new Date().toISOString(),
 });
 
@@ -46,7 +48,10 @@ describe('personajes guardados', () => {
       argon2Params: FAST,
     });
     await vault.create(PASSWORD);
-    store = new VaultCharacterStore(charactersFilePath(directory));
+    store = new VaultCharacterStore(
+      charactersFilePath(directory),
+      new LocalBlobStore(mediaDirectory(directory)),
+    );
   });
 
   afterEach(() => {
@@ -118,5 +123,20 @@ describe('personajes guardados', () => {
     await otraVault.create('otra frase larga distinta');
     await expect(store.list(otraVault)).rejects.toThrow();
     rmSync(otro, { recursive: true, force: true });
+  });
+
+  it('guarda el avatar cifrado y lo devuelve entero', async () => {
+    const bytes = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]);
+    const objectKey = await store.saveAvatar(vault, bytes);
+    // se pago con la creacion: perderlo obligaba a generar otra imagen para
+    // ver a quien acabas de crear
+    expect([...(await store.readAvatar(vault, objectKey))]).toEqual([...bytes]);
+  });
+
+  it('el avatar no queda en claro en el disco', async () => {
+    const bytes = new Uint8Array([200, 201, 202, 203, 204, 205, 206, 207]);
+    const objectKey = await store.saveAvatar(vault, bytes);
+    const guardado = readFileSync(join(mediaDirectory(directory), `${objectKey}.bin`));
+    expect(guardado.includes(Buffer.from(bytes))).toBe(false);
   });
 });

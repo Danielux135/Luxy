@@ -1,5 +1,34 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-09-02 04:10 — Claude — dar de alta un personaje que ya existe, y su avatar
+
+Dos huecos que salieron al intentar reutilizar el personaje ya pagado.
+
+**1. No habia forma de usar un identificador que ya tienes.** La lista solo
+mostraba los creados desde Luxy despues del arreglo anterior, y la API **no sabe
+listar personajes**. Quien tuviera uno de antes solo podia crear otro, pagando.
+
+Nuevo «Ya tengo un personaje»: identificador, nombre, quien es y —opcional— la
+URL de su avatar. El identificador se puede sacar del nombre del archivo del
+avatar, que es `<marca de tiempo>_<uuid>.webp`.
+
+**2. El avatar se tiraba.** `POST /v1/characters` devuelve `avatar_url` y el
+adaptador solo leia `character_id`. Ese avatar **se pago con la creacion** y es
+lo unico visual que identifica al personaje: descartarlo obligaba a generar otra
+imagen solo para ver a quien acababas de crear.
+
+- el adaptador devuelve ahora `{ characterId, avatarUrl }`;
+- al crear, el avatar **se descarga y se cifra** en la boveda. Si la descarga
+  falla, el personaje se guarda igual: un avatar perdido no vale perder un
+  identificador pagado;
+- al dar de alta uno existente, si se aporta la URL se descarga igual. La URL ya
+  era publica; lo que hace Luxy es traerse una copia propia y cifrarla;
+- el avatar se lee descifrado en memoria, como el resto de medios: nunca se
+  escribe sin cifrar en disco.
+
+Cuatro pruebas nuevas. **`npm run check` exit 0: 120 archivos, 2.083 superadas,
+9 omitidas.**
+
 ### 2026-09-02 03:40 — Claude — los personajes se guardan: crearlos cuesta creditos
 
 Daniel perdio el identificador del personaje que acababa de pagar. Luxy solo lo

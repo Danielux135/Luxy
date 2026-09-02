@@ -299,7 +299,10 @@ async function bootstrap(): Promise<void> {
   );
 
   privateConversations = new PrivateConversationStore(conversationsDirectory(luxyConfigDir()));
-  vaultCharacters = new VaultCharacterStore(charactersFilePath(luxyConfigDir()));
+  vaultCharacters = new VaultCharacterStore(
+    charactersFilePath(luxyConfigDir()),
+    new LocalBlobStore(mediaDirectory(luxyConfigDir())),
+  );
   privateMedia = new PrivateMediaStore(
     mediaIndexDirectory(luxyConfigDir()),
     new LocalBlobStore(mediaDirectory(luxyConfigDir())),

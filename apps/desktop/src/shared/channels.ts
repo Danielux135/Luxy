@@ -65,6 +65,8 @@ export const IPC_INVOKE = {
   vaultCharacterCreate: 'luxy:vault:character:create',
   vaultCharacterList: 'luxy:vault:character:list',
   vaultCharacterForget: 'luxy:vault:character:forget',
+  vaultCharacterImport: 'luxy:vault:character:import',
+  vaultCharacterAvatar: 'luxy:vault:character:avatar',
   vaultMediaKeySet: 'luxy:vault:media-key:set',
   vaultMediaKeyDelete: 'luxy:vault:media-key:delete',
   vaultSync: 'luxy:vault:sync',

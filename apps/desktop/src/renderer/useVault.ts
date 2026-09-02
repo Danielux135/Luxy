@@ -24,6 +24,7 @@ export interface VaultCharacterView {
   modelId: string;
   description: string;
   label: string;
+  avatarObjectKey: string | null;
   createdAt: string;
 }
 
@@ -168,6 +169,16 @@ export interface VaultController {
     description: string;
   }) => Promise<string | null>;
   forgetCharacter: (characterId: string) => Promise<void>;
+  /** da de alta uno que ya existe en el proveedor; la API no sabe listarlos */
+  importCharacter: (input: {
+    characterId: string;
+    modelId: 'realistic-sharp-v1' | 'anime-pure-v1';
+    label: string;
+    description: string;
+    avatarUrl: string;
+  }) => Promise<boolean>;
+  /** avatar descifrado como data URL; null si ese personaje no tiene */
+  readCharacterAvatar: (characterId: string) => Promise<string | null>;
   syncing: boolean;
   lastSync: {
     uploaded: number;
@@ -600,6 +611,33 @@ export function useVault(): VaultController {
     [],
   );
 
+  const importCharacter = useCallback(
+    async (input: {
+      characterId: string;
+      modelId: 'realistic-sharp-v1' | 'anime-pure-v1';
+      label: string;
+      description: string;
+      avatarUrl: string;
+    }): Promise<boolean> => {
+      setError(null);
+      setHint(null);
+      const result = await window.luxy.importVaultCharacter(input);
+      if (!result.ok) {
+        setError(result.error);
+        setHint(result.hint);
+        return false;
+      }
+      setCharacters(result.value.characters);
+      return true;
+    },
+    [],
+  );
+
+  const readCharacterAvatar = useCallback(async (characterId: string): Promise<string | null> => {
+    const result = await window.luxy.readVaultCharacterAvatar({ characterId });
+    return result.ok ? result.value.dataUrl : null;
+  }, []);
+
   const forgetCharacter = useCallback(async (characterId: string): Promise<void> => {
     const result = await window.luxy.forgetVaultCharacter({ characterId });
     if (result.ok) setCharacters(result.value.characters);
@@ -658,6 +696,8 @@ export function useVault(): VaultController {
     characterDescription,
     characters,
     forgetCharacter,
+    importCharacter,
+    readCharacterAvatar,
     lastImage,
     sending,
     openConversation,

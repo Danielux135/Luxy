@@ -58,9 +58,12 @@ const options = (impl: typeof fetch) => ({
 describe('personajes', () => {
   it('crea uno y devuelve su identificador', async () => {
     const { impl, calls } = fakeFetch([{ status: 201, body: { character_id: 'per-1' } }]);
-    const id = await createCharacter({ modelId: 'realistic-sharp-v1', traits: { pelo: 'largo' } }, options(impl));
+    const created = await createCharacter(
+      { modelId: 'realistic-sharp-v1', traits: { pelo: 'largo' } },
+      options(impl),
+    );
 
-    expect(id).toBe('per-1');
+    expect(created.characterId).toBe('per-1');
     expect(calls[0]?.url).toBe('https://api.xavira.ai/v1/characters');
     expect(calls[0]?.method).toBe('POST');
     expect(calls[0]?.authorization).toBe(`Bearer ${KEY}`);
@@ -89,6 +92,24 @@ describe('modelo del personaje', () => {
     await createCharacter({ modelId: 'modelo-que-aun-no-existe' }, options(impl));
     // si es invalido, el error de la API lo explica mejor que una lista nuestra
     expect((calls[0]?.body as { model_id: string }).model_id).toBe('modelo-que-aun-no-existe');
+  });
+});
+
+describe('avatar del personaje', () => {
+  it('se captura la URL que devuelve la creacion', async () => {
+    const { impl } = fakeFetch([
+      { status: 201, body: { character_id: 'per-1', avatar_url: 'https://cdn.example/a.webp' } },
+    ]);
+    const created = await createCharacter({ modelId: 'realistic-sharp-v1' }, options(impl));
+    // se pago con la creacion: descartarla obligaba a generar otra imagen solo
+    // para ver a quien acabas de crear
+    expect(created.avatarUrl).toBe('https://cdn.example/a.webp');
+  });
+
+  it('sin avatar en la respuesta, es null y no un fallo', async () => {
+    const { impl } = fakeFetch([{ status: 201, body: { character_id: 'per-1' } }]);
+    const created = await createCharacter({ modelId: 'realistic-sharp-v1' }, options(impl));
+    expect(created.avatarUrl).toBeNull();
   });
 });
 

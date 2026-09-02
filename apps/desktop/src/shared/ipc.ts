@@ -476,6 +476,8 @@ export const vaultCharacterSummarySchema = z.object({
   modelId: z.string(),
   description: z.string(),
   label: z.string(),
+  /** hay avatar guardado; los bytes se piden aparte y van cifrados en disco */
+  avatarObjectKey: z.string().nullable(),
   createdAt: z.string(),
 });
 
@@ -491,6 +493,27 @@ export const vaultCharacterCreateResultSchema = z.object({
 
 export const vaultCharacterForgetArgsSchema = z.object({
   characterId: z.string().min(1).max(128),
+});
+
+/**
+ * dar de alta un personaje que ya existe en el proveedor.
+ *
+ * Hace falta porque la API **no sabe listar personajes**: quien tenga un
+ * identificador de antes no tiene otra forma de meterlo en Luxy, y crear otro
+ * cuesta créditos.
+ */
+export const vaultCharacterImportArgsSchema = z.object({
+  characterId: z.string().min(1).max(128),
+  modelId: z.enum(['realistic-sharp-v1', 'anime-pure-v1']).default('realistic-sharp-v1'),
+  label: z.string().max(100).default(''),
+  description: z.string().max(2000).default(''),
+  /** URL del avatar, si se conoce: se descarga y se cifra aquí */
+  avatarUrl: z.string().max(2000).default(''),
+});
+
+export const vaultCharacterAvatarResultSchema = z.object({
+  /** data URL descifrada, o null si ese personaje no tiene avatar guardado */
+  dataUrl: z.string().nullable(),
 });
 
 export const vaultSyncResultSchema = z.object({
@@ -831,6 +854,13 @@ export interface LuxyBridge {
   forgetVaultCharacter(
     args: z.infer<typeof vaultCharacterForgetArgsSchema>,
   ): Promise<IpcResult<z.infer<typeof vaultCharacterListResultSchema>>>;
+  /** da de alta uno que ya existe: la API no sabe listarlos */
+  importVaultCharacter(
+    args: z.infer<typeof vaultCharacterImportArgsSchema>,
+  ): Promise<IpcResult<z.infer<typeof vaultCharacterListResultSchema>>>;
+  readVaultCharacterAvatar(
+    args: z.infer<typeof vaultCharacterForgetArgsSchema>,
+  ): Promise<IpcResult<z.infer<typeof vaultCharacterAvatarResultSchema>>>;
   syncVault(): Promise<IpcResult<z.infer<typeof vaultSyncResultSchema>>>;
   /** avisa de que la boveda se cerro sola. devuelve la funcion de baja */
   onVaultLocked(listener: () => void): () => void;
