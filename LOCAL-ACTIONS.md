@@ -1,5 +1,21 @@
 # Luxy — acciones locales de Daniel
 
+## LA-035 — publicar la consolidacion de ramas
+
+Estado: `pending` — abierta el 2026-09-02.
+
+En local ya solo existe `main`, con todo el trabajo dentro. El remoto no se ha
+tocado porque exige `push` y eso necesita tu autorizacion explicita. Cuando la
+des, en este orden:
+
+1. `git push origin main` — publica los 48 commits. Va primero: hasta que este
+   hecho, `origin` es la unica copia de las ramas viejas y borrarlas antes
+   dejaria el trabajo solo en este ordenador.
+2. `git push origin --delete feat/luxy-desktop luxy/work-update-001-studio
+   luxy/auto-init-git luxy/phase-4d-session-host luxy/f9-1-vault-crypto`
+3. `git remote prune origin`
+
+
 ## LA-034 — validar F9.29 con el personaje real
 
 Estado: `pending` — abierta el 2026-09-02.

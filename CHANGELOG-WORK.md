@@ -1,5 +1,32 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-09-02 15:30 — Claude — GIT-CONSOLIDACION-001
+
+- Estado anterior: siete ramas (`main`, `luxy/f9-1-vault-crypto`,
+  `luxy/f2-4-conversation-library` y cuatro remotas de fases ya cerradas), mas
+  dos worktrees con trabajo sin commitear en los dos.
+- Objetivo: rescatar todo lo que no estuviera en ninguna rama y dejar una sola.
+- Archivos leidos: estado, ramas y worktrees de Git; los diffs sin commitear de
+  ambos worktrees.
+- Archivos modificados: los 18 de F9.29 y los 32 del worktree de f2-4, ambos
+  commiteados tal cual; `apps/gateway/src/index.ts` y los cinco archivos de
+  continuidad al resolver la fusion; `.gitignore`.
+- Comandos ejecutados: `git branch/worktree/rev-list/merge`, `npm run check`,
+  `npm test`, `git worktree remove --force`, `git branch -d/-D`.
+- Resultado real: cuatro commits nuevos (F9.29, rescate de f2-4, `.gitignore`,
+  fusion) y `main` adelantado por avance rapido hasta contenerlo todo. Se
+  verifico con `git rev-list` que ninguna rama borrada tenia commits propios.
+  `.local-policies/` (WDAC local, nunca versionado) se copio al worktree
+  principal y se anadio a `.gitignore`.
+- Pruebas: `npm run check` verde tras la fusion — 121 archivos, 2.104 pruebas
+  superadas, 9 omitidas.
+- Riesgos o limites: el trabajo rescatado de f2-4 sigue siendo `implemented` con
+  validacion manual pendiente; no se ha revalidado aqui. Nada empujado todavia:
+  `origin` conserva las cinco ramas viejas y `origin/main` sigue 48 commits
+  atras.
+- Estado nuevo: `done` en local; el remoto espera autorizacion de Daniel.
+- Siguiente paso exacto: `LA-035`.
+
 ### 2026-09-02 14:56 — Codex — F9.29
 
 - Estado anterior: `buildVaultPrompt` ordenaba encarnar al personaje, pero el
