@@ -1,5 +1,25 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-02 — Windows 11 (equipo `oscar`) — F9.23 y arreglo de la clave de medios
+
+- **`npm run check`: exit 0.** Suite: **120 archivos, 2.072 superadas, 9
+  omitidas, 0 fallos**.
+- Siete pruebas nuevas del adaptador para la imagen de referencia. La que
+  sostiene la decisión: lo que viaja **empieza por `data:image/…;base64,` y no
+  contiene `http`** — no hay ninguna dirección desde la que descargarla. También
+  se prueba que sin referencia el campo no se manda, que la de en línea manda
+  sobre una URL pública, que una imagen de más de 6 MB se rechaza **antes de
+  tocar la red**, que lo que no es una imagen se rechaza, y que la conversión no
+  desborda la pila con archivos grandes.
+- Cinco pruebas de `parseTraits`, ahora en su propio módulo.
+- **Verificado a mano por Daniel en la aplicación real**: vincular la bóveda
+  local a una cuenta e iniciar sesión funcionan **contra el gateway y Supabase
+  de verdad** (log: `boveda local vinculada a una cuenta`, `sesion de boveda
+  iniciada { method: 'password' }`). Es la primera ejecución real del bloque de
+  cuentas, hasta ahora sólo probado con dobles.
+- **Sigue sin verificarse**: cualquier llamada a la API de generación, incluida
+  la creación de personaje con imagen de referencia.
+
 ### 2026-09-02 — Windows 11 (equipo `oscar`) — F9.22
 
 - **`npm run check`: exit 0.** Suite: **119 archivos, 2.060 superadas, 9

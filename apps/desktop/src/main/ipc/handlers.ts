@@ -905,15 +905,73 @@ export function registerIpcHandlers(context: HandlerContext): void {
     );
   });
 
+  /**
+   * crea un personaje, opcionalmente a partir de una imagen de referencia.
+   *
+   * La imagen NO se publica en ninguna parte: viaja en el cuerpo de la
+   * peticion como `data:` URI. Es el mismo criterio por el que el adaptador
+   * sondea en vez de usar un callback — Luxy no expone nada publico.
+   *
+   * Se guarda ademas cifrada en la conversacion, para que quede con ella y se
+   * sincronice como el resto. El renderer nunca ve los bytes ni la ruta.
+   */
   handle(IPC_INVOKE.vaultCharacterCreate, vaultCharacterCreateArgsSchema, async (args) => {
     if (!context.vault.isUnlocked()) throw new VaultError('la boveda esta bloqueada');
+
+    let referenceImage: { bytes: Uint8Array; mimeType: string } | undefined;
+    if (args.withReferenceImage) {
+      if (args.conversationId === null) {
+        throw new VaultError(
+          'envia un mensaje primero',
+          'la imagen de referencia se guarda dentro de una conversacion',
+        );
+      }
+      const window = context.getMainWindow();
+      if (window === null) throw new VaultError('no hay ventana desde la que elegir un archivo');
+
+      const picked = await dialog.showOpenDialog(window, {
+        title: 'Elige la imagen de referencia',
+        properties: ['openFile'],
+        filters: [{ name: 'Imagenes', extensions: ['png', 'jpg', 'jpeg', 'webp'] }],
+      });
+      const filePath = picked.canceled ? undefined : picked.filePaths[0];
+      if (filePath === undefined) {
+        // cancelar no crea un personaje sin referencia a escondidas: se pidio
+        // una, y crear otra cosa sin decirlo seria peor que no crear nada
+        throw new VaultError('no se eligio ninguna imagen de referencia');
+      }
+
+      const bytes = new Uint8Array(readFileSync(filePath));
+      const mimeType = mimeTypeFor(filePath);
+      referenceImage = { bytes, mimeType };
+
+      // se cifra en la boveda ANTES de salir hacia el proveedor: si la llamada
+      // falla, la referencia ya esta guardada y no hay que volver a elegirla
+      await context.privateMedia.add(context.vault, args.conversationId, bytes, {
+        mimeType,
+        displayName: basename(filePath),
+        prompt: null,
+        width: null,
+        height: null,
+        durationMs: null,
+        characterId: null,
+        provider: null,
+        model: null,
+      });
+    }
+
     const controller = new AbortController();
     try {
       const characterId = await createCharacter(
-        { traits: args.traits },
+        {
+          traits: args.traits,
+          ...(referenceImage === undefined ? {} : { referenceImage }),
+        },
         mediaProviderOptions(controller.signal),
       );
-      return { characterId };
+      // ni la ruta, ni el nombre, ni los bytes
+      context.log('personaje creado', { conReferencia: referenceImage !== undefined });
+      return { characterId, referenceImage: referenceImage !== undefined };
     } catch (error) {
       if (error instanceof XaviraError) throw new VaultError(error.message, error.hint);
       throw error;

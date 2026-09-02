@@ -1,5 +1,43 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-09-02 01:40 — Claude — F9.23: imagen de referencia del personaje
+
+Daniel pregunto si se podia dar una foto para que el personaje se pareciera. El
+campo existia en el adaptador (`referenceImageUrl` → `reference_image_url`) y
+**nada lo usaba**, porque conectarlo tal cual habria obligado a alojar la foto
+de una persona en una URL publica. Es lo mismo que ya se descarto con
+`callback_url`: Luxy no expone nada publico.
+
+Se envia como **`data:` URI dentro del cuerpo** (`D-052`). Un `data:` URI
+tambien es una URL, asi que el campo lo admite y no queda ninguna direccion
+desde la que un tercero pueda descargar la imagen.
+
+- `toDataUri` en el adaptador, con tope de 6 MB **antes de tocar la red** y
+  validacion de que es una imagen. Convierte por trozos: `fromCharCode(...bytes)`
+  con megas de datos revienta la pila por el numero de argumentos;
+- la referencia se **cifra en la conversacion antes** de salir hacia el
+  proveedor: si la llamada falla, no hay que volver a elegir el archivo, y se
+  sincroniza como cualquier otro medio;
+- el renderer manda la INTENCION, no la imagen: el proceso principal abre el
+  dialogo, lee, cifra y envia. Ni los bytes ni la ruta cruzan el IPC;
+- cancelar el dialogo **no** crea un personaje sin referencia a escondidas;
+- si se aportan la de en linea y una URL publica, manda la de en linea: dar las
+  dos significa que no se quiere publicar nada.
+
+De paso, corregido un defecto que habia metido yo: `parseTraits` se exportaba
+desde el modulo de la pantalla y eso rompia el refresco rapido de React —cada
+cambio recargaba la interfaz entera—. Ahora vive en `character-traits.ts` con
+cinco pruebas propias.
+
+Siete pruebas nuevas del adaptador. La que importa: lo que viaja **empieza por
+`data:image/...;base64,` y no contiene `http`**.
+
+**`npm run check` exit 0: 120 archivos, 2.072 superadas, 9 omitidas.**
+
+Riesgo abierto: **no esta verificado que la API acepte un `data:` URI ahi**. El
+nombre del campo sugiere que espera una direccion de verdad. Si lo rechaza, se
+vera en la primera llamada.
+
 ### 2026-09-02 01:10 — Claude — BUG: la clave del proveedor de imagenes no se podia guardar
 
 Daniel abrio Studio para probar y no encontro donde poner la clave. **No estaba

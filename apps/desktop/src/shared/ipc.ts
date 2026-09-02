@@ -400,6 +400,17 @@ export const vaultMediaGenerateArgsSchema = z.object({
 
 export const vaultCharacterCreateArgsSchema = z.object({
   traits: z.record(z.string().max(64), z.string().max(120)).default({}),
+  /**
+   * pedir una imagen de referencia antes de crear el personaje.
+   *
+   * El renderer NO manda la imagen: manda la intencion. El proceso principal
+   * abre el diálogo, lee el archivo, lo cifra en la bóveda y lo envía en el
+   * cuerpo de la petición. Así el renderer nunca toca los bytes y la ruta del
+   * archivo tampoco cruza el IPC.
+   */
+  withReferenceImage: z.boolean().default(false),
+  /** dónde guardar la referencia cifrada; obligatorio si se pide una */
+  conversationId: conversationIdSchema.nullable().default(null),
 });
 
 export const vaultMediaGenerateResultSchema = z.object({
@@ -412,6 +423,8 @@ export const vaultMediaGenerateResultSchema = z.object({
 
 export const vaultCharacterCreateResultSchema = z.object({
   characterId: z.string(),
+  /** se usó una imagen de referencia; queda guardada cifrada en la conversación */
+  referenceImage: z.boolean(),
 });
 
 export const vaultSyncResultSchema = z.object({

@@ -976,3 +976,47 @@ Entonces no hay imagen y el turno sigue siendo válido. Es el mismo límite que 
 tiene la memoria, y por eso los estados se distinguen (`absent`,
 `truncated_block`, `invalid`): «no la pidió» y «se cortó a medias» se arreglan
 de forma distinta.
+
+## D-052 — la imagen de referencia viaja en el cuerpo, no por una URL pública
+
+Fecha: 2026-09-02
+
+Estado: aceptada, implementada
+
+El campo del proveedor se llama `reference_image_url` y espera una dirección.
+Usarlo tal cual obligaría a **alojar la foto de una persona en una URL pública**
+para que el proveedor la descargue, y eso contradice la premisa de la bóveda:
+es la misma razón por la que el adaptador sondea en vez de usar `callback_url`,
+ya escrita en su cabecera. Luxy no expone nada público.
+
+Se envía como **`data:` URI dentro del cuerpo de la petición**. Un `data:` URI
+también es una URL, así que el campo lo admite sin inventar nada, y no existe
+ninguna dirección desde la que un tercero pueda descargar la imagen.
+
+Lo que va con esto:
+
+- **la referencia se guarda cifrada en la conversación** antes de salir hacia el
+  proveedor. Si la llamada falla, no hay que volver a elegir el archivo; y se
+  sincroniza entre equipos como cualquier otro medio;
+- **el renderer nunca ve los bytes ni la ruta.** Manda la intención
+  (`withReferenceImage`), y el proceso principal abre el diálogo, lee, cifra y
+  envía;
+- **tope de 6 MB antes de codificar**, y se rechaza antes de tocar la red.
+  base64 engorda un tercio y viaja dentro de un JSON; un archivo grande no
+  mejora el parecido, sólo produce un fallo difícil de leer;
+- **cancelar el diálogo no crea un personaje sin referencia.** Se pidió una;
+  crear otra cosa sin decirlo sería peor que no crear nada;
+- se conserva `referenceImageUrl` para el caso en que la imagen **ya** esté
+  publicada y se asuma. Si se dan las dos, manda la de en línea: aportar ambas
+  significa que no se quiere publicar nada.
+
+Lo que se asume y no se puede evitar: **el proveedor ve la imagen en claro**,
+igual que ve el prompt. La bóveda protege el almacenamiento y el transporte
+propios de Luxy, no lo que el usuario decide enviar a un tercero. La interfaz lo
+dice donde se elige la foto.
+
+Riesgo abierto: **no está verificado que la API acepte un `data:` URI en ese
+campo.** El contrato salió de su documentación pública y el nombre sugiere que
+espera una dirección de verdad. Si lo rechaza, se verá en la primera llamada por
+el mensaje de error, y la alternativa sería publicar la imagen (`opción 2`) o un
+endpoint de subida, si existe.

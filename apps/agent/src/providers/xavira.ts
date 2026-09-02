@@ -171,9 +171,61 @@ function hintForStatus(status: number): string | null {
 // operaciones
 // -----------------------------------------------------------------------------
 
+/**
+ * tope de la imagen de referencia, antes de codificarla.
+ *
+ * base64 la engorda un tercio, y viaja dentro de un JSON. Un archivo grande no
+ * da mejor parecido: da una peticion enorme y un fallo dificil de leer.
+ */
+export const MAX_REFERENCE_IMAGE_BYTES = 6 * 1024 * 1024;
+
 export interface CreateCharacterRequest {
   traits?: Record<string, string>;
+  /**
+   * imagen de referencia EN LINEA, dentro del cuerpo de la peticion.
+   *
+   * Es la unica forma de dar un parecido sin alojar la foto en ninguna parte.
+   * El campo de la API se llama `reference_image_url` y espera una URL, pero un
+   * `data:` URI TAMBIEN es una URL: asi el proveedor recibe la imagen sin que
+   * exista una direccion publica desde la que cualquiera pueda descargarla.
+   *
+   * Es el mismo criterio que hace que aqui se sondee en vez de usar
+   * `callback_url`: Luxy no expone nada publico.
+   *
+   * Lo que NO evita, y hay que decirlo: el proveedor ve la imagen en claro.
+   * Igual que ve el prompt.
+   */
+  referenceImage?: { bytes: Uint8Array; mimeType: string };
+  /**
+   * referencia por URL publica.
+   *
+   * Alternativa a `referenceImage` para cuando la imagen ya esta publicada y se
+   * asume. Si se dan las dos, manda la de en linea.
+   */
   referenceImageUrl?: string;
+}
+
+/** `data:` URI a partir de bytes. No toca disco ni deja copia sin cifrar */
+export function toDataUri(bytes: Uint8Array, mimeType: string): string {
+  if (bytes.length === 0) throw new XaviraError('la imagen de referencia esta vacia');
+  if (bytes.length > MAX_REFERENCE_IMAGE_BYTES) {
+    throw new XaviraError(
+      'la imagen de referencia es demasiado grande',
+      null,
+      'usa una de menos de 6 MB: no mejora el parecido y la peticion falla',
+    );
+  }
+  if (!/^image\/[a-z0-9.+-]+$/i.test(mimeType)) {
+    throw new XaviraError('la imagen de referencia no es una imagen');
+  }
+
+  // se construye en trozos: `String.fromCharCode(...bytes)` con megas de datos
+  // revienta la pila por el numero de argumentos
+  let binary = '';
+  for (let index = 0; index < bytes.length; index += 8192) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + 8192));
+  }
+  return `data:${mimeType};base64,${btoa(binary)}`;
 }
 
 /** crea un personaje persistente y devuelve su identificador */
@@ -181,13 +233,18 @@ export async function createCharacter(
   request: CreateCharacterRequest,
   options: XaviraOptions,
 ): Promise<string> {
+  // la de en linea manda sobre la publica: si alguien aporta las dos, la
+  // intencion es no publicar nada
+  const reference =
+    request.referenceImage !== undefined
+      ? toDataUri(request.referenceImage.bytes, request.referenceImage.mimeType)
+      : request.referenceImageUrl;
+
   const { body } = await call(options, '/v1/characters', {
     method: 'POST',
     body: JSON.stringify({
       ...(request.traits === undefined ? {} : { traits: request.traits }),
-      ...(request.referenceImageUrl === undefined
-        ? {}
-        : { reference_image_url: request.referenceImageUrl }),
+      ...(reference === undefined ? {} : { reference_image_url: reference }),
     }),
   });
 

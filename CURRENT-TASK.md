@@ -178,6 +178,7 @@ gateway real**. Ver el punto 2 de la lista de abajo.
 | F9.20 | instrucciones fijas por conversación | done |
 | F9.16 remoto | los medios viajan entre equipos | done |
 | F9.22 | el modelo pide una imagen y se genera sola | done; sin llamada real |
+| F9.23 | imagen de referencia del personaje | done; sin llamada real |
 | F9.9 | puente Telegram por conversación | planned |
 | F9.11 | transportes del invitado | planned |
 | F9.12 | documentación de privacidad | planned |
@@ -254,7 +255,8 @@ streaming) · `D-044` (relleno de longitud) · `D-045` (multiusuario, matiza
 es el origen de la llave; el archivo local es su caché) · `D-048` (sincronizar
 autoriza por sesión de cuenta) · `D-049` (la clave de recuperación no se trata
 como una contraseña) · `D-050` (los bytes de los medios van a Supabase Storage) ·
-`D-051` (el modelo pide la imagen con un bloque, no con una herramienta).
+`D-051` (el modelo pide la imagen con un bloque, no con una herramienta) ·
+`D-052` (la imagen de referencia viaja en el cuerpo, no por una URL pública).
 
 ### Siguiente paso exacto (para quien retome)
 
@@ -282,6 +284,18 @@ es ejecutar y documentar.
 
 Después quedan la limpieza de objetos huérfanos, `F9.9` (puente Telegram) y
 `F9.11` (invitar a un tercero).
+
+### F9.23 — done (Claude, 2026-09-02, sin llamada real)
+
+Imagen de referencia del personaje. El campo existía en el adaptador y nada lo
+usaba, porque conectarlo tal cual habría obligado a **alojar la foto en una URL
+pública**. Se envía como `data:` URI dentro del cuerpo (`D-052`), y se guarda
+cifrada en la conversación antes de salir.
+
+**Riesgo abierto, y es el que puede tumbarlo**: no está verificado que la API
+acepte un `data:` URI en un campo que se llama `reference_image_url`. Si lo
+rechaza, la alternativa es publicar la imagen —lo que Daniel llamó «opción 2»—
+o un endpoint de subida, si existe.
 
 ### F9.22 — done (Claude, 2026-09-02, sin llamada real)
 

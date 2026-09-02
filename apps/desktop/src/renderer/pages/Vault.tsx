@@ -7,6 +7,7 @@
 import { useEffect, useState, type JSX } from 'react';
 import { Empty, Field, Notice, Panel, Readout, Skeleton, Tag } from '../ui/primitives.js';
 import type { ConfigSummary } from '../useConfig.js';
+import { parseTraits } from '../character-traits.js';
 import {
   formatAutoLockOption,
   formatLockCountdown,
@@ -286,26 +287,6 @@ function MediaKeyPanel({ vault }: { vault: VaultController }): JSX.Element {
 }
 
 /**
- * convierte «clave: valor» por linea en el mapa que espera el proveedor.
- *
- * Es deliberadamente tonto: sin claves, sin valores vacios y sin lineas que no
- * lleven dos puntos. Lo que no encaja se ignora en vez de inventarse una clave,
- * porque un rasgo mal formado viajaria al proveedor tal cual.
- */
-export function parseTraits(text: string): Record<string, string> {
-  const traits: Record<string, string> = {};
-  for (const line of text.split(/\r?\n/)) {
-    const separator = line.indexOf(':');
-    if (separator === -1) continue;
-    const key = line.slice(0, separator).trim().slice(0, 64);
-    const value = line.slice(separator + 1).trim().slice(0, 120);
-    if (key.length === 0 || value.length === 0) continue;
-    traits[key] = value;
-  }
-  return traits;
-}
-
-/**
  * instrucciones fijas de la conversacion.
  *
  * Acompañan a cada turno sin que haya que rescribirlas, y sin depender de que
@@ -490,10 +471,34 @@ function GeneratePanel({ vault }: { vault: VaultController }): JSX.Element {
         >
           {creating ? 'Creando…' : 'Crear personaje nuevo'}
         </button>
+        <button
+          className="btn btn--quiet"
+          disabled={creating || disabled}
+          title={
+            disabled ? 'Envía un mensaje primero: la referencia se guarda en la conversación' : undefined
+          }
+          onClick={() => {
+            setCreating(true);
+            void vault
+              .createCharacter(parseTraits(traits), true)
+              .then((id) => {
+                if (id !== null) setCharacterId(id);
+              })
+              .finally(() => setCreating(false));
+          }}
+        >
+          {creating ? 'Creando…' : 'Crear desde una foto'}
+        </button>
       </div>
       <p className="field__hint">
         El identificador vive en el proveedor, no aquí: guárdalo si quieres
         reutilizar el mismo personaje en otra conversación.
+      </p>
+      <p className="field__hint">
+        La foto de referencia <strong>no se publica en ningún sitio</strong>:
+        viaja dentro de la petición y se guarda cifrada en esta conversación.
+        Lo que sí ocurre, y no se puede evitar, es que el proveedor la ve —igual
+        que ve el texto que le envías.
       </p>
 
       <Field label="Descripción">

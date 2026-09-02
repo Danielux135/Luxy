@@ -8,6 +8,8 @@ import {
   generateVideo,
   readGeneration,
   retryAfterMs,
+  toDataUri,
+  MAX_REFERENCE_IMAGE_BYTES,
 } from './xavira.js';
 
 const KEY = 'xav_live_clave_de_prueba';
@@ -66,6 +68,78 @@ describe('personajes', () => {
   it('rechaza una respuesta con otra forma', async () => {
     const { impl } = fakeFetch([{ status: 201, body: { id: 'per-1' } }]);
     await expect(createCharacter({}, options(impl))).rejects.toThrow('no tiene el formato esperado');
+  });
+});
+
+describe('imagen de referencia', () => {
+  const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
+
+  it('viaja EN EL CUERPO, no como una direccion publica', async () => {
+    const { impl, calls } = fakeFetch([{ status: 201, body: { character_id: 'per-1' } }]);
+    await createCharacter(
+      { referenceImage: { bytes: png, mimeType: 'image/png' } },
+      options(impl),
+    );
+
+    const enviado = (calls[0]?.body as { reference_image_url: string }).reference_image_url;
+    // esto es lo que hace que la foto no quede accesible para nadie mas: no hay
+    // ninguna direccion desde la que descargarla
+    expect(enviado.startsWith('data:image/png;base64,')).toBe(true);
+    expect(enviado).not.toContain('http');
+    // y los bytes llegan enteros
+    expect(enviado.slice('data:image/png;base64,'.length)).toBe(
+      Buffer.from(png).toString('base64'),
+    );
+  });
+
+  it('sin referencia no se manda el campo', async () => {
+    const { impl, calls } = fakeFetch([{ status: 201, body: { character_id: 'per-1' } }]);
+    await createCharacter({ traits: { pelo: 'largo' } }, options(impl));
+    expect(calls[0]?.body).not.toHaveProperty('reference_image_url');
+  });
+
+  it('la de en linea manda sobre la publica', async () => {
+    const { impl, calls } = fakeFetch([{ status: 201, body: { character_id: 'per-1' } }]);
+    await createCharacter(
+      {
+        referenceImage: { bytes: png, mimeType: 'image/png' },
+        referenceImageUrl: 'https://example.com/foto.png',
+      },
+      options(impl),
+    );
+    // dar las dos significa que no se quiere publicar nada
+    const enviado = (calls[0]?.body as { reference_image_url: string }).reference_image_url;
+    expect(enviado.startsWith('data:')).toBe(true);
+  });
+
+  it('una imagen enorme se rechaza antes de tocar la red', async () => {
+    const { impl, calls } = fakeFetch([{ status: 201, body: { character_id: 'per-1' } }]);
+    const enorme = new Uint8Array(MAX_REFERENCE_IMAGE_BYTES + 1);
+    await expect(
+      createCharacter({ referenceImage: { bytes: enorme, mimeType: 'image/png' } }, options(impl)),
+    ).rejects.toThrow('demasiado grande');
+    expect(calls).toHaveLength(0);
+  });
+
+  it('lo que no es una imagen se rechaza', async () => {
+    const { impl } = fakeFetch([{ status: 201, body: { character_id: 'per-1' } }]);
+    await expect(
+      createCharacter(
+        { referenceImage: { bytes: png, mimeType: 'application/pdf' } },
+        options(impl),
+      ),
+    ).rejects.toThrow('no es una imagen');
+  });
+
+  it('una imagen vacia se rechaza', () => {
+    expect(() => toDataUri(new Uint8Array(), 'image/png')).toThrow('vacia');
+  });
+
+  it('convierte sin desbordar la pila con archivos grandes', () => {
+    // `String.fromCharCode(...bytes)` con megas de datos revienta por el numero
+    // de argumentos: por eso se hace por trozos
+    const grande = new Uint8Array(400_000).fill(65);
+    expect(() => toDataUri(grande, 'image/png')).not.toThrow();
   });
 });
 

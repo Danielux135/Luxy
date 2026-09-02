@@ -140,7 +140,15 @@ export interface VaultController {
     prompt: string;
     kind: 'image' | 'video';
   }) => Promise<boolean>;
-  createCharacter: (traits: Record<string, string>) => Promise<string | null>;
+  /**
+   * crea un personaje. Con `withReferenceImage`, el proceso principal abre el
+   * diálogo, cifra la imagen en la conversación y la envía en el cuerpo de la
+   * petición: no se publica en ninguna parte y el renderer nunca ve los bytes.
+   */
+  createCharacter: (
+    traits: Record<string, string>,
+    withReferenceImage?: boolean,
+  ) => Promise<string | null>;
   syncing: boolean;
   lastSync: {
     uploaded: number;
@@ -536,16 +544,29 @@ export function useVault(): VaultController {
   );
 
   const createCharacter = useCallback(
-    async (traits: Record<string, string>): Promise<string | null> => {
-      const result = await window.luxy.createVaultCharacter({ traits });
+    async (
+      traits: Record<string, string>,
+      withReferenceImage = false,
+    ): Promise<string | null> => {
+      setError(null);
+      setHint(null);
+      const result = await window.luxy.createVaultCharacter({
+        traits,
+        withReferenceImage,
+        conversationId: openConversationId,
+      });
       if (!result.ok) {
         setError(result.error);
         setHint(result.hint);
         return null;
       }
+      if (result.value.referenceImage) {
+        setHint('Personaje creado con tu imagen de referencia, guardada cifrada aquí.');
+        await reloadMedia();
+      }
       return result.value.characterId;
     },
-    [],
+    [openConversationId, reloadMedia],
   );
 
   const sync = useCallback(async (): Promise<void> => {

@@ -310,6 +310,7 @@ interfaz: *workspace*, *privacy*, *vault*, *invitado en solo lectura*.
 | F9.20 | Instrucciones fijas por conversación: contexto persistente cifrado con ella | done |
 | F9.21 | Protocolo de Electron para servir medios grandes descifrados (vídeo > 20 MB) | planned |
 | F9.22 | El modelo pide una imagen dentro de la conversación y se genera sola | done (sin llamada real) |
+| F9.23 | Imagen de referencia del personaje, enviada en línea y guardada cifrada | done (sin llamada real) |
 
 `F9.18` cierra la avería que impedía usar la bóveda en un segundo ordenador:
 el archivo local y la llave envuelta del servidor eran dos orígenes de la misma
