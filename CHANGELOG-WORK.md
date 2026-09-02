@@ -1,5 +1,44 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-09-02 00:30 — Claude — F9.22: pedir una imagen dentro de la conversacion
+
+Daniel queria probar el flujo entero: pedirle una imagen al personaje dentro de
+la conversacion y recibirla. **No funcionaba, y no por la clave de la API**: la
+conversacion y la generacion eran dos cosas desconectadas. Se escribia en una y
+se generaba en otro panel, a mano, con el prompt y el personaje escritos otra
+vez. El modelo no generaba nada porque nadie escuchaba.
+
+- `packages/shared/src/vault-image-request.ts` (nuevo): el modelo pide una
+  imagen con un bloque estructurado al final de su respuesta, mismo patron que
+  la memoria (`D-051`). El modulo es PURO: decide que hay escrito, no genera,
+  no cifra y no habla con nadie, asi que **cada caso limite se prueba sin gastar
+  una generacion**;
+- la instruccion se añade al prompt **solo cuando generar es posible**. Sin
+  personaje o sin clave no se envia: ofrecerle al modelo algo que no puede hacer
+  garantiza una promesa incumplida en cada turno;
+- **el personaje pertenece a la conversacion**, como las instrucciones fijas, y
+  viaja cifrado en el turno. `latestCharacterId` lo lee hacia atras;
+- el handler del turno privado separa memoria → imagen → texto visible, genera,
+  cifra y guarda. **Una generacion fallida no tira la respuesta de texto**: se
+  guarda lo escrito y el fallo se devuelve aparte con su motivo, porque una
+  imagen que no aparece sin explicacion parece un cuelgue;
+- la generacion se extrae a `generatePrivateMedia`, que usan los dos caminos —el
+  panel manual y la peticion del modelo—. Tenerla dos veces garantizaria que una
+  se olvide de cifrar o de sondear.
+
+Pruebas: 14 nuevas en `vault-image-request.test.ts`, incluida la convivencia con
+el bloque de memoria (los dos se separan y **ninguno acaba guardado como texto
+del turno**) y que la herramienta no se ofrece cuando no existe.
+
+**`npm run check` exit 0: 119 archivos, 2.060 superadas, 9 omitidas.** Studio
+reconstruido.
+
+Lo que sigue sin comprobarse: **la API de generacion nunca se ha llamado**. Lo
+unico verificado contra ella es lo que se puede sin gastar nada — la URL base
+responde, la ruta de sondeo existe y pide `Authorization`, y su sobre de error
+es `{error:{code,message,request_id}}`, que encaja con lo que asume el
+adaptador.
+
 ### 2026-09-01 23:40 — Claude — F9.20 y F9.16 remoto: contexto fijo y medios que viajan
 
 Daniel aplico `0007` durante esta sesion (las cinco tablas con `rowsecurity =

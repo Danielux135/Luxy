@@ -101,6 +101,15 @@ export interface VaultController {
   turns: PrivateTurn[];
   /** instrucciones fijas de la conversación abierta; null si no tiene */
   instructions: string | null;
+  /** personaje que gobierna las imágenes de la conversación abierta */
+  characterId: string | null;
+  /**
+   * qué pasó con la imagen del último turno.
+   *
+   * null si el modelo no pidió ninguna, que es lo normal. Existe para que la
+   * interfaz pueda decir por qué no hay imagen: callarse parece un cuelgue.
+   */
+  lastImage: { mediaId: string | null; costCredits: number | null; error: string | null } | null;
   sending: boolean;
   openConversation: (conversationId: string | null) => Promise<void>;
   send: (input: {
@@ -110,6 +119,7 @@ export interface VaultController {
     projectAlias: string;
     /** null conserva las que hubiera; cadena vacía las borra */
     instructions: string | null;
+    characterId: string | null;
   }) => Promise<boolean>;
   removeConversation: (conversationId: string) => Promise<void>;
   media: PrivateMediaItem[];
@@ -149,6 +159,8 @@ export function useVault(): VaultController {
   const [openConversationId, setOpenConversationId] = useState<string | null>(null);
   const [turns, setTurns] = useState<PrivateTurn[]>([]);
   const [instructions, setInstructions] = useState<string | null>(null);
+  const [characterId, setCharacterId] = useState<string | null>(null);
+  const [lastImage, setLastImage] = useState<VaultController['lastImage']>(null);
   const [sending, setSending] = useState(false);
   const [media, setMedia] = useState<PrivateMediaItem[]>([]);
   const [attaching, setAttaching] = useState(false);
@@ -343,13 +355,19 @@ export function useVault(): VaultController {
         // una conversación nueva empieza sin instrucciones: arrastrar las de la
         // anterior las aplicaría sin que nadie las haya escrito aquí
         setInstructions(null);
+        setCharacterId(null);
+        setLastImage(null);
         return;
       }
       const result = await window.luxy.readVaultConversation(conversationId);
       if (mounted.current && result.ok) {
         setTurns(result.value.turns);
         setInstructions(result.value.instructions);
+        setCharacterId(result.value.characterId);
       }
+      // el resultado de una imagen pertenece al turno que la pidio, no a la
+      // conversacion: al cambiar de hilo deja de tener sentido
+      setLastImage(null);
       const mediaResult = await window.luxy.listVaultMedia(conversationId);
       if (mounted.current && mediaResult.ok) setMedia(mediaResult.value.media);
     },
@@ -412,6 +430,7 @@ export function useVault(): VaultController {
       model: string | null;
       projectAlias: string;
       instructions: string | null;
+      characterId: string | null;
     }): Promise<boolean> => {
       setSending(true);
       setError(null);
@@ -428,6 +447,11 @@ export function useVault(): VaultController {
         setOpenConversationId(result.value.conversationId);
         setTurns(result.value.turns);
         setInstructions(result.value.instructions);
+        setCharacterId(result.value.characterId);
+        setLastImage(result.value.image);
+        // lo generado en este turno se guarda contra la conversacion: recargar
+        // los medios es lo que hace que la imagen aparezca sin recargar nada
+        if (result.value.image?.mediaId != null) await reloadMedia();
         if (result.value.error !== null) setError(result.value.error);
         await reloadConversations();
         return result.value.outcome === 'completed';
@@ -435,7 +459,7 @@ export function useVault(): VaultController {
         if (mounted.current) setSending(false);
       }
     },
-    [openConversationId, reloadConversations],
+    [openConversationId, reloadConversations, reloadMedia],
   );
 
   const removeConversation = useCallback(
@@ -549,6 +573,8 @@ export function useVault(): VaultController {
     openConversationId,
     turns,
     instructions,
+    characterId,
+    lastImage,
     sending,
     openConversation,
     send,

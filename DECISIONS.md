@@ -932,3 +932,47 @@ Cómo queda:
 Lo que se asume: borrar una conversación borra sus filas en cascada, pero **los
 objetos del almacén quedan huérfanos**. No rompen nada y no son legibles; hace
 falta una limpieza que todavía no existe.
+
+## D-051 — el modelo pide la imagen con un bloque, no con una herramienta
+
+Fecha: 2026-09-01
+
+Estado: aceptada, implementada
+
+Hasta `F9.22` la conversación privada y la generación eran dos cosas que no se
+hablaban: se escribía en una y se generaba en otro panel, escribiendo a mano el
+prompt y el identificador del personaje. Pedirle una imagen al modelo dentro de
+la conversación no producía ninguna, y no por falta de clave: **nadie
+escuchaba**.
+
+Se resuelve con el mismo mecanismo que ya funciona para la memoria: el modelo
+termina su respuesta con un **bloque estructurado**, el proceso principal lo
+separa del texto visible y actúa. No se usa el protocolo de herramientas de cada
+proveedor porque los turnos privados corren sobre `runLocalTurn`, que admite
+Claude, Codex y cualquier conexión HTTP: una solución por proveedor serían tres
+implementaciones divergentes, y las conexiones HTTP no comparten un contrato de
+herramientas.
+
+Lo que va con esto:
+
+- **la herramienta sólo se ofrece cuando existe de verdad.** Sin personaje o sin
+  clave, la instrucción no se envía. Ofrecerle al modelo algo que no puede hacer
+  garantiza que lo use y que el usuario vea una promesa incumplida cada turno;
+- **el personaje pertenece a la conversación**, como las instrucciones fijas, y
+  viaja cifrado con el turno. Deja de ser un campo que rescribir;
+- **el prompt lo compone el modelo**, no se reenvía el mensaje del usuario: lo
+  que la gente escribe casi nunca describe una imagen;
+- **una por respuesta.** No es estético: cada generación cuesta créditos y sin
+  tope un modelo entusiasta los gasta en un turno;
+- **una generación fallida no tira la respuesta de texto.** Se guarda lo escrito
+  y el fallo se cuenta aparte, con su motivo. Una imagen que no aparece sin
+  explicación parece un cuelgue;
+- el orden de los bloques es **imagen antes que memoria**, porque la instrucción
+  de memoria dice que no se escriba nada después del suyo. Al separarlos se
+  quita primero el de memoria y después el de imagen.
+
+Lo que se asume: **el modelo puede no escribir el bloque, o escribirlo mal.**
+Entonces no hay imagen y el turno sigue siendo válido. Es el mismo límite que ya
+tiene la memoria, y por eso los estados se distinguen (`absent`,
+`truncated_block`, `invalid`): «no la pidió» y «se cortó a medias» se arreglan
+de forma distinta.

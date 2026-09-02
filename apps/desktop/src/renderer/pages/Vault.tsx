@@ -58,6 +58,7 @@ function ConversationPanel({
   const [message, setMessage] = useState('');
   // `null` mientras no se edite: enviar sin tocarlas conserva las guardadas
   const [draftInstructions, setDraftInstructions] = useState<string | null>(null);
+  const [draftCharacter, setDraftCharacter] = useState<string | null>(null);
   const projects = Object.keys(summary.config?.projects ?? {});
   const [project, setProject] = useState(projects[0] ?? '');
   const providers = ['claude', 'codex', ...(summary.config?.providers.http ?? []).map((p) => p.id)];
@@ -74,12 +75,14 @@ function ConversationPanel({
         model: null,
         projectAlias: project,
         instructions: draftInstructions,
+        characterId: draftCharacter,
       })
       .then(() => {
         setMessage('');
-        // ya están guardadas con el turno: el borrador deja de ser necesario y
-        // el panel vuelve a leer lo que hay de verdad
+        // ya están guardados con el turno: los borradores dejan de ser
+        // necesarios y el panel vuelve a leer lo que hay de verdad
         setDraftInstructions(null);
+        setDraftCharacter(null);
       });
   };
 
@@ -133,10 +136,14 @@ function ConversationPanel({
 
       {vault.media.length > 0 && <MediaStrip vault={vault} />}
 
+      {vault.lastImage !== null && <ImageOutcome image={vault.lastImage} />}
+
       <InstructionsPanel
         vault={vault}
         draft={draftInstructions}
         onChange={setDraftInstructions}
+        draftCharacter={draftCharacter}
+        onCharacterChange={setDraftCharacter}
       />
 
       <GeneratePanel vault={vault} />
@@ -246,18 +253,46 @@ export function parseTraits(text: string): Record<string, string> {
  * guardadas. Vaciarlas y enviar SI las borra, que es la unica forma de volver
  * atras una vez puestas.
  */
+function ImageOutcome({
+  image,
+}: {
+  image: NonNullable<VaultController['lastImage']>;
+}): JSX.Element {
+  if (image.error !== null) {
+    return (
+      <Notice tone="fault">
+        Se pidió una imagen y no pudo generarse: {image.error}. La respuesta de
+        texto sí se ha guardado.
+      </Notice>
+    );
+  }
+  return (
+    <Notice tone="ok">
+      Imagen generada y cifrada en esta conversación
+      {image.costCredits !== null && ` · ${image.costCredits} créditos`}. Aparece
+      abajo, con el resto de archivos.
+    </Notice>
+  );
+}
+
 function InstructionsPanel({
   vault,
   draft,
   onChange,
+  draftCharacter,
+  onCharacterChange,
 }: {
   vault: VaultController;
   draft: string | null;
   onChange: (value: string | null) => void;
+  draftCharacter: string | null;
+  onCharacterChange: (value: string | null) => void;
 }): JSX.Element {
   const saved = vault.instructions ?? '';
   const value = draft ?? saved;
   const pending = draft !== null && draft !== saved;
+  const savedCharacter = vault.characterId ?? '';
+  const characterValue = draftCharacter ?? savedCharacter;
 
   return (
     <details className="vault-generate" open={saved.length > 0}>
@@ -291,6 +326,24 @@ function InstructionsPanel({
           Al enviar vacías se borran las que había. Los turnos anteriores
           conservan las suyas: lo que cambia es de aquí en adelante.
         </Notice>
+      )}
+
+      <Field
+        label="Personaje de esta conversación"
+        hint="Con uno puesto, puedes pedir imágenes dentro de la conversación y se generan solas. Sin él, no se ofrece."
+      >
+        <input
+          value={characterValue}
+          placeholder="identificador del personaje"
+          disabled={vault.sending}
+          onChange={(event) => onCharacterChange(event.target.value)}
+        />
+      </Field>
+      {savedCharacter.length === 0 && characterValue.length === 0 && (
+        <p className="field__hint">
+          Créalo abajo, en «Generar imagen o vídeo», y pégalo aquí. Se guarda con
+          la conversación: no hay que repetirlo en cada mensaje.
+        </p>
       )}
     </details>
   );

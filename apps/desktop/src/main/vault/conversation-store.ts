@@ -223,6 +223,26 @@ export class PrivateConversationStore {
     return null;
   }
 
+  /**
+   * personaje en vigor, leido del ultimo turno que lo llevaba.
+   *
+   * Mismo criterio que `latestInstructions`: hacia atras y vale el primero que
+   * aparezca. Es lo que hace que «el personaje» sea de la conversacion y no de
+   * un campo que hay que rellenar en cada mensaje.
+   */
+  async latestCharacterId(
+    vault: VaultService,
+    conversationId: string,
+  ): Promise<string | null> {
+    const records = this.readRecords(conversationId);
+    for (let index = records.length - 1; index >= 0; index -= 1) {
+      const opened = await openTurn(vault, records[index]!);
+      if (opened.turn.characterId === null) continue;
+      return opened.turn.characterId.length === 0 ? null : opened.turn.characterId;
+    }
+    return null;
+  }
+
   /** borra una conversacion. no hay papelera: es lo que se espera aqui */
   delete(conversationId: string): void {
     const file = fileFor(this.directory, conversationId);

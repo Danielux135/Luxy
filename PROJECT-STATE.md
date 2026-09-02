@@ -34,8 +34,13 @@ fijas por conversación, y `F9.16` remoto, **los medios ya viajan entre equipos*
 (bucket privado de Supabase Storage, `D-050`). `npm run check` exit 0: 118
 archivos, 2.046 superadas, 9 omitidas.
 
-Lo que falta, por orden: la primera llamada real a la API de generación,
-aplicar `0008` y desplegar el gateway, `F9.21` (un vídeo de más de 20 MB se
+Actualización del 2026-09-02: **el gateway está desplegado y verificado** —
+`/health` responde y una petición de prueba demuestra que habla con el Supabase
+donde están las tablas—, `0008` aplicada con el bucket privado, y `F9.22` cierra
+el flujo que faltaba: **el modelo puede pedir una imagen dentro de la
+conversación y se genera, se cifra y se guarda sola** (`D-051`).
+
+Lo que falta, por orden: la primera llamada real a la API de generación, `F9.21` (un vídeo de más de 20 MB se
 guarda pero no se previsualiza), la limpieza de objetos huérfanos y `F9.12`
 (documentación de privacidad). Sin streaming es deliberado (`D-043`), no un
 olvido. El detalle, con tamaños y causas, en `CURRENT-TASK.md`.

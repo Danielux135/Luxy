@@ -260,6 +260,13 @@ export const vaultConversationSendArgsSchema = z.object({
    * una vez puestas.
    */
   instructions: z.string().max(8000).nullable().default(null),
+  /**
+   * personaje que gobierna las imagenes de esta conversacion.
+   *
+   * misma regla que `instructions`: `null` conserva el que hubiera, y una
+   * cadena vacia lo quita.
+   */
+  characterId: z.string().max(128).nullable().default(null),
 });
 
 export const vaultConversationIdArgsSchema = z.object({
@@ -289,6 +296,7 @@ export const vaultConversationReadResultSchema = z.object({
   turns: z.array(vaultConversationTurnSchema),
   /** las que estan en vigor; texto en claro, porque el main ya las descifro */
   instructions: z.string().nullable(),
+  characterId: z.string().nullable(),
 });
 
 export const vaultConversationSendResultSchema = z.object({
@@ -296,6 +304,22 @@ export const vaultConversationSendResultSchema = z.object({
   outcome: z.enum(['completed', 'failed', 'cancelled']),
   turns: z.array(vaultConversationTurnSchema),
   instructions: z.string().nullable(),
+  characterId: z.string().nullable(),
+  /**
+   * la imagen que el modelo pidio en este turno, si pidio alguna.
+   *
+   * `null` significa que no pidio ninguna, que es lo normal. Con `mediaId` la
+   * imagen esta guardada y cifrada; con `error` se pidio y no pudo ser, y la
+   * interfaz debe decir por que: una imagen que no aparece sin explicacion
+   * parece un cuelgue.
+   */
+  image: z
+    .object({
+      mediaId: z.string().nullable(),
+      costCredits: z.number().nullable(),
+      error: z.string().nullable(),
+    })
+    .nullable(),
   error: z.string().nullable(),
 });
 

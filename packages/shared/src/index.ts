@@ -6,6 +6,7 @@ export * from './vault.js';
 export * from './vault-auth.js';
 export * from './vault-payloads.js';
 export * from './vault-prompt.js';
+export * from './vault-image-request.js';
 export * from './response-outcome.js';
 export * from './continuation.js';
 export * from './artifacts.js';

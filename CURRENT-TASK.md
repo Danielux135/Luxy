@@ -85,14 +85,14 @@ Añadido después, **implementado y probado con mocks pero sin ejecutar de verda
 
 Ordenado por lo que más se nota al usarlo:
 
-1. **La API de Xavira nunca se ha llamado de verdad** (`F9.17`). El contrato
-   viene de su documentación pública; la primera llamada real puede desmentir
-   nombres de campo, códigos o formato de error. Necesita la clave en Conexiones
-   (`VAULT_MEDIA_API_KEY`, reservada) y una generación de prueba. Es `LA-031`.
-2. **Falta aplicar `0008` y desplegar el gateway.** El código de la
-   sincronización de medios está hecho y probado con dobles, pero sin el bucket
-   `vault-media` el gateway responde «falta crear el almacén de medios». El
-   texto sí sincroniza sin eso.
+1. **La API de generación nunca se ha llamado de verdad** (`F9.17`). Es lo único
+   que queda del camino y lo único donde espero sorpresas. Lo verificado sin
+   gastar créditos: la URL base responde, `GET /v1/generations/<id>` existe y
+   devuelve **401** sin credenciales (no 404), y su sobre de error es
+   `{error:{code,message,request_id}}`, que encaja con el adaptador. **Sin
+   verificar**: los nombres de campo de `POST /v1/images:generate`, la rama
+   201-con-`output_url` frente a 202-con-`poll_url`, y la creación de personaje.
+   Necesita la clave en Conexiones (`VAULT_MEDIA_API_KEY`) y una generación.
 3. **`F9.21` — vídeo grande sin previsualizar.** Se genera y se guarda cifrado,
    pero el tope de 20 MB del IPC impide verlo. Falta un protocolo de Electron
    que sirva el flujo descifrado. Ojo: **sincronizar y previsualizar tienen
@@ -175,7 +175,8 @@ gateway real**. Ver el punto 2 de la lista de abajo.
 | F9.18 | interfaz de cuenta y unión de los dos orígenes de la llave | done; sin ejecución real |
 | F9.19 | recuperación desde un equipo nuevo | done; sin ejecución real |
 | F9.20 | instrucciones fijas por conversación | done |
-| F9.16 remoto | los medios viajan entre equipos | done; falta `0008` y desplegar |
+| F9.16 remoto | los medios viajan entre equipos | done |
+| F9.22 | el modelo pide una imagen y se genera sola | done; sin llamada real |
 | F9.9 | puente Telegram por conversación | planned |
 | F9.11 | transportes del invitado | planned |
 | F9.12 | documentación de privacidad | planned |
@@ -249,7 +250,8 @@ streaming) · `D-044` (relleno de longitud) · `D-045` (multiusuario, matiza
 `D-001`) · `D-046` (auth y cifrado por caminos separados) · `D-047` (la cuenta
 es el origen de la llave; el archivo local es su caché) · `D-048` (sincronizar
 autoriza por sesión de cuenta) · `D-049` (la clave de recuperación no se trata
-como una contraseña) · `D-050` (los bytes de los medios van a Supabase Storage).
+como una contraseña) · `D-050` (los bytes de los medios van a Supabase Storage) ·
+`D-051` (el modelo pide la imagen con un bloque, no con una herramienta).
 
 ### Siguiente paso exacto (para quien retome)
 
@@ -277,6 +279,24 @@ es ejecutar y documentar.
 
 Después quedan la limpieza de objetos huérfanos, `F9.9` (puente Telegram) y
 `F9.11` (invitar a un tercero).
+
+### F9.22 — done (Claude, 2026-09-02, sin llamada real)
+
+El flujo que faltaba: **pedirle una imagen al personaje dentro de la
+conversación y recibirla**. No funcionaba, y no por la clave — la conversación y
+la generación eran dos cosas desconectadas y nadie escuchaba al modelo.
+
+Ahora el modelo la pide con un bloque estructurado al final de su respuesta
+—mismo patrón que la memoria— y el proceso principal la genera, la cifra y la
+guarda en la conversación (`D-051`). El personaje pertenece a la conversación,
+como las instrucciones. La herramienta **sólo se ofrece cuando existe de
+verdad**: sin personaje o sin clave, la instrucción ni se envía.
+
+Lo que hay que saber al probarlo: si el modelo no escribe el bloque o lo escribe
+mal, **no hay imagen y el turno sigue siendo válido**. Es el mismo límite que ya
+tiene la memoria.
+
+`npm run check` exit 0: 119 archivos, 2.060 superadas, 9 omitidas.
 
 ### F9.20 y F9.16 remoto — done (Claude, 2026-09-01, sin commit)
 

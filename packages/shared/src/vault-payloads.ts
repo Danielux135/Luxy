@@ -46,6 +46,16 @@ export const vaultTurnPayloadSchema = z.object({
    * a cambio, la ultima vale como estado actual sin indice aparte.
    */
   instructions: z.string().max(8000).nullable().default(null),
+  /**
+   * personaje del proveedor que gobierna las imagenes de esta conversacion.
+   *
+   * Vive con el turno por el mismo motivo que las instrucciones: es lo que
+   * convierte «el personaje» en algo de la conversacion y no en un campo que
+   * hay que rescribir cada vez. Es un identificador del proveedor, no un
+   * secreto, pero viaja cifrado como todo lo demas: saber que dos
+   * conversaciones comparten personaje ya dice algo.
+   */
+  characterId: z.string().max(128).nullable().default(null),
   createdAt: z.string().datetime(),
 });
 export type VaultTurnPayload = z.infer<typeof vaultTurnPayloadSchema>;

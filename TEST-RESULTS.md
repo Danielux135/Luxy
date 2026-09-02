@@ -1,5 +1,39 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-02 — Windows 11 (equipo `oscar`) — F9.22
+
+- **`npm run check`: exit 0.** Suite: **119 archivos, 2.060 superadas, 9
+  omitidas, 0 fallos**. Studio reconstruido (`npm run build`, exit 0).
+- Archivo nuevo: `vault-image-request.test.ts` (14). Todo puro: se prueba cada
+  caso límite **sin gastar una generación**, que es justo lo caro de este paso.
+- Casos cubiertos: sin bloque no hay petición; el bloque se separa y **no acaba
+  guardado como texto del turno**; `kind` por defecto es imagen; se tolera una
+  cerca Markdown; un bloque cortado se distingue de uno que no existía; un
+  bloque inválido no se traga la respuesta; un prompt vacío o un `kind`
+  inventado se rechazan; y los dos bloques —imagen y memoria— conviven y se
+  separan sin dejar rastro técnico.
+- También se prueba que la instrucción **no se envía** cuando no se puede
+  generar.
+
+### 2026-09-02 — comprobaciones contra servicios reales
+
+- **Gateway desplegado y verificado**: `/health` → 200 con `configured: true`.
+  `POST /api/vault/login/start` con un correo inexistente → 200 con la respuesta
+  señuelo, lo que prueba tres cosas a la vez: las rutas nuevas están
+  desplegadas, el gateway **habla con el Supabase donde están las tablas** (si
+  `0007` no estuviera allí, `getVaultUserByEmail` habría lanzado y habría dado
+  500), y el código de `F9.19` está vivo (la respuesta trae la puerta de
+  recuperación con `t=1, m=8192`). No se creó ninguna cuenta.
+- **API de generación, sin gastar créditos**: `GET /v1/generations/<uuid>` sin
+  credenciales → **401**, no 404. La URL base existe, la ruta de sondeo existe y
+  exige `Authorization`. Su sobre de error es
+  `{error:{code,message,request_id}}`, compatible con lo que hace el adaptador,
+  que se queda con el texto y decide por el código HTTP.
+- **Lo que sigue sin verificarse**: los nombres de campo del cuerpo de
+  `POST /v1/images:generate`, la rama 201-con-`output_url` frente a
+  202-con-`poll_url`, y la creación de personaje. Eso sólo lo confirma —o lo
+  desmiente— una generación real.
+
 ### 2026-09-01 — Windows 11 (equipo `oscar`) — F9.20 y F9.16 remoto
 
 - **`npm run check`: exit 0.** Suite: **118 archivos, 2.046 superadas, 9

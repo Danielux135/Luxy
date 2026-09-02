@@ -10,6 +10,7 @@ import type { z } from 'zod';
 import {
   buildVaultPrompt,
   parseConversationMemoryResponse,
+  parseVaultImageRequest,
   redact,
   storedAgentConfigSchema,
   secretRegistry,
@@ -756,6 +757,10 @@ export function registerIpcHandlers(context: HandlerContext): void {
       context.vault,
       args.conversationId,
     ),
+    characterId: await context.privateConversations.latestCharacterId(
+      context.vault,
+      args.conversationId,
+    ),
     conversationId: args.conversationId,
     turns: await context.privateConversations.read(context.vault, args.conversationId),
   }));
@@ -898,11 +903,28 @@ export function registerIpcHandlers(context: HandlerContext): void {
    * decidio enviarselo. Se guarda cifrado junto al medio, pero eso no lo retira
    * de los registros del proveedor.
    */
-  handle(IPC_INVOKE.vaultMediaGenerate, vaultMediaGenerateArgsSchema, async (args) => {
-    if (!context.vault.isUnlocked()) throw new VaultError('la boveda esta bloqueada');
-
+  /**
+   * genera un medio y lo guarda cifrado en la conversacion.
+   *
+   * La usan DOS caminos: el panel manual y la peticion que el modelo hace
+   * dentro de una conversacion. Es la misma operacion, y tenerla dos veces
+   * garantizaria que una de las dos se olvide de cifrar o de sondear.
+   */
+  const generatePrivateMedia = async (input: {
+    conversationId: string;
+    characterId: string;
+    prompt: string;
+    kind: 'image' | 'video';
+    fromGenerationId?: string;
+  }): Promise<{
+    mediaId: string;
+    mimeType: string;
+    byteSize: number;
+    costCredits: number | null;
+  }> => {
     const controller = new AbortController();
     const options = mediaProviderOptions(controller.signal);
+    const args = input;
 
     try {
       const started =
@@ -955,6 +977,17 @@ export function registerIpcHandlers(context: HandlerContext): void {
       if (error instanceof XaviraError) throw new VaultError(error.message, error.hint);
       throw error;
     }
+  };
+
+  handle(IPC_INVOKE.vaultMediaGenerate, vaultMediaGenerateArgsSchema, async (args) => {
+    if (!context.vault.isUnlocked()) throw new VaultError('la boveda esta bloqueada');
+    return generatePrivateMedia({
+      conversationId: args.conversationId,
+      characterId: args.characterId,
+      prompt: args.prompt,
+      kind: args.kind,
+      ...(args.fromGenerationId === undefined ? {} : { fromGenerationId: args.fromGenerationId }),
+    });
   });
 
   handle(IPC_INVOKE.vaultMediaRead, vaultMediaReadArgsSchema, async (args) => {
@@ -1002,6 +1035,20 @@ export function registerIpcHandlers(context: HandlerContext): void {
     const instructions = args.instructions === null ? previousInstructions : args.instructions;
     const changed = args.instructions !== null && args.instructions !== (previousInstructions ?? '');
 
+    // el personaje sigue la misma regla que las instrucciones: pertenece a la
+    // conversacion, no a un campo que haya que rescribir en cada mensaje
+    const previousCharacter = await store.latestCharacterId(context.vault, conversationId);
+    const characterId = args.characterId === null ? previousCharacter : args.characterId;
+    const characterChanged =
+      args.characterId !== null && args.characterId !== (previousCharacter ?? '');
+
+    // solo se le ofrece generar si de verdad se puede: sin personaje o sin
+    // clave, ofrecerselo garantiza una promesa incumplida en cada turno
+    const canGenerateImage =
+      characterId !== null &&
+      characterId.length > 0 &&
+      context.secretStore.get(VAULT_MEDIA_API_SECRET) !== undefined;
+
     await store.appendTurn(context.vault, conversationId, {
       role: 'user',
       text: args.message,
@@ -1013,6 +1060,7 @@ export function registerIpcHandlers(context: HandlerContext): void {
       // solo se vuelven a sellar cuando cambian: repetirlas en cada turno
       // engordaria el archivo sin decir nada nuevo
       ...(changed ? { instructions: args.instructions } : {}),
+      ...(characterChanged ? { characterId: args.characterId } : {}),
     });
 
     // el prompt se arma con la memoria acumulativa mas los ultimos turnos, no
@@ -1027,6 +1075,7 @@ export function registerIpcHandlers(context: HandlerContext): void {
       turns: history.slice(0, -1).map((turn) => ({ role: turn.role, text: turn.text })),
       message: args.message,
       instructions: instructions === null || instructions.length === 0 ? null : instructions,
+      canGenerateImage,
     });
 
     const result = await context.controller.runLocalTurn({
@@ -1037,16 +1086,62 @@ export function registerIpcHandlers(context: HandlerContext): void {
       prompt,
     });
 
+    // lo que el modelo pidio generar, y como acabo. Se devuelve a la interfaz
+    // para que pueda decir «no habia clave» o «el proveedor fallo» en vez de
+    // callarse: una imagen que no aparece sin explicacion parece un cuelgue
+    let image: {
+      mediaId: string | null;
+      costCredits: number | null;
+      error: string | null;
+    } | null = null;
+
     if (result.outcome !== 'failed' && result.text.length > 0) {
       // la memoria viaja DENTRO de la respuesta y se separa aqui: lo que se
       // guarda como turno es solo el texto visible, sin el bloque tecnico
       const parsed = parseConversationMemoryResponse(result.text);
+      // y despues la peticion de imagen, sobre lo que quedo. El orden es el
+      // inverso al del prompt: la memoria va la ultima, asi que sale la primera
+      const imageRequest = parseVaultImageRequest(parsed.visibleText);
+
+      if (imageRequest.request !== null && canGenerateImage && characterId !== null) {
+        try {
+          const generated = await generatePrivateMedia({
+            conversationId,
+            characterId,
+            prompt: imageRequest.request.prompt,
+            kind: imageRequest.request.kind,
+          });
+          image = {
+            mediaId: generated.mediaId,
+            costCredits: generated.costCredits,
+            error: null,
+          };
+        } catch (error) {
+          // una generacion fallida NO tira la respuesta de texto: lo escrito
+          // sigue valiendo y se guarda igual, con el fallo al lado
+          image = {
+            mediaId: null,
+            costCredits: null,
+            error: redact(error instanceof Error ? error.message : String(error)),
+          };
+        }
+      } else if (imageRequest.request !== null) {
+        image = {
+          mediaId: null,
+          costCredits: null,
+          error:
+            characterId === null || characterId.length === 0
+              ? 'elige un personaje para esta conversacion antes de pedir imagenes'
+              : 'falta la clave del proveedor de imagenes en Conexiones',
+        };
+      }
+
       await store.appendTurn(
         context.vault,
         conversationId,
         {
           role: 'assistant',
-          text: parsed.visibleText,
+          text: imageRequest.visibleText,
           title,
           provider: args.provider,
           model: result.executedModel ?? args.model,
@@ -1064,6 +1159,8 @@ export function registerIpcHandlers(context: HandlerContext): void {
       outcome: result.outcome,
       turns: await store.read(context.vault, conversationId),
       instructions: await store.latestInstructions(context.vault, conversationId),
+      characterId: await store.latestCharacterId(context.vault, conversationId),
+      image,
       error: result.error,
     };
   });

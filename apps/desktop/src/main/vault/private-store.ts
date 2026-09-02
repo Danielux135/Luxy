@@ -66,9 +66,10 @@ export interface SealTurnInput {
    * instrucciones fijas es lo normal, y obligar a escribir `instructions: null`
    * en cada llamada solo conseguiria que alguien lo rellene por costumbre.
    */
-  turn: Omit<VaultTurnPayload, 'v' | 'createdAt' | 'instructions'> & {
+  turn: Omit<VaultTurnPayload, 'v' | 'createdAt' | 'instructions' | 'characterId'> & {
     createdAt?: string;
     instructions?: string | null;
+    characterId?: string | null;
   };
   memory?: Omit<VaultMemoryPayload, 'v'>;
 }

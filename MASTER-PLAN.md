@@ -309,6 +309,7 @@ interfaz: *workspace*, *privacy*, *vault*, *invitado en solo lectura*.
 | F9.19 | Recuperación de la cuenta desde un equipo nuevo (envoltura de recuperación en servidor) | done |
 | F9.20 | Instrucciones fijas por conversación: contexto persistente cifrado con ella | done |
 | F9.21 | Protocolo de Electron para servir medios grandes descifrados (vídeo > 20 MB) | planned |
+| F9.22 | El modelo pide una imagen dentro de la conversación y se genera sola | done (sin llamada real) |
 
 `F9.18` cierra la avería que impedía usar la bóveda en un segundo ordenador:
 el archivo local y la llave envuelta del servidor eran dos orígenes de la misma
@@ -334,6 +335,14 @@ esquema del IPC, no se guarda con la conversación y no hay dónde escribirlo. S
 él, todo el contexto de una conversación tiene que rescribirse en cada mensaje o
 depender de que sobreviva a la memoria acumulativa, que resume y por tanto
 pierde matices a propósito. Es la pieza más barata que queda con efecto visible.
+
+`F9.22` cierra el hueco que hacía que el flujo completo no existiera: la
+conversación y la generación eran **dos cosas desconectadas**. Se escribía en
+una y se generaba en otro panel, a mano, con el prompt y el personaje escritos
+otra vez; pedirle una imagen al modelo no producía ninguna porque nadie
+escuchaba. Ahora el modelo la pide con un bloque estructurado —el mismo patrón
+que la memoria— y el proceso principal la genera, la cifra y la guarda en la
+conversación. Ver `D-051`.
 
 `F9.21` sale del tope de 20 MB del IPC: un vídeo generado se guarda cifrado y
 **no se puede previsualizar**. Hace falta un protocolo de Electron que sirva el
