@@ -12,6 +12,8 @@ import {
   agentHostStatusSchema,
   jobStatusSchema,
   projectAliasSchema,
+  studioConversationUpdateRequestSchema,
+  studioConversationUpdateResponseSchema,
   studioJobActionRequestSchema,
   studioJobActionResponseSchema,
   studioJobCreateRequestSchema,
@@ -83,6 +85,8 @@ export const appInfoSchema = z.object({
   electronVersion: z.string(),
   nodeVersion: z.string(),
   platform: z.string(),
+  /** nombre local del sistema; sirve para proponer una identidad, no es secreto */
+  hostname: z.string().min(1).max(255),
   /** carpeta de logs, para el boton "abrir carpeta" */
   logsDirectory: z.string(),
   /** true si safeStorage puede cifrar en este equipo */
@@ -320,12 +324,16 @@ export const studioJobActionArgsSchema = studioJobActionRequestSchema.extend({
 export const studioJobFeedbackArgsSchema = studioJobFeedbackRequestSchema.extend({
   jobId: z.string().uuid(),
 });
+export const studioConversationUpdateArgsSchema = studioConversationUpdateRequestSchema.and(
+  z.object({ jobId: z.string().uuid() }),
+);
 
 export const studioOptionsResultSchema = studioOptionsResponseSchema;
 export const studioJobsListResultSchema = studioJobsResponseSchema;
 export const studioJobResultSchema = studioJobResponseSchema;
 export const studioJobActionResultSchema = studioJobActionResponseSchema;
 export const studioJobFeedbackResultSchema = studioJobFeedbackResponseSchema;
+export const studioConversationUpdateResultSchema = studioConversationUpdateResponseSchema;
 
 // -----------------------------------------------------------------------------
 // API que el preload expone en window.luxy
@@ -391,6 +399,9 @@ export interface LuxyBridge {
   rateStudioJob(
     args: z.infer<typeof studioJobFeedbackArgsSchema>,
   ): Promise<IpcResult<z.infer<typeof studioJobFeedbackResultSchema>>>;
+  updateStudioConversation(
+    args: z.infer<typeof studioConversationUpdateArgsSchema>,
+  ): Promise<IpcResult<z.infer<typeof studioConversationUpdateResultSchema>>>;
   requestStudioJobAction(
     args: z.infer<typeof studioJobActionArgsSchema>,
   ): Promise<IpcResult<z.infer<typeof studioJobActionResultSchema>>>;

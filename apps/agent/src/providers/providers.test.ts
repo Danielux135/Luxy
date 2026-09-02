@@ -19,10 +19,12 @@ import {
   HttpApiProvider,
   MemoryBudgetStore,
   EXAMPLE_HTTP_PROVIDERS,
+  isRetryableAgenticTurn,
   resolveHttpRequestTimeout,
 } from './http-provider.js';
 import {
   httpProviderConfigSchema,
+  modelLimitsSchema,
   RetryError,
   SOFT_TERMINAL_GRACE_MS,
   TERMINAL_GRACE_MS,
@@ -398,6 +400,16 @@ describe('describeHttpError', () => {
 });
 
 describe('Retry-After', () => {
+  it('reintenta la red pero no la cancelacion ni un timeout del borde en un turno agentic', () => {
+    const active = new AbortController();
+    expect(isRetryableAgenticTurn(new TypeError('fetch failed'), active.signal)).toBe(true);
+    expect(isRetryableAgenticTurn(Object.assign(new Error('524'), { status: 524 }), active.signal)).toBe(
+      false,
+    );
+    active.abort();
+    expect(isRetryableAgenticTurn(new TypeError('fetch failed'), active.signal)).toBe(false);
+  });
+
   it('acepta segundos', () => {
     expect(parseRetryAfter('30')).toBe(30_000);
   });
@@ -636,6 +648,152 @@ describe('HttpApiProvider: diagnostico del final de la respuesta', () => {
     );
     expect(result.errorMessage).toContain('8192 tokens de salida consumidos');
   });
+
+  it('falla si una consulta sin contrato agentic termina con tool_calls', async () => {
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(
+          new TextEncoder().encode(
+            [
+              'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"write_file","arguments":"{\\"path\\":\\"index.html\\",\\"content\\":\\"hola\\"}"}}]},"finish_reason":"tool_calls"}]}',
+              'data: {"choices":[],"usage":{"prompt_tokens":452,"completion_tokens":2263}}',
+              'data: [DONE]',
+            ].join('\n') + '\n',
+          ),
+        );
+        controller.close();
+      },
+    });
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(body, { status: 200 }));
+
+    const provider = new HttpApiProvider(config, 'una-clave');
+    const result = await provider.run(peticion({ model: 'kimi-k3', readOnly: false }));
+
+    expect(result.ok).toBe(false);
+    expect(result.errorMessage).toContain('(kimi-k3) pidio 1 herramienta');
+    expect(result.errorMessage).toContain('No se ejecuto ninguna herramienta');
+    expect(result.termination).toMatchObject({
+      finishReason: 'tool_calls',
+      inputTokens: 452,
+      outputTokens: 2263,
+      textLength: 0,
+    });
+  });
+
+  it('entrega los tool_calls al bucle agentic en vez de rechazarlos como consulta', async () => {
+    const responses = [
+      new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(
+              new TextEncoder().encode(
+                'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"write_file","arguments":"{\\"path\\":\\"kimi-prueba.txt\\",\\"content\\":\\"ok\\"}"}}]},"finish_reason":"tool_calls"}]}\n' +
+                  'data: [DONE]\n',
+              ),
+            );
+            controller.close();
+          },
+        }),
+        { status: 200 },
+      ),
+      new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(
+              new TextEncoder().encode(
+                'data: {"choices":[{"delta":{"content":"listo"},"finish_reason":"stop"}]}\n' +
+                  'data: [DONE]\n',
+              ),
+            );
+            controller.close();
+          },
+        }),
+        { status: 200 },
+      ),
+    ];
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => responses.shift()!);
+    const runner = { execute: vi.fn(async () => ({ ok: true, content: 'archivo escrito' })) };
+    const provider = new HttpApiProvider(config, 'una-clave');
+
+    const result = await provider.run({
+      ...peticion({ model: 'kimi-k3', readOnly: false }),
+      agentic: {
+        runner,
+        allowedTools: ['write_file'],
+        limits: modelLimitsSchema.parse({}),
+        useNativeTools: true,
+      },
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      finalText: 'listo',
+      callMetrics: { modelCalls: 2, toolCalls: 1 },
+    });
+    expect(runner.execute).toHaveBeenCalledWith('write_file', {
+      path: 'kimi-prueba.txt',
+      content: 'ok',
+    });
+  });
+
+  it('reintenta un fetch failed de Kimi sin volver a ejecutar la herramienta anterior', async () => {
+    const responses: Array<Response | Error> = [
+      new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(
+              new TextEncoder().encode(
+                'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"write_file","arguments":"{\\"path\\":\\"kimi-reintento.txt\\",\\"content\\":\\"ok\\"}"}}]},"finish_reason":"tool_calls"}]}\n' +
+                  'data: [DONE]\n',
+              ),
+            );
+            controller.close();
+          },
+        }),
+        { status: 200 },
+      ),
+      new TypeError('fetch failed'),
+      new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(
+              new TextEncoder().encode(
+                'data: {"choices":[{"delta":{"content":"terminado tras reintento"},"finish_reason":"stop"}]}\n' +
+                  'data: [DONE]\n',
+              ),
+            );
+            controller.close();
+          },
+        }),
+        { status: 200 },
+      ),
+    ];
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+      const next = responses.shift();
+      if (next instanceof Error) throw next;
+      return next!;
+    });
+    const runner = { execute: vi.fn(async () => ({ ok: true, content: 'archivo escrito' })) };
+    const provider = new HttpApiProvider(config, 'una-clave');
+
+    const result = await provider.run({
+      ...peticion({ model: 'kimi-k3', readOnly: false }),
+      agentic: {
+        runner,
+        allowedTools: ['write_file'],
+        limits: modelLimitsSchema.parse({}),
+        useNativeTools: true,
+      },
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      finalText: 'terminado tras reintento',
+      callMetrics: { modelCalls: 2, toolCalls: 1 },
+    });
+    expect(globalThis.fetch).toHaveBeenCalledTimes(3);
+    expect(runner.execute).toHaveBeenCalledTimes(1);
+  }, 10_000);
 
   it('conserva finish_reason length y los limites efectivos de una respuesta truncada', async () => {
     const body = new ReadableStream<Uint8Array>({

@@ -21,6 +21,7 @@ import {
   type ConversationDocument,
   formatConversationCount,
   formatTurnCount,
+  filterConversationLibrary,
   groupConversationTurns,
   isConversationRunning,
   latestConversationMemory,
@@ -278,6 +279,10 @@ export function ConversationsPage({
   const [modelB, setModelB] = useState('');
   const [compare, setCompare] = useState(false);
   const [message, setMessage] = useState('');
+  const [historyQuery, setHistoryQuery] = useState('');
+  const [showArchived, setShowArchived] = useState(false);
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [titleDraft, setTitleDraft] = useState('');
   // respuesta cortada que el proximo envio continua; se limpia al enviar
   const [continuesJobId, setContinuesJobId] = useState<string | null>(null);
 
@@ -286,6 +291,20 @@ export function ConversationsPage({
     if (!providers.includes(providerB as ProviderId))
       setProviderB(providers[1] ?? providers[0] ?? '');
   }, [providerA, providerB, providers]);
+
+  useEffect(() => {
+    setTitleDraft(conversations.selected?.title ?? '');
+    setEditingTitle(false);
+  }, [conversations.selected?.id, conversations.selected?.title]);
+
+  const visibleConversations = useMemo(
+    () => filterConversationLibrary(conversations.conversations, historyQuery, showArchived),
+    [conversations.conversations, historyQuery, showArchived],
+  );
+  const activeConversationCount = conversations.conversations.filter(
+    (conversation) => conversation.archivedAt === null,
+  ).length;
+  const archivedConversationCount = conversations.conversations.length - activeConversationCount;
 
   const turns = useMemo(
     () => groupConversationTurns(conversations.selected?.jobs ?? []),
@@ -311,6 +330,7 @@ export function ConversationsPage({
     (!compare || providerB !== '') &&
     !sameTarget &&
     message.trim().length > 0 &&
+    conversations.selected?.archivedAt == null &&
     !conversations.busy;
 
   const send = async (): Promise<void> => {
@@ -367,6 +387,7 @@ export function ConversationsPage({
               className="btn btn--primary btn--quiet"
               onClick={() => {
                 setContinuesJobId(null);
+                setShowArchived(false);
                 conversations.startNew();
               }}
             >
@@ -374,11 +395,53 @@ export function ConversationsPage({
             </button>
           }
         >
+          <div className="conversation-settings">
+            <Field label="Buscar" hint="Título, preguntas y respuestas ya cargadas.">
+              <input
+                type="search"
+                value={historyQuery}
+                onChange={(event) => setHistoryQuery(event.target.value)}
+                placeholder="Buscar en el historial…"
+              />
+            </Field>
+            <div className="conversation-feedback" aria-label="Tipo de conversaciones">
+              <button
+                className="btn btn--quiet"
+                data-selected={!showArchived}
+                onClick={() => {
+                  setShowArchived(false);
+                  setEditingTitle(false);
+                  const next = filterConversationLibrary(conversations.conversations, '', false)[0];
+                  if (next === undefined) conversations.startNew();
+                  else conversations.select(next.id);
+                }}
+              >
+                Activas ({activeConversationCount})
+              </button>
+              <button
+                className="btn btn--quiet"
+                data-selected={showArchived}
+                onClick={() => {
+                  setShowArchived(true);
+                  setEditingTitle(false);
+                  const next = filterConversationLibrary(conversations.conversations, '', true)[0];
+                  if (next === undefined) conversations.startNew();
+                  else conversations.select(next.id);
+                }}
+              >
+                Archivadas ({archivedConversationCount})
+              </button>
+            </div>
+          </div>
           {conversations.conversations.length === 0 ? (
             <Empty title="Sin conversaciones">Escribe el primer mensaje para crear una.</Empty>
+          ) : visibleConversations.length === 0 ? (
+            <Empty title="Sin coincidencias">
+              No hay conversaciones en esta vista que coincidan con la búsqueda.
+            </Empty>
           ) : (
             <ul className="list conversation-list">
-              {conversations.conversations.map((conversation) => (
+              {visibleConversations.map((conversation) => (
                 <li
                   key={conversation.id}
                   data-selected={conversation.id === conversations.selected?.id}
@@ -402,7 +465,72 @@ export function ConversationsPage({
         </Panel>
 
         <section className="conversation-main">
-          <Panel title={conversations.selected?.title ?? 'Nueva conversacion'}>
+          <Panel
+            title={conversations.selected?.title ?? 'Nueva conversacion'}
+            actions={
+              conversations.selected === null ? undefined : (
+                <>
+                  <button
+                    className="btn btn--quiet"
+                    disabled={conversations.busy}
+                    onClick={() => setEditingTitle((current) => !current)}
+                  >
+                    Renombrar
+                  </button>
+                  <button
+                    className="btn btn--quiet"
+                    disabled={conversations.busy}
+                    onClick={() => {
+                      const selected = conversations.selected;
+                      if (selected === null) return;
+                      const archived = selected.archivedAt === null;
+                      void conversations
+                        .updateConversation(selected.id, { archived })
+                        .then((saved) => {
+                          if (!saved) return;
+                          setShowArchived(archived);
+                          setEditingTitle(false);
+                        });
+                    }}
+                  >
+                    {conversations.selected.archivedAt === null ? 'Archivar' : 'Restaurar'}
+                  </button>
+                </>
+              )
+            }
+          >
+            {editingTitle && conversations.selected !== null && (
+              <div className="conversation-settings">
+                <Field label="Título de la conversación">
+                  <input
+                    type="text"
+                    value={titleDraft}
+                    maxLength={120}
+                    onChange={(event) => setTitleDraft(event.target.value)}
+                  />
+                </Field>
+                <div className="conversation-feedback">
+                  <button
+                    className="btn btn--primary btn--quiet"
+                    disabled={conversations.busy || titleDraft.trim().length === 0}
+                    onClick={() => {
+                      const selected = conversations.selected;
+                      if (selected === null) return;
+                      void conversations
+                        .updateConversation(selected.id, { title: titleDraft })
+                        .then((saved) => {
+                          if (saved) setEditingTitle(false);
+                        });
+                    }}
+                  >
+                    Guardar título
+                  </button>
+                  <button className="btn btn--quiet" onClick={() => setEditingTitle(false)}>
+                    Cancelar
+                  </button>
+                </div>
+              </div>
+            )}
             {turns.length === 0 ? (
               <Empty title="Pregunta a tus modelos">
                 Elige una maquina, un proyecto y uno o dos modelos. Conversaciones siempre trabaja
@@ -434,7 +562,10 @@ export function ConversationsPage({
                             const target = conversations.machines.find(
                               (item) => item.id === source.targetMachineId,
                             );
-                            if (target === undefined || !target.providers.includes(source.provider)) {
+                            if (
+                              target === undefined ||
+                              !target.providers.includes(source.provider)
+                            ) {
                               window.alert(
                                 'Este proveedor pertenece al historial y ya no esta disponible para continuar.',
                               );
@@ -488,7 +619,9 @@ export function ConversationsPage({
           )}
 
           <Panel title="Enviar mensaje">
-            {conversations.machines.length === 0 ? (
+            {conversations.selected?.archivedAt != null ? (
+              <Notice tone="warn">Restaura esta conversación para enviarle un turno nuevo.</Notice>
+            ) : conversations.machines.length === 0 ? (
               <Empty title="Sin maquinas disponibles">
                 Arranca y registra una maquina antes de conversar.
               </Empty>

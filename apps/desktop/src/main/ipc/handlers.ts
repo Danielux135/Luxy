@@ -35,6 +35,7 @@ import {
   workspaceOpenArgsSchema,
   studioJobCreateArgsSchema,
   studioJobFeedbackArgsSchema,
+  studioConversationUpdateArgsSchema,
   studioJobActionArgsSchema,
   studioJobIdArgsSchema,
   studioJobsListArgsSchema,
@@ -169,6 +170,7 @@ export function registerIpcHandlers(context: HandlerContext): void {
     electronVersion: process.versions.electron ?? 'desconocida',
     nodeVersion: process.versions.node,
     platform: process.platform,
+    hostname: buildMachineIdentity().hostname,
     logsDirectory: context.logsDirectory,
     encryptionAvailable: safeStorage.isEncryptionAvailable(),
     agentBuild: context.controller.getAgentBuild(),
@@ -470,6 +472,14 @@ export function registerIpcHandlers(context: HandlerContext): void {
 
   handle(IPC_INVOKE.studioJobFeedback, studioJobFeedbackArgsSchema, async (args) => ({
     job: await studioClient(context).rateStudioJob(args.jobId, { rating: args.rating }),
+  }));
+
+  handle(IPC_INVOKE.studioConversationUpdate, studioConversationUpdateArgsSchema, async (args) => ({
+    job: await studioClient(context).updateStudioConversation(args.jobId, {
+      conversationId: args.conversationId,
+      ...(args.title === undefined ? {} : { title: args.title }),
+      ...(args.archived === undefined ? {} : { archived: args.archived }),
+    }),
   }));
 
   handle(IPC_INVOKE.studioJobAction, studioJobActionArgsSchema, async (args) =>

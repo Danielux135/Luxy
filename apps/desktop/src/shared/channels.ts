@@ -42,6 +42,7 @@ export const IPC_INVOKE = {
   studioJobGet: 'luxy:studio:job:get',
   studioJobCancel: 'luxy:studio:job:cancel',
   studioJobFeedback: 'luxy:studio:job:feedback',
+  studioConversationUpdate: 'luxy:studio:conversation:update',
   studioJobAction: 'luxy:studio:job:action',
 } as const;
 

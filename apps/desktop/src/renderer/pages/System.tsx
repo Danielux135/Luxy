@@ -51,7 +51,10 @@ export function LogsPage(): JSX.Element {
       >
         <div className="row">
           <Field label="Nivel">
-            <select value={level} onChange={(event) => setLevel(event.target.value as typeof level)}>
+            <select
+              value={level}
+              onChange={(event) => setLevel(event.target.value as typeof level)}
+            >
               {NIVELES.map((nivel) => (
                 <option key={nivel} value={nivel}>
                   {nivel}
@@ -167,6 +170,12 @@ export function SettingsPage({
             <Field label="Nombre de maquina">
               <input type="text" value={config.machineName} readOnly />
             </Field>
+            <Field
+              label="ID de maquina"
+              hint="La asigna Gateway al registrar este ordenador; no es un secreto."
+            >
+              <input type="text" value={config.machineId ?? 'no conservada'} readOnly />
+            </Field>
             <Field label="URL del gateway">
               <input type="text" value={config.gatewayUrl} readOnly />
             </Field>
@@ -179,7 +188,12 @@ export function SettingsPage({
               }
             >
               <div className="row">
-                <input type="password" value={tokenGuardado ? '••••••••••••' : ''} readOnly style={{ flex: 1 }} />
+                <input
+                  type="password"
+                  value={tokenGuardado ? '••••••••••••' : ''}
+                  readOnly
+                  style={{ flex: 1 }}
+                />
                 <Tag tone={tokenGuardado ? 'ok' : 'fault'}>
                   {tokenGuardado ? 'configurado' : 'ausente'}
                 </Tag>

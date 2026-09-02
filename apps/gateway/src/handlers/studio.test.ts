@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { hashToken } from '../auth.js';
 import {
+  handleStudioConversationUpdate,
   handleStudioJobAction,
   handleStudioJobCancel,
   handleStudioJobCreate,
@@ -229,6 +230,17 @@ function actionRequest(body: unknown): Request {
 function feedbackRequest(body: unknown): Request {
   return new Request(
     'https://gateway.test/api/studio/jobs/33333333-3333-4333-8333-333333333333/feedback',
+    {
+      method: 'POST',
+      headers: { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    },
+  );
+}
+
+function conversationUpdateRequest(body: unknown): Request {
+  return new Request(
+    'https://gateway.test/api/studio/jobs/33333333-3333-4333-8333-333333333333/conversation',
     {
       method: 'POST',
       headers: { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' },
@@ -926,5 +938,63 @@ describe('Luxy Studio API', () => {
 
     expect(response.status).toBe(403);
     expect(context.repo.mergeJobMetadata).not.toHaveBeenCalled();
+  });
+
+  it('renombra y archiva una conversacion propia sin reejecutarla', async () => {
+    const conversationId = '55555555-5555-4555-8555-555555555555';
+    const context = await deps({
+      metadata: {
+        requestedByMachineId: CREATOR_ID,
+        studioMode: 'conversation',
+        conversationId,
+        conversationTurnId: '66666666-6666-4666-8666-666666666666',
+        conversationTitle: 'Hola',
+        conversationUserMessage: 'hola',
+        comparisonIndex: 0,
+      },
+    });
+    const response = await handleStudioConversationUpdate(
+      conversationUpdateRequest({ conversationId, title: 'Plan de Luxy', archived: true }),
+      context,
+      { jobId: '33333333-3333-4333-8333-333333333333' },
+    );
+
+    expect(response.status, await response.clone().text()).toBe(200);
+    expect(context.repo.mergeJobMetadata).toHaveBeenCalledWith(
+      '33333333-3333-4333-8333-333333333333',
+      expect.objectContaining({
+        conversationTitle: 'Plan de Luxy',
+        conversationArchivedAt: expect.any(String),
+        conversationLibraryUpdatedAt: expect.any(String),
+      }),
+    );
+    expect(context.repo.createJob).not.toHaveBeenCalled();
+  });
+
+  it('no permite cambiar una conversacion ajena ni una ficha vacia', async () => {
+    const conversationId = '55555555-5555-4555-8555-555555555555';
+    const foreign = await deps({
+      metadata: {
+        requestedByMachineId: TARGET_ID,
+        studioMode: 'conversation',
+        conversationId,
+      },
+    });
+    const forbidden = await handleStudioConversationUpdate(
+      conversationUpdateRequest({ conversationId, archived: true }),
+      foreign,
+      { jobId: '33333333-3333-4333-8333-333333333333' },
+    );
+    expect(forbidden.status).toBe(403);
+    expect(foreign.repo.mergeJobMetadata).not.toHaveBeenCalled();
+
+    const own = await deps();
+    const invalid = await handleStudioConversationUpdate(
+      conversationUpdateRequest({ conversationId }),
+      own,
+      { jobId: '33333333-3333-4333-8333-333333333333' },
+    );
+    expect(invalid.status).toBe(422);
+    expect(own.repo.mergeJobMetadata).not.toHaveBeenCalled();
   });
 });

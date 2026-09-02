@@ -376,15 +376,19 @@ export class HttpApiProvider implements ProviderExecution {
             baseDelayMs: 2000,
             maxDelayMs: 60_000,
             signal: request.signal,
-            shouldRetry: (error) => !request.signal.aborted && statusOf(error) === 429,
+            shouldRetry: (error) => isRetryableAgenticTurn(error, request.signal),
             delayForError: (error, _attempt, calculado) => {
               const pedido = (error as { retryAfterMs?: number }).retryAfterMs;
               return typeof pedido === 'number' ? Math.max(pedido, calculado) : null;
             },
-            onRetry: (_error, _attempt, delayMs) => {
+            onRetry: (error, _attempt, delayMs) => {
+              const status = statusOf(error);
               request.onEvent({
                 type: 'phase',
-                message: `limite de frecuencia del proveedor; esperando ${Math.ceil(delayMs / 1000)}s antes de reintentar`,
+                message:
+                  status === 429
+                    ? `limite de frecuencia del proveedor; esperando ${Math.ceil(delayMs / 1000)}s antes de reintentar`
+                    : `conexion con el proveedor interrumpida; esperando ${Math.ceil(delayMs / 1000)}s antes de reintentar`,
               });
             },
           }),
@@ -616,10 +620,15 @@ export class HttpApiProvider implements ProviderExecution {
 
       if (!this.config.supportsStreaming || !response.body) {
         const payload = (await response.json()) as {
-          choices?: Array<{ message?: { content?: string }; finish_reason?: string }>;
+          choices?: Array<{
+            message?: { content?: string; tool_calls?: unknown };
+            finish_reason?: string;
+          }>;
           usage?: { prompt_tokens?: number; completion_tokens?: number };
         };
-        const text = payload.choices?.[0]?.message?.content ?? '';
+        const message = payload.choices?.[0]?.message ?? {};
+        const text = message.content ?? '';
+        const toolCalls = parseNativeToolCalls(message);
         const finishReason = payload.choices?.[0]?.finish_reason;
         const inputTokens = payload.usage?.prompt_tokens ?? 0;
         const outputTokens = payload.usage?.completion_tokens ?? 0;
@@ -637,6 +646,7 @@ export class HttpApiProvider implements ProviderExecution {
           outputTokens,
           textLength: text.length,
         });
+        if (toolCalls.length > 0) throw this.unexpectedToolCalls(request, toolCalls.length);
         request.onEvent({ type: 'text', message: text.slice(0, 500) });
         return {
           text,
@@ -697,6 +707,11 @@ export class HttpApiProvider implements ProviderExecution {
     truncated: boolean;
   }> {
     const turno = await this.consumeStream(body, request, abortTransport, diagnostics, parcial);
+    // `readStream` solo se usa por la ruta de consulta. El bucle agentic usa
+    // `readStreamingTurn` y necesita recibir las llamadas para ejecutarlas.
+    if (turno.toolCalls.length > 0) {
+      throw this.unexpectedToolCalls(request, turno.toolCalls.length);
+    }
     return {
       text: turno.text,
       inputTokens: turno.inputTokens,
@@ -865,6 +880,17 @@ export class HttpApiProvider implements ProviderExecution {
     return turno;
   }
 
+  /** convierte un tool_calls inesperado en un fallo que no se debe reintentar. */
+  private unexpectedToolCalls(request: ProviderRunRequest, count: number): Error {
+    const error = new Error(
+      `${this.label(request)} pidio ${count} ${count === 1 ? 'herramienta' : 'herramientas'}, ` +
+        'pero este modelo no tiene un contrato agentic verificado en Luxy. ' +
+        'No se ejecuto ninguna herramienta ni se realizaron cambios.',
+    );
+    (error as { retryable?: boolean }).retryable = false;
+    return error;
+  }
+
   private failure(message: string): ProviderRunResult {
     return {
       ok: false,
@@ -891,6 +917,24 @@ function statusOf(error: unknown): number | undefined {
   const interno = (error as { lastError?: unknown } | null)?.lastError;
   const anidado = (interno as { status?: unknown } | null)?.status;
   return typeof anidado === 'number' ? anidado : undefined;
+}
+
+/**
+ * un turno agentic no puede dar por perdido el trabajo por un socket caido.
+ *
+ * las herramientas solo se ejecutan DESPUES de recibir un turno completo, asi
+ * que repetir un `fetch failed` no repite una escritura ya confirmada. En
+ * cambio, reintentar un abort local, un rechazo declarado permanente o los
+ * timeouts 504/524 del borde solo alarga una ejecucion que no va a mejorar.
+ */
+export function isRetryableAgenticTurn(error: unknown, signal: AbortSignal): boolean {
+  if (signal.aborted || esTimeout(error)) return false;
+  if ((error as { retryable?: unknown } | null)?.retryable === false) return false;
+
+  const status = statusOf(error);
+  if (status === undefined) return true;
+  if (status === 504 || status === 524) return false;
+  return status === 408 || status === 429 || status >= 500;
 }
 
 /** texto del error y el del que envuelve, para no perder el motivo original */

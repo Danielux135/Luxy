@@ -452,6 +452,9 @@ describe('worktrees reales', () => {
       if (r.exitCode !== 0) throw new Error(`git ${args.join(' ')}: ${r.stderr}`);
     };
     await git(['init', '--initial-branch=main']);
+    // La prueba no puede depender de la identidad Git global del ordenador.
+    await git(['config', 'user.email', 'test@example.local']);
+    await git(['config', 'user.name', 'Test']);
 
     const worktree = await createWorktree(emptyRepo, 'LUX-EMPTY', 'primer trabajo', worktrees);
     expect(worktree.branch).toMatch(/^luxy\/empty-/);
@@ -891,7 +894,7 @@ describe('resolveJobModel', () => {
   });
 
   it('conserva el apiModel EXACTO, sin normalizar', () => {
-    for (const exacto of ['Qwen3.6-27B', 'kat-coder-pro-v2.5', 'Kimi-K2.6', 'MiniMax-M3']) {
+    for (const exacto of ['Qwen3.8-27B', 'kat-coder-pro-v2.5', 'kimi-k3', 'MiniMax-M3']) {
       expect(resolveJobModel(job('qwen', { model: exacto }), config)).toBe(exacto);
     }
   });
@@ -968,8 +971,8 @@ describe('resolveJobModel con el catalogo', () => {
 
   it('resuelve el predeterminado de cada familia', () => {
     const config = conConexion('PENDIENTE_X', false);
-    expect(resolveJobModel(trabajo('kimi'), config)).toBe('Kimi-K2.6');
-    expect(resolveJobModel(trabajo('qwen'), config)).toBe('Qwen3.6-27B');
+    expect(resolveJobModel(trabajo('kimi'), config)).toBe('kimi-k3');
+    expect(resolveJobModel(trabajo('qwen'), config)).toBe('Qwen3.8-27B');
     expect(resolveJobModel(trabajo('step'), config)).toBe('step-3.7-flash');
   });
 

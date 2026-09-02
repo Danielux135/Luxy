@@ -10,6 +10,7 @@ import {
   isMachineOnline,
   machineHasProject,
   machineSupportsProvider,
+  studioConversationUpdateRequestSchema,
   studioJobActionRequestSchema,
   studioJobCreateRequestSchema,
   studioJobFeedbackRequestSchema,
@@ -365,6 +366,45 @@ export const handleStudioJobFeedback = withMachineAuth(async (request, deps, cre
 
   return json({ job: toStudioJob(updated) });
 });
+
+/** renombra o archiva una conversacion sin tocar sus respuestas */
+export const handleStudioConversationUpdate = withMachineAuth(
+  async (request, deps, creator, params) => {
+    const jobId = params.jobId;
+    if (jobId === undefined) return errorResponse('falta el identificador del trabajo', 400);
+
+    const body = await readBody(request, studioConversationUpdateRequestSchema);
+    if (!body.ok) return body.response;
+
+    const job = await deps.repo.getJobById(jobId);
+    if (job === null) return errorResponse('trabajo no encontrado', 404);
+    if (
+      job.origin !== 'studio' ||
+      job.metadata['studioMode'] !== 'conversation' ||
+      job.metadata['requestedByMachineId'] !== creator.id ||
+      job.metadata['conversationId'] !== body.data.conversationId
+    ) {
+      return errorResponse('esa conversacion no pertenece a este Studio', 403);
+    }
+
+    const libraryMetadata: Record<string, unknown> = {
+      conversationLibraryUpdatedAt: new Date().toISOString(),
+    };
+    if (body.data.title !== undefined) {
+      libraryMetadata['conversationTitle'] = body.data.title;
+    }
+    if (body.data.archived !== undefined) {
+      libraryMetadata['conversationArchivedAt'] = body.data.archived
+        ? new Date().toISOString()
+        : null;
+    }
+    await deps.repo.mergeJobMetadata(job.id, libraryMetadata);
+    const updated = await deps.repo.getJobById(job.id);
+    if (updated === null) return errorResponse('no se pudo guardar la conversacion', 409);
+
+    return json({ job: toStudioJob(updated) });
+  },
+);
 
 /**
  * registra una decision explicita sobre los cambios de un trabajo terminado.

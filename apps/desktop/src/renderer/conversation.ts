@@ -33,6 +33,10 @@ export interface ConversationMetadata {
   title: string;
   userMessage: string;
   comparisonIndex: 0 | 1;
+  /** null mantiene la conversacion en la biblioteca activa */
+  archivedAt: string | null;
+  /** gana sobre createdAt al resolver cambios de titulo o archivo */
+  libraryUpdatedAt: string | null;
   /** trabajo cuya respuesta parcial continua este turno, si continua alguna */
   continuesJobId: string | null;
 }
@@ -41,6 +45,8 @@ export interface ConversationSummary {
   id: string;
   title: string;
   updatedAt: string;
+  archivedAt: string | null;
+  libraryUpdatedAt: string;
   jobs: StudioJob[];
 }
 
@@ -96,6 +102,8 @@ export function parseConversationMetadata(job: StudioJob): ConversationMetadata 
     title,
     userMessage,
     comparisonIndex: rawIndex,
+    archivedAt: nonEmpty(metadata['conversationArchivedAt']),
+    libraryUpdatedAt: nonEmpty(metadata['conversationLibraryUpdatedAt']),
     continuesJobId: nonEmpty(metadata['continuesJobId']),
   };
 }
@@ -111,14 +119,19 @@ export function groupConversations(jobs: StudioJob[]): ConversationSummary[] {
         id: metadata.conversationId,
         title: metadata.title,
         updatedAt: job.createdAt,
+        archivedAt: metadata.archivedAt,
+        libraryUpdatedAt: metadata.libraryUpdatedAt ?? job.createdAt,
         jobs: [job],
       });
       continue;
     }
     current.jobs.push(job);
-    if (job.createdAt > current.updatedAt) {
-      current.updatedAt = job.createdAt;
+    if (job.createdAt > current.updatedAt) current.updatedAt = job.createdAt;
+    const libraryUpdatedAt = metadata.libraryUpdatedAt ?? job.createdAt;
+    if (libraryUpdatedAt > current.libraryUpdatedAt) {
+      current.libraryUpdatedAt = libraryUpdatedAt;
       current.title = metadata.title;
+      current.archivedAt = metadata.archivedAt;
     }
   }
 
@@ -128,6 +141,38 @@ export function groupConversations(jobs: StudioJob[]): ConversationSummary[] {
       jobs: [...conversation.jobs].sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
     }))
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+}
+
+function normalizedSearchText(value: string): string {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLocaleLowerCase('es')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** filtra solo lo que el historial ya cargo; nunca provoca otra consulta */
+export function filterConversationLibrary(
+  conversations: ConversationSummary[],
+  query: string,
+  archived: boolean,
+): ConversationSummary[] {
+  const needle = normalizedSearchText(query);
+  return conversations.filter((conversation) => {
+    if ((conversation.archivedAt !== null) !== archived) return false;
+    if (needle.length === 0) return true;
+    const haystack = normalizedSearchText(
+      [
+        conversation.title,
+        ...conversation.jobs.flatMap((job) => {
+          const metadata = parseConversationMetadata(job);
+          return [metadata?.userMessage ?? '', job.resultSummary ?? ''];
+        }),
+      ].join('\n'),
+    );
+    return haystack.includes(needle);
+  });
 }
 
 export function groupConversationTurns(jobs: StudioJob[]): ConversationTurn[] {
