@@ -203,6 +203,26 @@ describe('la herramienta solo se ofrece cuando existe', () => {
     expect(instruction).toContain('no prometas enviarla sin incluirlo');
   });
 
+  it('la descripcion es todo lo que sabe: no puede inventar lo que no ve', () => {
+    // paso de verdad: el pie de foto decia «gata blanca con manchas marrones y
+    // negras» y el modelo añadio ojos grandes y una oreja doblada, dandolos por
+    // vistos. Inventar detalle es peor que decir que no puede ver la imagen,
+    // porque suena a observacion
+    const instruction = buildVaultImageInstruction([
+      { mediaId: 'med-1', description: 'gata blanca con manchas marrones y negras' },
+    ]);
+
+    expect(instruction).toContain('TODO lo que sabes de cada imagen: NO las ves');
+    expect(instruction).toContain('no añadas ningun detalle visual que no este escrito ahi');
+    expect(instruction).toContain('preguntalo; no lo supongas');
+  });
+
+  it('sin imagenes que listar no se le advierte de nada', () => {
+    // la advertencia acompaña a la lista: sin lista no hay nada que inventar y
+    // solo seria ruido en el prompt
+    expect(buildVaultImageInstruction()).not.toContain('NO las ves');
+  });
+
   it('sin imagenes previas no se le ofrece reenviar ninguna', () => {
     expect(buildVaultImageInstruction()).not.toContain('IMAGENES QUE YA EXISTEN');
   });

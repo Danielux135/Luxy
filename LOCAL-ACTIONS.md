@@ -8,13 +8,18 @@ Los cinco arreglos de `VAULT-ROLEPLAY-001` estan implementados y probados, pero
 **ninguno esta visto en pantalla**. Reconstruye (`rebuild-and-start-luxy.bat`) y
 comprueba:
 
-1. Elige un proveedor, cambia de pestaña y vuelve: debe seguir el que elegiste.
-   Escribe instrucciones sin enviar, cambia de pestaña y vuelve: deben seguir
-   ahi.
-2. Adjunta una imagen con pie de foto y preguntale por ella: ahora sabe que es.
-3. Pidele una foto: no debe salir nadie mas en el encuadre ni ninguna camara.
-4. Ofrecele parar: ahora **puede** aceptar. Si no lo hace nunca, el tono se
-   ajusta abajo, no en el codigo.
+1. ~~Elige un proveedor, cambia de pestaña y vuelve~~ **comprobado el
+   2026-09-02**: el proveedor sobrevive.
+2. ~~Adjunta una imagen con pie de foto y preguntale por ella~~ **comprobado el
+   2026-09-02**, y de paso aparecio otro fallo: describia detalles que el pie de
+   foto no decia. Ya corregido; conviene repetirlo para ver si ahora pregunta en
+   vez de inventar.
+3. **PENDIENTE, el unico que queda.** Pidele una foto: no debe salir nadie mas
+   en el encuadre ni ninguna camara. Cuesta 1 credito.
+4. Ofrecele parar: ahora **puede** aceptar. ~~Si no lo hace nunca, el tono se
+   ajusta abajo, no en el codigo.~~ **Comprobado el 2026-09-02**: acepto la
+   salida conservando su registro. Falta el caso dificil, que es frenar a mitad
+   de escalada y no solo al final de una escena.
 
 ### Donde vive el tono
 

@@ -1,5 +1,50 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-02 — comprobacion manual en la aplicacion — D-056
+
+Primera evidencia real del cambio de prompt, aportada por Daniel tras reiniciar
+Studio con el build `be6fa5a0e377@2026-09-02T19:30`.
+
+- Ante «pareces cansada, ¿quieres seguir o no te apetece?», el personaje
+  **acepto la salida** por primera vez: pidio que la sostuviera y la dejara
+  dormir. Las dos ofertas equivalentes de la conversacion anterior las habia
+  convertido en escalada.
+- El turno **no termina invitando a continuar**, que era el tic estructural: la
+  escena cierra con ella dormida.
+- La voz se conserva (mantiene su registro y su «cabron»), que es lo que el
+  bloque protege a proposito: se quita el «si» automatico, no la personalidad.
+- El cansancio **persiste** en vez de disolverse al primer contacto.
+- «mañana ya veremos» es un limite puesto DENTRO del rol, que es exactamente la
+  distincion que introduce `D-056`.
+
+**Lo que esto NO demuestra.** Es una muestra, y en el caso mas favorable:
+despues del climax, con la escena pidiendo cierre. Queda por ver si puede frenar
+a mitad de escalada, que es donde negarse cuesta algo. Hasta entonces, `D-056`
+esta confirmado como «puede aceptar una salida», no como «tiene voluntad
+sostenida».
+
+Observacion suelta, sin accion: el modelo colo una palabra en ingles («sleepy»)
+en una respuesta en español. Es mezcla de idiomas de DeepSeek, no del prompt.
+
+### 2026-09-02 — comprobacion manual — el proveedor, los adjuntos y una alucinacion
+
+- **El proveedor sobrevive al cambio de pestaña.** Punto 1 de `LA-037`
+  comprobado.
+- **Los adjuntos llegan al modelo.** Con un pie de foto («gata blanca con
+  manchas marrones y negras») el personaje comento la imagen en vez de decir que
+  no puede ver archivos. Punto 2 comprobado.
+- **Fallo nuevo encontrado en esa misma respuesta**: ademas de los colores del
+  pie de foto, describio «ojos grandes, curiosos» y «una oreja doblada». No los
+  vio; los dio por vistos. Confirmado con Daniel: el pie de foto no decia nada
+  de las orejas.
+- Corregido en `buildVaultImageInstruction`: la lista de imagenes ya no viaja
+  desnuda, sino con la advertencia de que esa linea es todo lo que sabe, que no
+  añada detalle visual que no este escrito y que pregunte en vez de suponer. Dos
+  pruebas nuevas. **`npm run check`: exit 0. 122 archivos, 2.129 superadas, 9
+  omitidas.**
+- Sin comprobar todavia: que una imagen generada salga sin segunda persona ni
+  camara (punto 3), que era el otro sintoma de la conversacion original.
+
 ### 2026-09-02 — Windows 11 (equipo `oscar`) — VAULT-ROLEPLAY-001
 
 - **`npm run lint`, `npm run typecheck`, `npm test` y `npm run build`: los

@@ -164,6 +164,14 @@ export function buildVaultImageInstruction(
           image.description.trim().length === 0 ? 'sin descripcion' : image.description.trim();
         return `- ${image.mediaId}: ${description}`;
       }),
+      '',
+      // paso de verdad: con un pie de foto que decia el color de una gata, el
+      // modelo describio ademas sus ojos y una oreja doblada. No las ve; las
+      // dio por vistas. Inventar detalle suena mas convincente que decir que no
+      // se puede ver, y por eso es peor
+      'Esa linea es TODO lo que sabes de cada imagen: NO las ves. Puedes comentarlas y darlas por',
+      'ciertas, pero no añadas ningun detalle visual que no este escrito ahi —colores, formas,',
+      'gestos, ropa, que hay al fondo—. Si te falta algo para responder, preguntalo; no lo supongas.',
     );
   }
 
