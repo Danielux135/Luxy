@@ -467,6 +467,14 @@ describe('HttpApiProvider', () => {
     expect(body?.messages[0]?.role).toBe('system');
     expect(body?.messages[0]?.content).toContain('directivas de personaje');
     expect(body?.messages[0]?.content).not.toContain('asistente tecnico');
+
+    // el system decia «participas en una conversacion DE LUXY», y sin personaje
+    // definido el modelo leia el nombre del programa como el suyo y se
+    // presentaba como Luxy. De ahi salio el primer «me llamo Luxy» de una
+    // boveda, que despues la memoria episodica propago fielmente durante dias
+    expect(body?.messages[0]?.content).not.toContain('conversacion de Luxy');
+    expect(body?.messages[0]?.content).toContain('Luxy es el nombre del programa');
+    expect(body?.messages[0]?.content).toContain('NO te inventes un nombre');
   });
 
   it('un trabajo conserva el system tecnico por defecto', async () => {

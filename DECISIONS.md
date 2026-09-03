@@ -1584,3 +1584,40 @@ La regla, ahora en codigo y con pruebas:
 comentarios, y no habia ni una prueba que lo exigiera. Todo lo demas de F10 se
 verifico con casos; esto se verifico leyendolo. Ahora hay tres pruebas, y la
 primera reproduce exactamente lo que vio Daniel.
+
+## D-063 — el nombre del programa no es el nombre del personaje
+
+Fecha: 2026-09-03
+
+Estado: aceptada, implementada
+
+El `system` de una conversacion empezaba asi:
+
+> «Participas en una conversacion **de Luxy** y respondes directamente al
+> usuario.»
+
+Sin ningun personaje definido, el modelo lee eso y concluye que se llama Luxy.
+Daniel lo aislo del modo mas limpio posible: conversacion nueva, sin personaje,
+sin memoria, «¿como te llamas?» → «Me llamo Luxy».
+
+**Lo grave es lo que vino despues.** El primer «me llamo Luxy» de la primera
+conversacion salio de aqui, no de una eleccion del usuario. La memoria episodica
+lo propago fielmente durante dias, y el titulo del catalogo lo consagro
+—«Presentación de Luxy y la insinuación»—. Daniel escribia «Lía» en todas partes
+y el personaje seguia llamandose Luxy, y el diagnostico que se le dio fue
+equivocado: se le dijo que era la memoria funcionando bien sobre un pasado que
+decia otra cosa. La memoria funcionaba bien; lo que estaba mal era el origen.
+
+Dos añadidos al `system`:
+
+- Luxy es el nombre del programa: no es el del personaje ni el del usuario;
+- sin personaje definido, **no se inventa un nombre**. Si preguntan como se llama
+  y nadie se lo ha dicho, lo dice en vez de elegir uno.
+
+**Leccion que va mas alla de este caso:** un dato inventado que entra en la
+memoria episodica se vuelve indistinguible de uno cierto, porque el sistema esta
+diseñado para tratar el pasado como canon. Ya paso con la oreja de la gata y con
+el café. Aqui el inventor no fue el modelo improvisando, sino **una linea del
+system prompt**. Cualquier cosa que el sistema afirme sin querer acaba siendo
+historia, asi que el prompt fijo merece la misma desconfianza que la salida del
+modelo.

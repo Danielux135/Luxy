@@ -1,5 +1,27 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-03 — el personaje se llamaba Luxy por una linea del system prompt
+
+Daniel lo aislo de la forma mas limpia posible: conversacion nueva, sin
+personaje, sin memoria, «¿como te llamas?» → «Me llamo Luxy».
+
+El `system` conversacional decia «participas en una conversacion DE LUXY», y sin
+personaje definido el modelo leia el nombre del programa como el suyo.
+
+**Correccion de un diagnostico anterior:** cuando Daniel dijo que el personaje se
+llamaba Luxy en vez de Lía, se le respondio que era la memoria funcionando bien
+sobre un pasado que decia otra cosa, y se le ofrecieron tres apaños —excluir la
+primera conversacion, explicarselo en las instrucciones, o rendirse al nombre—.
+Ninguno hacia falta. La memoria funcionaba; el origen estaba mal.
+
+- Corregido en `D-063`, con prueba: el system ya no llama Luxy a la conversacion,
+  dice que Luxy es el programa, y prohibe inventarse un nombre cuando no hay
+  personaje.
+- **`npm run check`: exit 0. 129 archivos, 2.257 superadas, 12 omitidas.**
+- Lo ya escrito no cambia: las conversaciones donde dijo llamarse Luxy siguen
+  diciendolo, y la memoria las propagara. Eso ya es historia y se arregla en las
+  instrucciones del personaje, no en el codigo.
+
 ### 2026-09-03 — dos conversaciones sin catalogar por una validacion desproporcionada
 
 Daniel: «¿por que las ultimas conversaciones no las ordena con Claude?». No las
