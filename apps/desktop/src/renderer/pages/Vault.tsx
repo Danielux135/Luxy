@@ -13,7 +13,11 @@ import {
   type VaultController,
 } from '../useVault.js';
 import { imageBlockReason } from '../../shared/vault-image-capability.js';
-import { modelForProvider, modelsForProvider } from '../../shared/model-selection.js';
+import {
+  NATIVE_MODEL_SUGGESTIONS,
+  modelForProvider,
+  modelsForProvider,
+} from '../../shared/model-selection.js';
 import { describeConversationMemoryStatus, type ModelDefinition } from '@luxy/shared';
 
 /** debe coincidir con AUTO_LOCK_MINUTES del proceso principal */
@@ -255,7 +259,7 @@ function ConversationPanel({
                 ))}
               </select>
             </Field>
-            {familyModels.length > 0 && (
+            {familyModels.length > 0 ? (
               <Field
                 label="Modelo"
                 hint="Sin elegir usa el de la conexión, que suele ser el mayor de la familia."
@@ -271,6 +275,26 @@ function ConversationPanel({
                     </option>
                   ))}
                 </select>
+              </Field>
+            ) : (
+              // los CLI locales no salen en /v1/models, asi que no hay catalogo
+              // que ofrecer: se escribe, con sugerencias donde las hay. El valor
+              // se manda exacto y decide el CLI
+              <Field
+                label="Modelo"
+                hint={`Sin escribir nada usa el que trae ${provider} por defecto.`}
+              >
+                <input
+                  value={model}
+                  list={`modelos-${provider}`}
+                  placeholder="por defecto"
+                  onChange={(event) => vault.setComposer({ model: event.target.value })}
+                />
+                <datalist id={`modelos-${provider}`}>
+                  {(NATIVE_MODEL_SUGGESTIONS[provider] ?? []).map((suggestion) => (
+                    <option key={suggestion} value={suggestion} />
+                  ))}
+                </datalist>
               </Field>
             )}
             <Field label="Proyecto">

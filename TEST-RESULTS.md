@@ -1,5 +1,25 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-03 — se puede elegir modelo tambien con los CLI nativos
+
+Daniel: «con Claude y ChatGPT no puedo elegir modelos, se ejecuta el Opus
+directamente».
+
+Causa: el selector se llena del catalogo que devuelve `/v1/models` de la conexion
+HTTP. Claude y Codex no son conexiones sino CLI locales, asi que no aparecen ahi,
+el selector quedaba vacio y se usaba el `defaultModel` del adaptador —`opus` en
+Claude—.
+
+- Con catalogo se sigue ofreciendo un desplegable. **Sin catalogo se escribe**,
+  con sugerencias donde las hay. El valor se manda exacto y decide el CLI.
+- Sugerencias solo para `claude`. Para `codex` **ninguna**: no se han comprobado
+  sus valores contra su `--help` y `CLAUDE.md` prohibe inventarse los de un CLI.
+  Hay una prueba que falla si alguien las añade sin comprobarlas.
+- `modelForProvider` deja de bloquear cuando no hay catalogo con que comparar.
+  La proteccion contra mandar el modelo de otra familia sigue siendo soltarlo al
+  cambiar de proveedor, que es donde estaba el fallo de verdad.
+- **`npm run check`: exit 0. 130 archivos, 2.265 superadas, 12 omitidas.**
+
 ### 2026-09-03 — cinco llamadas gastadas por un modelo de otra familia
 
 Daniel abrio el panel de recuerdos con el proveedor cambiado a Claude, y el log

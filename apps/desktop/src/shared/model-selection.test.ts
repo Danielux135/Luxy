@@ -5,6 +5,7 @@
 // escrita en la pantalla y no la comprobaba nadie.
 import { describe, it, expect } from 'vitest';
 import {
+  NATIVE_MODEL_SUGGESTIONS,
   modelForProvider,
   modelsForProvider,
   type SelectableModel,
@@ -42,9 +43,19 @@ describe('el modelo que viaja con el proveedor', () => {
     expect(modelForProvider(CATALOGO, 'deepseek', 'un-modelo-que-ya-no-existe')).toBeNull();
   });
 
-  it('un proveedor sin modelos no rompe nada', () => {
-    expect(modelForProvider(CATALOGO, 'codex', 'opus')).toBeNull();
-    expect(modelsForProvider(CATALOGO, 'codex')).toEqual([]);
+  it('sin catalogo para esa familia se acepta lo que se escriba', () => {
+    // Claude y Codex son CLI locales y no salen en `/v1/models`: si aqui se
+    // bloqueara, no se podria elegir modelo con ellos, que es justo lo que
+    // pasaba. La proteccion contra la familia equivocada es soltar el modelo al
+    // cambiar de proveedor, no esta comprobacion
+    expect(modelForProvider(CATALOGO, 'claude-cli', 'sonnet')).toBe('sonnet');
+    expect(modelsForProvider(CATALOGO, 'claude-cli')).toEqual([]);
+  });
+
+  it('las sugerencias nativas no se inventan donde no se han comprobado', () => {
+    // `CLAUDE.md` prohibe inventarse los valores de un CLI sin mirar su --help
+    expect(NATIVE_MODEL_SUGGESTIONS['claude']).toContain('sonnet');
+    expect(NATIVE_MODEL_SUGGESTIONS['codex']).toBeUndefined();
   });
 });
 
