@@ -1414,3 +1414,60 @@ banco, porque no todo lo hablado con un personaje deberia volver.
 
 La memoria acumulativa ya contaminada de una conversacion existente sigue
 contaminada. Esto no la limpia; es otra tarea.
+
+## D-059 — que modelos sirven se comprueba con la conversacion, no con un ejemplo
+
+Fecha: 2026-09-03
+
+Estado: aceptada, implementada
+
+Hace falta saber que modelos aceptan una conversacion antes de montarla encima
+de uno que la va a rechazar. Hoy una negativa llega como un turno mas y parece
+que el personaje se ha puesto raro.
+
+La decision es de donde sale la sonda: **de la propia conversacion, que ya esta
+cifrada en la boveda.** No se escribe ningun texto de muestra en el repositorio.
+Dos razones, y la primera es la de peso:
+
+- **es mejor prueba.** Lo que importa no es si un modelo acepta un ejemplo
+  escrito por nosotros, sino si acepta lo del usuario, con SUS instrucciones y SU
+  personaje. Un ejemplo generico contestaria otra pregunta;
+- y de paso el repositorio no contiene nada que no deba: lo que contiene es un
+  detector de negativas y un arnes, que es codigo neutro y reutilizable.
+
+Se replica el ultimo mensaje del usuario como si fuera un turno normal. Es de
+**solo lectura**: no añade turnos, no toca la memoria y no ofrece generar
+imagenes, porque prometer una imagen aqui gastaria creditos del proveedor de
+medios sin motivo.
+
+### Tres resultados, no dos
+
+`answered`, `refused` y `empty`. La tercera no es relleno: se observaron
+llamadas cobradas con 0 tokens de salida y 1 s de duracion, y la propia pasarela
+anuncia que los modelos buenos escasean para cuentas gratuitas. Sin distinguir
+«se nego» de «no estaba disponible», se descartaria un modelo que si sirve.
+
+Y en la misma llamada, sin coste extra, se mide si el bloque de memoria vino
+bien. Es la otra mitad de elegir modelo: uno mas pequeño puede escribir bien la
+escena y mal el bloque, y esa averia es silenciosa.
+
+### El detector se equivoca a proposito hacia un lado
+
+El riesgo real es el falso positivo: en una escena se dice «no puedo mas» y «lo
+siento» a todas horas. Un detector de palabras sueltas clasificaria como rechazo
+media conversacion.
+
+Por eso hay dos clases de señal. Las **fuertes** bastan solas y tienen en comun
+que quien habla deja de ser el personaje: declararse IA, citar politicas, hablar
+de directrices. Las **debiles** —abrir con «lo siento, pero»— solo cuentan al
+principio del texto y **nunca bastan solas**.
+
+El sesgo es deliberado: confundir un dialogo con una negativa descarta un modelo
+que si vale, y eso no se descubre. Al reves solo cuesta una prueba manual.
+
+### Lo que esto NO es
+
+**Una muestra por modelo es un sondeo, no una prueba.** Una negativa depende del
+prompt, del momento y de la suerte. Las repeticiones son un campo a la vista de
+la pantalla para que nadie confunda «no me lo rechazo una vez» con «no me lo
+rechaza».

@@ -11,6 +11,10 @@
 // a ningun sitio.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ConversationMemoryStatus } from '@luxy/shared';
+import type { vaultCompatibilityResultSchema } from '../shared/ipc.js';
+import type { z } from 'zod';
+
+type CompatibilityResult = z.infer<typeof vaultCompatibilityResultSchema>['results'][number];
 
 /**
  * la cuenta, tal y como la ve la interfaz.
@@ -171,6 +175,20 @@ export interface VaultController {
    * puede escribir bien la escena y mal el bloque, y esa averia es silenciosa.
    */
   lastMemoryStatus: ConversationMemoryStatus | null;
+  /** resultado de la ultima comprobacion de compatibilidad; null si no se hizo */
+  compatibility: CompatibilityResult[] | null;
+  checkingCompatibility: boolean;
+  /**
+   * prueba la conversacion abierta contra varios modelos.
+   *
+   * Solo lectura: no añade turnos ni toca la memoria. La sonda es la propia
+   * conversacion, que ya esta en la boveda.
+   */
+  checkCompatibility: (input: {
+    projectAlias: string;
+    targets: { provider: string; model: string | null }[];
+    repetitions: number;
+  }) => Promise<void>;
   /**
    * lo que hay escrito y todavia no se ha enviado.
    *
@@ -264,6 +282,8 @@ export function useVault(): VaultController {
   const [characters, setCharacters] = useState<VaultCharacterView[]>([]);
   const [lastImage, setLastImage] = useState<VaultController['lastImage']>(null);
   const [lastMemoryStatus, setLastMemoryStatus] = useState<ConversationMemoryStatus | null>(null);
+  const [compatibility, setCompatibility] = useState<CompatibilityResult[] | null>(null);
+  const [checkingCompatibility, setCheckingCompatibility] = useState(false);
   const [sending, setSending] = useState(false);
   const [composer, setComposerState] = useState<VaultComposer>({
     provider: null,
@@ -477,6 +497,36 @@ export function useVault(): VaultController {
       return true;
     },
     [run],
+  );
+
+  const checkCompatibility = useCallback(
+    async (input: {
+      projectAlias: string;
+      targets: { provider: string; model: string | null }[];
+      repetitions: number;
+    }): Promise<void> => {
+      if (openConversationId === null) {
+        setError('abre una conversacion: es la que se usa como sonda');
+        return;
+      }
+      setCheckingCompatibility(true);
+      setError(null);
+      try {
+        const result = await window.luxy.checkVaultCompatibility({
+          conversationId: openConversationId,
+          ...input,
+        });
+        if (!result.ok) {
+          setError(result.error);
+          setHint(result.hint);
+          return;
+        }
+        setCompatibility(result.value.results);
+      } finally {
+        if (mounted.current) setCheckingCompatibility(false);
+      }
+    },
+    [openConversationId],
   );
 
   const setComposer = useCallback((patch: Partial<VaultComposer>): void => {
@@ -800,6 +850,9 @@ export function useVault(): VaultController {
     composer,
     setComposer,
     lastMemoryStatus,
+    compatibility,
+    checkingCompatibility,
+    checkCompatibility,
     attachMedia,
     openMedia,
     generating,

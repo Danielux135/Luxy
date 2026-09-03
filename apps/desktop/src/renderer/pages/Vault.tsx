@@ -199,6 +199,8 @@ function ConversationPanel({
         }}
       />
 
+      <CompatibilityPanel vault={vault} models={models} project={project} />
+
       {vault.error !== null && <Notice tone="fault">{vault.error}</Notice>}
 
       {providers.length === 0 && (
@@ -1949,5 +1951,111 @@ function ChangePasswordForm({
         </button>
       </div>
     </>
+  );
+}
+
+
+/**
+ * comprueba que modelos sirven para esta conversacion.
+ *
+ * La sonda es la propia conversacion, que ya esta cifrada: no se escribe aqui
+ * ningun texto de muestra, y ademas es mejor prueba —lo que importa es si un
+ * modelo acepta lo tuyo, no un ejemplo inventado—.
+ *
+ * Es de solo lectura: no añade turnos ni toca la memoria.
+ */
+function CompatibilityPanel({
+  vault,
+  models,
+  project,
+}: {
+  vault: VaultController;
+  models: ModelDefinition[];
+  project: string;
+}): JSX.Element | null {
+  const [selected, setSelected] = useState<string[]>([]);
+  const [repetitions, setRepetitions] = useState(1);
+
+  const usable = models.filter((model) => model.enabled);
+  if (usable.length === 0 || vault.openConversationId === null) return null;
+
+  const toggle = (id: string): void => {
+    setSelected((previous) =>
+      previous.includes(id) ? previous.filter((each) => each !== id) : [...previous, id],
+    );
+  };
+
+  const run = (): void => {
+    const targets = usable
+      .filter((model) => selected.includes(model.id))
+      .map((model) => ({ provider: model.family, model: model.apiModel }));
+    void vault.checkCompatibility({ projectAlias: project, targets, repetitions });
+  };
+
+  return (
+    <details className="vault-generate">
+      <summary>Comprobar modelos con esta conversación</summary>
+
+      <p className="field__hint">
+        Ejecuta tu último mensaje contra los modelos que elijas, con las
+        instrucciones y el personaje de esta conversación. No guarda nada, no
+        añade turnos y no genera imágenes: solo mira qué contesta cada uno.
+      </p>
+
+      <div className="vault-list">
+        {usable.map((model) => (
+          <label key={model.id} className="row">
+            <input
+              type="checkbox"
+              checked={selected.includes(model.id)}
+              onChange={() => toggle(model.id)}
+            />
+            <span>
+              {model.displayName} <Tag tone="idle">{model.family}</Tag>
+            </span>
+          </label>
+        ))}
+      </div>
+
+      <Field
+        label="Repeticiones por modelo"
+        hint="Una sola vez es un sondeo, no una prueba: la respuesta de un modelo varía entre intentos."
+      >
+        <select
+          value={repetitions}
+          onChange={(event) => setRepetitions(Number(event.target.value))}
+        >
+          {[1, 2, 3, 5].map((count) => (
+            <option key={count} value={count}>
+              {count}
+            </option>
+          ))}
+        </select>
+      </Field>
+
+      <button
+        className="btn"
+        disabled={selected.length === 0 || vault.checkingCompatibility}
+        onClick={run}
+      >
+        {vault.checkingCompatibility ? 'Probando…' : `Probar ${selected.length} modelo(s)`}
+      </button>
+
+      {vault.compatibility !== null && (
+        <div className="vault-media">
+          {vault.compatibility.map((result) => (
+            <p key={`${result.provider}:${result.model ?? ''}`} className="field__hint">
+              <Tag tone={result.refused > 0 ? 'warn' : result.answered > 0 ? 'ok' : 'idle'}>
+                {result.model ?? result.provider}
+              </Tag>{' '}
+              {result.answered} contestó · {result.refused} se negó · {result.empty} sin respuesta
+              {result.answered > 0 && ` · memoria correcta ${result.memoryOk}/${result.answered}`}
+              {result.signals.length > 0 && ` · ${result.signals.join(', ')}`}
+              {result.error !== null && ` · ${result.error}`}
+            </p>
+          ))}
+        </div>
+      )}
+    </details>
   );
 }

@@ -391,6 +391,54 @@ export const vaultConversationSendResultSchema = z.object({
  */
 export const VAULT_PREVIEW_MAX_BYTES = 20 * 1024 * 1024;
 
+/**
+ * comprobar que modelos sirven para una conversacion.
+ *
+ * La sonda es la propia conversacion, que ya esta cifrada en la boveda: no viaja
+ * ningun texto desde el renderer y no hay nada que guardar en el repositorio.
+ * Es de SOLO LECTURA — no añade turnos ni toca la memoria.
+ */
+export const vaultCompatibilityArgsSchema = z.object({
+  conversationId: conversationIdSchema,
+  /** el turno se ejecuta dentro de un proyecto, igual que uno normal */
+  projectAlias: projectAliasSchema,
+  targets: z
+    .array(
+      z.object({
+        provider: z.string().min(1).max(64),
+        /** `null` deja decidir a la conexion, como en un turno normal */
+        model: z.string().max(128).nullable().default(null),
+      }),
+    )
+    .min(1)
+    .max(12),
+  /**
+   * veces que se prueba cada modelo.
+   *
+   * Una negativa depende del prompt y de la suerte, asi que una sola muestra es
+   * un sondeo y no una prueba. Se deja a la vista para que nadie confunda «no me
+   * lo rechazo una vez» con «no me lo rechaza».
+   */
+  repetitions: z.number().int().min(1).max(5).default(1),
+});
+
+export const vaultCompatibilityResultSchema = z.object({
+  results: z.array(
+    z.object({
+      provider: z.string(),
+      model: z.string().nullable(),
+      answered: z.number().int().min(0),
+      refused: z.number().int().min(0),
+      empty: z.number().int().min(0),
+      /** que delato la negativa, cuando la hubo */
+      signals: z.array(z.string()).max(20),
+      /** si ademas escribio bien el bloque de memoria */
+      memoryOk: z.number().int().min(0),
+      error: z.string().nullable(),
+    }),
+  ),
+});
+
 export const vaultMediaAttachArgsSchema = z.object({
   conversationId: conversationIdSchema,
   /**
@@ -890,6 +938,9 @@ export interface LuxyBridge {
     conversationId: string,
     caption: string,
   ): Promise<IpcResult<{ attached: number }>>;
+  checkVaultCompatibility(
+    args: z.infer<typeof vaultCompatibilityArgsSchema>,
+  ): Promise<IpcResult<z.infer<typeof vaultCompatibilityResultSchema>>>;
   listVaultMedia(
     conversationId: string,
   ): Promise<IpcResult<z.infer<typeof vaultMediaListResultSchema>>>;

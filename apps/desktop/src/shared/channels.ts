@@ -60,6 +60,7 @@ export const IPC_INVOKE = {
   vaultConversationSend: 'luxy:vault:conversation:send',
   vaultConversationDelete: 'luxy:vault:conversation:delete',
   vaultMediaAttach: 'luxy:vault:media:attach',
+  vaultCompatibility: 'luxy:vault:compatibility',
   vaultMediaList: 'luxy:vault:media:list',
   vaultMediaRead: 'luxy:vault:media:read',
   vaultMediaGenerate: 'luxy:vault:media:generate',

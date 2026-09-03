@@ -1,5 +1,22 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-03 — comprobacion de compatibilidad de modelos (D-059)
+
+- **`npm run check`: exit 0. 126 archivos, 2.194 superadas, 9 omitidas** (antes
+  2.180).
+- 13 pruebas del detector de negativas. La mitad son NEGATIVAS que no lo son:
+  «no puedo mas» dentro de la escena, una disculpa del personaje, y un personaje
+  que se niega dentro del rol —que es lo que `D-056` hizo posible y no debe
+  confundirse con un rechazo del proveedor—.
+- Una prueba fija el sesgo: una señal debil sola no basta. Confundir dialogo con
+  negativa descarta modelos que si valen, y eso no se descubre solo.
+- Una prueba del esquema: sin tope, un descuido en la pantalla se convierte en
+  una tanda de cientos de llamadas reales.
+- **Sin cobertura automatica**: el handler y el panel. El handler hace llamadas
+  reales por definicion, asi que no puede vivir en `npm test` (`test:live` es su
+  sitio); el panel es interfaz.
+- **Sin verificar en pantalla ni contra modelos reales.**
+
 ### 2026-09-03 — F10.2, episodios y memoria episodica
 
 - **`npm run check`: exit 0. 125 archivos, 2.180 superadas, 9 omitidas** (antes

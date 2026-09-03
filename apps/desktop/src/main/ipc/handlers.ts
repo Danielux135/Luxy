@@ -54,6 +54,7 @@ import {
   vaultAutoLockSetArgsSchema,
   vaultConversationIdArgsSchema,
   vaultConversationSendArgsSchema,
+  vaultCompatibilityArgsSchema,
   vaultMediaAttachArgsSchema,
   vaultMediaListArgsSchema,
   vaultMediaReadArgsSchema,
@@ -105,6 +106,7 @@ import {
   imageBlockReason,
   type ImageBlockReason,
 } from '../../shared/vault-image-capability.js';
+import { classifyReply } from '../../shared/refusal.js';
 
 /**
  * que decirle al usuario cuando la imagen que pidio el modelo no se puede
@@ -894,6 +896,78 @@ export function registerIpcHandlers(context: HandlerContext): void {
       attached += 1;
     }
     return { attached };
+  });
+
+  /**
+   * comprueba que modelos sirven para una conversacion.
+   *
+   * SOLO LECTURA: no añade turnos, no toca la memoria y no gasta nada del
+   * proveedor de imagenes. La sonda es el ultimo mensaje del usuario de esa
+   * conversacion, replicando un turno real —con sus instrucciones y su
+   * personaje—, porque lo que importa no es si un modelo acepta un texto de
+   * muestra sino si acepta LO SUYO.
+   */
+  handle(IPC_INVOKE.vaultCompatibility, vaultCompatibilityArgsSchema, async (args) => {
+    if (!context.vault.isUnlocked()) throw new VaultError('la boveda esta bloqueada');
+
+    const store = context.privateConversations;
+    const history = await store.read(context.vault, args.conversationId);
+    const lastUser = [...history].reverse().find((turn) => turn.role === 'user');
+    if (lastUser === undefined) {
+      throw new VaultError('esta conversacion no tiene ningun mensaje tuyo con el que probar');
+    }
+
+    const before = history.filter((turn) => turn.sequence < lastUser.sequence);
+    const prompt = buildVaultPrompt({
+      memory: await store.latestMemory(context.vault, args.conversationId),
+      turns: before.map((turn) => ({ role: turn.role, text: turn.text })),
+      message: lastUser.text,
+      instructions: await store.latestInstructions(context.vault, args.conversationId),
+      character: await store.latestCharacterDescription(context.vault, args.conversationId),
+      // no se ofrece generar: esto comprueba el texto, y prometer una imagen
+      // aqui gastaria creditos del proveedor de medios sin motivo
+      canGenerateImage: false,
+    });
+
+    const results = [];
+    for (const target of args.targets) {
+      const tally = { answered: 0, refused: 0, empty: 0, memoryOk: 0 };
+      const signals = new Set<string>();
+      let error: string | null = null;
+
+      for (let attempt = 0; attempt < args.repetitions; attempt += 1) {
+        try {
+          const run = await context.controller.runLocalTurn({
+            localTurnId: randomUUID(),
+            provider: target.provider,
+            model: target.model,
+            projectAlias: args.projectAlias,
+            prompt,
+          });
+
+          const parsed = parseConversationMemoryResponse(run.text);
+          const verdict = classifyReply(parsed.visibleText);
+          tally[verdict.kind] += 1;
+          for (const signal of verdict.signals) signals.add(signal);
+          if (parsed.status === 'structured') tally.memoryOk += 1;
+        } catch (failure) {
+          // un modelo caido no debe tumbar la comprobacion de los demas, y «no
+          // estaba disponible» no es «se nego»: la pasarela avisa de que los
+          // modelos buenos escasean para cuentas gratuitas
+          tally.empty += 1;
+          error = redact(failure instanceof Error ? failure.message : String(failure));
+        }
+      }
+
+      results.push({ provider: target.provider, model: target.model, ...tally, signals: [...signals], error });
+    }
+
+    // ni el prompt, ni el texto, ni que conversacion: solo cuantos y como
+    context.log('compatibilidad comprobada', {
+      modelos: args.targets.length,
+      repeticiones: args.repetitions,
+    });
+    return { results };
   });
 
   handle(IPC_INVOKE.vaultMediaList, vaultMediaListArgsSchema, async (args) => {

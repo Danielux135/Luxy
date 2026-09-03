@@ -17,6 +17,7 @@ import {
   configSaveArgsSchema,
   secretNameSchema,
   vaultCharacterImportArgsSchema,
+  vaultCompatibilityArgsSchema,
   vaultMediaAttachArgsSchema,
   worktreeOpenFolderArgsSchema,
   studioJobActionArgsSchema,
@@ -120,6 +121,29 @@ describe('validacion de argumentos', () => {
         caption: 'x'.repeat(501),
       }).success,
     ).toBe(false);
+  });
+
+  it('la comprobacion de modelos no admite una lista sin fin ni repeticiones locas', () => {
+    // cada objetivo es una llamada de verdad: sin tope, un descuido en la
+    // pantalla se convierte en una tanda de cientos
+    const base = {
+      conversationId: '4d609d37-8f3e-4558-ae82-538eb6385dda',
+      projectAlias: 'luxy',
+      targets: [{ provider: 'deepseek' }],
+    };
+    expect(vaultCompatibilityArgsSchema.parse(base).repetitions).toBe(1);
+    expect(vaultCompatibilityArgsSchema.parse(base).targets[0]?.model).toBeNull();
+
+    expect(vaultCompatibilityArgsSchema.safeParse({ ...base, targets: [] }).success).toBe(false);
+    expect(
+      vaultCompatibilityArgsSchema.safeParse({
+        ...base,
+        targets: Array.from({ length: 13 }, () => ({ provider: 'deepseek' })),
+      }).success,
+    ).toBe(false);
+    expect(vaultCompatibilityArgsSchema.safeParse({ ...base, repetitions: 50 }).success).toBe(
+      false,
+    );
   });
 
   it('acota la longitud de los textos que llegan del renderer', () => {
