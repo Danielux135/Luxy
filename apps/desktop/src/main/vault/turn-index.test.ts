@@ -4,7 +4,7 @@
 // prueba con objetos, que es justo lo que permite cubrir los casos raros del
 // español —tildes, eñes, la puntuacion de la accion— sin ceremonia.
 import { describe, it, expect } from 'vitest';
-import { TurnIndex, normalizeTerm, tokenize, type IndexedTurn } from './turn-index.js';
+import { TurnIndex, normalizeTerm, stem, tokenize, type IndexedTurn } from './turn-index.js';
 
 const A = 'a1111111-1111-4111-8111-111111111111';
 const B = 'b2222222-2222-4222-8222-222222222222';
@@ -31,13 +31,51 @@ describe('normalizacion de terminos', () => {
   });
 });
 
+describe('raiz de una palabra', () => {
+  it('la familia de una palabra cae en la misma raiz', () => {
+    // es lo que hace que preguntar «cuando nos presentamos» encuentre un turno
+    // que decia «presentacion», sin listar sinonimos a mano
+    const raiz = stem('presentamos');
+    expect(stem('presentacion')).toBe(raiz);
+    expect(stem('presentar')).toBe(raiz);
+    expect(stem('presentaciones')).toBe(raiz);
+  });
+
+  it('conocer, conocimos y conocido son lo mismo al buscar', () => {
+    const raiz = stem('conocimos');
+    expect(stem('conocer')).toBe(raiz);
+    expect(stem('conocido')).toBe(raiz);
+  });
+
+  it('los plurales no son otra palabra', () => {
+    expect(stem('estrellas')).toBe(stem('estrella'));
+    expect(stem('galletas')).toBe(stem('galleta'));
+  });
+
+  it('no se pasa de agresivo con las palabras cortas', () => {
+    // una raiz demasiado corta junta palabras que no tienen nada que ver y
+    // ensucia todas las busquedas
+    for (const corta of ['mar', 'casa', 'vida', 'ojos']) {
+      expect(stem(corta).length).toBeGreaterThanOrEqual(3);
+    }
+    expect(stem('vainilla')).not.toBe(stem('vaina'));
+  });
+
+  it('LIMITE: un verbo irregular cambia de raiz y esto no lo alcanza', () => {
+    // «vengo» y «venias» no comparten sufijo sino raiz cambiada; ningun recorte
+    // de sufijos arregla eso. Es parte de por que hacen falta etiquetas
+    expect(stem('vengo')).not.toBe(stem('venias'));
+  });
+});
+
 describe('troceado en terminos', () => {
   it('la puntuacion y los asteriscos de la accion son separadores', () => {
+    // ya salen recortadas a su raiz: es lo que se guarda en el indice
     expect(tokenize('*Hace una reverencia juguetona.*')).toEqual([
       'hace',
       'reverencia',
       'juguetona',
-    ]);
+    ].map(stem));
   });
 
   it('descarta palabras vacias y las de menos de tres letras', () => {
@@ -185,6 +223,18 @@ describe('el caso que motiva todo esto', () => {
     expect(found[0]?.sequence).toBe(2);
     // y no se lo lleva el turno de la jornada laboral, que no viene a cuento
     expect(found.map((match) => match.sequence)).not.toContain(41);
+  });
+
+  it('una palabra de la misma familia ya vale: «presentamos» encuentra «presento»', () => {
+    // esto lo resuelve el recorte de raices, sin modelo y sin coste
+    const index = new TurnIndex();
+    index.addAll([
+      turn(A, 1, 'Hola, ¿cómo te llamas?', 'user'),
+      turn(A, 2, '*Se presenta con una reverencia* Me llamo Luxy.'),
+      turn(A, 40, 'Hoy he trabajado todo el día', 'user'),
+    ]);
+
+    expect(index.search('¿te acuerdas de cuando nos presentamos?')[0]?.sequence).toBe(2);
   });
 
   it('LIMITE CONOCIDO: una parafrasis sin palabras comunes no encuentra nada', () => {

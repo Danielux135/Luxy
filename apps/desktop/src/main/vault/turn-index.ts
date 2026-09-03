@@ -94,7 +94,80 @@ export function normalizeTerm(word: string): string {
 }
 
 /**
- * parte un texto en terminos indexables.
+ * sufijos que se recortan, del mas largo al mas corto.
+ *
+ * El orden importa: «presentaciones» debe perder «aciones» entera y no quedarse
+ * a medias por haber probado «es» primero.
+ */
+const SUFFIXES = [
+  'amientos', 'imientos', 'amiento', 'imiento',
+  'aciones', 'iciones', 'acion', 'icion',
+  'adores', 'adoras', 'ador', 'adora',
+  'antes', 'entes', 'mente',
+  'abamos', 'iamos', 'aremos', 'eremos', 'iremos',
+  'aban', 'abas', 'aba', 'ian', 'ias',
+  'aron', 'ieron', 'aste', 'iste', 'amos', 'emos', 'imos',
+  'ando', 'iendo', 'ados', 'idos', 'ado', 'ido', 'ada', 'ida',
+  'ares', 'eres', 'ires', 'ar', 'er', 'ir',
+  'dades', 'dad', 'ezas', 'eza',
+  'es', 's',
+  // las terminaciones de una letra van al final y obligan a la segunda pasada:
+  // «presenta» debe llegar a la misma raiz que «presentamos»
+  'a', 'o', 'e',
+];
+
+/**
+ * pasadas de recorte.
+ *
+ * Dos, y no una: «vainillas» pierde primero la «s» y despues la «a», que es lo
+ * que la deja en la misma raiz que «vainilla». Con una sola pasada, el singular
+ * y el plural acabarian en raices distintas, que es peor que no recortar nada.
+ */
+const STEM_PASSES = 2;
+
+/**
+ * longitud minima de la raiz que queda tras recortar.
+ *
+ * Sin este suelo, «mar» y «mares» acabarian en cosas distintas y palabras
+ * cortas quedarian irreconocibles. Cuatro deja «conoc», «present» y «vainill»
+ * intactos y protege lo demas.
+ */
+const MIN_STEM_LENGTH = 4;
+
+/**
+ * raiz aproximada de una palabra ya normalizada.
+ *
+ * NO es un stemmer completo del español: es un recorte de sufijos regulares.
+ * Cubre la morfologia previsible —«presentamos», «presentacion» y «presentar»
+ * caen en la misma raiz— y **no alcanza los verbos irregulares**: «vengo» y
+ * «venias» siguen siendo cosas distintas, porque ahi cambia la raiz y no el
+ * sufijo. Eso ultimo no lo arregla ningun recorte, y es parte de por que hacen
+ * falta etiquetas (`D-058`).
+ *
+ * Se prefiere quedarse corto a pasarse: una raiz demasiado agresiva junta
+ * palabras que no tienen nada que ver y ensucia todas las busquedas.
+ */
+export function stem(term: string): string {
+  let current = term;
+  for (let pass = 0; pass < STEM_PASSES; pass += 1) {
+    const shorter = stripOnce(current);
+    if (shorter === current) break;
+    current = shorter;
+  }
+  return current;
+}
+
+function stripOnce(term: string): string {
+  for (const suffix of SUFFIXES) {
+    if (!term.endsWith(suffix)) continue;
+    const root = term.slice(0, term.length - suffix.length);
+    if (root.length >= MIN_STEM_LENGTH) return root;
+  }
+  return term;
+}
+
+/**
+ * parte un texto en terminos indexables, ya reducidos a su raiz.
  *
  * Los asteriscos de la accion —«*se rie*»— y la puntuacion desaparecen: son
  * separadores, no contenido.
@@ -103,8 +176,10 @@ export function tokenize(text: string): string[] {
   const terms: string[] = [];
   for (const raw of normalizeTerm(text).split(/[^a-z0-9ñ]+/)) {
     if (raw.length < MIN_TERM_LENGTH) continue;
+    // las vacias se descartan por su forma escrita, antes de recortar: la raiz
+    // de una palabra vacia puede coincidir con la de una que si importa
     if (STOPWORDS.has(raw)) continue;
-    terms.push(raw);
+    terms.push(stem(raw));
   }
   return terms;
 }

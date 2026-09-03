@@ -67,10 +67,15 @@ porque descomponerla convertiria «año» en otra palabra. Admite limitar la
 busqueda a un conjunto de conversaciones, que es lo que necesitan el alcance por
 personaje y los hilos excluidos.
 
-**Hallazgo que cambia el plan:** el lexico NO resuelve el caso que motiva la
+**Hallazgo que cambio el plan:** el lexico NO resuelve el caso que motiva la
 funcion si la pregunta no comparte palabras con lo que se dijo. La prueba lo
-afirma en vez de disimularlo. Ver la actualizacion de `D-058`: F10.6 asciende de
-opcional a probablemente necesaria.
+afirma en vez de disimularlo.
+
+Se ataco por los dos lados. El determinista esta hecho aqui: **recorte de raices
+en dos pasadas**, que cubre la morfologia regular —«presentamos», «presenta» y
+«presentar» comparten raiz— y no alcanza los verbos irregulares, que cambian la
+raiz y no el sufijo. Una prueba afirma cada mitad. El otro lado —que el modelo
+elija sobre el indice completo— es F10.3, ya revisada. Ver `D-058`.
 
 Pendiente al integrarlo (F10.2): **`clear()` al cerrar la boveda**. El indice
 tiene texto en claro en memoria y una boveda cerrada que conserve su contenido
@@ -98,9 +103,12 @@ llamada, no por token (ver la correccion de `D-058` con los registros reales).
 Medido: el prompt actual son ~4.800 tokens de entrada confirmados y un episodio
 de 6 turnos en crudo ~1.500.
 
-- **Nivel 1 (siempre):** lineas de indice —fecha, titulo derivado, una frase—.
-  Con el precio fuera de la ecuacion el tope puede ser generoso; lo que lo
-  limita es no diluir las directivas de personaje.
+- **Nivel 1 (siempre): TODOS los episodios**, no solo los que el lexico
+  encuentre. ~40 tokens por linea de indice; un centenar cabe de sobra. Asi el
+  personaje SIEMPRE sabe que ocurrio y de que iba, y la busqueda deja de decidir
+  eso para decidir solo que se cita en crudo. Es la respuesta a que el modelo
+  resuelva lo que el literal no alcanza, sin gastar una llamada de mas. El unico
+  tope es no diluir las directivas de personaje.
 - **Nivel 2 (con peticion de memoria y coincidencia fuerte):** los turnos en
   crudo del episodio, con tope de turnos y de caracteres.
 - La seleccion se hace ANTES de la llamada, con el mensaje del usuario.

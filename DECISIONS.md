@@ -1361,7 +1361,34 @@ el dia que alguien lo cruce. Consecuencias:
 - lo que NO cambia es de quien se fia el sistema: las etiquetas solo dirigen la
   busqueda. Lo que se rememora sigue siendo el turno real, asi que un titulo
   equivocado hace que un recuerdo no se encuentre, nunca que se recuerde algo
-  que no paso. Cuando se
+  que no paso.
+
+**Y el limite se ataca por dos lados, no por uno.** Daniel propuso lo evidente:
+que el modelo, que es la parte lista, resuelva lo que el literal no alcanza. Es
+correcto, y se reparte asi:
+
+*Lo determinista, ya hecho en F10.1:* recortar cada palabra a su raiz. Es gratis
+y cubre la morfologia regular, que es la mayoria del castellano —«presentamos»,
+«presentacion», «presenta» y «presentar» caen en la misma raiz—. Lo que no
+alcanza ningun recorte de sufijos son los verbos irregulares: «vengo» y «venias»
+cambian la raiz, no la terminacion.
+
+*Lo que decide el modelo, en F10.3, y sin llamadas de mas:* **el indice de TODOS
+los episodios entra en el prompt**, no solo los que el lexico encuentre. Un
+episodio son ~40 tokens de indice, asi que un centenar cabe de sobra, y con el
+coste fuera de la ecuacion no hay motivo para racionarlo. Entonces la busqueda
+lexica deja de decidir si el personaje *sabe* que algo ocurrio —lo sabe siempre,
+lo tiene delante— y pasa a decidir solo cual de esos episodios se cita en crudo.
+
+Eso degrada bien, que es la propiedad que se buscaba: en el peor caso recuerda
+que ocurrio y de que iba, sin las palabras exactas; en el mejor, las cita. Y
+mantiene la invariante de **una sola llamada por turno**.
+
+Queda una escotilla, ahora si defendible: que el modelo pida por su id un
+episodio cuyo detalle no se incluyo, con un bloque, al modo de `LUXY_IMAGEN`.
+Eso son dos llamadas, pero solo en el turno en que de verdad rememora, y con
+3,64 ¥ de media eso ya no es un argumento. Se deja para despues de ver si hace
+falta: si el indice completo mas el lexico aciertan, no hara ninguna. Cuando se
 añada, va en un hueco de «modelo auxiliar» en Conexiones, que es el mismo que
 necesitaria el describidor de imagenes.
 
