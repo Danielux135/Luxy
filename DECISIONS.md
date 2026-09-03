@@ -1193,3 +1193,119 @@ algo para excluirlo lo invoca.
 hace que una peticion corta y explicita rinda; y desde 2026-08-18 el propio
 emparejador sabe responder «ninguna de estas». El estilo del prompt lo decide el
 modelo del personaje: etiquetas para anime, prosa para realista.
+
+## D-058 — memoria episodica: buscar en lo que se dijo, no guardar otro resumen
+
+Fecha: 2026-09-03
+
+Estado: propuesta, sin implementar
+
+Un personaje debe poder rememorar: «¿te acuerdas de como nos conocimos?» tiene
+que traer aquel dia con sus detalles, no una parafrasis. La memoria acumulativa
+de `D-019` no puede hacerlo y no es un fallo suyo: es un **resumen que se
+reescribe en cada turno**, con techo de 1.200 caracteres y 12 entradas por
+lista, y pertenece a la conversacion. A los veinte turnos, el primer dia ha
+pasado por veinte compresiones. Sirve para el hilo inmediato, que es para lo que
+se hizo.
+
+### El activo que ya existe
+
+**Todos los turnos estan en disco, cifrados y numerados.** El primer dia esta
+ahi, palabra por palabra. El problema nunca fue guardarlo: es encontrarlo.
+
+De ahi la decision central: **un recuerdo es un puntero a turnos reales, no una
+copia resumida.** Se guarda `{conversationId, desde, hasta}` y al rememorar se
+leen esos turnos tal cual se escribieron.
+
+Tres consecuencias, y la tercera es la que mas pesa:
+
+- rememora con la palabra exacta, no con el resumen de un resumen;
+- no se degrada: un puntero no se reescribe;
+- **no se puede inventar hacia atras.** Con lo que se acaba de ver —un detalle
+  inventado sobre una imagen entro en la memoria acumulativa, volvio marcado
+  como hecho y genero mas— un banco de recuerdos *escritos por el modelo* seria
+  esa misma averia, pero permanente. Un puntero solo puede devolver lo que de
+  verdad se dijo.
+
+### Lo que costaria, con numeros de esta boveda
+
+Medido sobre la conversacion real de 62 turnos, deduciendo el texto del relleno
+de 256 B:
+
+| | tamaño | tokens |
+| --- | --- | --- |
+| turno del usuario | ~250 car. | ~80 |
+| turno del personaje | ~1.500 car. | ~430 |
+| par completo | ~1.750 car. | ~510 |
+| prompt actual de un turno | ~14.000 car. | **~4.000** |
+
+Un episodio de 6 turnos citados en crudo son **~1.500 tokens**. Dos episodios,
+~3.000: **el prompt crece un 75%** en cada mensaje de la conversacion, para
+siempre, se este rememorando o no. Eso descarta «meter siempre los recuerdos».
+
+### Por eso el recuerdo entra en dos niveles
+
+- **Nivel 1, siempre.** La linea de indice de los recuerdos que mas encajan:
+  fecha, titulo y una frase. ~40 tokens cada uno; cinco caben en 200 tokens, que
+  es ruido comparado con los 4.000 actuales. Con esto **sabe que ocurrio** y
+  puede aludirlo sin inventar.
+- **Nivel 2, solo cuando toca.** Los turnos en crudo de UN episodio, acotados.
+  Se activa cuando el mensaje del usuario pide memoria de forma clara y la
+  coincidencia es fuerte. Es el unico caso donde se paga el precio, y es
+  justamente cuando el usuario ha pedido rememorar.
+
+La seleccion se hace **antes** de la llamada, con el mensaje del usuario. La
+alternativa —enseñarle el indice y dejar que pida el detalle con un bloque, como
+`LUXY_IMAGEN`— es mas elegante y cuesta el doble: obliga a dos llamadas por
+turno cada vez que recuerda algo. No compensa.
+
+### El catalogador: probablemente no hace falta
+
+La pregunta era si un modelo barato puede catalogar los episodios. Puede, pero
+antes conviene ver si sobra:
+
+**Se puede buscar directamente en los turnos.** Al desbloquear la boveda ya se
+descifra todo para leerlo; construir un indice invertido en memoria sobre ese
+texto es inmediato para este volumen —la conversacion mas larga son 116 KB, y
+cien conversaciones no llegan a 12 MB—. «Como nos conocimos» encuentra las
+palabras que se dijeron aquel dia sin que nadie haya catalogado nada.
+
+Ventajas sobre catalogar con un modelo: **no cuesta nada, no falla, no inventa
+un titulo equivocado que deje un recuerdo inencontrable, y no manda contenido
+privado a ningun sitio.**
+
+Y hay una restriccion que el precio no captura: **el catalogador leeria el
+contenido explicito.** Un modelo barato que se niegue a procesarlo no vale por
+barato que sea. Eso reduce la lista a los que ya aceptan este contenido, que son
+los mismos de la conversacion. El ahorro real, por tanto, es menor de lo que
+parece: catalogar es una llamada por episodio (~5.000 tokens de entrada, ~150 de
+salida), no por mensaje.
+
+Decision: **empezar sin catalogador.** Se añade despues, y solo para dos cosas
+concretas que la busqueda lexica no da: un titulo legible en la pantalla de
+recuerdos, y encontrar por parafrasis lo que no comparte palabras. Cuando se
+añada, va en un hueco de «modelo auxiliar» en Conexiones, que es el mismo que
+necesitaria el describidor de imagenes.
+
+### Alcance
+
+Los recuerdos pertenecen al **personaje**, no a la conversacion: es lo que hace
+que Lia sea la misma en un hilo nuevo. Una conversacion puede excluirse del
+banco, porque no todo lo hablado con un personaje deberia volver.
+
+### Lo que se rechaza, y por que
+
+- **Que el modelo escriba el contenido del recuerdo.** Es exactamente la averia
+  de la oreja doblada, pero sin caducidad.
+- **Marcar los recuerdos a mano.** Un cerebro no se llena a botonazos, y lo que
+  se pide es que evolucione solo.
+- **Embeddings en la primera version.** Añaden un modelo, un almacen vectorial y
+  una decision sobre donde se calculan —uno remoto sacaria el contenido de la
+  boveda—. Solo si el lexico se queda corto de verdad.
+- **Meter los recuerdos en cada turno.** El 75% de prompt extra permanente no lo
+  paga el beneficio.
+
+### Lo que no resuelve
+
+La memoria acumulativa ya contaminada de una conversacion existente sigue
+contaminada. Esto no la limpia; es otra tarea.

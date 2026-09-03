@@ -1,5 +1,96 @@
 # Luxy — tarea activa
 
+## F10-MEMORY-001 — memoria episodica del personaje
+
+Estado: **plan aprobado, sin empezar.** Decision de diseño en `D-058`.
+
+Que un personaje rememore: «¿te acuerdas de como nos conocimos?» debe traer
+aquel dia con sus palabras. La memoria acumulativa actual no puede —es un
+resumen que se reescribe, con techo, y pertenece a la conversacion— y se queda
+como esta: sirve para el hilo inmediato.
+
+**Principio:** un recuerdo es un PUNTERO a turnos reales, no una copia
+resumida. Nada de esto lo escribe el modelo, asi que nada de esto se puede
+inventar. Ver `D-058` para el razonamiento y los numeros.
+
+### F10.1 — indice de busqueda en memoria
+
+Indice invertido sobre el texto de los turnos ya descifrados, construido al
+desbloquear la boveda y descartado al cerrarla. **Nunca toca disco**: un indice
+de terminos en claro filtraria el contenido con solo mirarlo.
+
+- normalizacion: minusculas, sin acentos, sin signos; lista de vacias en
+  español;
+- entrada: `(conversationId, sequence)`; salida: turnos ordenados por
+  coincidencia;
+- vive en `apps/desktop/src/main/vault/`, es pura salvo la lectura inicial;
+- pruebas: normalizacion, orden de resultados, y que el indice se vacia al
+  cerrar la boveda.
+
+Volumen medido: la conversacion mas larga son 116 KB; cien conversaciones no
+llegan a 12 MB. No hace falta nada mas sofisticado.
+
+### F10.2 — episodios y su almacen
+
+Un episodio es un tramo contiguo de turnos de una conversacion.
+
+- **Segmentacion determinista, sin modelo**: corta por salto de tiempo entre
+  turnos (umbral a fijar, orientativo 6 h), por cambio de conversacion y por un
+  maximo de turnos.
+- Registro: `{ id, characterId, conversationId, desde, hasta, inicio, fin,
+  turnos }`. Sin texto: el texto son los turnos.
+- Cifrado como el resto, con su dominio propio. Esquema en `vault-payloads.ts`.
+- Los episodios se recalculan a partir de los turnos, asi que **las
+  conversaciones que ya existen entran solas**, incluida la que Daniel quiere
+  conservar.
+- Pertenecen al personaje. Una conversacion puede excluirse del banco.
+
+### F10.3 — recuperacion en dos niveles
+
+El limite es el prompt, no el disco. Medido: el prompt actual son ~4.000 tokens
+y un episodio de 6 turnos en crudo son ~1.500.
+
+- **Nivel 1 (siempre):** hasta cinco lineas de indice —fecha, titulo derivado,
+  una frase—, ~200 tokens en total. Con esto sabe que ocurrio.
+- **Nivel 2 (solo con peticion clara y coincidencia fuerte):** los turnos en
+  crudo de UN episodio, con tope de turnos y de caracteres.
+- La seleccion se hace ANTES de la llamada, con el mensaje del usuario. Nada de
+  una segunda llamada por turno.
+- Pruebas: que sin señal de memoria no se activa el nivel 2; que el nivel 2
+  respeta su tope; que el coste del nivel 1 se mantiene acotado.
+
+### F10.4 — entrada en el prompt
+
+- Bloque nuevo en `buildVaultPrompt`, marcado **(DATOS)** como la memoria y los
+  turnos: es contenido, no ordenes.
+- Cada recuerdo lleva su fecha, para que pueda situarlo en el tiempo.
+- Regla explicita, heredada de la averia de la imagen: lo que no este en el
+  recuerdo no se da por ocurrido.
+- Pruebas del prompt, sin red.
+
+### F10.5 — pantalla de recuerdos
+
+Ver los episodios de un personaje, abrirlos y **excluir** uno o una conversacion
+entera. No sirve para crearlos —eso es automatico— sino para diagnosticar: si no
+se acuerda de algo, hay que poder ver por que.
+
+### F10.6 — catalogador opcional
+
+Solo si F10.3 demuestra que el lexico no basta. Añade titulo legible y busqueda
+por parafrasis. Va en un hueco de «modelo auxiliar» en Conexiones, el mismo que
+pide el describidor de imagenes.
+
+**Restriccion que el precio no captura:** el catalogador leeria contenido
+explicito, asi que un modelo barato que se niegue no vale. Pendiente de la tabla
+de precios, que exige iniciar sesion y no se ha podido leer.
+
+### Orden y criterio de parada
+
+F10.1 → F10.2 → F10.3 → F10.4 son lo minimo que ya rememora. F10.5 antes de dar
+por bueno el conjunto. F10.6 solo con evidencia de que hace falta.
+
+---
+
 ## VAULT-ROLEPLAY-001 — cinco fallos de la conversacion privada
 
 Estado: **`done` — Claude, 2026-09-02. Sin commit al abrir este bloque.**
