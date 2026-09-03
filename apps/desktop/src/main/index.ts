@@ -17,6 +17,7 @@ import {
   PrivateConversationStore,
   conversationsDirectory,
 } from './vault/conversation-store.js';
+import { PrivateMemory } from './vault/private-memory.js';
 import { PrivateMediaStore, mediaIndexDirectory } from './vault/media-store.js';
 import { VaultCharacterStore, charactersFilePath } from './vault/character-store.js';
 import { LocalBlobStore, mediaDirectory } from './vault/blob-store.js';
@@ -44,6 +45,7 @@ let vault: VaultService | null = null;
 let vaultAccounts: VaultAccountManager | null = null;
 let vaultCharacters: VaultCharacterStore | null = null;
 let privateConversations: PrivateConversationStore | null = null;
+let privateMemory: PrivateMemory | null = null;
 let privateMedia: PrivateMediaStore | null = null;
 let autoLockTimer: NodeJS.Timeout | null = null;
 let captureHost: CaptureHost | null = null;
@@ -303,6 +305,10 @@ async function bootstrap(): Promise<void> {
     charactersFilePath(luxyConfigDir()),
     new LocalBlobStore(mediaDirectory(luxyConfigDir())),
   );
+  privateMemory = new PrivateMemory(privateConversations);
+  // se engancha al cierre por los tres caminos —a mano, inactividad y salida—
+  // desde dentro de `lock()`: aqui dentro hay historial descifrado
+  privateMemory.attachTo(vault);
   privateMedia = new PrivateMediaStore(
     mediaIndexDirectory(luxyConfigDir()),
     new LocalBlobStore(mediaDirectory(luxyConfigDir())),
@@ -338,6 +344,7 @@ async function bootstrap(): Promise<void> {
     accounts: vaultAccounts,
     characters: vaultCharacters,
     privateConversations,
+    privateMemory,
     privateMedia,
     logsDirectory: logsDirectory(),
     artifactsDirectory: artifactsDirectory(),

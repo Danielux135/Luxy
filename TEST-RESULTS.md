@@ -1,5 +1,21 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-03 — F10.3 y F10.4, los recuerdos entran en el prompt
+
+- **`npm run check`: exit 0. 127 archivos, 2.211 superadas, 9 omitidas** (antes
+  2.194).
+- 12 pruebas de `recall.ts` contra una boveda real y 5 del bloque en
+  `vault-prompt.test.ts`.
+- Las que fijan el reparto entre niveles: las lineas van siempre, se pida o no
+  rememorar; la transcripcion solo con peticion Y acierto; **pidiendo rememorar
+  sin acertar no se trae un episodio cualquiera**.
+- Una prueba separa «mirar al pasado» de «pedir un recuerdo»: «ayer trabaje
+  mucho» no transcribe nada.
+- Y una fija que los recuerdos entran como DATOS: vienen de texto escrito en una
+  conversacion, donde puede colarse cualquier cosa.
+- **Sin verificar contra un modelo real.** Las pruebas fijan que se envia; que
+  el personaje rememore bien con eso delante es otra cosa, y se ve usandolo.
+
 ### 2026-09-03 — comprobacion de compatibilidad de modelos (D-059)
 
 - **`npm run check`: exit 0. 126 archivos, 2.194 superadas, 9 omitidas** (antes

@@ -146,6 +146,34 @@ de 6 turnos en crudo ~1.500.
   recuerdo no se da por ocurrido.
 - Pruebas del prompt, sin red.
 
+**F10.3 y F10.4 hechas el 2026-09-03**, y enchufadas al turno de verdad.
+
+`recall.ts` decide que recuerda el personaje: las lineas de todos los episodios
+siempre —hasta 40, ~1.600 tokens— y UNO transcrito solo cuando el mensaje pide
+rememorar de forma reconocible y la busqueda acierta. Si pide rememorar y no
+acierta, **no se trae un episodio cualquiera**: traer el equivocado es peor que
+no traer ninguno.
+
+`buildVaultPrompt` los renderiza como **(DATOS)**, con la misma regla que la
+lista de imagenes: de un momento no transcrito solo sabe su linea, y si le falta
+un detalle lo pregunta en vez de rellenarlo. Es la leccion de la oreja doblada
+aplicada antes de que ocurra.
+
+Detalles que costaron una prueba cada uno:
+
+- lo que ya viaja como historial reciente **no se transcribe otra vez**;
+- el identificador que ve el modelo es corto (`r1`) y no un uuid: el prompt no
+  tiene por que llevar identificadores internos;
+- el recorte del episodio conserva el PRINCIPIO: quien pregunta por un momento
+  quiere como fue, no como acabo;
+- mirar al pasado no es pedir un recuerdo. «Ayer trabaje mucho» no transcribe
+  nada.
+
+El indice se invalida al terminar cada turno y al borrar una conversacion —sin
+lo segundo, el personaje seguiria recordando algo borrado—. Se reconstruye solo
+y perezosamente. Si algun dia se nota, la alternativa es añadir los dos turnos
+nuevos al indice en vez de tirarlo entero; `TurnIndex.add` ya lo permite.
+
 ### F10.5 — pantalla de recuerdos
 
 Ver los episodios de un personaje, abrirlos y **excluir** uno o una conversacion

@@ -9,6 +9,7 @@ import { basename, join, resolve } from 'node:path';
 import type { z } from 'zod';
 import {
   buildVaultPrompt,
+  VAULT_RECENT_TURNS,
   parseConversationMemoryResponse,
   parseVaultImageRequest,
   redact,
@@ -107,6 +108,8 @@ import {
   type ImageBlockReason,
 } from '../../shared/vault-image-capability.js';
 import { classifyReply } from '../../shared/refusal.js';
+import type { PrivateMemory } from '../vault/private-memory.js';
+import { buildRecall } from '../vault/recall.js';
 
 /**
  * que decirle al usuario cuando la imagen que pidio el modelo no se puede
@@ -162,6 +165,13 @@ export interface HandlerContext {
   characters: VaultCharacterStore;
   /** conversaciones privadas cifradas en disco */
   privateConversations: PrivateConversationStore;
+  /**
+   * memoria episodica: indice de busqueda y episodios sobre esos turnos.
+   *
+   * Se construye sola en la primera busqueda y se vacia sola al cerrar la
+   * boveda; aqui solo se usa y se invalida cuando el historial cambia.
+   */
+  privateMemory: PrivateMemory;
   /** imagenes y videos privados, cifrados en disco */
   privateMedia: PrivateMediaStore;
   /** raiz de los artefactos generados; se abre, nunca se sirve por HTTP */
@@ -846,6 +856,8 @@ export function registerIpcHandlers(context: HandlerContext): void {
     // cifrados quedarian ocupando disco sin nada que los referenciara
     await context.privateMedia.deleteConversation(args.conversationId);
     context.privateConversations.delete(args.conversationId);
+    // sin esto, el personaje seguiria recordando una conversacion borrada
+    context.privateMemory.invalidate();
     return { deleted: true };
   });
 
@@ -1396,8 +1408,18 @@ export function registerIpcHandlers(context: HandlerContext): void {
           description: item.metadata.prompt ?? item.metadata.displayName ?? '',
         }))
       : [];
+    // los turnos que ya viajan como historial reciente no se transcriben otra
+    // vez: estarian dos veces en el mismo prompt
+    const oldestRecent = history.slice(-1 - VAULT_RECENT_TURNS)[0]?.sequence;
+    const recall = await buildRecall(context.privateMemory, context.vault, args.message, {
+      ...(oldestRecent === undefined
+        ? {}
+        : { alreadyInPrompt: { conversationId, fromSequence: oldestRecent } }),
+    });
+
     const prompt = buildVaultPrompt({
       memory,
+      recall,
       // el ultimo es el que se acaba de guardar: va aparte como mensaje nuevo
       turns: history.slice(0, -1).map((turn) => ({ role: turn.role, text: turn.text })),
       message: args.message,
@@ -1519,6 +1541,10 @@ export function registerIpcHandlers(context: HandlerContext): void {
         parsed.memory === null ? undefined : { memory: parsed.memory },
       );
     }
+
+    // el historial ha cambiado: el indice de la memoria episodica deja de estar
+    // al dia. Se reconstruye solo, y perezosamente, en la siguiente busqueda
+    context.privateMemory.invalidate();
 
     return {
       conversationId,

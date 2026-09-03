@@ -33,6 +33,39 @@ export interface VaultPromptTurn {
   text: string;
 }
 
+/**
+ * un momento anterior, reducido a su linea de indice.
+ *
+ * Esto es lo que el personaje ve SIEMPRE de cada episodio: cuando fue y de que
+ * iba. Son ~40 tokens, asi que caben todos, y con eso sabe que ocurrio aunque
+ * la busqueda no acierte a traer el detalle.
+ */
+export interface RecalledEpisodeLine {
+  id: string;
+  /** fecha legible; sin ella no puede situar nada en el tiempo */
+  date: string;
+  title: string;
+  turns: number;
+}
+
+/** un momento traido entero, con las palabras que se dijeron */
+export interface QuotedEpisode extends RecalledEpisodeLine {
+  turns: number;
+  conversation: VaultPromptTurn[];
+}
+
+/**
+ * lo que el personaje recuerda en este turno.
+ *
+ * Dos niveles a proposito (`D-058`): las lineas siempre, el detalle solo cuando
+ * de verdad se ha pedido rememorar. Asi degrada bien —en el peor caso sabe que
+ * paso, en el mejor lo cita— sin llenar cada mensaje de historial.
+ */
+export interface VaultRecall {
+  episodes: RecalledEpisodeLine[];
+  quoted: QuotedEpisode | null;
+}
+
 export interface VaultPromptInput {
   /** memoria acumulativa de turnos anteriores; null en el primer turno */
   memory: ConversationMemory | null;
@@ -71,6 +104,8 @@ export interface VaultPromptInput {
    * para que este modulo siga sin saber nada de ningun proveedor.
    */
   imagePromptStyle?: VaultImagePromptStyle;
+  /** momentos anteriores que puede recordar en este turno */
+  recall?: VaultRecall;
   recentTurns?: number;
 }
 
@@ -103,6 +138,44 @@ function dataBlock(title: string, body: string): string {
  */
 function directiveBlock(title: string, body: string): string {
   return `${title}:\n${body}`;
+}
+
+/**
+ * las lineas de indice.
+ *
+ * Llevan la misma regla que la lista de imagenes, y por el mismo motivo: un
+ * detalle inventado sobre algo que «recuerda» se blanquea despues en la memoria
+ * acumulativa y vuelve convertido en hecho.
+ */
+function formatRecallLines(episodes: readonly RecalledEpisodeLine[]): string {
+  return [
+    'Momentos anteriores con esta persona, del mas reciente al mas antiguo. Puedes aludirlos con',
+    'naturalidad y darlos por ciertos.',
+    'De cada uno sabes SOLO lo que dice su linea: cuando fue y de que iba. NO sabes que se dijo',
+    'exactamente salvo que aparezca abajo, transcrito. Si te falta un detalle para responder,',
+    'preguntalo; no lo supongas ni lo rellenes.',
+    '',
+    ...episodes.map(
+      (episode) => `- [${episode.id}] ${episode.date} · ${episode.title} · ${episode.turns} turnos`,
+    ),
+  ].join('\n');
+}
+
+/**
+ * un episodio transcrito.
+ *
+ * Es texto real, no un resumen: por eso rememorar suena a recordar y no a
+ * parafrasear. Va como DATOS igual que el resto del historial.
+ */
+function formatQuotedEpisode(quoted: QuotedEpisode): string {
+  return [
+    `${quoted.date} · ${quoted.title}`,
+    'Esto se dijo de verdad, palabra por palabra. Puedes citarlo o referirte a ello.',
+    '',
+    ...quoted.conversation.map(
+      (turn) => `${turn.role === 'user' ? USER_LABEL : ASSISTANT_LABEL}: ${turn.text}`,
+    ),
+  ].join('\n');
 }
 
 export function buildVaultPrompt(input: VaultPromptInput): string {
@@ -153,6 +226,16 @@ export function buildVaultPrompt(input: VaultPromptInput): string {
 
   if (instructions !== null) {
     blocks.push(directiveBlock('COMO DEBES COMPORTARTE EN ESTA CONVERSACION', instructions));
+  }
+
+  const recall = input.recall;
+  if (recall !== undefined && recall.episodes.length > 0) {
+    blocks.push(dataBlock('MOMENTOS ANTERIORES QUE RECUERDAS', formatRecallLines(recall.episodes)));
+  }
+  if (recall?.quoted != null) {
+    blocks.push(
+      dataBlock('UNO DE ESOS MOMENTOS, TAL Y COMO OCURRIO', formatQuotedEpisode(recall.quoted)),
+    );
   }
 
   if (input.memory !== null) {
