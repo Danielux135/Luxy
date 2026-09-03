@@ -21,11 +21,12 @@ Dos afirmaciones que no constan, anotadas sin corregir:
 
 - «cómo te reíste cuando te dije que me llamaba Luxy»: en aquel turno no hubo
   ninguna risa. Hecho del pasado sin respaldo, aunque menor;
-- «y gané yo, por cierto»: en esa escena ella dijo «ganaste». Afirma lo
-  contrario de lo que consta. **Puede ser caracter y no fallo** —reescribir a su
-  favor quien gano una partida es humano y encaja con ella—, asi que se deja
-  como decision abierta de Daniel: un personaje que no pueda contradecir el
-  registro ni en broma seria un archivador.
+- «y gané yo, por cierto»: en esa escena ella dijo «ganaste». **RESUELTO en el
+  turno siguiente, y no por concesion:** al corregirla no se reafirma ni se
+  disculpa, sino que aterriza en «creo que los dos ganamos», que es casi textual
+  de lo que dijo aquella noche —«esto no es ganar. Esto es rendirse. Los dos. A
+  la vez»—. Tenia el registro bien todo el rato; el «gané yo» era la broma. Un
+  fallo de memoria no se comporta asi.
 
 Con esto, `F10-MEMORY-001` queda verificado de punta a punta: F10.0 a F10.6, mas
 `D-058`, `D-059`, `D-060` y `D-061`.

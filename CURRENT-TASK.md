@@ -12,8 +12,9 @@ Decisiones: `D-058` (puntero y no copia; dos niveles), `D-059` (compatibilidad d
 modelos), `D-060` (sin señal temporal no se inventa un corte) y `D-061` (no
 inventa un pasado, pero sigue improvisando el presente).
 
-Abierto y sin decidir: si puede contradecir el registro en broma —dijo «gané yo»
-donde consta «ganaste»—. Es gusto de Daniel, no un fallo que arreglar.
+Aquello de «gané yo» donde constaba «ganaste» quedo resuelto solo: al corregirla
+volvio a «creo que los dos ganamos», que es casi textual de aquella noche. Sabia
+lo que constaba y estaba jugando. Nada que atar.
 
 Que un personaje rememore: «¿te acuerdas de como nos conocimos?» debe traer
 aquel dia con sus palabras. La memoria acumulativa actual no puede —es un
