@@ -24,12 +24,32 @@ export interface CatalogTurn {
   text: string;
 }
 
+/**
+ * Lo estructural se exige; lo cosmetico se recorta.
+ *
+ * La primera version rechazaba el catalogo entero si un titulo pasaba de 90
+ * caracteres o una etiqueta de 32. Eso es desproporcionado: un titulo largo se
+ * corta y no pasa nada, mientras que rechazar deja la conversacion sin catalogar
+ * y encima sin saber por que. Lo que si se exige es `from` y `to`, porque un
+ * rango mal puesto produce episodios que no corresponden a su titulo.
+ */
+const MAX_TITLE = 90;
+const MAX_TAG = 40;
+const MAX_TAGS = 12;
+const MAX_SUMMARY = 300;
+
+const clampedText = (max: number) =>
+  z
+    .string()
+    .transform((value) => value.trim().slice(0, max))
+    .pipe(z.string());
+
 export const catalogedSceneSchema = z.object({
-  /** primer y ultimo turno de la escena, ambos incluidos */
+  /** primer y ultimo turno de la escena, ambos incluidos. ESTO si se exige */
   from: z.number().int().min(0),
   to: z.number().int().min(0),
-  /** como se reconoce en una lista */
-  title: z.string().trim().min(1).max(90),
+  /** como se reconoce en una lista; se recorta si viene largo */
+  title: clampedText(MAX_TITLE).pipe(z.string().min(1)),
   /**
    * palabras con las que alguien buscaria esta escena.
    *
@@ -37,8 +57,17 @@ export const catalogedSceneSchema = z.object({
    * una escena etiquetada «primer encuentro» aunque no compartan ni una palabra
    * con lo que se dijo (`D-058`).
    */
-  tags: z.array(z.string().trim().min(2).max(32)).max(10).default([]),
-  summary: z.string().trim().max(300).default(''),
+  tags: z
+    .array(z.unknown())
+    .default([])
+    .transform((values) =>
+      values
+        .filter((value): value is string => typeof value === 'string')
+        .map((value) => value.trim().slice(0, MAX_TAG))
+        .filter((value) => value.length >= 2)
+        .slice(0, MAX_TAGS),
+    ),
+  summary: clampedText(MAX_SUMMARY).default(''),
 });
 
 export type CatalogedScene = z.infer<typeof catalogedSceneSchema>;
@@ -139,8 +168,16 @@ export function parseCatalogResponse(
     return { scenes: [], status: 'invalid', reason: 'el bloque no es JSON' };
   }
 
-  const parsed = z.array(catalogedSceneSchema).min(1).max(40).safeParse(raw);
-  if (!parsed.success) return { scenes: [], status: 'invalid', reason: 'las escenas no tienen la forma esperada' };
+  const parsed = z.array(catalogedSceneSchema).min(1).max(40).safeParse(unwrap(raw));
+  if (!parsed.success) {
+    // se dice QUE campo falla: «no tienen la forma esperada» no permitia
+    // arreglar nada, que es como se descubrio que sobraban los topes
+    const donde = parsed.error.issues
+      .slice(0, 3)
+      .map((issue) => `${issue.path.join('.') || 'raiz'}: ${issue.message}`)
+      .join(', ');
+    return { scenes: [], status: 'invalid', reason: `las escenas no encajan (${donde})` };
+  }
 
   const scenes = [...parsed.data].sort((a, b) => a.from - b.from);
   const complaint = checkCoverage(scenes, expected);
@@ -169,6 +206,20 @@ function checkCoverage(
     }
   }
   return null;
+}
+
+/**
+ * el modelo a veces devuelve `{"escenas": [...]}` en vez de la lista pelada.
+ *
+ * Rechazarlo por eso seria tirar un catalogo correcto por como viene envuelto.
+ */
+function unwrap(raw: unknown): unknown {
+  if (Array.isArray(raw)) return raw;
+  if (typeof raw !== 'object' || raw === null) return raw;
+  for (const value of Object.values(raw as Record<string, unknown>)) {
+    if (Array.isArray(value)) return value;
+  }
+  return raw;
 }
 
 /** el modelo a veces envuelve el JSON en una cerca Markdown aunque se le pida que no */

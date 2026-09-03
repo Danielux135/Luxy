@@ -134,6 +134,48 @@ describe('lo que se rechaza en bloque', () => {
     expect(parsed.status).toBe('invalid');
   });
 
+  it('un titulo largo se RECORTA, no tira el catalogo entero', () => {
+    // la primera version rechazaba por pasarse de 90 caracteres, y dejaba la
+    // conversacion sin catalogar por algo cosmetico. Asi fallaron dos de verdad
+    const largo = 'x'.repeat(300);
+    const parsed = parseCatalogResponse(
+      bloque(`[{"from":0,"to":9,"title":"${largo}","tags":[],"summary":""}]`),
+      rango,
+    );
+    expect(parsed.status).toBe('structured');
+    expect(parsed.scenes[0]!.title.length).toBeLessThanOrEqual(90);
+  });
+
+  it('las etiquetas raras se limpian en vez de tirarlo todo', () => {
+    const parsed = parseCatalogResponse(
+      bloque(
+        `[{"from":0,"to":9,"title":"t","tags":["a","${'y'.repeat(200)}",7,null,"primer encuentro"],"summary":""}]`,
+      ),
+      rango,
+    );
+    expect(parsed.status).toBe('structured');
+    // se cae la de una letra, se cae lo que no es texto, y la larga se recorta
+    expect(parsed.scenes[0]!.tags).toContain('primer encuentro');
+    expect(parsed.scenes[0]!.tags.every((tag) => tag.length <= 40)).toBe(true);
+  });
+
+  it('acepta la lista envuelta en un objeto', () => {
+    // devolver {"escenas": [...]} en vez de la lista pelada es comun, y tirar
+    // un catalogo correcto por como viene envuelto no tiene sentido
+    const parsed = parseCatalogResponse(bloque(`{"escenas":[${escena(0, 9)}]}`), rango);
+    expect(parsed.status).toBe('structured');
+  });
+
+  it('cuando se rechaza, dice QUE campo falla', () => {
+    // «no tienen la forma esperada» no dejaba arreglar nada
+    const parsed = parseCatalogResponse(
+      bloque('[{"from":"cero","to":9,"title":"t","tags":[],"summary":""}]'),
+      rango,
+    );
+    expect(parsed.status).toBe('invalid');
+    expect(parsed.reason).toContain('from');
+  });
+
   it('un titulo vacio', () => {
     const parsed = parseCatalogResponse(
       bloque('[{"from":0,"to":9,"title":"","tags":[],"summary":""}]'),

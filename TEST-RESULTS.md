@@ -1,5 +1,29 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-03 — dos conversaciones sin catalogar por una validacion desproporcionada
+
+Daniel: «¿por que las ultimas conversaciones no las ordena con Claude?». No las
+ordenaba nadie: fallaban, con el motivo «las escenas no tienen la forma
+esperada», que es mio y no dice nada.
+
+Dos problemas, y el segundo explica el primero:
+
+- **el motivo no permitia arreglar nada.** Ahora dice que campo falla. Sin eso
+  solo quedaba adivinar;
+- **la validacion rechazaba el catalogo entero por cosas cosmeticas**: un titulo
+  de mas de 90 caracteres, una etiqueta de mas de 32, once etiquetas en vez de
+  diez. Desproporcionado: eso se recorta y no pasa nada, mientras que rechazar
+  deja la conversacion sin catalogar.
+
+La regla ahora: **se exige lo estructural y se recorta lo cosmetico.** `from` y
+`to` siguen siendo estrictos —un rango mal puesto produce episodios que no
+corresponden a su titulo, que es el daño de verdad—; titulo, etiquetas y resumen
+se limpian. Tambien se acepta la lista envuelta en un objeto, que es una forma
+comun de devolverla.
+
+- 4 pruebas nuevas. **`npm run check`: exit 0. 129 archivos, 2.257 superadas.**
+- Las dos conversaciones se reintentaran al reiniciar Studio.
+
 ### 2026-09-03 — elegir un personaje trae tambien su forma de comportarse
 
 Pedido por Daniel: «elegir el personaje no rellena el Cómo debe comportarse,
