@@ -199,6 +199,8 @@ function ConversationPanel({
         }}
       />
 
+      <MemoryPanel vault={vault} />
+
       <CompatibilityPanel vault={vault} models={models} project={project} />
 
       {vault.error !== null && <Notice tone="fault">{vault.error}</Notice>}
@@ -2056,6 +2058,94 @@ function CompatibilityPanel({
           ))}
         </div>
       )}
+    </details>
+  );
+}
+
+
+/**
+ * lo que el personaje puede recordar.
+ *
+ * Existe para DIAGNOSTICAR, no para crear recuerdos: esos se hacen solos. Si un
+ * dia no se acuerda de algo, aqui se ve si el momento existe, con que titulo
+ * quedo y que hay dentro exactamente.
+ */
+function MemoryPanel({ vault }: { vault: VaultController }): JSX.Element {
+  const [open, setOpen] = useState<string | null>(null);
+  const [turns, setTurns] = useState<{ role: 'user' | 'assistant'; text: string }[]>([]);
+
+  const episodes = vault.memoryEpisodes;
+
+  return (
+    <details
+      className="vault-generate"
+      onToggle={(event) => {
+        // se cargan al abrir el panel y no antes: construir el indice tiene un
+        // coste y nadie lo pidio todavia
+        if (event.currentTarget.open && episodes === null) void vault.loadMemory();
+      }}
+    >
+      <summary>Lo que recuerda ({episodes?.length ?? '…'})</summary>
+
+      <p className="field__hint">
+        Momentos que puede recordar en cualquier conversación, del más reciente al
+        más antiguo. Se hacen solos a partir de lo que ya habéis hablado. Excluir
+        una conversación no la borra: sigue abriéndose igual, pero deja de volver
+        desde otro sitio.
+      </p>
+
+      {episodes !== null && episodes.length === 0 && (
+        <Empty title="Todavía no hay nada que recordar">
+          Habla un poco más y aquí irán apareciendo los momentos.
+        </Empty>
+      )}
+
+      {episodes?.map((episode) => {
+        const excluded = vault.memoryExcluded.includes(episode.conversationId);
+        return (
+          <div key={episode.id} className="vault-media__item">
+            <p className="field__hint">
+              <Tag tone={excluded ? 'idle' : 'ok'}>{episode.date}</Tag> {episode.title}{' '}
+              <span className="vault-list__meta">{episode.turns} turnos</span>
+            </p>
+            <div className="row">
+              <button
+                className="btn btn--quiet"
+                onClick={() => {
+                  if (open === episode.id) {
+                    setOpen(null);
+                    return;
+                  }
+                  void vault.readMemoryEpisode(episode).then((read) => {
+                    setTurns(read);
+                    setOpen(episode.id);
+                  });
+                }}
+              >
+                {open === episode.id ? 'Cerrar' : 'Ver'}
+              </button>
+              <button
+                className="btn btn--quiet"
+                onClick={() => void vault.excludeFromMemory(episode.conversationId, !excluded)}
+              >
+                {excluded ? 'Volver a recordar' : 'Excluir esta conversación'}
+              </button>
+            </div>
+            {open === episode.id && (
+              <div className="vault-thread">
+                {turns.map((turn, index) => (
+                  <div key={index} className={`vault-turn vault-turn--${turn.role}`}>
+                    <span className="vault-turn__who">
+                      {turn.role === 'user' ? 'Tú' : 'Ella'}
+                    </span>
+                    <p className="vault-turn__text">{turn.text}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
     </details>
   );
 }

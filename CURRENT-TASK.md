@@ -180,6 +180,23 @@ Ver los episodios de un personaje, abrirlos y **excluir** uno o una conversacion
 entera. No sirve para crearlos —eso es automatico— sino para diagnosticar: si no
 se acuerda de algo, hay que poder ver por que.
 
+**Hecha el 2026-09-03.** Panel «Lo que recuerda» en Privado: lista de episodios
+con fecha, titulo y numero de turnos, con «Ver» para abrir el contenido real y
+«Excluir esta conversacion» para sacarla del banco.
+
+Excluir NO borra: los turnos siguen ahi y la conversacion se abre igual. Lo que
+cambia es si el personaje puede recordarla desde otro sitio.
+
+Las exclusiones viven en `vault/memory-excluded.json`, **sin cifrar y a
+proposito**: lo unico que guarda son identificadores de conversacion, que ya
+estan a la vista como nombres de archivo en `vault/conversations/`. Cifrarlo no
+ocultaria nada nuevo y obligaria a tener la boveda abierta para saber que
+excluir, justo cuando se construye el indice. Ni un titulo, ni un texto, ni una
+fecha entran ahi.
+
+El panel carga al abrirse y no antes: construir el indice cuesta y nadie lo
+habia pedido.
+
 ### F10.6 — catalogador opcional
 
 Solo si F10.3 demuestra que el lexico no basta. Añade titulo legible y busqueda

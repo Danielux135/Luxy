@@ -56,6 +56,8 @@ import {
   vaultConversationIdArgsSchema,
   vaultConversationSendArgsSchema,
   vaultCompatibilityArgsSchema,
+  vaultMemoryExcludeArgsSchema,
+  vaultMemoryReadArgsSchema,
   vaultMediaAttachArgsSchema,
   vaultMediaListArgsSchema,
   vaultMediaReadArgsSchema,
@@ -109,6 +111,7 @@ import {
 } from '../../shared/vault-image-capability.js';
 import { classifyReply } from '../../shared/refusal.js';
 import type { PrivateMemory } from '../vault/private-memory.js';
+import type { MemoryPreferences } from '../vault/memory-preferences.js';
 import { buildRecall } from '../vault/recall.js';
 
 /**
@@ -172,6 +175,8 @@ export interface HandlerContext {
    * boveda; aqui solo se usa y se invalida cuando el historial cambia.
    */
   privateMemory: PrivateMemory;
+  /** que conversaciones quedan fuera del banco de recuerdos */
+  memoryPreferences: MemoryPreferences;
   /** imagenes y videos privados, cifrados en disco */
   privateMedia: PrivateMediaStore;
   /** raiz de los artefactos generados; se abre, nunca se sirve por HTTP */
@@ -980,6 +985,71 @@ export function registerIpcHandlers(context: HandlerContext): void {
       repeticiones: args.repetitions,
     });
     return { results };
+  });
+
+  /**
+   * los recuerdos del personaje, para poder mirarlos.
+   *
+   * Sirve para diagnosticar: cuando no se acuerde de algo, aqui se ve si el
+   * episodio existe y con que titulo quedo. No sirve para crearlos.
+   */
+  handle(IPC_INVOKE.vaultMemoryList, emptyArgsSchema, async () => {
+    if (!context.vault.isUnlocked()) throw new VaultError('la boveda esta bloqueada');
+
+    const episodes = await context.privateMemory.listEpisodes(context.vault);
+    return {
+      episodes: episodes.map((episode, position) => ({
+        id: `r${position + 1}`,
+        conversationId: episode.conversationId,
+        from: episode.from,
+        to: episode.to,
+        date: episode.startedAt.slice(0, 10),
+        title: episode.title,
+        turns: episode.turns,
+      })),
+      excluded: [...context.memoryPreferences.excluded()],
+    };
+  });
+
+  /** los turnos de un episodio, para ver que hay dentro exactamente */
+  handle(IPC_INVOKE.vaultMemoryRead, vaultMemoryReadArgsSchema, async (args) => {
+    if (!context.vault.isUnlocked()) throw new VaultError('la boveda esta bloqueada');
+
+    const turns = await context.privateConversations.read(context.vault, args.conversationId);
+    return {
+      turns: turns
+        .filter((turn) => turn.sequence >= args.from && turn.sequence <= args.to)
+        .map((turn) => ({ role: turn.role, text: turn.text })),
+    };
+  });
+
+  /**
+   * saca una conversacion del banco de recuerdos, o la devuelve.
+   *
+   * No la borra: los turnos siguen ahi y la conversacion se abre igual. Lo que
+   * cambia es si el personaje puede recordarla desde otro sitio.
+   */
+  handle(IPC_INVOKE.vaultMemoryExclude, vaultMemoryExcludeArgsSchema, async (args) => {
+    if (!context.vault.isUnlocked()) throw new VaultError('la boveda esta bloqueada');
+
+    const excluded = context.memoryPreferences.set(args.conversationId, args.excluded);
+    // el indice se construyo con la lista anterior
+    context.privateMemory.invalidate();
+
+    const episodes = await context.privateMemory.listEpisodes(context.vault);
+    context.log('banco de recuerdos actualizado', { excluidas: excluded.length });
+    return {
+      episodes: episodes.map((episode, position) => ({
+        id: `r${position + 1}`,
+        conversationId: episode.conversationId,
+        from: episode.from,
+        to: episode.to,
+        date: episode.startedAt.slice(0, 10),
+        title: episode.title,
+        turns: episode.turns,
+      })),
+      excluded,
+    };
   });
 
   handle(IPC_INVOKE.vaultMediaList, vaultMediaListArgsSchema, async (args) => {

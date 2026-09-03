@@ -19,6 +19,7 @@ import {
   vaultCharacterImportArgsSchema,
   vaultCompatibilityArgsSchema,
   vaultMediaAttachArgsSchema,
+  vaultMemoryReadArgsSchema,
   worktreeOpenFolderArgsSchema,
   studioJobActionArgsSchema,
   studioJobsListArgsSchema,
@@ -144,6 +145,30 @@ describe('validacion de argumentos', () => {
     expect(vaultCompatibilityArgsSchema.safeParse({ ...base, repetitions: 50 }).success).toBe(
       false,
     );
+  });
+
+  it('leer un recuerdo exige un rango, no una conversacion entera', () => {
+    // sin rango, este canal seria una forma de volcar una conversacion completa
+    // por un camino distinto al que ya existe y con otras comprobaciones
+    expect(
+      vaultMemoryReadArgsSchema.safeParse({
+        conversationId: '4d609d37-8f3e-4558-ae82-538eb6385dda',
+        from: 0,
+        to: 12,
+      }).success,
+    ).toBe(true);
+    expect(
+      vaultMemoryReadArgsSchema.safeParse({
+        conversationId: '4d609d37-8f3e-4558-ae82-538eb6385dda',
+      }).success,
+    ).toBe(false);
+    expect(
+      vaultMemoryReadArgsSchema.safeParse({
+        conversationId: '../otra',
+        from: 0,
+        to: 1,
+      }).success,
+    ).toBe(false);
   });
 
   it('acota la longitud de los textos que llegan del renderer', () => {

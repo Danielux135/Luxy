@@ -1,5 +1,18 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-03 — F10.5, pantalla de recuerdos
+
+- **`npm run check`: exit 0. 128 archivos, 2.220 superadas, 9 omitidas** (antes
+  2.211).
+- 8 pruebas de `MemoryPreferences`, incluidas las dos que importan: que el
+  archivo guarda identificadores y NADA mas —que es lo que permite no cifrarlo—
+  y que un archivo ilegible no impide usar la aplicacion. Fallar ahi dejaria
+  Privado inservible por una preferencia.
+- 1 prueba del canal de lectura: exige un rango. Sin el, seria una forma de
+  volcar una conversacion entera por un camino distinto al que ya existe.
+- **Sin cobertura automatica:** el panel. Es interfaz.
+- **Sin verificar en pantalla.**
+
 ### 2026-09-03 — F10.3 y F10.4, los recuerdos entran en el prompt
 
 - **`npm run check`: exit 0. 127 archivos, 2.211 superadas, 9 omitidas** (antes

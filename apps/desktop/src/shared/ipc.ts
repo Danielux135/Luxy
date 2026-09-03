@@ -439,6 +439,43 @@ export const vaultCompatibilityResultSchema = z.object({
   ),
 });
 
+/**
+ * los recuerdos que tiene el personaje.
+ *
+ * Existe para diagnosticar: si no se acuerda de algo, hay que poder ver por
+ * que. No sirve para crearlos —eso es automatico— sino para mirar y excluir.
+ */
+export const vaultMemoryEpisodeSchema = z.object({
+  id: z.string(),
+  conversationId: z.string(),
+  from: z.number().int().min(0),
+  to: z.number().int().min(0),
+  date: z.string(),
+  title: z.string(),
+  turns: z.number().int().min(0),
+});
+
+export const vaultMemoryListResultSchema = z.object({
+  episodes: z.array(vaultMemoryEpisodeSchema),
+  /** conversaciones que hoy quedan fuera del banco */
+  excluded: z.array(z.string()),
+});
+
+export const vaultMemoryReadArgsSchema = z.object({
+  conversationId: conversationIdSchema,
+  from: z.number().int().min(0),
+  to: z.number().int().min(0),
+});
+
+export const vaultMemoryReadResultSchema = z.object({
+  turns: z.array(z.object({ role: z.enum(['user', 'assistant']), text: z.string() })),
+});
+
+export const vaultMemoryExcludeArgsSchema = z.object({
+  conversationId: conversationIdSchema,
+  excluded: z.boolean(),
+});
+
 export const vaultMediaAttachArgsSchema = z.object({
   conversationId: conversationIdSchema,
   /**
@@ -941,6 +978,13 @@ export interface LuxyBridge {
   checkVaultCompatibility(
     args: z.infer<typeof vaultCompatibilityArgsSchema>,
   ): Promise<IpcResult<z.infer<typeof vaultCompatibilityResultSchema>>>;
+  listVaultMemory(): Promise<IpcResult<z.infer<typeof vaultMemoryListResultSchema>>>;
+  readVaultMemory(
+    args: z.infer<typeof vaultMemoryReadArgsSchema>,
+  ): Promise<IpcResult<z.infer<typeof vaultMemoryReadResultSchema>>>;
+  excludeFromVaultMemory(
+    args: z.infer<typeof vaultMemoryExcludeArgsSchema>,
+  ): Promise<IpcResult<z.infer<typeof vaultMemoryListResultSchema>>>;
   listVaultMedia(
     conversationId: string,
   ): Promise<IpcResult<z.infer<typeof vaultMediaListResultSchema>>>;

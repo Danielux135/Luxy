@@ -11,10 +11,14 @@
 // a ningun sitio.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ConversationMemoryStatus } from '@luxy/shared';
-import type { vaultCompatibilityResultSchema } from '../shared/ipc.js';
+import type {
+  vaultCompatibilityResultSchema,
+  vaultMemoryListResultSchema,
+} from '../shared/ipc.js';
 import type { z } from 'zod';
 
 type CompatibilityResult = z.infer<typeof vaultCompatibilityResultSchema>['results'][number];
+type MemoryEpisode = z.infer<typeof vaultMemoryListResultSchema>['episodes'][number];
 
 /**
  * la cuenta, tal y como la ve la interfaz.
@@ -176,6 +180,15 @@ export interface VaultController {
    */
   lastMemoryStatus: ConversationMemoryStatus | null;
   /** resultado de la ultima comprobacion de compatibilidad; null si no se hizo */
+  /** episodios que el personaje puede recordar; null hasta que se piden */
+  memoryEpisodes: MemoryEpisode[] | null;
+  /** conversaciones que hoy quedan fuera del banco */
+  memoryExcluded: string[];
+  loadMemory: () => Promise<void>;
+  readMemoryEpisode: (
+    episode: MemoryEpisode,
+  ) => Promise<{ role: 'user' | 'assistant'; text: string }[]>;
+  excludeFromMemory: (conversationId: string, excluded: boolean) => Promise<void>;
   compatibility: CompatibilityResult[] | null;
   checkingCompatibility: boolean;
   /**
@@ -282,6 +295,8 @@ export function useVault(): VaultController {
   const [characters, setCharacters] = useState<VaultCharacterView[]>([]);
   const [lastImage, setLastImage] = useState<VaultController['lastImage']>(null);
   const [lastMemoryStatus, setLastMemoryStatus] = useState<ConversationMemoryStatus | null>(null);
+  const [memoryEpisodes, setMemoryEpisodes] = useState<MemoryEpisode[] | null>(null);
+  const [memoryExcluded, setMemoryExcluded] = useState<string[]>([]);
   const [compatibility, setCompatibility] = useState<CompatibilityResult[] | null>(null);
   const [checkingCompatibility, setCheckingCompatibility] = useState(false);
   const [sending, setSending] = useState(false);
@@ -497,6 +512,47 @@ export function useVault(): VaultController {
       return true;
     },
     [run],
+  );
+
+  const loadMemory = useCallback(async (): Promise<void> => {
+    const result = await window.luxy.listVaultMemory();
+    if (!mounted.current) return;
+    if (!result.ok) {
+      setError(result.error);
+      return;
+    }
+    setMemoryEpisodes(result.value.episodes);
+    setMemoryExcluded(result.value.excluded);
+  }, []);
+
+  const readMemoryEpisode = useCallback(
+    async (episode: MemoryEpisode): Promise<{ role: 'user' | 'assistant'; text: string }[]> => {
+      const result = await window.luxy.readVaultMemory({
+        conversationId: episode.conversationId,
+        from: episode.from,
+        to: episode.to,
+      });
+      if (!result.ok) {
+        setError(result.error);
+        return [];
+      }
+      return result.value.turns;
+    },
+    [],
+  );
+
+  const excludeFromMemory = useCallback(
+    async (conversationId: string, excluded: boolean): Promise<void> => {
+      const result = await window.luxy.excludeFromVaultMemory({ conversationId, excluded });
+      if (!mounted.current) return;
+      if (!result.ok) {
+        setError(result.error);
+        return;
+      }
+      setMemoryEpisodes(result.value.episodes);
+      setMemoryExcluded(result.value.excluded);
+    },
+    [],
   );
 
   const checkCompatibility = useCallback(
@@ -850,6 +906,11 @@ export function useVault(): VaultController {
     composer,
     setComposer,
     lastMemoryStatus,
+    memoryEpisodes,
+    memoryExcluded,
+    loadMemory,
+    readMemoryEpisode,
+    excludeFromMemory,
     compatibility,
     checkingCompatibility,
     checkCompatibility,
