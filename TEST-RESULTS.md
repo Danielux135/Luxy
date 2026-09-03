@@ -1,5 +1,28 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-03 — F10 verificado: rememora en una conversacion NUEVA
+
+La comprobacion que justificaba el bloque entero, hecha por Daniel en un hilo
+recien creado —sin historial y sin memoria acumulativa—, asi que lo unico que el
+personaje podia saber venia del banco de recuerdos.
+
+Ante un «Hola, ¿te acuerdas de mí?», tres detalles rastreables:
+
+- «me prometiste quedarte» → viene del TITULO «Después: abrazo, sueño y promesa
+  de quedarse», que escribio el catalogador y no aparece en la conversacion;
+- «galletas de vainilla» → no esta en ningun titulo: sale del turno real del
+  primer dia, asi que llego la transcripcion y no solo el indice;
+- «un poco menos nerviosa» → «Se desnuda: blusa, sujetador y nervios».
+
+Las dos mitades a la vez: encuentra por lo que escribio el catalogador y cita por
+lo que se dijo. Es exactamente lo que se pidio el 2026-09-02.
+
+**PENDIENTE DE VERIFICAR, y es importante:** en la misma respuesta aparece «el
+olor a café por las mañanas». En las conversaciones que se han revisado no hay
+ningun café. Si no esta en ninguna de las otras, es detalle inventado presentado
+como recuerdo —la misma averia que la oreja doblada de la gata— y la regla del
+bloque de recuerdos hay que apretarla como se hizo con las imagenes.
+
 ### 2026-09-03 — el catalogado no repetia: iba a cuentagotas y sin decirlo
 
 Daniel: «esta volviendo a ordenar las memorias, cuando eso ya estaba hecho», sin
