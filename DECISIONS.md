@@ -1243,6 +1243,45 @@ Un episodio de 6 turnos citados en crudo son **~1.500 tokens**. Dos episodios,
 ~3.000: **el prompt crece un 75%** en cada mensaje de la conversacion, para
 siempre, se este rememorando o no. Eso descarta «meter siempre los recuerdos».
 
+### CORRECCION (2026-09-03): la pasarela cobra POR LLAMADA, no por token
+
+Los registros de uso reales de Daniel lo dejan sin ambiguedad. Con
+`DeepSeek-V4-Pro`, llamadas de 4.843/652, 4.881/1.008, 4.519/756 y hasta
+4.871/**0** tokens cuestan **exactamente lo mismo**: 6,935 ¥. La columna Details
+lo dice: `Per-call`.
+
+Eso invalida el razonamiento de coste de arriba, que optimizaba la variable
+equivocada. Lo que cambia:
+
+- **el tamaño del prompt no cuesta dinero.** El «+75% de prompt» no es un
+  argumento economico;
+- **el numero de llamadas SI es todo el coste.** Cualquier diseño que añada una
+  llamada por turno DUPLICA la factura. Eso entierra definitivamente la variante
+  de «enseñarle el indice y que pida el detalle con un bloque»: no era el doble
+  de elegante, era el doble de cara;
+- **una llamada fallida cuesta igual.** Entre esos registros hay varias con 0
+  tokens de salida y 1 s de duracion, cobradas al precio completo. Refuerza la
+  invariante de no reintentar un corte que ya produjo texto: el reintento se
+  paga entero;
+- de paso, **confirma la medicion del prompt**: 4.468-4.881 tokens de entrada
+  observados frente a los ~4.000 estimados a partir del relleno de la boveda.
+
+Los dos niveles de recuperacion **se conservan**, pero por otros motivos, que
+son los que quedan en pie cuando el precio deja de mandar:
+
+1. **contexto**: un episodio en crudo son ~1.500 tokens y el prompt ya va por
+   4.800. Se puede crecer, no sin limite;
+2. **dilucion**: cuanto mas texto irrelevante acompaña al turno, peor sigue el
+   modelo las directivas de personaje. Es el mismo motivo por el que la memoria
+   acumulativa existe en vez de reenviar la conversacion entera;
+3. **no** por latencia: en estos registros el tiempo va de 1 s a 2 min con el
+   mismo tamaño de entrada, asi que lo manda la carga del servidor y no el
+   prompt. No hay evidencia para usar la latencia como argumento.
+
+Con el precio fuera, el presupuesto del nivel 1 puede ser generoso —unos miles
+de tokens en vez de 200— y el nivel 2 deja de ser excepcional. Lo que no cambia
+es la forma: **una sola llamada por turno**.
+
 ### Por eso el recuerdo entra en dos niveles
 
 - **Nivel 1, siempre.** La linea de indice de los recuerdos que mas encajan:
@@ -1280,6 +1319,10 @@ barato que sea. Eso reduce la lista a los que ya aceptan este contenido, que son
 los mismos de la conversacion. El ahorro real, por tanto, es menor de lo que
 parece: catalogar es una llamada por episodio (~5.000 tokens de entrada, ~150 de
 salida), no por mensaje.
+
+Con el cobro por llamada, catalogar un episodio cuesta **lo mismo que un turno
+de conversacion**. Si un episodio son veinte turnos, es un recargo del 5%:
+asumible, pero se paga por algo que la busqueda lexica da gratis.
 
 Decision: **empezar sin catalogador.** Se añade despues, y solo para dos cosas
 concretas que la busqueda lexica no da: un titulo legible en la pantalla de

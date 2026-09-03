@@ -47,17 +47,21 @@ Un episodio es un tramo contiguo de turnos de una conversacion.
 
 ### F10.3 — recuperacion en dos niveles
 
-El limite es el prompt, no el disco. Medido: el prompt actual son ~4.000 tokens
-y un episodio de 6 turnos en crudo son ~1.500.
+El limite es el contexto y la dilucion, **no el dinero**: la pasarela cobra por
+llamada, no por token (ver la correccion de `D-058` con los registros reales).
+Medido: el prompt actual son ~4.800 tokens de entrada confirmados y un episodio
+de 6 turnos en crudo ~1.500.
 
-- **Nivel 1 (siempre):** hasta cinco lineas de indice —fecha, titulo derivado,
-  una frase—, ~200 tokens en total. Con esto sabe que ocurrio.
-- **Nivel 2 (solo con peticion clara y coincidencia fuerte):** los turnos en
-  crudo de UN episodio, con tope de turnos y de caracteres.
-- La seleccion se hace ANTES de la llamada, con el mensaje del usuario. Nada de
-  una segunda llamada por turno.
+- **Nivel 1 (siempre):** lineas de indice —fecha, titulo derivado, una frase—.
+  Con el precio fuera de la ecuacion el tope puede ser generoso; lo que lo
+  limita es no diluir las directivas de personaje.
+- **Nivel 2 (con peticion de memoria y coincidencia fuerte):** los turnos en
+  crudo del episodio, con tope de turnos y de caracteres.
+- La seleccion se hace ANTES de la llamada, con el mensaje del usuario.
+  **Invariante: una sola llamada por turno.** Con cobro por llamada, una segunda
+  duplicaria la factura.
 - Pruebas: que sin señal de memoria no se activa el nivel 2; que el nivel 2
-  respeta su tope; que el coste del nivel 1 se mantiene acotado.
+  respeta su tope; que el numero de llamadas por turno sigue siendo uno.
 
 ### F10.4 — entrada en el prompt
 
@@ -80,9 +84,10 @@ Solo si F10.3 demuestra que el lexico no basta. Añade titulo legible y busqueda
 por parafrasis. Va en un hueco de «modelo auxiliar» en Conexiones, el mismo que
 pide el describidor de imagenes.
 
-**Restriccion que el precio no captura:** el catalogador leeria contenido
-explicito, asi que un modelo barato que se niegue no vale. Pendiente de la tabla
-de precios, que exige iniciar sesion y no se ha podido leer.
+**Dos restricciones que el precio por token no captura:** el catalogador leeria
+contenido explicito, asi que un modelo barato que se niegue no vale; y con cobro
+por llamada, catalogar un episodio cuesta lo mismo que un turno de conversacion,
+asi que «mas barato» apenas existe como palanca. Lo que abarata es no llamar.
 
 ### Orden y criterio de parada
 
