@@ -1073,6 +1073,16 @@ export function registerIpcHandlers(context: HandlerContext): void {
    * conversacion se queda con la segmentacion por silencios (`D-060`), que sera
    * tosca pero no miente.
    */
+  /**
+   * conversaciones cuyo catalogo fallo en esta ejecucion.
+   *
+   * Sin esto, una que falle siempre —porque el modelo devuelve algo que no
+   * cuadra— vuelve a intentarse en CADA apertura del panel, gastando una
+   * llamada cada vez y pareciendo que el programa recataloga lo ya hecho. Se
+   * olvida al reiniciar, que es cuando tiene sentido volver a probar.
+   */
+  const catalogFailures = new Set<string>();
+
   handle(IPC_INVOKE.vaultCatalogSync, vaultCatalogSyncArgsSchema, async (args) => {
     if (!context.vault.isUnlocked()) throw new VaultError('la boveda esta bloqueada');
 
@@ -1083,8 +1093,10 @@ export function registerIpcHandlers(context: HandlerContext): void {
     const pending = conversations.filter((conversation) => {
       if (excluded.has(conversation.conversationId)) return false;
       if (args.conversationId !== undefined) {
+        // pedirla expresamente reintenta aunque haya fallado antes
         return conversation.conversationId === args.conversationId;
       }
+      if (catalogFailures.has(conversation.conversationId)) return false;
       const own = existing.filter((scene) => scene.conversationId === conversation.conversationId);
       if (own.length === 0) return true;
       // un catalogo se queda corto en cuanto la conversacion crece: hay escenas
@@ -1128,6 +1140,7 @@ export function registerIpcHandlers(context: HandlerContext): void {
 
         const parsed = parseCatalogResponse(run.text, range);
         if (parsed.status !== 'structured') {
+          catalogFailures.add(conversation.conversationId);
           failed.push({
             conversationId: conversation.conversationId,
             reason: parsed.reason ?? parsed.status,
@@ -1149,6 +1162,7 @@ export function registerIpcHandlers(context: HandlerContext): void {
         cataloged += 1;
         scenes += parsed.scenes.length;
       } catch (error) {
+        catalogFailures.add(conversation.conversationId);
         failed.push({
           conversationId: conversation.conversationId,
           reason: redact(error instanceof Error ? error.message : String(error)),
@@ -1158,8 +1172,18 @@ export function registerIpcHandlers(context: HandlerContext): void {
 
     if (cataloged > 0) context.privateMemory.invalidate();
     // ni un titulo, ni una etiqueta, ni de que conversacion: solo cuantas
-    context.log('escenas catalogadas', { conversaciones: cataloged, escenas: scenes });
-    return { cataloged, scenes, failed };
+    context.log('escenas catalogadas', {
+      conversaciones: cataloged,
+      escenas: scenes,
+      fallidas: failed.length,
+    });
+    return {
+      cataloged,
+      scenes,
+      failed,
+      // las que quedaban menos las que se han hecho o descartado en esta tanda
+      pending: Math.max(0, pending.length - Math.min(pending.length, args.limit)),
+    };
   });
 
   handle(IPC_INVOKE.vaultMediaList, vaultMediaListArgsSchema, async (args) => {

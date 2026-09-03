@@ -2122,6 +2122,26 @@ function MemoryPanel({
         otro para esta tarea, cámbialo antes de abrir esto. Lo excluido no se envía.
       </Notice>
 
+      {vault.lastCatalog !== null && (
+        <p className="field__hint">
+          {vault.lastCatalog.cataloged > 0
+            ? `Se han ordenado ${vault.lastCatalog.cataloged} conversación(es) en ${vault.lastCatalog.scenes} momentos.`
+            : 'No había nada nuevo que ordenar.'}
+          {vault.lastCatalog.pending > 0 &&
+            ` Quedan ${vault.lastCatalog.pending} por ordenar: vuelve a abrir esto para seguir.`}
+        </p>
+      )}
+
+      {vault.lastCatalog !== null && vault.lastCatalog.failed.length > 0 && (
+        <Notice tone="warn">
+          {vault.lastCatalog.failed.length} conversación(es) no se pudieron ordenar
+          y se quedan partidas por silencios:{' '}
+          {vault.lastCatalog.failed.map((each) => each.reason).join('; ')}. No se
+          reintentan solas hasta que reinicies, para no gastar una llamada en cada
+          apertura.
+        </Notice>
+      )}
+
       {episodes !== null && episodes.length === 0 && (
         <Empty title="Todavía no hay nada que recordar">
           Habla un poco más y aquí irán apareciendo los momentos.

@@ -513,6 +513,14 @@ export const vaultCatalogSyncResultSchema = z.object({
   scenes: z.number().int().min(0),
   /** las que se intentaron y no salieron, con el motivo */
   failed: z.array(z.object({ conversationId: z.string(), reason: z.string() })),
+  /**
+   * cuantas quedan por catalogar despues de esta tanda.
+   *
+   * Se devuelve porque sin esto la pantalla no puede distinguir «esta acabando
+   * una cola» de «esta repitiendo lo mismo cada vez», que es exactamente la
+   * confusion que produjo no enseñarlo.
+   */
+  pending: z.number().int().min(0),
 });
 
 export const vaultMediaAttachArgsSchema = z.object({
