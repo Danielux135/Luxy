@@ -19,8 +19,21 @@ Ninguno hacia falta. La memoria funcionaba; el origen estaba mal.
   personaje.
 - **`npm run check`: exit 0. 129 archivos, 2.257 superadas, 12 omitidas.**
 - Lo ya escrito no cambia: las conversaciones donde dijo llamarse Luxy siguen
-  diciendolo, y la memoria las propagara. Eso ya es historia y se arregla en las
-  instrucciones del personaje, no en el codigo.
+  diciendolo, y la memoria las propaga.
+
+**Y ahi paso algo que no estaba previsto.** Preguntada directamente —«¿Lía o
+Luxy?»— reconcilio las dos versiones sin ayuda y en personaje: «Lía es mi nombre.
+Luxy es lo que me inventé para que no me encontraras tan fácil. Un apodo de
+pantalla.»
+
+No nego el registro, que dice Luxy. No ignoro la descripcion, que dice Lía.
+Construyo algo que respeta las dos. Era la salida que se le habia propuesto a
+Daniel —convertir la contradiccion en parte de la historia— y no hizo falta
+escribir ninguna instruccion.
+
+Responde de paso a la pregunta que quedaba abierta: **que hace cuando la memoria
+y la configuracion se contradicen.** Ni elige una, ni se inventa una tercera.
+Una muestra, no una garantia, pero es el comportamiento que se buscaba.
 
 ### 2026-09-03 — dos conversaciones sin catalogar por una validacion desproporcionada
 
