@@ -59,6 +59,23 @@ de terminos en claro filtraria el contenido con solo mirarlo.
 Volumen medido: la conversacion mas larga son 116 KB; cien conversaciones no
 llegan a 12 MB. No hace falta nada mas sofisticado.
 
+**Hecha el 2026-09-03**, en `apps/desktop/src/main/vault/turn-index.ts`, con 19
+pruebas. Puntuacion TF-IDF corta: un termino que sale en pocos turnos pesa mas
+que uno que sale en todos, asi que «conocimos» decide y «quiero» no, sin ninguna
+lista de palabras importantes a mano. Normaliza tildes y **conserva la eñe**,
+porque descomponerla convertiria «año» en otra palabra. Admite limitar la
+busqueda a un conjunto de conversaciones, que es lo que necesitan el alcance por
+personaje y los hilos excluidos.
+
+**Hallazgo que cambia el plan:** el lexico NO resuelve el caso que motiva la
+funcion si la pregunta no comparte palabras con lo que se dijo. La prueba lo
+afirma en vez de disimularlo. Ver la actualizacion de `D-058`: F10.6 asciende de
+opcional a probablemente necesaria.
+
+Pendiente al integrarlo (F10.2): **`clear()` al cerrar la boveda**. El indice
+tiene texto en claro en memoria y una boveda cerrada que conserve su contenido
+accesible no esta cerrada. Hoy no hay agujero porque nadie lo construye todavia.
+
 ### F10.2 — episodios y su almacen
 
 Un episodio es un tramo contiguo de turnos de una conversacion.

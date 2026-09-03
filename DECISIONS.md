@@ -1340,7 +1340,28 @@ contenido privado a ningun sitio.
 
 Decision: **empezar sin catalogador.** Se añade despues, y solo para dos cosas
 concretas que la busqueda lexica no da: un titulo legible en la pantalla de
-recuerdos, y encontrar por parafrasis lo que no comparte palabras. Cuando se
+recuerdos, y encontrar por parafrasis lo que no comparte palabras.
+
+**Actualizacion tras implementar F10.1 (2026-09-03).** La segunda de esas dos
+cosas resulta ser necesaria, no un adorno. Escrita la prueba del caso que motiva
+la funcion, falla: «¿te acuerdas de cuando nos presentamos y me dijiste de donde
+venias?» no comparte NI UNA palabra con los turnos de aquel dia —«presentamos»
+no aparece y «venias» no es la cadena «vengo»—, asi que el indice no devuelve
+nada. Compartiendo cualquier palabra concreta («vainilla») acierta a la primera.
+
+La prueba se conserva afirmando el limite en vez de suavizarse, para que se note
+el dia que alguien lo cruce. Consecuencias:
+
+- **el lexico solo no cubre el caso estrella.** Sirve para recordar cosas
+  nombrandolas, no para preguntar en abstracto por un recuerdo;
+- **F10.6 pasa de opcional a probablemente necesaria**, y con el coste ya
+  descartado como criterio no hay razon para retrasarla. Un puñado de etiquetas
+  por episodio —«primer encuentro», «presentaciones»— resuelve exactamente esta
+  consulta;
+- lo que NO cambia es de quien se fia el sistema: las etiquetas solo dirigen la
+  busqueda. Lo que se rememora sigue siendo el turno real, asi que un titulo
+  equivocado hace que un recuerdo no se encuentre, nunca que se recuerde algo
+  que no paso. Cuando se
 añada, va en un hueco de «modelo auxiliar» en Conexiones, que es el mismo que
 necesitaria el describidor de imagenes.
 

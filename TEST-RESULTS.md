@@ -1,5 +1,21 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-03 — F10.1, indice de busqueda sobre turnos
+
+- **`npm run check`: exit 0. 123 archivos, 2.153 superadas, 9 omitidas** (antes
+  2.134).
+- 19 pruebas nuevas, todas sin boveda y sin disco: el modulo es puro y recibe
+  turnos ya descifrados.
+- Cubren lo que se rompe en español —tildes, la eñe que no debe convertirse en
+  «n», los asteriscos de la accion como separadores—, la puntuacion TF-IDF, el
+  filtrado por conversacion, el desempate por antigüedad y que `clear()` no deja
+  ni un termino.
+- **Una prueba afirma un LIMITE, no un exito**: una parafrasis sin palabras
+  comunes no encuentra nada. Se escribio esperando que pasara, fallo, y se
+  conserva diciendo la verdad. Es lo que asciende F10.6 a necesaria (`D-058`).
+- Sin integrar: nadie construye el indice todavia, asi que no hay riesgo de
+  dejar texto en claro en memoria tras cerrar la boveda. Esa conexion es F10.2.
+
 ### 2026-09-03 — F10.0, modelo elegible y memoria observable
 
 - **`npm run check`: exit 0. 122 archivos, 2.134 superadas, 9 omitidas** (antes
