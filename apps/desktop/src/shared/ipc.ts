@@ -461,6 +461,13 @@ export const vaultMemoryEpisodeSchema = z.object({
   date: z.string(),
   title: z.string(),
   turns: z.number().int().min(0),
+  /**
+   * con que modelo se catalogo, o `null` si la escena se dedujo por silencios.
+   *
+   * Se enseña porque catalogar manda la conversacion ENTERA a ese proveedor, y
+   * eso es una decision del usuario que no debe tomarse sin que la vea.
+   */
+  catalogedBy: z.string().nullable(),
 });
 
 export const vaultMemoryListResultSchema = z.object({

@@ -41,6 +41,8 @@ export interface Episode {
    * justo lo que añadiria F10.6.
    */
   title: string;
+  /** modelo que la catalogo; `null` si se dedujo por silencios */
+  catalogedBy?: string | null;
 }
 
 export interface SegmentOptions {

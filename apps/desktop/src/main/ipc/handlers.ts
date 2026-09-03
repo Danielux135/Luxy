@@ -1014,6 +1014,7 @@ export function registerIpcHandlers(context: HandlerContext): void {
         date: episode.startedAt.slice(0, 10),
         title: episode.title,
         turns: episode.turns,
+        catalogedBy: episode.catalogedBy ?? null,
       })),
       excluded: [...context.memoryPreferences.excluded()],
     };
@@ -1055,6 +1056,7 @@ export function registerIpcHandlers(context: HandlerContext): void {
         date: episode.startedAt.slice(0, 10),
         title: episode.title,
         turns: episode.turns,
+        catalogedBy: episode.catalogedBy ?? null,
       })),
       excluded,
     };

@@ -2115,6 +2115,13 @@ function MemoryPanel({
         desde otro sitio.
       </p>
 
+      <Notice tone="idle">
+        Para partirlos y titularlos se manda el texto completo de cada conversación
+        sin catalogar al proveedor elegido arriba: ahora mismo{' '}
+        <Tag tone="idle">{model.length === 0 ? provider : model}</Tag>. Si prefieres
+        otro para esta tarea, cámbialo antes de abrir esto. Lo excluido no se envía.
+      </Notice>
+
       {episodes !== null && episodes.length === 0 && (
         <Empty title="Todavía no hay nada que recordar">
           Habla un poco más y aquí irán apareciendo los momentos.
@@ -2127,7 +2134,12 @@ function MemoryPanel({
           <div key={episode.id} className="vault-media__item">
             <p className="field__hint">
               <Tag tone={excluded ? 'idle' : 'ok'}>{episode.date}</Tag> {episode.title}{' '}
-              <span className="vault-list__meta">{episode.turns} turnos</span>
+              <span className="vault-list__meta">
+                {episode.turns} turnos
+                {episode.catalogedBy === null
+                  ? ' · sin catalogar, partido por silencios'
+                  : ` · catalogado con ${episode.catalogedBy}`}
+              </span>
             </p>
             <div className="row">
               <button

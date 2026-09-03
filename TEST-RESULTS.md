@@ -1,5 +1,25 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-03 — el catalogador funciona, comprobado con conversaciones reales
+
+Primera ejecucion de verdad, por Daniel, y confirma la hipotesis de `D-060`.
+
+- Encontro **la ruptura que el reloj no ve**: «Al despertar: la foto de la gata»
+  separado de «Después: abrazo, sueño y promesa de quedarse». Ese corte es
+  narrativo —alguien se duerme y despues amanece— y ninguna marca de tiempo lo
+  señalaba.
+- Los episodios van de 2 a 10 turnos: escenas, no trozos iguales. Los titulos
+  describen lo que pasa en vez de repetir el primer mensaje.
+- **Lo catalogo Claude, y por accidente**: el panel usa el proveedor del selector
+  de la conversacion y cae al primero de la lista si no hay ninguno elegido. Es
+  una decision del usuario que el programa tomaba sin enseñarla.
+- Corregido: el panel dice a que proveedor se manda el texto antes de mandarlo, y
+  cada episodio muestra con que modelo se catalogo —o que se dedujo por
+  silencios—. Daniel confirmo despues que prefiere Claude para esto.
+- **`npm run check`: exit 0. 129 archivos, 2.247 superadas, 12 omitidas.**
+- **Sin comprobar todavia:** que el personaje rememore de verdad con esto
+  delante, que es el objetivo de todo el bloque F10.
+
 ### 2026-09-03 — F10.6 completa (sin verificar contra un modelo real)
 
 - **`npm run check`: exit 0. 129 archivos, 2.247 superadas, 12 omitidas.**

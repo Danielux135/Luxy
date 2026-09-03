@@ -234,5 +234,6 @@ function fromCatalog(scene: CatalogedEpisode, turns: readonly IndexedTurn[]): Ep
     endedAt: inside[inside.length - 1]?.createdAt ?? scene.catalogedAt,
     turns: inside.length,
     title: scene.title,
+    catalogedBy: scene.model,
   };
 }
