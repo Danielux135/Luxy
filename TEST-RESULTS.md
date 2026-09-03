@@ -1,5 +1,39 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-03 — llamadas duplicadas: Daniel tenia razon, y eran DOS cosas
+
+Daniel: «no sera que Luxy llama sin querer dos veces?». Si, y ademas se habia
+diagnosticado mal antes.
+
+**Lo que si es un bug: el catalogado se llamaba dos veces.** En los registros de
+la pasarela hay pares con los MISMOS tokens de entrada, a cuatro y a veintinueve
+segundos, **las dos con respuesta**: `1751/364` y `1751/416`, `2436/788` y
+`2436/672`. Un reintento no puede ser, porque la primera funciono.
+
+Causa: `syncCatalog` ponia `catalogingMemory` a true y no lo comprobaba, y el
+handler tampoco. Dos syncs simultaneos leen la misma lista de pendientes —ninguno
+ha escrito aun el catalogo— y catalogan lo mismo. No es un doble clic, es una
+carrera. Serializado en el proceso principal, que es donde protege de verdad, y
+con una guarda por `useRef` en la pantalla: un `useState` no sirve, porque dentro
+del callback llega con el valor de la renderizacion anterior.
+
+**Lo que NO es un bug: los turnos con cero salida.** `http-provider` reintenta
+hasta 3 veces ante fallo de red o 5xx, y las entradas agrupan exacto: `3057` ×2,
+`1898` ×2, `4836` ×**3**. Funciona como se diseño.
+
+Pero el diseño **da por hecho que se paga por token** —su propio comentario dice
+«vuelve a pagar el prompt»— y esta pasarela cobra **por llamada**. Un reintento
+cuesta 6,935 ¥ enteros aunque devuelva cero tokens. Queda como decision abierta,
+no como fallo: quitar los reintentos haria que Daniel viera muchos mas turnos
+fallidos, y eso puede ser peor que el coste.
+
+**Se retira la afirmacion anterior de «97 ¥ tirados»**: parte era el bug de las
+llamadas dobles y parte es una politica de reintentos correcta para otro modelo
+de precios.
+
+- **`npm run check`: exit 0. 130 archivos, 2.270 superadas, 12 omitidas.**
+- **Sin reiniciar Studio**, a peticion de Daniel: sigue con el build de las 15:16.
+
 ### 2026-09-03 — «absent» no es un motivo: ahora se dice que contesto el modelo
 
 Daniel probo el catalogado con `sonnet` y una conversacion fallo con el motivo

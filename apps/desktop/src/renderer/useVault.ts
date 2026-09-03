@@ -323,6 +323,9 @@ export function useVault(): VaultController {
   const [memoryEpisodes, setMemoryEpisodes] = useState<MemoryEpisode[] | null>(null);
   const [memoryExcluded, setMemoryExcluded] = useState<string[]>([]);
   const [catalogingMemory, setCatalogingMemory] = useState(false);
+  // un `useState` no sirve de guarda: dentro del callback llega con el valor de
+  // la ultima renderizacion, y dos disparos seguidos lo leen los dos en `false`
+  const catalogingRef = useRef(false);
   const [lastCatalog, setLastCatalog] = useState<VaultController['lastCatalog']>(null);
   const [compatibility, setCompatibility] = useState<CompatibilityResult[] | null>(null);
   const [checkingCompatibility, setCheckingCompatibility] = useState(false);
@@ -558,6 +561,11 @@ export function useVault(): VaultController {
       model: string | null;
       projectAlias: string;
     }): Promise<{ pending: number; cataloged: number; failed: number } | null> => {
+      // guarda en la pantalla ademas de la del proceso principal: sin esto se
+      // encolan tandas que ya no hacen falta, y el `<details>` puede disparar
+      // el `onToggle` mas de una vez
+      if (catalogingRef.current) return null;
+      catalogingRef.current = true;
       setCatalogingMemory(true);
       try {
         const result = await window.luxy.syncVaultCatalog({ ...input, limit: 3 });
@@ -578,6 +586,7 @@ export function useVault(): VaultController {
           failed: result.value.failed.length,
         };
       } finally {
+        catalogingRef.current = false;
         if (mounted.current) setCatalogingMemory(false);
       }
     },

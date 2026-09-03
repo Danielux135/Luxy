@@ -1084,8 +1084,38 @@ export function registerIpcHandlers(context: HandlerContext): void {
    */
   const catalogFailures = new Set<string>();
 
+  /**
+   * catalogado en curso, si lo hay.
+   *
+   * La guarda va AQUI y no solo en la pantalla porque el fallo no era un doble
+   * clic: es una carrera. Dos syncs simultaneos leen la misma lista de
+   * pendientes —ninguno ha escrito todavia el catalogo— y catalogan las mismas
+   * conversaciones. Se vio en los registros de la pasarela: dos llamadas con
+   * los mismos tokens de entrada, a cuatro segundos, las dos con respuesta.
+   *
+   * El segundo espera al primero en vez de rechazarse: quien llamo quiere el
+   * resultado, y despues del primero la lista de pendientes ya esta bien.
+   */
+  let catalogInFlight: Promise<unknown> | null = null;
+
   handle(IPC_INVOKE.vaultCatalogSync, vaultCatalogSyncArgsSchema, async (args) => {
     if (!context.vault.isUnlocked()) throw new VaultError('la boveda esta bloqueada');
+
+    // se serializa: dos a la vez catalogaban lo mismo dos veces, y cada llamada
+    // se paga entera
+    while (catalogInFlight !== null) await catalogInFlight.catch(() => undefined);
+
+    const run = catalogOnce(args);
+    catalogInFlight = run;
+    try {
+      return await run;
+    } finally {
+      catalogInFlight = null;
+    }
+  });
+
+  /** una tanda de catalogado. La serializacion la pone quien la llama */
+  const catalogOnce = async (args: z.infer<typeof vaultCatalogSyncArgsSchema>) => {
 
     const existing = await context.catalogs.list(context.vault);
     const conversations = await context.privateConversations.list(context.vault);
@@ -1187,7 +1217,7 @@ export function registerIpcHandlers(context: HandlerContext): void {
       // las que quedaban menos las que se han hecho o descartado en esta tanda
       pending: Math.max(0, pending.length - Math.min(pending.length, args.limit)),
     };
-  });
+  };
 
   handle(IPC_INVOKE.vaultMediaList, vaultMediaListArgsSchema, async (args) => {
     const items = await context.privateMedia.list(context.vault, args.conversationId);
