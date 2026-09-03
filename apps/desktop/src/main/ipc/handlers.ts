@@ -17,6 +17,9 @@ import {
   storedAgentConfigSchema,
   secretRegistry,
   buildCatalogSnapshot,
+  buildCatalogPrompt,
+  parseCatalogResponse,
+  CATALOG_MAX_TURNS,
   isPathInside,
   VAULT_IMAGE_NEGATIVE,
 } from '@luxy/shared';
@@ -55,6 +58,7 @@ import {
   vaultAutoLockSetArgsSchema,
   vaultConversationIdArgsSchema,
   vaultConversationSendArgsSchema,
+  vaultCatalogSyncArgsSchema,
   vaultCompatibilityArgsSchema,
   vaultMemoryExcludeArgsSchema,
   vaultMemoryReadArgsSchema,
@@ -112,6 +116,7 @@ import {
 import { classifyReply } from '../../shared/refusal.js';
 import type { PrivateMemory } from '../vault/private-memory.js';
 import type { MemoryPreferences } from '../vault/memory-preferences.js';
+import type { CatalogStore } from '../vault/catalog-store.js';
 import { buildRecall } from '../vault/recall.js';
 
 /**
@@ -177,6 +182,8 @@ export interface HandlerContext {
   privateMemory: PrivateMemory;
   /** que conversaciones quedan fuera del banco de recuerdos */
   memoryPreferences: MemoryPreferences;
+  /** escenas catalogadas por un modelo, cifradas */
+  catalogs: CatalogStore;
   /** imagenes y videos privados, cifrados en disco */
   privateMedia: PrivateMediaStore;
   /** raiz de los artefactos generados; se abre, nunca se sirve por HTTP */
@@ -862,6 +869,7 @@ export function registerIpcHandlers(context: HandlerContext): void {
     await context.privateMedia.deleteConversation(args.conversationId);
     context.privateConversations.delete(args.conversationId);
     // sin esto, el personaje seguiria recordando una conversacion borrada
+    await context.catalogs.removeConversation(context.vault, args.conversationId);
     context.privateMemory.invalidate();
     return { deleted: true };
   });
@@ -1050,6 +1058,106 @@ export function registerIpcHandlers(context: HandlerContext): void {
       })),
       excluded,
     };
+  });
+
+  /**
+   * cataloga en escenas las conversaciones que lo necesiten.
+   *
+   * Automatico y no a golpe de boton: lo dispara la pantalla al abrirse. Una
+   * llamada por conversacion sin catalogar —no por turno—, en modo TECNICO: el
+   * catalogador no encarna a nadie, solo lee y parte.
+   *
+   * Si el modelo devuelve un catalogo que no cuadra, se descarta entero y esa
+   * conversacion se queda con la segmentacion por silencios (`D-060`), que sera
+   * tosca pero no miente.
+   */
+  handle(IPC_INVOKE.vaultCatalogSync, vaultCatalogSyncArgsSchema, async (args) => {
+    if (!context.vault.isUnlocked()) throw new VaultError('la boveda esta bloqueada');
+
+    const existing = await context.catalogs.list(context.vault);
+    const conversations = await context.privateConversations.list(context.vault);
+    const excluded = context.memoryPreferences.excluded();
+
+    const pending = conversations.filter((conversation) => {
+      if (excluded.has(conversation.conversationId)) return false;
+      if (args.conversationId !== undefined) {
+        return conversation.conversationId === args.conversationId;
+      }
+      const own = existing.filter((scene) => scene.conversationId === conversation.conversationId);
+      if (own.length === 0) return true;
+      // un catalogo se queda corto en cuanto la conversacion crece: hay escenas
+      // nuevas que nadie ha leido
+      return own.every((scene) => scene.turnsAtCatalog < conversation.turns);
+    });
+
+    let cataloged = 0;
+    let scenes = 0;
+    const failed: { conversationId: string; reason: string }[] = [];
+
+    for (const conversation of pending.slice(0, args.limit)) {
+      const turns = await context.privateConversations.read(
+        context.vault,
+        conversation.conversationId,
+      );
+      if (turns.length === 0) continue;
+
+      const shown = turns.slice(0, CATALOG_MAX_TURNS);
+      const range = {
+        from: shown[0]!.sequence,
+        to: shown[shown.length - 1]!.sequence,
+      };
+
+      try {
+        const run = await context.controller.runLocalTurn({
+          localTurnId: randomUUID(),
+          provider: args.provider,
+          model: args.model,
+          projectAlias: args.projectAlias,
+          prompt: buildCatalogPrompt(
+            shown.map((turn) => ({
+              sequence: turn.sequence,
+              role: turn.role,
+              text: turn.text,
+            })),
+          ),
+          // catalogar es una tarea sobre un texto: nada de encarnar a nadie
+          kind: 'technical',
+        });
+
+        const parsed = parseCatalogResponse(run.text, range);
+        if (parsed.status !== 'structured') {
+          failed.push({
+            conversationId: conversation.conversationId,
+            reason: parsed.reason ?? parsed.status,
+          });
+          continue;
+        }
+
+        await context.catalogs.replaceForConversation(
+          context.vault,
+          conversation.conversationId,
+          parsed.scenes.map((scene) => ({
+            ...scene,
+            conversationId: conversation.conversationId,
+            model: run.executedModel ?? args.model,
+            catalogedAt: new Date().toISOString(),
+            turnsAtCatalog: turns.length,
+          })),
+        );
+        cataloged += 1;
+        scenes += parsed.scenes.length;
+      } catch (error) {
+        failed.push({
+          conversationId: conversation.conversationId,
+          reason: redact(error instanceof Error ? error.message : String(error)),
+        });
+      }
+    }
+
+    if (cataloged > 0) context.privateMemory.invalidate();
+    // ni un titulo, ni una etiqueta, ni de que conversacion: solo cuantas
+    context.log('escenas catalogadas', { conversaciones: cataloged, escenas: scenes });
+    return { cataloged, scenes, failed };
   });
 
   handle(IPC_INVOKE.vaultMediaList, vaultMediaListArgsSchema, async (args) => {

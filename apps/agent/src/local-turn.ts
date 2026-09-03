@@ -26,6 +26,8 @@ export interface LocalTurnInput {
   model: string | null;
   projectAlias: string;
   prompt: string;
+  /** `technical` no encarna a nadie; ver el contrato en `host-protocol` */
+  kind?: 'conversation' | 'technical';
 }
 
 export interface LocalTurnResult {
@@ -86,8 +88,10 @@ export function buildLocalJob(input: LocalTurnInput): ClaimedJob {
     attachment: null,
     metadata: {
       studioMode: 'conversation',
-      // marca explicita para que cualquier rama futura pueda distinguirlo
-      luxyPrivateLocalTurn: true,
+      // la marca que activa el envoltorio de personaje (`D-055`). Un turno
+      // tecnico NO la lleva: catalogar es una tarea sobre un texto, y encarnar
+      // a alguien mientras se rellena un JSON estropea las dos cosas
+      ...(input.kind === 'technical' ? {} : { luxyPrivateLocalTurn: true }),
     },
   };
 }

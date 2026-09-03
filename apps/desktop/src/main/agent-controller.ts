@@ -358,6 +358,8 @@ export class AgentController {
     model: string | null;
     projectAlias: string;
     prompt: string;
+    /** `technical` no encarna a nadie: ver `host-protocol` */
+    kind?: 'conversation' | 'technical';
   }): Promise<LocalTurnResponse> {
     const child = this.child;
     if (child === null) {

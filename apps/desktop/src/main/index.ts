@@ -19,6 +19,7 @@ import {
 } from './vault/conversation-store.js';
 import { PrivateMemory } from './vault/private-memory.js';
 import { MemoryPreferences, memoryPreferencesPath } from './vault/memory-preferences.js';
+import { CatalogStore, catalogFilePath } from './vault/catalog-store.js';
 import { PrivateMediaStore, mediaIndexDirectory } from './vault/media-store.js';
 import { VaultCharacterStore, charactersFilePath } from './vault/character-store.js';
 import { LocalBlobStore, mediaDirectory } from './vault/blob-store.js';
@@ -48,6 +49,7 @@ let vaultCharacters: VaultCharacterStore | null = null;
 let privateConversations: PrivateConversationStore | null = null;
 let privateMemory: PrivateMemory | null = null;
 let memoryPreferences: MemoryPreferences | null = null;
+let catalogs: CatalogStore | null = null;
 let privateMedia: PrivateMediaStore | null = null;
 let autoLockTimer: NodeJS.Timeout | null = null;
 let captureHost: CaptureHost | null = null;
@@ -308,8 +310,11 @@ async function bootstrap(): Promise<void> {
     new LocalBlobStore(mediaDirectory(luxyConfigDir())),
   );
   memoryPreferences = new MemoryPreferences(memoryPreferencesPath(luxyConfigDir()));
+  catalogs = new CatalogStore(catalogFilePath(luxyConfigDir()));
   privateMemory = new PrivateMemory(privateConversations, {
     excluded: () => memoryPreferences?.excluded() ?? new Set(),
+    // el catalogo manda sobre la segmentacion por silencios cuando existe
+    catalog: async () => (vault === null ? [] : ((await catalogs?.list(vault)) ?? [])),
   });
   // se engancha al cierre por los tres caminos —a mano, inactividad y salida—
   // desde dentro de `lock()`: aqui dentro hay historial descifrado
@@ -351,6 +356,7 @@ async function bootstrap(): Promise<void> {
     privateConversations,
     privateMemory,
     memoryPreferences,
+    catalogs,
     privateMedia,
     logsDirectory: logsDirectory(),
     artifactsDirectory: artifactsDirectory(),

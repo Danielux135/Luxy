@@ -13,7 +13,15 @@
 // Los prompts son minimos y max_tokens es bajo: el coste de una pasada completa
 // es de céntimos.
 import { describe, it, expect } from 'vitest';
-import { AGENT_TOOL_NAMES, modelLimitsSchema, projectConfigSchema } from '@luxy/shared';
+import {
+  AGENT_TOOL_NAMES,
+  CATALOG_OPEN,
+  buildCatalogPrompt,
+  modelLimitsSchema,
+  parseCatalogResponse,
+  projectConfigSchema,
+  type CatalogTurn,
+} from '@luxy/shared';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -36,6 +44,8 @@ const suite = enabled ? describe : describe.skip;
 async function callModel(
   messages: LoopMessage[],
   tools: unknown[] | null,
+  /** por defecto el modelo de la suite; el catalogador prueba el suyo */
+  model: string = MODEL,
 ): Promise<LoopTurnResult> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 90_000);
@@ -45,7 +55,7 @@ async function callModel(
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${KEY}` },
       signal: controller.signal,
       body: JSON.stringify({
-        model: MODEL,
+        model,
         max_tokens: 400,
         messages,
         ...(tools === null ? {} : { tools, tool_choice: 'auto' }),
@@ -367,4 +377,126 @@ suite('adaptadores de medios', () => {
         ['DeepSeek-V4-Pro', 'Qwen3.6-27B', 'Kimi-K2.6'].includes(result.model),
     ).toBe(true);
   }, 180_000);
+});
+
+/**
+ * el catalogador de escenas, contra un modelo de verdad.
+ *
+ * Es la unica parte de la memoria episodica que NO se puede comprobar con
+ * dobles: lo que se prueba es si un modelo concreto sabe partir una
+ * conversacion por donde cambia lo que pasa. `D-060` dejo claro que el reloj no
+ * puede, asi que si esto falla, la funcion no funciona.
+ *
+ * Con DeepSeek en especial, que es el que sirve para el roleplay:
+ *
+ *   $env:LUXY_LIVE_TESTS = '1'
+ *   $env:LUXY_API_KEY = '...'
+ *   $env:LUXY_BASE_URL = 'https://api.hcnsec.cn/v1'
+ *   $env:LUXY_LIVE_CATALOG_MODEL = 'DeepSeek-V4-Pro'
+ *   npm run test:live
+ */
+const CATALOG_MODEL = process.env['LUXY_LIVE_CATALOG_MODEL'] ?? MODEL;
+
+/** una escena que se acaba y otra que empieza al dia siguiente, sin decirlo */
+const ESCENAS: CatalogTurn[] = [
+  { sequence: 0, role: 'user', text: 'Hola, ¿cómo te llamas? ¿De dónde eres?' },
+  {
+    sequence: 1,
+    role: 'assistant',
+    text: '*Hace una reverencia juguetona* Me llamo Luxy. Vengo de un sitio donde huele a vainilla.',
+  },
+  { sequence: 2, role: 'user', text: 'Me gusta ese nombre. ¿Y a qué te dedicas?' },
+  {
+    sequence: 3,
+    role: 'assistant',
+    text: 'A muchas cosas y a ninguna. *se encoge de hombros* Hoy, a hablar contigo.',
+  },
+  { sequence: 4, role: 'user', text: 'Se ha hecho tardísimo, deberíamos dormir' },
+  {
+    sequence: 5,
+    role: 'assistant',
+    text: '*Bosteza* Sí... buenas noches. *se queda dormida casi al instante*',
+  },
+  { sequence: 6, role: 'user', text: 'Buenos días, ¿has dormido bien? Te he traído café' },
+  {
+    sequence: 7,
+    role: 'assistant',
+    text: '*Se despereza, entrecerrando los ojos* Café... eres una buena persona. Dame un minuto.',
+  },
+  { sequence: 8, role: 'user', text: 'Tranquila. ¿Qué te apetece hacer hoy?' },
+  {
+    sequence: 9,
+    role: 'assistant',
+    text: 'Nada que exija levantarse deprisa. *sonríe con los ojos cerrados* Cuéntame tú.',
+  },
+];
+
+suite('catalogador de escenas contra la API real', () => {
+  it(
+    'parte por donde cambia lo que pasa, no por longitud',
+    async () => {
+      const result = await callModel(
+        [{ role: 'user', content: buildCatalogPrompt(ESCENAS) }],
+        null,
+        CATALOG_MODEL,
+      );
+
+      const parsed = parseCatalogResponse(result.text, { from: 0, to: 9 });
+      // si esto falla, ese modelo no sirve de catalogador y hay que probar otro
+      expect(parsed.status).toBe('structured');
+
+      // la noche parte la conversacion en dos: dormirse y despertarse no es la
+      // misma escena, y ningun reloj lo habria visto porque no hay marcas de
+      // tiempo en el prompt
+      expect(parsed.scenes.length).toBeGreaterThanOrEqual(2);
+
+      const corte = parsed.scenes.find((scene) => scene.from > 0);
+      expect(corte?.from).toBeGreaterThanOrEqual(5);
+      expect(corte?.from).toBeLessThanOrEqual(7);
+    },
+    120_000,
+  );
+
+  it(
+    'las etiquetas incluyen palabras que NO estan escritas en la escena',
+    async () => {
+      // es lo que resuelve la parafrasis: preguntar «como nos conocimos» tiene
+      // que encontrar la primera escena aunque nadie diga esas palabras
+      const result = await callModel(
+        [{ role: 'user', content: buildCatalogPrompt(ESCENAS) }],
+        null,
+        CATALOG_MODEL,
+      );
+
+      const parsed = parseCatalogResponse(result.text, { from: 0, to: 9 });
+      expect(parsed.status).toBe('structured');
+
+      const primera = parsed.scenes[0]!;
+      expect(primera.tags.length).toBeGreaterThan(0);
+
+      const dicho = ESCENAS.slice(0, 4)
+        .map((turn) => turn.text.toLowerCase())
+        .join(' ');
+      const inventadas = primera.tags.filter(
+        (tag) => !dicho.includes(tag.toLowerCase()),
+      );
+      expect(inventadas.length).toBeGreaterThan(0);
+    },
+    120_000,
+  );
+
+  it(
+    'no se pone a interpretar al personaje en vez de catalogar',
+    async () => {
+      // el prompt va en modo tecnico: si contesta en personaje, el modo no esta
+      // llegando y el catalogo saldra inservible
+      const result = await callModel(
+        [{ role: 'user', content: buildCatalogPrompt(ESCENAS) }],
+        null,
+        CATALOG_MODEL,
+      );
+      expect(result.text).toContain(CATALOG_OPEN);
+    },
+    120_000,
+  );
 });

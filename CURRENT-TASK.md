@@ -220,10 +220,27 @@ ninguna señal temporal que sirva.
   el contenido**. Un catalogo equivocado hace que un recuerdo no se encuentre;
   no puede hacer que se recuerde algo que no paso.
 
-**Falta:** almacen cifrado de los catalogos —esto SI hay que persistirlo, porque
-no se deduce de nada—, la llamada y cuando se dispara, que `PrivateMemory`
-prefiera un episodio catalogado al deducido, y que las etiquetas entren en el
-indice de busqueda.
+**Hecho tambien (2026-09-03): el resto.**
+
+- `catalog-store.ts`: almacen cifrado. Es lo UNICO de la memoria episodica que
+  se persiste, porque un titulo y unas etiquetas no se deducen de nada.
+  Sustituye el catalogo de una conversacion en vez de acumularlo: dos versiones
+  del mismo momento compitiendo en la lista es peor que ninguna.
+- **Modo tecnico en el turno local.** `buildLocalJob` ponia siempre
+  `luxyPrivateLocalTurn: true`, que activa el envoltorio de personaje de
+  `D-055`. El catalogador habria catalogado en personaje. Ahora el protocolo
+  lleva `kind: 'conversation' | 'technical'`.
+- El handler cataloga **una llamada por conversacion sin catalogar**, no por
+  turno, y descarta entero un catalogo que no cuadre: esa conversacion se queda
+  con la segmentacion por silencios, que es tosca pero no miente.
+- `PrivateMemory` prefiere el catalogo cuando existe, y las etiquetas viven en
+  un **indice aparte**: su texto no es lo que se dijo, asi que mezclarlo con los
+  turnos ensuciaria lo que despues se cita.
+- Lo dispara la pantalla al abrir el panel, no un boton.
+
+**Falta:** verificarlo contra un modelo real. La prueba esta escrita en
+`live.test.ts` y se lanza con la clave en el entorno; `npm test` sigue sin gastar
+nada.
 
 
 

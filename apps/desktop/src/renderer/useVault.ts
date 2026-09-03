@@ -185,6 +185,16 @@ export interface VaultController {
   /** conversaciones que hoy quedan fuera del banco */
   memoryExcluded: string[];
   loadMemory: () => Promise<void>;
+  /**
+   * cataloga en escenas lo que aun no lo este. Gasta una llamada por
+   * conversacion, asi que la pantalla lo lanza una vez al abrirse y no en bucle.
+   */
+  syncCatalog: (input: {
+    provider: string;
+    model: string | null;
+    projectAlias: string;
+  }) => Promise<{ cataloged: number; scenes: number } | null>;
+  catalogingMemory: boolean;
   readMemoryEpisode: (
     episode: MemoryEpisode,
   ) => Promise<{ role: 'user' | 'assistant'; text: string }[]>;
@@ -298,6 +308,7 @@ export function useVault(): VaultController {
   const [lastMemoryStatus, setLastMemoryStatus] = useState<ConversationMemoryStatus | null>(null);
   const [memoryEpisodes, setMemoryEpisodes] = useState<MemoryEpisode[] | null>(null);
   const [memoryExcluded, setMemoryExcluded] = useState<string[]>([]);
+  const [catalogingMemory, setCatalogingMemory] = useState(false);
   const [compatibility, setCompatibility] = useState<CompatibilityResult[] | null>(null);
   const [checkingCompatibility, setCheckingCompatibility] = useState(false);
   const [sending, setSending] = useState(false);
@@ -525,6 +536,27 @@ export function useVault(): VaultController {
     setMemoryEpisodes(result.value.episodes);
     setMemoryExcluded(result.value.excluded);
   }, []);
+
+  const syncCatalog = useCallback(
+    async (input: {
+      provider: string;
+      model: string | null;
+      projectAlias: string;
+    }): Promise<{ cataloged: number; scenes: number } | null> => {
+      setCatalogingMemory(true);
+      try {
+        const result = await window.luxy.syncVaultCatalog({ ...input, limit: 3 });
+        if (!result.ok) {
+          setError(result.error);
+          return null;
+        }
+        return { cataloged: result.value.cataloged, scenes: result.value.scenes };
+      } finally {
+        if (mounted.current) setCatalogingMemory(false);
+      }
+    },
+    [],
+  );
 
   const readMemoryEpisode = useCallback(
     async (episode: MemoryEpisode): Promise<{ role: 'user' | 'assistant'; text: string }[]> => {
@@ -916,6 +948,8 @@ export function useVault(): VaultController {
     memoryEpisodes,
     memoryExcluded,
     loadMemory,
+    syncCatalog,
+    catalogingMemory,
     readMemoryEpisode,
     excludeFromMemory,
     compatibility,

@@ -202,7 +202,7 @@ function ConversationPanel({
         }}
       />
 
-      <MemoryPanel vault={vault} />
+      <MemoryPanel vault={vault} provider={provider} model={model} project={project} />
 
       <CompatibilityPanel vault={vault} models={models} project={project} />
 
@@ -2073,7 +2073,17 @@ function CompatibilityPanel({
  * dia no se acuerda de algo, aqui se ve si el momento existe, con que titulo
  * quedo y que hay dentro exactamente.
  */
-function MemoryPanel({ vault }: { vault: VaultController }): JSX.Element {
+function MemoryPanel({
+  vault,
+  provider,
+  model,
+  project,
+}: {
+  vault: VaultController;
+  provider: string;
+  model: string;
+  project: string;
+}): JSX.Element {
   const [open, setOpen] = useState<string | null>(null);
   const [turns, setTurns] = useState<{ role: 'user' | 'assistant'; text: string }[]>([]);
 
@@ -2085,10 +2095,18 @@ function MemoryPanel({ vault }: { vault: VaultController }): JSX.Element {
       onToggle={(event) => {
         // se cargan al abrir el panel y no antes: construir el indice tiene un
         // coste y nadie lo pidio todavia
-        if (event.currentTarget.open && episodes === null) void vault.loadMemory();
+        if (!event.currentTarget.open || episodes !== null) return;
+        // catalogar primero y listar despues: si hay escenas nuevas, la lista
+        // ya sale partida y titulada por quien leyo la conversacion, no por el
+        // reloj. Gasta una llamada por conversacion sin catalogar
+        void vault
+          .syncCatalog({ provider, model: model.length === 0 ? null : model, projectAlias: project })
+          .then(() => vault.loadMemory());
       }}
     >
-      <summary>Lo que recuerda ({episodes?.length ?? '…'})</summary>
+      <summary>
+        Lo que recuerda ({vault.catalogingMemory ? 'leyendo…' : (episodes?.length ?? '…')})
+      </summary>
 
       <p className="field__hint">
         Momentos que puede recordar en cualquier conversación, del más reciente al

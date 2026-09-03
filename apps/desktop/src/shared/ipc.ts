@@ -484,6 +484,30 @@ export const vaultMemoryExcludeArgsSchema = z.object({
   excluded: z.boolean(),
 });
 
+/**
+ * cataloga las conversaciones que lo necesiten.
+ *
+ * Una llamada por conversacion sin catalogar, no por turno. Es automatico: lo
+ * dispara la pantalla al abrirse, no un boton, porque un cerebro no se llena a
+ * botonazos.
+ */
+export const vaultCatalogSyncArgsSchema = z.object({
+  provider: z.string().min(1).max(64),
+  model: z.string().max(128).nullable().default(null),
+  projectAlias: projectAliasSchema,
+  /** solo esta; sin ella, todas las que lo necesiten */
+  conversationId: conversationIdSchema.optional(),
+  /** tope de conversaciones por tanda: cada una es una llamada de verdad */
+  limit: z.number().int().min(1).max(10).default(3),
+});
+
+export const vaultCatalogSyncResultSchema = z.object({
+  cataloged: z.number().int().min(0),
+  scenes: z.number().int().min(0),
+  /** las que se intentaron y no salieron, con el motivo */
+  failed: z.array(z.object({ conversationId: z.string(), reason: z.string() })),
+});
+
 export const vaultMediaAttachArgsSchema = z.object({
   conversationId: conversationIdSchema,
   /**
@@ -987,6 +1011,9 @@ export interface LuxyBridge {
     args: z.infer<typeof vaultCompatibilityArgsSchema>,
   ): Promise<IpcResult<z.infer<typeof vaultCompatibilityResultSchema>>>;
   listVaultMemory(): Promise<IpcResult<z.infer<typeof vaultMemoryListResultSchema>>>;
+  syncVaultCatalog(
+    args: z.infer<typeof vaultCatalogSyncArgsSchema>,
+  ): Promise<IpcResult<z.infer<typeof vaultCatalogSyncResultSchema>>>;
   readVaultMemory(
     args: z.infer<typeof vaultMemoryReadArgsSchema>,
   ): Promise<IpcResult<z.infer<typeof vaultMemoryReadResultSchema>>>;

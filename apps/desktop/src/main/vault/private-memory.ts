@@ -15,8 +15,18 @@ import type { PrivateConversationStore } from './conversation-store.js';
 import type { VaultService } from './vault-service.js';
 import { segmentIntoEpisodes, type Episode, type SegmentOptions } from './episodes.js';
 import { TurnIndex, type IndexedTurn, type TurnMatch } from './turn-index.js';
+import type { CatalogedEpisode } from './catalog-store.js';
 
 export interface PrivateMemoryOptions extends SegmentOptions {
+  /**
+   * escenas catalogadas por un modelo, si las hay.
+   *
+   * Cuando una conversacion tiene catalogo, MANDA sobre la segmentacion por
+   * silencios: `D-060` demostro que dentro de una sesion continua el reloj no
+   * ve donde cambia la escena, y el catalogo si lo ha leido. Sin catalogo se
+   * sigue deduciendo, que es tosco pero nunca miente.
+   */
+  catalog?: () => Promise<readonly CatalogedEpisode[]>;
   /**
    * conversaciones excluidas del banco de recuerdos.
    *
@@ -33,6 +43,15 @@ export interface RecalledTurn extends IndexedTurn {
 
 export class PrivateMemory {
   private index: TurnIndex | null = null;
+  /**
+   * indice aparte para lo que escribio el catalogador.
+   *
+   * Va separado del de turnos porque su texto NO es lo que se dijo: son
+   * titulos, resumenes y sobre todo etiquetas que no aparecen en la escena
+   * —«primer encuentro»—, que es justo lo que permite encontrarla preguntando
+   * de otra forma. Mezclarlo con los turnos ensuciaria lo que despues se cita.
+   */
+  private scenes: TurnIndex | null = null;
   private episodes: Episode[] = [];
   private building: Promise<void> | null = null;
 
@@ -69,15 +88,19 @@ export class PrivateMemory {
    */
   invalidate(): void {
     this.index?.clear();
+    this.scenes?.clear();
     this.index = null;
+    this.scenes = null;
     this.episodes = [];
     this.building = null;
   }
 
   private async build(vault: VaultService): Promise<void> {
     const index = new TurnIndex();
+    const scenes = new TurnIndex();
     const episodes: Episode[] = [];
     const excluded = this.options.excluded?.() ?? new Set<string>();
+    const cataloged = (await this.options.catalog?.()) ?? [];
 
     for (const conversation of await this.conversations.list(vault)) {
       if (excluded.has(conversation.conversationId)) continue;
@@ -92,10 +115,29 @@ export class PrivateMemory {
       }));
 
       index.addAll(withId);
-      episodes.push(...segmentIntoEpisodes(withId, this.options));
+
+      const own = cataloged.filter(
+        (scene) => scene.conversationId === conversation.conversationId,
+      );
+      if (own.length > 0) {
+        for (const scene of own) {
+          episodes.push(fromCatalog(scene, withId));
+          // lo que hace encontrable una escena por parafrasis: el titulo, el
+          // resumen y las etiquetas que NO estan escritas dentro de ella
+          scenes.add({
+            conversationId: scene.conversationId,
+            sequence: scene.from,
+            role: 'assistant',
+            text: `${scene.title} ${scene.tags.join(' ')} ${scene.summary}`,
+          });
+        }
+      } else {
+        episodes.push(...segmentIntoEpisodes(withId, this.options));
+      }
     }
 
     this.index = index;
+    this.scenes = scenes;
     // del mas reciente al mas antiguo: es el orden en que se enseñan y en que
     // se recortan cuando no caben todos
     this.episodes = episodes.sort((a, b) => b.startedAt.localeCompare(a.startedAt));
@@ -131,10 +173,28 @@ export class PrivateMemory {
     await this.ensureBuilt(vault);
     if (this.index === null) return [];
 
-    return this.index.search(query, { limit: options.limit ?? 5 }).map((match: TurnMatch) => {
-      const turn = this.index!.get(match.conversationId, match.sequence)!;
-      return { ...turn, episode: this.episodeFor(match.conversationId, match.sequence) };
-    });
+    const limit = options.limit ?? 5;
+    // las dos busquedas se mezclan: una acierta por lo que se dijo y la otra
+    // por como se llama. Una escena encontrada por su etiqueta apunta a su
+    // primer turno real, que es lo que despues se cita
+    const found = new Map<string, TurnMatch>();
+    for (const match of [
+      ...this.index.search(query, { limit }),
+      ...(this.scenes?.search(query, { limit }) ?? []),
+    ]) {
+      const key = `${match.conversationId}#${match.sequence}`;
+      const previous = found.get(key);
+      if (previous === undefined || match.score > previous.score) found.set(key, match);
+    }
+
+    return [...found.values()]
+      .sort((a, b) => b.score - a.score)
+      .slice(0, limit)
+      .flatMap((match) => {
+        const turn = this.index!.get(match.conversationId, match.sequence);
+        if (turn === undefined) return [];
+        return [{ ...turn, episode: this.episodeFor(match.conversationId, match.sequence) }];
+      });
   }
 
   /** los turnos de un episodio, en orden, para citarlos tal y como se dijeron */
@@ -158,4 +218,21 @@ export class PrivateMemory {
         sequence <= episode.to,
     );
   }
+}
+
+/** un episodio a partir de una escena catalogada, con sus fechas reales */
+function fromCatalog(scene: CatalogedEpisode, turns: readonly IndexedTurn[]): Episode {
+  const inside = turns.filter(
+    (turn) => turn.sequence >= scene.from && turn.sequence <= scene.to,
+  ) as (IndexedTurn & { createdAt?: string })[];
+
+  return {
+    conversationId: scene.conversationId,
+    from: scene.from,
+    to: scene.to,
+    startedAt: inside[0]?.createdAt ?? scene.catalogedAt,
+    endedAt: inside[inside.length - 1]?.createdAt ?? scene.catalogedAt,
+    turns: inside.length,
+    title: scene.title,
+  };
 }

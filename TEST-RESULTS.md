@@ -1,5 +1,39 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-03 — F10.6 completa (sin verificar contra un modelo real)
+
+- **`npm run check`: exit 0. 129 archivos, 2.247 superadas, 12 omitidas.**
+- Las 3 omitidas nuevas son las de `live.test.ts`: se saltan solas sin clave, que
+  es la invariante que protege que `npm test` no gaste nunca nada.
+- **Hallazgo al enchufarlo:** `buildLocalJob` marcaba SIEMPRE
+  `luxyPrivateLocalTurn: true`, que activa el envoltorio de personaje de
+  `D-055`. El catalogador habria catalogado en personaje, y el fallo habria
+  parecido «el modelo no sabe hacer JSON». El protocolo lleva ahora
+  `kind: 'conversation' | 'technical'`.
+
+### Como probarlo con llamadas reales
+
+No pasa ninguna clave por el chat. En PowerShell:
+
+```
+$env:LUXY_LIVE_TESTS = '1'
+$env:LUXY_API_KEY = '<la de la pasarela>'
+$env:LUXY_BASE_URL = 'https://api.hcnsec.cn/v1'
+$env:LUXY_LIVE_CATALOG_MODEL = 'DeepSeek-V4-Pro'
+npm run test:live
+```
+
+Tres pruebas, tres llamadas. Lo que comprueban:
+
+1. que parte por donde cambia lo que pasa: la conversacion de muestra tiene una
+   noche en medio —alguien se duerme y despues amanece— **sin ninguna marca de
+   tiempo en el prompt**. Si el corte no cae ahi, ese modelo no sirve de
+   catalogador;
+2. que las etiquetas incluyen palabras que NO estan escritas en la escena, que
+   es lo unico que resuelve la parafrasis;
+3. que responde con el bloque y no se pone a interpretar al personaje, que es lo
+   que delataria que el modo tecnico no esta llegando.
+
 ### 2026-09-03 — F10.6, contrato del catalogador de escenas
 
 - **`npm run check`: exit 0. 129 archivos, 2.247 superadas, 9 omitidas.**

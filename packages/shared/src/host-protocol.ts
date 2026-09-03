@@ -76,6 +76,15 @@ export const hostRequestSchema = z.discriminatedUnion('type', [
     projectAlias: z.string().min(1).max(64),
     /** texto en claro. no se escribe en ningun log ni se devuelve al gateway */
     prompt: z.string().min(1).max(2_000_000),
+    /**
+     * para que es el turno.
+     *
+     * `conversation` es un turno de roleplay y recibe el envoltorio de
+     * personaje de `D-055`. `technical` es una tarea SOBRE un texto —catalogar
+     * escenas, por ejemplo— y no debe encarnar a nadie: pedirle a quien esta
+     * interpretando a alguien que ademas rellene un JSON estropea las dos cosas.
+     */
+    kind: z.enum(['conversation', 'technical']).default('conversation'),
   }),
   z.object({
     type: z.literal('cancel_local_turn'),
