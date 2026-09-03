@@ -1,5 +1,21 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-03 — F10.6, contrato del catalogador de escenas
+
+- **`npm run check`: exit 0. 129 archivos, 2.247 superadas, 9 omitidas.**
+- 21 pruebas, ninguna gasta una llamada: el modulo arma un prompt y valida una
+  respuesta, y nada mas.
+- La mitad fijan **que se rechaza**: huecos entre escenas, solapes, un catalogo
+  que no cubre el tramo entero, un titulo vacio, una lista vacia, un bloque que
+  no es JSON, uno cortado. Aceptar cualquiera produciria episodios que no
+  corresponden a lo que dice su titulo.
+- Y una fija que nada de esto lanza: un catalogo malo no puede tumbar un turno.
+- Dos pruebas fallaron al escribirlas por frases clave partidas entre lineas del
+  prompt. Se reajusto el prompt, no la asercion. Es la tercera vez que pasa lo
+  mismo en este archivo de trabajo.
+- **Sin probar contra un modelo real.** Es lo siguiente, y su sitio es
+  `test:live`, nunca `npm test`.
+
 ### 2026-09-03 — un turno sin respuesta ya no se queda en el historial
 
 Diagnosticado por Daniel: el «Tú / Tú» duplicado del panel no era un fallo de

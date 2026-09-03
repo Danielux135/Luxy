@@ -197,7 +197,35 @@ fecha entran ahi.
 El panel carga al abrirse y no antes: construir el indice cuesta y nadie lo
 habia pedido.
 
-### F10.6 — catalogador opcional
+### F10.6 — catalogador — **en curso**
+
+Ya NO es opcional: `D-058` la pedia para las parafrasis y `D-060` la hizo
+necesaria para partir por escenas, porque dentro de una sesion continua no hay
+ninguna señal temporal que sirva.
+
+**Hecho (2026-09-03): el contrato y su validacion**, en
+`packages/shared/src/vault-catalog.ts`, con 21 pruebas y sin gastar una llamada.
+
+- `buildCatalogPrompt` pide partir por lo que PASA —sitio, momento, asunto,
+  alguien que se duerme y vuelve— y prohibe expresamente partir por longitud,
+  que es lo que fallaba. Va en modo tecnico, no en personaje, y la conversacion
+  entra como DATOS.
+- Pide `tags` **que no esten escritas en la escena**: es lo que resuelve la
+  parafrasis. «Primer encuentro» aunque nadie diga esas palabras.
+- `parseCatalogResponse` **rechaza en bloque**: huecos, solapes, un tramo que no
+  se cubre entero, un titulo vacio. Reparar a medias produciria episodios que no
+  corresponden a su titulo, y eso es peor que la segmentacion por silencios, que
+  sera tosca pero nunca miente sobre donde empieza cada cosa.
+- La asimetria que permite delegar esto en un modelo: **escribe el indice, nunca
+  el contenido**. Un catalogo equivocado hace que un recuerdo no se encuentre;
+  no puede hacer que se recuerde algo que no paso.
+
+**Falta:** almacen cifrado de los catalogos —esto SI hay que persistirlo, porque
+no se deduce de nada—, la llamada y cuando se dispara, que `PrivateMemory`
+prefiera un episodio catalogado al deducido, y que las etiquetas entren en el
+indice de busqueda.
+
+
 
 Solo si F10.3 demuestra que el lexico no basta. Añade titulo legible y busqueda
 por parafrasis. Va en un hueco de «modelo auxiliar» en Conexiones, el mismo que
