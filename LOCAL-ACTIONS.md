@@ -79,6 +79,24 @@ breasts, blue eyes`.
 
 ## LA-035 — publicar la consolidacion de ramas
 
+**Actualizado el 2026-09-03.** Los pasos 2 y 3 ya NO hacen falta: `git ls-remote`
+confirma que el remoto solo tiene `main`, en `016d36d`. Las cinco ramas viejas ya
+se borraron en algun momento y la lista de abajo estaba desactualizada.
+
+Queda solo el paso 1, y Daniel lo autorizo el 2026-09-03. El `push` no se pudo
+lanzar desde la sesion de IA porque el sistema de permisos de la herramienta lo
+bloquea, asi que lo ejecuta el:
+
+    git push origin main
+
+Son 30 commits, de `98fe84d` a `dd0d0b2`, y es un avance rapido: `main` local
+esta limpio y el remoto no se ha movido.
+
+---
+
+### Texto original (parcialmente obsoleto)
+
+
 Estado: `pending` — abierta el 2026-09-02.
 
 En local ya solo existe `main`, con todo el trabajo dentro. El remoto no se ha
