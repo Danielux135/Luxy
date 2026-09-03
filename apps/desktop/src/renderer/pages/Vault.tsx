@@ -188,9 +188,11 @@ function ConversationPanel({
 
       {vault.lastMemoryStatus !== null && vault.lastMemoryStatus !== 'structured' && (
         <Notice tone="warn">
-          {describeConversationMemoryStatus(vault.lastMemoryStatus)} Se conserva la
-          anterior, así que la conversación sigue; pero si se repite, ese modelo
-          no está escribiendo bien el bloque de memoria.
+          {/* la frase de `describeConversationMemoryStatus` ya termina en «se
+              conserva la anterior»: repetirlo aqui la duplicaba en pantalla */}
+          {describeConversationMemoryStatus(vault.lastMemoryStatus)} La conversación
+          sigue igual; pero si se repite, ese modelo no está escribiendo bien el
+          bloque de memoria.
         </Notice>
       )}
 
