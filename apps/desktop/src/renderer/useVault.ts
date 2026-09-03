@@ -215,6 +215,7 @@ export interface VaultController {
   setComposer: (patch: Partial<VaultComposer>) => void;
   sending: boolean;
   openConversation: (conversationId: string | null) => Promise<void>;
+  /** devuelve `true` si el mensaje llego a formar parte de la conversacion */
   send: (input: {
     message: string;
     provider: string;
@@ -719,13 +720,19 @@ export function useVault(): VaultController {
           setComposerState((previous) => ({ ...previous, model: result.value.model }));
         }
         setLastMemoryStatus(result.value.memoryStatus);
+        // el mensaje se retiro porque no hubo respuesta: se devuelve al
+        // compositor en vez de obligar a reescribirlo, que es lo que acababa
+        // duplicandolo en el historial
+        if (!result.value.userTurnKept) {
+          setComposerState((previous) => ({ ...previous, message: input.message }));
+        }
         setLastImage(result.value.image);
         // lo generado en este turno se guarda contra la conversacion: recargar
         // los medios es lo que hace que la imagen aparezca sin recargar nada
         if (result.value.image?.mediaId != null) await reloadMedia();
         if (result.value.error !== null) setError(result.value.error);
         await reloadConversations();
-        return result.value.outcome === 'completed';
+        return result.value.userTurnKept;
       } finally {
         if (mounted.current) setSending(false);
       }

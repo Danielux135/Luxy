@@ -1539,7 +1539,9 @@ export function registerIpcHandlers(context: HandlerContext): void {
     // funcionando y solo semanas despues parece que «se le olvidan cosas»
     let memoryStatus: ConversationMemoryStatus = 'absent';
 
+    let wroteReply = false;
     if (result.outcome !== 'failed' && result.text.length > 0) {
+      wroteReply = true;
       // la memoria viaja DENTRO de la respuesta y se separa aqui: lo que se
       // guarda como turno es solo el texto visible, sin el bloque tecnico
       const parsed = parseConversationMemoryResponse(result.text);
@@ -1612,6 +1614,14 @@ export function registerIpcHandlers(context: HandlerContext): void {
       );
     }
 
+    // si no llego a escribirse ninguna respuesta, el mensaje del usuario queda
+    // huerfano. Se retira: un turno sin contestacion no es parte de la
+    // conversacion, es un intento fallido, y dejarlo hace que el usuario
+    // reescriba lo mismo y acabe con su mensaje dos veces —en pantalla y en el
+    // proximo prompt—
+    const userTurnKept = wroteReply;
+    if (!userTurnKept) store.removeLastTurn(conversationId);
+
     // el historial ha cambiado: el indice de la memoria episodica deja de estar
     // al dia. Se reconstruye solo, y perezosamente, en la siguiente busqueda
     context.privateMemory.invalidate();
@@ -1626,6 +1636,7 @@ export function registerIpcHandlers(context: HandlerContext): void {
       provider: args.provider,
       model: result.executedModel ?? args.model,
       memoryStatus,
+      userTurnKept,
       image,
       error: result.error,
     };

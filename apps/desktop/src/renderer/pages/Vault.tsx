@@ -109,7 +109,10 @@ function ConversationPanel({
         characterId: draftCharacter,
         characterDescription: draftDescription,
       })
-      .then(() => {
+      .then((kept) => {
+        // solo si el turno llegó a existir. Si el modelo no contestó, el
+        // mensaje vuelve al compositor y limpiarlo aquí lo perdería
+        if (!kept) return;
         // ya están guardados con el turno: los borradores dejan de ser
         // necesarios y el panel vuelve a leer lo que hay de verdad
         vault.setComposer({

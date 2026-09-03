@@ -10,7 +10,16 @@
 //
 // El NOMBRE del archivo es el identificador de la conversacion, que es un uuid
 // aleatorio. Nunca el titulo: `%APPDATA%` no puede revelar de que hablas.
-import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync } from 'node:fs';
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { privateRecordSchema, type ConversationMemory, type PrivateRecord } from '@luxy/shared';
 import { openTurn, sealTurn, type SealTurnInput } from './private-store.js';
@@ -303,6 +312,41 @@ export class PrivateConversationStore {
         : opened.turn.characterDescription;
     }
     return null;
+  }
+
+  /**
+   * retira el ultimo turno.
+   *
+   * Existe para un caso concreto: el mensaje del usuario se sella ANTES de
+   * llamar al modelo —para no perderlo si algo va mal a mitad—, y si la llamada
+   * falla sin devolver nada, ese turno se queda sin respuesta. El usuario
+   * reescribe lo mismo y acaba con su mensaje dos veces en el historial, que
+   * ademas viaja duplicado al modelo en el siguiente prompt.
+   *
+   * Un turno sin contestacion no es parte de la conversacion: es un intento
+   * fallido. Devuelve true si habia algo que retirar.
+   */
+  removeLastTurn(conversationId: string): boolean {
+    const file = fileFor(this.directory, conversationId);
+    if (!existsSync(file)) return false;
+
+    const lines = readFileSync(file, 'utf8').split('\n').filter((line) => line.trim().length > 0);
+    if (lines.length === 0) return false;
+
+    lines.pop();
+    // sin turnos, la conversacion deja de existir: una entrada vacia en la
+    // lista es peor que ninguna
+    if (lines.length === 0) {
+      unlinkSync(file);
+      return true;
+    }
+
+    // escritura atomica, como el resto: un corte a medias no puede dejar el
+    // historial ilegible
+    const temporary = `${file}.tmp`;
+    writeFileSync(temporary, `${lines.join('\n')}\n`, 'utf8');
+    renameSync(temporary, file);
+    return true;
   }
 
   /** borra una conversacion. no hay papelera: es lo que se espera aqui */

@@ -168,6 +168,42 @@ describe('conversaciones privadas en disco', () => {
     expect(await store.read(vault, B)).toEqual([]);
   });
 
+  it('retira el ultimo turno cuando el modelo no contesto', async () => {
+    // pasa de verdad: se escribe a DeepSeek, da error, y el mensaje se queda
+    // guardado sin respuesta. Al reescribirlo aparece dos veces —en pantalla y
+    // en el proximo prompt—, que fue como se detecto
+    await store.appendTurn(vault, A, turn('hola'));
+    await store.appendTurn(vault, A, turn('¿sigues ahi?'));
+
+    expect(store.removeLastTurn(A)).toBe(true);
+    const turns = await store.read(vault, A);
+    expect(turns.map((each) => each.text)).toEqual(['hola']);
+  });
+
+  it('retirar el unico turno deja la conversacion sin existir', async () => {
+    // una entrada vacia en la lista es peor que ninguna
+    await store.appendTurn(vault, A, turn('hola'));
+    expect(store.removeLastTurn(A)).toBe(true);
+    expect(await store.list(vault)).toEqual([]);
+  });
+
+  it('retirar de una conversacion que no existe no es un error', () => {
+    expect(store.removeLastTurn(A)).toBe(false);
+  });
+
+  it('lo retirado no deja rastro para el siguiente turno', async () => {
+    await store.appendTurn(vault, A, turn('primero'));
+    await store.appendTurn(vault, A, turn('intento fallido'));
+    store.removeLastTurn(A);
+    await store.appendTurn(vault, A, turn('segundo intento'));
+
+    const turns = await store.read(vault, A);
+    expect(turns.map((each) => each.text)).toEqual(['primero', 'segundo intento']);
+    // y las secuencias siguen siendo unicas y crecientes
+    expect(turns.map((each) => each.sequence)).toEqual([...turns].map((each) => each.sequence).sort((a, b) => a - b));
+    expect(new Set(turns.map((each) => each.sequence)).size).toBe(turns.length);
+  });
+
   it('borrar elimina el archivo', async () => {
     await store.appendTurn(vault, A, turn('hola'));
     store.delete(A);

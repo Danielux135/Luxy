@@ -363,6 +363,14 @@ export const vaultConversationSendResultSchema = z.object({
    */
   memoryStatus: conversationMemoryStatusSchema,
   /**
+   * si el mensaje del usuario sobrevivio a este turno.
+   *
+   * `false` cuando el modelo no devolvio nada: el turno se retira para que el
+   * historial no acumule mensajes sin contestacion, y la pantalla debe conservar
+   * el texto en el compositor en vez de obligar a reescribirlo.
+   */
+  userTurnKept: z.boolean(),
+  /**
    * la imagen que el modelo pidio en este turno, si pidio alguna.
    *
    * `null` significa que no pidio ninguna, que es lo normal. Con `mediaId` la

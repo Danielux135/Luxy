@@ -1,5 +1,29 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-03 — un turno sin respuesta ya no se queda en el historial
+
+Diagnosticado por Daniel: el «Tú / Tú» duplicado del panel no era un fallo de
+pantalla. Escribio a DeepSeek, dio error, y reescribio lo mismo. Su mensaje se
+sella ANTES de llamar al modelo —para no perderlo si algo va mal a mitad— y
+nadie lo retiraba al fallar.
+
+Dos fallos encadenados, y el segundo empeoraba el primero:
+
+- el turno se quedaba huerfano, sin contestacion, y viajaba duplicado al modelo
+  en el prompt siguiente ademas de verse dos veces en pantalla;
+- el compositor se vaciaba igual, con lo que habia que reescribir el mensaje: es
+  justo lo que produce el duplicado.
+
+Ahora, si no llego a escribirse respuesta, el turno se retira y el texto vuelve
+al compositor. Un turno sin contestacion no es parte de la conversacion: es un
+intento fallido.
+
+- 4 pruebas nuevas: retira el ultimo turno; retirar el unico deja la conversacion
+  sin existir, porque una entrada vacia es peor que ninguna; retirar de una que
+  no existe no es error; y lo retirado no deja rastro en las secuencias.
+- **`npm run check`: exit 0. 128 archivos, 2.226 superadas, 9 omitidas.**
+- **Sin verificar en pantalla:** hace falta provocar un error de proveedor.
+
 ### 2026-09-03 — resultado NEGATIVO: no hay señal temporal dentro de una sesion
 
 Segunda prueba de Daniel con sus conversaciones reales, y esta vez lo que falla
