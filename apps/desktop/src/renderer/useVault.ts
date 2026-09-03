@@ -193,6 +193,8 @@ export interface VaultController {
     provider: string;
     model: string | null;
     projectAlias: string;
+    /** solo esta, y reintentandola aunque hubiera fallado antes */
+    conversationId?: string;
   }) => Promise<{ pending: number; cataloged: number; failed: number } | null>;
   catalogingMemory: boolean;
   /** que paso en el ultimo catalogado; null si no se ha hecho ninguno */
@@ -560,6 +562,7 @@ export function useVault(): VaultController {
       provider: string;
       model: string | null;
       projectAlias: string;
+      conversationId?: string;
     }): Promise<{ pending: number; cataloged: number; failed: number } | null> => {
       // guarda en la pantalla ademas de la del proceso principal: sin esto se
       // encolan tandas que ya no hacen falta, y el `<details>` puede disparar

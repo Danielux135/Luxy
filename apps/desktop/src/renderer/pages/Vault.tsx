@@ -2199,6 +2199,30 @@ function MemoryPanel({
 
       {vault.lastCatalog !== null && vault.lastCatalog.failed.length > 0 && (
         <Notice tone="warn">
+          {/* el reintento va aqui y no tras reiniciar: quien se niega es un
+              modelo concreto, asi que la salida natural es probar con otro sin
+              cerrar el programa */}
+          <button
+            className="btn btn--quiet"
+            disabled={vault.catalogingMemory}
+            onClick={() => {
+              const target = {
+                provider,
+                model: model.length === 0 ? null : model,
+                projectAlias: project,
+              };
+              void (async () => {
+                for (const each of vault.lastCatalog?.failed ?? []) {
+                  await vault.syncCatalog({ ...target, conversationId: each.conversationId });
+                }
+                await vault.loadMemory();
+              })();
+            }}
+          >
+            {vault.catalogingMemory
+              ? 'Probando…'
+              : `Reintentar con ${model.length === 0 ? provider : model}`}
+          </button>{' '}
           {vault.lastCatalog.failed.length === 1
             ? 'Una conversación no se pudo ordenar y se queda partida por silencios'
             : `${vault.lastCatalog.failed.length} conversaciones no se pudieron ordenar y se quedan partidas por silencios`}

@@ -1192,6 +1192,8 @@ export function registerIpcHandlers(context: HandlerContext): void {
             turnsAtCatalog: turns.length,
           })),
         );
+        // si venia marcada como fallida, deja de estarlo: se acaba de lograr
+        catalogFailures.delete(conversation.conversationId);
         cataloged += 1;
         scenes += parsed.scenes.length;
       } catch (error) {
