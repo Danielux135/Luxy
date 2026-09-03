@@ -10,6 +10,7 @@ import {
   CATALOG_MAX_TURNS,
   CATALOG_OPEN,
   buildCatalogPrompt,
+  describeCatalogFailure,
   parseCatalogResponse,
   type CatalogTurn,
 } from './vault-catalog.js';
@@ -186,6 +187,44 @@ describe('lo que se rechaza en bloque', () => {
 
   it('una lista vacia no es un catalogo', () => {
     expect(parseCatalogResponse(bloque('[]'), rango).status).toBe('invalid');
+  });
+});
+
+describe('el motivo que se le enseña a una persona', () => {
+  const rango = { from: 0, to: 9 };
+
+  it('cuando no escribe el bloque, dice QUE dijo en su lugar', () => {
+    // «absent» no es un mensaje, es el nombre de un estado. Y sin saber que
+    // contesto no se distingue «no supo» de «se nego a catalogarlo», que se
+    // arreglan de formas muy distintas
+    const said = 'Lo siento, pero no puedo ayudarte a catalogar ese contenido.';
+    const parsed = parseCatalogResponse(said, rango);
+
+    const motivo = describeCatalogFailure(parsed, said);
+    expect(motivo).toContain('no escribio el bloque');
+    expect(motivo).toContain('no puedo ayudarte');
+  });
+
+  it('recorta lo que dijo: es una pista, no un volcado', () => {
+    const said = 'x'.repeat(5000);
+    expect(describeCatalogFailure(parseCatalogResponse(said, rango), said).length).toBeLessThan(250);
+  });
+
+  it('un bloque cortado se explica como lo que es', () => {
+    const said = `${CATALOG_OPEN}
+[{"from":0`;
+    expect(describeCatalogFailure(parseCatalogResponse(said, rango), said)).toContain(
+      'se corto a medias',
+    );
+  });
+
+  it('un bloque invalido conserva el campo que falla', () => {
+    const said = bloque('[{"from":"cero","to":9,"title":"t","tags":[],"summary":""}]');
+    expect(describeCatalogFailure(parseCatalogResponse(said, rango), said)).toContain('from');
+  });
+
+  it('sin respuesta ninguna tambien se entiende', () => {
+    expect(describeCatalogFailure(parseCatalogResponse('', rango), '')).toContain('no dijo nada');
   });
 });
 

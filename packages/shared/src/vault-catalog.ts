@@ -83,6 +83,31 @@ export interface ParsedCatalog {
 }
 
 /**
+ * el motivo dicho para una persona.
+ *
+ * `absent` no es un mensaje: es el nombre interno de un estado. Y cuando el
+ * modelo no escribe el bloque, lo unico que permite saber por que es **lo que
+ * escribio en su lugar** —una negativa, una pregunta, una explicacion—, asi que
+ * se conserva un trozo. Sin eso, «absent» y «se nego a catalogarlo» son
+ * indistinguibles.
+ */
+export function describeCatalogFailure(parsed: ParsedCatalog, said: string): string {
+  const excerpt = said.replace(/\s+/g, ' ').trim().slice(0, 160);
+  const dijo = excerpt.length === 0 ? 'no dijo nada' : `dijo: «${excerpt}…»`;
+
+  switch (parsed.status) {
+    case 'absent':
+      return `no escribio el bloque de escenas; ${dijo}`;
+    case 'truncated_block':
+      return 'empezo el bloque y se corto a medias: la respuesta se quedo sin sitio';
+    case 'invalid':
+      return parsed.reason ?? 'el bloque no se pudo leer';
+    default:
+      return 'sin motivo';
+  }
+}
+
+/**
  * cuantos turnos se le enseñan de una vez.
  *
  * Un tope alto no cuesta dinero —se cobra por llamada— pero si contexto y

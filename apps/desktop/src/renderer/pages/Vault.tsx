@@ -2197,8 +2197,10 @@ function MemoryPanel({
 
       {vault.lastCatalog !== null && vault.lastCatalog.failed.length > 0 && (
         <Notice tone="warn">
-          {vault.lastCatalog.failed.length} conversación(es) no se pudieron ordenar
-          y se quedan partidas por silencios:{' '}
+          {vault.lastCatalog.failed.length === 1
+            ? 'Una conversación no se pudo ordenar y se queda partida por silencios'
+            : `${vault.lastCatalog.failed.length} conversaciones no se pudieron ordenar y se quedan partidas por silencios`}
+          :{' '}
           {[...new Set(vault.lastCatalog.failed.map((each) => each.reason))].join('; ')}. No se
           reintentan solas hasta que reinicies, para no gastar una llamada en cada
           apertura.

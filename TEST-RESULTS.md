@@ -1,5 +1,24 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-03 — «absent» no es un motivo: ahora se dice que contesto el modelo
+
+Daniel probo el catalogado con `sonnet` y una conversacion fallo con el motivo
+`absent`, que es el nombre interno de un estado y no un mensaje.
+
+Peor que eso: **la respuesta del modelo se tiraba.** `absent` significa que no
+escribio el bloque de escenas, y lo unico que permite saber por que es lo que
+escribio en su lugar. Sin eso, «no supo hacerlo» y «se nego a catalogarlo» son
+indistinguibles, y se arreglan de formas opuestas.
+
+- Los cuatro estados tienen ahora una frase en castellano, y cuando falta el
+  bloque se incluye un trozo de lo que dijo —recortado a 160 caracteres, y pasa
+  por `redact` como todo lo que sale de un modelo—.
+- De paso, el plural del aviso: decia «1 conversación(es)».
+- 5 pruebas nuevas. **`npm run check`: exit 0. 130 archivos, 2.270 superadas.**
+- **Pendiente:** repetir con `sonnet` para ver que contesta de verdad esa
+  conversacion. Es una llamada, y decide si el problema es de formato o de que
+  ese modelo no quiere catalogar ese contenido.
+
 ### 2026-09-03 — se puede elegir modelo tambien con los CLI nativos
 
 Daniel: «con Claude y ChatGPT no puedo elegir modelos, se ejecuta el Opus

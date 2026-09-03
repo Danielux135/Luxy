@@ -18,6 +18,7 @@ import {
   secretRegistry,
   buildCatalogSnapshot,
   buildCatalogPrompt,
+  describeCatalogFailure,
   parseCatalogResponse,
   CATALOG_MAX_TURNS,
   isPathInside,
@@ -1143,7 +1144,9 @@ export function registerIpcHandlers(context: HandlerContext): void {
           catalogFailures.add(conversation.conversationId);
           failed.push({
             conversationId: conversation.conversationId,
-            reason: parsed.reason ?? parsed.status,
+            // con lo que dijo en su lugar: es lo unico que distingue «no supo»
+            // de «se nego». Pasa por redact como todo lo que sale de un modelo
+            reason: redact(describeCatalogFailure(parsed, run.text)),
           });
           continue;
         }
