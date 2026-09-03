@@ -246,6 +246,24 @@ export class PrivateConversationStore {
   }
 
   /**
+   * modelo con el que se hablo por ultima vez en esta conversacion.
+   *
+   * Va aparte del proveedor porque son dos cosas: el proveedor dice con QUIEN se
+   * habla y el modelo CUAL de los suyos. La conversacion privada nunca elegia
+   * modelo —mandaba `null`— y caia siempre en el de la conexion, que suele ser
+   * el mas caro y lento de la familia.
+   */
+  async latestModel(vault: VaultService, conversationId: string): Promise<string | null> {
+    const records = this.readRecords(conversationId);
+    for (let index = records.length - 1; index >= 0; index -= 1) {
+      const opened = await openTurn(vault, records[index]!);
+      if (opened.turn.model === null) continue;
+      return opened.turn.model.length === 0 ? null : opened.turn.model;
+    }
+    return null;
+  }
+
+  /**
    * personaje en vigor, leido del ultimo turno que lo llevaba.
    *
    * Mismo criterio que `latestInstructions`: hacia atras y vale el primero que

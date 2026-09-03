@@ -13,6 +13,7 @@ import {
   type VaultController,
 } from '../useVault.js';
 import { imageBlockReason } from '../../shared/vault-image-capability.js';
+import { describeConversationMemoryStatus, type ModelDefinition } from '@luxy/shared';
 
 /** debe coincidir con AUTO_LOCK_MINUTES del proceso principal */
 const AUTO_LOCK_CHOICES = [1, 5, 15, 30, 60, 240, 0] as const;
@@ -26,9 +27,12 @@ export function VaultPage({
   vault,
   summary,
   providers,
+  models,
 }: {
   vault: VaultController;
   summary: ConfigSummary;
+  /** catalogo real de la conexion; se filtra por familia = proveedor */
+  models: ModelDefinition[];
   /**
    * proveedores que el agente tiene EN MARCHA, tal y como los anuncia.
    *
@@ -48,7 +52,12 @@ export function VaultPage({
   if (!vault.status.unlocked) return <UnlockPanel vault={vault} />;
   return (
     <>
-      <ConversationPanel vault={vault} summary={summary} providers={providers} />
+      <ConversationPanel
+        vault={vault}
+        summary={summary}
+        providers={providers}
+        models={models}
+      />
       <UnlockedPanel vault={vault} />
     </>
   );
@@ -62,10 +71,12 @@ function ConversationPanel({
   vault,
   summary,
   providers,
+  models,
 }: {
   vault: VaultController;
   summary: ConfigSummary;
   providers: string[];
+  models: ModelDefinition[];
 }): JSX.Element {
   const projects = Object.keys(summary.config?.projects ?? {});
   // el compositor vive en el controlador, no aquí: esta página se desmonta al
@@ -78,6 +89,11 @@ function ConversationPanel({
   // pero una elección suya se conserva aunque la lista cambie de orden
   const project = composer.project ?? projects[0] ?? '';
   const provider = composer.provider ?? providers[0] ?? 'claude';
+  // el id de proveedor ES la familia del modelo: asi los registra el agente
+  const familyModels = models.filter((model) => model.family === provider && model.enabled);
+  // cadena vacia = «el de la conexion». Es lo que hacia siempre, y ahora es una
+  // eleccion visible en vez de la unica posibilidad
+  const model = composer.model ?? '';
 
   const canSend =
     message.trim().length > 0 && project.length > 0 && provider.length > 0 && !vault.sending;
@@ -87,7 +103,7 @@ function ConversationPanel({
       .send({
         message: message.trim(),
         provider,
-        model: null,
+        model: model.length === 0 ? null : model,
         projectAlias: project,
         instructions: draftInstructions,
         characterId: draftCharacter,
@@ -157,6 +173,14 @@ function ConversationPanel({
 
       {vault.lastImage !== null && <ImageOutcome image={vault.lastImage} />}
 
+      {vault.lastMemoryStatus !== null && vault.lastMemoryStatus !== 'structured' && (
+        <Notice tone="warn">
+          {describeConversationMemoryStatus(vault.lastMemoryStatus)} Se conserva la
+          anterior, así que la conversación sigue; pero si se repite, ese modelo
+          no está escribiendo bien el bloque de memoria.
+        </Notice>
+      )}
+
       <InstructionsPanel
         vault={vault}
         draft={draftInstructions}
@@ -204,6 +228,24 @@ function ConversationPanel({
                 ))}
               </select>
             </Field>
+            {familyModels.length > 0 && (
+              <Field
+                label="Modelo"
+                hint="Sin elegir usa el de la conexión, que suele ser el mayor de la familia."
+              >
+                <select
+                  value={model}
+                  onChange={(event) => vault.setComposer({ model: event.target.value })}
+                >
+                  <option value="">por defecto de la conexión</option>
+                  {familyModels.map((definition) => (
+                    <option key={definition.id} value={definition.apiModel}>
+                      {definition.displayName}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            )}
             <Field label="Proyecto">
               <select
                 value={project}

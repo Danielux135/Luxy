@@ -10,6 +10,7 @@ import { z } from 'zod';
 import {
   type agentEventSchema,
   agentHostStatusSchema,
+  conversationMemoryStatusSchema,
   jobStatusSchema,
   projectAliasSchema,
   studioConversationUpdateRequestSchema,
@@ -337,6 +338,8 @@ export const vaultConversationReadResultSchema = z.object({
    * en memoria de la ventana y un reinicio lo devolvia al primero de la lista.
    */
   provider: z.string().nullable(),
+  /** modelo del ultimo turno; `null` si nunca se eligio uno */
+  model: z.string().nullable(),
 });
 
 export const vaultConversationSendResultSchema = z.object({
@@ -348,6 +351,17 @@ export const vaultConversationSendResultSchema = z.object({
   characterDescription: z.string().nullable(),
   /** proveedor con el que se respondio; queda fijado para la conversacion */
   provider: z.string().nullable(),
+  /** modelo con el que se respondio, tal y como lo ejecuto el agente */
+  model: z.string().nullable(),
+  /**
+   * que le paso al bloque de memoria en este turno.
+   *
+   * Se calculaba y se tiraba. Sin esto, un modelo que escribe mal el bloque deja
+   * la conversacion sin actualizar la memoria —se conserva la anterior, que es
+   * lo correcto— y el usuario solo lo nota semanas despues, como «se le olvidan
+   * cosas», sin poder atribuirlo al cambio de modelo.
+   */
+  memoryStatus: conversationMemoryStatusSchema,
   /**
    * la imagen que el modelo pidio en este turno, si pidio alguna.
    *

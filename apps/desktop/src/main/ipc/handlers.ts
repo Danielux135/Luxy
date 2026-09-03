@@ -12,6 +12,7 @@ import {
   parseConversationMemoryResponse,
   parseVaultImageRequest,
   redact,
+  type ConversationMemoryStatus,
   storedAgentConfigSchema,
   secretRegistry,
   buildCatalogSnapshot,
@@ -835,6 +836,7 @@ export function registerIpcHandlers(context: HandlerContext): void {
       context.vault,
       args.conversationId,
     ),
+    model: await context.privateConversations.latestModel(context.vault, args.conversationId),
   }));
 
   handle(IPC_INVOKE.vaultConversationDelete, vaultConversationIdArgsSchema, async (args) => {
@@ -1366,10 +1368,16 @@ export function registerIpcHandlers(context: HandlerContext): void {
       error: string | null;
     } | null = null;
 
+    // se calculaba y se tiraba. Un modelo que escribe mal el bloque deja de
+    // actualizar la memoria sin que nadie lo vea: la conversacion sigue
+    // funcionando y solo semanas despues parece que «se le olvidan cosas»
+    let memoryStatus: ConversationMemoryStatus = 'absent';
+
     if (result.outcome !== 'failed' && result.text.length > 0) {
       // la memoria viaja DENTRO de la respuesta y se separa aqui: lo que se
       // guarda como turno es solo el texto visible, sin el bloque tecnico
       const parsed = parseConversationMemoryResponse(result.text);
+      memoryStatus = parsed.status;
       // y despues la peticion de imagen, sobre lo que quedo. El orden es el
       // inverso al del prompt: la memoria va la ultima, asi que sale la primera
       const imageRequest = parseVaultImageRequest(parsed.visibleText);
@@ -1446,6 +1454,8 @@ export function registerIpcHandlers(context: HandlerContext): void {
       characterId: await store.latestCharacterId(context.vault, conversationId),
       characterDescription: await store.latestCharacterDescription(context.vault, conversationId),
       provider: args.provider,
+      model: result.executedModel ?? args.model,
+      memoryStatus,
       image,
       error: result.error,
     };

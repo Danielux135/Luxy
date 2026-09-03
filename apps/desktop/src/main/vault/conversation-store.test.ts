@@ -126,6 +126,44 @@ describe('conversaciones privadas en disco', () => {
     expect(first?.turns).toBe(2);
   });
 
+  it('el proveedor y el modelo pertenecen a la conversacion', async () => {
+    // vivian solo en memoria de la ventana: al reiniciar Studio el proveedor
+    // volvia al primero de la lista y el modelo nunca se elegia, asi que una
+    // conversacion de roleplay acababa en un modelo que la rechaza
+    await store.appendTurn(vault, A, { ...turn('hola'), provider: 'deepseek', model: 'flash' });
+    await store.appendTurn(vault, A, {
+      ...turn('que tal', 'assistant'),
+      provider: 'deepseek',
+      model: 'pro',
+    });
+
+    expect(await store.latestProvider(vault, A)).toBe('deepseek');
+    // vale el ULTIMO que lo llevaba, igual que las instrucciones
+    expect(await store.latestModel(vault, A)).toBe('pro');
+  });
+
+  it('un turno sin proveedor ni modelo no borra el que hubiera', async () => {
+    await store.appendTurn(vault, A, { ...turn('uno'), provider: 'deepseek', model: 'pro' });
+    await store.appendTurn(vault, A, { ...turn('dos'), provider: null, model: null });
+
+    // `null` significa «este turno no lo cambio», no «se quito»
+    expect(await store.latestProvider(vault, A)).toBe('deepseek');
+    expect(await store.latestModel(vault, A)).toBe('pro');
+  });
+
+  it('sin turnos no hay proveedor ni modelo que recordar', async () => {
+    expect(await store.latestProvider(vault, A)).toBeNull();
+    expect(await store.latestModel(vault, A)).toBeNull();
+  });
+
+  it('cada conversacion recuerda el suyo', async () => {
+    await store.appendTurn(vault, A, { ...turn('uno'), provider: 'deepseek', model: 'pro' });
+    await store.appendTurn(vault, B, { ...turn('otro'), provider: 'claude', model: 'opus' });
+
+    expect(await store.latestModel(vault, A)).toBe('pro');
+    expect(await store.latestModel(vault, B)).toBe('opus');
+  });
+
   it('una conversacion inexistente es una lista vacia, no un error', async () => {
     expect(await store.read(vault, B)).toEqual([]);
   });

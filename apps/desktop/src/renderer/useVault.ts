@@ -10,6 +10,7 @@
 // Nada de eso se persiste en localStorage, ni en un estado global, ni se envia
 // a ningun sitio.
 import { useCallback, useEffect, useRef, useState } from 'react';
+import type { ConversationMemoryStatus } from '@luxy/shared';
 
 /**
  * la cuenta, tal y como la ve la interfaz.
@@ -87,6 +88,13 @@ export interface PrivateMediaItem {
 export interface VaultComposer {
   /** proveedor elegido; `null` mientras no se haya elegido ninguno */
   provider: string | null;
+  /**
+   * modelo elegido; `null` deja decidir al de la conexion.
+   *
+   * Mandarlo siempre en `null` era el motivo de que una conversacion privada
+   * acabara SIEMPRE en el modelo por defecto de la conexion, sin poder elegir.
+   */
+  model: string | null;
   /** proyecto elegido; `null` mientras no se haya elegido ninguno */
   project: string | null;
   message: string;
@@ -98,14 +106,19 @@ export interface VaultComposer {
   caption: string;
 }
 
-/** lo que se borra al cambiar de conversacion; el resto son preferencias */
+/**
+ * lo que se borra al cambiar de conversacion.
+ *
+ * Fuera quedan proveedor, modelo y proyecto: los dos primeros los trae la
+ * conversacion que se abre, y el proyecto es preferencia del usuario.
+ */
 const EMPTY_DRAFT = {
   message: '',
   instructions: null,
   characterId: null,
   characterDescription: null,
   caption: '',
-} satisfies Omit<VaultComposer, 'provider' | 'project'>;
+} satisfies Omit<VaultComposer, 'provider' | 'model' | 'project'>;
 
 export interface VaultController {
   status: VaultStatusView;
@@ -152,6 +165,13 @@ export interface VaultController {
    */
   lastImage: { mediaId: string | null; costCredits: number | null; error: string | null } | null;
   /**
+   * que le paso al bloque de memoria en el ultimo turno.
+   *
+   * Existe para poder cambiar de modelo con evidencia: un modelo mas pequeño
+   * puede escribir bien la escena y mal el bloque, y esa averia es silenciosa.
+   */
+  lastMemoryStatus: ConversationMemoryStatus | null;
+  /**
    * lo que hay escrito y todavia no se ha enviado.
    *
    * Vive AQUI y no en la pantalla a proposito. Estaba en estado del componente,
@@ -167,6 +187,7 @@ export interface VaultController {
   send: (input: {
     message: string;
     provider: string;
+    /** `null` deja que decida la conexion; con valor, manda este */
     model: string | null;
     projectAlias: string;
     /** null conserva las que hubiera; cadena vacía las borra */
@@ -242,9 +263,11 @@ export function useVault(): VaultController {
   const [characterDescription, setCharacterDescription] = useState<string | null>(null);
   const [characters, setCharacters] = useState<VaultCharacterView[]>([]);
   const [lastImage, setLastImage] = useState<VaultController['lastImage']>(null);
+  const [lastMemoryStatus, setLastMemoryStatus] = useState<ConversationMemoryStatus | null>(null);
   const [sending, setSending] = useState(false);
   const [composer, setComposerState] = useState<VaultComposer>({
     provider: null,
+    model: null,
     project: null,
     ...EMPTY_DRAFT,
   });
@@ -475,6 +498,7 @@ export function useVault(): VaultController {
         setCharacterId(null);
         setCharacterDescription(null);
         setLastImage(null);
+        setLastMemoryStatus(null);
         return;
       }
       const result = await window.luxy.readVaultConversation(conversationId);
@@ -489,10 +513,17 @@ export function useVault(): VaultController {
         if (result.value.provider !== null) {
           setComposerState((previous) => ({ ...previous, provider: result.value.provider }));
         }
+        // el modelo tambien pertenece a la conversacion. `null` no se propaga:
+        // una conversacion vieja sin modelo no debe borrar el que este elegido
+        if (result.value.model !== null) {
+          setComposerState((previous) => ({ ...previous, model: result.value.model }));
+        }
       }
-      // el resultado de una imagen pertenece al turno que la pidio, no a la
-      // conversacion: al cambiar de hilo deja de tener sentido
+      // el resultado de una imagen y el estado de la memoria pertenecen al turno
+      // que los produjo, no a la conversacion: al cambiar de hilo dejan de tener
+      // sentido
       setLastImage(null);
+      setLastMemoryStatus(null);
       const mediaResult = await window.luxy.listVaultMedia(conversationId);
       if (mounted.current && mediaResult.ok) setMedia(mediaResult.value.media);
     },
@@ -578,6 +609,10 @@ export function useVault(): VaultController {
         if (result.value.provider !== null) {
           setComposerState((previous) => ({ ...previous, provider: result.value.provider }));
         }
+        if (result.value.model !== null) {
+          setComposerState((previous) => ({ ...previous, model: result.value.model }));
+        }
+        setLastMemoryStatus(result.value.memoryStatus);
         setLastImage(result.value.image);
         // lo generado en este turno se guarda contra la conversacion: recargar
         // los medios es lo que hace que la imagen aparezca sin recargar nada
@@ -764,6 +799,7 @@ export function useVault(): VaultController {
     attaching,
     composer,
     setComposer,
+    lastMemoryStatus,
     attachMedia,
     openMedia,
     generating,

@@ -13,6 +13,35 @@ como esta: sirve para el hilo inmediato.
 resumida. Nada de esto lo escribe el modelo, asi que nada de esto se puede
 inventar. Ver `D-058` para el razonamiento y los numeros.
 
+### F10.0 — elegir modelo y ver el estado de la memoria — **hecha**
+
+Estado: `done`, 2026-09-03. Sin verificar en pantalla.
+
+La conversacion privada mandaba `model: null` **siempre**, asi que
+`modelFor()` del proveedor HTTP caia en el modelo de la conexion: nunca se podia
+elegir, y en la cuenta de Daniel eso significa el Pro de la familia en cada
+turno.
+
+- `latestModel` en `conversation-store.ts`, gemelo de `latestProvider`: el turno
+  ya sellaba el modelo y nadie lo leia. El modelo pasa a ser propiedad de la
+  conversacion y sobrevive al reinicio.
+- Selector de modelo en Privado, con el catalogo real filtrado por familia —el
+  id de proveedor ES la familia, asi los registra el agente—. La opcion vacia
+  mantiene el comportamiento anterior, ahora como eleccion visible.
+- **Estado del bloque de memoria por turno**, que se calculaba y se tiraba. Sin
+  esto no se puede cambiar de modelo con criterio: uno mas pequeño puede escribir
+  bien la escena y mal el bloque, y como un bloque invalido conserva la memoria
+  anterior (`D-019`), la averia solo se nota semanas despues como «se le olvidan
+  cosas».
+
+Cuatro pruebas nuevas en `conversation-store.test.ts`. `npm run check` exit 0:
+122 archivos, 2.134 superadas, 9 omitidas.
+
+Pendiente de Daniel: comparar un modelo menor contra el actual mirando ese aviso,
+con Laboratorio o a mano. El coste no es criterio (ver `D-058`): el motivo para
+bajar de modelo seria la latencia, que en los registros llega a 56 s hasta el
+primer token.
+
 ### F10.1 — indice de busqueda en memoria
 
 Indice invertido sobre el texto de los turnos ya descifrados, construido al

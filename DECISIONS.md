@@ -1266,6 +1266,17 @@ equivocada. Lo que cambia:
 - de paso, **confirma la medicion del prompt**: 4.468-4.881 tokens de entrada
   observados frente a los ~4.000 estimados a partir del relleno de la boveda.
 
+**Y el coste, ademas, es irrelevante en esta cuenta.** Cifras reales del
+2026-09-03: 65.464,63 ¥ de credito, 294,19 ¥ consumidos en 24 h, 1.655,1 ¥ en
+455 llamadas historicas —media de **3,64 ¥ por llamada**— y ~222 dias de
+autonomia sin contar el credito que la pasarela regala a diario.
+
+Conclusion que conviene dejar fijada para que nadie la reabra: **el coste no
+debe influir en ninguna decision de diseño de esta funcion.** Un catalogador de
+una llamada por episodio —uno o tres al dia— serian ~20 ¥ diarios sobre 294: por
+debajo del ruido. Si el catalogador se descarta es por otras razones, no por
+dinero.
+
 Los dos niveles de recuperacion **se conservan**, pero por otros motivos, que
 son los que quedan en pie cuando el precio deja de mandar:
 
@@ -1320,9 +1331,12 @@ los mismos de la conversacion. El ahorro real, por tanto, es menor de lo que
 parece: catalogar es una llamada por episodio (~5.000 tokens de entrada, ~150 de
 salida), no por mensaje.
 
-Con el cobro por llamada, catalogar un episodio cuesta **lo mismo que un turno
-de conversacion**. Si un episodio son veinte turnos, es un recargo del 5%:
-asumible, pero se paga por algo que la busqueda lexica da gratis.
+Con el cobro por llamada, catalogar un episodio cuesta lo mismo que un turno de
+conversacion. Con las cifras reales de la cuenta eso es despreciable, asi que
+**el argumento economico contra el catalogador queda retirado**. Lo que queda en
+pie es lo demas: la busqueda lexica no falla, no inventa un titulo que deje un
+recuerdo inencontrable, no depende de que un modelo este disponible y no manda
+contenido privado a ningun sitio.
 
 Decision: **empezar sin catalogador.** Se añade despues, y solo para dos cosas
 concretas que la busqueda lexica no da: un titulo legible en la pantalla de

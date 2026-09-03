@@ -11,6 +11,7 @@ import { LogsPage, SettingsPage } from './pages/System.js';
 import { SetupPage } from './pages/Setup.js';
 import { LaboratoryPage } from './pages/Laboratory.js';
 import { VaultPage } from './pages/Vault.js';
+import { useDetectedCatalog } from './useCatalog.js';
 import { useVault } from './useVault.js';
 import { projectDisplayLabel } from './project-context.js';
 
@@ -33,6 +34,8 @@ export function App(): JSX.Element {
   const { status, activity, pending, approve, busy, error, hint, start, stop, restart } =
     useAgent();
   const { summary, loading, save, setSecret, deleteSecret, reload } = useConfig();
+  // el catalogo se lee de la conexion, asi que va DESPUES de la configuracion
+  const catalogo = useDetectedCatalog(summary);
   const vault = useVault();
   const [seccion, setSeccion] = useState<SeccionId>('inicio');
   const [projectScope, setProjectScope] = useState<string | null>(null);
@@ -153,6 +156,7 @@ export function App(): JSX.Element {
             vault={vault}
             summary={summary}
             providers={status.agent?.providers ?? []}
+            models={catalogo.models}
           />
         )}
         {seccion === 'registros' && <LogsPage />}

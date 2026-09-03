@@ -1,5 +1,29 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-03 — F10.0, modelo elegible y memoria observable
+
+- **`npm run check`: exit 0. 122 archivos, 2.134 superadas, 9 omitidas** (antes
+  2.130).
+- Cuatro pruebas nuevas en `conversation-store.test.ts`: el proveedor y el modelo
+  pertenecen a la conversacion y vale el ultimo turno que los llevaba; un turno
+  con `null` no borra los que hubiera; sin turnos no hay nada que recordar; cada
+  conversacion recuerda el suyo.
+- **Sin cobertura automatica:** el selector de modelo y el aviso del estado de la
+  memoria son interfaz, y el renderer no tiene banco de pruebas de componentes.
+  Lo que si esta cubierto es la lectura desde la boveda, que es donde estaba el
+  fallo.
+- **Sin verificar en pantalla.**
+
+Economia, con cifras reales de la cuenta (no estimaciones): 65.464,63 ¥ de
+credito, 294,19 ¥ en 24 h, 1.655,1 ¥ en 455 llamadas —3,64 ¥ de media— y ~222
+dias de autonomia. **El coste deja de ser un criterio de diseño**; queda
+registrado en `D-058` para no reabrirlo.
+
+Pista sobre las llamadas cobradas sin salida que se detectaron ayer: un anuncio
+de la propia pasarela dice que la disponibilidad de los modelos buenos para
+usuarios gratuitos es muy baja. Encaja con los fallos instantaneos de 1 s y 0
+tokens de salida. No investigado.
+
 ### 2026-09-02 — dos fallos mas, encontrados probando en la aplicacion
 
 - **El proveedor no sobrevivia al reinicio.** El arreglo anterior lo subio a
