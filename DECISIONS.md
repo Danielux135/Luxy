@@ -1506,3 +1506,53 @@ Consecuencia para el plan: **F10.6 deja de ser opcional.** Ya no solo por las
 parafrasis —eso era `D-058`—; ahora tambien porque partir por escenas y titular
 cada una exige a alguien que lea lo que pasa. Es lo unico que queda por hacer
 para que esto funcione como se pidio, y el coste ya se descarto como criterio.
+
+## D-061 — un recuerdo que no se puede señalar no se dice
+
+Fecha: 2026-09-03
+
+Estado: aceptada, implementada
+
+Tercera aparicion de la misma averia, y esta vez con el mecanismo a la vista.
+
+Las dos anteriores: un pie de foto que decia el color de una gata y la respuesta
+añadio una oreja doblada; y ese detalle inventado entrando despues en la memoria
+acumulativa, donde volvio convertido en hecho. La tercera, en la primera
+conversacion nueva con memoria episodica:
+
+> «todavía siento el peso de tu mano en mi cintura. Y el olor a café por las
+> mañanas. Y cómo te quedabas callado cuando te miraba demasiado tiempo.»
+
+La mano en la cintura es real y sale de un turno. Las galletas de vainilla, que
+menciona despues, tambien. **El café no existe en ninguna conversacion.**
+
+Lo importante es que **no fue una mala lectura de un titulo**: fue una
+enumeracion. Una lista de tres suena mejor que una de dos, y el tercer elemento
+se relleno. La regla que habia —«no lo supongas ni lo rellenes»— prohibe suponer
+lo que no consta; no prohibe COMPLETAR una figura retorica.
+
+La regla se acota al PASADO, y ese matiz es la mitad de la decision. La primera
+version prohibia «detalles que no esten escritos: olores, sabores, sonidos…», y
+eso le habria quitado lo que mejor hace: inventarse la escena. El aire que huele
+de pronto a vainilla tibia es su trabajo, no un fallo.
+
+La distincion que vale:
+
+- **el presente se inventa entero.** Olores, gestos, el tiempo que hace, lo que
+  se le ocurra. Improvisar la escena es lo que se le pide;
+- **el pasado no.** Cualquier cosa presentada como recuerdo compartido tiene que
+  poder **señalarse** en una linea de indice o en la transcripcion;
+- y si al enumerar falta uno para redondear la frase, se dicen dos ciertos en vez
+  de tres con uno falso.
+
+Es la misma leccion que `D-056`: al corregir un exceso es facil pasarse al otro
+lado y aplanar el personaje. Lo que se ata es una cosa concreta —afirmar un
+pasado que no existio—, no su libertad.
+
+El motivo por el que esto importa mas aqui que en una imagen: un recuerdo
+inventado es indistinguible de uno cierto para quien escucha, y ademas puede
+acabar en la memoria acumulativa y volver como hecho.
+
+**Leccion general, ya con tres casos:** cualquier bloque que entregue RESUMENES
+en vez de texto literal invita a rellenar, y cada uno necesita su regla
+explicita. No basta con haberla escrito en otro bloque parecido.

@@ -17,11 +17,11 @@ Ante un «Hola, ¿te acuerdas de mí?», tres detalles rastreables:
 Las dos mitades a la vez: encuentra por lo que escribio el catalogador y cita por
 lo que se dijo. Es exactamente lo que se pidio el 2026-09-02.
 
-**PENDIENTE DE VERIFICAR, y es importante:** en la misma respuesta aparece «el
-olor a café por las mañanas». En las conversaciones que se han revisado no hay
-ningun café. Si no esta en ninguna de las otras, es detalle inventado presentado
-como recuerdo —la misma averia que la oreja doblada de la gata— y la regla del
-bloque de recuerdos hay que apretarla como se hizo con las imagenes.
+**CONFIRMADO detalle inventado.** En la misma respuesta aparece «el olor a café
+por las mañanas», y Daniel confirma que no hay ningun café en ninguna de sus
+conversaciones. No fue una mala lectura de un titulo: fue completar una
+enumeracion de tres con dos elementos ciertos y uno relleno. Corregido en
+`D-061`, con prueba.
 
 ### 2026-09-03 — el catalogado no repetia: iba a cuentagotas y sin decirlo
 

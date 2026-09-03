@@ -177,6 +177,38 @@ describe('prompt de conversacion privada', () => {
     expect(prompt).toContain('preguntalo; no lo supongas');
   });
 
+  it('prohibe completar una enumeracion con un recuerdo inventado', () => {
+    // paso de verdad en la primera conversacion nueva: enumero «el peso de tu
+    // mano en mi cintura, el olor a café por las mañanas y cómo te quedabas
+    // callado». Dos eran ciertas y el café no existia en ninguna conversacion.
+    // No malinterpreto un titulo: relleno el tercer elemento que pedia la frase
+    const prompt = buildVaultPrompt({
+      memory: null,
+      turns: [],
+      message: '¿te acuerdas de mí?',
+      recall: { episodes: [{ id: 'r1', date: '2026-09-02', title: 'x', turns: 2 }], quoted: null },
+    });
+
+    expect(prompt).toContain('di DOS de verdad en vez de');
+    expect(prompt).toContain('tiene que poder señalarse');
+  });
+
+  it('la regla ata el pasado y NO le quita la improvisacion', () => {
+    // el matiz que pidio Daniel, y que la primera version se cargaba: inventar
+    // el presente es su trabajo —los olores de la escena son de lo mejor que
+    // hace—; inventar el pasado y presentarlo como recuerdo compartido, no
+    const prompt = buildVaultPrompt({
+      memory: null,
+      turns: [],
+      message: 'hola',
+      recall: { episodes: [{ id: 'r1', date: '2026-09-02', title: 'x', turns: 2 }], quoted: null },
+    });
+
+    expect(prompt).toContain('Lo que pasa AHORA te lo inventas entero');
+    expect(prompt).toContain('Improvisar la escena es tu trabajo');
+    expect(prompt).toContain('Lo que no se inventa es lo que YA ocurrio');
+  });
+
   it('un momento transcrito llega con las palabras que se dijeron', () => {
     const prompt = buildVaultPrompt({
       memory: null,
