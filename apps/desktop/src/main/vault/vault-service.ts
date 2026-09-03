@@ -101,6 +101,8 @@ export interface VaultServiceOptions {
 }
 
 export class VaultService {
+  private readonly lockListeners = new Set<() => void>();
+
   private masterKey: Uint8Array | null = null;
   private lastActivityAt = 0;
   private readonly now: () => number;
@@ -532,10 +534,26 @@ export class VaultService {
    * a partir de aqui los datos siguen en disco pero son indescifrables, tambien
    * para Luxy. Es la diferencia entre esconder una seccion y no poder leerla.
    */
+  /**
+   * avisa cuando la boveda se cierra, por el camino que sea.
+   *
+   * Lo necesita todo lo que mantenga contenido descifrado en memoria: una
+   * boveda cerrada que siga teniendo su contenido accesible no esta cerrada.
+   * Devuelve la funcion de baja.
+   */
+  onLock(listener: () => void): () => void {
+    this.lockListeners.add(listener);
+    return () => this.lockListeners.delete(listener);
+  }
+
   lock(): void {
     wipe(this.masterKey);
     this.masterKey = null;
     this.lastActivityAt = 0;
+    // se avisa DESDE AQUI y no desde cada sitio que cierra, porque cerrar
+    // ocurre por tres caminos —a mano, por inactividad y al salir— y olvidar uno
+    // dejaria contenido descifrado en memoria con la boveda cerrada
+    for (const listener of this.lockListeners) listener();
   }
 
   private adopt(masterKey: Uint8Array): void {

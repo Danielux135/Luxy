@@ -96,6 +96,26 @@ Un episodio es un tramo contiguo de turnos de una conversacion.
   conservar.
 - Pertenecen al personaje. Una conversacion puede excluirse del banco.
 
+**Hecha el 2026-09-03**, con una simplificacion sobre lo planeado: **los
+episodios NO se persisten.** Se deducen por completo de los turnos, que ya estan
+en disco; un almacen cifrado propio añadiria un esquema, una migracion y la
+posibilidad de que los dos se separen, a cambio de ahorrar una pasada sobre una
+lista que ya se ha leido. Lo unico que habra que guardar algun dia son los
+titulos y etiquetas de F10.6, porque eso no se deduce de nada.
+
+Piezas: `episodes.ts` (segmentacion pura, 13 pruebas) y `private-memory.ts`, que
+junta el indice y los episodios y les pone lo unico que no puede ser puro —leer
+la boveda y saber cuando dejan de valer— con 8 pruebas contra una boveda real.
+
+Se construye **perezosamente**, en la primera busqueda y no al abrir: abrir ya
+tarda por el derivado de la contraseña, y quien no rememore nada no debe pagar
+una pasada sobre todo su historial.
+
+Y se vacia sola al cerrar. Para eso `VaultService` tiene ahora `onLock`: cerrar
+ocurre por tres caminos —a mano, por inactividad y al salir— y avisar desde
+dentro de `lock()` es lo unico que garantiza que ninguno se olvide. Hay una
+prueba que lo afirma.
+
 ### F10.3 — recuperacion en dos niveles
 
 El limite es el contexto y la dilucion, **no el dinero**: la pasarela cobra por

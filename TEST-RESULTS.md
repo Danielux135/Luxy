@@ -1,5 +1,25 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-03 — F10.2, episodios y memoria episodica
+
+- **`npm run check`: exit 0. 125 archivos, 2.180 superadas, 9 omitidas** (antes
+  2.159).
+- 13 pruebas de segmentacion, puras: donde corta y donde no —un silencio largo
+  si, una pausa para cenar no—, el tope de turnos sin perder ni repetir ninguno,
+  una fecha ilegible que no parte la conversacion, y que el episodio guarda el
+  rango pero **nunca el texto**.
+- 8 pruebas de `PrivateMemory` contra una boveda de verdad, cifrando y
+  descifrando. La que importa: **cerrar la boveda vacia la memoria**. Se
+  comprueba llamando a `lock()` directamente, que es el camino comun a los tres
+  —a mano, inactividad y salida—.
+- Tambien cubiertas: construccion perezosa, invalidacion al cambiar el
+  historial, exclusion de conversaciones y que dos busquedas simultaneas no
+  construyen el indice dos veces.
+- Un fallo real durante el desarrollo: la prueba del episodio esperaba turnos
+  numerados desde 1 y se numeran desde 0. Se corrigio la asercion, no el codigo.
+- **Sin integrar en la conversacion todavia**: nadie llama a esto desde un turno.
+  Eso es F10.3.
+
 ### 2026-09-03 — F10.1, indice de busqueda sobre turnos
 
 - **`npm run check`: exit 0. 123 archivos, 2.153 superadas, 9 omitidas** (antes
