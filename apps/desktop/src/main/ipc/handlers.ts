@@ -1616,6 +1616,9 @@ export function registerIpcHandlers(context: HandlerContext): void {
     // vez: estarian dos veces en el mismo prompt
     const oldestRecent = history.slice(-1 - VAULT_RECENT_TURNS)[0]?.sequence;
     const recall = await buildRecall(context.privateMemory, context.vault, args.message, {
+      // los recuerdos son del personaje: un hilo sin personaje no hereda los de
+      // nadie, y uno con otro personaje tampoco ve los de este
+      characterId,
       ...(oldestRecent === undefined
         ? {}
         : { alreadyInPrompt: { conversationId, fromSequence: oldestRecent } }),

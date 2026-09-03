@@ -16,6 +16,8 @@ import { buildRecall, looksLikeMemoryRequest } from './recall.js';
 const PASSWORD = 'una frase larga de prueba';
 const FAST = { t: 1, m: 8 * 1024, p: 1 } as const;
 const A = '11111111-1111-4111-8111-111111111111';
+const LIA = '83cc7f03-5eb3-4d03-833f-56dfbe80cd7d';
+const OTRO = '99999999-9999-4999-8999-999999999999';
 
 function memoryDeviceKeys(): DeviceKeyStore {
   let value: string | undefined;
@@ -89,12 +91,14 @@ describe('lo que recuerda en un turno', () => {
     memory = new PrivateMemory(store);
     memory.attachTo(vault);
 
-    await store.appendTurn(vault, A, turn('¿cómo te llamas? ¿de dónde eres?'));
-    await store.appendTurn(
-      vault,
-      A,
-      turn('Me llamo Luxy. Vengo de un lugar donde huele a vainilla.', 'assistant'),
-    );
+    await store.appendTurn(vault, A, {
+      ...turn('¿cómo te llamas? ¿de dónde eres?'),
+      characterId: LIA,
+    });
+    await store.appendTurn(vault, A, {
+      ...turn('Me llamo Luxy. Vengo de un lugar donde huele a vainilla.', 'assistant'),
+      characterId: LIA,
+    });
   });
 
   afterEach(() => {
@@ -103,7 +107,7 @@ describe('lo que recuerda en un turno', () => {
 
   it('las lineas van SIEMPRE, se pida o no rememorar', () => {
     // es lo que hace que sepa que ocurrio aunque la busqueda no acierte
-    return buildRecall(memory, vault, 'hola, ¿qué tal?').then((recall) => {
+    return buildRecall(memory, vault, 'hola, ¿qué tal?', { characterId: LIA }).then((recall) => {
       expect(recall.episodes).toHaveLength(1);
       expect(recall.episodes[0]).toMatchObject({ id: 'r1', title: '¿cómo te llamas? ¿de dónde eres?' });
       expect(recall.quoted).toBeNull();
@@ -111,18 +115,18 @@ describe('lo que recuerda en un turno', () => {
   });
 
   it('la linea lleva fecha, para poder situarlo en el tiempo', async () => {
-    const recall = await buildRecall(memory, vault, 'hola');
+    const recall = await buildRecall(memory, vault, 'hola', { characterId: LIA });
     expect(recall.episodes[0]?.date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
 
   it('el identificador que ve el modelo es corto, no un uuid', async () => {
     // el prompt no tiene por que llevar identificadores internos
-    const recall = await buildRecall(memory, vault, 'hola');
+    const recall = await buildRecall(memory, vault, 'hola', { characterId: LIA });
     expect(JSON.stringify(recall)).not.toContain(A);
   });
 
   it('pidiendo rememorar Y acertando, se transcribe el momento', async () => {
-    const recall = await buildRecall(memory, vault, '¿te acuerdas de lo de la vainilla?');
+    const recall = await buildRecall(memory, vault, '¿te acuerdas de lo de la vainilla?', { characterId: LIA });
     expect(recall.quoted).not.toBeNull();
     // texto real, no un resumen: por eso suena a recordar
     expect(recall.quoted?.conversation.map((each) => each.text)).toContain(
@@ -132,7 +136,7 @@ describe('lo que recuerda en un turno', () => {
 
   it('pidiendo rememorar pero sin acertar, no se inventa un momento', async () => {
     // traer un episodio cualquiera seria peor que no traer ninguno
-    const recall = await buildRecall(memory, vault, '¿te acuerdas del submarino amarillo?');
+    const recall = await buildRecall(memory, vault, '¿te acuerdas del submarino amarillo?', { characterId: LIA });
     expect(recall.quoted).toBeNull();
     expect(recall.episodes).toHaveLength(1);
   });
@@ -141,28 +145,54 @@ describe('lo que recuerda en un turno', () => {
     // preguntar «¿te acuerdas de lo que acabas de decir?» no debe repetir turnos
     // que estan tres bloques mas abajo en el mismo prompt
     const recall = await buildRecall(memory, vault, '¿te acuerdas de la vainilla?', {
+      characterId: LIA,
       alreadyInPrompt: { conversationId: A, fromSequence: 0 },
     });
     expect(recall.quoted).toBeNull();
   });
 
   it('respeta el tope de lineas', async () => {
-    const recall = await buildRecall(memory, vault, 'hola', { maxEpisodeLines: 0 });
+    const recall = await buildRecall(memory, vault, 'hola', { characterId: LIA, maxEpisodeLines: 0 });
     expect(recall.episodes).toEqual([]);
   });
 
   it('recorta el momento transcrito por el principio, no por el final', async () => {
     // quien pregunta por un momento quiere como fue, no como acabo
     const recall = await buildRecall(memory, vault, '¿te acuerdas de la vainilla?', {
+      characterId: LIA,
       maxQuotedTurns: 1,
     });
     expect(recall.quoted?.conversation).toHaveLength(1);
     expect(recall.quoted?.conversation[0]?.text).toBe('¿cómo te llamas? ¿de dónde eres?');
   });
 
+  it('un hilo SIN personaje no hereda los recuerdos de nadie', async () => {
+    // el fallo que encontro Daniel: abrio una conversacion nueva sin elegir
+    // personaje y le hablo con los recuerdos de Lía. `D-058` decia que los
+    // recuerdos son del personaje y el alcance nunca se llego a implementar
+    const recall = await buildRecall(memory, vault, 'hola', { characterId: LIA });
+    expect(recall.episodes.length).toBeGreaterThan(0);
+
+    const huerfano = await buildRecall(memory, vault, 'hola', { characterId: null });
+    expect(huerfano.episodes).toEqual([]);
+  });
+
+  it('un personaje no ve los recuerdos de otro', async () => {
+    const otra = await buildRecall(memory, vault, '¿te acuerdas de la vainilla?', {
+      characterId: OTRO,
+    });
+    expect(otra.episodes).toEqual([]);
+    expect(otra.quoted).toBeNull();
+  });
+
+  it('sin indicar personaje se sigue viendo todo, para la pantalla de diagnostico', async () => {
+    // esa pantalla existe para ver QUE hay, incluido lo de otros
+    expect((await memory.listEpisodes(vault)).length).toBeGreaterThan(0);
+  });
+
   it('sin nada en la boveda no recuerda nada, y no es un error', async () => {
     const empty = new PrivateMemory(store, { excluded: () => new Set([A]) });
-    const recall = await buildRecall(empty, vault, '¿te acuerdas?');
+    const recall = await buildRecall(empty, vault, '¿te acuerdas?', { characterId: LIA });
     expect(recall).toEqual({ episodes: [], quoted: null });
   });
 });

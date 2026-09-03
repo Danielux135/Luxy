@@ -52,6 +52,15 @@ export class PrivateMemory {
    * de otra forma. Mezclarlo con los turnos ensuciaria lo que despues se cita.
    */
   private scenes: TurnIndex | null = null;
+  /**
+   * de quien es cada conversacion.
+   *
+   * Los recuerdos pertenecen al PERSONAJE, no a la boveda (`D-058`). Sin esto,
+   * una conversacion recibia los recuerdos de todas las demas —incluidas las de
+   * otro personaje, o las de ninguno—, que es a la vez incoherente y una fuga:
+   * un hilo nuevo sin personaje contaba la intimidad de otro.
+   */
+  private characterOf = new Map<string, string | null>();
   private episodes: Episode[] = [];
   private building: Promise<void> | null = null;
 
@@ -91,6 +100,7 @@ export class PrivateMemory {
     this.scenes?.clear();
     this.index = null;
     this.scenes = null;
+    this.characterOf.clear();
     this.episodes = [];
     this.building = null;
   }
@@ -104,6 +114,11 @@ export class PrivateMemory {
 
     for (const conversation of await this.conversations.list(vault)) {
       if (excluded.has(conversation.conversationId)) continue;
+
+      this.characterOf.set(
+        conversation.conversationId,
+        await this.conversations.latestCharacterId(vault, conversation.conversationId),
+      );
 
       const turns = await this.conversations.read(vault, conversation.conversationId);
       const withId = turns.map((turn) => ({
@@ -152,10 +167,32 @@ export class PrivateMemory {
     await this.building;
   }
 
-  /** todos los episodios, del mas reciente al mas antiguo */
-  async listEpisodes(vault: VaultService): Promise<Episode[]> {
+  /**
+   * conversaciones de un personaje.
+   *
+   * `null` no significa «todas»: significa «las que tampoco tienen personaje».
+   * Un hilo sin personaje no hereda la memoria de nadie.
+   */
+  private conversationsOf(characterId: string | null): ReadonlySet<string> {
+    const own = new Set<string>();
+    for (const [conversationId, owner] of this.characterOf) {
+      if (owner === characterId) own.add(conversationId);
+    }
+    return own;
+  }
+
+  /**
+   * episodios del personaje indicado, del mas reciente al mas antiguo.
+   *
+   * Sin `characterId` devuelve todos: lo usa la pantalla de diagnostico, que
+   * existe para ver que hay. Un turno SIEMPRE pasa el suyo.
+   */
+  async listEpisodes(vault: VaultService, characterId?: string | null): Promise<Episode[]> {
     await this.ensureBuilt(vault);
-    return this.episodes;
+    if (characterId === undefined) return this.episodes;
+
+    const own = this.conversationsOf(characterId);
+    return this.episodes.filter((episode) => own.has(episode.conversationId));
   }
 
   /**
@@ -168,19 +205,22 @@ export class PrivateMemory {
   async search(
     vault: VaultService,
     query: string,
-    options: { limit?: number } = {},
+    options: { limit?: number; characterId?: string | null } = {},
   ): Promise<RecalledTurn[]> {
     await this.ensureBuilt(vault);
     if (this.index === null) return [];
 
     const limit = options.limit ?? 5;
+    // sin personaje indicado se busca en todo; con el, solo en lo suyo
+    const only =
+      options.characterId === undefined ? undefined : this.conversationsOf(options.characterId);
     // las dos busquedas se mezclan: una acierta por lo que se dijo y la otra
     // por como se llama. Una escena encontrada por su etiqueta apunta a su
     // primer turno real, que es lo que despues se cita
     const found = new Map<string, TurnMatch>();
     for (const match of [
-      ...this.index.search(query, { limit }),
-      ...(this.scenes?.search(query, { limit }) ?? []),
+      ...this.index.search(query, { limit, ...(only === undefined ? {} : { only }) }),
+      ...(this.scenes?.search(query, { limit, ...(only === undefined ? {} : { only }) }) ?? []),
     ]) {
       const key = `${match.conversationId}#${match.sequence}`;
       const previous = found.get(key);

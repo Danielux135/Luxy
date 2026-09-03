@@ -1556,3 +1556,31 @@ acabar en la memoria acumulativa y volver como hecho.
 **Leccion general, ya con tres casos:** cualquier bloque que entregue RESUMENES
 en vez de texto literal invita a rellenar, y cada uno necesita su regla
 explicita. No basta con haberla escrito en otro bloque parecido.
+
+## D-062 — los recuerdos son del personaje, y eso hay que implementarlo
+
+Fecha: 2026-09-03
+
+Estado: aceptada, implementada
+
+`D-058` dijo que el alcance del banco de recuerdos era el PERSONAJE. Nunca se
+implemento. `PrivateMemory` filtraba por conversaciones excluidas y por nada mas,
+asi que **cualquier conversacion privada recibia los recuerdos de todas**.
+
+Lo encontro Daniel abriendo una conversacion nueva sin elegir personaje: le hablo
+con los recuerdos de Lía. Es a la vez incoherente —un personaje que no existe
+recordando lo que vivio otro— y una fuga: la intimidad de una conversacion
+llegando a un hilo que no tiene nada que ver.
+
+La regla, ahora en codigo y con pruebas:
+
+- un turno **siempre** pasa el personaje de su conversacion;
+- `null` no significa «todos»: significa «los hilos que tampoco tienen
+  personaje». Uno sin personaje no hereda la memoria de nadie;
+- la pantalla de recuerdos sigue viendolo todo, porque existe para diagnosticar
+  y ahi interesa ver que hay.
+
+**Por que se colo:** el alcance estaba escrito en la decision y en los
+comentarios, y no habia ni una prueba que lo exigiera. Todo lo demas de F10 se
+verifico con casos; esto se verifico leyendolo. Ahora hay tres pruebas, y la
+primera reproduce exactamente lo que vio Daniel.

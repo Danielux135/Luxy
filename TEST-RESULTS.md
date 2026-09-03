@@ -1,5 +1,19 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-03 — FALLO: los recuerdos no estaban acotados al personaje
+
+Encontrado por Daniel: abrio una conversacion nueva **sin elegir personaje** y le
+hablo con los recuerdos de Lía.
+
+`D-058` decia que el banco pertenece al personaje. Nunca se implemento: se
+filtraba por conversaciones excluidas y por nada mas. Corregido en `D-062`.
+
+- Se colo porque el alcance estaba en la decision y en los comentarios, y **no
+  habia ni una prueba que lo exigiera**. Todo lo demas de F10 se verifico con
+  casos; esto se verifico leyendolo, que no es verificar.
+- Tres pruebas nuevas, y la primera reproduce lo que el vio.
+- **`npm run check`: exit 0. 129 archivos, 2.252 superadas, 12 omitidas.**
+
 ### 2026-09-03 — D-061 comprobado: recuerda con precision y sigue improvisando
 
 Segunda conversacion nueva, con la regla acotada al pasado. Once afirmaciones

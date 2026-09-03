@@ -54,6 +54,14 @@ export interface RecallOptions {
   maxEpisodeLines?: number;
   maxQuotedTurns?: number;
   /**
+   * de quien son los recuerdos que puede traer.
+   *
+   * Obligatorio en un turno real: los recuerdos pertenecen al personaje
+   * (`D-058`). `null` significa «esta conversacion no tiene personaje», y
+   * entonces solo alcanza a otras que tampoco lo tengan; NO a las de todos.
+   */
+  characterId?: string | null;
+  /**
    * lo que ya viaja en el prompt como historial reciente.
    *
    * Sin esto, preguntar «¿te acuerdas de lo que acabas de decir?» transcribiria
@@ -81,7 +89,7 @@ export async function buildRecall(
   message: string,
   options: RecallOptions = {},
 ): Promise<VaultRecall> {
-  const all = await memory.listEpisodes(vault);
+  const all = await memory.listEpisodes(vault, options.characterId ?? null);
   if (all.length === 0) return { episodes: [], quoted: null };
 
   const visible = all.slice(0, options.maxEpisodeLines ?? MAX_EPISODE_LINES);
@@ -94,7 +102,10 @@ export async function buildRecall(
 
   if (!looksLikeMemoryRequest(message)) return { episodes: lines, quoted: null };
 
-  const matches = await memory.search(vault, message, { limit: 5 });
+  const matches = await memory.search(vault, message, {
+    limit: 5,
+    characterId: options.characterId ?? null,
+  });
   const already = options.alreadyInPrompt;
 
   for (const match of matches) {
