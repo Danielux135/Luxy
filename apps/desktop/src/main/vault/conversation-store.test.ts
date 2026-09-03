@@ -204,6 +204,20 @@ describe('conversaciones privadas en disco', () => {
     expect(new Set(turns.map((each) => each.sequence)).size).toBe(turns.length);
   });
 
+  it('las instrucciones de un personaje se pueden recuperar de su ultima conversacion', async () => {
+    // la personalidad es del personaje y no del hilo: es lo que permite
+    // rellenarlas al elegirlo en una conversacion nueva
+    const LIA = '83cc7f03-5eb3-4d03-833f-56dfbe80cd7d';
+    await store.appendTurn(vault, A, {
+      ...turn('hola'),
+      characterId: LIA,
+      instructions: 'Dulce, curiosa, un poco tímida',
+    });
+
+    expect(await store.latestCharacterId(vault, A)).toBe(LIA);
+    expect(await store.latestInstructions(vault, A)).toBe('Dulce, curiosa, un poco tímida');
+  });
+
   it('borrar elimina el archivo', async () => {
     await store.appendTurn(vault, A, turn('hola'));
     store.delete(A);

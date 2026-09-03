@@ -199,6 +199,15 @@ function ConversationPanel({
           // se adopta directamente: copiar un uuid a mano entre dos campos de
           // la misma pantalla era un paso que no aportaba nada
           vault.setComposer({ characterId: id, characterDescription: description });
+
+          // y con el vienen sus instrucciones: la personalidad es del personaje,
+          // no del hilo, y reescribirla en cada conversacion nueva produce el
+          // mismo personaje comportandose distinto segun donde se le hable.
+          // No pisa las que ya haya: solo rellena lo que esta vacio
+          if (draftInstructions !== null || (vault.instructions ?? '').length > 0) return;
+          void vault.readCharacterInstructions(id).then((instructions) => {
+            if (instructions !== null) vault.setComposer({ instructions });
+          });
         }}
       />
 

@@ -688,6 +688,17 @@ export const vaultCharacterImportArgsSchema = z.object({
   avatarUrl: z.string().max(2000).default(''),
 });
 
+/**
+ * como se comporto ese personaje la ultima vez.
+ *
+ * La personalidad es del personaje y no del hilo: al elegirlo en una
+ * conversacion nueva se rellenan sus instrucciones para no tener que escribirlas
+ * otra vez. Sigue siendo un borrador editable, y no pisa las que ya haya.
+ */
+export const vaultCharacterInstructionsResultSchema = z.object({
+  instructions: z.string().nullable(),
+});
+
 export const vaultCharacterAvatarResultSchema = z.object({
   /** data URL descifrada, o null si ese personaje no tiene avatar guardado */
   dataUrl: z.string().nullable(),
@@ -1056,6 +1067,9 @@ export interface LuxyBridge {
   importVaultCharacter(
     args: z.infer<typeof vaultCharacterImportArgsSchema>,
   ): Promise<IpcResult<z.infer<typeof vaultCharacterListResultSchema>>>;
+  readVaultCharacterInstructions(
+    args: z.infer<typeof vaultCharacterForgetArgsSchema>,
+  ): Promise<IpcResult<z.infer<typeof vaultCharacterInstructionsResultSchema>>>;
   readVaultCharacterAvatar(
     args: z.infer<typeof vaultCharacterForgetArgsSchema>,
   ): Promise<IpcResult<z.infer<typeof vaultCharacterAvatarResultSchema>>>;

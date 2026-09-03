@@ -1348,6 +1348,35 @@ export function registerIpcHandlers(context: HandlerContext): void {
     return { characters };
   });
 
+  /**
+   * las ultimas instrucciones que se usaron con este personaje.
+   *
+   * La personalidad es del personaje, no del hilo: escribirla otra vez en cada
+   * conversacion nueva es trabajo repetido y ademas produce personajes que se
+   * comportan distinto segun donde se hable con ellos.
+   *
+   * Se busca en la conversacion mas reciente que fuera suya. Devuelve `null` si
+   * nunca se le pusieron ningunas, que no es un error.
+   */
+  handle(IPC_INVOKE.vaultCharacterInstructions, vaultCharacterForgetArgsSchema, async (args) => {
+    if (!context.vault.isUnlocked()) throw new VaultError('la boveda esta bloqueada');
+
+    const store = context.privateConversations;
+    // `list` viene de la mas reciente a la mas antigua: la primera que sea suya
+    // y tenga instrucciones es la que vale
+    for (const conversation of await store.list(context.vault)) {
+      const owner = await store.latestCharacterId(context.vault, conversation.conversationId);
+      if (owner !== args.characterId) continue;
+
+      const instructions = await store.latestInstructions(
+        context.vault,
+        conversation.conversationId,
+      );
+      if (instructions !== null && instructions.length > 0) return { instructions };
+    }
+    return { instructions: null };
+  });
+
   /** avatar descifrado, para enseñarlo. Nunca se escribe sin cifrar en disco */
   handle(IPC_INVOKE.vaultCharacterAvatar, vaultCharacterForgetArgsSchema, async (args) => {
     const character = (await context.characters.list(context.vault)).find(

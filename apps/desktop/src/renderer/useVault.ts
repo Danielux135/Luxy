@@ -282,6 +282,13 @@ export interface VaultController {
     description: string;
     avatarUrl: string;
   }) => Promise<boolean>;
+  /**
+   * las ultimas instrucciones que se usaron con ese personaje.
+   *
+   * Para no reescribir su personalidad en cada conversacion nueva: es del
+   * personaje, no del hilo.
+   */
+  readCharacterInstructions: (characterId: string) => Promise<string | null>;
   /** avatar descifrado como data URL; null si ese personaje no tiene */
   readCharacterAvatar: (characterId: string) => Promise<string | null>;
   syncing: boolean;
@@ -885,6 +892,14 @@ export function useVault(): VaultController {
     [],
   );
 
+  const readCharacterInstructions = useCallback(
+    async (characterId: string): Promise<string | null> => {
+      const result = await window.luxy.readVaultCharacterInstructions({ characterId });
+      return result.ok ? result.value.instructions : null;
+    },
+    [],
+  );
+
   const readCharacterAvatar = useCallback(async (characterId: string): Promise<string | null> => {
     const result = await window.luxy.readVaultCharacterAvatar({ characterId });
     return result.ok ? result.value.dataUrl : null;
@@ -949,6 +964,7 @@ export function useVault(): VaultController {
     characters,
     forgetCharacter,
     importCharacter,
+    readCharacterInstructions,
     readCharacterAvatar,
     lastImage,
     sending,

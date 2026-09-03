@@ -65,6 +65,7 @@ export const IPC_INVOKE = {
   vaultMemoryRead: 'luxy:vault:memory:read',
   vaultMemoryExclude: 'luxy:vault:memory:exclude',
   vaultCatalogSync: 'luxy:vault:catalog:sync',
+  vaultCharacterInstructions: 'luxy:vault:character:instructions',
   vaultMediaList: 'luxy:vault:media:list',
   vaultMediaRead: 'luxy:vault:media:read',
   vaultMediaGenerate: 'luxy:vault:media:generate',

@@ -92,6 +92,8 @@ const bridge: LuxyBridge = {
     ipcRenderer.invoke(IPC_INVOKE.vaultCompatibility, args),
   listVaultMemory: () => ipcRenderer.invoke(IPC_INVOKE.vaultMemoryList, {}),
   syncVaultCatalog: (args: unknown) => ipcRenderer.invoke(IPC_INVOKE.vaultCatalogSync, args),
+  readVaultCharacterInstructions: (args: unknown) =>
+    ipcRenderer.invoke(IPC_INVOKE.vaultCharacterInstructions, args),
   readVaultMemory: (args: unknown) => ipcRenderer.invoke(IPC_INVOKE.vaultMemoryRead, args),
   excludeFromVaultMemory: (args: unknown) =>
     ipcRenderer.invoke(IPC_INVOKE.vaultMemoryExclude, args),

@@ -1,5 +1,25 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-03 — elegir un personaje trae tambien su forma de comportarse
+
+Pedido por Daniel: «elegir el personaje no rellena el Cómo debe comportarse,
+cuando debería: la personalidad es la misma a no ser que quiera cambiarla».
+
+Tiene razon en la premisa. La descripcion —quien es— si viaja con el personaje;
+las instrucciones —como se comporta— eran del hilo, asi que el mismo personaje
+acababa comportandose distinto segun donde se hablara con el, y habia que
+reescribirlas cada vez.
+
+Al elegirlo se buscan ahora las de su conversacion mas reciente y se rellenan
+como BORRADOR. Dos cosas que no hace:
+
+- no pisa unas instrucciones que ya haya. Solo rellena lo vacio;
+- no las guarda en el personaje. Siguen sellandose con el turno, como siempre,
+  asi que el historial conserva cuales regian cada respuesta (`D-019`).
+
+- **`npm run check`: exit 0. 129 archivos, 2.253 superadas, 12 omitidas.**
+- **Sin verificar en pantalla.**
+
 ### 2026-09-03 — FALLO: los recuerdos no estaban acotados al personaje
 
 Encontrado por Daniel: abrio una conversacion nueva **sin elegir personaje** y le
