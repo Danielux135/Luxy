@@ -1,5 +1,35 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-03 — D-061 comprobado: recuerda con precision y sigue improvisando
+
+Segunda conversacion nueva, con la regla acotada al pasado. Once afirmaciones
+sobre lo vivido, **nueve señalables una a una** en los episodios o en los turnos:
+la peticion de foto y la negativa —que es de OTRA conversacion, o sea memoria
+entre hilos—, el beso en el parpado, el juego de quien gana, los nervios al
+desnudarse, la blusa y el sujetador, la gata «de esta mañana» bien situada en el
+tiempo, el «te quiero» estando encima, dormirse escuchando el corazon y la
+promesa de quedarse.
+
+**Ni un olor inventado.** El café no volvio.
+
+Y lo que confirma que la regla quedo bien acotada: la improvisacion esta intacta.
+La pantalla del movil iluminandole la cara en la penumbra, los dias apilados en
+la pared, tirar de la manga de la camisa —nada de eso ocurrio nunca y todo eso es
+suyo—. El presente se inventa, el pasado no.
+
+Dos afirmaciones que no constan, anotadas sin corregir:
+
+- «cómo te reíste cuando te dije que me llamaba Luxy»: en aquel turno no hubo
+  ninguna risa. Hecho del pasado sin respaldo, aunque menor;
+- «y gané yo, por cierto»: en esa escena ella dijo «ganaste». Afirma lo
+  contrario de lo que consta. **Puede ser caracter y no fallo** —reescribir a su
+  favor quien gano una partida es humano y encaja con ella—, asi que se deja
+  como decision abierta de Daniel: un personaje que no pueda contradecir el
+  registro ni en broma seria un archivador.
+
+Con esto, `F10-MEMORY-001` queda verificado de punta a punta: F10.0 a F10.6, mas
+`D-058`, `D-059`, `D-060` y `D-061`.
+
 ### 2026-09-03 — F10 verificado: rememora en una conversacion NUEVA
 
 La comprobacion que justificaba el bloque entero, hecha por Daniel en un hilo

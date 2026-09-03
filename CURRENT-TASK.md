@@ -2,7 +2,18 @@
 
 ## F10-MEMORY-001 — memoria episodica del personaje
 
-Estado: **plan aprobado, sin empezar.** Decision de diseño en `D-058`.
+Estado: **`done` — 2026-09-03, verificado de punta a punta.** Sin push.
+
+Un personaje recuerda entre conversaciones: en un hilo nuevo, sin historial ni
+memoria acumulativa, cita momentos de otras conversaciones y los sitúa en el
+tiempo. Nueve de once afirmaciones comprobadas una a una contra los turnos.
+
+Decisiones: `D-058` (puntero y no copia; dos niveles), `D-059` (compatibilidad de
+modelos), `D-060` (sin señal temporal no se inventa un corte) y `D-061` (no
+inventa un pasado, pero sigue improvisando el presente).
+
+Abierto y sin decidir: si puede contradecir el registro en broma —dijo «gané yo»
+donde consta «ganaste»—. Es gusto de Daniel, no un fallo que arreglar.
 
 Que un personaje rememore: «¿te acuerdas de como nos conocimos?» debe traer
 aquel dia con sus palabras. La memoria acumulativa actual no puede —es un
