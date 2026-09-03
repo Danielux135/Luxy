@@ -1,5 +1,29 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-03 — el corte de episodios ya no parte una escena por la mitad
+
+Encontrado por Daniel mirando el panel nuevo con sus conversaciones reales: un
+episodio de **exactamente 40 turnos** que separaba una escena de su
+continuacion. No era casualidad, era el tope: la conversacion siguio sin ninguna
+pausa larga, llego al numero y se corto ahi.
+
+- El tope existia para que un episodio citado cupiera en el prompt, y **eso ya
+  lo resuelve el recorte al citar** (12 turnos, 6.000 caracteres). Se estaba
+  resolviendo el mismo problema dos veces, y la segunda mal.
+- Ahora, cuando un tramo se pasa del tope, el corte cae en la **pausa mas larga
+  que haya dentro**. El tope se conserva solo por granularidad —una sesion de un
+  dia entero seria un episodio con un titulo que solo describe su principio—.
+- **Fallo intermedio, encontrado por la propia suite:** con turnos a ritmo
+  constante «la pausa mas larga» no significa nada, y el primer intento cortaba
+  en el turno 4. Se añadio un listón: una pausa solo vale como costura si es al
+  menos el triple de la tipica del tramo. Sin costura, se corta por el numero,
+  que es lo honesto.
+- 3 pruebas nuevas: corta en la pausa y no en el tope; a ritmo constante se parte
+  por el tope; una pausa en el borde no deja un episodio de un turno.
+- **`npm run check`: exit 0. 128 archivos, 2.222 superadas, 9 omitidas.**
+- Pendiente de comprobar con las conversaciones reales de Daniel, que es donde
+  se vio el fallo.
+
 ### 2026-09-03 — F10.5, pantalla de recuerdos
 
 - **`npm run check`: exit 0. 128 archivos, 2.220 superadas, 9 omitidas** (antes

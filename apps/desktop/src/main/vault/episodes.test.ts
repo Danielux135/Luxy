@@ -52,8 +52,8 @@ describe('segmentacion en episodios', () => {
     expect(episodes).toHaveLength(1);
   });
 
-  it('una sesion larguisima se parte por el tope de turnos', () => {
-    // sin tope, citarla en crudo no cabria en ningun prompt
+  it('a ritmo constante, sin ninguna costura, se parte por el tope', () => {
+    // aqui no hay un sitio mejor que otro: cortar por el numero es lo honesto
     const turns = Array.from({ length: 95 }, (_, index) =>
       at(new Date(Date.UTC(2026, 8, 1, 20, index)).toISOString(), index + 1),
     );
@@ -64,6 +64,32 @@ describe('segmentacion en episodios', () => {
     expect(episodes[0]?.from).toBe(1);
     expect(episodes[1]?.from).toBe(41);
     expect(episodes[2]?.to).toBe(95);
+  });
+
+  it('con una pausa marcada, corta AHI y no en el turno del tope', () => {
+    // el fallo que encontro Daniel: una conversacion seguida llegaba a 40 y se
+    // partia por el numero, separando una escena de su continuacion. La costura
+    // esta donde la gente hace una pausa, no donde cae la cuenta
+    const turns = Array.from({ length: 50 }, (_, index) => {
+      // un turno por minuto, salvo un descanso de dos horas tras el turno 30
+      const minutes = index < 30 ? index : index + 120;
+      return at(new Date(Date.UTC(2026, 8, 1, 20, minutes)).toISOString(), index + 1);
+    });
+
+    const episodes = segmentIntoEpisodes(turns, { maxTurns: 40 });
+    expect(episodes.map((episode) => episode.turns)).toEqual([30, 20]);
+    expect(episodes[1]?.from).toBe(31);
+  });
+
+  it('una pausa en el borde no deja un episodio de un turno', () => {
+    const turns = Array.from({ length: 45 }, (_, index) => {
+      // el descanso cae en el segundo turno: cortar ahi seria absurdo
+      const minutes = index < 2 ? index : index + 300;
+      return at(new Date(Date.UTC(2026, 8, 1, 20, minutes)).toISOString(), index + 1);
+    });
+
+    const episodes = segmentIntoEpisodes(turns, { maxTurns: 40, gapMs: 6 * 3600_000 });
+    expect(episodes.every((episode) => episode.turns >= 4)).toBe(true);
   });
 
   it('el umbral de silencio se puede ajustar', () => {
