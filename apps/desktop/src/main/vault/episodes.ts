@@ -52,29 +52,28 @@ export interface SegmentOptions {
    */
   gapMs?: number;
   /**
-   * tope de turnos por episodio.
+   * tope de turnos por episodio. **Por defecto no hay.**
    *
-   * NO existe para que quepa en el prompt —de eso se encarga el recorte al
-   * citar—, sino para no perder granularidad: una sesion de un dia entero
-   * seria un solo episodio con un titulo que solo describe su principio.
+   * Historia, porque cuesta de creer: primero se cortaba por el numero, y
+   * partia escenas por la mitad. Se cambio a cortar por la pausa mas larga del
+   * tramo, y con conversaciones reales resulto ser PEOR: cuando alguien habla
+   * de una sentada, todos los turnos estan a minutos unos de otros y «la pausa
+   * mas larga» es donde tardo mas en escribir. Nada que ver con donde cambia la
+   * escena. La unica ruptura de verdad de aquel registro —ella se duerme, y
+   * luego amanece— era narrativa y ningun reloj la ve.
    *
-   * Cuando se supera, el corte cae en la PAUSA MAS LARGA del tramo y no en el
-   * turno que hace el numero. Cortar por el numero partia una escena por la
-   * mitad y separaba el principio de su continuacion.
+   * Un corte falso produce un titulo falso, y el titulo es de lo que depende que
+   * un recuerdo se encuentre. Asi que ahora un episodio es un tramo continuo y
+   * punto: **pocos limites, pero todos ciertos**. Partir por escenas exige leer
+   * lo que se dice, y eso es F10.6.
+   *
+   * Se conserva el parametro para quien quiera un tope duro; sin el, no se
+   * parte por numero.
    */
   maxTurns?: number;
 }
 
 const DEFAULT_GAP_MS = 6 * 60 * 60 * 1000;
-const DEFAULT_MAX_TURNS = 40;
-
-/**
- * turnos minimos a cada lado de un corte por pausa.
- *
- * Sin esto, una pausa larga en el segundo turno dejaria un episodio de uno, que
- * no es un momento que nadie quiera recordar.
- */
-const MIN_EPISODE_TURNS = 4;
 const MAX_TITLE_LENGTH = 70;
 
 /**
@@ -107,14 +106,13 @@ export function segmentIntoEpisodes(
   if (turns.length === 0) return [];
 
   const gapMs = options.gapMs ?? DEFAULT_GAP_MS;
-  const maxTurns = options.maxTurns ?? DEFAULT_MAX_TURNS;
+  const maxTurns = options.maxTurns;
 
   const episodes: Episode[] = [];
   let current: EpisodeTurn[] = [];
 
   const close = (): void => {
     if (current.length === 0) return;
-    // un tramo largo se trocea por sus pausas, no por el numero de turnos
     for (const piece of splitLongRun(current, maxTurns)) {
       const first = piece[0]!;
       const last = piece[piece.length - 1]!;
@@ -147,70 +145,15 @@ export function segmentIntoEpisodes(
 }
 
 /**
- * parte un tramo demasiado largo por su pausa mas marcada.
+ * trocea un tramo si se pidio un tope duro.
  *
- * El tramo ya no tiene ningun silencio de los que separan escenas —eso lo
- * decidio la pasada anterior—, pero dentro sigue habiendo pausas relativas, y
- * una de ellas es la costura mas probable. Cortar ahi se parece a donde lo
- * cortaria una persona; cortar en el turno que hace el numero, no.
+ * Sin `maxTurns` no se parte nada: cualquier corte dentro de una conversacion
+ * continua seria inventado, y un corte inventado da un titulo que no describe
+ * lo que hay dentro.
  */
-function splitLongRun(turns: readonly EpisodeTurn[], maxTurns: number): EpisodeTurn[][] {
-  if (turns.length <= maxTurns) return [[...turns]];
-
-  const at = largestGapIndex(turns);
-  if (at === null) {
-    // ni una pausa: no hay costura, asi que se corta por el tope. Ultimo recurso
-    return [
-      [...turns.slice(0, maxTurns)],
-      ...splitLongRun(turns.slice(maxTurns), maxTurns),
-    ];
-  }
-  return [...splitLongRun(turns.slice(0, at), maxTurns), ...splitLongRun(turns.slice(at), maxTurns)];
-}
-
-/**
- * cuanto tiene que destacar una pausa para valer como costura.
- *
- * Sin este listón, un tramo de ritmo constante —un turno por minuto durante una
- * hora— tendria «una pausa mas larga» que no significa nada, y el corte caeria
- * en el primer sitio permitido. Peor que cortar por el numero.
- */
-const GAP_STANDOUT_FACTOR = 3;
-
-/**
- * indice donde empieza el tramo siguiente, o `null` si no hay costura.
- *
- * `null` no es un fallo: significa que la conversacion fue seguida y no hay
- * ningun sitio mejor que otro para partirla.
- */
-function largestGapIndex(turns: readonly EpisodeTurn[]): number | null {
-  const gaps: { index: number; silence: number }[] = [];
-  for (let index = 1; index < turns.length; index += 1) {
-    const silence = elapsedMs(turns[index - 1]!.createdAt, turns[index]!.createdAt);
-    if (silence !== null && silence > 0) gaps.push({ index, silence });
-  }
-  if (gaps.length === 0) return null;
-
-  const typical = median(gaps.map((gap) => gap.silence));
-  let best: { index: number; silence: number } | null = null;
-
-  for (const gap of gaps) {
-    // los extremos no valen: una pausa en el segundo turno dejaria un episodio
-    // de uno, que no es un momento que nadie quiera recordar
-    if (gap.index < MIN_EPISODE_TURNS) continue;
-    if (gap.index > turns.length - MIN_EPISODE_TURNS) continue;
-    if (gap.silence < typical * GAP_STANDOUT_FACTOR) continue;
-    if (best === null || gap.silence > best.silence) best = gap;
-  }
-  return best?.index ?? null;
-}
-
-function median(values: number[]): number {
-  const sorted = [...values].sort((a, b) => a - b);
-  const middle = Math.floor(sorted.length / 2);
-  return sorted.length % 2 === 0
-    ? ((sorted[middle - 1]! + sorted[middle]!) / 2)
-    : sorted[middle]!;
+function splitLongRun(turns: readonly EpisodeTurn[], maxTurns: number | undefined): EpisodeTurn[][] {
+  if (maxTurns === undefined || turns.length <= maxTurns) return [[...turns]];
+  return [[...turns.slice(0, maxTurns)], ...splitLongRun(turns.slice(maxTurns), maxTurns)];
 }
 
 /** milisegundos entre dos marcas, o `null` si alguna no se entiende */

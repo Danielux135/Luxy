@@ -52,44 +52,42 @@ describe('segmentacion en episodios', () => {
     expect(episodes).toHaveLength(1);
   });
 
-  it('a ritmo constante, sin ninguna costura, se parte por el tope', () => {
-    // aqui no hay un sitio mejor que otro: cortar por el numero es lo honesto
+  it('una conversacion continua NO se parte, por larga que sea', () => {
+    // Lo que enseño la realidad: con conversaciones de una sentada, todos los
+    // turnos estan a minutos unos de otros y cualquier corte interno es
+    // inventado. Se probo cortar por el numero —partia escenas— y despues por
+    // «la pausa mas larga», que resulto ser donde el usuario tardo mas en
+    // escribir. Un corte falso da un titulo falso, y el titulo es de lo que
+    // depende que un recuerdo se encuentre.
+    const turns = Array.from({ length: 95 }, (_, index) =>
+      at(new Date(Date.UTC(2026, 8, 1, 20, index)).toISOString(), index + 1),
+    );
+
+    const episodes = segmentIntoEpisodes(turns);
+    expect(episodes).toHaveLength(1);
+    expect(episodes[0]).toMatchObject({ from: 1, to: 95, turns: 95 });
+  });
+
+  it('una pausa larga dentro de una sesion tampoco la parte', () => {
+    // dos horas de descanso no son una escena nueva: solo un descanso. Lo unico
+    // que separa es un silencio de los que dejan pasar la noche
+    const turns = Array.from({ length: 50 }, (_, index) => {
+      const minutes = index < 30 ? index : index + 120;
+      return at(new Date(Date.UTC(2026, 8, 1, 20, minutes)).toISOString(), index + 1);
+    });
+    expect(segmentIntoEpisodes(turns)).toHaveLength(1);
+  });
+
+  it('quien quiera un tope duro puede pedirlo', () => {
     const turns = Array.from({ length: 95 }, (_, index) =>
       at(new Date(Date.UTC(2026, 8, 1, 20, index)).toISOString(), index + 1),
     );
 
     const episodes = segmentIntoEpisodes(turns, { maxTurns: 40 });
     expect(episodes.map((episode) => episode.turns)).toEqual([40, 40, 15]);
-    // y no se pierde ni se repite ningun turno por el camino
+    // sin perder ni repetir ningun turno
     expect(episodes[0]?.from).toBe(1);
-    expect(episodes[1]?.from).toBe(41);
     expect(episodes[2]?.to).toBe(95);
-  });
-
-  it('con una pausa marcada, corta AHI y no en el turno del tope', () => {
-    // el fallo que encontro Daniel: una conversacion seguida llegaba a 40 y se
-    // partia por el numero, separando una escena de su continuacion. La costura
-    // esta donde la gente hace una pausa, no donde cae la cuenta
-    const turns = Array.from({ length: 50 }, (_, index) => {
-      // un turno por minuto, salvo un descanso de dos horas tras el turno 30
-      const minutes = index < 30 ? index : index + 120;
-      return at(new Date(Date.UTC(2026, 8, 1, 20, minutes)).toISOString(), index + 1);
-    });
-
-    const episodes = segmentIntoEpisodes(turns, { maxTurns: 40 });
-    expect(episodes.map((episode) => episode.turns)).toEqual([30, 20]);
-    expect(episodes[1]?.from).toBe(31);
-  });
-
-  it('una pausa en el borde no deja un episodio de un turno', () => {
-    const turns = Array.from({ length: 45 }, (_, index) => {
-      // el descanso cae en el segundo turno: cortar ahi seria absurdo
-      const minutes = index < 2 ? index : index + 300;
-      return at(new Date(Date.UTC(2026, 8, 1, 20, minutes)).toISOString(), index + 1);
-    });
-
-    const episodes = segmentIntoEpisodes(turns, { maxTurns: 40, gapMs: 6 * 3600_000 });
-    expect(episodes.every((episode) => episode.turns >= 4)).toBe(true);
   });
 
   it('el umbral de silencio se puede ajustar', () => {

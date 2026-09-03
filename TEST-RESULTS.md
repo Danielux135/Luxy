@@ -1,5 +1,24 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-03 — resultado NEGATIVO: no hay señal temporal dentro de una sesion
+
+Segunda prueba de Daniel con sus conversaciones reales, y esta vez lo que falla
+es el enfoque, no la implementacion. Ver `D-060`.
+
+- Cortar por la pausa mas larga produjo dos limites, **los dos en mitad de una
+  escena**, y dejo sin detectar la unica ruptura real del registro: el personaje
+  se duerme y despues amanece. Esa ruptura es narrativa; el reloj no la ve.
+- La causa: sus conversaciones son de una sentada. Todos los turnos estan a
+  minutos unos de otros, asi que «la pausa mas larga» es donde tardo mas en
+  escribir. La heuristica estaba eligiendo ruido y presentandolo como estructura.
+- Corregido quitando el troceado: un episodio es un tramo continuo, separado
+  solo por un silencio de los que dejan pasar la noche. Menos limites, todos
+  ciertos. El parametro de tope duro se conserva para quien lo quiera.
+- 3 pruebas reescritas: una conversacion continua no se parte por larga que sea;
+  una pausa de dos horas tampoco; y el tope duro sigue funcionando si se pide.
+- **`npm run check`: exit 0. 128 archivos, 2.222 superadas, 9 omitidas.**
+- Pendiente de confirmar en el panel con sus conversaciones.
+
 ### 2026-09-03 — el corte de episodios ya no parte una escena por la mitad
 
 Encontrado por Daniel mirando el panel nuevo con sus conversaciones reales: un

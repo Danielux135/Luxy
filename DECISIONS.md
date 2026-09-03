@@ -1471,3 +1471,38 @@ que si vale, y eso no se descubre. Al reves solo cuesta una prueba manual.
 prompt, del momento y de la suerte. Las repeticiones son un campo a la vista de
 la pantalla para que nadie confunda «no me lo rechazo una vez» con «no me lo
 rechaza».
+
+## D-060 — un episodio se corta donde de verdad se corto, o no se corta
+
+Fecha: 2026-09-03
+
+Estado: aceptada, implementada
+
+Tres intentos y un resultado negativo que conviene dejar escrito, porque es
+tentador volver a intentarlo.
+
+**Primero se cortaba por numero de turnos.** Un episodio de exactamente 40
+separaba una escena de su continuacion. Obvio en cuanto se vio.
+
+**Despues por la pausa mas larga del tramo.** Suena bien y con datos sinteticos
+funciona. Con conversaciones reales es PEOR: cuando alguien habla de una
+sentada, todos los turnos estan a minutos unos de otros, y «la pausa mas larga»
+es donde tardo mas en escribir —pensar una respuesta, levantarse un momento—.
+Los dos cortes que produjo cayeron en mitad de una escena, y la unica ruptura de
+verdad de aquel registro —el personaje se duerme, y despues amanece— quedo sin
+detectar, porque era **narrativa y no cronologica**. Ningun reloj la ve.
+
+**Conclusion: no hay señal temporal dentro de una sesion continua.** Lo que
+separa escenas ahi es lo que se dice, y eso exige leerlo.
+
+Por tanto un episodio es un tramo continuo, separado solo por un silencio de los
+que dejan pasar la noche. **Pocos limites, pero todos ciertos.**
+
+El motivo de fondo no es estetico: un corte falso produce un **titulo falso**, y
+el titulo es de lo que depende que un recuerdo se encuentre. Una lista mas corta
+y correcta recupera mejor que una lista mas fina y mentirosa.
+
+Consecuencia para el plan: **F10.6 deja de ser opcional.** Ya no solo por las
+parafrasis —eso era `D-058`—; ahora tambien porque partir por escenas y titular
+cada una exige a alguien que lea lo que pasa. Es lo unico que queda por hacer
+para que esto funcione como se pidio, y el coste ya se descarto como criterio.
