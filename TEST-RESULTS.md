@@ -1,5 +1,36 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-03 — el catalogado no repetia: iba a cuentagotas y sin decirlo
+
+Daniel: «esta volviendo a ordenar las memorias, cuando eso ya estaba hecho», sin
+haber escrito nada nuevo.
+
+**Diagnostico inicial equivocado.** Se afirmo que solo podia deberse a
+conversaciones que fallaban y se reintentaban. Los datos siguientes lo
+desmienten: 26 momentos catalogados repartidos por casi todas sus
+conversaciones, unos con opus y otros con DeepSeek segun que proveedor tuviera
+elegido en cada apertura. **Estaba terminando una cola**, tres conversaciones por
+vez sobre diez que tenia.
+
+Lo que si era cierto: no habia ninguna forma de distinguir «acabando una cola» de
+«repitiendo lo mismo», porque el resultado se devolvia y la pantalla lo tiraba.
+
+Tres cambios, y el ultimo es el que sobraba desde el principio:
+
+- lo que falla al catalogar no se reintenta hasta reiniciar. Sigue siendo
+  correcto, aunque no fuera la causa aqui;
+- la pantalla cuenta cuantas se han ordenado, cuantas quedan y cuales fallaron;
+- **el catalogado sigue en tandas hasta acabar**, en vez de tres por apertura. Si
+  se hacen solos, tienen que acabarse solos. Con tope de vueltas: una cola que no
+  baja es un fallo, no un motivo para seguir gastando llamadas.
+
+Tambien se ve que el catalogador funciona con los dos modelos y con contenido
+explicito: los titulos describen la escena sin rodeos y sin negarse.
+
+- **`npm run check`: exit 0. 129 archivos, 2.247 superadas, 12 omitidas.**
+- Quedan 3 conversaciones «sin catalogar, partido por silencios»: con el aviso
+  nuevo se sabra si es cola o fallo.
+
 ### 2026-09-03 — el catalogador funciona, comprobado con conversaciones reales
 
 Primera ejecucion de verdad, por Daniel, y confirma la hipotesis de `D-060`.

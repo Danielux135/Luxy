@@ -193,7 +193,7 @@ export interface VaultController {
     provider: string;
     model: string | null;
     projectAlias: string;
-  }) => Promise<void>;
+  }) => Promise<{ pending: number; cataloged: number } | null>;
   catalogingMemory: boolean;
   /** que paso en el ultimo catalogado; null si no se ha hecho ninguno */
   lastCatalog: {
@@ -550,21 +550,22 @@ export function useVault(): VaultController {
       provider: string;
       model: string | null;
       projectAlias: string;
-    }): Promise<void> => {
+    }): Promise<{ pending: number; cataloged: number } | null> => {
       setCatalogingMemory(true);
       try {
         const result = await window.luxy.syncVaultCatalog({ ...input, limit: 3 });
         if (!result.ok) {
           setError(result.error);
-          return;
+          return null;
         }
-        if (!mounted.current) return;
+        if (!mounted.current) return null;
         setLastCatalog({
           cataloged: result.value.cataloged,
           scenes: result.value.scenes,
           pending: result.value.pending,
           failed: result.value.failed,
         });
+        return { pending: result.value.pending, cataloged: result.value.cataloged };
       } finally {
         if (mounted.current) setCatalogingMemory(false);
       }

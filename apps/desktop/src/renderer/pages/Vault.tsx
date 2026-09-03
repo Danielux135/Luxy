@@ -2098,10 +2098,26 @@ function MemoryPanel({
         if (!event.currentTarget.open || episodes !== null) return;
         // catalogar primero y listar despues: si hay escenas nuevas, la lista
         // ya sale partida y titulada por quien leyo la conversacion, no por el
-        // reloj. Gasta una llamada por conversacion sin catalogar
-        void vault
-          .syncCatalog({ provider, model: model.length === 0 ? null : model, projectAlias: project })
-          .then(() => vault.loadMemory());
+        // reloj.
+        //
+        // Y hasta ACABAR, en tandas: a tres por apertura, diez conversaciones
+        // exigian abrir el panel cuatro veces sin saber por que, que parecia
+        // que recatalogaba lo ya hecho. Se hacen solos, asi que se acaban solos.
+        void (async () => {
+          const target = {
+            provider,
+            model: model.length === 0 ? null : model,
+            projectAlias: project,
+          };
+          // tope de vueltas: una cola que no baja es un fallo, no un motivo
+          // para seguir gastando llamadas
+          for (let vuelta = 0; vuelta < 12; vuelta += 1) {
+            const result = await vault.syncCatalog(target);
+            if (result === null || result.pending === 0) break;
+            if (result.cataloged === 0) break;
+          }
+          await vault.loadMemory();
+        })();
       }}
     >
       <summary>
@@ -2128,7 +2144,7 @@ function MemoryPanel({
             ? `Se han ordenado ${vault.lastCatalog.cataloged} conversación(es) en ${vault.lastCatalog.scenes} momentos.`
             : 'No había nada nuevo que ordenar.'}
           {vault.lastCatalog.pending > 0 &&
-            ` Quedan ${vault.lastCatalog.pending} por ordenar: vuelve a abrir esto para seguir.`}
+            ` Quedan ${vault.lastCatalog.pending} sin ordenar.`}
         </p>
       )}
 
