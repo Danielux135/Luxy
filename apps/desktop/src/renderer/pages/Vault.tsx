@@ -13,6 +13,7 @@ import {
   type VaultController,
 } from '../useVault.js';
 import { imageBlockReason } from '../../shared/vault-image-capability.js';
+import { modelForProvider, modelsForProvider } from '../../shared/model-selection.js';
 import { describeConversationMemoryStatus, type ModelDefinition } from '@luxy/shared';
 
 /** debe coincidir con AUTO_LOCK_MINUTES del proceso principal */
@@ -90,10 +91,15 @@ function ConversationPanel({
   const project = composer.project ?? projects[0] ?? '';
   const provider = composer.provider ?? providers[0] ?? 'claude';
   // el id de proveedor ES la familia del modelo: asi los registra el agente
-  const familyModels = models.filter((model) => model.family === provider && model.enabled);
+  const familyModels = modelsForProvider(models, provider) as ModelDefinition[];
   // cadena vacia = «el de la conexion». Es lo que hacia siempre, y ahora es una
-  // eleccion visible en vez de la unica posibilidad
-  const model = composer.model ?? '';
+  // eleccion visible en vez de la unica posibilidad.
+  //
+  // Y se comprueba que pertenezca a ESTA familia: el modelo se recuerda por
+  // conversacion y viaja al cambiar de proveedor, asi que uno guardado puede no
+  // existir para el proveedor actual. Mandarlo gasta la llamada y devuelve
+  // `unrecognized_model`
+  const model = modelForProvider(models, provider, composer.model) ?? '';
 
   const canSend =
     message.trim().length > 0 && project.length > 0 && provider.length > 0 && !vault.sending;
@@ -235,7 +241,12 @@ function ConversationPanel({
             <Field label="Proveedor">
               <select
                 value={provider}
-                onChange={(event) => vault.setComposer({ provider: event.target.value })}
+                onChange={(event) =>
+                  // el modelo se suelta al cambiar de proveedor: uno de otra
+                  // familia no existe para el nuevo, y mandarlo produce un
+                  // `unrecognized_model` que gasta la llamada igual
+                  vault.setComposer({ provider: event.target.value, model: null })
+                }
               >
                 {providers.map((id) => (
                   <option key={id} value={id}>
@@ -2123,7 +2134,10 @@ function MemoryPanel({
           for (let vuelta = 0; vuelta < 12; vuelta += 1) {
             const result = await vault.syncCatalog(target);
             if (result === null || result.pending === 0) break;
-            if (result.cataloged === 0) break;
+            // si una tanda no cataloga NADA, algo va mal de forma sistematica
+            // —un modelo que no existe para ese proveedor, por ejemplo— y seguir
+            // solo gasta una llamada por conversacion pendiente
+            if (result.cataloged === 0 || result.failed > 0) break;
           }
           await vault.loadMemory();
         })();

@@ -1,5 +1,34 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-03 — cinco llamadas gastadas por un modelo de otra familia
+
+Daniel abrio el panel de recuerdos con el proveedor cambiado a Claude, y el log
+del agente muestra cinco intentos seguidos:
+
+    ejecutando Claude con el modelo DeepSeek-V4-Pro
+    [claude-code:unrecognized_model] {"model":"DeepSeek-V4-Pro"}
+    Conexion interrumpida
+
+**El modelo se recuerda por conversacion y sobrevivia a cambiar de proveedor.**
+Uno de otra familia no existe para el proveedor nuevo, asi que la llamada se
+gasta y devuelve `unrecognized_model`. No afectaba solo al catalogado: pasaria
+igual en un turno normal al cambiar de proveedor.
+
+Tres arreglos:
+
+- cambiar de proveedor **suelta** el modelo elegido;
+- ademas se **valida la familia** antes de mandarlo, porque el modelo tambien
+  llega restaurado de la conversacion y puede no encajar con el proveedor
+  actual;
+- la tanda de catalogado **para en cuanto una falla**. Antes seguia y gastaba una
+  llamada por cada conversacion pendiente.
+
+La regla se saco a `shared/model-selection.ts` con **7 pruebas**, en vez de
+dejarla en la pantalla. Es la tercera vez hoy que una regla escrita solo en la
+interfaz o en un comentario se cuela: `D-062` fue igual.
+
+- **`npm run check`: exit 0. 130 archivos, 2.264 superadas, 12 omitidas.**
+
 ### 2026-09-03 — el personaje se llamaba Luxy por una linea del system prompt
 
 Daniel lo aislo de la forma mas limpia posible: conversacion nueva, sin
