@@ -135,6 +135,45 @@ npm run setup:machine
 
 Para probar el Worker sin desplegar: `cd apps/gateway && npm run dry-run`.
 
+## Consola en Windows: cómo no romper un comando
+
+Reglas sacadas de los fallos reales de una sesión —19 comandos fallidos
+analizados uno a uno—, no de suposiciones. **Ninguno falló por sintaxis de
+PowerShell.** Ocho fallaron por lo mismo: meter un script dentro de un comando.
+
+**1. Nunca `node -e` ni `python -c` con el script dentro.** Es la causa
+principal, con diferencia. Un script en línea pasa por el intérprete de bash
+antes de llegar a Node o a Python, y ahí las comillas, las barras invertidas y
+los saltos de línea se transforman. Escribe el script a un archivo del
+scratchpad con un heredoc de delimitador **entrecomillado** y ejecútalo. Elige
+un delimitador que no pueda aparecer dentro; si el texto habla de heredocs, uno
+corto como `FIN` se cierra solo a mitad.
+
+**2. Los acentos graves y `$` dentro de comillas dobles se EJECUTAN.** Escribir
+una entrada de changelog que mencionaba `npx vitest run` entre acentos graves,
+con comillas dobles, lanzó vitest de verdad y dejó el shell colgado seis horas
+esperando a que alguien cerrase la sustitución. El delimitador entrecomillado es
+lo único que lo impide.
+
+**3. Rutas absolutas en `cd`.** El directorio de trabajo no persiste entre
+llamadas como uno espera, y un `cd` relativo falla sin más.
+
+**4. Los archivos del repositorio son CRLF.** Léelos y escríbelos preservando el
+separador, y detéctalo antes de sustituir. Un `sed -i` o un `replace` ingenuo o
+no encuentra nada, o deja el archivo con finales mezclados.
+
+**5. Encadenar con `;` devuelve el código del ÚLTIMO comando.** Un `grep` sin
+resultados marca como fallido todo el bloque aunque lo anterior fuera bien. Si
+importa distinguirlo, sepáralo en dos llamadas.
+
+**6. Lo que se le pasa a Daniel va a PowerShell 5.1.** Un comando por bloque y
+**sin `&&`**: en la 5.1 no es un separador, es un error de sintaxis. PowerShell
+7.6.5 está instalada en el equipo, pero como `pwsh`, que **no** es el shell por
+defecto (`LA-041`); si de verdad hace falta, se escribe
+`pwsh -NoProfile -Command "..."` explícitamente. La política de ejecución está
+en `Restricted`, así que `npx` falla: se usan los atajos
+`node_modules\.bin\*.cmd`.
+
 ## Convenciones
 
 **TypeScript**
