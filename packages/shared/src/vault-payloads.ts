@@ -90,15 +90,39 @@ export type VaultMemoryPayload = z.infer<typeof vaultMemoryPayloadSchema>;
  * metadatos de una imagen o un video.
  *
  * `mimeType` va aqui y no fuera: saber que una conversacion tiene cuarenta
- * `video/mp4` ya dice bastante sin abrir ninguno. Lo mismo con `prompt` y con
- * el identificador de personaje del proveedor.
+ * `video/mp4` ya dice bastante sin abrir ninguno. Lo mismo con `prompt`, con el
+ * pie de foto y con el identificador de personaje del proveedor.
  */
 export const vaultMediaPayloadSchema = z.object({
   v: payloadVersionSchema,
   mimeType: z.string().max(128),
   /** nombre para mostrar y para guardar; nunca se usa como ruta */
   displayName: z.string().max(260).nullable().default(null),
+  /**
+   * lo que se PIDIO al generar el medio, tal y como se le mando al proveedor.
+   *
+   * Es historia, no descripcion: no se corrige. Es lo unico que explica por que
+   * una imagen salio como salio, y borrarlo al reescribir el pie de foto dejaba
+   * el archivo sin ninguna forma de saber de donde venia.
+   */
   prompt: z.string().max(8000).nullable().default(null),
+  /**
+   * lo que se VE, en las palabras de quien lo mira. Esto SI se corrige.
+   *
+   * Va aparte de `prompt` porque mezclarlos fue el error: un mismo campo
+   * significaba tres cosas distintas segun el origen del medio —la intencion en
+   * ingles de una imagen generada, el pie de foto de un adjunto, o la cadena
+   * fija del avatar copiado—, asi que ni describia ni recordaba bien.
+   *
+   * Importa mas de lo que parece: el pie de foto es lo unico que el modelo sabe
+   * de una imagen ya guardada, porque no la abre ni la ve. Con una descripcion
+   * vacia o inutil elige a ciegas y paga otra generacion en vez de reenviar la
+   * que ya existe.
+   *
+   * `default(null)` conserva lo ya escrito en disco: un medio sellado antes de
+   * este campo se abre con `caption: null` en vez de fallar al validarse.
+   */
+  caption: z.string().max(2000).nullable().default(null),
   width: z.number().int().min(1).max(16384).nullable().default(null),
   height: z.number().int().min(1).max(16384).nullable().default(null),
   durationMs: z.number().int().min(0).nullable().default(null),
@@ -108,4 +132,15 @@ export const vaultMediaPayloadSchema = z.object({
   model: z.string().max(128).nullable().default(null),
   createdAt: z.string().datetime(),
 });
-export type VaultMediaPayload = z.infer<typeof vaultMediaPayloadSchema>;
+/**
+ * `caption` es opcional en el TIPO aunque el esquema lo rellene siempre.
+ *
+ * Quien sella construye estos metadatos a mano, campo a campo, y casi ninguna
+ * alta tiene pie de foto: exigir `caption: null` en cada una solo conseguiria
+ * que se rellene por costumbre. Al abrir un medio el campo esta siempre, porque
+ * el `default(null)` lo pone; el tipo solo es mas permisivo de lo necesario en
+ * ese sentido, nunca al reves. Es el mismo trato que `instructions` en un turno.
+ */
+export type VaultMediaPayload = Omit<z.infer<typeof vaultMediaPayloadSchema>, 'caption'> & {
+  caption?: string | null;
+};

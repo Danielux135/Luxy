@@ -21,6 +21,7 @@ import {
   EXAMPLE_HTTP_PROVIDERS,
   isRetryableAgenticTurn,
   resolveHttpRequestTimeout,
+  buildUserContent,
 } from './http-provider.js';
 import {
   httpProviderConfigSchema,
@@ -403,9 +404,9 @@ describe('Retry-After', () => {
   it('reintenta la red pero no la cancelacion ni un timeout del borde en un turno agentic', () => {
     const active = new AbortController();
     expect(isRetryableAgenticTurn(new TypeError('fetch failed'), active.signal)).toBe(true);
-    expect(isRetryableAgenticTurn(Object.assign(new Error('524'), { status: 524 }), active.signal)).toBe(
-      false,
-    );
+    expect(
+      isRetryableAgenticTurn(Object.assign(new Error('524'), { status: 524 }), active.signal),
+    ).toBe(false);
     active.abort();
     expect(isRetryableAgenticTurn(new TypeError('fetch failed'), active.signal)).toBe(false);
   });
@@ -611,6 +612,133 @@ describe('HttpApiProvider', () => {
   });
 });
 
+// POR QUE EXISTE: mandar una imagen obliga a cambiar la forma de `content`, que
+// es el campo por el que pasa TODA peticion. Estas pruebas fijan las dos mitades
+// del trato: quien no manda imagenes ve exactamente el cuerpo de siempre, y
+// quien las manda las ve en el orden y la forma que documenta su proveedor.
+describe('HttpApiProvider: imagenes', () => {
+  const base = { ...EXAMPLE_HTTP_PROVIDERS[0]!, enabled: true, supportsStreaming: false };
+
+  const IMAGEN_BASE64 = 'AAAABBBB';
+
+  /** captura el cuerpo enviado; no hay red, la respuesta es fija */
+  function espiarFetch(): { body: () => Record<string, unknown> | null } {
+    let sent: Record<string, unknown> | null = null;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (_url, init) => {
+      sent = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      return new Response(
+        JSON.stringify({
+          choices: [{ message: { content: 'lo veo' }, finish_reason: 'stop' }],
+          usage: { prompt_tokens: 4, completion_tokens: 2 },
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    });
+    return { body: () => sent };
+  }
+
+  function peticion(overrides: Record<string, unknown> = {}) {
+    return {
+      prompt: 'que ves aqui',
+      workingDirectory: 'C:/wt',
+      timeoutMs: 1000,
+      signal: new AbortController().signal,
+      onEvent: () => undefined,
+      ...overrides,
+    };
+  }
+
+  it('sin imagenes el cuerpo lleva content como CADENA, igual que siempre', async () => {
+    const espia = espiarFetch();
+    const provider = new HttpApiProvider(base, 'una-clave');
+
+    const result = await provider.run(peticion());
+
+    const mensajes = espia.body()?.['messages'] as Array<{ role: string; content: unknown }>;
+    expect(result.ok).toBe(true);
+    expect(mensajes[1]?.role).toBe('user');
+    expect(mensajes[1]?.content).toBe('que ves aqui');
+    expect(typeof mensajes[1]?.content).toBe('string');
+  });
+
+  it('un array de imagenes vacio se comporta igual que no mandar ninguna', async () => {
+    const espia = espiarFetch();
+    const provider = new HttpApiProvider(base, 'una-clave');
+
+    await provider.run(peticion({ images: [] }));
+
+    const mensajes = espia.body()?.['messages'] as Array<{ content: unknown }>;
+    expect(mensajes[1]?.content).toBe('que ves aqui');
+  });
+
+  it('con una imagen el content es un array con el TEXTO primero', async () => {
+    const espia = espiarFetch();
+    const provider = new HttpApiProvider(base, 'una-clave');
+
+    await provider.run(peticion({ images: [{ mimeType: 'image/webp', base64: IMAGEN_BASE64 }] }));
+
+    const mensajes = espia.body()?.['messages'] as Array<{ content: unknown }>;
+    const partes = mensajes[1]?.content as Array<Record<string, unknown>>;
+    expect(Array.isArray(partes)).toBe(true);
+    expect(partes).toHaveLength(2);
+    // el orden no es estetico: OpenRouter documenta el texto delante
+    expect(partes[0]).toEqual({ type: 'text', text: 'que ves aqui' });
+    expect(partes[1]?.['type']).toBe('image_url');
+  });
+
+  it("imageUrlFormat 'object' manda image_url como objeto con url", async () => {
+    const espia = espiarFetch();
+    const provider = new HttpApiProvider({ ...base, imageUrlFormat: 'object' }, 'una-clave');
+
+    await provider.run(peticion({ images: [{ mimeType: 'image/webp', base64: IMAGEN_BASE64 }] }));
+
+    const mensajes = espia.body()?.['messages'] as Array<{ content: unknown }>;
+    const partes = mensajes[1]?.content as Array<Record<string, unknown>>;
+    expect(partes[1]?.['image_url']).toEqual({ url: `data:image/webp;base64,${IMAGEN_BASE64}` });
+  });
+
+  it("imageUrlFormat 'string' manda image_url como cadena, que es lo que documenta Mistral", async () => {
+    const espia = espiarFetch();
+    const provider = new HttpApiProvider({ ...base, imageUrlFormat: 'string' }, 'una-clave');
+
+    await provider.run(peticion({ images: [{ mimeType: 'image/jpeg', base64: IMAGEN_BASE64 }] }));
+
+    const mensajes = espia.body()?.['messages'] as Array<{ content: unknown }>;
+    const partes = mensajes[1]?.content as Array<Record<string, unknown>>;
+    expect(partes[1]?.['image_url']).toBe(`data:image/jpeg;base64,${IMAGEN_BASE64}`);
+  });
+
+  it('el data URL se compone con el mimeType que se pasa, no con uno fijo', () => {
+    const partes = buildUserContent('mira', [{ mimeType: 'image/png', base64: 'ZZZZ' }], 'string');
+    expect(partes).toEqual([
+      { type: 'text', text: 'mira' },
+      { type: 'image_url', image_url: 'data:image/png;base64,ZZZZ' },
+    ]);
+  });
+
+  it('sin formato indicado se usa el objeto, que es la forma estandar', () => {
+    const partes = buildUserContent('mira', [{ mimeType: 'image/gif', base64: 'YY' }]);
+    expect(partes).toEqual([
+      { type: 'text', text: 'mira' },
+      { type: 'image_url', image_url: { url: 'data:image/gif;base64,YY' } },
+    ]);
+  });
+
+  it('varias imagenes van todas detras del texto, en orden', () => {
+    const partes = buildUserContent(
+      'compara',
+      [
+        { mimeType: 'image/png', base64: 'AA' },
+        { mimeType: 'image/png', base64: 'BB' },
+      ],
+      'string',
+    ) as Array<Record<string, unknown>>;
+    expect(partes.map((parte) => parte['type'])).toEqual(['text', 'image_url', 'image_url']);
+    expect(partes[1]?.['image_url']).toBe('data:image/png;base64,AA');
+    expect(partes[2]?.['image_url']).toBe('data:image/png;base64,BB');
+  });
+});
+
 // POR QUE EXISTE: una web generada durante 23 minutos acabo a mitad de una
 // etiqueta y no se pudo demostrar el motivo. Sin estas señales, "se acabaron
 // los tokens", "Luxy corto la conexion" y "el proveedor cerro el socket" son
@@ -635,7 +763,10 @@ describe('HttpApiProvider: diagnostico del final de la respuesta', () => {
     vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
       intentos += 1;
       if (intentos === 1) {
-        return new Response('demasiadas peticiones', { status: 429, headers: { 'Retry-After': '1' } });
+        return new Response('demasiadas peticiones', {
+          status: 429,
+          headers: { 'Retry-After': '1' },
+        });
       }
       return new Response(
         new ReadableStream<Uint8Array>({
@@ -656,7 +787,9 @@ describe('HttpApiProvider: diagnostico del final de la respuesta', () => {
 
     const events: string[] = [];
     const provider = new HttpApiProvider(config, 'una-clave');
-    const result = await provider.run(peticion({ onEvent: (event) => events.push(`${event.type}:${event.message}`) }));
+    const result = await provider.run(
+      peticion({ onEvent: (event) => events.push(`${event.type}:${event.message}`) }),
+    );
 
     expect(result.ok).toBe(true);
     expect(intentos).toBe(2);
@@ -1119,9 +1252,9 @@ describe('timeout de llamadas HTTP', () => {
   });
 
   it('conserva el limite especifico de una llamada cuando existe', () => {
-    expect(
-      resolveHttpRequestTimeout({ timeoutMs: 3_600_000, requestTimeoutMs: 300_000 }),
-    ).toBe(300_000);
+    expect(resolveHttpRequestTimeout({ timeoutMs: 3_600_000, requestTimeoutMs: 300_000 })).toBe(
+      300_000,
+    );
   });
 });
 
@@ -1138,6 +1271,34 @@ describe('margen de cierre por defecto', () => {
     });
     expect(parsed.softTerminalGraceMs).toBe(SOFT_TERMINAL_GRACE_MS);
     expect(SOFT_TERMINAL_GRACE_MS).toBeGreaterThan(TERMINAL_GRACE_MS * 5);
+  });
+});
+
+describe('forma de image_url por conexion', () => {
+  const base = {
+    id: 'kimi',
+    displayName: 'Kimi',
+    baseUrl: 'https://ejemplo.test/v1',
+    model: 'Kimi-K2.6',
+    apiKeyEnv: 'connection:x',
+  };
+
+  it('una conexion antigua se queda con la forma estandar de objeto', () => {
+    expect(httpProviderConfigSchema.parse(base).imageUrlFormat).toBe('object');
+  });
+
+  // Mistral documenta `image_url` como cadena; el resto, como objeto. La
+  // eleccion es explicita justamente porque no hay una respuesta unica
+  it('se puede pedir la forma de cadena que documenta Mistral', () => {
+    expect(
+      httpProviderConfigSchema.parse({ ...base, imageUrlFormat: 'string' }).imageUrlFormat,
+    ).toBe('string');
+  });
+
+  it('rechaza cualquier otra forma', () => {
+    expect(httpProviderConfigSchema.safeParse({ ...base, imageUrlFormat: 'array' }).success).toBe(
+      false,
+    );
   });
 });
 

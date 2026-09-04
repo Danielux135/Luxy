@@ -6,6 +6,7 @@
 import type {
   HttpProviderConfig,
   ProviderExecution,
+  ProviderImage,
   ProviderRunRequest,
   ProviderRunResult,
   ProviderUsage,
@@ -133,9 +134,48 @@ export class MemoryBudgetStore implements BudgetStore {
   }
 }
 
+/**
+ * una parte de un mensaje multimodal, segun el contrato `chat completions`.
+ *
+ * `image_url` admite dos formas porque los proveedores no se han puesto de
+ * acuerdo: OpenAI documenta el objeto `{ url }` y Mistral documenta la cadena
+ * suelta. Cual se usa lo decide `imageUrlFormat` de la conexion.
+ */
+export type ChatContentPart =
+  { type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } | string };
+
 interface ChatMessage {
   role: 'system' | 'user' | 'assistant';
-  content: string;
+  content: string | ChatContentPart[];
+}
+
+/**
+ * contenido del mensaje del usuario.
+ *
+ * sin imagenes devuelve la CADENA de siempre, no un array de una sola parte de
+ * texto: un proveedor que no entienda el formato multimodal no puede romperse
+ * por un cambio que no le afecta.
+ *
+ * con imagenes, el texto va PRIMERO y las imagenes despues (lo documenta
+ * OpenRouter). El data URL se compone aqui porque el base64 viaja puro: es el
+ * unico punto que conoce a la vez el tipo del archivo y la forma que espera
+ * esta conexion.
+ */
+export function buildUserContent(
+  prompt: string,
+  images: readonly ProviderImage[] | undefined,
+  imageUrlFormat: 'object' | 'string' = 'object',
+): string | ChatContentPart[] {
+  if (images === undefined || images.length === 0) return prompt;
+  const parts: ChatContentPart[] = [{ type: 'text', text: prompt }];
+  for (const image of images) {
+    const url = `data:${image.mimeType};base64,${image.base64}`;
+    parts.push({
+      type: 'image_url',
+      image_url: imageUrlFormat === 'string' ? url : { url },
+    });
+  }
+  return parts;
 }
 
 /**
@@ -220,7 +260,10 @@ export class HttpApiProvider implements ProviderExecution {
             ? CONVERSATION_SYSTEM_PROMPT
             : TECHNICAL_SYSTEM_PROMPT,
       },
-      { role: 'user', content: request.prompt },
+      {
+        role: 'user',
+        content: buildUserContent(request.prompt, request.images, this.config.imageUrlFormat),
+      },
     ];
 
     request.onEvent({ type: 'phase', message: `consultando ${this.label(request)}` });

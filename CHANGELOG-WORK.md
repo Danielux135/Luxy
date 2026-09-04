@@ -1,5 +1,77 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-09-04 15:10 — Claude — F12-DESCRIBIR-001 y BUG-CATALOGO-TROZOS-001
+
+- Origen: Daniel pregunta por que no usar imagen a texto para no tener que
+  describir el personaje a mano. Investigado antes de prometer nada, y la
+  respuesta corrigio la idea: **AI Horde SI tiene interrogacion gratuita, pero
+  no sirve para esto.** Su `caption` es BLIP original —una frase generica de
+  escena, nunca rasgos de identidad—, ademas NO es reproducible (muestreo con
+  `sample=True`) y su `min_length` obliga a rellenar, que es invitar a inventar.
+  Su `interrogation` no es el clip-interrogator conocido sino un ranking contra
+  siete listas de ESTILO. Y no hay ningun etiquetador booru en la red.
+  Comprobado como ausencia, no como «no lo encontre».
+- Por eso NO se implemento el describidor del horde. Habria dado algo que
+  PARECE una descripcion y no lo es, y ese texto entra en el prompt como dato y
+  de ahi a la memoria como hecho: es exactamente `D-061`.
+- Lo que si se hizo, en dos mitades:
+
+  **1. El pie de foto se puede ver y corregir.** Era el agujero real: es lo
+  UNICO que el modelo sabe de una imagen guardada —con eso decide cual reenviar
+  gratis en vez de pagar otra— y hasta hoy no se podia ni ver. En el avatar
+  copiado a cada conversacion decia siempre «su foto de perfil». Ahora
+  `vaultMediaPayloadSchema` separa `prompt` —lo que se PIDIO, que es historia y
+  no se corrige— de `caption` —lo que se VE—, y `PrivateMediaStore.setCaption`
+  resella solo la metadata sin tocar los bytes.
+
+  **2. Camino de vision hasta el proveedor.** `ProviderRunRequest.images`,
+  `ChatMessage.content` como array de partes y `imageUrlFormat` por conexion,
+  porque **Mistral documenta `image_url` como CADENA y el estandar lo quiere
+  como objeto**. Sin imagenes el cuerpo sale EXACTAMENTE igual que antes: un
+  proveedor que no entienda el array no puede romperse por un cambio que no le
+  afecta. Con eso, `vaultMediaDescribe` pide la descripcion a un modelo con
+  vista, en modo tecnico, y **una negativa NO se guarda como pie de foto**:
+  guardarla haria que el modelo creyera que la imagen ES esa frase.
+- De los proveedores de Daniel, el unico viable para esto es **Mistral**: es el
+  unico cuya politica no prohibe contenido adulto consentido y su nivel gratuito
+  incluye vision. DeepSeek lo prohibe y su vision es de pago; los de Groq son
+  preview con presupuesto para ~3 imagenes por minuto; el de Cohere no es
+  alcanzable por la capa de compatibilidad; OpenRouter no tiene hoy vision sin
+  censura.
+
+- **BUG-CATALOGO-TROZOS-001.** Daniel: «corta mucho, en vez de agrupar cosas mas
+  generales». Evidencia suya: 22 turnos partidos en 4+4+4+4+4+2. Tres causas,
+  las tres confirmadas leyendo el codigo:
+  1. cada turno se recortaba a **600 caracteres y por el principio**, con turnos
+     de 1.200-2.000: el modelo veia el arranque de todos y nunca el final, que
+     es donde se ve que algo se cierra. Sin señal, reparte;
+  2. los criterios eran todos CAMBIOS —sitio, momento, asunto, alguien que se
+     va—, y en una escena continua no ocurre ninguno: se queda sin corte valido
+     y corta igual porque se le pidio una lista;
+  3. habia una prohibicion —«no partas por longitud»— sin regla positiva que
+     dijera cuanto PUEDE durar una escena.
+  Arreglado: recorte a 1.400 con presupuesto global repartido y **conservando
+  los dos extremos** del turno con una marca de corte, regla positiva en el
+  prompt —pocas escenas largas, y si no ha cambiado nada sigue siendo la misma
+  aunque lleve veinte turnos— y `detectEvenSplit`, que marca un catalogo
+  troceado sin rechazarlo, para poder avisar y ofrecer repetirlo con otro modelo.
+- Archivos: `types.ts`, `schemas.ts`, `host-protocol.ts`, `vault-payloads.ts`,
+  `vault-describe.ts` (nuevo), `vault-catalog.ts`, `http-provider.ts`,
+  `local-turn.ts`, `host-entry.ts`, `job-runner.ts`, `agent-controller.ts`,
+  `media-store.ts`, `handlers.ts`, `ipc.ts`, `channels.ts`, `preload/index.ts`,
+  `useVault.ts`, `Vault.tsx`, `styles.css` y sus pruebas.
+- **Defecto anterior corregido de paso:** `host-entry.ts` construia el
+  `LocalTurnInput` campo a campo y NO reenviaba `kind`, asi que el catalogador
+  —que pide modo tecnico— llegaba al proveedor con el envoltorio de personaje de
+  `D-055`. Con prueba de regresion.
+- Resultado real: **`npm run check` exit 0 — 136 archivos, 2.420 pruebas
+  superadas, 12 omitidas.**
+- Sin verificar: nada contra una API real. Que Mistral acepte la imagen, y que
+  el catalogador devuelva 2-3 escenas en vez de 6 con la conversacion de 22
+  turnos, son hipotesis. Lo probado es que Luxy manda lo que dice mandar y que
+  el prompt dice lo que debe decir.
+
+
 ### 2026-09-04 13:30 — Claude — F11-HORDE-003
 
 - Origen, con sus palabras: «quiero que Lia pueda enviarme imagenes desde Horde,

@@ -9,10 +9,14 @@ import {
   CATALOG_CLOSE,
   CATALOG_MAX_TURNS,
   CATALOG_OPEN,
+  CATALOG_PROMPT_CHARS,
+  CATALOG_TURN_CHARS,
   buildCatalogPrompt,
   describeCatalogFailure,
+  detectEvenSplit,
   parseCatalogResponse,
   type CatalogTurn,
+  type CatalogedScene,
 } from './vault-catalog.js';
 
 const turn = (sequence: number, text: string, role: 'user' | 'assistant' = 'user'): CatalogTurn => ({
@@ -20,6 +24,35 @@ const turn = (sequence: number, text: string, role: 'user' | 'assistant' = 'user
   role,
   text,
 });
+
+/** la linea de datos de un turno concreto, sin su prefijo */
+const shownText = (prompt: string, sequence: number): string =>
+  prompt
+    .split('\n')
+    .find((line) => line.startsWith(`[${sequence}] `))
+    ?.replace(/^\[\d+\] (Usuario|Personaje): /, '') ?? '';
+
+const shownTexts = (prompt: string): string[] =>
+  prompt
+    .split('\n')
+    .filter((line) => /^\[\d+\] (Usuario|Personaje): /.test(line))
+    .map((line) => line.replace(/^\[\d+\] (Usuario|Personaje): /, ''));
+
+/** un catalogo con los tamaños dados, seguidos y sin huecos */
+const catalogOf = (...sizes: number[]): CatalogedScene[] => {
+  let start = 0;
+  return sizes.map((size) => {
+    const scene: CatalogedScene = {
+      from: start,
+      to: start + size - 1,
+      title: 'una escena',
+      tags: [],
+      summary: '',
+    };
+    start += size;
+    return scene;
+  });
+};
 
 const bloque = (json: string): string => `${CATALOG_OPEN}\n${json}\n${CATALOG_CLOSE}`;
 
@@ -54,6 +87,20 @@ describe('prompt del catalogador', () => {
 
   it('prohibe partir por longitud, que es justo lo que fallaba', () => {
     expect(buildCatalogPrompt(turns)).toContain('No partas por longitud');
+  });
+
+  it('dice que una escena puede durar muchos turnos', () => {
+    // sin esto, una conversacion seguida no tiene ningun corte que cumpla los
+    // criterios, y el modelo se inventa uno cada pocos turnos
+    const prompt = buildCatalogPrompt(turns);
+    expect(prompt).toContain('durar MUCHOS turnos');
+    expect(prompt).toContain('POCAS escenas largas');
+    expect(prompt).toContain('sigue siendo la misma escena');
+  });
+
+  it('dice que trozos del mismo tamaño son la señal de haberlo hecho mal', () => {
+    // prohibir sin decir la alternativa dejaba el hueco que rellena la costumbre
+    expect(buildCatalogPrompt(turns)).toContain('tamaño parecido, lo has hecho mal');
   });
 
   it('recorta cada turno y acota cuantos enseña', () => {
@@ -251,5 +298,101 @@ describe('respuestas que no llegaron a serlo', () => {
     for (const entrada of ['', CATALOG_OPEN, CATALOG_CLOSE, bloque('null'), bloque('{}')]) {
       expect(() => parseCatalogResponse(entrada, rango)).not.toThrow();
     }
+  });
+});
+
+describe('lo que se ve de cada turno', () => {
+  it('un turno largo conserva su principio Y su final', () => {
+    // recortar por el final dejaba el arranque de todos los turnos, que se
+    // parecen entre si, y perdia justo donde una escena se cierra o gira
+    const prompt = buildCatalogPrompt([
+      turn(0, `EMPIEZA_AQUI ${'x'.repeat(4000)} ACABA_AQUI`),
+    ]);
+    const shown = shownText(prompt, 0);
+
+    expect(shown.startsWith('EMPIEZA_AQUI')).toBe(true);
+    expect(shown.endsWith('ACABA_AQUI')).toBe(true);
+    expect(shown).toContain('[…recorte…]');
+    expect(shown.length).toBeLessThanOrEqual(CATALOG_TURN_CHARS);
+  });
+
+  it('un turno que cabe no se toca', () => {
+    const texto = 'me quedé dormida en el sofá y me despertaste tú';
+    expect(shownText(buildCatalogPrompt([turn(0, texto)]), 0)).toBe(texto);
+  });
+
+  it('el presupuesto global se respeta aunque todos los turnos sean largos', () => {
+    const muchos = Array.from({ length: CATALOG_MAX_TURNS }, (_, index) =>
+      turn(index, 'x'.repeat(5000)),
+    );
+    const textos = shownTexts(buildCatalogPrompt(muchos));
+
+    expect(textos).toHaveLength(CATALOG_MAX_TURNS);
+    expect(textos.reduce((total, texto) => total + texto.length, 0)).toBeLessThanOrEqual(
+      CATALOG_PROMPT_CHARS,
+    );
+    // y aun asi cada uno ve mas de lo que veia antes cualquiera (600)
+    expect(Math.min(...textos.map((texto) => texto.length))).toBeGreaterThan(600);
+  });
+
+  it('un turno largo entre muchos cortos se lleva el tope, no la parte igual', () => {
+    // lo que no gastan los cortos se lo quedan los largos: son los unicos a los
+    // que recortar les quita algo
+    const cortos = Array.from({ length: CATALOG_MAX_TURNS - 1 }, (_, index) =>
+      turn(index, 'vale'),
+    );
+    const prompt = buildCatalogPrompt([
+      ...cortos,
+      turn(CATALOG_MAX_TURNS - 1, 'y'.repeat(9000), 'assistant'),
+    ]);
+
+    expect(shownText(prompt, CATALOG_MAX_TURNS - 1).length).toBe(CATALOG_TURN_CHARS);
+  });
+});
+
+describe('reparto uniforme', () => {
+  it('marca 4+4+4+4+4+2, que es el caso real', () => {
+    // 22 turnos partidos en seis trozos iguales con el resto al final: eso no lo
+    // decide lo que pasa en la conversacion, lo decide contar turnos
+    const signal = detectEvenSplit(catalogOf(4, 4, 4, 4, 4, 2));
+    expect(signal.even).toBe(true);
+    expect(signal.scenes).toBe(6);
+  });
+
+  it('no marca 9+3+10, que es un reparto sano', () => {
+    expect(detectEvenSplit(catalogOf(9, 3, 10)).even).toBe(false);
+  });
+
+  it('no marca un catalogo de una sola escena ni de dos', () => {
+    // coincidir de tamaño con una o dos escenas es casualidad, no evidencia
+    expect(detectEvenSplit(catalogOf(22)).even).toBe(false);
+    expect(detectEvenSplit(catalogOf(4, 5)).even).toBe(false);
+    expect(detectEvenSplit(catalogOf(11, 11)).even).toBe(false);
+  });
+
+  it('un turno de diferencia sigue siendo el mismo tamaño', () => {
+    expect(detectEvenSplit(catalogOf(4, 5, 4, 5)).even).toBe(true);
+  });
+
+  it('no marca un reparto desigual aunque acabe en un trozo corto', () => {
+    expect(detectEvenSplit(catalogOf(12, 3, 7, 1)).even).toBe(false);
+  });
+
+  it('cuenta las escenas y sus extremos para poder decirlo', () => {
+    const signal = detectEvenSplit(catalogOf(9, 3, 10));
+    expect(signal).toEqual({ even: false, scenes: 3, shortest: 3, longest: 10 });
+  });
+
+  it('un catalogo vacio no rompe nada', () => {
+    expect(detectEvenSplit([])).toEqual({ even: false, scenes: 0, shortest: 0, longest: 0 });
+  });
+
+  it('lee lo que devuelve el parser, no una lista inventada', () => {
+    const parsed = parseCatalogResponse(
+      `${CATALOG_OPEN}[${escena(0, 3)},${escena(4, 7)},${escena(8, 11)},${escena(12, 13)}]${CATALOG_CLOSE}`,
+      { from: 0, to: 13 },
+    );
+    expect(parsed.status).toBe('structured');
+    expect(detectEvenSplit(parsed.scenes).even).toBe(true);
   });
 });

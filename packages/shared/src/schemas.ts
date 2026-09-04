@@ -945,6 +945,19 @@ export const httpProviderConfigSchema = z.object({
    * margen sigue siendo corto, porque ahi el mensaje SI termino.
    */
   softTerminalGraceMs: z.number().int().min(1).max(120_000).default(SOFT_TERMINAL_GRACE_MS),
+  /**
+   * como manda esta conexion el campo `image_url` de una parte de imagen.
+   *
+   * no es un capricho: la forma estandar de OpenAI es un objeto
+   * (`image_url: { url: 'data:...' }`), pero Mistral documenta ese mismo campo
+   * como CADENA (`image_url: 'data:...'`). La forma de objeto probablemente
+   * tambien le valga, pero no lo documenta en ninguna parte, y adivinar por el
+   * usuario significa que una conexion falle con un 400 que no explica nada.
+   *
+   * el valor por defecto es la forma estandar, que es la que entiende casi
+   * todo el mundo.
+   */
+  imageUrlFormat: z.enum(['object', 'string']).default('object'),
 });
 
 const httpProviderListSchema = z

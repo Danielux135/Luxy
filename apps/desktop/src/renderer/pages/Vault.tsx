@@ -194,7 +194,9 @@ function ConversationPanel({
         </div>
       )}
 
-      {vault.media.length > 0 && <MediaStrip vault={vault} />}
+      {vault.media.length > 0 && (
+        <MediaStrip vault={vault} provider={provider} model={model} project={project} />
+      )}
 
       {vault.lastImage !== null && <ImageOutcome image={vault.lastImage} />}
 
@@ -2257,7 +2259,19 @@ function GeneratePanel({
  * imagenes descifradas en memoria del renderer las dejaria vivas despues de
  * cerrar la boveda, que es justo lo contrario de lo que hace cerrarla.
  */
-function MediaStrip({ vault }: { vault: VaultController }): JSX.Element {
+function MediaStrip({
+  vault,
+  provider,
+  model,
+  project,
+}: {
+  vault: VaultController;
+  /* el mismo proveedor, modelo y proyecto que ya estan elegidos arriba: pedir
+     una descripcion es otra llamada a lo mismo, no una conexion aparte */
+  provider: string;
+  model: string;
+  project: string;
+}): JSX.Element {
   const [openId, setOpenId] = useState<string | null>(null);
 
   return (
@@ -2269,6 +2283,9 @@ function MediaStrip({ vault }: { vault: VaultController }): JSX.Element {
           open={openId === item.mediaId}
           onToggle={() => setOpenId(openId === item.mediaId ? null : item.mediaId)}
           vault={vault}
+          provider={provider}
+          model={model}
+          project={project}
         />
       ))}
     </div>
@@ -2280,14 +2297,28 @@ function MediaTile({
   open,
   onToggle,
   vault,
+  provider,
+  model,
+  project,
 }: {
   item: VaultController['media'][number];
   open: boolean;
   onToggle: () => void;
   vault: VaultController;
+  provider: string;
+  model: string;
+  project: string;
 }): JSX.Element {
   const [dataUrl, setDataUrl] = useState<string | null>(null);
   const [tooBig, setTooBig] = useState(false);
+  // borrador del pie de foto. `null` significa «nadie lo esta corrigiendo», y
+  // se guarda aparte del valor real para que una descripcion recien escrita por
+  // el modelo se vea sin pisar lo que haya a medio escribir aqui
+  const [draft, setDraft] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  // por que no hay descripcion despues de pedirla: negarse y no contestar se
+  // arreglan de forma distinta, asi que no se pueden contar igual
+  const [failure, setFailure] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open) {
@@ -2307,12 +2338,115 @@ function MediaTile({
   }, [open, item.mediaId, vault]);
 
   const isVideo = item.mimeType.startsWith('video/');
+  // solo una imagen se puede mirar: pedirle a un modelo con vista que describa
+  // un video gasta la llamada y no devuelve nada
+  const isImage = item.mimeType.startsWith('image/');
+  const caption = item.caption ?? '';
+  const editing = draft !== null;
+  const chosen = model.length === 0 ? provider : model;
 
   return (
     <div className="vault-media__item">
       <button className="btn btn--quiet" onClick={onToggle}>
         {open ? 'Ocultar' : 'Ver'} · {item.displayName ?? item.mediaId.slice(0, 8)}
       </button>
+
+      {caption.length > 0 ? (
+        <p className="vault-media__caption">{caption}</p>
+      ) : (
+        <Notice tone="warn">
+          Sin pie de foto. Es lo único que el modelo sabe de este archivo: sin él
+          no sabe qué se ve aquí, así que no puede elegirlo para reenviártelo y
+          acaba pagando otra generación.
+        </Notice>
+      )}
+
+      {item.prompt !== null && item.prompt.length > 0 && (
+        /* lo que se PIDIO no es lo que se VE: verlos juntos es justo lo que
+           explica una imagen que no salio como se esperaba. Es historia, y por
+           eso se enseña en pequeño y no se puede corregir */
+        <p className="vault-media__prompt">Se pidió al generarla: «{item.prompt}»</p>
+      )}
+
+      {editing ? (
+        <div className="row">
+          <input
+            className="vault-caption"
+            value={draft}
+            placeholder="Qué se ve en este archivo…"
+            disabled={saving}
+            onChange={(event) => setDraft(event.target.value)}
+          />
+          <button
+            className="btn btn--primary"
+            disabled={saving}
+            onClick={() => {
+              setSaving(true);
+              // vacio a proposito lo deja sin pie de foto: borrar una
+              // descripcion equivocada es tan legitimo como corregirla
+              void vault.setMediaCaption(item.mediaId, draft.trim()).then((ok) => {
+                setSaving(false);
+                if (ok) setDraft(null);
+              });
+            }}
+          >
+            {saving ? 'Guardando…' : 'Guardar'}
+          </button>
+          <button className="btn btn--quiet" disabled={saving} onClick={() => setDraft(null)}>
+            Cancelar
+          </button>
+        </div>
+      ) : (
+        <div className="row">
+          <button className="btn btn--quiet" onClick={() => setDraft(caption)}>
+            {caption.length > 0 ? 'Corregir el pie de foto' : 'Escribir el pie de foto'}
+          </button>
+          {isImage && (
+            <button
+              className="btn btn--quiet"
+              disabled={vault.describingMedia}
+              onClick={() => {
+                setFailure(null);
+                void vault
+                  .describeMedia({
+                    mediaId: item.mediaId,
+                    provider,
+                    model: model.length === 0 ? null : model,
+                    projectAlias: project,
+                  })
+                  // con descripcion ya esta guardada y la lista se recarga sola:
+                  // aqui solo queda quedarse con el motivo cuando no la hubo
+                  .then((result) => setFailure(result.failure));
+              }}
+            >
+              {vault.describingMedia ? 'Mirando…' : 'Describir con IA'}
+            </button>
+          )}
+        </div>
+      )}
+
+      {isImage && !editing && (
+        <p className="field__hint">
+          Describir gasta una llamada a <Tag tone="idle">{chosen}</Tag> y necesita
+          un modelo que sepa <strong>mirar</strong> imágenes: no todos los de la
+          lista lo son. Lo que escriba se puede corregir a mano, porque es
+          exactamente lo que lee después el personaje.
+        </p>
+      )}
+
+      {failure === 'negativa' && (
+        <Notice tone="warn">
+          Ese modelo se negó a describir la imagen. Repetirlo no lo arregla:
+          cambia el modelo de arriba y vuelve a pulsar, o escribe tú el pie de
+          foto.
+        </Notice>
+      )}
+
+      {failure === 'vacio' && (
+        <Notice tone="warn">
+          {chosen} no contestó nada. Aquí sí tiene sentido volver a intentarlo.
+        </Notice>
+      )}
 
       {open && tooBig && (
         <Notice tone="warn">
@@ -3324,6 +3458,41 @@ function MemoryPanel({
           {[...new Set(vault.lastCatalog.failed.map((each) => each.reason))].join('; ')}. No se
           reintentan solas hasta que reinicies, para no gastar una llamada en cada
           apertura.
+        </Notice>
+      )}
+
+      {vault.lastCatalog !== null && vault.lastCatalog.uneven.length > 0 && (
+        <Notice tone="warn">
+          {/* mismo boton que el reintento por fallo, y por el mismo motivo: lo
+              que hay que cambiar es el modelo, no volver a abrir el panel */}
+          <button
+            className="btn btn--quiet"
+            disabled={vault.catalogingMemory}
+            onClick={() => {
+              const target = {
+                provider,
+                model: model.length === 0 ? null : model,
+                projectAlias: project,
+              };
+              void (async () => {
+                for (const each of vault.lastCatalog?.uneven ?? []) {
+                  await vault.syncCatalog({ ...target, conversationId: each.conversationId });
+                }
+                await vault.loadMemory();
+              })();
+            }}
+          >
+            {vault.catalogingMemory
+              ? 'Probando…'
+              : `Repetir con ${model.length === 0 ? provider : model}`}
+          </button>{' '}
+          {vault.lastCatalog.uneven.length === 1
+            ? 'Una conversación salió partida en trozos del mismo tamaño'
+            : `${vault.lastCatalog.uneven.length} conversaciones salieron partidas en trozos del mismo tamaño`}
+          . Eso no es como fue la conversación: es que el modelo no encontró dónde
+          cortar y repartió a ojo. El catálogo se conserva —uno tosco recuerda más
+          que ninguno—, así que no hay nada que arreglar con prisa; si quieres
+          momentos de verdad, cambia el modelo de arriba y repítelas.
         </Notice>
       )}
 

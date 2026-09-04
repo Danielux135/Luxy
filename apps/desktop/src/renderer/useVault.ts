@@ -108,6 +108,15 @@ export interface PrivateMediaItem {
   hasThumbnail: boolean;
   /** false si es demasiado grande para previsualizar por ahora */
   previewable: boolean;
+  /**
+   * lo que se VE en el archivo, y lo único que el modelo sabe de él.
+   *
+   * Con esto decide cuál reenviarte en vez de pagar otra generación. Se puede
+   * corregir; `null` cuando nadie lo ha escrito.
+   */
+  caption: string | null;
+  /** lo que se PIDIÓ al generarlo. Es historia y no se corrige */
+  prompt: string | null;
 }
 
 export interface VaultComposer {
@@ -186,6 +195,21 @@ export interface VaultController {
     description: string;
     recipe: HordeRecipe;
   }) => Promise<string | null>;
+  /** corrige a mano el pie de foto de un archivo guardado */
+  setMediaCaption: (mediaId: string, caption: string) => Promise<boolean>;
+  /**
+   * le pide a un modelo con vista que describa un archivo.
+   *
+   * Gasta una llamada, así que lo dispara el usuario. Devuelve el motivo cuando
+   * no se pudo: no contestó, o se negó, que se arreglan de forma distinta.
+   */
+  describeMedia: (input: {
+    mediaId: string;
+    provider: string;
+    model: string | null;
+    projectAlias: string;
+  }) => Promise<{ caption: string | null; failure: string | null }>;
+  describingMedia: boolean;
   /**
    * cambia quién le hace las fotos a un personaje.
    *
@@ -255,6 +279,14 @@ export interface VaultController {
     scenes: number;
     pending: number;
     failed: { conversationId: string; reason: string }[];
+    /**
+     * catálogos que parecen cortados por longitud y no por lo que pasa.
+     *
+     * Todas las escenas del mismo tamaño no es como fue la conversación: es que
+     * el modelo no encontró dónde cortar y repartió. El catálogo se conserva;
+     * esto sólo permite avisar y ofrecer repetirlo con otro modelo.
+     */
+    uneven: { conversationId: string; scenes: number }[];
   } | null;
   readMemoryEpisode: (
     episode: MemoryEpisode,
@@ -379,6 +411,7 @@ export function useVault(): VaultController {
   const [characterId, setCharacterId] = useState<string | null>(null);
   const [characterDescription, setCharacterDescription] = useState<string | null>(null);
   const [characters, setCharacters] = useState<VaultCharacterView[]>([]);
+  const [describingMedia, setDescribingMedia] = useState(false);
   const [hordeAccount, setHordeAccount] = useState<{
     username: string;
     kudos: number;
@@ -712,6 +745,7 @@ export function useVault(): VaultController {
           scenes: result.value.scenes,
           pending: result.value.pending,
           failed: result.value.failed,
+          uneven: result.value.uneven,
         });
         return {
           pending: result.value.pending,
@@ -842,6 +876,57 @@ export function useVault(): VaultController {
     const result = await window.luxy.listVaultMedia(openConversationId);
     if (mounted.current && result.ok) setMedia(result.value.media);
   }, [openConversationId]);
+
+  const setMediaCaption = useCallback(
+    async (mediaId: string, caption: string): Promise<boolean> => {
+      if (openConversationId === null) return false;
+      setError(null);
+      const result = await window.luxy.setVaultMediaCaption({
+        conversationId: openConversationId,
+        mediaId,
+        caption,
+      });
+      if (!result.ok) {
+        setError(result.error);
+        setHint(result.hint);
+        return false;
+      }
+      setMedia(result.value.media);
+      return true;
+    },
+    [openConversationId],
+  );
+
+  const describeMedia = useCallback(
+    async (input: {
+      mediaId: string;
+      provider: string;
+      model: string | null;
+      projectAlias: string;
+    }): Promise<{ caption: string | null; failure: string | null }> => {
+      if (openConversationId === null) return { caption: null, failure: null };
+      setDescribingMedia(true);
+      setError(null);
+      setHint(null);
+      try {
+        const result = await window.luxy.describeVaultMedia({
+          conversationId: openConversationId,
+          ...input,
+        });
+        if (!result.ok) {
+          setError(result.error);
+          setHint(result.hint);
+          return { caption: null, failure: null };
+        }
+        // el pie de foto ya está guardado en el main: se recarga para verlo
+        if (result.value.caption !== null) await reloadMedia();
+        return result.value;
+      } finally {
+        if (mounted.current) setDescribingMedia(false);
+      }
+    },
+    [openConversationId, reloadMedia],
+  );
 
   const attachMedia = useCallback(async (caption: string): Promise<void> => {
     if (openConversationId === null) {
@@ -1124,6 +1209,9 @@ export function useVault(): VaultController {
     loadHordeModels,
     saveHordeCharacter,
     setCharacterImageProvider,
+    setMediaCaption,
+    describeMedia,
+    describingMedia,
     create,
     unlock,
     lock,

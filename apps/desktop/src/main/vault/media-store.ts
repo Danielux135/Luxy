@@ -14,10 +14,19 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
+  renameSync,
   unlinkSync,
+  writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
-import { privateMediaSchema, type PrivateMedia, type VaultMediaPayload } from '@luxy/shared';
+import {
+  assertNoPlaintextLeak,
+  privateMediaSchema,
+  vaultMediaPayloadSchema,
+  type PrivateMedia,
+  type VaultMediaPayload,
+} from '@luxy/shared';
+import { sealText, wipe } from '@luxy/vault-crypto';
 import { openMedia, openMediaMetadata, openMediaThumbnail, sealMedia } from './private-store.js';
 import { VaultError, type VaultService } from './vault-service.js';
 import type { BlobStore } from './blob-store.js';
@@ -217,6 +226,57 @@ export class PrivateMediaStore {
     }
     const blob = await this.blobs.get(record.thumbnailObjectKey);
     return openMediaThumbnail(vault, record, blob);
+  }
+
+  /**
+   * corrige el pie de foto de un medio ya guardado.
+   *
+   * Se vuelve a sellar SOLO la metadata. Los bytes siguen donde estan, con su
+   * cifrado intacto: descifrarlos para volver a cifrarlos identicos costaria
+   * tiempo, obligaria a tener el archivo entero en claro en memoria y podria
+   * dejar el objeto a medias. Nada de eso compra nada, porque los bytes no
+   * cambian.
+   *
+   * Del payload anterior se conserva todo, `prompt` incluido. Corregir lo que
+   * se VE no puede borrar lo que se PIDIO: es lo unico que explica por que la
+   * imagen salio como salio, y no se puede reconstruir despues.
+   */
+  async setCaption(
+    vault: VaultService,
+    conversationId: string,
+    mediaId: string,
+    caption: string | null,
+  ): Promise<void> {
+    const records = this.readRecords(conversationId);
+    const index = records.findIndex((entry) => entry.mediaId === mediaId);
+    // un identificador que no esta es un error, no un no-op silencioso: quien
+    // corrige el pie de foto del medio equivocado se queda creyendo que lo hizo
+    if (index === -1) throw new VaultError('ese archivo no existe en esta conversacion');
+    const record = records[index]!;
+
+    const previous = await openMediaMetadata(vault, record);
+    const payload = vaultMediaPayloadSchema.parse({ ...previous, caption });
+
+    const key = vault.subkeyFor('media', mediaId);
+    try {
+      const content = await sealText(key, 'vault.media', JSON.stringify(payload));
+      const updated = privateMediaSchema.parse({ ...record, content });
+      // el guardian tambien aqui: este registro sale hacia la sincronizacion
+      // sin volver a pasar por el sellado de `private-store`
+      assertNoPlaintextLeak(updated);
+      records[index] = updated;
+    } finally {
+      wipe(key);
+    }
+
+    // escritura atomica: el alta solo añade una linea al final, pero corregir
+    // reescribe el indice entero, y un corte a media escritura dejaria ilegible
+    // toda la conversacion, no solo el medio que se estaba corrigiendo
+    const file = this.indexFile(conversationId);
+    const temporary = `${file}.tmp`;
+    const lines = records.map((entry) => JSON.stringify(entry));
+    writeFileSync(temporary, `${lines.join('\n')}\n`, 'utf8');
+    renameSync(temporary, file);
   }
 
   /**

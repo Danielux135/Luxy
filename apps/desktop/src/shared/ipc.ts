@@ -546,6 +546,16 @@ export const vaultCatalogSyncResultSchema = z.object({
    * confusion que produjo no enseñarlo.
    */
   pending: z.number().int().min(0),
+  /**
+   * catálogos que parecen cortados por longitud y no por lo que pasa.
+   *
+   * Cuando todas las escenas salen del mismo tamaño —seis de cuatro turnos,
+   * por ejemplo— no es que la conversación fuera así: es que el modelo no
+   * encontró dónde cortar y repartió. El catálogo **se conserva**, porque uno
+   * tosco es mejor que ninguno; esto sólo permite avisar y ofrecer repetirlo
+   * con otro modelo.
+   */
+  uneven: z.array(z.object({ conversationId: z.string(), scenes: z.number().int() })),
 });
 
 export const vaultMediaAttachArgsSchema = z.object({
@@ -578,6 +588,21 @@ export const vaultMediaItemSchema = z.object({
   hasThumbnail: z.boolean(),
   /** false cuando pasa de VAULT_PREVIEW_MAX_BYTES */
   previewable: z.boolean(),
+  /**
+   * lo que se VE en el archivo, y lo único que el modelo sabe de él.
+   *
+   * Viaja al renderer porque hasta ahora el usuario no podía ni verlo ni
+   * corregirlo: el modelo elegía qué foto reenviarte a partir de una línea
+   * invisible. `null` cuando nadie lo ha escrito.
+   */
+  caption: z.string().nullable().default(null),
+  /**
+   * lo que se PIDIÓ al generarlo, cuando lo generó Luxy.
+   *
+   * Es historia y no se corrige: es lo único que explica por qué una imagen
+   * salió como salió. Separado de `caption` a propósito.
+   */
+  prompt: z.string().nullable().default(null),
 });
 
 export const vaultMediaListResultSchema = z.object({
@@ -589,6 +614,40 @@ export const vaultMediaReadResultSchema = z.object({
   mimeType: z.string(),
   /** data URL con los bytes descifrados. null si es demasiado grande */
   dataUrl: z.string().nullable(),
+});
+
+/**
+ * corrige a mano el pie de foto de un medio guardado.
+ *
+ * Vacío lo deja sin pie de foto, que es distinto de no haberlo tocado: es la
+ * única forma de retirar una descripción que estaba mal.
+ */
+export const vaultMediaCaptionArgsSchema = z.object({
+  conversationId: conversationIdSchema,
+  mediaId: z.string().min(1).max(128),
+  caption: z.string().max(2000).default(''),
+});
+
+/**
+ * se lo pide a un modelo que sepa mirar.
+ *
+ * Gasta una llamada, así que lo dispara el usuario y nunca ocurre solo. El
+ * modelo y el proveedor los elige quien llama, como en el catalogador: no hay
+ * un «modelo auxiliar» global todavía.
+ */
+export const vaultMediaDescribeArgsSchema = z.object({
+  conversationId: conversationIdSchema,
+  mediaId: z.string().min(1).max(128),
+  provider: z.string().min(1).max(64),
+  model: z.string().min(1).max(128).nullable().default(null),
+  projectAlias: projectAliasSchema,
+});
+
+/** qué pasó al pedir la descripción; `caption` es null cuando no se pudo */
+export const vaultMediaDescribeResultSchema = z.object({
+  caption: z.string().nullable(),
+  /** por qué no se pudo, para poder arreglarlo: no contestó o se negó */
+  failure: z.enum(['vacio', 'negativa']).nullable(),
 });
 
 export const vaultMediaGenerateArgsSchema = z.object({
@@ -1210,6 +1269,14 @@ export interface LuxyBridge {
   generateVaultMedia(
     args: z.infer<typeof vaultMediaGenerateArgsSchema>,
   ): Promise<IpcResult<z.infer<typeof vaultMediaGenerateResultSchema>>>;
+  /** corrige a mano el pie de foto; devuelve la lista ya actualizada */
+  setVaultMediaCaption(
+    args: z.infer<typeof vaultMediaCaptionArgsSchema>,
+  ): Promise<IpcResult<z.infer<typeof vaultMediaListResultSchema>>>;
+  /** se lo pide a un modelo con vista. Gasta una llamada */
+  describeVaultMedia(
+    args: z.infer<typeof vaultMediaDescribeArgsSchema>,
+  ): Promise<IpcResult<z.infer<typeof vaultMediaDescribeResultSchema>>>;
   createVaultCharacter(
     args: z.infer<typeof vaultCharacterCreateArgsSchema>,
   ): Promise<IpcResult<z.infer<typeof vaultCharacterCreateResultSchema>>>;

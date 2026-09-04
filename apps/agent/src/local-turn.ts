@@ -15,7 +15,7 @@
 // Lo que se pierde a cambio, y hay que asumir: no hay lease, no hay reintento
 // tras un corte y no hay historial en el servidor. Si Luxy se cierra a media
 // respuesta, esa respuesta se pierde.
-import type { AgentConfig, ClaimedJob, ProviderId } from '@luxy/shared';
+import type { AgentConfig, ClaimedJob, ProviderId, ProviderImage } from '@luxy/shared';
 import { runJob, type JobOutcome } from './job-runner.js';
 import type { AgentLogger } from './logger.js';
 import type { ProviderExecution } from '@luxy/shared';
@@ -28,6 +28,14 @@ export interface LocalTurnInput {
   prompt: string;
   /** `technical` no encarna a nadie; ver el contrato en `host-protocol` */
   kind?: 'conversation' | 'technical';
+  /**
+   * imagenes del turno, con el base64 PURO.
+   *
+   * no entran en el trabajo sintetico: van directas al ejecutor. Meterlas en el
+   * `ClaimedJob` seria meterlas en el contrato del gateway, y un turno privado
+   * existe para que su contenido no llegue a ningun servidor.
+   */
+  images?: readonly ProviderImage[];
 }
 
 export interface LocalTurnResult {
@@ -83,6 +91,10 @@ export class LocalTurnIsolationError extends Error {
  * activa el camino de SOLO LECTURA en runJob — sin worktree, sin herramientas
  * de escritura, sin comprobaciones en el anfitrion. Un turno privado no debe
  * poder tocar archivos.
+ *
+ * Las imagenes del turno NO entran aqui: este objeto tiene la forma del
+ * contrato del gateway, y lo que quepa en el es lo que algun dia podria
+ * acabar viajando por la cola. Van aparte, en las dependencias del ejecutor.
  */
 export function buildLocalJob(input: LocalTurnInput): ClaimedJob {
   return {
@@ -122,6 +134,9 @@ export async function runLocalTurn(
     getProvider: deps.getProvider,
     worktreesDirectory: deps.worktreesDirectory,
     apiKeyFor: deps.apiKeyFor,
+    // las imagenes acompañan al prompt y siguen su mismo camino: memoria entre
+    // dos procesos de Luxy, nunca la cola
+    ...(input.images === undefined ? {} : { images: input.images }),
     // el progreso sale solo hacia quien llama. No hay EventQueue de por medio,
     // asi que no existe el camino por el que un evento acabaria en Supabase.
     emit: (type, message) => deps.onProgress(type, message),

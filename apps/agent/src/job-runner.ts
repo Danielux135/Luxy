@@ -9,6 +9,7 @@ import type {
   AgenticContext,
   ResponseTermination,
   JobArtifact,
+  ProviderImage,
 } from '@luxy/shared';
 import {
   redact,
@@ -75,6 +76,15 @@ export interface JobRunnerDeps {
   downloadAttachment: () => Promise<Buffer>;
   /** clave de una conexion de API, desde el almacen cifrado */
   apiKeyFor: (connectionId: string) => string | undefined;
+  /**
+   * imagenes que acompañan al prompt de ESTE trabajo.
+   *
+   * viajan aqui y no dentro de `ClaimedJob` porque `ClaimedJob` es el contrato
+   * del gateway: meter ahi megabytes de base64 significaria que las imagenes
+   * pasan por el servidor, y el unico camino que las usa hoy —el turno
+   * privado— existe justamente para que no lo hagan.
+   */
+  images?: readonly ProviderImage[];
 }
 
 export type JobOutcome =
@@ -712,6 +722,10 @@ export async function runJob(
     try {
       providerResult = await provider.run({
         prompt: buildProviderPrompt(job, project),
+        // sin imagenes el campo no se manda: ausente y vacio significan lo
+        // mismo, y omitirlo deja intacta la peticion de los proveedores que
+        // solo hablan texto
+        ...(deps.images !== undefined && deps.images.length > 0 ? { images: deps.images } : {}),
         workingDirectory,
         timeoutMs: deps.config.jobTimeoutMs,
         signal,

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { agentConfigSchema, hostRequestSchema, hostResponseSchema } from '@luxy/shared';
-import type { AgentConfig, ProviderExecution } from '@luxy/shared';
+import type { AgentConfig, ProviderExecution, ProviderRunRequest } from '@luxy/shared';
 import { buildLocalJob, runLocalTurn, LocalTurnIsolationError } from './local-turn.js';
 import type { AgentLogger } from './logger.js';
 
@@ -90,6 +90,81 @@ describe('protocolo del turno privado', () => {
     expect(parsed.success).toBe(false);
   });
 
+  // el tope no es decorativo: cada imagen paga tokens de entrada en cada vuelta
+  // y el mensaje cruza dos procesos por memoria
+  it('acepta cuatro imagenes, que es el tope', () => {
+    const parsed = hostRequestSchema.safeParse({
+      type: 'run_local_turn',
+      requestId: 'r1',
+      localTurnId: TURN_ID,
+      provider: 'claude',
+      model: null,
+      projectAlias: 'privado',
+      prompt: 'que ves',
+      images: Array.from({ length: 4 }, () => ({ mimeType: 'image/webp', base64: 'AAAA' })),
+    });
+    expect(parsed.success).toBe(true);
+  });
+
+  it('rechaza cinco imagenes', () => {
+    const parsed = hostRequestSchema.safeParse({
+      type: 'run_local_turn',
+      requestId: 'r1',
+      localTurnId: TURN_ID,
+      provider: 'claude',
+      model: null,
+      projectAlias: 'privado',
+      prompt: 'que ves',
+      images: Array.from({ length: 5 }, () => ({ mimeType: 'image/webp', base64: 'AAAA' })),
+    });
+    expect(parsed.success).toBe(false);
+  });
+
+  it('sin imagenes el campo llega como lista vacia', () => {
+    const parsed = hostRequestSchema.safeParse({
+      type: 'run_local_turn',
+      requestId: 'r1',
+      localTurnId: TURN_ID,
+      provider: 'claude',
+      model: null,
+      projectAlias: 'privado',
+      prompt: 'hola',
+    });
+    expect(parsed.success && parsed.data.type === 'run_local_turn' && parsed.data.images).toEqual(
+      [],
+    );
+  });
+
+  // si el prefijo entrase aqui, quien compone la peticion generaria
+  // `data:...;base64,data:...` y el proveedor devolveria un 400 opaco
+  it('rechaza un base64 que ya trae el prefijo data:', () => {
+    const parsed = hostRequestSchema.safeParse({
+      type: 'run_local_turn',
+      requestId: 'r1',
+      localTurnId: TURN_ID,
+      provider: 'claude',
+      model: null,
+      projectAlias: 'privado',
+      prompt: 'que ves',
+      images: [{ mimeType: 'image/png', base64: 'data:image/png;base64,AAAA' }],
+    });
+    expect(parsed.success).toBe(false);
+  });
+
+  it('rechaza un tipo que no sea de imagen', () => {
+    const parsed = hostRequestSchema.safeParse({
+      type: 'run_local_turn',
+      requestId: 'r1',
+      localTurnId: TURN_ID,
+      provider: 'claude',
+      model: null,
+      projectAlias: 'privado',
+      prompt: 'que ves',
+      images: [{ mimeType: 'application/pdf', base64: 'AAAA' }],
+    });
+    expect(parsed.success).toBe(false);
+  });
+
   it('la respuesta lleva el texto y su final', () => {
     const parsed = hostResponseSchema.safeParse({
       type: 'local_turn',
@@ -132,6 +207,96 @@ describe('trabajo sintetico', () => {
     expect(job.telegramChatId).toBeNull();
     expect(job.telegramUserId).toBeNull();
     expect(job.attachment).toBeNull();
+  });
+});
+
+describe('imagenes del turno privado', () => {
+  /** proveedor que guarda la peticion recibida; sigue sin red y sin CLI */
+  function spyProvider(capturado: { request: ProviderRunRequest | null }): ProviderExecution {
+    return {
+      id: 'claude',
+      displayName: 'Proveedor de prueba',
+      detect: async () => ({ available: true, version: 'falso' }),
+      run: async (request: ProviderRunRequest) => {
+        capturado.request = request;
+        return {
+          ok: true,
+          finalText: 'lo veo',
+          sessionId: null,
+          exitCode: 0,
+          timedOut: false,
+          cancelled: false,
+          errorMessage: null,
+          usage: { inputTokens: 1, outputTokens: 1 },
+          callMetrics: { modelCalls: 1, toolCalls: 0 },
+        };
+      },
+    } as unknown as ProviderExecution;
+  }
+
+  it('las imagenes llegan hasta el proveedor', async () => {
+    const capturado: { request: ProviderRunRequest | null } = { request: null };
+
+    await runLocalTurn(
+      {
+        localTurnId: TURN_ID,
+        provider: 'claude',
+        model: null,
+        projectAlias: 'privado',
+        prompt: 'que ves',
+        images: [{ mimeType: 'image/webp', base64: 'AAAA' }],
+      },
+      new AbortController().signal,
+      {
+        config: config(),
+        logger,
+        getProvider: () => spyProvider(capturado),
+        worktreesDirectory: 'C:/no/se/usa',
+        apiKeyFor: () => undefined,
+        onProgress: () => undefined,
+      },
+    );
+
+    expect(capturado.request?.images).toEqual([{ mimeType: 'image/webp', base64: 'AAAA' }]);
+  });
+
+  it('un turno sin imagenes no manda el campo', async () => {
+    const capturado: { request: ProviderRunRequest | null } = { request: null };
+
+    await runLocalTurn(
+      {
+        localTurnId: TURN_ID,
+        provider: 'claude',
+        model: null,
+        projectAlias: 'privado',
+        prompt: 'hola',
+      },
+      new AbortController().signal,
+      {
+        config: config(),
+        logger,
+        getProvider: () => spyProvider(capturado),
+        worktreesDirectory: 'C:/no/se/usa',
+        apiKeyFor: () => undefined,
+        onProgress: () => undefined,
+      },
+    );
+
+    expect(capturado.request?.images).toBeUndefined();
+  });
+
+  // el trabajo sintetico tiene la forma del contrato del gateway: lo que quepa
+  // ahi es lo que algun dia podria acabar viajando por la cola
+  it('las imagenes NO entran en el trabajo sintetico', () => {
+    const job = buildLocalJob({
+      localTurnId: TURN_ID,
+      provider: 'claude',
+      model: null,
+      projectAlias: 'privado',
+      prompt: 'que ves',
+      images: [{ mimeType: 'image/webp', base64: 'UNBASE64RECONOCIBLE' }],
+    });
+    expect(JSON.stringify(job)).not.toContain('UNBASE64RECONOCIBLE');
   });
 });
 

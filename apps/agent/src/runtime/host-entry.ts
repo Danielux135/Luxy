@@ -136,6 +136,12 @@ export function startHostEntry(port: ParentPort): void {
             model: request.model,
             projectAlias: request.projectAlias,
             prompt: request.prompt,
+            // el modo del turno tiene que llegar entero: sin reenviarlo, un
+            // turno `technical` —catalogar escenas— se ejecutaba con el
+            // envoltorio de personaje de `D-055`, porque buildLocalJob solo
+            // deja de marcarlo cuando ve `technical` de verdad
+            kind: request.kind,
+            images: request.images,
           },
           (type, message) => {
             // SOLO fases y avisos. `provider_output` lleva texto del modelo, y

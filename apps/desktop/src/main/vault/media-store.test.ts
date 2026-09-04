@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, readFileSync, readdirSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, rmSync, existsSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { randomBytes, toBase64Url } from '@luxy/vault-crypto';
+import { randomBytes, sealText, toBase64Url, wipe } from '@luxy/vault-crypto';
 import { VaultService, VaultError, type DeviceKeyStore } from './vault-service.js';
 import { vaultFilePathFor } from './key-file.js';
 import { LocalBlobStore, mediaDirectory } from './blob-store.js';
@@ -162,6 +162,138 @@ describe('medios privados', () => {
       await expect(store.readThumbnail(vault, CONVERSATION, stored.mediaId)).rejects.toThrow(
         'no tiene miniatura',
       );
+    });
+  });
+
+  describe('corregir el pie de foto', () => {
+    const objetos = (): string[] => readdirSync(mediaDirectory(directory));
+    const indice = (): string =>
+      readFileSync(join(mediaIndexDirectory(directory), `${CONVERSATION}.jsonl`), 'utf8');
+
+    it('lo cambia sin tocar los bytes de la imagen', async () => {
+      const original = randomBytes(20_000);
+      const stored = await store.add(vault, CONVERSATION, original, metadata);
+      const cifradoAntes = readFileSync(join(mediaDirectory(directory), objetos()[0]!));
+
+      await store.setCaption(vault, CONVERSATION, stored.mediaId, 'ella mirando por la ventana');
+
+      // el archivo cifrado es byte a byte el mismo: solo se resella la
+      // metadata, y volver a cifrar la imagen entera no compraria nada
+      const cifradoDespues = readFileSync(join(mediaDirectory(directory), objetos()[0]!));
+      expect(cifradoDespues.equals(cifradoAntes)).toBe(true);
+
+      const leido = await store.read(vault, CONVERSATION, stored.mediaId);
+      expect([...leido.bytes]).toEqual([...original]);
+
+      const lista = await store.list(vault, CONVERSATION);
+      expect(lista[0]?.metadata.caption).toBe('ella mirando por la ventana');
+    });
+
+    it('conserva el prompt y todo lo demas de la metadata', async () => {
+      const stored = await store.add(vault, CONVERSATION, randomBytes(2048), metadata);
+      const antes = (await store.list(vault, CONVERSATION))[0]!.metadata;
+      expect(antes.caption).toBeNull();
+
+      await store.setCaption(vault, CONVERSATION, stored.mediaId, 'un pie de foto corregido');
+
+      const despues = (await store.list(vault, CONVERSATION))[0]!.metadata;
+      // corregir lo que se VE no puede borrar lo que se PIDIO: es lo unico que
+      // explica por que la imagen salio como salio
+      expect(despues.prompt).toBe('el prompt con el que se genero');
+      expect(despues).toEqual({ ...antes, caption: 'un pie de foto corregido' });
+    });
+
+    it('no se lleva por delante los demas medios de la conversacion', async () => {
+      const primero = await store.add(vault, CONVERSATION, randomBytes(1024), metadata);
+      const segundo = await store.add(vault, CONVERSATION, randomBytes(1024), metadata);
+
+      await store.setCaption(vault, CONVERSATION, primero.mediaId, 'solo el primero');
+
+      // el indice se reescribe entero, asi que perder una linea es el fallo a
+      // vigilar: los dos siguen ahi y en el mismo orden
+      const lista = await store.list(vault, CONVERSATION);
+      expect(lista.map((item) => item.mediaId)).toEqual([primero.mediaId, segundo.mediaId]);
+      expect(lista[1]?.metadata.caption).toBeNull();
+    });
+
+    it('sobrevive a cerrar y volver a abrir la boveda', async () => {
+      const stored = await store.add(vault, CONVERSATION, randomBytes(2048), metadata);
+      await store.setCaption(vault, CONVERSATION, stored.mediaId, 'lo que se ve, ya corregido');
+      vault.lock();
+
+      const otra = new VaultService(vaultFilePathFor(directory), memoryDeviceKeys(), {
+        argon2Params: FAST,
+      });
+      await otra.unlock(PASSWORD);
+      const lista = await store.list(otra, CONVERSATION);
+      expect(lista[0]?.metadata.caption).toBe('lo que se ve, ya corregido');
+    });
+
+    it('no queda en claro en ningun archivo', async () => {
+      const stored = await store.add(vault, CONVERSATION, randomBytes(2048), metadata, randomBytes(512));
+      await store.setCaption(vault, CONVERSATION, stored.mediaId, 'una frase que describe algo privado');
+
+      // describe el contenido, asi que filtrarlo seria tan malo como filtrar la
+      // imagen: ni en el indice ni en los objetos
+      expect(indice()).not.toContain('una frase que describe');
+      for (const archivo of objetos()) {
+        const bytes = readFileSync(join(mediaDirectory(directory), archivo)).toString('latin1');
+        expect(bytes).not.toContain('una frase que describe');
+      }
+      // y ningun temporal a medio escribir con el texto dentro
+      expect(readdirSync(mediaIndexDirectory(directory)).filter((f) => f.endsWith('.tmp'))).toEqual(
+        [],
+      );
+    });
+
+    it('un medio que no existe es un error, no un cambio silencioso', async () => {
+      await store.add(vault, CONVERSATION, randomBytes(1024), metadata);
+
+      await expect(
+        store.setCaption(vault, CONVERSATION, '99999999-9999-4999-8999-999999999999', 'da igual'),
+      ).rejects.toThrow('no existe en esta conversacion');
+    });
+
+    it('un medio guardado antes de que existiera el campo se lee con null', async () => {
+      const stored = await store.add(vault, CONVERSATION, randomBytes(2048), metadata);
+      const record = store.rawRecords(CONVERSATION)[0]!;
+
+      // se resella el payload TAL Y COMO se escribia antes de este campo, sin
+      // el: es lo que hay en el disco de quien ya usaba Luxy
+      const key = vault.subkeyFor('media', record.mediaId);
+      const contenido = await sealText(
+        key,
+        'vault.media',
+        JSON.stringify({
+          v: 1,
+          mimeType: 'image/png',
+          displayName: 'foto.png',
+          prompt: 'lo que se pidio entonces',
+          width: null,
+          height: null,
+          durationMs: null,
+          characterId: null,
+          provider: null,
+          model: null,
+          createdAt: new Date().toISOString(),
+        }),
+      );
+      wipe(key);
+      writeFileSync(
+        join(mediaIndexDirectory(directory), `${CONVERSATION}.jsonl`),
+        `${JSON.stringify({ ...record, content: contenido })}\n`,
+        'utf8',
+      );
+
+      const lista = await store.list(vault, CONVERSATION);
+      expect(lista[0]?.metadata.caption).toBeNull();
+      expect(lista[0]?.metadata.prompt).toBe('lo que se pidio entonces');
+
+      // y se puede corregir sin inventar nada de lo que falta
+      await store.setCaption(vault, CONVERSATION, stored.mediaId, 'lo que se ve ahora');
+      const despues = (await store.list(vault, CONVERSATION))[0]!.metadata;
+      expect(despues.caption).toBe('lo que se ve ahora');
+      expect(despues.prompt).toBe('lo que se pidio entonces');
     });
   });
 

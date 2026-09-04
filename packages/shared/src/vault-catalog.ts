@@ -115,8 +115,37 @@ export function describeCatalogFailure(parsed: ParsedCatalog, said: string): str
  */
 export const CATALOG_MAX_TURNS = 60;
 
-/** recorte de cada turno dentro del prompt del catalogador */
-const CATALOG_TURN_CHARS = 600;
+/**
+ * cuanto se le enseña de cada turno.
+ *
+ * Con 600 caracteres se catalogo mal una conversacion real de 22 turnos: sus
+ * turnos median entre 1.200 y 2.000 caracteres, asi que el modelo veia el
+ * arranque de todos —que se parecen entre si— y nunca el final, que es justo
+ * donde una escena se cierra o gira. Sin esa señal reparte uniforme.
+ *
+ * 1.400 cubre entero el turno tipico de esa conversacion, y en uno de 2.000
+ * deja unos 700 caracteres de principio y otros 700 de final. No es el maximo
+ * que cabe: es lo que hace falta para ver como empieza y como acaba un turno.
+ */
+export const CATALOG_TURN_CHARS = 1400;
+
+/**
+ * cuanto ocupan como mucho los turnos juntos.
+ *
+ * Hace falta porque 60 turnos por 1.400 caracteres son 84.000 de prompt solo de
+ * datos. Con 60.000 el peor caso —los 60 turnos largos— sigue dando 1.000
+ * caracteres a cada uno, que es mas de lo que habia antes para cualquiera y
+ * sigue dejando ver los dos extremos.
+ */
+export const CATALOG_PROMPT_CHARS = 60_000;
+
+/**
+ * la marca del recorte.
+ *
+ * Un turno cortado sin marca parece un turno entero, y entonces el modelo lee
+ * un salto de tema donde solo hay un agujero.
+ */
+const CUT_MARK = ' […recorte…] ';
 
 /**
  * el prompt del catalogador.
@@ -130,14 +159,27 @@ export function buildCatalogPrompt(turns: readonly CatalogTurn[]): string {
   const first = shown[0]?.sequence ?? 0;
   const last = shown[shown.length - 1]?.sequence ?? 0;
 
+  const flattened = shown.map((turn) => ({ ...turn, text: flatten(turn.text) }));
+  const allowance = turnAllowance(flattened.map((turn) => turn.text.length));
+
   return [
     'Estas catalogando una conversacion para un indice de busqueda. No la continues, no la',
     'valores y no hables con nadie: solo describes lo que hay para poder encontrarlo despues.',
     '',
     'Parte la conversacion en ESCENAS. Una escena cambia cuando cambia lo que esta pasando: el',
     'sitio, el momento, el asunto, o porque alguien se despide, se duerme o vuelve mas tarde.',
-    'No partas por longitud: dos escenas seguidas pueden ser muy desiguales, y una conversacion',
-    'corta puede ser una sola escena.',
+    '',
+    'Una escena puede durar MUCHOS turnos. Si no ha cambiado el sitio, ni el momento, ni lo que',
+    'esta pasando, sigue siendo la misma escena aunque lleve veinte turnos. En una conversacion',
+    'seguida lo normal son POCAS escenas largas, no muchas cortas.',
+    'Que la cosa vaya a mas, o que se siga hablando de lo mismo mas a fondo, no abre una escena',
+    'nueva: es la misma escena avanzando. No hagas una por cada paso.',
+    'No partas por longitud. Si te salen trozos de tamaño parecido, lo has hecho mal: lo que pasa',
+    'en una conversacion no dura lo mismo cada vez. Dos escenas seguidas pueden ser muy',
+    'desiguales, y una conversacion corta puede ser una sola escena.',
+    '',
+    `Si un turno viene con «${CUT_MARK.trim()}» en medio, es que se le ha quitado el centro para que`,
+    'quepa: tienes su principio y su final, y lo de en medio no existe como salto.',
     '',
     'De cada escena das:',
     '- `from` y `to`: numeros de turno, incluidos. Van seguidas y sin huecos, y cada una empieza',
@@ -155,16 +197,60 @@ export function buildCatalogPrompt(turns: readonly CatalogTurn[]): string {
     `${CATALOG_CLOSE}`,
     '',
     'CONVERSACION (DATOS):',
-    ...shown.map(
+    ...flattened.map(
       (turn) =>
-        `[${turn.sequence}] ${turn.role === 'user' ? 'Usuario' : 'Personaje'}: ${trim(turn.text)}`,
+        `[${turn.sequence}] ${turn.role === 'user' ? 'Usuario' : 'Personaje'}: ${clip(
+          turn.text,
+          allowance,
+        )}`,
     ),
   ].join('\n');
 }
 
-function trim(text: string): string {
-  const flat = text.replace(/\s+/g, ' ').trim();
-  return flat.length <= CATALOG_TURN_CHARS ? flat : `${flat.slice(0, CATALOG_TURN_CHARS)}…`;
+function flatten(text: string): string {
+  return text.replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * cuanto le toca a cada turno cuando no caben todos enteros.
+ *
+ * No se reparte a partes iguales: un turno de dos lineas no gasta su parte, y lo
+ * que le sobra se lo quedan los largos, que son los unicos a los que recortar
+ * les quita algo. Se recorre de mas corto a mas largo: en cuanto uno no cabe en
+ * su parte, ninguno de los que quedan cabe tampoco, y todos ellos se llevan esa
+ * misma parte.
+ */
+function turnAllowance(lengths: readonly number[]): number {
+  let budget = CATALOG_PROMPT_CHARS;
+  let pending = lengths.length;
+
+  for (const length of [...lengths].sort((a, b) => a - b)) {
+    const share = Math.floor(budget / pending);
+    if (length > share) return Math.min(CATALOG_TURN_CHARS, share);
+    budget -= length;
+    pending -= 1;
+  }
+  return CATALOG_TURN_CHARS;
+}
+
+/**
+ * recorta por el MEDIO, no por el final.
+ *
+ * Quedarse con el primer tercio de cada turno es lo que rompia el catalogo: los
+ * arranques se parecen entre si y lo que distingue una escena de la siguiente
+ * —que algo se cierra, que alguien se despide, que la cosa gira— esta al final.
+ * Conservando los dos extremos eso se ve.
+ */
+function clip(flat: string, allowance: number): string {
+  if (flat.length <= allowance) return flat;
+
+  const keep = allowance - CUT_MARK.length;
+  // con un presupuesto tan corto que no caben ni los dos extremos, al menos se
+  // conserva el principio en vez de devolver solo la marca
+  if (keep < 2) return `${flat.slice(0, Math.max(allowance, 0))}…`;
+
+  const head = Math.ceil(keep / 2);
+  return `${flat.slice(0, head)}${CUT_MARK}${flat.slice(flat.length - (keep - head))}`;
 }
 
 /**
@@ -209,6 +295,63 @@ export function parseCatalogResponse(
   if (complaint !== null) return { scenes: [], status: 'invalid', reason: complaint };
 
   return { scenes, status: 'structured', reason: null };
+}
+
+/** lo que se ve al mirar los tamaños de un catalogo ya aceptado */
+export interface EvenSplitSignal {
+  /** el reparto parece hecho por longitud y no por lo que pasa */
+  even: boolean;
+  /** cuantas escenas se miraron, y cuanto miden la mas corta y la mas larga */
+  scenes: number;
+  shortest: number;
+  longest: number;
+}
+
+/**
+ * un turno de diferencia sigue siendo «lo mismo».
+ *
+ * 4+5+4 esta tan medido como 4+4+4; exigir tamaños identicos dejaria fuera el
+ * caso mas comun, que es un reparto regular con un turno que se descuadra.
+ */
+const EVEN_SPLIT_SLACK = 1;
+
+/** por debajo de esto, medir lo mismo es casualidad y no evidencia de nada */
+const EVEN_SPLIT_MIN_SCENES = 3;
+
+/**
+ * detecta el reparto uniforme, que es la huella de haber partido por longitud.
+ *
+ * **No rechaza el catalogo.** Uno regular sigue sirviendo para encontrar cosas,
+ * y quedarse sin ninguno es peor; esto solo devuelve la señal para que quien
+ * llama pueda avisar y ofrecer reintentar con otro modelo.
+ *
+ * El caso real son 22 turnos partidos en 4+4+4+4+4+2. El ultimo trozo de un
+ * reparto por longitud es el RESTO —mas corto que todos los demas—, asi que se
+ * deja fuera antes de comparar; si no, esos 2 turnos finales disimularian los
+ * cinco cuatros. Un reparto sano como 9+3+10 no se parece a esto ni de lejos.
+ *
+ * Espera las escenas en orden, tal y como las devuelve `parseCatalogResponse`.
+ */
+export function detectEvenSplit(scenes: readonly CatalogedScene[]): EvenSplitSignal {
+  const sizes = scenes.map((scene) => scene.to - scene.from + 1);
+  const signal: EvenSplitSignal = {
+    even: false,
+    scenes: sizes.length,
+    shortest: sizes.length === 0 ? 0 : Math.min(...sizes),
+    longest: sizes.length === 0 ? 0 : Math.max(...sizes),
+  };
+  if (sizes.length < EVEN_SPLIT_MIN_SCENES) return signal;
+
+  const body = isRemainder(sizes) ? sizes.slice(0, -1) : sizes;
+  if (body.length < EVEN_SPLIT_MIN_SCENES) return signal;
+
+  return { ...signal, even: Math.max(...body) - Math.min(...body) <= EVEN_SPLIT_SLACK };
+}
+
+/** la ultima escena es el sobrante de haber contado turnos: mas corta que todas */
+function isRemainder(sizes: readonly number[]): boolean {
+  const last = sizes[sizes.length - 1]!;
+  return sizes.slice(0, -1).every((size) => size > last);
 }
 
 /** las escenas tienen que cubrir el tramo entero, seguidas y sin pisarse */

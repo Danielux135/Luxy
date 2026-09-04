@@ -109,6 +109,8 @@ const bridge: LuxyBridge = {
     ipcRenderer.invoke(IPC_INVOKE.vaultMediaList, { conversationId }),
   readVaultMedia: (args: unknown) => ipcRenderer.invoke(IPC_INVOKE.vaultMediaRead, args),
   generateVaultMedia: (args: unknown) => ipcRenderer.invoke(IPC_INVOKE.vaultMediaGenerate, args),
+  setVaultMediaCaption: (args: unknown) => ipcRenderer.invoke(IPC_INVOKE.vaultMediaCaption, args),
+  describeVaultMedia: (args: unknown) => ipcRenderer.invoke(IPC_INVOKE.vaultMediaDescribe, args),
   createVaultCharacter: (args: unknown) =>
     ipcRenderer.invoke(IPC_INVOKE.vaultCharacterCreate, args),
   listVaultCharacters: () => ipcRenderer.invoke(IPC_INVOKE.vaultCharacterList),

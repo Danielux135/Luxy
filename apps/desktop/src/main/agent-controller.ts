@@ -360,6 +360,14 @@ export class AgentController {
     prompt: string;
     /** `technical` no encarna a nadie: ver `host-protocol` */
     kind?: 'conversation' | 'technical';
+    /**
+     * imagenes del turno, con el base64 PURO (sin `data:`).
+     *
+     * cruzan por memoria igual que el prompt. El hijo las vuelve a validar con
+     * `hostRequestSchema`: que las mande el proceso principal no las convierte
+     * en entrada de confianza.
+     */
+    images?: readonly { mimeType: string; base64: string }[];
   }): Promise<LocalTurnResponse> {
     const child = this.child;
     if (child === null) {

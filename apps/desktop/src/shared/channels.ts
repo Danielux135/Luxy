@@ -69,6 +69,10 @@ export const IPC_INVOKE = {
   vaultMediaList: 'luxy:vault:media:list',
   vaultMediaRead: 'luxy:vault:media:read',
   vaultMediaGenerate: 'luxy:vault:media:generate',
+  /** corrige a mano el pie de foto de un medio ya guardado */
+  vaultMediaCaption: 'luxy:vault:media:caption',
+  /** se lo pide a un modelo que sepa mirar. Gasta una llamada */
+  vaultMediaDescribe: 'luxy:vault:media:describe',
   vaultCharacterCreate: 'luxy:vault:character:create',
   vaultCharacterList: 'luxy:vault:character:list',
   vaultCharacterForget: 'luxy:vault:character:forget',

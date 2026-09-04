@@ -168,6 +168,31 @@ export interface HttpProviderConfig {
    * `SOFT_TERMINAL_GRACE_MS`.
    */
   softTerminalGraceMs?: number;
+  /**
+   * forma en la que esta conexion espera `image_url` dentro de una parte de
+   * imagen.
+   *
+   * la forma estandar de OpenAI es un objeto (`image_url: { url }`), pero
+   * Mistral la documenta como CADENA (`image_url: "data:..."`). La de objeto
+   * probablemente tambien le valga, pero no lo dice en ninguna parte, asi que
+   * la eleccion es por conexion en vez de una suposicion global.
+   *
+   * opcional para no romper una configuracion anterior: sin valor se usa la
+   * forma estandar de objeto.
+   */
+  imageUrlFormat?: 'object' | 'string';
+}
+
+/**
+ * una imagen que acompaña al prompt en una peticion multimodal.
+ *
+ * el base64 va PURO, sin el prefijo `data:`. El prefijo lo compone quien
+ * construye la peticion, porque cada proveedor lo quiere a su manera; guardarlo
+ * ya compuesto obligaria a deshacerlo para el que no lo use igual.
+ */
+export interface ProviderImage {
+  mimeType: string;
+  base64: string;
 }
 
 // uso de tokens registrado tras una llamada http
@@ -225,6 +250,18 @@ export interface AgenticContext {
 
 export interface ProviderRunRequest {
   prompt: string;
+  /**
+   * imagenes que viajan con el prompt en una peticion multimodal.
+   *
+   * es OPCIONAL a proposito: todo lo que ya llama a `run()` manda solo texto, y
+   * hacerlo obligatorio obligaria a tocar cada punto de llamada para escribir
+   * un array vacio que no aporta nada. Ausente y vacio significan lo mismo:
+   * peticion de texto, con `content` como cadena de siempre.
+   *
+   * El base64 va PURO, sin el prefijo `data:`: el prefijo lo compone quien
+   * construye la peticion, porque cada proveedor lo quiere a su manera.
+   */
+  images?: readonly ProviderImage[];
   workingDirectory: string;
   timeoutMs: number;
   signal: AbortSignal;

@@ -1673,6 +1673,30 @@ input[aria-invalid='true'] {
   border-radius: 6px;
 }
 
+/* el pie de foto es lo unico que el modelo sabe del archivo: se lee en el
+   cuerpo del texto, no como un metadato de segunda */
+.vault-media__caption {
+  margin: 0;
+  line-height: 1.45;
+}
+
+/* lo que se pidio al generarla es historia y no se corrige: se distingue del
+   pie de foto a simple vista para que nadie confunda uno con otro */
+.vault-media__prompt {
+  margin: 0;
+  color: var(--dim);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+/* el tile apila en columna alineado a la izquierda: sin esto la fila de
+   corregir, sus avisos y el cuadro de texto salian encogidos contra el borde */
+.vault-media__item > .row,
+.vault-media__item > .notice,
+.vault-media__item > p {
+  align-self: stretch;
+}
+
 /* avatar del personaje en la lista: miniatura fija, no la imagen a su tamaño
    natural, que son 896x1152 y ocupaba la pantalla entera */
 .vault-character__avatar {

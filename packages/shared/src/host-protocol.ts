@@ -10,6 +10,40 @@
 import { z } from 'zod';
 import { agentEventSchema, agentHostStatusSchema } from './agent-events.js';
 
+/**
+ * tope de imagenes en un turno privado.
+ *
+ * cuatro no es un numero magico: es lo que cabe sin convertir un turno en una
+ * subida de archivos. Cada imagen paga tokens de entrada en cada vuelta de la
+ * conversacion, asi que el limite protege el bolsillo, no solo la memoria.
+ */
+export const MAX_LOCAL_TURN_IMAGES = 4;
+
+/**
+ * tope de una imagen, en caracteres de base64 (~8 MB de texto).
+ *
+ * el mensaje cruza dos procesos por memoria; sin tope, un archivo suelto podia
+ * llevarse la ventana por delante antes de que nadie validara nada.
+ */
+export const MAX_LOCAL_TURN_IMAGE_BASE64 = 8 * 1024 * 1024;
+
+/**
+ * una imagen adjunta a un turno privado.
+ *
+ * el base64 se exige PURO: si aqui entrase un `data:image/png;base64,...`
+ * entero, quien compone la peticion generaria `data:...;base64,data:...` y el
+ * proveedor devolveria un 400 que no señala a este punto. La forma del campo es
+ * lo que impide ese fallo.
+ */
+const localTurnImageSchema = z.object({
+  mimeType: z.string().regex(/^image\/[a-z0-9][a-z0-9.+-]{0,62}$/, 'tipo de imagen no valido'),
+  base64: z
+    .string()
+    .min(1)
+    .max(MAX_LOCAL_TURN_IMAGE_BASE64)
+    .regex(/^[A-Za-z0-9+/]+={0,2}$/, 'el base64 debe ir sin el prefijo data:'),
+});
+
 /** mensajes del proceso principal hacia el agente */
 export const hostRequestSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('start'), requestId: z.string() }),
@@ -85,6 +119,14 @@ export const hostRequestSchema = z.discriminatedUnion('type', [
      * interpretando a alguien que ademas rellene un JSON estropea las dos cosas.
      */
     kind: z.enum(['conversation', 'technical']).default('conversation'),
+    /**
+     * imagenes que acompañan al prompt.
+     *
+     * opcional porque un turno de texto —que son casi todos— no manda ninguna,
+     * y un agente anterior no sabria rellenar el campo. Vacio y ausente
+     * significan lo mismo.
+     */
+    images: z.array(localTurnImageSchema).max(MAX_LOCAL_TURN_IMAGES).default([]),
   }),
   z.object({
     type: z.literal('cancel_local_turn'),

@@ -20,10 +20,13 @@ import {
   buildCatalogPrompt,
   describeCatalogFailure,
   parseCatalogResponse,
+  detectEvenSplit,
   CATALOG_MAX_TURNS,
   isPathInside,
   VAULT_IMAGE_NEGATIVE,
   buildHordeRequest,
+  buildDescribePrompt,
+  parseDescribeResponse,
   imagePromptStyleFor,
   type HordeRecipe,
 } from '@luxy/shared';
@@ -70,6 +73,8 @@ import {
   vaultMediaListArgsSchema,
   vaultMediaReadArgsSchema,
   vaultMediaGenerateArgsSchema,
+  vaultMediaCaptionArgsSchema,
+  vaultMediaDescribeArgsSchema,
   vaultCharacterCreateArgsSchema,
   vaultCharacterForgetArgsSchema,
   vaultCharacterImportArgsSchema,
@@ -1264,6 +1269,7 @@ export function registerIpcHandlers(context: HandlerContext): void {
     let cataloged = 0;
     let scenes = 0;
     const failed: { conversationId: string; reason: string }[] = [];
+    const uneven: { conversationId: string; scenes: number }[] = [];
 
     for (const conversation of pending.slice(0, args.limit)) {
       const turns = await context.privateConversations.read(
@@ -1322,6 +1328,17 @@ export function registerIpcHandlers(context: HandlerContext): void {
         catalogFailures.delete(conversation.conversationId);
         cataloged += 1;
         scenes += parsed.scenes.length;
+
+        // todas las escenas del mismo tamaño no es como fue la conversacion:
+        // es que no encontro donde cortar y repartio. El catalogo se conserva
+        // —uno tosco es mejor que ninguno— y solo se avisa
+        const reparto = detectEvenSplit(parsed.scenes);
+        if (reparto.even) {
+          uneven.push({
+            conversationId: conversation.conversationId,
+            scenes: reparto.scenes,
+          });
+        }
       } catch (error) {
         catalogFailures.add(conversation.conversationId);
         failed.push({
@@ -1342,23 +1359,109 @@ export function registerIpcHandlers(context: HandlerContext): void {
       cataloged,
       scenes,
       failed,
+      uneven,
       // las que quedaban menos las que se han hecho o descartado en esta tanda
       pending: Math.max(0, pending.length - Math.min(pending.length, args.limit)),
     };
   };
 
-  handle(IPC_INVOKE.vaultMediaList, vaultMediaListArgsSchema, async (args) => {
-    const items = await context.privateMedia.list(context.vault, args.conversationId);
-    return {
-      media: items.map((item) => ({
-        mediaId: item.mediaId,
-        mimeType: item.metadata.mimeType,
-        displayName: item.metadata.displayName,
-        byteSize: 0,
-        hasThumbnail: item.hasThumbnail,
-        previewable: true,
-      })),
-    };
+  /** la lista tal y como la ve el renderer; la usan el listado y las correcciones */
+  const listMediaForRenderer = async (conversationId: string) => {
+    const items = await context.privateMedia.list(context.vault, conversationId);
+    return items.map((item) => ({
+      mediaId: item.mediaId,
+      mimeType: item.metadata.mimeType,
+      displayName: item.metadata.displayName,
+      byteSize: 0,
+      hasThumbnail: item.hasThumbnail,
+      previewable: true,
+      caption: item.metadata.caption ?? null,
+      prompt: item.metadata.prompt,
+    }));
+  };
+
+  handle(IPC_INVOKE.vaultMediaList, vaultMediaListArgsSchema, async (args) => ({
+    media: await listMediaForRenderer(args.conversationId),
+  }));
+
+  /**
+   * corrige a mano el pie de foto de un medio.
+   *
+   * Es lo UNICO que el modelo sabe de una imagen guardada, y con ello decide
+   * cual reenviarte en vez de pagar otra generacion. Hasta ahora no se podia ni
+   * ver ni corregir: elegia a partir de una linea invisible, y en el avatar
+   * copiado esa linea era siempre «su foto de perfil».
+   */
+  handle(IPC_INVOKE.vaultMediaCaption, vaultMediaCaptionArgsSchema, async (args) => {
+    if (!context.vault.isUnlocked()) throw new VaultError('la boveda esta bloqueada');
+    const limpio = args.caption.trim();
+    await context.privateMedia.setCaption(
+      context.vault,
+      args.conversationId,
+      args.mediaId,
+      // vaciarlo lo deja SIN pie de foto, que es distinto de no tocarlo: es la
+      // unica forma de retirar una descripcion equivocada
+      limpio.length === 0 ? null : limpio,
+    );
+    // ni el texto ni de que imagen es
+    context.log('pie de foto corregido');
+    return { media: await listMediaForRenderer(args.conversationId) };
+  });
+
+  /**
+   * le pide a un modelo con vista que describa una imagen.
+   *
+   * Gasta una llamada, asi que lo dispara el usuario. Va en modo TECNICO: es
+   * una descripcion de un archivo, no una escena, y pedirsela a quien esta
+   * encarnando a alguien mezcla dos cosas distintas (`D-055`).
+   *
+   * Una negativa NO se guarda como pie de foto. Guardarla seria lo peor de los
+   * dos mundos: el modelo creeria que la imagen ES esa frase y la reenviaria
+   * describiendola asi.
+   */
+  handle(IPC_INVOKE.vaultMediaDescribe, vaultMediaDescribeArgsSchema, async (args) => {
+    if (!context.vault.isUnlocked()) throw new VaultError('la boveda esta bloqueada');
+
+    const { bytes, mimeType } = await context.privateMedia.read(
+      context.vault,
+      args.conversationId,
+      args.mediaId,
+    );
+    if (!mimeType.startsWith('image/')) {
+      throw new VaultError(
+        'solo se pueden describir imagenes',
+        'un video no se puede mirar de una sola vez; describelo a mano',
+      );
+    }
+
+    const run = await context.controller.runLocalTurn({
+      localTurnId: randomUUID(),
+      provider: args.provider,
+      model: args.model,
+      projectAlias: args.projectAlias,
+      prompt: buildDescribePrompt(),
+      kind: 'technical',
+      // base64 PURO: el prefijo `data:` lo compone el proveedor, que lo quiere
+      // a su manera segun con quien hable
+      images: [{ mimeType, base64: Buffer.from(bytes).toString('base64') }],
+    });
+
+    // una negativa llega como un turno normal y parece una descripcion rara
+    const refused = classifyReply(run.text).kind === 'refused';
+    const described = parseDescribeResponse(run.text, refused);
+    if (described.caption === null) {
+      return { caption: null, failure: described.failure };
+    }
+
+    await context.privateMedia.setCaption(
+      context.vault,
+      args.conversationId,
+      args.mediaId,
+      described.caption,
+    );
+    // ni la descripcion ni de que imagen es: solo que se pudo
+    context.log('imagen descrita por un modelo');
+    return { caption: described.caption, failure: null };
   });
 
   /**
