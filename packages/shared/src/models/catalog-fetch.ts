@@ -9,6 +9,7 @@
 // red. Quien hace la peticion es el proceso principal de Desktop, que es el
 // unico que tiene la clave descifrada.
 import { z } from 'zod';
+import type { ModelCapability } from './types.js';
 
 /**
  * respuesta de `GET /v1/models`, formato OpenAI.
@@ -22,6 +23,16 @@ export const providerModelEntrySchema = z
     id: z.string().min(1).max(200),
     owned_by: z.string().max(200).optional(),
     created: z.number().optional(),
+    /**
+     * lo que la pasarela dice que ese modelo sabe hacer.
+     *
+     * No todas lo publican, y las que lo hacen no coinciden en los nombres. Se
+     * acepta cualquier objeto de banderas y se guardan **las que vienen a
+     * `true`, tal cual las escribe la pasarela**: es un dato suyo, no una
+     * deduccion nuestra. Antes se descartaba entero y quedaba solo el nombre,
+     * asi que para saber cual sabe mirar una imagen habia que adivinarlo.
+     */
+    capabilities: z.record(z.unknown()).optional(),
   })
   .passthrough();
 
@@ -45,6 +56,14 @@ export interface CatalogModelPrice {
   perCall: number | null;
   /** grupos o niveles a los que pertenece, si la pasarela los declara */
   groups: string[];
+  /**
+   * lo que la pasarela dice que sabe hacer, con SUS nombres y sin traducir.
+   *
+   * Vacio significa «no lo declara», nunca «no sabe hacer nada». La diferencia
+   * importa: una pasarela que no publica capacidades no convierte a sus modelos
+   * en incapaces. Ausente en los catalogos guardados antes de esto.
+   */
+  declaredCapabilities?: string[];
 }
 
 /**
@@ -118,16 +137,78 @@ export const gatewayPricingResponseSchema = z
   })
   .passthrough();
 
-/** identificadores de modelo que declara `/v1/models` */
-export function parseProviderModels(payload: unknown): string[] {
+/**
+ * capacidades que la pasarela declara **en `true`**, con su nombre original.
+ *
+ * No se traducen ni se normalizan aqui: lo que dice la pasarela se guarda como
+ * lo dice. La traduccion a nuestro vocabulario se hace aparte y a la vista,
+ * para que se pueda revisar sin volver a llamar a la red.
+ */
+export function parseModelCapabilities(raw: unknown): string[] {
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return [];
+  return Object.entries(raw as Record<string, unknown>)
+    .filter(([, valor]) => valor === true)
+    .map(([nombre]) => nombre)
+    .sort();
+}
+
+/**
+ * lo que nuestro vocabulario entiende de una capacidad declarada por la pasarela.
+ *
+ * Solo se traduce lo que se reconoce con certeza. Una bandera desconocida se
+ * conserva en `declared` pero NO se convierte en una capacidad nuestra:
+ * afirmar que un modelo sabe hacer algo sin que nadie lo haya dicho es
+ * exactamente el error que esto viene a evitar.
+ */
+const CAPABILITY_ALIASES: Readonly<Record<string, ModelCapability>> = {
+  vision: 'image_input',
+  image_input: 'image_input',
+  multimodal: 'image_input',
+  audio: 'audio_input',
+  audio_input: 'audio_input',
+  transcription: 'transcription',
+  function_calling: 'agent_tools',
+  tools: 'agent_tools',
+  tool_use: 'agent_tools',
+  reasoning: 'reasoning',
+};
+
+/** las nuestras que corresponden a lo declarado; sin inventar ninguna */
+export function mapDeclaredCapabilities(declared: readonly string[]): ModelCapability[] {
+  const nuestras = new Set<ModelCapability>();
+  for (const nombre of declared) {
+    const propia = CAPABILITY_ALIASES[nombre.toLowerCase()];
+    if (propia !== undefined) nuestras.add(propia);
+  }
+  return [...nuestras].sort();
+}
+
+/** un modelo servido, con lo que la pasarela declara de el */
+export interface ProviderModelEntry {
+  id: string;
+  /** las banderas que vienen a `true`, con el nombre que les da la pasarela */
+  declaredCapabilities: string[];
+}
+
+/** lo que declara `/v1/models`, ya parseado */
+export function parseProviderModelEntries(payload: unknown): ProviderModelEntry[] {
   const parsed = providerModelsResponseSchema.safeParse(payload);
   if (!parsed.success) return [];
-  const ids: string[] = [];
+  const entries: ProviderModelEntry[] = [];
   for (const entry of parsed.data.data) {
     const model = providerModelEntrySchema.safeParse(entry);
-    if (model.success) ids.push(model.data.id);
+    if (!model.success) continue;
+    entries.push({
+      id: model.data.id,
+      declaredCapabilities: parseModelCapabilities(model.data.capabilities),
+    });
   }
-  return ids;
+  return entries;
+}
+
+/** identificadores de modelo que declara `/v1/models` */
+export function parseProviderModels(payload: unknown): string[] {
+  return parseProviderModelEntries(payload).map((entry) => entry.id);
 }
 
 function billingModeOf(quotaType: number | undefined): BillingMode {
@@ -153,7 +234,7 @@ export function buildCatalogSnapshot(input: {
   notice?: string | null;
   pricingProbes?: PricingProbe[];
 }): CatalogSnapshot {
-  const served = parseProviderModels(input.modelsPayload);
+  const served = parseProviderModelEntries(input.modelsPayload);
 
   const prices = new Map<string, CatalogModelPrice>();
   const pricing = gatewayPricingResponseSchema.safeParse(input.pricingPayload ?? undefined);
@@ -175,18 +256,21 @@ export function buildCatalogSnapshot(input: {
     }
   }
 
-  const models = served.map(
-    (apiModel) =>
-      prices.get(apiModel) ?? {
-        apiModel,
-        ownedBy: null,
-        billing: 'unknown' as BillingMode,
-        modelRatio: null,
-        completionRatio: null,
-        perCall: null,
-        groups: [],
-      },
-  );
+  // el precio y las capacidades vienen de sitios distintos —la tabla de precios
+  // y `/v1/models`— y se juntan aqui: quien manda sobre que EXISTE es la lista
+  // de servidos, y las capacidades acompañan siempre a su modelo
+  const models = served.map((entry) => ({
+    ...(prices.get(entry.id) ?? {
+      apiModel: entry.id,
+      ownedBy: null,
+      billing: 'unknown' as BillingMode,
+      modelRatio: null,
+      completionRatio: null,
+      perCall: null,
+      groups: [],
+    }),
+    declaredCapabilities: entry.declaredCapabilities,
+  }));
 
   return {
     connectionId: input.connectionId,

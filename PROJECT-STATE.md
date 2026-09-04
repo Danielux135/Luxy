@@ -1,6 +1,39 @@
 # Luxy — estado canónico del proyecto
 
-Última actualización: **2026-09-04 — el catálogo ya sabe preguntarle a las dos listas**
+Última actualización: **2026-09-04 — el catálogo dice qué sabe hacer cada modelo**
+
+Dos arreglos que salen del mismo sitio: con 46 modelos de Mistral en pantalla,
+elegir uno era adivinar.
+
+**`/v1/models` dice, por modelo, lo que sabe hacer, y Luxy lo tiraba.**
+`parseProviderModels` se quedaba con el identificador y descartaba el resto, así
+que para saber cuál acepta imágenes había que deducirlo del nombre. Ahora se
+guardan las banderas que la pasarela declara **en `true`, con sus nombres y sin
+traducir**, y la traducción a nuestro vocabulario va aparte y **sólo traduce lo
+que reconoce**: una bandera desconocida se conserva como dato pero no se
+convierte en una capacidad nuestra. Lo declarado se **suma** a la ficha escrita a
+mano, no la sustituye.
+
+**«Actualizar modelos» no avisaba a nadie.** El catálogo se escribía en disco y
+cada pantalla lo leía sólo al montarse, así que el selector de Privado seguía
+vacío hasta reiniciar Luxy. Medido en el equipo de Daniel: la aplicación arrancó
+a las 16:44:05 y el catálogo se escribió a las 16:44:16. Un contador con
+suscripción basta; no hay estado que compartir, sólo «vuelve a leer».
+
+En pantalla: etiquetas por modelo en «Catálogo real» con **«ve imágenes»**
+resaltada, y `· ve imágenes` en el desplegable de Privado. En silencio significa
+«la conexión no lo declara», no «no puede».
+
+`npm run check` exit 0: **141 archivos, 2.462 pruebas superadas, 12 omitidas.**
+
+**Sin verificar:** nada en pantalla. Y el catálogo de Mistral que hay en disco se
+descargó antes de este cambio, así que hay que volver a leerlo para que aparezcan
+las capacidades (`LA-042`). Sigue abierto el hueco de `imageUrlFormat`, que no
+tiene campo en la interfaz.
+
+---
+
+Última actualización anterior: **2026-09-04 — el catálogo ya sabe preguntarle a las dos listas**
 
 Luxy guarda las conexiones en **dos sitios distintos** —`connections` y
 `providers.http`— y toda la maquinaria del catálogo miraba sólo el primero, y

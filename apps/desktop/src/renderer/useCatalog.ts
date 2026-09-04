@@ -5,7 +5,7 @@
 // —escrito a mano como `connections[0]`—. Con eso, un proveedor HTTP no
 // aparecía nunca: añadir Mistral y pulsar «Actualizar modelos» volvía a
 // preguntarle a la pasarela de siempre, y su selector de modelo salía vacío.
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import {
   buildCatalogForConnection,
   buildDefaultCatalog,
@@ -60,6 +60,43 @@ export function catalogOriginKey(origin: Pick<CatalogOrigin, 'id' | 'source'>): 
   return `${origin.source}:${origin.id}`;
 }
 
+// -----------------------------------------------------------------------------
+// aviso de catálogo nuevo
+// -----------------------------------------------------------------------------
+//
+// POR QUÉ EXISTE: «Actualizar modelos» escribía el catálogo en disco y nadie
+// más se enteraba. Cada pantalla lee el suyo al montarse, así que el selector
+// de modelo de Privado seguía vacío después de descargarlo —medido: el catálogo
+// se escribió once segundos después de arrancar la aplicación— y sólo se
+// arreglaba reiniciando Luxy. Un contador con suscripción es lo mínimo que
+// hace falta: no hay estado que compartir, sólo «vuelve a leer».
+
+let version = 0;
+const oyentes = new Set<() => void>();
+
+/** avisa a toda la ventana de que hay un catálogo nuevo en disco */
+export function catalogChanged(): void {
+  version += 1;
+  for (const oyente of oyentes) oyente();
+}
+
+function suscribir(oyente: () => void): () => void {
+  oyentes.add(oyente);
+  return () => {
+    oyentes.delete(oyente);
+  };
+}
+
+function useCatalogVersion(): number {
+  return useSyncExternalStore(
+    suscribir,
+    () => version,
+    // el renderizado del servidor no existe aquí, pero la firma lo pide y
+    // devolver otra cosa provocaría un desajuste de hidratación
+    () => version,
+  );
+}
+
 /**
  * el catálogo de TODOS los orígenes configurados, junto.
  *
@@ -75,6 +112,9 @@ export function useDetectedCatalog(summary: ConfigSummary): {
   // una cadena y no el array: el array se construye nuevo en cada render y
   // como dependencia dispararía el efecto para siempre
   const clave = origins.map(catalogOriginKey).join(',');
+  // vuelve a leer cuando alguien descarga un catálogo nuevo, no sólo cuando
+  // cambia la lista de orígenes
+  const catalogVersion = useCatalogVersion();
   const [snapshots, setSnapshots] = useState<Map<string, CatalogSnapshot | null>>(new Map());
   const [loading, setLoading] = useState(clave.length > 0);
 
@@ -103,7 +143,7 @@ export function useDetectedCatalog(summary: ConfigSummary): {
     return () => {
       active = false;
     };
-  }, [clave]);
+  }, [clave, catalogVersion]);
 
   const todos = loading
     ? []
@@ -115,11 +155,10 @@ export function useDetectedCatalog(summary: ConfigSummary): {
         if (snapshot == null) {
           return origin.source === 'connection' ? buildDefaultCatalog(origin.id) : [];
         }
-        return buildCatalogForConnection(
-          origin.id,
-          snapshot.models.map((model) => model.apiModel),
-          origin.family ?? undefined,
-        );
+        // se pasan los registros enteros y no solo los nombres: llevan lo que
+        // la pasarela declara que sabe hacer cada uno, que es lo que marca
+        // cuáles aceptan imágenes sin tener que deducirlo del nombre
+        return buildCatalogForConnection(origin.id, snapshot.models, origin.family ?? undefined);
       });
 
   // dos orígenes pueden servir el mismo modelo, y su identificador se deriva

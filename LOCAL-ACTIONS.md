@@ -1,5 +1,33 @@
 # Luxy — acciones locales de Daniel
 
+## LA-042 — cuál de los 46 modelos de Mistral es el que toca
+
+Estado: `pending` — abierta el 2026-09-04.
+
+Ya está resuelto en código, pero hace falta un paso tuyo porque **el catálogo
+que tienes guardado se descargó antes del cambio y no lleva capacidades**.
+
+1. **Modelos → Mistral · proveedor HTTP → Actualizar modelos**, otra vez.
+2. Ahora cada modelo debería llevar sus etiquetas, con **«ve imágenes»**
+   resaltada. Ése es el que sirve para «Describir con IA».
+3. En **Privado**, el desplegable de Modelo marca los mismos con `· ve imágenes`,
+   y ya no hace falta reiniciar después de actualizar el catálogo.
+
+Lo que ya se sabe de sus 46 modelos, mirados uno a uno:
+
+- **Ninguno genera imágenes.** Mistral no hace fotos. Ésas siguen viniendo de
+  Xavira o de AI Horde, y se eligen en el personaje.
+- `voxtral-*` es **audio**, no vista.
+- `mistral-ocr-*` saca el **texto** de un documento escaneado, va por otro
+  endpoint y desde aquí no respondería.
+- Los candidatos con vista son `mistral-medium-latest` y `mistral-small-latest`.
+  No hay ningún `pixtral` en la lista: Mistral ya no los vende aparte.
+
+**Si no aparece ninguna etiqueta**, significa que Mistral no publica las
+capacidades en `/v1/models`. No es un fallo de Luxy y se vería igual de claro:
+en silencio quiere decir «no lo dice», nunca «no puede». Dímelo y buscamos otra
+forma.
+
 ## LA-041 — PowerShell 7 está instalada, pero no es la que corre por defecto
 
 Estado: `informativa` — anotada el 2026-09-04.

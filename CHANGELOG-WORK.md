@@ -1,5 +1,61 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-09-04 17:55 — Claude — F14-CAPACIDADES-001 y BUG-CATALOGO-AVISO-001
+
+- Origen: Daniel, con Mistral ya conectado: «no me sale nada en modelos de
+  Mistral, y hay 500 (estoy exagerando), como se cual es el que toca». Y luego:
+  «quiero saber con cual genero fotos, con cual puedo hacer que describa una
+  imagen».
+- Comprobado en su disco antes de responder nada: `http-mistral.json` existia,
+  9,6 KB, con **46 modelos reales**. O sea que el arreglo del origen funcionaba;
+  el problema era otro.
+
+**BUG-CATALOGO-AVISO-001 — «Actualizar modelos» no se lo contaba a nadie.**
+
+- Las horas lo dijeron sin ambiguedad: Luxy arranco a las **16:44:05** y el
+  catalogo se escribio a las **16:44:16**, once segundos despues. Cada pantalla
+  lee el catalogo al montarse, asi que el selector de Privado se habia quedado
+  con el estado de antes de la descarga y solo se arreglaba reiniciando.
+- Un contador con suscripcion (`catalogChanged` + `useSyncExternalStore`) y
+  `useDetectedCatalog` depende de el. No hay estado que compartir, solo «vuelve
+  a leer»: cualquier cosa mas grande seria inventarse un problema.
+
+**F14-CAPACIDADES-001 — se tiraba justo el dato que responde la pregunta.**
+
+- `/v1/models` devuelve, por modelo, lo que sabe hacer. `parseProviderModels`
+  hacia `ids.push(model.data.id)` y descartaba el resto. Con 46 nombres delante,
+  saber cual acepta imagenes quedaba en deducirlo del nombre, que es adivinar.
+- Ahora se guardan **las banderas que vienen a `true`, con el nombre que les da
+  la pasarela**, sin traducir. La traduccion a nuestro vocabulario va aparte
+  (`mapDeclaredCapabilities`) y **solo traduce lo que reconoce**: una bandera
+  desconocida se conserva como dato pero NO se convierte en una capacidad
+  nuestra. Afirmar que un modelo sabe algo que nadie ha dicho es el error que
+  esto viene a evitar, y tiene su prueba.
+- Lo declarado se **suma** a la ficha escrita a mano en vez de sustituirla: la
+  pasarela sabe lo que sirve hoy, la ficha lleva lo que hemos comprobado
+  nosotros. Con prueba de que `DeepSeek-V4-Pro` no pierde sus alias de Telegram
+  al leerle una capacidad nueva.
+- En pantalla: etiquetas por modelo en «Catalogo real», con «ve imagenes»
+  resaltada, y en el desplegable de Privado el modelo lleva `· ve imagenes`. En
+  silencio significa «la conexion no lo declara», no «no puede».
+- `buildCatalogForConnection` acepta ahora el registro entero o el nombre suelto:
+  romper la firma obligaria a tocar cada sitio sin ganar nada.
+- **Lo que se respondio de paso, mirando sus 46 modelos:** Mistral **no genera
+  imagenes** —no hay ni un modelo de imagen en la lista—, `voxtral` es audio y
+  `mistral-ocr` saca texto de un escaneo por otro endpoint. Las fotos siguen
+  siendo de Xavira o AI Horde.
+- Archivos: `models/catalog-fetch.ts`, `models/catalog.ts`,
+  `models/capabilities.test.ts` (nuevo, 9), `renderer/useCatalog.ts`,
+  `renderer/pages/Config.tsx`, `renderer/pages/Vault.tsx`, `styles.css`.
+- Resultado real: **`npm run check` exit 0 — 141 archivos, 2.462 pruebas
+  superadas, 12 omitidas.**
+- Sin verificar: **no se ha visto en pantalla.** Que Mistral declare `vision` en
+  sus modelos es lo esperable segun su documentacion, pero el catalogo que hay
+  hoy en disco se leyo ANTES de este cambio y no lleva capacidades: hay que
+  volver a pulsar «Actualizar modelos» para que aparezcan. Si Mistral no las
+  publicase, no saldria ninguna etiqueta y habria que preguntarselo de otra
+  forma.
+
 ### 2026-09-04 16:35 — Claude — BUG-CATALOGO-ORIGEN-001
 
 - Origen: Daniel añade la clave de Mistral por Conexiones → Proveedores HTTP, va

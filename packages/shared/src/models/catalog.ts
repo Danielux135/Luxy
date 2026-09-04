@@ -14,7 +14,7 @@ import {
   type ConnectionProfile,
   type ModelDefinition,
 } from './types.js';
-import { MISTRAL_NAMES } from './catalog-fetch.js';
+import { MISTRAL_NAMES, mapDeclaredCapabilities } from './catalog-fetch.js';
 
 /** id de la conexion que se crea durante el onboarding */
 export const DEFAULT_CONNECTION_ID = 'hcnsec';
@@ -338,9 +338,19 @@ export function buildDefaultCatalog(connectionId = DEFAULT_CONNECTION_ID): Model
  * conocidos conservan su contrato; los nuevos reciben la categoría más segura
  * que permiten sus identificadores, sin herramientas ni capacidades inventadas.
  */
+/**
+ * un modelo servido, tal y como llega del catalogo leido.
+ *
+ * Acepta el nombre suelto o el registro entero: lo primero es lo que habia y
+ * sigue valiendo; lo segundo trae ademas lo que la pasarela dice que sabe
+ * hacer, que es lo que permite marcar cual acepta imagenes en vez de deducirlo
+ * del nombre.
+ */
+export type ServedModel = string | { apiModel: string; declaredCapabilities?: readonly string[] };
+
 export function buildCatalogForConnection(
   connectionId: string,
-  servedModels: readonly string[],
+  servedModels: readonly ServedModel[],
   /**
    * familia a la que pertenece TODO lo que sirve este origen.
    *
@@ -355,11 +365,25 @@ export function buildCatalogForConnection(
     buildDefaultCatalog(connectionId).map((model) => [model.apiModel, model]),
   );
 
-  return servedModels.map((apiModel) => {
+  return servedModels.map((servido) => {
+    const apiModel = typeof servido === 'string' ? servido : servido.apiModel;
+    // lo que la pasarela declara se cree; lo que no declara no se inventa
+    const declaradas = mapDeclaredCapabilities(
+      typeof servido === 'string' ? [] : (servido.declaredCapabilities ?? []),
+    );
     const known = knownByApiModel.get(apiModel);
     // con familia impuesta no vale el catalogo de fabrica: ese modelo puede
     // existir con el mismo nombre en otra conexion y con otra familia
-    if (known !== undefined && familyOverride === undefined) return known;
+    if (known !== undefined && familyOverride === undefined) {
+      // lo declarado se SUMA a la ficha escrita a mano en vez de sustituirla:
+      // la pasarela sabe lo que sirve hoy, y la ficha lleva lo que hemos
+      // comprobado nosotros. Ninguna de las dos sobra
+      if (declaradas.length === 0) return known;
+      return modelDefinitionSchema.parse({
+        ...known,
+        capabilities: [...new Set([...known.capabilities, ...declaradas])].sort(),
+      });
+    }
 
     const lower = apiModel.toLowerCase();
     const guessed =
@@ -416,11 +440,19 @@ export function buildCatalogForConnection(
       connectionId,
       category,
       capabilities:
-        category === 'text'
-          ? ['text']
-          : category === 'routing'
-            ? ['routing', 'model_selection']
-            : [],
+        // lo que la pasarela declara se añade a la lectura del nombre: sin
+        // ella no habia forma de saber cual acepta imagenes, y con ella no
+        // hace falta adivinarlo
+        [
+          ...new Set([
+            ...(category === 'text'
+              ? ['text']
+              : category === 'routing'
+                ? ['routing', 'model_selection']
+                : []),
+            ...declaradas,
+          ]),
+        ].sort(),
       telegramAliases: [],
       enabled: category !== 'routing',
       supportsStreaming: category === 'text',

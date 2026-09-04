@@ -505,6 +505,13 @@ body {
   align-items: center;
 }
 
+/* fila de etiquetas dentro de una lista: con el hueco normal, las capacidades
+   de un modelo ocupaban mas que su propio nombre */
+.row--tight {
+  gap: 4px;
+  margin-top: 3px;
+}
+
 .studio-form {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

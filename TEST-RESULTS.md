@@ -1,5 +1,34 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-04 — F14-CAPACIDADES-001 y BUG-CATALOGO-AVISO-001
+
+`npm run check` exit 0.
+
+```
+Test Files  141 passed (141)
+     Tests   2462 passed | 12 skipped (2474)
+```
+
+Nueve pruebas nuevas en `capabilities.test.ts`, todas sobre el mismo riesgo:
+**no afirmar capacidades que nadie ha declarado.**
+
+- que sólo se guardan las banderas que vienen a `true`;
+- que una pasarela que no las publica deja la lista vacía y **no un error**
+  —vacío significa «no lo dice», nunca «no sabe hacer nada»—;
+- que una bandera desconocida **no** se convierte en capacidad nuestra;
+- que llegan de punta a punta, de `/v1/models` al catálogo guardado;
+- que `vision` acaba siendo `image_input` en el catálogo operativo;
+- que lo declarado **se suma** a la ficha escrita a mano en vez de
+  sustituirla: `DeepSeek-V4-Pro` conserva sus alias de Telegram al leerle una
+  capacidad nueva;
+- que la firma antigua —una lista de nombres sueltos— sigue valiendo;
+- que una respuesta con basura no tumba el parseo.
+
+No verificado: **nada en pantalla.** Y un detalle que importa para la prueba
+real: el catálogo de Mistral que hay hoy en disco se descargó **antes** de este
+cambio, así que no lleva capacidades. Hay que volver a pulsar «Actualizar
+modelos» para que aparezcan las etiquetas.
+
 ### 2026-09-04 — BUG-CATALOGO-ORIGEN-001
 
 `npm run check` exit 0.

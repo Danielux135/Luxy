@@ -276,6 +276,12 @@ function ConversationPanel({
                   {familyModels.map((definition) => (
                     <option key={definition.id} value={definition.apiModel}>
                       {definition.displayName}
+                      {/* marcado aquí y no en un aviso aparte: describir una
+                          imagen necesita un modelo que sepa mirarla, y elegir
+                          uno que no lo hace gasta la llamada para nada. Sólo
+                          sale si la conexión lo declara: en silencio significa
+                          «no lo dice», no «no puede» */}
+                      {definition.capabilities.includes('image_input') ? ' · ve imágenes' : ''}
                     </option>
                   ))}
                 </select>

@@ -38,7 +38,19 @@ import {
 } from '../http-provider-config.js';
 import { Empty, Explica, Field, Notice, Panel, Tag } from '../ui/primitives.js';
 import type { ConfigSummary } from '../useConfig.js';
-import { catalogOriginKey, catalogOriginsOf, type CatalogOrigin } from '../useCatalog.js';
+import {
+  catalogChanged,
+  catalogOriginKey,
+  catalogOriginsOf,
+  type CatalogOrigin,
+} from '../useCatalog.js';
+
+/**
+ * banderas que significan «acepta imágenes», con los nombres que usan las
+ * pasarelas. Se resaltan porque es la pregunta que de verdad se hace uno
+ * delante de esta lista: cuál puede describir una foto.
+ */
+const VISION_FLAGS = ['vision', 'image_input', 'multimodal'];
 
 const FAMILIA: Record<ModelFamily, string> = {
   deepseek: 'DeepSeek',
@@ -97,11 +109,9 @@ function buildRegistry(
     origin === null
       ? []
       : leido
-        ? buildCatalogForConnection(
-            origin.id,
-            snapshot.models.map((model) => model.apiModel),
-            origin.family ?? undefined,
-          )
+        ? // los registros enteros, no solo los nombres: llevan lo que la
+          // pasarela declara que sabe hacer cada modelo
+          buildCatalogForConnection(origin.id, snapshot.models, origin.family ?? undefined)
         : // de un proveedor HTTP no se sabe NADA hasta preguntarle: rellenarlo
           // con el catalogo de fabrica ofreceria modelos de otra pasarela
           origin.source === 'connection'
@@ -1322,8 +1332,14 @@ function CatalogoReal({
       source: origin.source,
     });
     setBusy(false);
-    if (result.ok) onSnapshot(result.value);
-    else setError(result.error);
+    if (!result.ok) {
+      setError(result.error);
+      return;
+    }
+    onSnapshot(result.value);
+    // sin esto el catálogo nuevo se quedaba en esta pantalla: el selector de
+    // modelo de Privado seguía vacío hasta reiniciar Luxy
+    catalogChanged();
   };
 
   const porFamiliaReal = new Map<string, CatalogSnapshot['models']>();
@@ -1383,13 +1399,32 @@ function CatalogoReal({
                 {familia} · {modelos.length}
               </div>
               <ul className="model-catalog-list">
-                {modelos.map((model) => (
-                  <li key={model.apiModel}>
-                    <div className="list__main">
-                      <div className="list__name mono scroller">{model.apiModel}</div>
-                    </div>
-                  </li>
-                ))}
+                {modelos.map((model) => {
+                  const declaradas = model.declaredCapabilities ?? [];
+                  return (
+                    <li key={model.apiModel}>
+                      <div className="list__main">
+                        <div className="list__name mono scroller">{model.apiModel}</div>
+                        {declaradas.length > 0 && (
+                          /* lo que dice la pasarela, con SUS nombres y sin
+                             traducir: es un dato suyo, no una deducción nuestra.
+                             Sin esto había que adivinar por el nombre cuál sabe
+                             mirar una imagen */
+                          <div className="row row--tight">
+                            {declaradas.map((capacidad) => (
+                              <Tag
+                                key={capacidad}
+                                tone={VISION_FLAGS.includes(capacidad) ? 'ok' : 'idle'}
+                              >
+                                {capacidad === 'vision' ? 've imágenes' : capacidad}
+                              </Tag>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </li>
+                  );
+                })}
               </ul>
             </section>
           ))}
