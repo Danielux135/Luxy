@@ -1,5 +1,56 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-09-04 12:40 — Claude — UI-GLOSARIO-001
+
+- Origen: Daniel dice que hay muchos terminos que no entiende y pide que, al
+  pasar el raton por encima, se le explique como a alguien que no tiene ni idea
+  y que se le diga **que tiene que rellenar en cada cuadro**. Es una averia real
+  de la aplicacion, no una comodidad: hoy la pantalla Privado pide «clipSkip» y
+  «denoising» sin decir en ningun sitio que son, y equivocarse cuesta kudos o
+  una tarde.
+- Un glosario, no textos sueltos: `apps/desktop/src/renderer/ui/glossary.ts`.
+  Cada entrada tiene `termino`, `queEs` —el concepto, para quien no ha oido la
+  palabra nunca—, y opcionalmente `queRelleno` —que se escribe en ESE cuadro,
+  que es lo que de verdad se pregunta uno delante de el—, `ejemplo` y `ojo`.
+  **Un termino se explica en un solo sitio**: dos pantallas que lo usen comparten
+  la entrada, porque dos explicaciones del mismo campo acaban contradiciendose.
+- `Explica` en `primitives.tsx`: un «?» que abre la explicacion al pasar el
+  raton **y al enfocarlo con el teclado**. Es un `button` de verdad y no el
+  `title` del navegador, que tarda un segundo, no se puede leer con el teclado y
+  se corta si el texto es largo, que es justo el caso. `Field` acepta ahora
+  `explica` y lo pinta junto a la etiqueta, asi que cablear un campo es una
+  palabra.
+- Defecto encontrado al cablear y arreglado en el componente, no en cada sitio:
+  un «?» dentro de un `<summary>` plegaba el desplegable al pulsarlo. El boton
+  cancela su propio clic; el foco si llega, que es lo que abre la caja.
+- **30 conceptos cableados**: 23 en Privado y 7 en Conexiones. Donde un `hint`
+  repetia el glosario palabra por palabra se ha acortado el hint, no duplicado:
+  el hint se lee siempre y el «?» es para quien necesita mas.
+- **Xavira se llama Xavira.** Lo pidio Daniel: la interfaz decia «proveedor de
+  pago» en catorce sitios y no se sabia de que servicio hablaba. Cambiado el
+  texto visible —incluida la etiqueta de la lista de personajes, que ahora dice
+  `Xavira · anime`— sin tocar ningun identificador del codigo.
+- Pruebas nuevas (`glossary.test.ts`, 4): que ninguna entrada repite el nombre
+  del campo en vez de explicarlo, que un ejemplo nunca viaja sin decir que
+  escribir, que el aviso de `ojo` no esta en todas —si todo lleva aviso, el
+  aviso deja de leerse— y, la que de verdad importa, **que ninguna entrada se
+  queda sin usar**: una explicacion que ya no cuelga de ningun cuadro no la lee
+  nadie y envejece sin que falle nada. Esa prueba cazo dos huerfanas al
+  escribirla (`boveda` y `claveRecuperacion`), y se cablearon.
+- Archivos: `glossary.ts` y `glossary.test.ts` (nuevos), `primitives.tsx`,
+  `styles.css`, `Vault.tsx`, `Config.tsx`.
+- Resultado real: **`npm run check` exit 0 — 134 archivos, 2.360 pruebas
+  superadas, 12 omitidas.**
+- **No visto en pantalla.** La maquetacion de la caja esta razonada, no
+  comprobada: hay una clase `explica--fin` para los «?» pegados al borde
+  derecho, pero si alguno se sale en un sitio que no previmos se vera al abrir
+  Studio, no antes.
+- Terminos que la interfaz usa y el glosario todavia NO explica, detectados al
+  cablear Conexiones: worktree, lista blanca de ejecutables, alias de proyecto,
+  push y commit, endpoint, y la distincion entre modelo «declarado» y «servido»
+  de la pantalla de Modelos. Ninguno se invento en pantalla.
+
+
 ### 2026-09-04 12:05 — Claude — F11-HORDE-002
 
 - Origen: Daniel pregunta si se puede subir una imagen de referencia al horde
