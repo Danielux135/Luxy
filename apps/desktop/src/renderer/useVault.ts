@@ -14,11 +14,20 @@ import type { ConversationMemoryStatus, HordeRecipe } from '@luxy/shared';
 import type {
   vaultCompatibilityResultSchema,
   vaultMemoryListResultSchema,
+  vaultVisionProbeResultSchema,
 } from '../shared/ipc.js';
 import type { z } from 'zod';
 
 type CompatibilityResult = z.infer<typeof vaultCompatibilityResultSchema>['results'][number];
 type MemoryEpisode = z.infer<typeof vaultMemoryListResultSchema>['episodes'][number];
+
+/**
+ * lo que devuelve el banco de pruebas de visión.
+ *
+ * No se guarda en ningún sitio: vive en el estado de la ventana y desaparece al
+ * cerrar la bóveda. Es una prueba, no contenido.
+ */
+export type VisionProbe = z.infer<typeof vaultVisionProbeResultSchema>;
 
 /**
  * la cuenta, tal y como la ve la interfaz.
@@ -214,6 +223,21 @@ export interface VaultController {
     projectAlias: string;
   }) => Promise<{ caption: string | null; failure: string | null }>;
   describingMedia: boolean;
+  /**
+   * banco de pruebas: una imagen del disco y a ver qué dice el modelo.
+   *
+   * **No escribe nada** y no necesita conversación abierta. Sirve para saber si
+   * un modelo sabe mirar antes de gastar una llamada sobre contenido de la
+   * bóveda, y sin dejar una conversación de prueba dentro.
+   */
+  probeVision: (input: {
+    provider: string;
+    model: string | null;
+    projectAlias: string;
+  }) => Promise<VisionProbe | null>;
+  probingVision: boolean;
+  /** lo último que devolvió el banco de pruebas; no se guarda en disco */
+  lastProbe: VisionProbe | null;
   /**
    * cambia quién le hace las fotos a un personaje.
    *
@@ -416,6 +440,9 @@ export function useVault(): VaultController {
   const [characterDescription, setCharacterDescription] = useState<string | null>(null);
   const [characters, setCharacters] = useState<VaultCharacterView[]>([]);
   const [describingMedia, setDescribingMedia] = useState(false);
+  const [probingVision, setProbingVision] = useState(false);
+  // lo ultimo que devolvio el banco de pruebas; no se guarda en ningun sitio
+  const [lastProbe, setLastProbe] = useState<VisionProbe | null>(null);
   const [hordeAccount, setHordeAccount] = useState<{
     username: string;
     kudos: number;
@@ -932,6 +959,40 @@ export function useVault(): VaultController {
     [openConversationId, reloadMedia],
   );
 
+  /**
+   * prueba de visión: una imagen del disco y a ver qué dice el modelo.
+   *
+   * No escribe nada y **no necesita conversación abierta**, que es justo el
+   * punto: sirve para saber si un modelo sabe mirar antes de gastar una llamada
+   * sobre contenido de la bóveda, y sin dejar una conversación de prueba dentro.
+   */
+  const probeVision = useCallback(
+    async (input: {
+      provider: string;
+      model: string | null;
+      projectAlias: string;
+    }): Promise<VisionProbe | null> => {
+      setProbingVision(true);
+      setError(null);
+      setHint(null);
+      try {
+        const result = await window.luxy.probeVision(input);
+        if (!result.ok) {
+          setError(result.error);
+          setHint(result.hint);
+          return null;
+        }
+        // cerrar el diálogo sin elegir no es un resultado: deja lo anterior
+        if (result.value.cancelled) return null;
+        if (mounted.current) setLastProbe(result.value);
+        return result.value;
+      } finally {
+        if (mounted.current) setProbingVision(false);
+      }
+    },
+    [],
+  );
+
   const attachMedia = useCallback(async (caption: string): Promise<void> => {
     if (openConversationId === null) {
       setError('abre o empieza una conversacion antes de adjuntar');
@@ -1216,6 +1277,9 @@ export function useVault(): VaultController {
     setMediaCaption,
     describeMedia,
     describingMedia,
+    probeVision,
+    probingVision,
+    lastProbe,
     create,
     unlock,
     lock,

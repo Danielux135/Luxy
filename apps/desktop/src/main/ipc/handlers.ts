@@ -75,6 +75,7 @@ import {
   vaultMediaGenerateArgsSchema,
   vaultMediaCaptionArgsSchema,
   vaultMediaDescribeArgsSchema,
+  vaultVisionProbeArgsSchema,
   vaultCharacterCreateArgsSchema,
   vaultCharacterForgetArgsSchema,
   vaultCharacterImportArgsSchema,
@@ -1495,6 +1496,81 @@ export function registerIpcHandlers(context: HandlerContext): void {
     // ni la descripcion ni de que imagen es: solo que se pudo
     context.log('imagen descrita por un modelo');
     return { caption: described.caption, failure: null };
+  });
+
+  /**
+   * prueba de vision: una imagen del disco, un modelo, y la descripcion.
+   *
+   * **No escribe NADA.** Ni en la boveda, ni en la conversacion, ni en el pie
+   * de foto de nada. Existe por dos motivos concretos:
+   *
+   * 1. saber si un modelo sabe mirar ANTES de confiarle una imagen privada. Con
+   *    46 modelos en el catalogo, averiguarlo gastando llamadas sobre contenido
+   *    de la boveda es lo que no se quiere hacer;
+   * 2. no obligar a crear una conversacion solo para probarlo: adjuntar exige
+   *    una conversacion porque los medios cuelgan de ella, y para una prueba eso
+   *    deja basura dentro.
+   *
+   * El archivo lo elige el usuario en su disco y los bytes NO cruzan el IPC de
+   * ida: los lee el proceso principal. Solo vuelve una copia para verla al lado
+   * del texto, y solo si es pequeña.
+   */
+  handle(IPC_INVOKE.vaultVisionProbe, vaultVisionProbeArgsSchema, async (args) => {
+    const window = context.getMainWindow();
+    if (window === null) throw new VaultError('no hay ventana desde la que elegir un archivo');
+
+    const picked = await dialog.showOpenDialog(window, {
+      title: 'Elige una imagen para la prueba',
+      properties: ['openFile'],
+      filters: [{ name: 'Imagenes', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif'] }],
+    });
+    const filePath = picked.filePaths[0];
+    if (picked.canceled || filePath === undefined) {
+      return {
+        cancelled: true,
+        fileName: null,
+        mimeType: null,
+        byteSize: 0,
+        dataUrl: null,
+        caption: null,
+        failure: null,
+        executedModel: null,
+      };
+    }
+
+    const bytes = new Uint8Array(readFileSync(filePath));
+    const mimeType = mimeTypeFor(filePath);
+
+    const run = await context.controller.runLocalTurn({
+      localTurnId: randomUUID(),
+      provider: args.provider,
+      model: args.model,
+      projectAlias: args.projectAlias,
+      prompt: buildDescribePrompt(),
+      // modo TECNICO: es una descripcion de un archivo, no una escena, y
+      // pedirsela a quien esta encarnando a alguien mezcla dos cosas (`D-055`)
+      kind: 'technical',
+      images: [{ mimeType, base64: Buffer.from(bytes).toString('base64') }],
+    });
+
+    const refused = classifyReply(run.text).kind === 'refused';
+    const described = parseDescribeResponse(run.text, refused);
+
+    // ni el nombre del archivo ni lo que se vio: solo que se pudo probar
+    context.log('prueba de vision', { pudo: described.caption !== null });
+    return {
+      cancelled: false,
+      fileName: basename(filePath),
+      mimeType,
+      byteSize: bytes.length,
+      dataUrl:
+        bytes.length > VAULT_PREVIEW_MAX_BYTES
+          ? null
+          : `data:${mimeType};base64,${Buffer.from(bytes).toString('base64')}`,
+      caption: described.caption,
+      failure: described.failure,
+      executedModel: run.executedModel ?? args.model,
+    };
   });
 
   /**

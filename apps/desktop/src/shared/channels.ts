@@ -73,6 +73,7 @@ export const IPC_INVOKE = {
   vaultMediaCaption: 'luxy:vault:media:caption',
   /** se lo pide a un modelo que sepa mirar. Gasta una llamada */
   vaultMediaDescribe: 'luxy:vault:media:describe',
+  vaultVisionProbe: 'luxy:vault:vision:probe',
   vaultCharacterCreate: 'luxy:vault:character:create',
   vaultCharacterList: 'luxy:vault:character:list',
   vaultCharacterForget: 'luxy:vault:character:forget',

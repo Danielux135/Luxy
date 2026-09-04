@@ -1,5 +1,32 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-04 — F15-BANCO-VISION-001
+
+`npm run check` exit 0.
+
+```
+Test Files  141 passed (141)
+     Tests   2467 passed | 12 skipped (2479)
+```
+
+Cinco pruebas nuevas en `ipc.test.ts`, sobre el contrato del banco de pruebas.
+La que importa de verdad es la tercera:
+
+- que el modelo es opcional y sin elegir manda el de la conexión;
+- que sin proveedor o sin proyecto no se acepta: no hay a quién preguntarle;
+- **que el esquema NO admite una ruta de archivo del renderer.** El archivo lo
+  elige el usuario en un diálogo del proceso principal. Si el renderer pudiera
+  nombrar la ruta, podría pedir que se leyera cualquier cosa del disco —una
+  clave privada, por ejemplo— y se enviara a un proveedor externo;
+- que cancelar el diálogo es un resultado válido y no un error;
+- que se distingue «no contestó» de «se negó», y que cualquier otro motivo se
+  rechaza.
+
+No verificado: **no se ha visto en pantalla ni se ha llamado a ningún modelo con
+vista de verdad.** Todo el punto del banco es hacer esa llamada, así que hasta
+que se pulse no se sabe si Mistral acepta la imagen tal y como se le manda
+—sigue pendiente lo de `imageUrlFormat`, que no tiene campo en la interfaz—.
+
 ### 2026-09-04 — F14-CAPACIDADES-001 y BUG-CATALOGO-AVISO-001
 
 `npm run check` exit 0.

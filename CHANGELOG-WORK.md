@@ -1,5 +1,48 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-09-04 21:35 — Claude — F15-BANCO-VISION-001
+
+- Origen, tres cosas en un mensaje de Daniel: el boton de adjuntar no le dejaba
+  pulsar; si elige un modelo con vista «tendria que pasarle un texto tambien,
+  cosa que no queremos, la leeria tambien Lia»; y «necesitamos un sitio en
+  Privado que permita hacer pruebas para pasarle fotos y que nos devuelva las
+  descripciones».
+- Las tres comprobadas en el codigo antes de contestar:
+  1. **Adjuntar** estaba `disabled` sin conversacion abierta —los medios cuelgan
+     de una conversacion— y el motivo vivia solo en el `title` del navegador,
+     que tarda un segundo y casi nadie ve. El boton parecia roto.
+  2. **La descripcion NO entra en la conversacion**: `vaultMediaDescribe` no
+     llama a `appendTurn`, corre en modo `technical` y solo escribe el pie de
+     foto. Esa parte del temor de Daniel no ocurria.
+  3. **Pero tenia razon en lo importante**: `describeMedia` usaba el proveedor y
+     el modelo DEL COMPOSITOR, o sea los mismos de la conversacion. Elegir un
+     modelo con vista para describir cambiaba tambien quien encarna al personaje.
+     Un selector para dos cosas distintas.
+- Hecho: **banco de pruebas de vision**, con su propio proveedor y su propio
+  modelo, aparte de los de la conversacion.
+  - Canal nuevo `vaultVisionProbe`. El archivo lo elige el usuario en un dialogo
+    del proceso principal y los bytes NO cruzan el IPC de ida: el renderer no
+    puede nombrar una ruta, asi que no puede pedir que se lea cualquier cosa del
+    disco y se mande a un proveedor. Con su prueba.
+  - **No escribe nada**: ni boveda, ni conversacion, ni pie de foto. Y no
+    necesita conversacion abierta, que era justo el bloqueo.
+  - Vuelve una copia de la imagen para verla al lado del texto, y solo si cabe
+    bajo `VAULT_PREVIEW_MAX_BYTES`.
+  - Distingue negarse de no contestar, como el describidor: se arreglan distinto.
+  - En el selector de modelo, los que la conexion declara con vista salen
+    marcados `· ve imagenes`. En silencio significa «no lo declara».
+- El aviso de adjuntar pasa del `title` a texto visible, y apunta al banco.
+- Archivos: `channels.ts`, `ipc.ts` (+5 pruebas), `preload/index.ts`,
+  `handlers.ts`, `useVault.ts`, `Vault.tsx`, `styles.css`.
+- Resultado real: **`npm run check` exit 0 — 141 archivos, 2.467 pruebas
+  superadas, 12 omitidas.**
+- **Lo que queda y es lo siguiente:** que «Describir con IA» sobre un archivo YA
+  guardado use tambien ese modelo aparte, en vez del de la conversacion. Hoy
+  sigue usando el del compositor. El banco existe para decidir cual antes de
+  cablearlo; hacerlo ahora seria cablear un modelo sin haber comprobado que ve.
+- Sin verificar: no se ha visto en pantalla ni se ha llamado a ningun modelo con
+  vista de verdad.
+
 ### 2026-09-04 17:55 — Claude — F14-CAPACIDADES-001 y BUG-CATALOGO-AVISO-001
 
 - Origen: Daniel, con Mistral ya conectado: «no me sale nada en modelos de

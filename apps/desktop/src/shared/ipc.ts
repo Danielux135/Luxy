@@ -665,6 +665,34 @@ export const vaultMediaDescribeResultSchema = z.object({
   failure: z.enum(['vacio', 'negativa']).nullable(),
 });
 
+/**
+ * prueba de visión: una imagen del disco, un modelo, y la descripción de vuelta.
+ *
+ * **No escribe nada.** Ni en la bóveda, ni en la conversación, ni en el pie de
+ * foto de nada. Existe para poder saber si un modelo sabe mirar **antes** de
+ * confiarle una imagen privada, y para no tener que crear una conversación sólo
+ * para probarlo.
+ */
+export const vaultVisionProbeArgsSchema = z.object({
+  provider: z.string().min(1).max(64),
+  model: z.string().min(1).max(128).nullable().default(null),
+  projectAlias: projectAliasSchema,
+});
+
+export const vaultVisionProbeResultSchema = z.object({
+  /** true si cerró el diálogo sin elegir; no es un error */
+  cancelled: z.boolean(),
+  fileName: z.string().nullable(),
+  mimeType: z.string().nullable(),
+  byteSize: z.number().int().min(0),
+  /** para verla al lado del texto; `null` si es demasiado grande */
+  dataUrl: z.string().nullable(),
+  caption: z.string().nullable(),
+  failure: z.enum(['vacio', 'negativa']).nullable(),
+  /** el modelo que respondió de verdad, que puede no ser el pedido */
+  executedModel: z.string().nullable(),
+});
+
 export const vaultMediaGenerateArgsSchema = z.object({
   conversationId: conversationIdSchema,
   characterId: z.string().min(1).max(128),
@@ -1307,6 +1335,9 @@ export interface LuxyBridge {
   describeVaultMedia(
     args: z.infer<typeof vaultMediaDescribeArgsSchema>,
   ): Promise<IpcResult<z.infer<typeof vaultMediaDescribeResultSchema>>>;
+  probeVision(
+    args: z.input<typeof vaultVisionProbeArgsSchema>,
+  ): Promise<IpcResult<z.infer<typeof vaultVisionProbeResultSchema>>>;
   createVaultCharacter(
     args: z.infer<typeof vaultCharacterCreateArgsSchema>,
   ): Promise<IpcResult<z.infer<typeof vaultCharacterCreateResultSchema>>>;

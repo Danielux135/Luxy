@@ -79,6 +79,13 @@ export function VaultPage({
         providers={providers}
         models={models}
       />
+      <VisionBench
+        vault={vault}
+        providers={providers}
+        models={models}
+        project={vault.composer.project ?? Object.keys(summary.config?.projects ?? {})[0] ?? ''}
+        conversationProvider={vault.composer.provider ?? providers[0] ?? 'claude'}
+      />
       <UnlockedPanel vault={vault} />
     </>
   );
@@ -359,6 +366,18 @@ function ConversationPanel({
             >
               {vault.attaching ? 'Cifrando…' : 'Adjuntar'}
             </button>
+            {vault.openConversationId === null && (
+              /* estaba explicado sólo en el `title` del navegador, que tarda un
+                 segundo en salir y casi nadie llega a ver: el botón parecía roto.
+                 Los archivos cuelgan de una conversación, así que hasta que
+                 exista no hay dónde guardarlos */
+              <p className="field__hint">
+                Adjuntar necesita una conversación: envía un mensaje primero. Para
+                sólo probar si un modelo sabe mirar una foto, usa{' '}
+                <strong>Probar la vista de un modelo</strong>, abajo — eso no
+                guarda nada.
+              </p>
+            )}
             {vault.openConversationId !== null && (
               <button
                 className="btn btn--danger"
@@ -2253,6 +2272,137 @@ function GeneratePanel({
  * imagenes descifradas en memoria del renderer las dejaria vivas despues de
  * cerrar la boveda, que es justo lo contrario de lo que hace cerrarla.
  */
+/**
+ * banco de pruebas de visión.
+ *
+ * POR QUÉ EXISTE, con las palabras de Daniel: «necesitamos un sitio en Privado
+ * que permita hacer pruebas para pasarle fotos y que nos devuelva las
+ * descripciones». Antes, para averiguar si un modelo sabe mirar había que
+ * adjuntar una imagen a una conversación —lo que obligaba a crear una— y pedir
+ * la descripción sobre contenido de la bóveda.
+ *
+ * Tiene **su propio proveedor y su propio modelo**, aparte de los de la
+ * conversación. Ése era el problema de fondo: el selector era el mismo, así que
+ * elegir un modelo con vista cambiaba también quién encarna al personaje.
+ *
+ * No guarda nada: ni en la bóveda, ni en la conversación, ni como pie de foto.
+ */
+function VisionBench({
+  vault,
+  providers,
+  models,
+  project,
+  conversationProvider,
+}: {
+  vault: VaultController;
+  providers: string[];
+  models: ModelDefinition[];
+  project: string;
+  /** el de la conversación, sólo como punto de partida razonable */
+  conversationProvider: string;
+}): JSX.Element {
+  const [provider, setProvider] = useState<string | null>(null);
+  const [model, setModel] = useState('');
+  const elegido = provider ?? conversationProvider;
+  const familyModels = modelsForProvider(models, elegido) as ModelDefinition[];
+  // un modelo de otra familia no existe para este proveedor: mandarlo gasta la
+  // llamada y devuelve `unrecognized_model`
+  const modelo = modelForProvider(models, elegido, model.length === 0 ? null : model) ?? '';
+  const probe = vault.lastProbe;
+
+  return (
+    <Panel title="Probar la vista de un modelo">
+      <p className="page__lede">
+        Elige una imagen de tu disco y mira qué dice de ella. <strong>No se guarda
+        nada</strong>: ni en la bóveda, ni en la conversación, ni como pie de
+        foto. Sirve para saber si un modelo sabe mirar antes de gastar una
+        llamada sobre algo tuyo.
+      </p>
+
+      <div className="row">
+        <Field label="Proveedor">
+          <select value={elegido} onChange={(event) => {
+            setProvider(event.target.value);
+            // el modelo se suelta al cambiar de proveedor: uno de otra familia
+            // no existe para el nuevo
+            setModel('');
+          }}>
+            {providers.map((entry) => (
+              <option key={entry} value={entry}>
+                {entry}
+              </option>
+            ))}
+          </select>
+        </Field>
+        {familyModels.length > 0 ? (
+          <Field
+            label="Modelo"
+            hint="Los marcados «ve imágenes» son los que la conexión declara con vista."
+          >
+            <select value={modelo} onChange={(event) => setModel(event.target.value)}>
+              <option value="">por defecto de la conexión</option>
+              {familyModels.map((definition) => (
+                <option key={definition.id} value={definition.apiModel}>
+                  {definition.displayName}
+                  {definition.capabilities.includes('image_input') ? ' · ve imágenes' : ''}
+                </option>
+              ))}
+            </select>
+          </Field>
+        ) : (
+          <Field label="Modelo" hint={`Sin escribir nada usa el que trae ${elegido} por defecto.`}>
+            <input
+              value={model}
+              placeholder="por defecto"
+              onChange={(event) => setModel(event.target.value)}
+            />
+          </Field>
+        )}
+        <button
+          className="btn btn--primary"
+          disabled={vault.probingVision || project.length === 0}
+          onClick={() => {
+            void vault.probeVision({
+              provider: elegido,
+              model: modelo.length === 0 ? null : modelo,
+              projectAlias: project,
+            });
+          }}
+        >
+          {vault.probingVision ? 'Mirando…' : 'Elegir una imagen y probar'}
+        </button>
+      </div>
+
+      {probe !== null && (
+        <div className="vision-probe">
+          {probe.dataUrl !== null && (
+            <img className="vision-probe__image" src={probe.dataUrl} alt="" />
+          )}
+          <div className="vision-probe__text">
+            <p className="field__hint">
+              {probe.fileName} · {Math.round(probe.byteSize / 1024)} KB
+              {probe.executedModel === null ? '' : ` · respondió ${probe.executedModel}`}
+            </p>
+            {probe.caption !== null && <p className="vault-media__caption">{probe.caption}</p>}
+            {probe.failure === 'negativa' && (
+              <Notice tone="warn">
+                Ese modelo se negó a describir la imagen. Repetirlo no lo arregla:
+                prueba con otro.
+              </Notice>
+            )}
+            {probe.failure === 'vacio' && (
+              <Notice tone="warn">
+                No contestó nada. Puede que no sepa mirar imágenes, o que se le
+                haya atragantado ésta: vuelve a intentarlo antes de descartarlo.
+              </Notice>
+            )}
+          </div>
+        </div>
+      )}
+    </Panel>
+  );
+}
+
 /**
  * la lista de conversaciones, separada por personaje.
  *

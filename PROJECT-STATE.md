@@ -1,6 +1,41 @@
 # Luxy — estado canónico del proyecto
 
-Última actualización: **2026-09-04 — el catálogo dice qué sabe hacer cada modelo**
+Última actualización: **2026-09-04 — hay dónde probar si un modelo ve una foto**
+
+La pestaña Privado tiene un **banco de pruebas de visión**: eliges una imagen de
+tu disco, eliges proveedor y modelo, y te devuelve lo que el modelo dice de ella.
+**No escribe nada** —ni bóveda, ni conversación, ni pie de foto— y no necesita
+conversación abierta.
+
+Existe por un problema de diseño real que salió al usarlo: **`describeMedia`
+usaba el proveedor y el modelo del compositor**, es decir los mismos de la
+conversación. Elegir un modelo con vista para describir una imagen cambiaba
+también quién encarna al personaje. Un selector para dos cosas distintas. El
+banco tiene los suyos.
+
+Lo que **no** ocurría, y conviene tenerlo claro: la descripción nunca entraba en
+la conversación. `vaultMediaDescribe` no añade ningún turno, corre en modo
+técnico y sólo escribe el pie de foto.
+
+Seguridad del canal nuevo: el archivo lo elige el usuario en un diálogo del
+proceso principal y **el renderer no puede nombrar una ruta**. Si pudiera, podría
+pedir que se leyera cualquier cosa del disco y se enviara a un proveedor externo.
+Hay una prueba que fija esa ausencia.
+
+De paso, el botón **Adjuntar** explica por qué está desactivado —los archivos
+cuelgan de una conversación— en texto visible, en vez de en un `title` del
+navegador que tarda un segundo y casi nadie ve.
+
+`npm run check` exit 0: **141 archivos, 2.467 pruebas superadas, 12 omitidas.**
+
+**Lo siguiente, y a propósito sin hacer:** que «Describir con IA» sobre un
+archivo ya guardado use también ese modelo aparte. El banco existe para decidir
+cuál antes de cablearlo; hacerlo ya sería fijar un modelo sin haber comprobado
+que ve (`LA-043`).
+
+---
+
+Última actualización anterior: **2026-09-04 — el catálogo dice qué sabe hacer cada modelo**
 
 Dos arreglos que salen del mismo sitio: con 46 modelos de Mistral en pantalla,
 elegir uno era adivinar.

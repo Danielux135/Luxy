@@ -1,5 +1,32 @@
 # Luxy — acciones locales de Daniel
 
+## LA-043 — probar de verdad si un modelo ve una foto
+
+Estado: `pending` — abierta el 2026-09-04.
+
+Ya hay sitio para hacerlo sin tocar nada tuyo: **Privado → «Probar la vista de
+un modelo»**, debajo de la conversación. No guarda nada y no necesita
+conversación abierta.
+
+1. Elige **proveedor y modelo ahí dentro** — son suyos, no los de la
+   conversación, así que probar no cambia quién es Lía.
+2. **Elegir una imagen y probar.** Sale un diálogo, escoges una foto de tu disco
+   y abajo aparece la imagen con lo que el modelo dice de ella.
+3. Prueba primero con `mistral-small-latest` o `mistral-medium-latest`. Si tras
+   volver a pulsar «Actualizar modelos» en Modelos aparecen marcados
+   **«ve imágenes»**, ésos son los buenos.
+
+Qué significa cada resultado:
+
+- **Describe la foto** → funciona; dime cuál y lo cablearemos al botón
+  «Describir con IA» de los archivos guardados.
+- **«Se negó»** → repetirlo no arregla nada, cambia de modelo.
+- **«No contestó nada»** → puede que no sepa mirar, o que se le atragantara ésa.
+  Vuelve a intentarlo antes de descartarlo.
+- **Un error 400 sin explicación** → es lo que faltaba por comprobar:
+  `imageUrlFormat` está fijo en `object` y Mistral documenta ese campo como
+  cadena. Ese ajuste todavía no tiene campo en la interfaz. Dímelo y lo añado.
+
 ## LA-042 — cuál de los 46 modelos de Mistral es el que toca
 
 Estado: `pending` — abierta el 2026-09-04.

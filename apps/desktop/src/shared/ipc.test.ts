@@ -17,6 +17,8 @@ import {
   configSaveArgsSchema,
   secretNameSchema,
   vaultCharacterImportArgsSchema,
+  vaultVisionProbeArgsSchema,
+  vaultVisionProbeResultSchema,
   vaultCharacterSummarySchema,
   vaultCharacterProviderArgsSchema,
   vaultHordeCharacterSaveArgsSchema,
@@ -560,5 +562,74 @@ describe('protocolo de aprobacion con el agente', () => {
     expect(agentEventSchema.safeParse(evento).success).toBe(true);
     const { worktreePath: _sin, ...incompleto } = evento;
     expect(agentEventSchema.safeParse(incompleto).success).toBe(false);
+  });
+});
+
+describe('banco de pruebas de vision', () => {
+  it('el modelo es opcional: sin elegir manda el de la conexion', () => {
+    const valido = vaultVisionProbeArgsSchema.safeParse({
+      provider: 'mistral',
+      projectAlias: 'luxy-test',
+    });
+    expect(valido.success && valido.data.model).toBeNull();
+  });
+
+  it('exige proveedor y proyecto: sin ellos no hay a quien preguntarle', () => {
+    expect(vaultVisionProbeArgsSchema.safeParse({ projectAlias: 'luxy-test' }).success).toBe(false);
+    expect(vaultVisionProbeArgsSchema.safeParse({ provider: 'mistral' }).success).toBe(false);
+  });
+
+  it('NO admite una ruta de archivo del renderer', () => {
+    // el archivo lo elige el usuario en un dialogo del proceso principal: si el
+    // renderer pudiera nombrar la ruta, podria pedir que se leyera cualquier
+    // cosa del disco y se enviara a un proveedor
+    const conRuta = vaultVisionProbeArgsSchema.safeParse({
+      provider: 'mistral',
+      projectAlias: 'luxy-test',
+      filePath: 'C:/Users/oscar/.ssh/id_rsa',
+    });
+    expect(conRuta.success && 'filePath' in conRuta.data).toBe(false);
+  });
+
+  it('cancelar el dialogo es un resultado valido, no un error', () => {
+    const cancelado = vaultVisionProbeResultSchema.safeParse({
+      cancelled: true,
+      fileName: null,
+      mimeType: null,
+      byteSize: 0,
+      dataUrl: null,
+      caption: null,
+      failure: null,
+      executedModel: null,
+    });
+    expect(cancelado.success).toBe(true);
+  });
+
+  it('distingue no contestar de negarse', () => {
+    for (const failure of ['vacio', 'negativa', null]) {
+      const resultado = vaultVisionProbeResultSchema.safeParse({
+        cancelled: false,
+        fileName: 'foto.webp',
+        mimeType: 'image/webp',
+        byteSize: 1234,
+        dataUrl: null,
+        caption: null,
+        failure,
+        executedModel: 'mistral-small-latest',
+      });
+      expect(resultado.success).toBe(true);
+    }
+    expect(
+      vaultVisionProbeResultSchema.safeParse({
+        cancelled: false,
+        fileName: 'foto.webp',
+        mimeType: 'image/webp',
+        byteSize: 1,
+        dataUrl: null,
+        caption: null,
+        failure: 'lo-que-sea',
+        executedModel: null,
+      }).success,
+    ).toBe(false);
   });
 });
