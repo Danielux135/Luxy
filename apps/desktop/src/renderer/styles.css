@@ -30,6 +30,15 @@
   --fault: #ff6b5b; /* fallo */
   --warn: #e8c05a;
 
+  /* dos nombres de la misma tinta.
+     Media pantalla estaba escrita contra `--line` y `--accent`, que no existian
+     en la paleta: una `var()` sin definir invalida la declaracion entera, asi
+     que esos bordes NO se pintaban —la lista de conversaciones, entre otros—.
+     Se declaran como alias en vez de reescribir cada regla: son el mismo color,
+     y renombrar a mano trece sitios solo añade ocasiones de equivocarse. */
+  --line: var(--rule);
+  --accent: var(--signal);
+
   --mono: 'Cascadia Mono', 'Cascadia Code', Consolas, 'Courier New', monospace;
   --display: 'Bahnschrift', 'DIN Alternate', 'Segoe UI Variable Display', 'Segoe UI', sans-serif;
   --body: 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif;
@@ -1581,11 +1590,43 @@ input[aria-invalid='true'] {
   word-break: break-all;
 }
 
+/* los hilos van separados por personaje: sin esto los de Lia salian mezclados
+   con los que no son suyos y habia que abrirlos para saber de quien eran */
+.vault-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.vault-group__head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0 0 6px;
+}
+
+.vault-group__name {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.vault-group__count {
+  font-size: 11px;
+  color: var(--dim);
+}
+
 .vault-list {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
   margin-bottom: 14px;
+}
+
+/* dentro de un grupo el hueco de abajo lo pone el grupo, no la lista */
+.vault-group .vault-list {
+  margin-bottom: 0;
 }
 
 .vault-list__item {
@@ -1650,6 +1691,126 @@ input[aria-invalid='true'] {
 .vault-caption {
   flex: 1 1 220px;
   min-width: 0;
+}
+
+/* la rejilla de archivos. `auto-fill` con un minimo en vez de un numero fijo
+   de columnas: el panel cambia de ancho y una cuadricula rigida deja franjas
+   vacias o corta las baldosas */
+.vault-gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(128px, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.vault-gallery__tile {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+  overflow: hidden;
+}
+
+.vault-gallery__tile:hover {
+  border-color: var(--accent);
+}
+
+/* cuadrada pase lo que pase: con imagenes de proporciones distintas —y las
+   hay, porque el alto y el ancho se eligen por personaje— una rejilla de
+   alturas libres queda en escalera */
+.vault-gallery__frame {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 1;
+  background: var(--raised);
+}
+
+.vault-gallery__image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.vault-gallery__placeholder {
+  font-size: 11px;
+  color: var(--dim);
+}
+
+.vault-gallery__badge {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  font-size: 10px;
+}
+
+/* dos lineas y corta: el pie entero se lee en el visor, y aqui solo sirve
+   para distinguir una baldosa de otra */
+.vault-gallery__foot {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  padding: 0 8px 8px;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--dim);
+}
+
+.vault-gallery__missing {
+  color: var(--warn);
+  font-style: italic;
+}
+
+/* el visor va por encima de todo: corregir un pie de foto es leerlo contra la
+   imagen, y en linea no cabian los dos */
+.vault-viewer {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.66);
+}
+
+.vault-viewer__panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(720px, 100%);
+  max-height: 100%;
+  overflow-y: auto;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+}
+
+.vault-viewer__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.vault-viewer__media {
+  max-width: 100%;
+  max-height: 58vh;
+  align-self: center;
+  border-radius: 6px;
 }
 
 .vault-media {

@@ -1,5 +1,70 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-09-04 15:25 — Claude — F13-GALERIA-001 y F13-HILOS-001
+
+- Origen: Daniel, en el mismo mensaje que el catalogador: «una galeria mas
+  chula, conversaciones ordenadas por tiempo/personaje para separar las que no
+  son de Lia». Las dos quedaron sin empezar en la tanda anterior y se dijo asi.
+
+**F13-HILOS-001 — la lista de conversaciones, separada por personaje.**
+
+- Plana y ordenada solo por fecha, los hilos de Lia salian mezclados con los que
+  no son suyos: habia que ABRIRLOS para saber de quien eran, que en un contenido
+  privado es justo lo que no se quiere hacer.
+- Lo que costo trabajo no fue agrupar sino SABER de quien es cada hilo. El
+  personaje solo se vuelve a sellar cuando CAMBIA —para no engordar el archivo
+  repitiendolo en cada turno—, asi que mirar el ultimo turno devolvia `null` en
+  casi todos. `characterOf` recorre hacia atras y se queda con el primero que lo
+  lleve, reutilizando el ultimo registro que la lista ya habia abierto.
+- Cadena vacia sigue significando «ya no es de nadie», distinto de «sin sellar».
+- El NOMBRE se resuelve en el proceso principal, no en el renderer: alli solo
+  llegaria un uuid y agrupar por «83cc7f03…» no separa nada. Un personaje
+  olvidado conserva sus hilos agrupados bajo «Personaje olvidado» en vez de
+  desaparecer.
+- Los hilos sin personaje van al final aunque sean los mas recientes: son el
+  cajon de sastre y arriba estorban a lo que si tiene dueño. Con un solo grupo
+  no se pinta cabecera: no separa nada y solo añade ruido.
+- `describeWhen` recibe el `now` en vez de leer el reloj —asi es pura y se
+  prueba— y cuenta los dias en hora LOCAL: comparar instantes UTC diria «ayer» a
+  algo de esta misma tarde para cualquiera que no viva en Greenwich.
+
+**F13-GALERIA-001 — los archivos en rejilla, con visor.**
+
+- Era una lista de botones «Ver» y no se veia NADA sin abrirlos de uno en uno.
+- **Comprobado antes de diseñar: `nativeImage` de Electron no decodifica webp ni
+  gif** —solo png y jpeg—, y webp es el formato de casi todo lo que entra aqui
+  (avatares, lo que devuelve el horde, las imagenes de referencia). Con eso se
+  cae la idea de guardar miniaturas hechas en el proceso principal, que era el
+  plan obvio. Se probo con un webp y un gif de 1x1 reales, no de memoria.
+- Asi que cada baldosa descifra SU imagen cuando entra en pantalla, con un
+  `IntersectionObserver`, y ni una antes: abrir una conversacion con treinta
+  archivos no puede descifrarlos todos de golpe. La copia descifrada vive en el
+  estado del componente, que se desmonta al cerrar la boveda.
+- El visor va SOBRE la pantalla porque corregir un pie de foto es leerlo contra
+  la imagen, y en linea el cuadro de texto y la imagen no cabian a la vez. Cierra
+  con Escape y pulsando fuera; pulsando DENTRO no, o escribir el pie de foto lo
+  cerraba con cada clic.
+- Sin pie de foto se marca en la propia baldosa: es lo unico que el modelo sabe
+  del archivo y sin el acaba pagando otra generacion.
+
+**Defecto de fondo encontrado de paso: media pantalla no tenia bordes.**
+
+- `--line` y `--accent` se usaban en trece sitios y **no existian en la paleta**.
+  Una `var()` sin definir invalida la declaracion entera, asi que
+  `border: 1px solid var(--line)` no pintaba ningun borde: la lista de
+  conversaciones, los recuadros de medios y varios paneles mas estaban sin marco
+  y nadie lo habia notado. Se declaran como alias de `--rule` y `--signal` en
+  `:root`, que es un cambio de una linea cada uno, en vez de reescribir trece
+  reglas a mano.
+
+- Archivos: `conversation-store.ts` y su prueba, `ipc.ts`, `handlers.ts`,
+  `useVault.ts`, `Vault.tsx`, `styles.css`, y `vault-conversation-groups.ts` +
+  su prueba (nuevos).
+- Resultado real: **`npm run check` exit 0 — 137 archivos, 2.436 pruebas
+  superadas, 12 omitidas.**
+- Sin verificar: **nada de esto se ha visto en pantalla.** La rejilla, el visor y
+  las cabeceras estan probadas como logica y compiladas, no miradas.
+
 ### 2026-09-04 15:10 — Claude — F12-DESCRIBIR-001 y BUG-CATALOGO-TROZOS-001
 
 - Origen: Daniel pregunta por que no usar imagen a texto para no tener que
@@ -260,6 +325,7 @@
 
 
 ### 2026-09-04 10:30 — Claude — F11-HORDE-001 (revision adversarial)
+
 
 - Origen: revision del cambio por cuatro dimensiones —correccion, seguridad,
   contrato y interfaz— con cada hallazgo pasado por un verificador que intentaba

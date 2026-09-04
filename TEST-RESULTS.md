@@ -1,5 +1,35 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-04 — F13-GALERIA-001 y F13-HILOS-001
+
+`npm run check` exit 0.
+
+```
+Test Files  137 passed (137)
+     Tests   2436 passed | 12 skipped (2448)
+```
+
+Dieciséis pruebas nuevas sobre las 2.420 de la tanda anterior:
+
+- `vault-conversation-groups.test.ts` (13): que los hilos de cada personaje se
+  separan, que los grupos se ordenan por su actividad más reciente, que dentro
+  de un grupo manda la fecha, que los hilos sin personaje van al final **aunque
+  sean los más recientes**, que un personaje olvidado conserva sus hilos, y que
+  el nombre se recupera aunque sólo venga sellado en uno de ellos. En
+  `describeWhen`, que una fecha futura da «hoy» y no «hace -1 días».
+- `conversation-store.test.ts` (3): que la lista dice de qué personaje es cada
+  conversación, que **lo encuentra aunque sólo lo lleve el primer turno** —que
+  es el caso normal, porque el personaje sólo se vuelve a sellar cuando cambia—
+  y que la cadena vacía deja el hilo sin dueño en vez de heredar el anterior.
+
+Comprobación aparte, fuera de vitest: se ejecutó Electron de verdad para saber
+si `nativeImage` puede hacer miniaturas. **No puede con webp ni con gif**, sólo
+con png y jpeg, y webp es el formato de casi todo lo que hay en la bóveda. Ese
+resultado es el que decidió el diseño de la galería (`D-069`).
+
+No verificado: **nada de esto se ha visto en pantalla.** La rejilla, el visor y
+las cabeceras de grupo están probadas como lógica y compiladas, no miradas.
+
 ### 2026-09-04 — F11-HORDE-001, AI Horde entero sin gastar un kudo
 
 `npm run check` exit 0.

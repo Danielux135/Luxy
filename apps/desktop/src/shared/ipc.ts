@@ -328,6 +328,21 @@ export const vaultConversationSummarySchema = z.object({
   title: z.string(),
   turns: z.number().int().min(0),
   updatedAt: z.string(),
+  /**
+   * de quién es el hilo. Es el `characterId` durable de la bóveda (`D-068`).
+   *
+   * `null` cuando nunca se eligió personaje, que es un grupo legítimo y no un
+   * error: hay conversaciones privadas que no son de nadie.
+   */
+  characterId: z.string().nullable().default(null),
+  /**
+   * su nombre, ya resuelto aquí.
+   *
+   * Va junto al identificador porque la lista se agrupa por personaje y el
+   * renderer no tiene forma de traducir un uuid a un nombre. `null` si el
+   * personaje ya no existe: el hilo sobrevive a que lo olvides.
+   */
+  characterLabel: z.string().nullable().default(null),
 });
 
 export const vaultConversationListResultSchema = z.object({

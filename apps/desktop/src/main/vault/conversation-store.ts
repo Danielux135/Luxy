@@ -53,6 +53,38 @@ export interface PrivateConversationSummary {
   title: string;
   turns: number;
   updatedAt: string;
+  /**
+   * de quien es la conversacion, para poder separarlas.
+   *
+   * Es el `characterId` DURABLE de la boveda (`D-068`), no el de ningun
+   * proveedor: por eso un hilo de Lia sigue siendo de Lia aunque cambie quien
+   * le hace las fotos. `null` cuando nunca se eligio personaje.
+   */
+  characterId: string | null;
+}
+
+/**
+ * de quien es la conversacion, mirando hacia atras desde el ultimo turno.
+ *
+ * Hay que recorrerla porque el personaje SOLO se vuelve a sellar cuando cambia:
+ * quedarse con el del ultimo turno devolveria `null` en casi todos los hilos, y
+ * entonces la lista no podria separar los de Lia de los demas. Se corta en el
+ * primero que lo lleve, que es el que esta en vigor.
+ */
+async function characterOf(
+  vault: VaultService,
+  records: PrivateRecord[],
+  fromLastTurn: string | null,
+): Promise<string | null> {
+  if (fromLastTurn !== null) return fromLastTurn.length === 0 ? null : fromLastTurn;
+  // el ultimo ya viene abierto por quien llama: descifrarlo otra vez seria
+  // pagar dos veces por el mismo turno en cada conversacion de la lista
+  for (let index = records.length - 2; index >= 0; index -= 1) {
+    const opened = await openTurn(vault, records[index]!);
+    if (opened.turn.characterId === null) continue;
+    return opened.turn.characterId.length === 0 ? null : opened.turn.characterId;
+  }
+  return null;
 }
 
 export class PrivateConversationStore {
@@ -181,6 +213,7 @@ export class PrivateConversationStore {
         title: opened.turn.title ?? 'Sin titulo',
         turns: records.length,
         updatedAt: last.createdAt,
+        characterId: await characterOf(vault, records, opened.turn.characterId),
       });
     }
     return summaries.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));

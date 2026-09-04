@@ -126,6 +126,38 @@ describe('conversaciones privadas en disco', () => {
     expect(first?.turns).toBe(2);
   });
 
+  it('la lista dice de que personaje es cada conversacion', async () => {
+    await store.appendTurn(vault, A, { ...turn('hola'), characterId: 'lia' });
+    await store.appendTurn(vault, B, turn('sin personaje'));
+
+    const list = await store.list(vault);
+    expect(list.find((c) => c.conversationId === A)?.characterId).toBe('lia');
+    expect(list.find((c) => c.conversationId === B)?.characterId).toBeNull();
+  });
+
+  it('encuentra el personaje aunque solo lo lleve el primer turno', async () => {
+    // el personaje SOLO se vuelve a sellar cuando cambia, asi que mirar el
+    // ultimo turno devolveria null en casi todos los hilos y la lista no
+    // podria separar los de uno de los de otro
+    await store.appendTurn(vault, A, { ...turn('primero'), characterId: 'lia' });
+    for (const texto of ['segundo', 'tercero', 'cuarto']) {
+      await store.appendTurn(vault, A, turn(texto));
+    }
+
+    const list = await store.list(vault);
+    expect(list.find((c) => c.conversationId === A)?.characterId).toBe('lia');
+  });
+
+  it('un personaje quitado a mitad deja la conversacion sin dueño', async () => {
+    // cadena vacia es «ya no es de nadie», no «sigue igual»: si contara como
+    // sin sellar, quitar el personaje no tendria forma de notarse
+    await store.appendTurn(vault, A, { ...turn('con personaje'), characterId: 'lia' });
+    await store.appendTurn(vault, A, { ...turn('ya no'), characterId: '' });
+
+    const list = await store.list(vault);
+    expect(list.find((c) => c.conversationId === A)?.characterId).toBeNull();
+  });
+
   it('el proveedor y el modelo pertenecen a la conversacion', async () => {
     // vivian solo en memoria de la ventana: al reiniciar Studio el proveedor
     // volvia al primero de la lista y el modelo nunca se elegia, asi que una

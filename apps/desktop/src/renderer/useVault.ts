@@ -99,6 +99,10 @@ export interface PrivateConversation {
   title: string;
   turns: number;
   updatedAt: string;
+  /** de quién es el hilo; `null` cuando nunca se eligió personaje */
+  characterId: string | null;
+  /** su nombre, ya resuelto por el proceso principal; `null` si ya no existe */
+  characterLabel: string | null;
 }
 
 export interface PrivateMediaItem {

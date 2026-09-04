@@ -1,5 +1,58 @@
 # Luxy — tarea activa
 
+## F13-GALERIA-001 y F13-HILOS-001 — la galeria y los hilos por personaje
+
+Estado: **`done` — Claude, 2026-09-04.** Falta verlo en pantalla: `LA-039`.
+
+Las dos ultimas peticiones del mensaje de Daniel sobre la memoria: «una galeria
+mas chula, conversaciones ordenadas por tiempo/personaje para separar las que no
+son de Lia». Quedaron sin empezar en la tanda anterior y se dijo asi.
+
+### F13-HILOS-001 — de quien es cada conversacion
+
+La lista era plana y ordenada solo por fecha, asi que los hilos de Lia salian
+mezclados con los que no son suyos y habia que ABRIRLOS para saber de quien
+eran. En un contenido privado eso es justo lo que no se quiere hacer.
+
+Lo dificil no era agrupar sino **saber de quien es cada hilo**: el personaje solo
+se vuelve a sellar cuando CAMBIA —para no repetirlo en cada turno y engordar el
+archivo—, asi que el ultimo turno devuelve `null` en casi todos. `characterOf`
+recorre hacia atras y se queda con el primero que lo lleve, reutilizando el
+registro que la lista ya habia abierto. Cadena vacia sigue siendo «ya no es de
+nadie», distinto de «sin sellar».
+
+El nombre se resuelve en el proceso principal: al renderer solo llegaria un uuid.
+Un personaje olvidado conserva sus hilos bajo «Personaje olvidado»; los que nunca
+tuvieron personaje van al final aunque sean recientes. Con un solo grupo no se
+pinta cabecera.
+
+### F13-GALERIA-001 — los archivos en rejilla
+
+Era una lista de botones «Ver» y no se veia nada sin abrirlos de uno en uno.
+Ahora hay rejilla de baldosas cuadradas y un visor a pantalla casi completa con
+el pie de foto, lo que se pidio al generarla, «Describir con IA» y sus avisos.
+
+**No hay miniaturas guardadas, y no es un olvido: `nativeImage` de Electron no
+decodifica webp ni gif** —comprobado ejecutandolo—, y webp es el formato de casi
+todo lo que entra aqui. Cada baldosa descifra su imagen al entrar en pantalla y
+ni una antes (`D-069`).
+
+### De paso: media pantalla no tenia bordes
+
+`--line` y `--accent` se usaban en trece sitios y **no existian en la paleta**.
+Una `var()` sin definir invalida la declaracion entera, asi que esos bordes no se
+pintaban. Declarados como alias de `--rule` y `--signal`.
+
+`npm run check` exit 0: **137 archivos, 2.436 pruebas superadas, 12 omitidas.**
+
+### Siguiente paso exacto
+
+`LA-039`: abrir Privado y mirarlo. En concreto, que las cabeceras de personaje
+salgan cuando hay mas de uno, que las baldosas carguen al bajar y que el visor
+cierre con Escape sin cerrarse al escribir el pie de foto.
+
+---
+
 ## F11-HORDE-001 — imagenes NSFW gratis con AI Horde
 
 Estado: **`done` — Claude, 2026-09-04. Sin commit.** Queda `LA-038`, que es

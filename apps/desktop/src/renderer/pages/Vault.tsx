@@ -4,8 +4,12 @@
 // pantalla no muestra NADA de su contenido. Ni titulos, ni recuentos, ni "tu
 // ultima conversacion fue el martes". No es que se oculte: es que el renderer
 // no lo tiene, porque el proceso principal no puede descifrarlo sin la llave.
-import { useEffect, useState, type JSX } from 'react';
+import { useEffect, useMemo, useRef, useState, type JSX } from 'react';
 import { Empty, Explica, Field, Notice, Panel, Readout, Skeleton, Tag } from '../ui/primitives.js';
+import {
+  describeWhen,
+  groupConversationsByCharacter,
+} from '../vault-conversation-groups.js';
 import type { ConfigSummary } from '../useConfig.js';
 import {
   formatAutoLockOption,
@@ -157,23 +161,7 @@ function ConversationPanel({
         )
       }
     >
-      {vault.conversations.length > 0 && (
-        <div className="vault-list">
-          {vault.conversations.map((conversation) => (
-            <button
-              key={conversation.conversationId}
-              className="vault-list__item"
-              aria-current={
-                conversation.conversationId === vault.openConversationId ? 'true' : undefined
-              }
-              onClick={() => void vault.openConversation(conversation.conversationId)}
-            >
-              <span className="vault-list__title">{conversation.title}</span>
-              <span className="vault-list__meta">{conversation.turns} turnos</span>
-            </button>
-          ))}
-        </div>
-      )}
+      {vault.conversations.length > 0 && <ConversationList vault={vault} />}
 
       {vault.turns.length === 0 ? (
         <Empty title="Nada todavía">
@@ -195,7 +183,7 @@ function ConversationPanel({
       )}
 
       {vault.media.length > 0 && (
-        <MediaStrip vault={vault} provider={provider} model={model} project={project} />
+        <MediaGallery vault={vault} provider={provider} model={model} project={project} />
       )}
 
       {vault.lastImage !== null && <ImageOutcome image={vault.lastImage} />}
@@ -2259,7 +2247,76 @@ function GeneratePanel({
  * imagenes descifradas en memoria del renderer las dejaria vivas despues de
  * cerrar la boveda, que es justo lo contrario de lo que hace cerrarla.
  */
-function MediaStrip({
+/**
+ * la lista de conversaciones, separada por personaje.
+ *
+ * Plana y ordenada solo por fecha, los hilos de Lia salian mezclados con los
+ * que no son suyos y habia que abrirlos para saber de quien eran: en un
+ * contenido privado eso es justo lo que no se quiere hacer.
+ *
+ * Con un solo personaje no se pinta ninguna cabecera. Un unico grupo titulado
+ * no separa nada y solo añade ruido.
+ */
+function ConversationList({ vault }: { vault: VaultController }): JSX.Element {
+  const groups = useMemo(
+    () => groupConversationsByCharacter(vault.conversations),
+    [vault.conversations],
+  );
+  // se lee una vez por render y se pasa a `describeWhen`, que es pura: asi
+  // «hoy» y «ayer» se calculan con la hora local sin meter el reloj dentro
+  const now = new Date();
+  const grouped = groups.length > 1;
+
+  return (
+    <div className="vault-groups">
+      {groups.map((group) => (
+        <div className="vault-group" key={group.characterId ?? 'sin-personaje'}>
+          {grouped && (
+            <p className="vault-group__head">
+              <span className="vault-group__name">{group.label}</span>
+              <span className="vault-group__count">
+                {group.conversations.length === 1
+                  ? '1 conversación'
+                  : `${group.conversations.length} conversaciones`}
+              </span>
+            </p>
+          )}
+          <div className="vault-list">
+            {group.conversations.map((conversation) => (
+              <button
+                key={conversation.conversationId}
+                className="vault-list__item"
+                aria-current={
+                  conversation.conversationId === vault.openConversationId ? 'true' : undefined
+                }
+                onClick={() => void vault.openConversation(conversation.conversationId)}
+              >
+                <span className="vault-list__title">{conversation.title}</span>
+                <span className="vault-list__meta">
+                  {conversation.turns} turnos · {describeWhen(conversation.updatedAt, now)}
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * los archivos de la conversacion, en rejilla.
+ *
+ * Antes era una lista de botones «Ver» y no se veia nada sin abrirlos uno a
+ * uno. Con miniaturas se ve de un vistazo lo que hay, que es justo lo que hace
+ * falta para decidir si pedir otra imagen o reutilizar una.
+ *
+ * No hay miniaturas GUARDADAS a proposito: Electron no sabe decodificar webp
+ * en el proceso principal —comprobado—, y webp es el formato de casi todo lo
+ * que entra aqui. Asi que cada baldosa descifra su imagen cuando entra en
+ * pantalla y ni una antes.
+ */
+function MediaGallery({
   vault,
   provider,
   model,
@@ -2273,41 +2330,141 @@ function MediaStrip({
   project: string;
 }): JSX.Element {
   const [openId, setOpenId] = useState<string | null>(null);
+  const open = vault.media.find((item) => item.mediaId === openId) ?? null;
 
   return (
-    <div className="vault-media">
-      {vault.media.map((item) => (
-        <MediaTile
-          key={item.mediaId}
-          item={item}
-          open={openId === item.mediaId}
-          onToggle={() => setOpenId(openId === item.mediaId ? null : item.mediaId)}
+    <>
+      <div className="vault-gallery">
+        {vault.media.map((item) => (
+          <GalleryTile
+            key={item.mediaId}
+            item={item}
+            vault={vault}
+            onOpen={() => setOpenId(item.mediaId)}
+          />
+        ))}
+      </div>
+      {open !== null && (
+        <MediaViewer
+          item={open}
           vault={vault}
           provider={provider}
           model={model}
           project={project}
+          onClose={() => setOpenId(null)}
         />
-      ))}
-    </div>
+      )}
+    </>
   );
 }
 
-function MediaTile({
+/**
+ * una baldosa de la rejilla.
+ *
+ * Descifra su imagen cuando entra en pantalla y no antes: abrir una
+ * conversacion con treinta archivos no puede descifrarlos todos de golpe.
+ * La copia descifrada vive en el estado de este componente, que se desmonta
+ * al cerrar la boveda, asi que no sobrevive al cierre.
+ */
+function GalleryTile({
   item,
-  open,
-  onToggle,
+  vault,
+  onOpen,
+}: {
+  item: VaultController['media'][number];
+  vault: VaultController;
+  onOpen: () => void;
+}): JSX.Element {
+  const [dataUrl, setDataUrl] = useState<string | null>(null);
+  const [tooBig, setTooBig] = useState(false);
+  const [visible, setVisible] = useState(false);
+  const box = useRef<HTMLButtonElement | null>(null);
+
+  useEffect(() => {
+    const node = box.current;
+    if (node === null || visible) return;
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) setVisible(true);
+    });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [visible]);
+
+  useEffect(() => {
+    if (!visible) return;
+    let cancelled = false;
+    void vault.openMedia(item.mediaId).then((url) => {
+      if (cancelled) return;
+      if (url === null) setTooBig(true);
+      else setDataUrl(url);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [visible, item.mediaId, vault]);
+
+  const isVideo = item.mimeType.startsWith('video/');
+  const caption = item.caption ?? '';
+  const name = item.displayName ?? item.mediaId.slice(0, 8);
+
+  return (
+    <button
+      ref={box}
+      className="vault-gallery__tile"
+      onClick={onOpen}
+      title={caption.length > 0 ? caption : name}
+    >
+      <span className="vault-gallery__frame">
+        {dataUrl !== null && !isVideo && (
+          <img className="vault-gallery__image" src={dataUrl} alt="" />
+        )}
+        {dataUrl !== null && isVideo && (
+          /* sin `controls`: la baldosa es para mirar, y el visor es donde se
+             reproduce. Con controles, pulsar la baldosa daba al play en vez
+             de abrirla */
+          <video className="vault-gallery__image" src={dataUrl} muted />
+        )}
+        {dataUrl === null && (
+          <span className="vault-gallery__placeholder">
+            {tooBig ? 'demasiado grande' : '…'}
+          </span>
+        )}
+        {isVideo && <span className="vault-gallery__badge">vídeo</span>}
+      </span>
+      <span className="vault-gallery__foot">
+        {caption.length > 0 ? (
+          caption
+        ) : (
+          /* sin pie de foto el modelo no sabe que hay aqui y acaba pagando otra
+             generacion: se marca en la propia baldosa, no en un aviso aparte */
+          <em className="vault-gallery__missing">sin pie de foto</em>
+        )}
+      </span>
+    </button>
+  );
+}
+
+/**
+ * el archivo abierto a tamaño completo, con todo lo que se puede hacer con el.
+ *
+ * Va sobre la pantalla y no dentro de la rejilla porque corregir un pie de foto
+ * es leerlo contra la imagen: en linea, el cuadro de texto y la imagen no
+ * cabian a la vez.
+ */
+function MediaViewer({
+  item,
   vault,
   provider,
   model,
   project,
+  onClose,
 }: {
   item: VaultController['media'][number];
-  open: boolean;
-  onToggle: () => void;
   vault: VaultController;
   provider: string;
   model: string;
   project: string;
+  onClose: () => void;
 }): JSX.Element {
   const [dataUrl, setDataUrl] = useState<string | null>(null);
   const [tooBig, setTooBig] = useState(false);
@@ -2321,11 +2478,6 @@ function MediaTile({
   const [failure, setFailure] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!open) {
-      // al cerrar se suelta la copia descifrada en vez de dejarla en memoria
-      setDataUrl(null);
-      return;
-    }
     let cancelled = false;
     void vault.openMedia(item.mediaId).then((url) => {
       if (cancelled) return;
@@ -2335,7 +2487,17 @@ function MediaTile({
     return () => {
       cancelled = true;
     };
-  }, [open, item.mediaId, vault]);
+  }, [item.mediaId, vault]);
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent): void => {
+      // sin esto la unica salida es dar al boton, y en una imagen a pantalla
+      // casi completa lo primero que se pulsa es Escape
+      if (event.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
 
   const isVideo = item.mimeType.startsWith('video/');
   // solo una imagen se puede mirar: pedirle a un modelo con vista que describa
@@ -2346,122 +2508,137 @@ function MediaTile({
   const chosen = model.length === 0 ? provider : model;
 
   return (
-    <div className="vault-media__item">
-      <button className="btn btn--quiet" onClick={onToggle}>
-        {open ? 'Ocultar' : 'Ver'} · {item.displayName ?? item.mediaId.slice(0, 8)}
-      </button>
-
-      {caption.length > 0 ? (
-        <p className="vault-media__caption">{caption}</p>
-      ) : (
-        <Notice tone="warn">
-          Sin pie de foto. Es lo único que el modelo sabe de este archivo: sin él
-          no sabe qué se ve aquí, así que no puede elegirlo para reenviártelo y
-          acaba pagando otra generación.
-        </Notice>
-      )}
-
-      {item.prompt !== null && item.prompt.length > 0 && (
-        /* lo que se PIDIO no es lo que se VE: verlos juntos es justo lo que
-           explica una imagen que no salio como se esperaba. Es historia, y por
-           eso se enseña en pequeño y no se puede corregir */
-        <p className="vault-media__prompt">Se pidió al generarla: «{item.prompt}»</p>
-      )}
-
-      {editing ? (
-        <div className="row">
-          <input
-            className="vault-caption"
-            value={draft}
-            placeholder="Qué se ve en este archivo…"
-            disabled={saving}
-            onChange={(event) => setDraft(event.target.value)}
-          />
-          <button
-            className="btn btn--primary"
-            disabled={saving}
-            onClick={() => {
-              setSaving(true);
-              // vacio a proposito lo deja sin pie de foto: borrar una
-              // descripcion equivocada es tan legitimo como corregirla
-              void vault.setMediaCaption(item.mediaId, draft.trim()).then((ok) => {
-                setSaving(false);
-                if (ok) setDraft(null);
-              });
-            }}
-          >
-            {saving ? 'Guardando…' : 'Guardar'}
-          </button>
-          <button className="btn btn--quiet" disabled={saving} onClick={() => setDraft(null)}>
-            Cancelar
+    <div
+      className="vault-viewer"
+      role="dialog"
+      aria-modal="true"
+      // cerrar al pulsar FUERA, no dentro: sin la comprobacion, escribir en el
+      // pie de foto cerraba el visor con cada clic
+      onClick={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <div className="vault-viewer__panel">
+        <div className="vault-viewer__head">
+          <strong>{item.displayName ?? item.mediaId.slice(0, 8)}</strong>
+          <button className="btn btn--quiet" onClick={onClose}>
+            Cerrar
           </button>
         </div>
-      ) : (
-        <div className="row">
-          <button className="btn btn--quiet" onClick={() => setDraft(caption)}>
-            {caption.length > 0 ? 'Corregir el pie de foto' : 'Escribir el pie de foto'}
-          </button>
-          {isImage && (
+
+        {dataUrl !== null && !isVideo && (
+          <img className="vault-viewer__media" src={dataUrl} alt="" />
+        )}
+        {dataUrl !== null && isVideo && (
+          <video className="vault-viewer__media" src={dataUrl} controls />
+        )}
+        {dataUrl === null && !tooBig && <Skeleton rows={3} />}
+
+        {tooBig && (
+          <Notice tone="warn">
+            Demasiado grande para previsualizarlo todavía. El archivo está
+            guardado y cifrado; falta la parte que reproduce vídeo sin
+            descifrarlo entero en memoria.
+          </Notice>
+        )}
+
+        {caption.length > 0 ? (
+          <p className="vault-media__caption">{caption}</p>
+        ) : (
+          <Notice tone="warn">
+            Sin pie de foto. Es lo único que el modelo sabe de este archivo: sin
+            él no sabe qué se ve aquí, así que no puede elegirlo para
+            reenviártelo y acaba pagando otra generación.
+          </Notice>
+        )}
+
+        {item.prompt !== null && item.prompt.length > 0 && (
+          /* lo que se PIDIO no es lo que se VE: verlos juntos es justo lo que
+             explica una imagen que no salio como se esperaba. Es historia, y por
+             eso se enseña en pequeño y no se puede corregir */
+          <p className="vault-media__prompt">Se pidió al generarla: «{item.prompt}»</p>
+        )}
+
+        {editing ? (
+          <div className="row">
+            <input
+              className="vault-caption"
+              value={draft}
+              placeholder="Qué se ve en este archivo…"
+              disabled={saving}
+              onChange={(event) => setDraft(event.target.value)}
+            />
             <button
-              className="btn btn--quiet"
-              disabled={vault.describingMedia}
+              className="btn btn--primary"
+              disabled={saving}
               onClick={() => {
-                setFailure(null);
-                void vault
-                  .describeMedia({
-                    mediaId: item.mediaId,
-                    provider,
-                    model: model.length === 0 ? null : model,
-                    projectAlias: project,
-                  })
-                  // con descripcion ya esta guardada y la lista se recarga sola:
-                  // aqui solo queda quedarse con el motivo cuando no la hubo
-                  .then((result) => setFailure(result.failure));
+                setSaving(true);
+                // vacio a proposito lo deja sin pie de foto: borrar una
+                // descripcion equivocada es tan legitimo como corregirla
+                void vault.setMediaCaption(item.mediaId, draft.trim()).then((ok) => {
+                  setSaving(false);
+                  if (ok) setDraft(null);
+                });
               }}
             >
-              {vault.describingMedia ? 'Mirando…' : 'Describir con IA'}
+              {saving ? 'Guardando…' : 'Guardar'}
             </button>
-          )}
-        </div>
-      )}
+            <button className="btn btn--quiet" disabled={saving} onClick={() => setDraft(null)}>
+              Cancelar
+            </button>
+          </div>
+        ) : (
+          <div className="row">
+            <button className="btn btn--quiet" onClick={() => setDraft(caption)}>
+              {caption.length > 0 ? 'Corregir el pie de foto' : 'Escribir el pie de foto'}
+            </button>
+            {isImage && (
+              <button
+                className="btn btn--quiet"
+                disabled={vault.describingMedia}
+                onClick={() => {
+                  setFailure(null);
+                  void vault
+                    .describeMedia({
+                      mediaId: item.mediaId,
+                      provider,
+                      model: model.length === 0 ? null : model,
+                      projectAlias: project,
+                    })
+                    // con descripcion ya esta guardada y la lista se recarga sola:
+                    // aqui solo queda quedarse con el motivo cuando no la hubo
+                    .then((result) => setFailure(result.failure));
+                }}
+              >
+                {vault.describingMedia ? 'Mirando…' : 'Describir con IA'}
+              </button>
+            )}
+          </div>
+        )}
 
-      {isImage && !editing && (
-        <p className="field__hint">
-          Describir gasta una llamada a <Tag tone="idle">{chosen}</Tag> y necesita
-          un modelo que sepa <strong>mirar</strong> imágenes: no todos los de la
-          lista lo son. Lo que escriba se puede corregir a mano, porque es
-          exactamente lo que lee después el personaje.
-        </p>
-      )}
+        {isImage && !editing && (
+          <p className="field__hint">
+            Describir gasta una llamada a <Tag tone="idle">{chosen}</Tag> y necesita
+            un modelo que sepa <strong>mirar</strong> imágenes: no todos los de la
+            lista lo son. Lo que escriba se puede corregir a mano, porque es
+            exactamente lo que lee después el personaje.
+          </p>
+        )}
 
-      {failure === 'negativa' && (
-        <Notice tone="warn">
-          Ese modelo se negó a describir la imagen. Repetirlo no lo arregla:
-          cambia el modelo de arriba y vuelve a pulsar, o escribe tú el pie de
-          foto.
-        </Notice>
-      )}
+        {failure === 'negativa' && (
+          <Notice tone="warn">
+            Ese modelo se negó a describir la imagen. Repetirlo no lo arregla:
+            cambia el modelo de arriba y vuelve a pulsar, o escribe tú el pie de
+            foto.
+          </Notice>
+        )}
 
-      {failure === 'vacio' && (
-        <Notice tone="warn">
-          {chosen} no contestó nada. Aquí sí tiene sentido volver a intentarlo.
-        </Notice>
-      )}
-
-      {open && tooBig && (
-        <Notice tone="warn">
-          Demasiado grande para previsualizarlo todavía. El archivo está guardado
-          y cifrado; falta la parte que reproduce vídeo sin descifrarlo entero en
-          memoria.
-        </Notice>
-      )}
-
-      {open && dataUrl !== null && !isVideo && (
-        <img className="vault-media__preview" src={dataUrl} alt="" />
-      )}
-      {open && dataUrl !== null && isVideo && (
-        <video className="vault-media__preview" src={dataUrl} controls />
-      )}
+        {failure === 'vacio' && (
+          <Notice tone="warn">
+            {chosen} no contestó nada. Aquí sí tiene sentido volver a intentarlo.
+          </Notice>
+        )}
+      </div>
     </div>
   );
 }

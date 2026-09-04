@@ -969,9 +969,24 @@ export function registerIpcHandlers(context: HandlerContext): void {
   // llave, el proceso principal literalmente no puede descifrar los archivos.
   // ---------------------------------------------------------------------------
 
-  handle(IPC_INVOKE.vaultConversationList, emptyArgsSchema, async () => ({
-    conversations: await context.privateConversations.list(context.vault),
-  }));
+  handle(IPC_INVOKE.vaultConversationList, emptyArgsSchema, async () => {
+    const conversations = await context.privateConversations.list(context.vault);
+    // el nombre se resuelve aqui y no en el renderer: alli solo llegaria un
+    // uuid, y agrupar los hilos por «83cc7f03…» no separa nada
+    const characters = await context.characters.list(context.vault);
+    const labels = new Map(characters.map((entry) => [entry.characterId, entry.label]));
+    return {
+      conversations: conversations.map((conversation) => ({
+        ...conversation,
+        // un personaje olvidado deja huerfanos sus hilos, y siguen siendo
+        // suyos: se agrupan igual, sin nombre, en vez de desaparecer
+        characterLabel:
+          conversation.characterId === null
+            ? null
+            : (labels.get(conversation.characterId) ?? null),
+      })),
+    };
+  });
 
   handle(IPC_INVOKE.vaultConversationRead, vaultConversationIdArgsSchema, async (args) => ({
     instructions: await context.privateConversations.latestInstructions(

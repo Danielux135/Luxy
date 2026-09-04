@@ -1,6 +1,36 @@
 # Luxy — estado canónico del proyecto
 
-Última actualización: **2026-09-04 — F11-HORDE-001, imágenes sin pagar**
+Última actualización: **2026-09-04 — Privado se puede mirar: galería y hilos por personaje**
+
+Dos arreglos de uso en la pestaña Privado, ninguno de arquitectura.
+
+**Las conversaciones se separan por personaje.** La lista era plana y ordenada
+sólo por fecha, así que los hilos de Lía salían mezclados con los que no son
+suyos y había que abrirlos para saber de quién eran. Ahora van agrupados, con el
+nombre del personaje y la fecha en lenguaje normal («hoy», «hace 3 días»). Lo
+que costó trabajo no fue agrupar: el personaje **sólo se vuelve a sellar cuando
+cambia**, para no repetirlo en cada turno, así que el último turno devuelve
+`null` en casi todos los hilos y hay que recorrerlos hacia atrás.
+
+**Los archivos van en rejilla, con visor.** Antes era una lista de botones «Ver»
+y no se veía nada sin abrirlos de uno en uno. **No hay miniaturas guardadas y no
+es un olvido:** `nativeImage` de Electron no decodifica webp ni gif —comprobado
+ejecutándolo—, y webp es el formato de casi todo lo que entra en la bóveda. Cada
+baldosa descifra su imagen al entrar en pantalla y ninguna antes (`D-069`).
+
+**Defecto de fondo corregido de paso:** `--line` y `--accent` se usaban en trece
+sitios de la hoja de estilos y **no existían en la paleta**. Una `var()` sin
+definir invalida la declaración entera, así que esos bordes no se pintaban: la
+lista de conversaciones y varios paneles llevaban tiempo sin marco.
+
+`npm run check` exit 0: **137 archivos, 2.436 pruebas superadas, 12 omitidas.**
+
+**Nada de esto se ha visto en pantalla** (`LA-039`), y sigue pendiente `LA-038`,
+probar AI Horde contra la red real.
+
+---
+
+Última actualización anterior: **2026-09-04 — F11-HORDE-001, imágenes sin pagar**
 
 La bóveda privada ya no depende de un proveedor de pago para generar imágenes.
 **AI Horde** entra como segundo proveedor: es gratis de verdad, no pide método

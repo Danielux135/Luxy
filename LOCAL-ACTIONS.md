@@ -1,5 +1,32 @@
 # Luxy — acciones locales de Daniel
 
+## LA-039 — mirar la galería y la lista de conversaciones
+
+Estado: `pending` — abierta el 2026-09-04.
+
+`F13-GALERIA-001` y `F13-HILOS-001` están implementados, con pruebas, y
+**nadie los ha visto en pantalla**. Las pruebas cubren la lógica: que los grupos
+salen bien ordenados y que la bóveda sabe de quién es cada hilo. No cubren cómo
+queda.
+
+Qué mirar, en Privado y con la bóveda abierta:
+
+1. **Las cabeceras de personaje.** Salen sólo si hay más de un grupo. Con Lía y
+   algún hilo sin personaje deberían aparecer dos: «Lía» arriba y «Sin
+   personaje» al final, aunque el suelto sea más reciente.
+2. **La fecha de cada hilo**, junto al número de turnos: «hoy», «ayer», «hace 3
+   días», y a partir del mes la fecha entera.
+3. **Que las baldosas cargan al bajar**, no todas de golpe. Cada una descifra su
+   imagen cuando entra en pantalla, así que verás un hueco breve en cada una la
+   primera vez. Es lo esperado (`D-069`), no un fallo.
+4. **El visor**: se abre al pulsar una baldosa, cierra con Escape y pulsando
+   fuera, y **no** debe cerrarse al escribir dentro del pie de foto.
+5. **Los bordes.** Se arregló que `--line` y `--accent` no existían, así que la
+   lista de conversaciones y los recuadros de medios deberían tener marco ahora.
+   Si algo se ve con un borde que antes no tenía, es esto y es lo correcto.
+
+Si algo queda feo, dilo y se ajusta: es maquetación, no arquitectura.
+
 ## LA-038 — probar AI Horde de verdad: clave, personaje y una imagen
 
 Estado: `pending` — abierta el 2026-09-04.

@@ -1808,3 +1808,52 @@ seguirá siendo Lía, con su nombre, su personalidad y todo lo que han hablado;
 pero sus fotos de Xavira y sus fotos del horde no serán la misma cara. Eso es
 una limitación de los generadores, no del diseño, y la pantalla lo avisa antes
 de cambiar en vez de dejar que se descubra en la primera foto.
+
+## D-069 — la galería no guarda miniaturas: Electron no sabe leer webp
+
+Fecha: 2026-09-04
+
+Estado: aceptada, implementada
+
+El plan obvio para una rejilla de imágenes es guardar una miniatura junto a cada
+archivo: se descifra rápido, ocupa poco y evita tener treinta imágenes a tamaño
+completo descifradas en memoria. El almacén ya tenía el hueco preparado
+(`thumbnailObjectKey`, `readThumbnail`, `subkeyFor('thumbnail', …)`), sin que
+nadie lo rellenara nunca.
+
+**No se puede hacer en el proceso principal.** Comprobado ejecutando Electron de
+verdad contra un webp y un gif de 1x1:
+
+```
+{"name":"webp","empty":true,"size":{"width":0,"height":0}}
+{"name":"png","empty":false,"size":{"width":1,"height":1},"jpegBytes":761}
+{"name":"gif","empty":true,"size":{"width":0,"height":0}}
+```
+
+`nativeImage` sólo decodifica PNG y JPEG, y **webp es el formato de casi todo lo
+que entra en la bóveda**: los avatares, lo que devuelve AI Horde y las imágenes
+de referencia, que además se rechazan si no son webp. Una miniatura hecha así
+saldría vacía justo en los archivos que importan.
+
+Las salidas descartadas, y por qué:
+
+- **Una dependencia nativa (`sharp` y parecidas).** Binario por plataforma,
+  recompilación contra la ABI de Electron en cada actualización, y todo para
+  redimensionar. Es mucho equipaje para un panel de imágenes.
+- **Decodificar en el renderer y devolver la miniatura sellada.** Funciona
+  —Chromium sí lee webp— pero abre un canal que mete bytes del renderer en la
+  bóveda, y sólo se gana la primera vez: para verla hay que haber descifrado
+  antes la imagen entera de todos modos.
+
+Lo que se hace: **cada baldosa descifra su propia imagen cuando entra en
+pantalla**, con un `IntersectionObserver`, y ninguna antes. Abrir una
+conversación con treinta archivos no descifra treinta imágenes; descifra las que
+se ven. La copia descifrada vive en el estado del componente, que se desmonta al
+cerrar la bóveda, así que sigue valiendo la regla de `openMedia`: nada
+descifrado sobrevive al cierre.
+
+Consecuencia asumida: al bajar por una galería larga se descifra archivo a
+archivo, así que hay un instante de hueco en cada baldosa. Es el precio de no
+tener miniaturas, y se paga en comodidad, no en seguridad. Si algún día molesta
+de verdad, el camino es el segundo descartado —miniaturas hechas en el
+renderer—, no la dependencia nativa.
