@@ -8,11 +8,13 @@
 // El campo apiModel es EXACTO: no se normaliza ni se corrigen mayusculas.
 import {
   AGENT_TOOL_NAMES,
+  MODEL_FAMILIES,
   connectionProfileSchema,
   modelDefinitionSchema,
   type ConnectionProfile,
   type ModelDefinition,
 } from './types.js';
+import { MISTRAL_NAMES } from './catalog-fetch.js';
 
 /** id de la conexion que se crea durante el onboarding */
 export const DEFAULT_CONNECTION_ID = 'hcnsec';
@@ -339,6 +341,15 @@ export function buildDefaultCatalog(connectionId = DEFAULT_CONNECTION_ID): Model
 export function buildCatalogForConnection(
   connectionId: string,
   servedModels: readonly string[],
+  /**
+   * familia a la que pertenece TODO lo que sirve este origen.
+   *
+   * Una conexion agregadora sirve muchas familias y hay que adivinarlas por el
+   * nombre. Un proveedor HTTP no: el agente lo registra bajo SU identificador,
+   * y el identificador de proveedor ES la familia. Adivinar ahi es lo que hacia
+   * que los modelos de Mistral cayeran en «otros» y su selector saliera vacio.
+   */
+  familyOverride?: string,
 ): ModelDefinition[] {
   const knownByApiModel = new Map(
     buildDefaultCatalog(connectionId).map((model) => [model.apiModel, model]),
@@ -346,10 +357,12 @@ export function buildCatalogForConnection(
 
   return servedModels.map((apiModel) => {
     const known = knownByApiModel.get(apiModel);
-    if (known !== undefined) return known;
+    // con familia impuesta no vale el catalogo de fabrica: ese modelo puede
+    // existir con el mismo nombre en otra conexion y con otra familia
+    if (known !== undefined && familyOverride === undefined) return known;
 
     const lower = apiModel.toLowerCase();
-    const family =
+    const guessed =
       lower.includes('qwen')
           ? 'qwen'
           : lower.includes('glm')
@@ -372,13 +385,25 @@ export function buildCatalogForConnection(
                             ? 'step'
                             : lower === 'auto' || lower.includes('router')
                               ? 'router'
-                              : 'other';
+                              : MISTRAL_NAMES.some((parte) => lower.includes(parte))
+                                ? 'mistral'
+                                : 'other';
+    // la categoria se sigue deduciendo del nombre aunque la familia venga
+    // impuesta: un proveedor puede servir texto, audio e imagen a la vez
+    // el override solo vale si es una familia REAL. Un proveedor HTTP puede
+    // llamarse como quiera, y meter su identificador tal cual en el esquema
+    // haria saltar el enum y tumbar el catalogo entero por una errata: se
+    // prefiere agrupar peor a no tener catalogo
+    const family =
+      familyOverride !== undefined && (MODEL_FAMILIES as readonly string[]).includes(familyOverride)
+        ? familyOverride
+        : guessed;
     const category =
-      family === 'router'
+      guessed === 'router'
         ? 'routing'
-        : family === 'stepaudio'
+        : guessed === 'stepaudio'
           ? 'audio'
-          : family === 'stepimage'
+          : guessed === 'stepimage'
             ? 'image'
             : 'text';
     const safeId = lower.replace(/[^a-z0-9._-]+/g, '-').replace(/-+/g, '-');

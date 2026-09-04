@@ -1,5 +1,61 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-09-04 16:35 — Claude — BUG-CATALOGO-ORIGEN-001
+
+- Origen: Daniel añade la clave de Mistral por Conexiones → Proveedores HTTP, va
+  a Modelos, pulsa «Actualizar modelos» y le salen 19 modelos que **no son de
+  Mistral**: los de su pasarela agregadora.
+- Diagnostico, leyendo el codigo y no suponiendo: Luxy guarda las conexiones en
+  **dos listas distintas** —`connections` y `providers.http`— y toda la
+  maquinaria del catalogo miraba solo la primera, y ademas solo su PRIMER
+  elemento, escrito a mano en tres sitios:
+  - `useCatalog.ts:16` — el catalogo que alimenta los selectores de Privado,
+    Conversaciones y Laboratorio;
+  - `Config.tsx:98` — el panel «Catalogo real de la conexion»;
+  - `Config.tsx:69` — el registro de la lista grande de Modelos.
+  Con eso, un proveedor HTTP no tenia forma de que le preguntaran que sirve, y
+  una segunda conexion tampoco.
+- Y un segundo fallo debajo, que habria dejado el arreglo a medias:
+  **`buildCatalogForConnection` adivina la familia por el NOMBRE del modelo**, y
+  los de Mistral con vista se llaman `pixtral`. Caian en `other`. Como el
+  identificador de proveedor ES la familia, el selector de modelo de Privado
+  habria seguido vacio con Mistral elegido aunque el catalogo ya se leyera.
+- Hecho:
+  - `CatalogSource` (`'connection' | 'http'`) en el contrato, con defecto
+    `connection`: un catalogo guardado antes de esto se sigue leyendo.
+  - `catalogRefresh` y `catalogRead` buscan en la lista que toca y usan el
+    nombre de secreto que toca —`apiKeyEnv` propio del proveedor HTTP, no
+    `connection:<id>`—.
+  - El almacen separa los dos origenes por nombre de archivo. Los de
+    `connections` **conservan el nombre de siempre**: cambiarlo dejaria
+    huerfanos los catalogos ya leidos.
+  - `catalogOriginsOf`, puro y probado, junta las dos listas. `useDetectedCatalog`
+    lee TODOS los origenes y los concatena, deduplicando por id: quien lo consume
+    filtra por familia, asi que tenerlos juntos es lo correcto.
+  - Selector «A quien se le pregunta» en el panel, visible solo con mas de uno.
+  - `familyOverride` en `buildCatalogForConnection`: un proveedor HTTP impone su
+    identificador como familia en vez de adivinarla. Una conexion agregadora
+    sigue adivinando, porque sirve muchas familias.
+  - Familia `mistral` en `MODEL_FAMILIES`, con sus nombres reales —`pixtral`,
+    `ministral`, `magistral`, `codestral`, `devstral`—, compartidos entre los dos
+    adivinadores para que agrupar en pantalla y elegir familia no discrepen.
+- **Riesgo que me cree y cerre antes de seguir:** `family` es un enum CERRADO.
+  Meter ahi el identificador de un proveedor cualquiera haria saltar el esquema
+  y tumbaria el catalogo entero por una errata en la configuracion. El override
+  solo se aplica si es una familia real; si no, se sigue adivinando. Se prefiere
+  agrupar peor a no tener catalogo. Con su prueba.
+- La categoria se deduce del nombre aunque la familia venga impuesta: un
+  proveedor puede servir texto, audio e imagen a la vez.
+- Archivos: `models/types.ts`, `models/catalog.ts` (+ prueba nueva),
+  `models/catalog-fetch.ts` (+2 pruebas), `shared/ipc.ts`, `preload/index.ts`,
+  `main/catalog-store.ts` (+ prueba nueva), `main/ipc/handlers.ts`,
+  `renderer/useCatalog.ts` (+ prueba nueva), `renderer/pages/Config.tsx`.
+- Resultado real: **`npm run check` exit 0 — 140 archivos, 2.453 pruebas
+  superadas, 12 omitidas.**
+- Sin verificar: **no se ha visto en pantalla ni se ha llamado a Mistral.** Que
+  `https://api.mistral.ai/v1/models` conteste con la forma que Luxy espera es lo
+  unico que falta por comprobar, y es `LA-040`.
+
 ### 2026-09-04 15:25 — Claude — F13-GALERIA-001 y F13-HILOS-001
 
 - Origen: Daniel, en el mismo mensaje que el catalogador: «una galeria mas

@@ -1,6 +1,41 @@
 # Luxy — estado canónico del proyecto
 
-Última actualización: **2026-09-04 — Privado se puede mirar: galería y hilos por personaje**
+Última actualización: **2026-09-04 — el catálogo ya sabe preguntarle a las dos listas**
+
+Luxy guarda las conexiones en **dos sitios distintos** —`connections` y
+`providers.http`— y toda la maquinaria del catálogo miraba sólo el primero, y
+sólo su primer elemento, escrito a mano como `connections[0]` en tres puntos.
+Consecuencia visible: añadir un proveedor HTTP, pulsar «Actualizar modelos» y
+recibir el catálogo de otra pasarela **sin ningún error**.
+
+Ahora el catálogo se direcciona por **origen + identificador** (`D-070`): hay un
+selector de a quién se le pregunta, el catálogo que alimenta los selectores de
+Privado, Conversaciones y Laboratorio lee **todos** los orígenes, y cada uno
+guarda su lectura por separado —los de `connections` conservan su nombre de
+archivo de siempre, para no dejar huérfano lo ya leído—.
+
+Debajo había un segundo fallo que habría dejado el arreglo a medias: **la
+familia de un modelo se adivinaba por su nombre**, y los de Mistral con vista se
+llaman `pixtral`, así que caían en `other`. Como el identificador de proveedor
+**es** la familia con la que el agente lo ejecuta, su selector de modelo habría
+seguido vacío. Un proveedor HTTP impone ahora su identificador como familia; una
+conexión agregadora sigue adivinando, porque sirve muchas a la vez.
+
+`family` sigue siendo un enum **cerrado** a propósito: un identificador que no
+sea una familia conocida no se impone, se vuelve a adivinar. Aceptar cualquier
+cadena convertiría una errata en la configuración en un catálogo que desaparece
+entero.
+
+`npm run check` exit 0: **140 archivos, 2.453 pruebas superadas, 12 omitidas.**
+
+**Sin verificar:** no se ha llamado a Mistral ni se ha visto la pantalla nueva
+(`LA-040`). Y queda un hueco conocido: `imageUrlFormat` existe en el esquema y
+lo usa el agente, pero **no tiene campo en la interfaz**, así que no se puede
+cambiar a la forma de cadena que documenta Mistral.
+
+---
+
+Última actualización anterior: **2026-09-04 — Privado se puede mirar: galería y hilos por personaje**
 
 Dos arreglos de uso en la pestaña Privado, ninguno de arquitectura.
 

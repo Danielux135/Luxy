@@ -1,5 +1,55 @@
 # Luxy — tarea activa
 
+## BUG-CATALOGO-ORIGEN-001 — el catalogo solo sabia preguntarle a una conexion
+
+Estado: **`done` — Claude, 2026-09-04.** Falta probarlo contra Mistral: `LA-040`.
+
+Daniel guarda la clave de Mistral, va a Modelos, pulsa «Actualizar modelos» y le
+salen 19 modelos que no son de Mistral.
+
+### La causa, que eran dos
+
+**1. Dos listas que no se hablan.** Luxy guarda las conexiones en `connections`
+y en `providers.http`. Toda la maquinaria del catalogo miraba solo la primera, y
+solo su PRIMER elemento, escrito a mano en tres sitios: `useCatalog.ts:16` —el
+catalogo que alimenta los selectores de Privado, Conversaciones y Laboratorio—,
+`Config.tsx:98` —el panel «Catalogo real»— y `Config.tsx:69` —el registro de la
+lista grande—.
+
+**2. La familia se adivinaba por el nombre.** Los modelos con vista de Mistral se
+llaman `pixtral`, asi que caian en `other`. Como el identificador de proveedor ES
+la familia, el selector de modelo de Privado habria seguido vacio aunque el
+catalogo ya se leyera. Sin esto, el arreglo se quedaba a medias.
+
+### Lo hecho
+
+`CatalogSource` en el contrato; los dos handlers buscan en la lista que toca y
+con el nombre de secreto que toca; el almacen separa los origenes por archivo
+—conservando el nombre de siempre para las conexiones, para no dejar huerfano lo
+ya leido—; `catalogOriginsOf` junta las dos listas; `useDetectedCatalog` lee
+TODOS los origenes y deduplica; selector «A quien se le pregunta»;
+`familyOverride` para que un proveedor HTTP imponga su identificador; y familia
+`mistral` con sus nombres reales.
+
+**Riesgo cerrado antes de seguir:** `family` es un enum CERRADO, asi que meter un
+identificador cualquiera tumbaria el catalogo entero por una errata. El override
+solo se aplica si es una familia real. Con prueba.
+
+`npm run check` exit 0: **140 archivos, 2.453 pruebas superadas, 12 omitidas.**
+
+### Lo que sigue sin tener sitio en la pantalla
+
+`imageUrlFormat` existe en el esquema y el agente lo usa, pero **no hay campo
+para cambiarlo**: se queda en `object`. Mistral documenta `image_url` como
+cadena. Si «Describir con IA» devuelve un 400 que no explica nada, es eso.
+
+### Siguiente paso exacto
+
+`LA-040`: reiniciar Luxy, elegir Mistral en el selector del catalogo, pulsar
+«Actualizar modelos» y quedarse con el identificador real de un modelo con vista.
+
+---
+
 ## F13-GALERIA-001 y F13-HILOS-001 — la galeria y los hilos por personaje
 
 Estado: **`done` — Claude, 2026-09-04.** Falta verlo en pantalla: `LA-039`.

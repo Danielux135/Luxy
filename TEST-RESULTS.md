@@ -1,5 +1,37 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-04 — BUG-CATALOGO-ORIGEN-001
+
+`npm run check` exit 0.
+
+```
+Test Files  140 passed (140)
+     Tests   2453 passed | 12 skipped (2465)
+```
+
+Diecisiete pruebas nuevas sobre las 2.436 anteriores, en cuatro archivos:
+
+- `useCatalog.test.ts` (4, nuevo): que se juntan **las dos listas**, que un
+  proveedor HTTP impone su familia y una conexión no, y que dos orígenes con el
+  mismo nombre no comparten clave.
+- `catalog.test.ts` (5, nuevo): que la familia impuesta llega a todos sus
+  modelos, que sin ella se sigue adivinando, que **una familia que no existe no
+  tumba el catálogo** —el caso peligroso, porque `family` es un enum cerrado—,
+  que la categoría se sigue deduciendo del nombre, y que con familia impuesta no
+  se hereda la ficha de fábrica de otro modelo homónimo.
+- `catalog-store.test.ts` (6, nuevo): que una conexión y un proveedor con el
+  mismo nombre **no se pisan** el archivo, que el de una conexión conserva el
+  nombre de siempre, que un catálogo escrito antes de esto se sigue leyendo, y
+  que un identificador con `../` no escapa de la carpeta.
+- `catalog-fetch.test.ts` (2): que se reconocen los nombres reales de Mistral
+  —`pixtral`, `ministral`, `magistral`, `codestral`, `devstral`— y que no se
+  traga los de otra familia.
+
+No verificado, y es lo único que queda: **no se ha llamado a Mistral**. Que
+`https://api.mistral.ai/v1/models` conteste con la forma que Luxy espera está
+implementado según el contrato estándar, no comprobado contra la red (`LA-040`).
+Tampoco se ha visto la pantalla nueva.
+
 ### 2026-09-04 — F13-GALERIA-001 y F13-HILOS-001
 
 `npm run check` exit 0.

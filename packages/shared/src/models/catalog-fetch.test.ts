@@ -217,3 +217,27 @@ describe('familias de los 19 modelos actuales', () => {
     }
   });
 });
+
+describe('familia de Mistral', () => {
+  // sin esto sus modelos caian en «otros», y como el id de proveedor ES la
+  // familia, el selector de modelo de Privado salia vacio con Mistral elegido
+  it('reconoce los nombres reales, no solo los que dicen «mistral»', () => {
+    for (const modelo of [
+      'mistral-large-latest',
+      'mistral-medium-latest',
+      'pixtral-12b-2409',
+      'pixtral-large-latest',
+      'ministral-8b-latest',
+      'magistral-medium-latest',
+      'codestral-latest',
+      'devstral-small-latest',
+    ]) {
+      expect(guessModelFamily(modelo)).toBe('mistral');
+    }
+  });
+
+  it('no se traga modelos de otra familia', () => {
+    expect(guessModelFamily('DeepSeek-V4-Pro')).toBe('deepseek');
+    expect(guessModelFamily('kimi-k3')).toBe('kimi');
+  });
+});

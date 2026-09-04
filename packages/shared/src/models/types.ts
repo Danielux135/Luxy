@@ -94,12 +94,24 @@ export const MODEL_CAPABILITIES = [
 export type ModelCapability = (typeof MODEL_CAPABILITIES)[number];
 
 /** familias, para agrupar en la interfaz y resolver el alias sin version */
+/**
+ * familias con las que un modelo puede registrarse.
+ *
+ * Es una lista CERRADA a proposito: el identificador de proveedor ES la familia
+ * con la que el agente lo ejecuta, y aceptar cualquier cadena convertiria una
+ * errata en la configuracion en un proveedor que no existe. El precio es que
+ * una conexion nueva no se agrupa sola: hay que añadirla aqui y ponerle
+ * etiqueta, y TypeScript obliga a lo segundo.
+ */
 export const MODEL_FAMILIES = [
   'deepseek',
   'glm',
   'kat',
   'kimi',
   'minimax',
+  // los modelos con vista de Mistral se llaman «pixtral», no «mistral»: sin
+  // esta familia caian en «other» y su selector en Privado salia vacio
+  'mistral',
   'other',
   'qwen',
   'sensenova',

@@ -7,18 +7,27 @@
 // El archivo NO lleva claves: solo nombres de modelo, multiplicadores y grupos.
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { CatalogSnapshot } from '@luxy/shared';
+import type { CatalogSnapshot, CatalogSource } from '@luxy/shared';
 
-/** nombre de archivo seguro por conexion; el identificador se filtra */
-function snapshotPath(directory: string, connectionId: string): string {
+/**
+ * nombre de archivo seguro por origen; el identificador se filtra.
+ *
+ * Los de `connections` conservan el nombre de siempre, sin prefijo: cambiarlo
+ * dejaria huerfanos los catalogos ya leidos y la pantalla diria «sin consultar
+ * todavia» sobre una conexion que si se consulto. Los de `providers.http`
+ * llevan prefijo porque las dos listas comparten espacio de nombres y una
+ * conexion y un proveedor pueden llamarse igual.
+ */
+function snapshotPath(directory: string, connectionId: string, source: CatalogSource): string {
   const safe = connectionId.replace(/[^A-Za-z0-9._-]/g, '').slice(0, 64);
-  return join(directory, `${safe.length > 0 ? safe : 'conexion'}.json`);
+  const nombre = safe.length > 0 ? safe : 'conexion';
+  return join(directory, source === 'http' ? `http-${nombre}.json` : `${nombre}.json`);
 }
 
 export function writeCatalogSnapshot(directory: string, snapshot: CatalogSnapshot): void {
   mkdirSync(directory, { recursive: true });
   writeFileSync(
-    snapshotPath(directory, snapshot.connectionId),
+    snapshotPath(directory, snapshot.connectionId, snapshot.source ?? 'connection'),
     JSON.stringify(snapshot, null, 2),
     'utf8',
   );
@@ -33,10 +42,14 @@ export function writeCatalogSnapshot(directory: string, snapshot: CatalogSnapsho
 export function readCatalogSnapshot(
   directory: string,
   connectionId: string,
+  source: CatalogSource = 'connection',
 ): CatalogSnapshot | null {
   try {
-    const raw = readFileSync(snapshotPath(directory, connectionId), 'utf8');
-    return JSON.parse(raw) as CatalogSnapshot;
+    const raw = readFileSync(snapshotPath(directory, connectionId, source), 'utf8');
+    const parsed = JSON.parse(raw) as CatalogSnapshot;
+    // un archivo escrito antes de que existieran los dos origenes no lleva
+    // `source`, y sin esto el renderer no podria emparejarlo con lo que pidio
+    return { ...parsed, source: parsed.source ?? source };
   } catch {
     return null;
   }

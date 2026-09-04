@@ -65,8 +65,20 @@ export interface PricingProbe {
   entryCount: number;
 }
 
+/**
+ * de cual de las DOS listas sale este catalogo.
+ *
+ * `connections` y `providers.http` son listas distintas y sus identificadores
+ * viven en el mismo espacio de nombres, asi que el identificador solo no basta
+ * para saber a quien hay que preguntarle. Sin esto, una conexion y un proveedor
+ * HTTP que se llamen igual comparten catalogo y se pisan.
+ */
+export type CatalogSource = 'connection' | 'http';
+
 export interface CatalogSnapshot {
   connectionId: string;
+  /** ausente en los catalogos guardados antes de que existieran los dos origenes */
+  source?: CatalogSource;
   fetchedAt: string;
   /** modelos que la conexion declara servir */
   models: CatalogModelPrice[];
@@ -134,6 +146,7 @@ function billingModeOf(quotaType: number | undefined): BillingMode {
  */
 export function buildCatalogSnapshot(input: {
   connectionId: string;
+  source?: CatalogSource;
   fetchedAt: string;
   modelsPayload: unknown;
   pricingPayload: unknown | null;
@@ -177,6 +190,7 @@ export function buildCatalogSnapshot(input: {
 
   return {
     connectionId: input.connectionId,
+    source: input.source ?? 'connection',
     fetchedAt: input.fetchedAt,
     models,
     pricingAvailable: pricing.success && prices.size > 0,
@@ -204,6 +218,22 @@ export function describePricingProbes(probes: PricingProbe[]): string {
  * es una heuristica sobre el nombre y se usa solo para agrupar en pantalla.
  * NO decide con que proveedor se ejecuta: eso lo sigue diciendo el catalogo.
  */
+/**
+ * como se llaman de verdad los modelos de Mistral.
+ *
+ * Se comparte con `buildCatalogForConnection` para que agrupar en pantalla y
+ * decidir la familia operativa no puedan discrepar: si un sitio dice «mistral»
+ * y el otro «otros», el selector de Privado se queda vacio sin explicar nada.
+ */
+export const MISTRAL_NAMES = [
+  'mistral',
+  'pixtral',
+  'ministral',
+  'magistral',
+  'codestral',
+  'devstral',
+] as const;
+
 export function guessModelFamily(apiModel: string): string {
   const name = apiModel.toLowerCase();
   if (name.includes('deepseek')) return 'deepseek';
@@ -214,6 +244,9 @@ export function guessModelFamily(apiModel: string): string {
   if (name.includes('gpt') || name.includes('o1') || name.includes('o3')) return 'openai';
   if (name.includes('gemini')) return 'gemini';
   if (name.includes('kat')) return 'kat';
+  // la familia de Mistral no se llama siempre «mistral»: sus modelos con vista
+  // son «pixtral», y los pequeños «ministral». Sin esto caian todos en «otros»
+  if (MISTRAL_NAMES.some((parte) => name.includes(parte))) return 'mistral';
   // la familia "otros" conserva modelos reales sin familia operativa propia.
   if (name.startsWith('stepaudio') || name.startsWith('step-image')) return 'step-media';
   if (name.includes('step')) return 'step';

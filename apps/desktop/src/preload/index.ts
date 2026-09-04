@@ -45,10 +45,8 @@ const bridge: LuxyBridge = {
   registerMachine: (args: unknown) => ipcRenderer.invoke(IPC_INVOKE.machineRegister, args),
   testConnection: (connectionId: string) =>
     ipcRenderer.invoke(IPC_INVOKE.connectionTest, { connectionId }),
-  refreshCatalog: (connectionId: string) =>
-    ipcRenderer.invoke(IPC_INVOKE.catalogRefresh, { connectionId }),
-  readCatalog: (connectionId: string) =>
-    ipcRenderer.invoke(IPC_INVOKE.catalogRead, { connectionId }),
+  refreshCatalog: (args: unknown) => ipcRenderer.invoke(IPC_INVOKE.catalogRefresh, args),
+  readCatalog: (args: unknown) => ipcRenderer.invoke(IPC_INVOKE.catalogRead, args),
   resolveApproval: (args: unknown) => ipcRenderer.invoke(IPC_INVOKE.approvalResolve, args),
   prepareWorkspace: (projectAlias: string, label: string) =>
     ipcRenderer.invoke(IPC_INVOKE.workspacePrepare, { projectAlias, label }),

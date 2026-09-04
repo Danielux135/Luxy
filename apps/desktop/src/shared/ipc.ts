@@ -1028,6 +1028,17 @@ export const connectionTestResultSchema = z.object({
  */
 export const catalogRefreshArgsSchema = z.object({
   connectionId: z.string().min(1).max(64),
+  /**
+   * de cuál de las dos listas sale: `connections` o `providers.http`.
+   *
+   * Hacen falta las dos porque son listas distintas y sus identificadores
+   * comparten espacio de nombres. Sin esto, el catálogo sólo sabía preguntarle
+   * a `connections`, así que un proveedor HTTP —donde vive Mistral— no tenía
+   * forma de que le preguntaran qué sirve.
+   *
+   * El valor por defecto conserva el comportamiento anterior.
+   */
+  source: z.enum(['connection', 'http']).default('connection'),
 });
 
 export const catalogModelSchema = z.object({
@@ -1042,6 +1053,8 @@ export const catalogModelSchema = z.object({
 
 export const catalogSnapshotSchema = z.object({
   connectionId: z.string(),
+  /** un catálogo guardado antes de que existieran los dos orígenes es de `connections` */
+  source: z.enum(['connection', 'http']).default('connection'),
   fetchedAt: z.string(),
   models: z.array(catalogModelSchema),
   pricingAvailable: z.boolean(),
@@ -1158,9 +1171,11 @@ export interface LuxyBridge {
   testConnection(
     connectionId: string,
   ): Promise<IpcResult<z.infer<typeof connectionTestResultSchema>>>;
-  refreshCatalog(connectionId: string): Promise<IpcResult<z.infer<typeof catalogSnapshotSchema>>>;
+  refreshCatalog(
+    args: z.input<typeof catalogRefreshArgsSchema>,
+  ): Promise<IpcResult<z.infer<typeof catalogSnapshotSchema>>>;
   readCatalog(
-    connectionId: string,
+    args: z.input<typeof catalogRefreshArgsSchema>,
   ): Promise<IpcResult<{ snapshot: z.infer<typeof catalogSnapshotSchema> | null }>>;
   resolveApproval(
     args: z.infer<typeof approvalResolveArgsSchema>,

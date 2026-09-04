@@ -1,5 +1,32 @@
 # Luxy — acciones locales de Daniel
 
+## LA-040 — usar Mistral: leer su catálogo y elegir un modelo con vista
+
+Estado: `pending` — abierta el 2026-09-04.
+
+La clave de Mistral ya está guardada. Falta comprobar que Luxy le sabe
+preguntar, que es lo único que no se puede probar sin red.
+
+Qué hacer, en este orden:
+
+1. **Reinicia Luxy.** Lo de abajo no está en la versión que tienes abierta.
+2. **Modelos → «A quién se le pregunta»** (el selector sale sólo si hay más de
+   un origen) → elige **Mistral · proveedor HTTP** → **Actualizar modelos**.
+   - Si salen sus modelos, funciona. Apunta el identificador exacto del que
+     tenga vista: hoy son los de la familia **Pixtral**, pero los nombres
+     cambian y el que vale es el que devuelva la lista, no el que diga yo.
+   - Si dice «no hay clave guardada para esta conexión», la clave se guardó con
+     otro nombre y hay que mirarlo.
+   - Si dice «la conexión no devolvió la lista de modelos», es que
+     `https://api.mistral.ai/v1/models` no contestó lo que se espera. Dilo con
+     el mensaje exacto.
+3. **Privado → Proveedor: Mistral.** El selector de modelo debería traer ahora
+   los suyos, agrupados en su familia. Elige el que tenga vista.
+4. **Abre una imagen y pulsa «Describir con IA».** Si devuelve un 400 sin
+   explicación, es lo que falta: `imageUrlFormat` no está en la pantalla y se
+   queda en `object`, mientras que Mistral documenta ese campo como cadena. Ese
+   ajuste sigue sin tener sitio en la interfaz.
+
 ## LA-039 — mirar la galería y la lista de conversaciones
 
 Estado: `pending` — abierta el 2026-09-04.

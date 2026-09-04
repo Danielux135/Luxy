@@ -1857,3 +1857,47 @@ archivo, así que hay un instante de hueco en cada baldosa. Es el precio de no
 tener miniaturas, y se paga en comodidad, no en seguridad. Si algún día molesta
 de verdad, el camino es el segundo descartado —miniaturas hechas en el
 renderer—, no la dependencia nativa.
+
+## D-070 — el catálogo tiene dos orígenes, y hay que decir de cuál se habla
+
+Fecha: 2026-09-04
+
+Estado: aceptada, implementada
+
+Luxy guarda las conexiones en dos listas que no se hablan:
+
+- `connections` — pasarelas con perfil completo: protocolo, cabeceras, tiempo de
+  espera. Su clave se guarda como `connection:<id>`.
+- `providers.http` — APIs compatibles con `chat completions`, que es donde vive
+  el selector de proveedores conocidos y por tanto Mistral, Cohere o Groq. Su
+  clave se guarda con el nombre que declara el propio proveedor.
+
+Toda la maquinaria del catálogo miraba **sólo la primera, y sólo su primer
+elemento**, escrito a mano como `connections[0]` en tres sitios. La consecuencia
+visible: añadir Mistral, pulsar «Actualizar modelos» y recibir el catálogo de
+otra pasarela, sin ningún error.
+
+La opción descartada fue **fundir las dos listas en una**. Es lo que parece
+correcto, y no lo es hoy: los dos lados guardan la clave con nombres distintos,
+el agente los registra de forma distinta —un proveedor HTTP bajo su
+identificador; una conexión, un proveedor por cada familia de su catálogo— y
+migrar una configuración existente sin poder probarla contra la máquina de
+Daniel es la clase de cambio que rompe el arranque. Queda como trabajo aparte.
+
+Lo que se hace: el catálogo se direcciona por **origen + identificador**, no por
+identificador solo. Los identificadores de las dos listas comparten espacio de
+nombres, así que sin el origen una conexión y un proveedor llamados igual
+compartirían archivo y se pisarían.
+
+Dos consecuencias que conviene tener presentes:
+
+- **La familia de un proveedor HTTP es su identificador, no lo que diga el
+  nombre del modelo.** El agente lo registra así, y adivinar por el nombre es lo
+  que dejaba a `pixtral-12b` fuera de Mistral. Para una conexión agregadora se
+  sigue adivinando, porque sirve muchas familias a la vez.
+- **`family` es un enum cerrado y sigue siéndolo.** Un identificador de
+  proveedor que no sea una familia conocida no se impone: se vuelve a adivinar.
+  Aceptar cualquier cadena convertiría una errata en la configuración en un
+  esquema que salta y un catálogo que desaparece entero. El precio es que un
+  proveedor nuevo no se agrupa solo hasta añadirlo a `MODEL_FAMILIES`, y
+  TypeScript obliga a ponerle etiqueta al hacerlo.

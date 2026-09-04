@@ -668,18 +668,35 @@ export function registerIpcHandlers(context: HandlerContext): void {
   );
 
   handle(IPC_INVOKE.catalogRead, catalogRefreshArgsSchema, (args) => ({
-    snapshot: readCatalogSnapshot(context.catalogDirectory, args.connectionId),
+    snapshot: readCatalogSnapshot(context.catalogDirectory, args.connectionId, args.source),
   }));
 
   handle(IPC_INVOKE.catalogRefresh, catalogRefreshArgsSchema, async (args) => {
     // misma regla que la prueba de conexion: la URL sale de la configuracion
     // guardada, nunca del renderer, y la clave no cruza el IPC
-    const stored = context.configStore
-      .load()
-      ?.connections.find((connection) => connection.id === args.connectionId);
-    if (stored === undefined) throw new Error('esa conexion no esta configurada');
+    const config = context.configStore.load();
+    // las dos listas son distintas y hay que buscar en la que toca. Antes solo
+    // se miraba `connections`, asi que a un proveedor HTTP —donde vive
+    // Mistral— no habia forma de preguntarle que sirve
+    const stored =
+      args.source === 'http'
+        ? config?.providers.http.find((provider) => provider.id === args.connectionId)
+        : config?.connections.find((connection) => connection.id === args.connectionId);
+    if (stored === undefined) {
+      throw new Error(
+        args.source === 'http'
+          ? 'ese proveedor HTTP no esta configurado'
+          : 'esa conexion no esta configurada',
+      );
+    }
 
-    const apiKey = context.secretStore.get(connectionSecretName(args.connectionId));
+    // cada lista guarda su clave con un nombre distinto: la del proveedor HTTP
+    // es la suya propia, no `connection:<id>`
+    const secretName =
+      args.source === 'http'
+        ? (stored as { apiKeyEnv: string }).apiKeyEnv
+        : connectionSecretName(args.connectionId);
+    const apiKey = context.secretStore.get(secretName);
     if (apiKey === undefined) throw new Error('no hay clave guardada para esta conexion');
 
     const base = stored.baseUrl.replace(/\/+$/, '');
@@ -705,6 +722,7 @@ export function registerIpcHandlers(context: HandlerContext): void {
 
     const snapshot = buildCatalogSnapshot({
       connectionId: args.connectionId,
+      source: args.source,
       fetchedAt: new Date().toISOString(),
       modelsPayload: models,
       pricingPayload: null,

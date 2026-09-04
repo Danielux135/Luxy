@@ -5,8 +5,10 @@ import {
   ModelRegistry,
   buildCatalogForConnection,
   buildDefaultCatalog,
+  connectionProfileSchema,
   guessModelFamily,
   type CatalogSnapshot,
+  type CatalogSource,
   type ConnectionProfile,
   type ModelFamily,
   type ProjectType,
@@ -36,6 +38,7 @@ import {
 } from '../http-provider-config.js';
 import { Empty, Explica, Field, Notice, Panel, Tag } from '../ui/primitives.js';
 import type { ConfigSummary } from '../useConfig.js';
+import { catalogOriginKey, catalogOriginsOf, type CatalogOrigin } from '../useCatalog.js';
 
 const FAMILIA: Record<ModelFamily, string> = {
   deepseek: 'DeepSeek',
@@ -43,6 +46,7 @@ const FAMILIA: Record<ModelFamily, string> = {
   kat: 'KAT',
   kimi: 'Kimi',
   minimax: 'MiniMax',
+  mistral: 'Mistral',
   other: 'Otros',
   qwen: 'Qwen',
   sensenova: 'SenseNova',
@@ -61,27 +65,65 @@ const FAMILIA: Record<ModelFamily, string> = {
  * como «no sirve ninguno» y la pantalla declaraba los 19 modelos no
  * disponibles con la clave puesta y trabajos corriendo contra ellos.
  */
-function buildRegistry(summary: ConfigSummary, snapshot: CatalogSnapshot | null): ModelRegistry {
-  const connections = (summary.config?.connections ?? []) as ConnectionProfile[];
+function buildRegistry(
+  summary: ConfigSummary,
+  snapshot: CatalogSnapshot | null,
+  origin: CatalogOrigin | null,
+): ModelRegistry {
+  const declaradas = (summary.config?.connections ?? []) as ConnectionProfile[];
+  // un proveedor HTTP no es una conexion, pero tiene lo que el registro
+  // necesita para resolver: identificador, nombre y URL. Se construye uno
+  // equivalente para que sus modelos puedan salir disponibles en vez de
+  // aparecer como huerfanos de una conexion que no existe
+  const comoConexion =
+    origin === null || origin.source !== 'http'
+      ? null
+      : (connectionProfileSchema.safeParse({
+          id: origin.id,
+          displayName: origin.displayName,
+          baseUrl:
+            summary.config?.providers.http.find((provider) => provider.id === origin.id)?.baseUrl ??
+            'https://example.invalid',
+        }).data ?? null);
+
+  const connections = comoConexion === null ? declaradas : [...declaradas, comoConexion];
+  // se compara tambien el ORIGEN: una conexion y un proveedor pueden llamarse
+  // igual, y con solo el identificador el catalogo de uno pasaria por el del otro
+  const leido =
+    origin !== null &&
+    snapshot?.connectionId === origin.id &&
+    (snapshot.source ?? 'connection') === origin.source;
   const models =
-    connections.length === 0
+    origin === null
       ? []
-      : snapshot?.connectionId === connections[0]!.id
+      : leido
         ? buildCatalogForConnection(
-            connections[0]!.id,
+            origin.id,
             snapshot.models.map((model) => model.apiModel),
+            origin.family ?? undefined,
           )
-        : buildDefaultCatalog(connections[0]!.id);
+        : // de un proveedor HTTP no se sabe NADA hasta preguntarle: rellenarlo
+          // con el catalogo de fabrica ofreceria modelos de otra pasarela
+          origin.source === 'connection'
+          ? buildDefaultCatalog(origin.id)
+          : [];
+
   return new ModelRegistry({
     connections,
     models,
     statuses: connections.map((connection) => ({
       connectionId: connection.id,
-      hasApiKey: summary.secrets.configured[connectionSecretName(connection.id)] === true,
-      reachable: snapshot?.connectionId === connection.id ? true : null,
-      checkedAt: snapshot?.connectionId === connection.id ? snapshot.fetchedAt : null,
+      hasApiKey:
+        connection.id === comoConexion?.id
+          ? summary.secrets.configured[
+              summary.config?.providers.http.find((provider) => provider.id === connection.id)
+                ?.apiKeyEnv ?? ''
+            ] === true
+          : summary.secrets.configured[connectionSecretName(connection.id)] === true,
+      reachable: leido && snapshot.connectionId === connection.id ? true : null,
+      checkedAt: leido && snapshot.connectionId === connection.id ? snapshot.fetchedAt : null,
       availableModels:
-        snapshot?.connectionId === connection.id
+        leido && snapshot.connectionId === connection.id
           ? snapshot.models.map((model) => model.apiModel)
           : [],
       error: null,
@@ -89,25 +131,53 @@ function buildRegistry(summary: ConfigSummary, snapshot: CatalogSnapshot | null)
   });
 }
 
-/** lee el ultimo catalogo guardado de la primera conexion configurada */
+/**
+ * lee el ultimo catalogo guardado del origen ELEGIDO.
+ *
+ * Antes era siempre `connections[0]`, escrito a mano. Con mas de una conexion
+ * —o con un proveedor HTTP, que vive en otra lista— no habia forma de
+ * preguntarle a ningun otro: «Actualizar modelos» volvia a interrogar siempre
+ * al mismo y el resto quedaba invisible.
+ */
 function useCatalogSnapshot(summary: ConfigSummary): {
   snapshot: CatalogSnapshot | null;
   setSnapshot: (value: CatalogSnapshot) => void;
-  connectionId: string | null;
+  origins: CatalogOrigin[];
+  origin: CatalogOrigin | null;
+  setOriginKey: (value: string) => void;
 } {
-  const connectionId = summary.config?.connections?.[0]?.id ?? null;
+  const origins = catalogOriginsOf(summary.config);
+  const [originKey, setOriginKey] = useState<string | null>(null);
+  const origin =
+    origins.find((entry) => catalogOriginKey(entry) === originKey) ?? origins[0] ?? null;
   const [snapshot, setSnapshot] = useState<CatalogSnapshot | null>(null);
-  const [leido, setLeido] = useState(false);
+  // la clave, no el objeto: se construye nuevo en cada render y como
+  // dependencia dispararia la lectura sin parar
+  const clave = origin === null ? null : catalogOriginKey(origin);
 
   useEffect(() => {
-    if (connectionId === null || leido) return;
-    setLeido(true);
-    void window.luxy.readCatalog(connectionId).then((result) => {
+    if (clave === null) return;
+    let active = true;
+    // al cambiar de origen se suelta el anterior: dejarlo puesto enseñaria los
+    // modelos de una conexion bajo el nombre de otra
+    setSnapshot(null);
+    // el origen se reconstruye desde la clave y no se toma de fuera: el objeto
+    // nace nuevo en cada render, y como dependencia repetiria la lectura sin
+    // parar. Ni los identificadores de conexion ni los de proveedor admiten
+    // dos puntos, asi que la clave se parte sin ambiguedad
+    const corte = clave.indexOf(':');
+    const source = clave.slice(0, corte) as CatalogSource;
+    const id = clave.slice(corte + 1);
+    void window.luxy.readCatalog({ connectionId: id, source }).then((result) => {
+      if (!active) return;
       if (result.ok && result.value.snapshot !== null) setSnapshot(result.value.snapshot);
     });
-  }, [connectionId, leido]);
+    return () => {
+      active = false;
+    };
+  }, [clave]);
 
-  return { snapshot, setSnapshot, connectionId };
+  return { snapshot, setSnapshot, origins, origin, setOriginKey };
 }
 
 /** lee una vez el historial reciente; no sondea ni ejecuta modelos */
@@ -1227,23 +1297,30 @@ export function ConnectionsPage({
  * verdad, con su fecha. Cuando no coinciden, manda este.
  */
 function CatalogoReal({
-  connectionId,
+  origin,
+  origins,
+  onOrigin,
   snapshot,
   onSnapshot,
 }: {
-  connectionId: string | null;
+  origin: CatalogOrigin | null;
+  origins: CatalogOrigin[];
+  onOrigin: (value: string) => void;
   snapshot: CatalogSnapshot | null;
   onSnapshot: (value: CatalogSnapshot) => void;
 }): JSX.Element | null {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  if (connectionId === null) return null;
+  if (origin === null) return null;
 
   const refrescar = async (): Promise<void> => {
     setBusy(true);
     setError(null);
-    const result = await window.luxy.refreshCatalog(connectionId);
+    const result = await window.luxy.refreshCatalog({
+      connectionId: origin.id,
+      source: origin.source,
+    });
     setBusy(false);
     if (result.ok) onSnapshot(result.value);
     else setError(result.error);
@@ -1271,10 +1348,28 @@ function CatalogoReal({
         </>
       }
     >
+      {origins.length > 1 && (
+        <Field
+          label="A quién se le pregunta"
+          hint="Cada conexión y cada proveedor HTTP sirve sus propios modelos; se consultan por separado."
+        >
+          <select
+            value={catalogOriginKey(origin)}
+            onChange={(event) => onOrigin(event.target.value)}
+          >
+            {origins.map((entry) => (
+              <option key={catalogOriginKey(entry)} value={catalogOriginKey(entry)}>
+                {entry.displayName}
+                {entry.source === 'http' ? ' · proveedor HTTP' : ' · conexión'}
+              </option>
+            ))}
+          </select>
+        </Field>
+      )}
       {error !== null && <Notice tone="fault">{error}</Notice>}
       {snapshot === null ? (
         <Empty title="Sin consultar todavia">
-          Pulsa para preguntarle a la pasarela que modelos sirve de verdad.
+          Pulsa para preguntarle a {origin.displayName} qué modelos sirve de verdad.
         </Empty>
       ) : (
         <>
@@ -1305,9 +1400,9 @@ function CatalogoReal({
 }
 
 export function ModelsPage({ summary }: { summary: ConfigSummary }): JSX.Element {
-  const { snapshot, setSnapshot, connectionId } = useCatalogSnapshot(summary);
+  const { snapshot, setSnapshot, origins, origin, setOriginKey } = useCatalogSnapshot(summary);
   const localEvidence = useModelEvidence();
-  const registry = buildRegistry(summary, snapshot);
+  const registry = buildRegistry(summary, snapshot, origin);
   const resolved = registry.resolveAll();
 
   const porFamilia = new Map<ModelFamily, ResolvedModel[]>();
@@ -1327,7 +1422,13 @@ export function ModelsPage({ summary }: { summary: ConfigSummary }): JSX.Element
         conexion activa, clave guardada y que la conexion confirme que lo sirve.
       </p>
 
-      <CatalogoReal connectionId={connectionId} snapshot={snapshot} onSnapshot={setSnapshot} />
+      <CatalogoReal
+        origin={origin}
+        origins={origins}
+        onOrigin={setOriginKey}
+        snapshot={snapshot}
+        onSnapshot={setSnapshot}
+      />
 
       {localEvidence.error !== null && (
         <Notice tone="warn">No se pudo leer la evidencia local: {localEvidence.error}</Notice>
