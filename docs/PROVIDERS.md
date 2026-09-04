@@ -122,19 +122,63 @@ por el hecho de ser HTTP.
 - Errores traducidos a lenguaje claro (clave rechazada, rate limit, error del
   servidor).
 
+### Cohere
+
+Cohere publica una **capa de compatibilidad** con el contrato `chat completions`,
+así que entra por el camino de Proveedores HTTP sin tocar código.
+
+Se da de alta en **Studio → Ajustes → Conexiones → Proveedores HTTP**, con
+identificador `cohere`.
+
+| Campo            | Valor                                    |
+| ---------------- | ---------------------------------------- |
+| URL base         | `https://api.cohere.ai/compatibility/v1` |
+| Autenticación    | `Authorization: Bearer <clave>`          |
+| Prefijo de clave | ninguno reconocible                      |
+
+**El host es `.ai`, no `.com`.** `api.cohere.com` es su API nativa, que habla otro
+contrato y no sirve por aquí. Es el error más fácil de cometer.
+
+**Clave de evaluación gratuita.** Cohere da una clave gratuita con **20 peticiones
+por minuto** y **1.000 llamadas al mes**. Su propia documentación dice que **no se
+permite para producción**. No consta que pida tarjeta.
+
+**`/models` no está documentado en la capa de compatibilidad.** Eso no rompe nada
+por el camino de Proveedores HTTP, porque Luxy no lo consulta ahí: sólo llama a
+`<baseUrl>/chat/completions`. El catálogo real y el botón _Probar conexión_
+pertenecen al camino de Conexiones (ver más abajo), y ese sí depende de `/v1/models`.
+
+**`safety_mode` no viaja por aquí.** Ese parámetro sólo existe en su API nativa
+`/v2/chat`. El valor por defecto es `CONTEXTUAL`, que es el modo más permisivo que
+queda en sus modelos actuales, así que se obtiene de hecho — pero **no se puede
+elegir** desde la capa de compatibilidad.
+
+**Riesgo, NO VERIFICADO contra la API real.** Luxy manda siempre `max_tokens` y,
+con streaming activo, `stream_options`. Si Cohere rechazara alguno de los dos, el
+trabajo **muere en el primer intento**: un 400 no se reintenta a propósito. El
+apaño sin tocar código es **desmarcar «Respuesta en streaming»** en la conexión,
+que quita `stream_options` del cuerpo. Nadie ha comprobado todavía si hace falta.
+
+**Contenido adulto: la política de Cohere se contradice a sí misma.** Su política
+de uso sólo prohíbe expresamente lo relacionado con menores, pero sus Términos de
+Uso prohíben contenido con «pornography, nudity». Las dos cosas son suyas y no
+encajan. Como base para roleplay adulto **no es sólida**: no es que esté permitido
+y sea ambiguo, es que hay un documento firmado que lo prohíbe. Que la capa de
+compatibilidad no exponga `safety_mode` no cambia eso.
+
 ## Modo automático
 
 `/auto <proyecto> <tarea>` usa un **router determinista**. No consulta ningún
 modelo para decidir: es texto y reglas, así que es gratis e instantáneo.
 
-| Señal en la petición | Proveedor |
-|---|---|
-| Petición explícita de proveedor | **se respeta siempre** |
-| Cambios complejos en varios archivos | Claude |
-| Corrección concreta y verificable | Codex |
-| Análisis de logs o texto largo | DeepSeek / GLM |
-| Documentación extensa | Qwen / GLM |
-| Sin señales claras | Claude |
+| Señal en la petición                 | Proveedor              |
+| ------------------------------------ | ---------------------- |
+| Petición explícita de proveedor      | **se respeta siempre** |
+| Cambios complejos en varios archivos | Claude                 |
+| Corrección concreta y verificable    | Codex                  |
+| Análisis de logs o texto largo       | DeepSeek / GLM         |
+| Documentación extensa                | Qwen / GLM             |
+| Sin señales claras                   | Claude                 |
 
 Nunca devuelve un proveedor que no esté instalado: si el pedido no está,
 elige otro compatible **y lo explica**.
@@ -166,6 +210,16 @@ nuevo solo tiene que implementar `detect()` y `run()`.
 
 Si el proveedor no habla `chat completions`, implementa `ProviderExecution` en
 `apps/agent/src/providers/` y regístralo en `agent.ts`.
+
+## Imágenes: AI Horde
+
+Las dos familias de arriba son de **texto**. La generación de imágenes de la
+pestaña Privado va por su propio camino: **AI Horde**, una red de voluntarios que
+es gratis de verdad y no pide método de pago. No es una conexión HTTP ni un CLI, y
+no aparece en `/providers` ni en el router automático.
+
+Cómo sacar la clave, qué son los kudos, cómo se define un personaje y qué no hace:
+[IMAGENES-GRATIS.md](IMAGENES-GRATIS.md).
 
 ## Problemas
 
@@ -222,7 +276,7 @@ catálogo verificado, los alias de Telegram y qué funciona de verdad hoy.
 
 ### Añadir una conexión
 
-Desde la vista de Conexiones. El botón *Probar conexión* consulta `/v1/models` y
+Desde la vista de Conexiones. El botón _Probar conexión_ consulta `/v1/models` y
 marca qué modelos sirve realmente — que no tiene por qué coincidir con el catálogo.
 
 La URL que se prueba sale de la configuración guardada, **no de lo que mande la

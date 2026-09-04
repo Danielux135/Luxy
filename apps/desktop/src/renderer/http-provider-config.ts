@@ -19,6 +19,60 @@ export interface HttpProviderBuildResult {
   error: string | null;
 }
 
+/**
+ * proveedores conocidos, para no tener que recordar su URL exacta.
+ *
+ * Un solo carácter de más en la URL base produce un 404 que no se ve hasta el
+ * primer trabajo, porque este camino no tiene botón de «Probar». Estas están
+ * comprobadas contra su documentación el 2026-09-04.
+ *
+ * `nota` no es publicidad: es lo que hay que saber ANTES de gastar la clave.
+ */
+export const HTTP_PROVIDER_PRESETS: readonly {
+  id: string;
+  displayName: string;
+  baseUrl: string;
+  model: string;
+  nota: string;
+}[] = [
+  {
+    id: 'cohere',
+    displayName: 'Cohere',
+    // el host es .ai; la API nativa vive en .com y NO habla este contrato
+    baseUrl: 'https://api.cohere.ai/compatibility/v1',
+    model: 'command-a-03-2025',
+    nota: 'Clave de evaluación gratuita: 20 peticiones por minuto y 1.000 llamadas al mes. Su documentación no la permite para producción, y sus términos prohíben contenido pornográfico.',
+  },
+  {
+    id: 'deepseek',
+    displayName: 'DeepSeek',
+    baseUrl: 'https://api.deepseek.com/v1',
+    model: 'deepseek-chat',
+    nota: 'De pago por uso, sin cuota gratuita renovable. Pon un presupuesto diario distinto de cero.',
+  },
+  {
+    id: 'groq',
+    displayName: 'Groq',
+    baseUrl: 'https://api.groq.com/openai/v1',
+    model: 'llama-3.3-70b-versatile',
+    nota: 'Nivel gratuito por minuto y por día, sin tarjeta. No promete aceptar contenido adulto.',
+  },
+  {
+    id: 'mistral',
+    displayName: 'Mistral',
+    baseUrl: 'https://api.mistral.ai/v1',
+    model: 'mistral-large-latest',
+    nota: 'Plan gratuito con crédito mensual y sin tarjeta. Su política sobre ficción adulta no es explícita.',
+  },
+  {
+    id: 'openrouter',
+    displayName: 'OpenRouter',
+    baseUrl: 'https://openrouter.ai/api/v1',
+    model: 'meta-llama/llama-3.3-70b-instruct',
+    nota: 'Agregador: la política y la retención dependen del modelo que elijas, no de OpenRouter.',
+  },
+];
+
 export function emptyHttpProviderDraft(): HttpProviderDraft {
   return {
     id: '',

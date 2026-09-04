@@ -30,6 +30,7 @@ import {
   buildHttpProvider,
   emptyHttpProviderDraft,
   httpProviderToDraft,
+  HTTP_PROVIDER_PRESETS,
   type HttpProviderConfig,
   type HttpProviderDraft,
 } from '../http-provider-config.js';
@@ -712,6 +713,8 @@ export function ConnectionsPage({
   const [providerDraft, setProviderDraft] = useState<HttpProviderDraft | null>(null);
   const [providerSecret, setProviderSecret] = useState('');
   const [providerError, setProviderError] = useState<string | null>(null);
+  /** lo que conviene saber del proveedor elegido antes de gastar la clave */
+  const [providerNote, setProviderNote] = useState<string | null>(null);
   const [pendingProviderDelete, setPendingProviderDelete] = useState<HttpProviderConfig | null>(
     null,
   );
@@ -728,6 +731,7 @@ export function ConnectionsPage({
     setProviderDraft(httpProviderToDraft(provider));
     setProviderSecret('');
     setProviderError(null);
+    setProviderNote(null);
   };
 
   const cancelarProveedor = (): void => {
@@ -735,6 +739,7 @@ export function ConnectionsPage({
     setProviderDraft(null);
     setProviderSecret('');
     setProviderError(null);
+    setProviderNote(null);
   };
 
   const guardarProveedor = async (): Promise<void> => {
@@ -927,6 +932,7 @@ export function ConnectionsPage({
               setProviderDraft(emptyHttpProviderDraft());
               setProviderSecret('');
               setProviderError(null);
+              setProviderNote(null);
             }}
           >
             Añadir proveedor
@@ -943,6 +949,39 @@ export function ConnectionsPage({
           title={editingProviderId === null ? 'Nuevo proveedor HTTP' : 'Editar proveedor HTTP'}
         >
           {providerError !== null && <Notice tone="fault">{providerError}</Notice>}
+          {editingProviderId === null && (
+            <Field
+              label="Empezar desde uno conocido"
+              hint="Rellena la URL base y un modelo de partida. Sigue haciendo falta tu clave."
+            >
+              <select
+                value=""
+                onChange={(event) => {
+                  const preset = HTTP_PROVIDER_PRESETS.find(
+                    (entry) => entry.id === event.target.value,
+                  );
+                  if (preset === undefined) return;
+                  setProviderDraft({
+                    ...providerDraft,
+                    id: preset.id,
+                    displayName: preset.displayName,
+                    baseUrl: preset.baseUrl,
+                    model: preset.model,
+                  });
+                  // lo que hay que saber antes de gastar la clave, no después
+                  setProviderNote(preset.nota);
+                }}
+              >
+                <option value="">Configurarlo a mano</option>
+                {HTTP_PROVIDER_PRESETS.map((preset) => (
+                  <option key={preset.id} value={preset.id}>
+                    {preset.displayName}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          )}
+          {providerNote !== null && <Notice tone="idle">{providerNote}</Notice>}
           <Field
             label="Identificador"
             hint="Minúsculas, números, guion o guion bajo. Queda fijo después de crear el proveedor."

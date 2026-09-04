@@ -3,6 +3,7 @@ import {
   apiKeyNameForProvider,
   buildHttpProvider,
   emptyHttpProviderDraft,
+  HTTP_PROVIDER_PRESETS,
 } from './http-provider-config.js';
 
 describe('configuracion de proveedores HTTP', () => {
@@ -78,5 +79,33 @@ describe('configuracion de proveedores HTTP', () => {
       { ...existing, apiKeyEnv: 'CLAVE_EXISTENTE' },
     );
     expect(edited.provider?.apiKeyEnv).toBe('CLAVE_EXISTENTE');
+  });
+
+  it('todos los proveedores conocidos construyen una configuracion valida', () => {
+    // un preset que no valide seria un boton que no hace nada, y el error solo
+    // se veria al pulsarlo. Aqui se ve al escribirlo
+    for (const preset of HTTP_PROVIDER_PRESETS) {
+      const result = buildHttpProvider(
+        {
+          ...emptyHttpProviderDraft(),
+          id: preset.id,
+          displayName: preset.displayName,
+          baseUrl: preset.baseUrl,
+          model: preset.model,
+        },
+        null,
+      );
+      expect(result.error, `${preset.id}: ${result.error ?? ''}`).toBeNull();
+      // la URL base es lo unico que este camino no puede comprobar contra la
+      // red: Luxy le pega /chat/completions y no hay boton de «Probar»
+      expect(preset.baseUrl.endsWith('/')).toBe(false);
+      expect(preset.baseUrl.startsWith('https://')).toBe(true);
+    }
+  });
+
+  it('no hay dos proveedores conocidos con el mismo identificador', () => {
+    // dos con el mismo id chocarian al guardar, porque el id debe ser unico
+    const ids = HTTP_PROVIDER_PRESETS.map((preset) => preset.id);
+    expect(new Set(ids).size).toBe(ids.length);
   });
 });
