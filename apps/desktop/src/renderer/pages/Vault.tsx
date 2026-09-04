@@ -5,7 +5,7 @@
 // ultima conversacion fue el martes". No es que se oculte: es que el renderer
 // no lo tiene, porque el proceso principal no puede descifrarlo sin la llave.
 import { useEffect, useState, type JSX } from 'react';
-import { Empty, Field, Notice, Panel, Readout, Skeleton, Tag } from '../ui/primitives.js';
+import { Empty, Explica, Field, Notice, Panel, Readout, Skeleton, Tag } from '../ui/primitives.js';
 import type { ConfigSummary } from '../useConfig.js';
 import {
   formatAutoLockOption,
@@ -383,8 +383,8 @@ function ConversationPanel({
  * los dos proveedores de imagen, en el orden en que le sirven a quien mira.
  *
  * AI Horde va primero porque es gratis de verdad y no pide tarjeta: quien no
- * quiera pagar nada tiene que ver esa puerta antes que la otra. El de pago
- * sigue debajo sin recortes, porque hace vídeo y el horde no.
+ * quiera pagar nada tiene que ver esa puerta antes que la otra. Xavira sigue
+ * debajo sin recortes, porque hace vídeo y el horde no.
  *
  * Las dos claves son cuentas distintas y se guardan por separado: tener una no
  * habilita la otra.
@@ -420,13 +420,25 @@ function HordeKeyPanel({ vault }: { vault: VaultController }): JSX.Element {
     <Panel
       title="Gratis: AI Horde"
       actions={
-        !configured ? (
-          <Tag tone="idle">sin clave</Tag>
-        ) : anonymous ? (
-          <Tag tone="warn">clave anónima</Tag>
-        ) : (
-          <Tag tone="ok">clave guardada</Tag>
-        )
+        <>
+          {/* la cabecera empuja sus acciones contra el borde derecho, y sin
+              «--fin» la caja de la explicacion se saldria de la ventana */}
+          <span className="explica--fin">
+            <Explica termino="aiHorde" />
+          </span>
+          {!configured ? (
+            <Tag tone="idle">sin clave</Tag>
+          ) : anonymous ? (
+            <Tag tone="warn">
+              clave anónima
+              <span className="explica--fin">
+                <Explica termino="claveAnonima" />
+              </span>
+            </Tag>
+          ) : (
+            <Tag tone="ok">clave guardada</Tag>
+          )}
+        </>
       }
     >
       <p className="vault-prose">
@@ -436,7 +448,7 @@ function HordeKeyPanel({ vault }: { vault: VaultController }): JSX.Element {
         <a href="https://aihorde.net" target="_blank" rel="noreferrer">
           aihorde.net
         </a>
-        . No genera vídeo; para eso está el proveedor de pago de abajo.
+        . No genera vídeo; para eso está Xavira, más abajo.
       </p>
 
       <Field
@@ -498,17 +510,19 @@ function HordeKeyPanel({ vault }: { vault: VaultController }): JSX.Element {
         />
       )}
 
+      {/* el resto lo cuenta el «?»: repetir aqui la entrada entera del
+          glosario dejaba el mismo parrafo dos veces en la misma tarjeta */}
       <p className="field__hint">
-        Los kudos no son dinero: no se compran y no se gastan en euros. Deciden
-        en qué puesto de la cola entra tu petición. Con cero kudos se genera
-        igual, sólo que esperando más.
+        Los kudos
+        <Explica termino="kudos" /> no son dinero: deciden en qué puesto de la
+        cola entra tu petición.
       </p>
     </Panel>
   );
 }
 
 /**
- * clave del proveedor de imagenes DE PAGO.
+ * clave de Xavira, el proveedor de imagenes DE PAGO.
  *
  * Vive aqui y no en Conexiones a proposito. Conexiones gestiona las pasarelas
  * de texto, y su formulario **rechaza** este nombre: es un secreto reservado,
@@ -525,19 +539,28 @@ function MediaKeyPanel({ vault }: { vault: VaultController }): JSX.Element {
 
   return (
     <Panel
-      title="De pago: proveedor de imágenes y vídeo"
-      actions={configured ? <Tag tone="ok">clave guardada</Tag> : <Tag tone="idle">sin clave</Tag>}
+      title="Xavira (de pago): imágenes y vídeo"
+      actions={
+        <>
+          {/* mismo caso que en el panel del horde: pegada al borde derecho, la
+              caja necesita abrirse hacia dentro */}
+          <span className="explica--fin">
+            <Explica termino="xavira" />
+          </span>
+          {configured ? <Tag tone="ok">clave guardada</Tag> : <Tag tone="idle">sin clave</Tag>}
+        </>
+      }
     >
       <p className="vault-prose">
-        Sin clave, Luxy no ofrece generar imágenes con él: ni en el panel de
+        Sin clave, Luxy no ofrece generar imágenes con Xavira: ni en el panel de
         generación ni dentro de una conversación. Se guarda cifrada con tu cuenta
         de Windows y no vuelve a mostrarse. Es el único de los dos que hace
         vídeo, y aquí cada personaje y cada generación cuestan créditos.
       </p>
 
       <Field
-        label={configured ? 'Sustituir la clave' : 'Clave del proveedor'}
-        hint="Se envía sólo al proveedor de imágenes. Ni el gateway ni Supabase la ven."
+        label={configured ? 'Sustituir la clave' : 'Clave de Xavira'}
+        hint="Se envía sólo a Xavira. Ni el gateway ni Supabase la ven."
       >
         <input
           type="password"
@@ -654,7 +677,7 @@ function InstructionsPanel({
     characterId: characterValue,
     characterInVault: knownCharacter !== undefined,
     // la clave que hace falta es la del proveedor de ESTE personaje. Preguntar
-    // siempre por la de pago dejaría «sin clave» a un personaje del horde que
+    // siempre por la de Xavira dejaría «sin clave» a un personaje del horde que
     // está perfectamente configurado, que es la misma regla que aplica el
     // proceso principal al armar el prompt
     hasApiKey:
@@ -671,9 +694,12 @@ function InstructionsPanel({
         {pending && ' · se aplicarán al enviar'}
       </summary>
 
+      {/* el hint decia ademas «acompaña a cada mensaje sin repetirlo», que es
+          palabra por palabra lo que ya cuenta el glosario */}
       <Field
         label="Cómo debe comportarse"
-        hint="Acompaña a cada mensaje de esta conversación. No hace falta repetirlo, y se guarda cifrado como el resto."
+        hint="Se guarda cifrado con la conversación, como el resto."
+        explica="instruccionesConversacion"
       >
         <textarea
           rows={4}
@@ -1105,7 +1131,7 @@ function hordeModelSummary(recipe: HordeRecipe | null): string {
  *
  * Alli no hay personajes en ningun servidor: el personaje **es** esta receta,
  * guardada cifrada en este equipo. Por eso editarla no cuesta nada y se puede
- * repetir hasta que la cara salga bien, al reves que en el proveedor de pago.
+ * repetir hasta que la cara salga bien, al reves que en Xavira.
  *
  * El formulario se remonta con `key` cuando cambia a quien edita: asi el estado
  * inicial se lee una sola vez y no hace falta un efecto que lo sincronice.
@@ -1266,10 +1292,12 @@ function HordeCharacterForm({
 
   return (
     <>
+      {/* el parrafo entero repetia la entrada del glosario; queda la frase que
+          hay que leer sin hacer nada, y el «?» cuenta por que importa */}
       <p className="field__hint">
-        Un personaje de AI Horde no existe en ningún servidor: <strong>es</strong>{' '}
-        esta receta, guardada cifrada aquí. Por eso corregirla no cuesta nada y
-        puedes repetirla hasta que la cara salga bien.
+        Aquí el personaje <strong>es</strong> esta receta, guardada cifrada en
+        este equipo.
+        <Explica termino="personajeReceta" />
       </p>
 
       <Field label="Nombre">
@@ -1284,6 +1312,7 @@ function HordeCharacterForm({
       <Field
         label="Estilo"
         hint="Cambia los modelos que se ofrecen y cómo se le escribe: etiquetas en anime, prosa en realista."
+        explica="estiloPrompt"
       >
         <div className="row">
           {(['anime', 'realistic'] as const).map((option) => (
@@ -1302,6 +1331,7 @@ function HordeCharacterForm({
       <Field
         label={`Modelos (hasta ${HORDE_MAX_MODELS})`}
         hint="Marcar varios suma sus workers y acorta la espera; no cuesta kudos de más."
+        explica="modeloImagen"
       >
         <div className="vault-models">
           {preset.models.map((option) => {
@@ -1343,6 +1373,7 @@ function HordeCharacterForm({
         >
           Ver disponibilidad
         </button>
+        <Explica termino="workers" />
         {vault.hordeModels !== null && vault.hordeModels.length > 0 && (
           <span className="field__hint">
             Workers y espera de ahora mismo. Cambian cada pocas horas.
@@ -1359,6 +1390,7 @@ function HordeCharacterForm({
       <Field
         label="Aspecto fijo, en inglés"
         hint="Es lo único que se repite palabra por palabra en cada imagen: es lo que hace que sea la misma persona."
+        explica="aspectoFijo"
       >
         <textarea
           rows={2}
@@ -1382,6 +1414,7 @@ function HordeCharacterForm({
       <Field
         label="Negativo propio (opcional)"
         hint="Lo que no quieres ver nunca, separado por comas."
+        explica="negativo"
       >
         <input
           value={negative}
@@ -1391,7 +1424,7 @@ function HordeCharacterForm({
         />
       </Field>
 
-      <Field label="Semilla (opcional)">
+      <Field label="Semilla (opcional)" explica="semilla">
         <input
           value={seed}
           disabled={saving}
@@ -1414,14 +1447,17 @@ function HordeCharacterForm({
       </div>
 
       <details className="vault-generate">
-        <summary>LoRA de personaje (lo único que fija la cara)</summary>
+        <summary>
+          LoRA de personaje (lo único que fija la cara)
+          <Explica termino="lora" />
+        </summary>
+        {/* lo del id numerico lo dice ahora el «?» de la propia casilla, justo
+            donde se decide; aqui se queda lo que cuesta pedir un LoRA */}
         <p className="field__hint">
           El LoRA tiene que estar <strong>publicado en CivitAI</strong>: al horde
           no se le puede subir uno propio. Cada uno cuesta <strong>+3 kudos</strong>{' '}
           y sólo <strong>9 de los 18 workers</strong> de hoy los aceptan, así que
-          pedirlos <strong>reduce a la mitad</strong> quién puede atenderte. Con
-          «es un id de versión» marcado, el valor tiene que ser el id{' '}
-          <strong>numérico</strong> de la versión de CivitAI, no su nombre.
+          pedirlos <strong>reduce a la mitad</strong> quién puede atenderte.
         </p>
 
         {loras.map((lora, index) => (
@@ -1456,6 +1492,9 @@ function HordeCharacterForm({
               />
               <span>
                 Es un id de versión
+                {/* el «?» es un boton, y pulsarlo dentro de una etiqueta NO
+                    marca la casilla: el navegador no propaga esa activacion */}
+                <Explica termino="loraVersion" />
                 <small>
                   Marcado, el identificador es el número de una versión concreta.
                   Sin marcar, el nombre exacto o el id de la página del modelo.
@@ -1464,7 +1503,9 @@ function HordeCharacterForm({
             </label>
 
             <div className="row">
-              <Field label="Peso del modelo">
+              {/* el «?» va solo en el primero: los dos pesos son el mismo
+                  concepto y repetirlo llena la fila de interrogaciones */}
+              <Field label="Peso del modelo" explica="loraPeso">
                 <input
                   type="number"
                   min={-5}
@@ -1490,7 +1531,8 @@ function HordeCharacterForm({
 
             <Field
               label="Palabra de activación (opcional)"
-              hint="Si el LoRA necesita una y no se pone, el LoRA casi no hace nada. El valor «any» coge la primera disponible."
+              hint="Si el LoRA la necesita y no se pone, casi no hace nada."
+              explica="loraTrigger"
             >
               <input
                 maxLength={30}
@@ -1520,13 +1562,18 @@ function HordeCharacterForm({
 
       <details className="vault-generate">
         <summary>Avanzado</summary>
+        {/* no hay campo para el clipSkip: se pone solo con el modelo, asi que
+            el «?» cuelga de donde se lee su valor */}
         <p className="field__hint">
           Los valores los pone el modelo elegido y casi nunca hay que tocarlos:
-          ahora mismo cfgScale {cfgScale} y clipSkip {clipSkip}. Los lados van de
-          512 a 1536 y tienen que ser múltiplos de 64.
+          ahora mismo cfgScale {cfgScale} y clipSkip {clipSkip}
+          <Explica termino="clipSkip" />. Los lados van de 512 a 1536 y tienen
+          que ser múltiplos de 64.
         </p>
         <div className="row">
-          <Field label="Ancho">
+          {/* el «?» explica el par ancho/alto entero, asi que va solo en el
+              primero de los dos */}
+          <Field label="Ancho" explica="resolucion">
             <input
               type="number"
               min={512}
@@ -1554,7 +1601,7 @@ function HordeCharacterForm({
               }}
             />
           </Field>
-          <Field label="Pasos" hint="Más pasos no arreglan un prompt malo; sólo tardan más.">
+          <Field label="Pasos" hint="Deja 30." explica="pasos">
             <input
               type="number"
               min={1}
@@ -1571,7 +1618,8 @@ function HordeCharacterForm({
 
         <Field
           label="Cuánto puede cambiar respecto a la imagen de partida"
-          hint="Sólo cuenta al partir de una imagen anterior. Por debajo de 0,3 devuelve casi la misma; por encima de 0,6 se pierde la cara."
+          hint="Sólo cuenta al partir de una imagen anterior."
+          explica="cuantoPuedeCambiar"
         >
           <input
             type="number"
@@ -1661,7 +1709,7 @@ function GeneratePanel({
   // cadena vacia = empezar de cero, que es lo normal
   const [fromMediaId, setFromMediaId] = useState('');
 
-  // partir de una imagen solo existe en el horde: el de pago no tiene img2img
+  // partir de una imagen solo existe en el horde: Xavira no tiene img2img
   const hordeCharacter =
     vault.characters.find(
       (character) =>
@@ -1691,15 +1739,15 @@ function GeneratePanel({
 
       {!vault.status.mediaProviderConfigured && !vault.status.hordeConfigured && (
         <Notice tone="warn">
-          No hay ninguna clave guardada: ni la gratuita de AI Horde ni la del
-          proveedor de pago. Las dos están más abajo; sin una de ellas no se
-          puede generar nada, ni aquí ni desde la conversación.
+          No hay ninguna clave guardada: ni la gratuita de AI Horde ni la de
+          Xavira. Las dos están más abajo; sin una de ellas no se puede generar
+          nada, ni aquí ni desde la conversación.
         </Notice>
       )}
       {!vault.status.mediaProviderConfigured && vault.status.hordeConfigured && (
         <Notice tone="idle">
           Sólo está la clave gratuita de AI Horde: generan sus personajes, y sólo
-          imágenes. El vídeo lo hace el proveedor de pago, que está más abajo.
+          imágenes. El vídeo lo hace Xavira, que está más abajo.
         </Notice>
       )}
 
@@ -1717,9 +1765,9 @@ function GeneratePanel({
       <details className="vault-generate">
         <summary>Ya tengo un personaje</summary>
         <p className="field__hint">
-          El proveedor de pago no sabe listar personajes, así que uno creado
-          fuera de Luxy —o antes de que se guardaran— hay que darlo de alta a
-          mano. Crear otro costaría créditos.
+          Xavira no sabe listar personajes, así que uno creado fuera de Luxy —o
+          antes de que se guardaran— hay que darlo de alta a mano. Crear otro
+          costaría créditos.
         </p>
         <ImportCharacterForm vault={vault} onImported={() => setCreated(null)} />
       </details>
@@ -1799,7 +1847,7 @@ function GeneratePanel({
                   <span className="vault-list__meta">
                     {character.provider === 'horde'
                       ? `gratis · AI Horde · ${hordeModelSummary(character.recipe)}`
-                      : `de pago · ${character.modelId === 'anime-pure-v1' ? 'anime' : 'realista'}`}
+                      : `Xavira · ${character.modelId === 'anime-pure-v1' ? 'anime' : 'realista'}`}
                   </span>
                 </button>
                 {character.characterId === activeCharacterId ? (
@@ -1816,7 +1864,7 @@ function GeneratePanel({
                   </button>
                 )}
                 {/* editar solo tiene sentido en los del horde: alli el personaje
-                    es su receta y corregirla es gratis. En el de pago vive en su
+                    es su receta y corregirla es gratis. En Xavira vive en su
                     servidor y no se puede cambiar */}
                 {character.provider === 'horde' && (
                   <button
@@ -1842,9 +1890,9 @@ function GeneratePanel({
           <p className="field__hint">
             Tus personajes guardados. Pulsa <strong>Usar</strong> para que sea
             quien responda en esta conversación: queda fijado al enviar el
-            próximo mensaje. Los del proveedor <strong>de pago</strong> se
-            guardan aquí porque él <strong>no sabe listarlos</strong> y crearlos
-            cuesta créditos; los de AI Horde viven sólo aquí, así que se pueden
+            próximo mensaje. Los de <strong>Xavira</strong> se guardan aquí
+            porque él <strong>no sabe listarlos</strong> y crearlos cuesta
+            créditos; los de AI Horde viven sólo aquí, así que se pueden
             editar tantas veces como haga falta sin pagar nada.
           </p>
         </>
@@ -1852,7 +1900,7 @@ function GeneratePanel({
 
       <Field
         label="Nombre del personaje"
-        hint="Sólo para reconocerlo en tu lista y en el panel del proveedor."
+        hint="Sólo para reconocerlo en tu lista y en el panel de Xavira."
       >
         <input
           value={label}
@@ -1864,7 +1912,7 @@ function GeneratePanel({
 
       <Field
         label="Estilo del personaje"
-        hint="Lo decide la API al crearlo y no se puede cambiar después: gobierna el aspecto de todo lo que genere."
+        hint="Lo decide Xavira al crearlo y no se puede cambiar después: gobierna el aspecto de todo lo que genere."
       >
         <select
           value={modelId}
@@ -1914,14 +1962,14 @@ function GeneratePanel({
         </div>
       )}
       <p className="field__hint">
-        El proveedor sólo acepta esta lista cerrada de rasgos; no admite texto
-        libre aquí. Lo demás —ojos, pecas, ropa, luz, pose, escenario— va en la
+        Xavira sólo acepta esta lista cerrada de rasgos; no admite texto libre
+        aquí. Lo demás —ojos, pecas, ropa, luz, pose, escenario— va en la
         descripción de abajo.
       </p>
 
       <Field
         label="Aspecto, en inglés (para las imágenes)"
-        hint="En inglés: es lo que pide su documentación. Aquí va lo que los rasgos no cubren. Pasa por la moderación del proveedor."
+        hint="En inglés: es lo que pide su documentación. Aquí va lo que los rasgos no cubren. Pasa por la moderación de Xavira."
       >
         <textarea
           rows={2}
@@ -1978,10 +2026,10 @@ function GeneratePanel({
         </Notice>
       )}
       <p className="field__hint">
-        Esto crea un personaje en el <strong>proveedor de pago</strong>: su
-        identificador vive allí, no aquí, generar su avatar{' '}
-        <strong>consume créditos</strong> y después no se puede cambiar. El de AI
-        Horde, arriba, es gratis y se corrige cuando quieras.
+        Esto crea un personaje en <strong>Xavira</strong>: su identificador vive
+        allí, no aquí, generar su avatar <strong>consume créditos</strong> y
+        después no se puede cambiar. El de AI Horde, arriba, es gratis y se
+        corrige cuando quieras.
       </p>
 
       {hordeCharacter !== null && sourceOptions.length > 0 && (
@@ -1989,6 +2037,7 @@ function GeneratePanel({
           <Field
             label="Partir de una imagen de esta conversación"
             hint="Opcional. Sirve para volver a intentar una imagen que ya salió bien."
+            explica="imagenPartida"
           >
             <select
               value={sourceMediaId}
@@ -2264,6 +2313,9 @@ function AccountPanel({ vault }: { vault: VaultController }): JSX.Element {
 
       <Field
         label={recovering ? 'Clave de recuperación' : 'Contraseña'}
+        // solo cuando toca: quien escribe su contraseña no necesita que le
+        // expliquen que es una contraseña
+        {...(recovering ? { explica: 'claveRecuperacion' as const } : {})}
         hint={
           registering
             ? `Al menos ${MIN_PASSWORD_LENGTH} caracteres. Una frase de varias palabras es más fácil de recordar y más difícil de adivinar.`
@@ -2501,7 +2553,14 @@ function UnlockPanel({ vault }: { vault: VaultController }): JSX.Element {
   };
 
   return (
-    <Panel title="Bóveda cerrada">
+    <Panel
+      title="Bóveda cerrada"
+      actions={
+        <span className="explica--fin">
+          <Explica termino="boveda" />
+        </span>
+      }
+    >
       <p className="vault-prose">
         El contenido sigue en este equipo, pero está cifrado. Luxy tampoco puede
         leerlo hasta que la abras.
@@ -2531,6 +2590,7 @@ function UnlockPanel({ vault }: { vault: VaultController }): JSX.Element {
 
       <Field
         label={mode === 'password' ? 'Contraseña' : 'Clave de recuperación'}
+        {...(mode === 'recovery' ? { explica: 'claveRecuperacion' as const } : {})}
         hint={
           mode === 'recovery'
             ? 'Ocho grupos de cuatro caracteres. Da igual mayúsculas, guiones o espacios.'

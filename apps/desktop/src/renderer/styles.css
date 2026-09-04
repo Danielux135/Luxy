@@ -1767,3 +1767,101 @@ input[aria-invalid='true'] {
   flex: 1 1 200px;
   margin-bottom: 0;
 }
+
+/* ---- explicaciones al pasar el raton --------------------------------------
+   La caja aparece con :hover y con :focus-within, no solo con el raton: quien
+   navega con el teclado tiene el mismo derecho a saber que es «clipSkip».
+   -------------------------------------------------------------------------- */
+
+.explica {
+  position: relative;
+  display: inline-flex;
+  vertical-align: middle;
+  margin-left: 5px;
+}
+
+.explica__marca {
+  width: 15px;
+  height: 15px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid var(--rule);
+  background: var(--raised);
+  color: var(--dim);
+  font-family: var(--body);
+  font-size: 10px;
+  line-height: 1;
+  /* la etiqueta que lo contiene va en mayusculas y con letra separada */
+  letter-spacing: normal;
+  text-transform: none;
+  cursor: help;
+}
+
+.explica__marca:hover,
+.explica__marca:focus-visible {
+  color: var(--signal);
+  border-color: var(--signal);
+}
+
+.explica__caja {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 7px);
+  left: -8px;
+  display: none;
+  flex-direction: column;
+  gap: 7px;
+  width: 320px;
+  padding: 12px 14px;
+  border: 1px solid var(--rule);
+  border-radius: 5px;
+  background: var(--panel);
+  box-shadow: 0 10px 28px #0006;
+  /* la etiqueta que la contiene va en mayusculas y con letra estrecha */
+  font-family: var(--body);
+  font-size: 12.5px;
+  font-weight: 400;
+  line-height: 1.5;
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--text);
+  white-space: normal;
+  cursor: auto;
+}
+
+.explica:hover .explica__caja,
+.explica:focus-within .explica__caja {
+  display: flex;
+}
+
+/* pegada al borde derecho la caja se saldria de la ventana */
+.explica--fin .explica__caja {
+  left: auto;
+  right: -8px;
+}
+
+.explica__termino {
+  font-family: var(--display);
+  font-size: 13px;
+  color: var(--signal);
+}
+
+.explica__rellenar strong,
+.explica__ojo strong {
+  color: var(--text);
+}
+
+.explica__ejemplo code {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--raised);
+  color: var(--lock);
+}
+
+.explica__ojo {
+  padding-top: 7px;
+  border-top: 1px solid var(--rule);
+  color: var(--warn);
+}

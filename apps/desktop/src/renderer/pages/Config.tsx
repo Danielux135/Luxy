@@ -34,7 +34,7 @@ import {
   type HttpProviderConfig,
   type HttpProviderDraft,
 } from '../http-provider-config.js';
-import { Empty, Field, Notice, Panel, Tag } from '../ui/primitives.js';
+import { Empty, Explica, Field, Notice, Panel, Tag } from '../ui/primitives.js';
 import type { ConfigSummary } from '../useConfig.js';
 
 const FAMILIA: Record<ModelFamily, string> = {
@@ -984,7 +984,9 @@ export function ConnectionsPage({
           {providerNote !== null && <Notice tone="idle">{providerNote}</Notice>}
           <Field
             label="Identificador"
-            hint="Minúsculas, números, guion o guion bajo. Queda fijo después de crear el proveedor."
+            // el «queda fijo» ya lo cuenta el glosario; aqui sobra repetirlo
+            hint="Minúsculas, números, guion o guion bajo."
+            explica="identificadorProveedor"
           >
             <input
               type="text"
@@ -1009,7 +1011,10 @@ export function ConnectionsPage({
           </Field>
           <Field
             label="URL base"
-            hint="Incluye la versión, por ejemplo https://api.example/v1. HTTPS es obligatorio salvo en localhost."
+            // el formato y el ejemplo los da el glosario; aqui queda lo que solo
+            // sabe esta pantalla: la regla de HTTPS que aplica Luxy al validarla
+            hint="HTTPS es obligatorio salvo en localhost."
+            explica="urlBase"
           >
             <input
               type="url"
@@ -1022,7 +1027,7 @@ export function ConnectionsPage({
               }
             />
           </Field>
-          <Field label="Modelo predeterminado">
+          <Field label="Modelo predeterminado" explica="modeloTexto">
             <input
               type="text"
               value={providerDraft.model}
@@ -1036,11 +1041,14 @@ export function ConnectionsPage({
           </Field>
           <Field
             label="Clave de API"
+            // que se cifra y no vuelve a verse ya lo dice el glosario: el hint
+            // solo aclara lo que cambia entre crear y editar
             hint={
               editingProviderId === null
-                ? 'Obligatoria al crear. Se cifra y no vuelve a mostrarse.'
+                ? 'Obligatoria al crear el proveedor.'
                 : 'Déjala vacía para conservar la actual; introduce otra para sustituirla.'
             }
+            explica="claveApi"
           >
             <input
               type="password"
@@ -1052,7 +1060,7 @@ export function ConnectionsPage({
             />
           </Field>
           <div className="row">
-            <Field label="Máximo de tokens">
+            <Field label="Máximo de tokens" explica="maxTokens">
               <input
                 type="number"
                 min={256}
@@ -1064,7 +1072,11 @@ export function ConnectionsPage({
                 }
               />
             </Field>
-            <Field label="Presupuesto diario" hint="0 significa sin límite local.">
+            <Field
+              label="Presupuesto diario"
+              hint="0 significa sin límite local."
+              explica="presupuestoDiario"
+            >
               <input
                 type="number"
                 min={0}
@@ -1101,6 +1113,7 @@ export function ConnectionsPage({
               />
               <span>
                 Respuesta en streaming
+                <Explica termino="streaming" />
                 <small>Desactívalo si el endpoint sólo devuelve JSON completo.</small>
               </span>
             </label>
