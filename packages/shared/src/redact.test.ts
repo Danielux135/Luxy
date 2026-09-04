@@ -78,6 +78,17 @@ describe('SecretRegistry - valores literales conocidos', () => {
     expect(redact('abc es una palabra normal', registry)).toContain('abc');
   });
 
+  it('ignora un valor sin variacion, que no puede ser un secreto', () => {
+    // caso real: la clave anonima de AI Horde son diez ceros, es publica y esta
+    // documentada. Registrarla tapaba ese numero en cualquier texto del
+    // proceso, empezando por la pista que explica como usarla
+    registry.add('0000000000');
+    expect(registry.list()).not.toContain('0000000000');
+    expect(redact('con la clave 0000000000 entras como anonimo', registry)).toContain(
+      '0000000000',
+    );
+  });
+
   it('carga los secretos de un entorno por el nombre de la variable', () => {
     registry.addFromEnv({
       DEEPSEEK_API_KEY: 'clave-secreta-larga-123456',

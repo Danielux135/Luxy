@@ -17,6 +17,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from '
 import { join } from 'node:path';
 import { z } from 'zod';
 import { openBlob, openText, sealBlob, sealText, wipe, type SealedEnvelope } from '@luxy/vault-crypto';
+import { hordeRecipeSchema } from '@luxy/shared';
 import { VaultError, type VaultService } from './vault-service.js';
 import { randomObjectKey } from './private-store.js';
 import type { BlobStore } from './blob-store.js';
@@ -28,6 +29,25 @@ export function charactersFilePath(configDirectory: string): string {
 /** lo que se guarda de cada personaje, ya descifrado */
 export const vaultCharacterSchema = z.object({
   characterId: z.string().min(1).max(128),
+  /**
+   * quien genera sus imagenes.
+   *
+   * `xavira` es el proveedor de pago, que guarda el personaje en su servidor y
+   * devuelve un identificador. `horde` es AI Horde, que es gratis y NO tiene
+   * personajes: ahi la identidad vive entera en `recipe`, aqui en local.
+   *
+   * El default conserva los personajes que ya existian, que son todos del
+   * proveedor de pago: sin el, una boveda anterior dejaria de leerse.
+   */
+  provider: z.enum(['xavira', 'horde']).default('xavira'),
+  /**
+   * la identidad visual, solo para `horde`.
+   *
+   * Es lo que hace que dos imagenes parezcan la misma persona, porque en esa
+   * red no hay nada que lo recuerde por nosotros. `null` en los de pago, donde
+   * ese trabajo lo hace su `characterId`.
+   */
+  recipe: hordeRecipeSchema.nullable().default(null),
   /** modelo con el que se creo; no se puede cambiar despues */
   modelId: z.string().min(1).max(64),
   /** quien es, en texto, para el modelo que escribe */
@@ -45,6 +65,16 @@ export const vaultCharacterSchema = z.object({
   createdAt: z.string().datetime(),
 });
 export type VaultCharacter = z.infer<typeof vaultCharacterSchema>;
+
+/**
+ * lo que hace falta aportar para guardar uno.
+ *
+ * Es la ENTRADA del esquema, no la salida: los campos con valor por defecto
+ * —`provider` y `recipe`— no hay que escribirlos. Sin esta distincion, añadir un
+ * campo con default obligaria a tocar todas las llamadas que ya existen, que es
+ * justo lo que el default esta evitando.
+ */
+export type VaultCharacterInput = z.input<typeof vaultCharacterSchema>;
 
 const sealedFileSchema = z.object({
   version: z.literal(1),
@@ -132,7 +162,7 @@ export class VaultCharacterStore {
    * usuario pueda hacer cualquier otra cosa: es lo unico que impide pagar por
    * un identificador y perderlo.
    */
-  async add(vault: VaultService, character: VaultCharacter): Promise<VaultCharacter[]> {
+  async add(vault: VaultService, character: VaultCharacterInput): Promise<VaultCharacter[]> {
     const existing = await this.list(vault);
     // reescribir el mismo identificador actualiza en vez de duplicar
     const characters = [

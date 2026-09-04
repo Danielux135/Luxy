@@ -1735,3 +1735,35 @@ input[aria-invalid='true'] {
 .vault-generate[open] > summary {
   margin-bottom: 10px;
 }
+
+/*
+ * los modelos de AI Horde son una docena y cada uno lleva debajo su familia y
+ * su disponibilidad. En una fila que envuelve quedaban de anchos distintos y no
+ * se podian comparar; en una columna ocupaban la pantalla entera.
+ */
+.vault-models {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 2px 14px;
+  margin-bottom: 4px;
+}
+
+/*
+ * cada LoRA es una ficha de cinco campos. Sin la linea de la izquierda, cinco
+ * seguidos se leen como un unico bloque y no se ve donde acaba uno.
+ */
+.vault-lora {
+  border-left: 2px solid var(--line);
+  padding-left: 10px;
+  margin-bottom: 14px;
+}
+
+.vault-lora .row {
+  margin-bottom: 10px;
+}
+
+/* el identificador ocupa lo que le deje la «x»; los dos pesos se reparten */
+.vault-lora .row > .field {
+  flex: 1 1 200px;
+  margin-bottom: 0;
+}

@@ -70,6 +70,12 @@ const bridge: LuxyBridge = {
   logoutVaultAccount: () => ipcRenderer.invoke(IPC_INVOKE.vaultAccountLogout),
   setVaultMediaKey: (args: unknown) => ipcRenderer.invoke(IPC_INVOKE.vaultMediaKeySet, args),
   deleteVaultMediaKey: () => ipcRenderer.invoke(IPC_INVOKE.vaultMediaKeyDelete),
+  setVaultHordeKey: (args: unknown) => ipcRenderer.invoke(IPC_INVOKE.vaultHordeKeySet, args),
+  deleteVaultHordeKey: () => ipcRenderer.invoke(IPC_INVOKE.vaultHordeKeyDelete),
+  readVaultHordeAccount: () => ipcRenderer.invoke(IPC_INVOKE.vaultHordeAccount),
+  listVaultHordeModels: () => ipcRenderer.invoke(IPC_INVOKE.vaultHordeModels),
+  saveVaultHordeCharacter: (args: unknown) =>
+    ipcRenderer.invoke(IPC_INVOKE.vaultHordeCharacterSave, args),
   createVault: (password: string) => ipcRenderer.invoke(IPC_INVOKE.vaultCreate, { password }),
   unlockVault: (args: unknown) => ipcRenderer.invoke(IPC_INVOKE.vaultUnlock, args),
   lockVault: () => ipcRenderer.invoke(IPC_INVOKE.vaultLock),

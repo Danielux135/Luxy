@@ -11,6 +11,7 @@ import {
   type agentEventSchema,
   agentHostStatusSchema,
   conversationMemoryStatusSchema,
+  hordeRecipeSchema,
   jobStatusSchema,
   projectAliasSchema,
   studioConversationUpdateRequestSchema,
@@ -219,6 +220,22 @@ export const vaultStatusSchema = z.object({
    * imagen y no llegue.
    */
   mediaProviderConfigured: z.boolean(),
+  /**
+   * hay clave guardada de AI Horde, el proveedor de imagenes gratuito.
+   *
+   * Va aparte de la anterior porque son dos cuentas distintas y un personaje
+   * pertenece a una sola de las dos: tener la de pago no habilita el horde.
+   */
+  hordeConfigured: z.boolean(),
+  /**
+   * la clave guardada del horde es la anonima.
+   *
+   * Funciona y no cuesta nada, pero la red la atiende la ultima y ademas fuerza
+   * `shared`, es decir, dona las imagenes a un conjunto de datos publico. La
+   * pantalla tiene que poder decirlo: para una boveda privada es justo lo
+   * contrario de lo que se espera.
+   */
+  hordeAnonymous: z.boolean(),
 });
 
 /**
@@ -382,6 +399,14 @@ export const vaultConversationSendResultSchema = z.object({
     .object({
       mediaId: z.string().nullable(),
       costCredits: z.number().nullable(),
+      /**
+       * en qué se cuenta ese número.
+       *
+       * No es cosmético: los créditos del proveedor de pago se compran con
+       * dinero y los kudos de AI Horde no. Enseñar «12 créditos» después de una
+       * generación gratuita se lee como que la opción gratis está cobrando.
+       */
+      costUnit: z.enum(['creditos', 'kudos']).nullable().default(null),
       error: z.string().nullable(),
     })
     .nullable(),
@@ -571,8 +596,20 @@ export const vaultMediaGenerateArgsSchema = z.object({
   characterId: z.string().min(1).max(128),
   prompt: z.string().min(1).max(2000),
   kind: z.enum(['image', 'video']),
-  /** solo para video: anima una imagen ya generada */
+  /** solo para vídeo: anima una imagen ya generada */
   fromGenerationId: z.string().max(128).optional(),
+  /**
+   * parte de una imagen que YA está en esta conversación (img2img).
+   *
+   * Es un identificador de medio LOCAL, no del proveedor: los bytes se leen de
+   * la bóveda, se descifran en memoria y viajan en el cuerpo de la petición.
+   * Nunca se publica una URL, que es la misma razón por la que se sondea en vez
+   * de usar un callback (`D-042`).
+   *
+   * Sirve para **variar** una imagen que ya salió bien, no para llevar la cara
+   * del personaje a una escena nueva: eso AI Horde no lo sabe hacer.
+   */
+  fromMediaId: z.string().max(128).optional(),
 });
 
 export const vaultCharacterCreateArgsSchema = z.object({
@@ -628,8 +665,10 @@ export const vaultMediaGenerateResultSchema = z.object({
   mediaId: z.string(),
   mimeType: z.string(),
   byteSize: z.number().int().min(0),
-  /** creditos declarados por el proveedor, para que el gasto sea visible */
+  /** lo que declaró el proveedor, para que el gasto sea visible */
   costCredits: z.number().nullable(),
+  /** créditos (se compran con dinero) o kudos (no se compran); ver el bloque `image` */
+  costUnit: z.enum(['creditos', 'kudos']).nullable().default(null),
 });
 
 /**
@@ -647,6 +686,17 @@ export const vaultCharacterSummarySchema = z.object({
   /** hay avatar guardado; los bytes se piden aparte y van cifrados en disco */
   avatarObjectKey: z.string().nullable(),
   createdAt: z.string(),
+  /** quién genera sus imágenes: el de pago o AI Horde, que es gratis */
+  provider: z.enum(['xavira', 'horde']).default('xavira'),
+  /**
+   * la receta con la que se repite su aspecto en AI Horde.
+   *
+   * Viaja al renderer entera y a propósito: sin ella la pantalla no podría
+   * enseñar ni corregir con qué modelo y qué rasgos se está generando, que es
+   * justo lo que hay que mirar cuando un personaje deja de parecerse a sí mismo.
+   * No contiene ningún secreto.
+   */
+  recipe: hordeRecipeSchema.nullable().default(null),
 });
 
 export const vaultCharacterListResultSchema = z.object({
@@ -686,6 +736,66 @@ export const vaultCharacterImportArgsSchema = z.object({
   description: z.string().max(2000).default(''),
   /** URL del avatar, si se conoce: se descarga y se cifra aquí */
   avatarUrl: z.string().max(2000).default(''),
+});
+
+/**
+ * clave de AI Horde.
+ *
+ * Canal propio por la misma razón que la del proveedor de pago: el nombre del
+ * secreto lo pone el proceso principal y nunca viaja por el IPC, así que el
+ * renderer no puede elegir qué secreto escribe.
+ */
+export const vaultHordeKeyArgsSchema = z.object({
+  apiKey: z.string().min(1).max(512),
+});
+
+/**
+ * la cuenta del horde, para poder enseñar la prioridad real.
+ *
+ * Los kudos no son dinero y no se compran: deciden en qué posición de la cola
+ * entra cada petición. Verlos es la única forma de entender por qué una imagen
+ * tarda dos minutos y otra veinte segundos.
+ */
+export const vaultHordeAccountResultSchema = z.object({
+  username: z.string(),
+  kudos: z.number(),
+  /** imágenes que puede tener en vuelo a la vez */
+  concurrency: z.number().int(),
+  /** es la clave anónima: funciona, pero comparte lo que genera */
+  anonymous: z.boolean(),
+});
+
+/** un modelo servido AHORA, con cuántos workers lo tienen cargado */
+export const vaultHordeModelSchema = z.object({
+  name: z.string(),
+  count: z.number().int(),
+  /** segundos estimados para vaciar la cola de ese modelo */
+  eta: z.number().int(),
+  jobs: z.number().int(),
+});
+
+export const vaultHordeModelsResultSchema = z.object({
+  models: z.array(vaultHordeModelSchema),
+});
+
+/**
+ * guarda un personaje de AI Horde.
+ *
+ * No llama a ninguna API y no cuesta nada: un personaje del horde **es** su
+ * receta. Por eso se puede editar tantas veces como haga falta hasta que la
+ * cara salga bien, al contrario que en el proveedor de pago, donde crear otro
+ * cuesta créditos.
+ */
+export const vaultHordeCharacterSaveArgsSchema = z.object({
+  /**
+   * vacío al crear; con valor, sustituye a ese personaje conservando su
+   * identificador, y con él las imágenes y los recuerdos que ya cuelgan de él.
+   */
+  characterId: z.string().max(128).default(''),
+  label: z.string().max(100).default(''),
+  /** quién es, en texto, para el modelo que escribe */
+  description: z.string().max(2000).default(''),
+  recipe: hordeRecipeSchema,
 });
 
 /**
@@ -1009,6 +1119,19 @@ export interface LuxyBridge {
     args: z.infer<typeof vaultMediaKeyArgsSchema>,
   ): Promise<IpcResult<z.infer<typeof vaultStatusSchema>>>;
   deleteVaultMediaKey(): Promise<IpcResult<z.infer<typeof vaultStatusSchema>>>;
+  /** guarda la clave de AI Horde; va aparte porque es otra cuenta */
+  setVaultHordeKey(
+    args: z.infer<typeof vaultHordeKeyArgsSchema>,
+  ): Promise<IpcResult<z.infer<typeof vaultStatusSchema>>>;
+  deleteVaultHordeKey(): Promise<IpcResult<z.infer<typeof vaultStatusSchema>>>;
+  /** saldo de kudos: es lo que decide la posición en la cola, no el dinero */
+  readVaultHordeAccount(): Promise<IpcResult<z.infer<typeof vaultHordeAccountResultSchema>>>;
+  /** modelos que el horde sirve ahora mismo; el número de workers cambia solo */
+  listVaultHordeModels(): Promise<IpcResult<z.infer<typeof vaultHordeModelsResultSchema>>>;
+  /** guarda o corrige la receta de un personaje del horde; no cuesta nada */
+  saveVaultHordeCharacter(
+    args: z.infer<typeof vaultHordeCharacterSaveArgsSchema>,
+  ): Promise<IpcResult<z.infer<typeof vaultCharacterCreateResultSchema>>>;
   createVault(password: string): Promise<IpcResult<z.infer<typeof vaultCreateResultSchema>>>;
   unlockVault(
     args: z.infer<typeof vaultUnlockArgsSchema>,

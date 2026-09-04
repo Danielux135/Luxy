@@ -67,6 +67,11 @@ export class SecretRegistry {
     const trimmed = value.trim();
     // por debajo de 8 caracteres redactar produciria falsos positivos masivos
     if (trimmed.length < 8) return;
+    // un valor sin ninguna variacion tampoco es un secreto. El caso real: la
+    // clave anonima de AI Horde son diez ceros, es publica y esta documentada;
+    // registrarla haria que redact() tapara ese numero en CUALQUIER texto del
+    // proceso, incluida la propia pista que explica como usarla
+    if (new Set(trimmed).size === 1) return;
     this.values.add(trimmed);
   }
 

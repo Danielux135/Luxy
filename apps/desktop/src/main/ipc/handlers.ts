@@ -23,6 +23,9 @@ import {
   CATALOG_MAX_TURNS,
   isPathInside,
   VAULT_IMAGE_NEGATIVE,
+  buildHordeRequest,
+  imagePromptStyleFor,
+  type HordeRecipe,
 } from '@luxy/shared';
 import { detectEnvironment } from '@luxy/agent/dist/detect.js';
 import { GatewayClient } from '@luxy/agent/dist/gateway-client.js';
@@ -74,6 +77,8 @@ import {
   vaultAccountArgsSchema,
   vaultAccountLoginArgsSchema,
   vaultMediaKeyArgsSchema,
+  vaultHordeKeyArgsSchema,
+  vaultHordeCharacterSaveArgsSchema,
   vaultDeviceUnlockSetArgsSchema,
   vaultPasswordArgsSchema,
   vaultUnlockArgsSchema,
@@ -96,6 +101,8 @@ import { syncVault } from '../vault/sync.js';
 import { randomUUID } from 'node:crypto';
 import {
   MACHINE_TOKEN_SECRET,
+  RESERVED_SECRET_NAMES,
+  VAULT_HORDE_API_SECRET,
   VAULT_MEDIA_API_SECRET,
   connectionSecretName,
 } from '../../shared/ipc.js';
@@ -107,6 +114,17 @@ import {
   generateImage,
   generateVideo,
 } from '@luxy/agent/dist/providers/xavira.js';
+import {
+  ANONYMOUS_API_KEY,
+  HORDE_BASE_URL,
+  HordeError,
+  awaitImage,
+  downloadImage,
+  findUser,
+  isAnonymousKey,
+  listImageModels,
+  submitImage,
+} from '@luxy/agent/dist/providers/horde.js';
 import { deleteMigratedFile, inspectEnvFile, readEnvSecrets } from '../migration.js';
 import { readCatalogSnapshot, writeCatalogSnapshot } from '../catalog-store.js';
 import { resolveWorktreeDirectory } from '../worktree-directory.js';
@@ -126,12 +144,21 @@ import { buildRecall } from '../vault/recall.js';
  * su frase: la anterior mandaba a Conexiones incluso cuando la clave estaba
  * bien y lo que fallaba era el identificador del personaje.
  */
-const IMAGE_BLOCK_MESSAGES: Record<ImageBlockReason, string> = {
-  'sin-personaje': 'elige un personaje para esta conversacion antes de pedir imagenes',
-  'personaje-desconocido':
-    'el personaje de esta conversacion no esta en la boveda de este equipo: dalo de alta con su identificador o elige otro',
-  'sin-clave': 'falta la clave del proveedor de imagenes en Conexiones',
-};
+function imageBlockMessage(reason: ImageBlockReason, provider: 'xavira' | 'horde'): string {
+  switch (reason) {
+    case 'sin-personaje':
+      return 'elige un personaje para esta conversacion antes de pedir imagenes';
+    case 'personaje-desconocido':
+      return 'el personaje de esta conversacion no esta en la boveda de este equipo: dalo de alta con su identificador o elige otro';
+    case 'sin-clave':
+      // dos proveedores, dos sitios distintos donde arreglarlo. Mandar al de
+      // pago a quien usa el gratuito es exactamente el fallo que este mensaje
+      // existe para no repetir
+      return provider === 'horde'
+        ? 'falta la clave de AI Horde: se saca gratis en aihorde.net y se guarda en Privado, en «Proveedor de imagenes»'
+        : 'falta la clave del proveedor de imagenes en Conexiones';
+  }
+}
 
 /** tipo declarado por la extension del archivo elegido en el dialogo */
 function mimeTypeFor(filePath: string): string {
@@ -385,6 +412,27 @@ export function registerIpcHandlers(context: HandlerContext): void {
         .map((issue) => `${issue.path.join('.') || 'raiz'}: ${issue.message}`)
         .join('; ');
       throw new Error(`la configuracion no es valida (${detalle})`);
+    }
+
+    // un proveedor HTTP no puede apropiarse de un secreto reservado.
+    //
+    // Es la unica comprobacion que faltaba para que esa reserva significara
+    // algo: `secretSet` y `secretDelete` si la hacian, pero por aqui bastaba
+    // declarar un proveedor con `apiKeyEnv: 'VAULT_HORDE_API_KEY'` para (a)
+    // pisar la clave de la boveda y (b) —peor— conseguir que `reconfigureAgent`
+    // se la entregara al agente, que la mandaria como `Authorization` al
+    // endpoint declarado en ese mismo proveedor. Se rechaza la configuracion
+    // entera antes de escribir nada.
+    const secuestrado = parsed.data.providers.http.find((provider) =>
+      RESERVED_SECRET_NAMES.includes(provider.apiKeyEnv),
+    );
+    if (secuestrado !== undefined) {
+      throw new Error(
+        `el nombre de clave ${secuestrado.apiKeyEnv} esta reservado y no puede usarlo un proveedor HTTP`,
+      );
+    }
+    if (args.providerSecret !== undefined && RESERVED_SECRET_NAMES.includes(args.providerSecret.name)) {
+      throw new Error(`el nombre de clave ${args.providerSecret.name} esta reservado`);
     }
 
     if (
@@ -723,11 +771,18 @@ export function registerIpcHandlers(context: HandlerContext): void {
    * sesion» son dos cosas distintas y se arreglan de forma distinta— y porque
    * asi el refresco periodico del renderer no dobla las llamadas.
    */
-  const vaultStatus = (): z.infer<typeof vaultStatusSchema> => ({
-    ...context.vault.status(),
-    account: context.accounts.status(),
-    mediaProviderConfigured: context.secretStore.get(VAULT_MEDIA_API_SECRET) !== undefined,
-  });
+  const vaultStatus = (): z.infer<typeof vaultStatusSchema> => {
+    const hordeKey = context.secretStore.get(VAULT_HORDE_API_SECRET);
+    return {
+      ...context.vault.status(),
+      account: context.accounts.status(),
+      mediaProviderConfigured: context.secretStore.get(VAULT_MEDIA_API_SECRET) !== undefined,
+      hordeConfigured: hordeKey !== undefined,
+      // el hecho, no la clave: la pantalla necesita poder avisar de que con la
+      // anonima el horde comparte lo que genera
+      hordeAnonymous: hordeKey !== undefined && isAnonymousKey(hordeKey),
+    };
+  };
 
   handle(IPC_INVOKE.vaultStatus, emptyArgsSchema, () => vaultStatus());
 
@@ -779,6 +834,76 @@ export function registerIpcHandlers(context: HandlerContext): void {
     context.log('clave del proveedor de imagenes borrada');
     await context.reconfigureAgent();
     return vaultStatus();
+  });
+
+  /**
+   * clave de AI Horde.
+   *
+   * Mismo criterio que la anterior: el nombre del secreto lo pone esta linea y
+   * no viaja por el IPC. Se registra ademas si la clave guardada es la anonima,
+   * porque eso cambia lo que le pasa al contenido —el horde lo comparte— y es
+   * el tipo de cosa que nadie deberia descubrir despues.
+   */
+  handle(IPC_INVOKE.vaultHordeKeySet, vaultHordeKeyArgsSchema, async (args) => {
+    context.secretStore.set(VAULT_HORDE_API_SECRET, args.apiKey.trim());
+    context.log('clave de AI Horde guardada', { anonima: isAnonymousKey(args.apiKey.trim()) });
+    await context.reconfigureAgent();
+    return vaultStatus();
+  });
+
+  handle(IPC_INVOKE.vaultHordeKeyDelete, emptyArgsSchema, async () => {
+    context.secretStore.delete(VAULT_HORDE_API_SECRET);
+    context.log('clave de AI Horde borrada');
+    await context.reconfigureAgent();
+    return vaultStatus();
+  });
+
+  /**
+   * saldo de kudos de la cuenta del horde.
+   *
+   * Los kudos NO son dinero y no se compran: deciden la posicion en la cola. Es
+   * la unica explicacion honesta de por que una imagen tarda veinte segundos y
+   * la siguiente cuatro minutos, asi que se enseña en vez de dejarlo a la
+   * imaginacion.
+   */
+  handle(IPC_INVOKE.vaultHordeAccount, emptyArgsSchema, async () => {
+    const controller = new AbortController();
+    const options = hordeOptions(controller.signal);
+    try {
+      const user = await findUser(options);
+      return {
+        username: user.username,
+        kudos: user.kudos,
+        concurrency: user.concurrency,
+        anonymous: isAnonymousKey(options.apiKey),
+      };
+    } catch (error) {
+      if (error instanceof HordeError) throw new VaultError(error.message, error.hint);
+      throw error;
+    }
+  });
+
+  /**
+   * modelos que el horde sirve AHORA.
+   *
+   * La lista curada del catalogo dice cuales sirven para lo que se quiere; esta
+   * dice cuales tienen workers en este momento. Las dos hacen falta: un nombre
+   * correcto sin workers deja la peticion en cola hasta que caduca.
+   */
+  handle(IPC_INVOKE.vaultHordeModels, emptyArgsSchema, async () => {
+    const controller = new AbortController();
+    try {
+      // sin clave a proposito: el catalogo es publico y consultarlo no deberia
+      // exigir tener la cuenta puesta todavia
+      const models = await listImageModels({
+        baseUrl: HORDE_BASE_URL,
+        signal: controller.signal,
+      });
+      return { models };
+    } catch (error) {
+      if (error instanceof HordeError) throw new VaultError(error.message, error.hint);
+      throw error;
+    }
   });
 
   handle(IPC_INVOKE.vaultCreate, vaultPasswordArgsSchema, async (args) => {
@@ -1255,6 +1380,26 @@ export function registerIpcHandlers(context: HandlerContext): void {
   };
 
   /**
+   * opciones de AI Horde.
+   *
+   * Va aparte y no hereda de la anterior: son dos cuentas distintas y la
+   * cabecera tambien lo es (`apikey`, no `Authorization`). La clave anonima
+   * FUNCIONA, pero no se pone sola: con ella el horde fuerza `shared`, o sea que
+   * dona las imagenes a un conjunto de datos publico, y eso en una boveda
+   * privada tiene que ser una decision escrita, no un valor por defecto.
+   */
+  const hordeOptions = (signal: AbortSignal): { baseUrl: string; apiKey: string; signal: AbortSignal } => {
+    const apiKey = context.secretStore.get(VAULT_HORDE_API_SECRET);
+    if (apiKey === undefined) {
+      throw new VaultError(
+        'no hay clave de AI Horde guardada en este equipo',
+        `sacala gratis en aihorde.net —no pide tarjeta— y guardala en Privado. La clave anonima ${ANONYMOUS_API_KEY} tambien vale, pero comparte lo que generes`,
+      );
+    }
+    return { baseUrl: HORDE_BASE_URL, apiKey, signal };
+  };
+
+  /**
    * sincroniza la boveda con el gateway.
    *
    * Sube ciphertext y baja ciphertext. El identificador de boveda se deriva
@@ -1326,6 +1471,10 @@ export function registerIpcHandlers(context: HandlerContext): void {
       // listarlos: si no se guarda en este instante, se paga y se pierde
       const characters = await context.characters.add(context.vault, {
         characterId: created.characterId,
+        // el proveedor de pago guarda la identidad en su servidor, asi que aqui
+        // no hay receta que conservar
+        provider: 'xavira',
+        recipe: null,
         modelId: args.modelId,
         description: args.description,
         label: args.label.trim(),
@@ -1373,6 +1522,8 @@ export function registerIpcHandlers(context: HandlerContext): void {
 
     const characters = await context.characters.add(context.vault, {
       characterId: args.characterId.trim(),
+      provider: 'xavira',
+      recipe: null,
       modelId: args.modelId,
       description: args.description,
       label: args.label.trim(),
@@ -1381,6 +1532,55 @@ export function registerIpcHandlers(context: HandlerContext): void {
     });
     context.log('personaje dado de alta', { modelId: args.modelId });
     return { characters };
+  });
+
+  /**
+   * guarda o corrige un personaje de AI Horde.
+   *
+   * No llama a ninguna API y no cuesta nada, porque en el horde un personaje NO
+   * existe fuera de aqui: es su receta. Eso cambia una cosa importante respecto
+   * al proveedor de pago, donde equivocarse cuesta creditos y el aspecto no se
+   * puede cambiar: aqui se edita hasta que la cara salga bien.
+   *
+   * Editar CONSERVA el identificador. Es lo que hace que las imagenes ya
+   * generadas y los recuerdos sigan siendo de esa misma persona en vez de
+   * quedarse huerfanos con cada retoque.
+   */
+  handle(IPC_INVOKE.vaultHordeCharacterSave, vaultHordeCharacterSaveArgsSchema, async (args) => {
+    if (!context.vault.isUnlocked()) throw new VaultError('la boveda esta bloqueada');
+
+    const existing = (await context.characters.list(context.vault)).find(
+      (entry) => entry.characterId === args.characterId,
+    );
+    if (args.characterId.length > 0 && existing === undefined) {
+      throw new VaultError('ese personaje ya no esta en la boveda');
+    }
+    if (existing !== undefined && existing.provider !== 'horde') {
+      // cambiar de proveedor a un personaje existente no es editarlo: seria
+      // otra persona con el mismo nombre, y la receta no sirve alli
+      throw new VaultError(
+        'ese personaje es del proveedor de pago',
+        'crea uno nuevo de AI Horde en vez de convertir este',
+      );
+    }
+
+    const characterId = existing?.characterId ?? randomUUID();
+    const characters = await context.characters.add(context.vault, {
+      characterId,
+      provider: 'horde',
+      recipe: args.recipe,
+      // el horde no tiene modelos de personaje: se guarda el primero de la
+      // receta para que la lista pueda decir con que se esta generando
+      modelId: args.recipe.models[0] ?? 'horde',
+      description: args.description,
+      label: args.label.trim(),
+      avatarObjectKey: existing?.avatarObjectKey ?? null,
+      createdAt: existing?.createdAt ?? new Date().toISOString(),
+    });
+
+    // ni el aspecto ni la etiqueta: describen a una persona
+    context.log('personaje de AI Horde guardado', { modelos: args.recipe.models.length });
+    return { characterId, characters };
   });
 
   /**
@@ -1441,18 +1641,167 @@ export function registerIpcHandlers(context: HandlerContext): void {
    * dentro de una conversacion. Es la misma operacion, y tenerla dos veces
    * garantizaria que una de las dos se olvide de cifrar o de sondear.
    */
+  /**
+   * genera con AI Horde, que es gratis y no guarda personajes.
+   *
+   * La diferencia de fondo con el proveedor de pago: alli la identidad vive en
+   * su servidor detras de un identificador, y aqui vive en la receta local. Por
+   * eso esta rama compone el prompt entero —aspecto, ropa y escena— en vez de
+   * mandar solo la escena.
+   *
+   * No hay video: el horde no genera video. Se dice en vez de intentarlo.
+   */
+  /**
+   * lee una imagen ya guardada de la conversacion para partir de ella.
+   *
+   * Los bytes se descifran en memoria y viajan en el CUERPO de la peticion:
+   * nunca se publica una URL, que es la misma razon por la que se sondea en vez
+   * de usar un callback (`D-042`).
+   *
+   * Solo webp: es lo que documenta la API del horde y es lo que ella misma
+   * devuelve, asi que partir de una imagen suya funciona siempre. Un adjunto en
+   * PNG se rechaza con su motivo en vez de mandarlo y esperar a ver.
+   */
+  const readSourceImage = async (conversationId: string, mediaId: string): Promise<string> => {
+    const { bytes, mimeType } = await context.privateMedia.read(
+      context.vault,
+      conversationId,
+      mediaId,
+    );
+    if (mimeType !== 'image/webp') {
+      throw new VaultError(
+        `AI Horde solo admite webp como imagen de partida, y esa es ${mimeType}`,
+        'usa una imagen generada aqui: todas las del horde son webp',
+      );
+    }
+    // base64 PURO: con el prefijo `data:` el servidor lo decodifica igual y
+    // falla mucho despues con un error que no explica nada
+    return Buffer.from(bytes).toString('base64');
+  };
+
+  const generateHordeImage = async (input: {
+    conversationId: string;
+    prompt: string;
+    kind: 'image' | 'video';
+    character: { characterId: string; recipe: HordeRecipe | null };
+    /** identificador LOCAL de un medio de esta conversacion, para img2img */
+    fromMediaId?: string;
+  }): Promise<{
+    mediaId: string;
+    mimeType: string;
+    byteSize: number;
+    costCredits: number | null;
+    costUnit: "creditos" | "kudos";
+  }> => {
+    if (input.kind === 'video') {
+      throw new VaultError(
+        'AI Horde no genera video',
+        'para video hace falta el proveedor de pago; este personaje solo hace imagenes',
+      );
+    }
+    const recipe = input.character.recipe;
+    if (recipe === null) {
+      throw new VaultError(
+        'ese personaje no tiene receta guardada',
+        'en AI Horde la apariencia vive en la receta: editalo en Privado y elige modelo y aspecto',
+      );
+    }
+
+    const controller = new AbortController();
+    const options = hordeOptions(controller.signal);
+    const sourceImage =
+      input.fromMediaId === undefined
+        ? null
+        : await readSourceImage(input.conversationId, input.fromMediaId);
+    // con la clave anonima el horde ignora este campo y comparte igual; con una
+    // clave propia, que es gratis, no comparte nada
+    const request = buildHordeRequest({
+      recipe,
+      prompt: input.prompt,
+      extraNegative: VAULT_IMAGE_NEGATIVE,
+      shared: false,
+      sourceImage,
+    });
+
+    try {
+      const submission = await submitImage(request, options);
+      const result = await awaitImage(submission.id, options);
+      const [generation] = result.generations;
+      if (generation === undefined) {
+        throw new VaultError('AI Horde termino sin devolver ninguna imagen');
+      }
+
+      const { bytes, mimeType } = await downloadImage(generation.img, options);
+
+      // se cifra ANTES de tocar el disco, igual que en el otro proveedor
+      const stored = await context.privateMedia.add(context.vault, input.conversationId, bytes, {
+        mimeType,
+        displayName: null,
+        prompt: input.prompt,
+        width: recipe.width,
+        height: recipe.height,
+        durationMs: null,
+        characterId: input.character.characterId,
+        provider: 'horde',
+        // el modelo que de verdad la genero, que puede no ser el primero de la
+        // lista: se mandan varios justo para que lo coja el que este libre
+        model: generation.model,
+      });
+
+      context.log('medio privado generado', {
+        proveedor: 'horde',
+        kind: input.kind,
+        byteSize: stored.byteSize,
+      });
+
+      return {
+        mediaId: stored.mediaId,
+        mimeType,
+        byteSize: stored.byteSize,
+        // kudos, no dinero: no se compran y no se gastan de una cartera. Se
+        // enseñan igual porque son lo que decide la espera del proximo turno, y
+        // la unidad viaja con el numero para que la pantalla no los llame
+        // creditos, que es lo que cobra el OTRO proveedor
+        costCredits: result.kudos,
+        costUnit: 'kudos',
+      };
+    } catch (error) {
+      if (error instanceof HordeError) throw new VaultError(error.message, error.hint);
+      throw error;
+    }
+  };
+
   const generatePrivateMedia = async (input: {
     conversationId: string;
     characterId: string;
     prompt: string;
     kind: 'image' | 'video';
     fromGenerationId?: string;
+    /**
+     * imagen de ESTA conversacion de la que partir (img2img).
+     *
+     * Solo la entiende AI Horde. El proveedor de pago mantiene la identidad con
+     * su propio personaje y no necesita ninguna imagen de entrada; ademas la
+     * retiro a proposito.
+     */
+    fromMediaId?: string;
   }): Promise<{
     mediaId: string;
     mimeType: string;
     byteSize: number;
     costCredits: number | null;
+    costUnit: "creditos" | "kudos";
   }> => {
+    const character = (await context.characters.list(context.vault)).find(
+      (entry) => entry.characterId === input.characterId,
+    );
+    // el proveedor es del PERSONAJE y no de la conversacion: dos personajes de
+    // la misma boveda pueden generarse en sitios distintos, y mezclarlos
+    // significaria mandar la receta de uno a la API del otro
+    if (character?.provider === 'horde') {
+      return generateHordeImage({ ...input, character });
+    }
+
     const controller = new AbortController();
     const options = mediaProviderOptions(controller.signal);
     const args = input;
@@ -1514,6 +1863,7 @@ export function registerIpcHandlers(context: HandlerContext): void {
         mimeType,
         byteSize: stored.byteSize,
         costCredits: finished.costCredits,
+        costUnit: 'creditos',
       };
     } catch (error) {
       if (error instanceof XaviraError) throw new VaultError(error.message, error.hint);
@@ -1529,6 +1879,7 @@ export function registerIpcHandlers(context: HandlerContext): void {
       prompt: args.prompt,
       kind: args.kind,
       ...(args.fromGenerationId === undefined ? {} : { fromGenerationId: args.fromGenerationId }),
+      ...(args.fromMediaId === undefined ? {} : { fromMediaId: args.fromMediaId }),
     });
   });
 
@@ -1637,12 +1988,19 @@ export function registerIpcHandlers(context: HandlerContext): void {
       }
     }
 
+    // la clave que hace falta es la del proveedor de ESTE personaje. Preguntar
+    // siempre por la de pago dejaba sin imagenes a un personaje del horde que
+    // estaba perfectamente configurado
+    const imageProvider = character?.provider ?? 'xavira';
+    const providerSecret =
+      imageProvider === 'horde' ? VAULT_HORDE_API_SECRET : VAULT_MEDIA_API_SECRET;
+
     // solo se le ofrece generar si de verdad se puede: sin personaje conocido o
     // sin clave, ofrecerselo garantiza una promesa incumplida en cada turno
     const imageBlock = imageBlockReason({
       characterId,
       characterInVault: character !== undefined,
-      hasApiKey: context.secretStore.get(VAULT_MEDIA_API_SECRET) !== undefined,
+      hasApiKey: context.secretStore.get(providerSecret) !== undefined,
     });
     const canGenerateImage = imageBlock === null;
 
@@ -1703,7 +2061,10 @@ export function registerIpcHandlers(context: HandlerContext): void {
       existingImages,
       // los modelos de anime rinden peor con prosa y los realistas peor con
       // etiquetas sueltas: lo dice la documentacion del proveedor
-      imagePromptStyle: character?.modelId === 'anime-pure-v1' ? 'tags' : 'prose',
+      imagePromptStyle: imagePromptStyleFor(imageProvider, {
+        xaviraModelId: character?.modelId ?? null,
+        recipe: character?.recipe ?? null,
+      }),
     });
 
     // ni el texto ni los rasgos: solo si el turno pudo ofrecer imagenes y
@@ -1732,6 +2093,7 @@ export function registerIpcHandlers(context: HandlerContext): void {
     let image: {
       mediaId: string | null;
       costCredits: number | null;
+      costUnit: "creditos" | "kudos" | null;
       error: string | null;
     } | null = null;
 
@@ -1759,8 +2121,13 @@ export function registerIpcHandlers(context: HandlerContext): void {
         const found = known.find((item) => item.mediaId === imageRequest.request?.mediaId);
         image =
           found === undefined
-            ? { mediaId: null, costCredits: null, error: 'esa imagen no existe en esta conversacion' }
-            : { mediaId: found.mediaId, costCredits: null, error: null };
+            ? {
+                mediaId: null,
+                costCredits: null,
+                costUnit: null,
+                error: 'esa imagen no existe en esta conversacion',
+              }
+            : { mediaId: found.mediaId, costCredits: null, costUnit: null, error: null };
       } else if (
         imageRequest.request?.prompt !== undefined &&
         canGenerateImage &&
@@ -1776,6 +2143,7 @@ export function registerIpcHandlers(context: HandlerContext): void {
           image = {
             mediaId: generated.mediaId,
             costCredits: generated.costCredits,
+            costUnit: generated.costUnit,
             error: null,
           };
         } catch (error) {
@@ -1784,6 +2152,7 @@ export function registerIpcHandlers(context: HandlerContext): void {
           image = {
             mediaId: null,
             costCredits: null,
+            costUnit: null,
             error: redact(error instanceof Error ? error.message : String(error)),
           };
         }
@@ -1791,9 +2160,10 @@ export function registerIpcHandlers(context: HandlerContext): void {
         image = {
           mediaId: null,
           costCredits: null,
+          costUnit: null,
           // tres motivos distintos con tres arreglos distintos: mezclarlos
           // mandaba a mirar la clave cuando el problema era el identificador
-          error: IMAGE_BLOCK_MESSAGES[imageBlock ?? 'sin-personaje'],
+          error: imageBlockMessage(imageBlock ?? 'sin-personaje', imageProvider),
         };
       }
 

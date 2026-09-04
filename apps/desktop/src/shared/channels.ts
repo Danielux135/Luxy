@@ -76,6 +76,15 @@ export const IPC_INVOKE = {
   vaultCharacterAvatar: 'luxy:vault:character:avatar',
   vaultMediaKeySet: 'luxy:vault:media-key:set',
   vaultMediaKeyDelete: 'luxy:vault:media-key:delete',
+  /** clave de AI Horde, el proveedor de imagenes gratuito */
+  vaultHordeKeySet: 'luxy:vault:horde-key:set',
+  vaultHordeKeyDelete: 'luxy:vault:horde-key:delete',
+  /** saldo de kudos y nombre de la cuenta del horde: dice que prioridad tienes */
+  vaultHordeAccount: 'luxy:vault:horde:account',
+  /** modelos que el horde sirve AHORA: los workers cambian cada pocos minutos */
+  vaultHordeModels: 'luxy:vault:horde:models',
+  /** guarda la receta de un personaje del horde. No llama a ninguna API */
+  vaultHordeCharacterSave: 'luxy:vault:horde:character-save',
   vaultSync: 'luxy:vault:sync',
 } as const;
 
@@ -136,6 +145,20 @@ export const VAULT_DEVICE_SECRET = 'VAULT_DEVICE_KEY';
 export const VAULT_MEDIA_API_SECRET = 'VAULT_MEDIA_API_KEY';
 
 /**
+ * clave de AI Horde, el proveedor de imagenes gratuito.
+ *
+ * Va aparte de la del proveedor de pago y no la sustituye: son dos cuentas
+ * distintas y un personaje pertenece a una sola de las dos. Reservada por el
+ * mismo motivo que las demas.
+ *
+ * Se puede guardar la clave anonima `0000000000`, que funciona sin registrarse
+ * pero con la prioridad mas baja de la red y —esto es lo que importa aqui— con
+ * `shared` forzado a true: el horde dona esas imagenes a un conjunto de datos
+ * publico. Por eso Luxy pide una clave propia, que es gratis y no exige tarjeta.
+ */
+export const VAULT_HORDE_API_SECRET = 'VAULT_HORDE_API_KEY';
+
+/**
  * sesion abierta en la cuenta de la boveda.
  *
  * Es una credencial reutilizable contra el gateway, asi que vive en el almacen
@@ -149,6 +172,7 @@ export const VAULT_SESSION_SECRET = 'VAULT_ACCOUNT_SESSION';
 export const RESERVED_SECRET_NAMES: readonly string[] = [
   VAULT_DEVICE_SECRET,
   VAULT_MEDIA_API_SECRET,
+  VAULT_HORDE_API_SECRET,
   VAULT_SESSION_SECRET,
 ];
 

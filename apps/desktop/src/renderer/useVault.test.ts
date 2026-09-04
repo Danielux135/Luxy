@@ -49,6 +49,8 @@ describe('contrato IPC de la boveda', () => {
         openedWithRecoveryKey: false,
       },
       mediaProviderConfigured: true,
+      hordeConfigured: true,
+      hordeAnonymous: false,
       // lo que alguien pudiera intentar colar de vuelta al renderer
       masterKey: 'AAAA',
       salt: 'BBBB',
@@ -63,6 +65,10 @@ describe('contrato IPC de la boveda', () => {
       'account',
       'autoLockMinutes',
       'configured',
+      // el hecho de que haya clave, nunca la clave; y si es la anonima, porque
+      // esa comparte lo que genera y hay que poder avisarlo
+      'hordeAnonymous',
+      'hordeConfigured',
       'lockingInMs',
       'mediaProviderConfigured',
       'methods',
@@ -110,6 +116,8 @@ describe('contrato IPC de la boveda', () => {
           openedWithRecoveryKey: false,
         },
         mediaProviderConfigured: false,
+        hordeConfigured: false,
+        hordeAnonymous: false,
       },
       recoveryKey: 'ABCD-EFGH-JKMN-PQRS-TVWX-YZ23-4567-89AB',
     });

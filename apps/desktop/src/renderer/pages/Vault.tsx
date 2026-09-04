@@ -10,6 +10,7 @@ import type { ConfigSummary } from '../useConfig.js';
 import {
   formatAutoLockOption,
   formatLockCountdown,
+  type VaultCharacterView,
   type VaultController,
 } from '../useVault.js';
 import { imageBlockReason } from '../../shared/vault-image-capability.js';
@@ -18,7 +19,18 @@ import {
   modelForProvider,
   modelsForProvider,
 } from '../../shared/model-selection.js';
-import { describeConversationMemoryStatus, type ModelDefinition } from '@luxy/shared';
+import {
+  HORDE_ANIME_MODELS,
+  HORDE_REALISTIC_MODELS,
+  describeConversationMemoryStatus,
+  describeHordeCharacter,
+  hordeRecipeSchema,
+  recipeDefaultsFor,
+  type HordeBaseline,
+  type HordeLora,
+  type HordeRecipe,
+  type ModelDefinition,
+} from '@luxy/shared';
 
 /** debe coincidir con AUTO_LOCK_MINUTES del proceso principal */
 const AUTO_LOCK_CHOICES = [1, 5, 15, 30, 60, 240, 0] as const;
@@ -368,7 +380,135 @@ function ConversationPanel({
 }
 
 /**
- * clave del proveedor de imagenes.
+ * los dos proveedores de imagen, en el orden en que le sirven a quien mira.
+ *
+ * AI Horde va primero porque es gratis de verdad y no pide tarjeta: quien no
+ * quiera pagar nada tiene que ver esa puerta antes que la otra. El de pago
+ * sigue debajo sin recortes, porque hace vídeo y el horde no.
+ *
+ * Las dos claves son cuentas distintas y se guardan por separado: tener una no
+ * habilita la otra.
+ */
+function ImageProvidersPanel({ vault }: { vault: VaultController }): JSX.Element {
+  return (
+    <>
+      <HordeKeyPanel vault={vault} />
+      <MediaKeyPanel vault={vault} />
+    </>
+  );
+}
+
+/**
+ * clave de AI Horde, el proveedor gratuito.
+ *
+ * Aqui no hay nada que comprar: la red la sostienen ordenadores prestados y los
+ * kudos deciden el turno en la cola, no el precio. Lo que si hay que decir sin
+ * rodeos es lo de la clave anonima, porque el horde le fuerza `shared` y eso
+ * dona a un conjunto de datos publico justo lo que se genera en una boveda
+ * privada.
+ *
+ * Los kudos NO se piden al montar: es una llamada de red y la dispara el
+ * usuario, igual que hace el panel de memoria de esta misma pantalla.
+ */
+function HordeKeyPanel({ vault }: { vault: VaultController }): JSX.Element {
+  const [apiKey, setApiKey] = useState('');
+  const configured = vault.status.hordeConfigured;
+  const anonymous = vault.status.hordeAnonymous;
+  const account = vault.hordeAccount;
+
+  return (
+    <Panel
+      title="Gratis: AI Horde"
+      actions={
+        !configured ? (
+          <Tag tone="idle">sin clave</Tag>
+        ) : anonymous ? (
+          <Tag tone="warn">clave anónima</Tag>
+        ) : (
+          <Tag tone="ok">clave guardada</Tag>
+        )
+      }
+    >
+      <p className="vault-prose">
+        AI Horde genera imágenes en ordenadores que presta otra gente. Es gratis
+        y <strong>no pide método de pago</strong>: la clave se saca registrándose
+        en{' '}
+        <a href="https://aihorde.net" target="_blank" rel="noreferrer">
+          aihorde.net
+        </a>
+        . No genera vídeo; para eso está el proveedor de pago de abajo.
+      </p>
+
+      <Field
+        label={configured ? 'Sustituir la clave' : 'Clave de AI Horde'}
+        hint="Se envía sólo a AI Horde. Se guarda cifrada con tu cuenta de Windows y no vuelve a mostrarse."
+      >
+        <input
+          type="password"
+          value={apiKey}
+          autoComplete="off"
+          placeholder={configured ? 'Introduce una nueva para sustituirla' : 'Pega la clave'}
+          onChange={(event) => setApiKey(event.target.value)}
+        />
+      </Field>
+
+      <div className="row">
+        <button
+          className="btn btn--primary"
+          disabled={apiKey.length === 0 || vault.busy}
+          onClick={() => {
+            void vault.setHordeKey(apiKey).then(() => setApiKey(''));
+          }}
+        >
+          Guardar clave
+        </button>
+        {configured && (
+          <button
+            className="btn btn--danger"
+            disabled={vault.busy}
+            onClick={() => void vault.deleteHordeKey()}
+          >
+            Borrar
+          </button>
+        )}
+        {configured && (
+          <button className="btn" disabled={vault.busy} onClick={() => void vault.readHordeAccount()}>
+            Ver mis kudos
+          </button>
+        )}
+      </div>
+
+      {anonymous && (
+        <Notice tone="warn">
+          Estás usando la clave anónima <code>0000000000</code>. Funciona, pero
+          el horde obliga a <strong>compartir</strong> con ella: todo lo que
+          generes se dona a un conjunto de datos público. En una bóveda privada
+          eso es lo contrario de lo que se espera. Una clave propia de aihorde.net
+          es gratis, tarda un minuto y no comparte nada.
+        </Notice>
+      )}
+
+      {account !== null && (
+        <Readout
+          items={[
+            { label: 'Usuario', value: account.username },
+            { label: 'Kudos', value: String(account.kudos) },
+            { label: 'Peticiones a la vez', value: String(account.concurrency) },
+          ]}
+        />
+      )}
+
+      <p className="field__hint">
+        Los kudos no son dinero: no se compran y no se gastan en euros. Deciden
+        en qué puesto de la cola entra tu petición. Con cero kudos se genera
+        igual, sólo que esperando más.
+      </p>
+    </Panel>
+  );
+}
+
+/**
+ * clave del proveedor de imagenes DE PAGO.
  *
  * Vive aqui y no en Conexiones a proposito. Conexiones gestiona las pasarelas
  * de texto, y su formulario **rechaza** este nombre: es un secreto reservado,
@@ -385,13 +525,14 @@ function MediaKeyPanel({ vault }: { vault: VaultController }): JSX.Element {
 
   return (
     <Panel
-      title="Proveedor de imágenes"
+      title="De pago: proveedor de imágenes y vídeo"
       actions={configured ? <Tag tone="ok">clave guardada</Tag> : <Tag tone="idle">sin clave</Tag>}
     >
       <p className="vault-prose">
-        Sin clave, Luxy no ofrece generar imágenes: ni en el panel de abajo ni
-        dentro de una conversación. Se guarda cifrada con tu cuenta de Windows y
-        no vuelve a mostrarse.
+        Sin clave, Luxy no ofrece generar imágenes con él: ni en el panel de
+        generación ni dentro de una conversación. Se guarda cifrada con tu cuenta
+        de Windows y no vuelve a mostrarse. Es el único de los dos que hace
+        vídeo, y aquí cada personaje y cada generación cuestan créditos.
       </p>
 
       <Field
@@ -466,6 +607,18 @@ function ImageOutcome({
       </Notice>
     );
   }
+  // los kudos NO son créditos: no se compran y no se gastan en euros. Llamarlos
+  // igual en una pantalla donde el otro proveedor cobra de verdad se lee como
+  // que la opción gratis está cobrando
+  if (image.costUnit === 'kudos') {
+    return (
+      <Notice tone="ok">
+        Imagen generada y cifrada en esta conversación · {image.costCredits}{' '}
+        kudos, que no son dinero: sólo tu puesto en la cola. Aparece abajo, con
+        el resto de archivos.
+      </Notice>
+    );
+  }
   return (
     <Notice tone="ok">
       Imagen generada y cifrada en esta conversación · {image.costCredits}{' '}
@@ -500,7 +653,14 @@ function InstructionsPanel({
   const imageBlock = imageBlockReason({
     characterId: characterValue,
     characterInVault: knownCharacter !== undefined,
-    hasApiKey: vault.status.mediaProviderConfigured,
+    // la clave que hace falta es la del proveedor de ESTE personaje. Preguntar
+    // siempre por la de pago dejaría «sin clave» a un personaje del horde que
+    // está perfectamente configurado, que es la misma regla que aplica el
+    // proceso principal al armar el prompt
+    hasApiKey:
+      knownCharacter?.provider === 'horde'
+        ? vault.status.hordeConfigured
+        : vault.status.mediaProviderConfigured,
   });
 
   return (
@@ -866,6 +1026,599 @@ function ImportCharacterForm({
   );
 }
 
+/** el tope de la receta: mas de cuatro modelos los rechaza `hordeRecipeSchema` */
+const HORDE_MAX_MODELS = 4;
+
+/** el tope del horde: la peticion con un sexto LoRA se rechaza entera */
+const HORDE_MAX_LORAS = 5;
+
+/** un modelo ofrecido en la lista, con la foto de workers del dia que se anotó */
+interface HordeModelOption {
+  readonly name: string;
+  readonly workers: number;
+  readonly baseline: HordeBaseline;
+}
+
+type HordeStyle = 'anime' | 'realistic';
+
+/**
+ * de que lista salen los modelos y como se le escribe al generador.
+ *
+ * No es solo estetico: los modelos de anime se guian por etiquetas booru y los
+ * realistas por prosa. Escribirle a uno como al otro empeora el resultado sin
+ * dar ningun error.
+ */
+const HORDE_STYLES: Record<
+  HordeStyle,
+  {
+    label: string;
+    models: readonly HordeModelOption[];
+    promptStyle: HordeRecipe['promptStyle'];
+    appearance: string;
+    outfit: string;
+  }
+> = {
+  anime: {
+    label: 'Anime',
+    models: HORDE_ANIME_MODELS,
+    promptStyle: 'tags',
+    appearance: '1girl, long black hair, green eyes, small mole under left eye',
+    outfit: 'white blouse, denim jacket, black pleated skirt',
+  },
+  realistic: {
+    label: 'Realista',
+    models: HORDE_REALISTIC_MODELS,
+    promptStyle: 'prose',
+    appearance:
+      'a woman in her late twenties, dark wavy hair, green eyes, a small mole under her left eye',
+    outfit: 'a white blouse and a worn denim jacket',
+  },
+};
+
+/**
+ * de que lista viene un personaje que ya existe.
+ *
+ * Se mira por el modelo y no por `promptStyle`, porque el modelo es lo que de
+ * verdad decide el aspecto; el estilo de prompt es el desempate cuando la
+ * receta trae un modelo que ya no esta en ninguna de las dos listas.
+ */
+function hordeStyleOf(recipe: HordeRecipe | null): HordeStyle {
+  if (recipe === null) return 'anime';
+  for (const style of ['anime', 'realistic'] as const) {
+    const known = HORDE_STYLES[style].models;
+    if (recipe.models.some((name) => known.some((option) => option.name === name))) return style;
+  }
+  return recipe.promptStyle === 'tags' ? 'anime' : 'realistic';
+}
+
+/** con que se esta generando ese personaje, para leerlo de un vistazo en la lista */
+function hordeModelSummary(recipe: HordeRecipe | null): string {
+  if (recipe === null) return 'sin modelo';
+  const first = recipe.models[0];
+  if (first === undefined) return 'sin modelo';
+  const rest = recipe.models.length - 1;
+  return rest === 0 ? first : `${first} +${rest}`;
+}
+
+/**
+ * crear o corregir un personaje de AI Horde.
+ *
+ * Alli no hay personajes en ningun servidor: el personaje **es** esta receta,
+ * guardada cifrada en este equipo. Por eso editarla no cuesta nada y se puede
+ * repetir hasta que la cara salga bien, al reves que en el proveedor de pago.
+ *
+ * El formulario se remonta con `key` cuando cambia a quien edita: asi el estado
+ * inicial se lee una sola vez y no hace falta un efecto que lo sincronice.
+ */
+function HordeCharacterForm({
+  vault,
+  editing,
+  onSaved,
+  onCancel,
+}: {
+  vault: VaultController;
+  /** a quien se corrige; `null` para crear uno nuevo */
+  editing: VaultCharacterView | null;
+  onSaved: (characterId: string, description: string) => void;
+  onCancel: () => void;
+}): JSX.Element {
+  const base = editing?.recipe ?? null;
+  const initial = recipeDefaultsFor('sdxl');
+
+  const [label, setLabel] = useState(editing?.label ?? '');
+  const [style, setStyle] = useState<HordeStyle>(hordeStyleOf(base));
+  const [models, setModels] = useState<string[]>(base === null ? [] : [...base.models]);
+  const [appearance, setAppearance] = useState(base?.appearance ?? '');
+  const [outfit, setOutfit] = useState(base?.outfit ?? '');
+  const [negative, setNegative] = useState(base?.negative ?? '');
+  const [seed, setSeed] = useState(base?.seed ?? '');
+  const [width, setWidth] = useState(base?.width ?? initial.width);
+  const [height, setHeight] = useState(base?.height ?? initial.height);
+  const [steps, setSteps] = useState(base?.steps ?? initial.steps);
+  // una receta que ya existe llega con sus numeros decididos: elegir un modelo
+  // no debe pisarlos. Y en cuanto alguien los toca a mano, tampoco
+  const [tuned, setTuned] = useState(base !== null);
+  const [cfgScale, setCfgScale] = useState(base?.cfgScale ?? initial.cfgScale);
+  const [clipSkip, setClipSkip] = useState(base?.clipSkip ?? initial.clipSkip);
+  // se copia cada LoRA en vez de compartir el array de la receta: editarlo en
+  // sitio mutaria el personaje guardado aunque despues se cancele
+  const [loras, setLoras] = useState<HordeLora[]>(
+    base === null ? [] : base.loras.map((lora) => ({ ...lora })),
+  );
+  const [denoisingStrength, setDenoisingStrength] = useState(base?.denoisingStrength ?? 0.45);
+  // `null` significa «no la he escrito»: entonces vale la que sale de la receta
+  const [description, setDescription] = useState<string | null>(editing?.description ?? null);
+  const [problem, setProblem] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  const preset = HORDE_STYLES[style];
+
+  // un LoRA sin palabra de activacion no la lleva como cadena vacia: el campo
+  // se omite, porque '' viajaria al horde como un disparador literal vacio
+  const cleanLoras: HordeLora[] = loras.map((lora) => {
+    const trigger = lora.injectTrigger?.trim() ?? '';
+    const clean: HordeLora = {
+      name: lora.name.trim(),
+      isVersion: lora.isVersion,
+      model: lora.model,
+      clip: lora.clip,
+    };
+    return trigger.length === 0 ? clean : { ...clean, injectTrigger: trigger };
+  });
+
+  // lo que la receta ya tenia y este formulario no edita —muestreador, retoques,
+  // hiresFix— se conserva: corregir la cara no es motivo para tirar el resto
+  const candidate = {
+    ...(base ?? {}),
+    models,
+    appearance: appearance.trim(),
+    outfit: outfit.trim(),
+    negative: negative.trim(),
+    seed: seed.trim().length === 0 ? null : seed.trim(),
+    width,
+    height,
+    steps,
+    cfgScale,
+    clipSkip,
+    loras: cleanLoras,
+    denoisingStrength,
+    promptStyle: preset.promptStyle,
+  };
+  const parsed = hordeRecipeSchema.safeParse(candidate);
+  const auto = parsed.success ? describeHordeCharacter(label, parsed.data) : '';
+  const descriptionValue = description ?? auto;
+
+  const applyStyle = (next: HordeStyle): void => {
+    setStyle(next);
+    // los modelos son de una lista o de la otra: dejar marcados los de la
+    // anterior los escondia de la vista sin quitarlos de la receta
+    if (next !== style) setModels([]);
+  };
+
+  const toggleModel = (option: HordeModelOption): void => {
+    if (models.includes(option.name)) {
+      setModels(models.filter((name) => name !== option.name));
+      return;
+    }
+    if (models.length >= HORDE_MAX_MODELS) return;
+    // el primero decide la familia, y con ella el tamaño y el clipSkip: SD1 a
+    // 1024 produce cuerpos deformes, y SDXL a 512 pierde detalle
+    if (models.length === 0 && !tuned) {
+      const defaults = recipeDefaultsFor(option.baseline);
+      setWidth(defaults.width);
+      setHeight(defaults.height);
+      setSteps(defaults.steps);
+      setCfgScale(defaults.cfgScale);
+      setClipSkip(defaults.clipSkip);
+    }
+    setModels([...models, option.name]);
+  };
+
+  const updateLora = (index: number, patch: Partial<HordeLora>): void => {
+    setLoras(loras.map((lora, each) => (each === index ? { ...lora, ...patch } : lora)));
+  };
+
+  const save = (): void => {
+    // el motivo mas frecuente, dicho en español: el de Zod para una lista vacía
+    // llega en inglés y no explica para qué sirve el modelo
+    if (models.length === 0) {
+      setProblem('Marca al menos un modelo: sin ninguno el horde no sabe con qué generar.');
+      return;
+    }
+    // el de Zod para una fila a medias sería «loras.0.name: String must contain
+    // at least 1 character(s)», que no dice qué hacer con ella
+    if (cleanLoras.some((lora) => lora.name.length === 0)) {
+      setProblem(
+        'Hay un LoRA sin identificador: escribe el suyo de CivitAI o quítalo de la lista.',
+      );
+      return;
+    }
+    if (!parsed.success) {
+      // el mensaje de Zod aqui es mucho mas util que el error del proceso
+      // principal, que llega despues y sin decir que campo fue
+      setProblem(
+        parsed.error.issues
+          .map((issue) =>
+            issue.path.length === 0 ? issue.message : `${issue.path.join('.')}: ${issue.message}`,
+          )
+          .join('; '),
+      );
+      return;
+    }
+    setProblem(null);
+    const text = descriptionValue.trim();
+    setSaving(true);
+    void vault
+      .saveHordeCharacter({
+        // vacio crea uno nuevo; con valor sustituye a ese, conservando sus
+        // imagenes y sus recuerdos
+        characterId: editing?.characterId ?? '',
+        label: label.trim(),
+        description: text,
+        recipe: parsed.data,
+      })
+      .then((id) => {
+        if (id === null) return;
+        onSaved(id, text);
+      })
+      .finally(() => setSaving(false));
+  };
+
+  return (
+    <>
+      <p className="field__hint">
+        Un personaje de AI Horde no existe en ningún servidor: <strong>es</strong>{' '}
+        esta receta, guardada cifrada aquí. Por eso corregirla no cuesta nada y
+        puedes repetirla hasta que la cara salga bien.
+      </p>
+
+      <Field label="Nombre">
+        <input
+          value={label}
+          disabled={saving}
+          placeholder="Luxy"
+          onChange={(event) => setLabel(event.target.value)}
+        />
+      </Field>
+
+      <Field
+        label="Estilo"
+        hint="Cambia los modelos que se ofrecen y cómo se le escribe: etiquetas en anime, prosa en realista."
+      >
+        <div className="row">
+          {(['anime', 'realistic'] as const).map((option) => (
+            <button
+              key={option}
+              className={style === option ? 'btn btn--primary' : 'btn btn--quiet'}
+              disabled={saving}
+              onClick={() => applyStyle(option)}
+            >
+              {HORDE_STYLES[option].label}
+            </button>
+          ))}
+        </div>
+      </Field>
+
+      <Field
+        label={`Modelos (hasta ${HORDE_MAX_MODELS})`}
+        hint="Marcar varios suma sus workers y acorta la espera; no cuesta kudos de más."
+      >
+        <div className="vault-models">
+          {preset.models.map((option) => {
+            const chosen = models.includes(option.name);
+            const live = vault.hordeModels?.find((each) => each.name === option.name) ?? null;
+            return (
+              <label key={option.name} className="check">
+                <input
+                  type="checkbox"
+                  checked={chosen}
+                  disabled={saving || (!chosen && models.length >= HORDE_MAX_MODELS)}
+                  onChange={() => toggleModel(option)}
+                />
+                <span>
+                  {option.name}
+                  <small>
+                    {option.baseline === 'sdxl' ? 'SDXL' : 'SD1'} · {option.workers} workers
+                    cuando se anotó
+                    {live !== null && ` · ahora ${live.count}, espera ${live.eta} s`}
+                    {live === null &&
+                      vault.hordeModels !== null &&
+                      vault.hordeModels.length > 0 &&
+                      ' · ahora no lo sirve nadie'}
+                  </small>
+                </span>
+              </label>
+            );
+          })}
+        </div>
+      </Field>
+
+      <div className="row">
+        <button
+          className="btn btn--quiet"
+          disabled={saving}
+          // no se pregunta al montar: es una llamada de red, y la dispara quien
+          // la quiera, igual que hace el panel de memoria de esta pantalla
+          onClick={() => void vault.loadHordeModels()}
+        >
+          Ver disponibilidad
+        </button>
+        {vault.hordeModels !== null && vault.hordeModels.length > 0 && (
+          <span className="field__hint">
+            Workers y espera de ahora mismo. Cambian cada pocas horas.
+          </span>
+        )}
+        {vault.hordeModels !== null && vault.hordeModels.length === 0 && (
+          <span className="field__hint">
+            La consulta no ha devuelto ningún modelo: puede ser un fallo de red.
+            Los de la lista siguen valiendo.
+          </span>
+        )}
+      </div>
+
+      <Field
+        label="Aspecto fijo, en inglés"
+        hint="Es lo único que se repite palabra por palabra en cada imagen: es lo que hace que sea la misma persona."
+      >
+        <textarea
+          rows={2}
+          value={appearance}
+          disabled={saving}
+          placeholder={preset.appearance}
+          onChange={(event) => setAppearance(event.target.value)}
+        />
+      </Field>
+
+      <Field label="Ropa habitual, en inglés" hint="Va aparte porque cambia mucho más a menudo que la cara.">
+        <textarea
+          rows={2}
+          value={outfit}
+          disabled={saving}
+          placeholder={preset.outfit}
+          onChange={(event) => setOutfit(event.target.value)}
+        />
+      </Field>
+
+      <Field
+        label="Negativo propio (opcional)"
+        hint="Lo que no quieres ver nunca, separado por comas."
+      >
+        <input
+          value={negative}
+          disabled={saving}
+          placeholder="blurry, extra fingers, watermark"
+          onChange={(event) => setNegative(event.target.value)}
+        />
+      </Field>
+
+      <Field label="Semilla (opcional)">
+        <input
+          value={seed}
+          disabled={saving}
+          placeholder="sin fijar"
+          onChange={(event) => setSeed(event.target.value)}
+        />
+      </Field>
+      <div className="row">
+        <button
+          className="btn btn--quiet"
+          disabled={saving}
+          onClick={() => setSeed(String(Math.floor(Math.random() * 2147483647)))}
+        >
+          Fijar una al azar
+        </button>
+        <span className="field__hint">
+          Con la misma semilla la cara se repite mucho mejor. Sin fijarla, cambia
+          en cada imagen.
+        </span>
+      </div>
+
+      <details className="vault-generate">
+        <summary>LoRA de personaje (lo único que fija la cara)</summary>
+        <p className="field__hint">
+          El LoRA tiene que estar <strong>publicado en CivitAI</strong>: al horde
+          no se le puede subir uno propio. Cada uno cuesta <strong>+3 kudos</strong>{' '}
+          y sólo <strong>9 de los 18 workers</strong> de hoy los aceptan, así que
+          pedirlos <strong>reduce a la mitad</strong> quién puede atenderte. Con
+          «es un id de versión» marcado, el valor tiene que ser el id{' '}
+          <strong>numérico</strong> de la versión de CivitAI, no su nombre.
+        </p>
+
+        {loras.map((lora, index) => (
+          // la clave es la posición porque un LoRA no tiene identificador
+          // propio y todos los campos los gobierna este estado
+          <div key={index} className="vault-lora">
+            <div className="row">
+              <Field label="Identificador o nombre en CivitAI">
+                <input
+                  value={lora.name}
+                  disabled={saving}
+                  placeholder={lora.isVersion ? '1234567' : 'nombre exacto o id de la página'}
+                  onChange={(event) => updateLora(index, { name: event.target.value })}
+                />
+              </Field>
+              <button
+                className="vault-character__forget"
+                title="Quitar este LoRA"
+                disabled={saving}
+                onClick={() => setLoras(loras.filter((_, each) => each !== index))}
+              >
+                ×
+              </button>
+            </div>
+
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={lora.isVersion}
+                disabled={saving}
+                onChange={(event) => updateLora(index, { isVersion: event.target.checked })}
+              />
+              <span>
+                Es un id de versión
+                <small>
+                  Marcado, el identificador es el número de una versión concreta.
+                  Sin marcar, el nombre exacto o el id de la página del modelo.
+                </small>
+              </span>
+            </label>
+
+            <div className="row">
+              <Field label="Peso del modelo">
+                <input
+                  type="number"
+                  min={-5}
+                  max={5}
+                  step={0.05}
+                  value={lora.model}
+                  disabled={saving}
+                  onChange={(event) => updateLora(index, { model: Number(event.target.value) })}
+                />
+              </Field>
+              <Field label="Peso del CLIP">
+                <input
+                  type="number"
+                  min={-5}
+                  max={5}
+                  step={0.05}
+                  value={lora.clip}
+                  disabled={saving}
+                  onChange={(event) => updateLora(index, { clip: Number(event.target.value) })}
+                />
+              </Field>
+            </div>
+
+            <Field
+              label="Palabra de activación (opcional)"
+              hint="Si el LoRA necesita una y no se pone, el LoRA casi no hace nada. El valor «any» coge la primera disponible."
+            >
+              <input
+                maxLength={30}
+                value={lora.injectTrigger ?? ''}
+                disabled={saving}
+                placeholder="any"
+                onChange={(event) => updateLora(index, { injectTrigger: event.target.value })}
+              />
+            </Field>
+          </div>
+        ))}
+
+        <div className="row">
+          <button
+            className="btn btn--quiet"
+            disabled={saving || loras.length >= HORDE_MAX_LORAS}
+            onClick={() => setLoras([...loras, { name: '', isVersion: false, model: 1, clip: 1 }])}
+          >
+            Añadir LoRA
+          </button>
+          <span className="field__hint">
+            {loras.length} de {HORDE_MAX_LORAS}.
+            {loras.length >= HORDE_MAX_LORAS && ' El horde no acepta más.'}
+          </span>
+        </div>
+      </details>
+
+      <details className="vault-generate">
+        <summary>Avanzado</summary>
+        <p className="field__hint">
+          Los valores los pone el modelo elegido y casi nunca hay que tocarlos:
+          ahora mismo cfgScale {cfgScale} y clipSkip {clipSkip}. Los lados van de
+          512 a 1536 y tienen que ser múltiplos de 64.
+        </p>
+        <div className="row">
+          <Field label="Ancho">
+            <input
+              type="number"
+              min={512}
+              max={1536}
+              step={64}
+              value={width}
+              disabled={saving}
+              onChange={(event) => {
+                setTuned(true);
+                setWidth(Number(event.target.value));
+              }}
+            />
+          </Field>
+          <Field label="Alto">
+            <input
+              type="number"
+              min={512}
+              max={1536}
+              step={64}
+              value={height}
+              disabled={saving}
+              onChange={(event) => {
+                setTuned(true);
+                setHeight(Number(event.target.value));
+              }}
+            />
+          </Field>
+          <Field label="Pasos" hint="Más pasos no arreglan un prompt malo; sólo tardan más.">
+            <input
+              type="number"
+              min={1}
+              max={60}
+              value={steps}
+              disabled={saving}
+              onChange={(event) => {
+                setTuned(true);
+                setSteps(Number(event.target.value));
+              }}
+            />
+          </Field>
+        </div>
+
+        <Field
+          label="Cuánto puede cambiar respecto a la imagen de partida"
+          hint="Sólo cuenta al partir de una imagen anterior. Por debajo de 0,3 devuelve casi la misma; por encima de 0,6 se pierde la cara."
+        >
+          <input
+            type="number"
+            min={0.01}
+            max={1}
+            step={0.05}
+            value={denoisingStrength}
+            disabled={saving}
+            onChange={(event) => setDenoisingStrength(Number(event.target.value))}
+          />
+        </Field>
+      </details>
+
+      <Field
+        label="Quién es (lo lee el modelo)"
+        hint="El modelo que escribe no ve ninguna imagen: sin esto no sabe a quién encarna y responde como un asistente."
+      >
+        <textarea
+          rows={2}
+          value={descriptionValue}
+          disabled={saving}
+          placeholder="Se compone sola con el nombre y el aspecto; puedes reescribirla."
+          onChange={(event) => setDescription(event.target.value)}
+        />
+      </Field>
+
+      {problem !== null && <Notice tone="fault">{problem}</Notice>}
+
+      <div className="row">
+        <button className="btn btn--primary" disabled={saving} onClick={save}>
+          {saving ? 'Guardando…' : editing === null ? 'Guardar personaje' : 'Guardar cambios'}
+        </button>
+        {editing !== null && (
+          <button className="btn btn--quiet" disabled={saving} onClick={onCancel}>
+            Cancelar
+          </button>
+        )}
+      </div>
+      <p className="field__hint">
+        Guardar no llama a ninguna API y no cuesta nada. Lo que escribas aquí
+        viaja a AI Horde cuando generes: la bóveda protege lo que Luxy guarda, no
+        lo que un tercero ve porque se lo envías.
+      </p>
+    </>
+  );
+}
+
 /**
  * generacion de imagen y video.
  *
@@ -901,6 +1654,25 @@ function GeneratePanel({
   const [creating, setCreating] = useState(false);
   const [created, setCreated] = useState<string | null>(null);
   const [label, setLabel] = useState('');
+  // a quien se esta corrigiendo del horde, y si su formulario esta desplegado.
+  // El desplegable va controlado porque «Editar» tiene que abrirlo desde fuera
+  const [hordeEditing, setHordeEditing] = useState<VaultCharacterView | null>(null);
+  const [hordeFormOpen, setHordeFormOpen] = useState(false);
+  // cadena vacia = empezar de cero, que es lo normal
+  const [fromMediaId, setFromMediaId] = useState('');
+
+  // partir de una imagen solo existe en el horde: el de pago no tiene img2img
+  const hordeCharacter =
+    vault.characters.find(
+      (character) =>
+        character.characterId === characterId.trim() && character.provider === 'horde',
+    ) ?? null;
+  const sourceOptions = vault.media.filter((item) => item.mimeType.startsWith('image/'));
+  // una eleccion que ya no esta en la lista —otra conversacion, un medio
+  // olvidado— no puede seguir viajando: seria un identificador que no existe
+  const sourceMediaId = sourceOptions.some((item) => item.mediaId === fromMediaId)
+    ? fromMediaId
+    : '';
 
   const disabled = vault.openConversationId === null;
   const canGenerate =
@@ -917,11 +1689,17 @@ function GeneratePanel({
         </Notice>
       )}
 
-      {!vault.status.mediaProviderConfigured && (
+      {!vault.status.mediaProviderConfigured && !vault.status.hordeConfigured && (
         <Notice tone="warn">
-          Falta la clave del proveedor de imágenes. Está más abajo, en
-          «Proveedor de imágenes»: sin ella no se puede generar nada, ni aquí ni
-          desde la conversación.
+          No hay ninguna clave guardada: ni la gratuita de AI Horde ni la del
+          proveedor de pago. Las dos están más abajo; sin una de ellas no se
+          puede generar nada, ni aquí ni desde la conversación.
+        </Notice>
+      )}
+      {!vault.status.mediaProviderConfigured && vault.status.hordeConfigured && (
+        <Notice tone="idle">
+          Sólo está la clave gratuita de AI Horde: generan sus personajes, y sólo
+          imágenes. El vídeo lo hace el proveedor de pago, que está más abajo.
         </Notice>
       )}
 
@@ -939,11 +1717,61 @@ function GeneratePanel({
       <details className="vault-generate">
         <summary>Ya tengo un personaje</summary>
         <p className="field__hint">
-          El proveedor no sabe listar personajes, así que uno creado fuera de
-          Luxy —o antes de que se guardaran— hay que darlo de alta a mano. Crear
-          otro costaría créditos.
+          El proveedor de pago no sabe listar personajes, así que uno creado
+          fuera de Luxy —o antes de que se guardaran— hay que darlo de alta a
+          mano. Crear otro costaría créditos.
         </p>
         <ImportCharacterForm vault={vault} onImported={() => setCreated(null)} />
+      </details>
+
+      <details
+        className="vault-generate"
+        open={hordeFormOpen}
+        onToggle={(event) => setHordeFormOpen(event.currentTarget.open)}
+      >
+        <summary>
+          {hordeEditing === null
+            ? 'Crear un personaje gratis, con AI Horde'
+            : `Editar ${hordeEditing.label.length > 0 ? hordeEditing.label : 'este personaje'}`}
+        </summary>
+
+        {!vault.status.hordeConfigured && (
+          <Notice tone="warn">
+            Falta la clave de AI Horde. Está más abajo, en «Gratis: AI Horde», y
+            es gratis y sin tarjeta. Puedes escribir la receta y guardarla igual,
+            pero no generará ninguna imagen hasta que la pongas.
+          </Notice>
+        )}
+        {vault.status.hordeAnonymous && (
+          <Notice tone="warn">
+            Con la clave anónima el horde <strong>dona</strong> lo que generes a
+            un conjunto de datos público. Cambiarla por una propia es gratis y
+            está más abajo.
+          </Notice>
+        )}
+
+        <HordeCharacterForm
+          // remontar al cambiar de personaje: asi el formulario nace con sus
+          // valores y no hace falta sincronizarlo despues
+          key={hordeEditing?.characterId ?? 'nuevo'}
+          vault={vault}
+          editing={hordeEditing}
+          onSaved={(id, description) => {
+            // corregir el pelo de un personaje CUALQUIERA no puede cambiar quién
+            // responde en la conversación abierta. Crear uno sí lo adopta, que
+            // es lo que se espera al acabar de crearlo; editar, no
+            const creando = hordeEditing === null;
+            setHordeEditing(null);
+            setHordeFormOpen(false);
+            if (!creando) return;
+            setCharacterId(id);
+            onCharacterReady(id, description);
+          }}
+          onCancel={() => {
+            setHordeEditing(null);
+            setHordeFormOpen(false);
+          }}
+        />
       </details>
 
       {vault.characters.length > 0 && (
@@ -969,7 +1797,9 @@ function GeneratePanel({
                     {character.label.length > 0 ? character.label : 'Sin nombre'}
                   </span>
                   <span className="vault-list__meta">
-                    {character.modelId === 'anime-pure-v1' ? 'anime' : 'realista'}
+                    {character.provider === 'horde'
+                      ? `gratis · AI Horde · ${hordeModelSummary(character.recipe)}`
+                      : `de pago · ${character.modelId === 'anime-pure-v1' ? 'anime' : 'realista'}`}
                   </span>
                 </button>
                 {character.characterId === activeCharacterId ? (
@@ -985,6 +1815,20 @@ function GeneratePanel({
                     Usar
                   </button>
                 )}
+                {/* editar solo tiene sentido en los del horde: alli el personaje
+                    es su receta y corregirla es gratis. En el de pago vive en su
+                    servidor y no se puede cambiar */}
+                {character.provider === 'horde' && (
+                  <button
+                    className="btn btn--quiet"
+                    onClick={() => {
+                      setHordeEditing(character);
+                      setHordeFormOpen(true);
+                    }}
+                  >
+                    Editar
+                  </button>
+                )}
                 <button
                   className="vault-character__forget"
                   title="Olvidar aquí. En el proveedor sigue existiendo."
@@ -998,8 +1842,10 @@ function GeneratePanel({
           <p className="field__hint">
             Tus personajes guardados. Pulsa <strong>Usar</strong> para que sea
             quien responda en esta conversación: queda fijado al enviar el
-            próximo mensaje. Se guardan aquí porque el proveedor{' '}
-            <strong>no sabe listarlos</strong> y crearlos cuesta créditos.
+            próximo mensaje. Los del proveedor <strong>de pago</strong> se
+            guardan aquí porque él <strong>no sabe listarlos</strong> y crearlos
+            cuesta créditos; los de AI Horde viven sólo aquí, así que se pueden
+            editar tantas veces como haga falta sin pagar nada.
           </p>
         </>
       )}
@@ -1132,9 +1978,47 @@ function GeneratePanel({
         </Notice>
       )}
       <p className="field__hint">
-        El identificador vive en el proveedor, no aquí. Crear un personaje genera
-        su avatar y <strong>consume créditos</strong>.
+        Esto crea un personaje en el <strong>proveedor de pago</strong>: su
+        identificador vive allí, no aquí, generar su avatar{' '}
+        <strong>consume créditos</strong> y después no se puede cambiar. El de AI
+        Horde, arriba, es gratis y se corrige cuando quieras.
       </p>
+
+      {hordeCharacter !== null && sourceOptions.length > 0 && (
+        <>
+          <Field
+            label="Partir de una imagen de esta conversación"
+            hint="Opcional. Sirve para volver a intentar una imagen que ya salió bien."
+          >
+            <select
+              value={sourceMediaId}
+              disabled={vault.generating}
+              onChange={(event) => setFromMediaId(event.target.value)}
+            >
+              <option value="">Empezar de cero</option>
+              {sourceOptions.map((item) => (
+                <option key={item.mediaId} value={item.mediaId}>
+                  {item.displayName !== null && item.displayName.length > 0
+                    ? item.displayName
+                    : item.mediaId.slice(0, 8)}
+                </option>
+              ))}
+            </select>
+          </Field>
+          {sourceMediaId.length > 0 && (
+            <Notice tone="warn">
+              Esto <strong>varía</strong> esa imagen. <strong>No</strong> lleva la
+              cara del personaje a una escena nueva: AI Horde no sabe hacer eso.
+              Y cuesta <strong>un 30 % más de kudos</strong>.
+            </Notice>
+          )}
+          <p className="field__hint">
+            Cuánto se aleja del original lo decide el personaje, en su campo
+            «Cuánto puede cambiar»: por debajo de 0,3 devuelve casi la misma
+            imagen y por encima de 0,6 se pierde la cara.
+          </p>
+        </>
+      )}
 
       <Field
         label="Qué quieres ver en la imagen"
@@ -1158,7 +2042,14 @@ function GeneratePanel({
           disabled={!canGenerate}
           onClick={() => {
             void vault
-              .generateMedia({ characterId: characterId.trim(), prompt: prompt.trim(), kind })
+              .generateMedia({
+                characterId: characterId.trim(),
+                prompt: prompt.trim(),
+                kind,
+                // sin imagen de partida el campo no viaja: el horde cobra un
+                // 30 % mas solo por llevarla
+                fromMediaId: sourceMediaId.length === 0 ? undefined : sourceMediaId,
+              })
               .then((ok) => {
                 if (ok) setPrompt('');
               });
@@ -1176,7 +2067,12 @@ function GeneratePanel({
       )}
 
       {vault.lastCost !== null && (
-        <p className="field__hint">Última generación: {vault.lastCost} créditos.</p>
+        <p className="field__hint">
+          Última generación: {vault.lastCost.amount}{' '}
+          {vault.lastCost.unit === 'kudos'
+            ? 'kudos, que no son dinero: sólo tu puesto en la cola.'
+            : 'créditos.'}
+        </p>
       )}
 
       <p className="field__hint">
@@ -1769,7 +2665,7 @@ function UnlockedPanel({ vault }: { vault: VaultController }): JSX.Element {
 
       </Panel>
 
-      <MediaKeyPanel vault={vault} />
+      <ImageProvidersPanel vault={vault} />
 
       <AccountSection vault={vault} />
 

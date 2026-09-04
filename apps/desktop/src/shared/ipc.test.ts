@@ -17,6 +17,8 @@ import {
   configSaveArgsSchema,
   secretNameSchema,
   vaultCharacterImportArgsSchema,
+  vaultCharacterSummarySchema,
+  vaultHordeCharacterSaveArgsSchema,
   vaultCompatibilityArgsSchema,
   vaultMediaAttachArgsSchema,
   vaultMemoryReadArgsSchema,
@@ -107,6 +109,67 @@ describe('validacion de argumentos', () => {
         false,
       );
     }
+  });
+
+  it('un personaje de AI Horde no exige UUID ni existe en ningun servidor', () => {
+    // la diferencia de fondo con el de pago: alli el identificador lo da la API
+    // y aqui no hay API, asi que exigir un UUID del proveedor no tendria a quien
+    // preguntarselo. Lo obligatorio es la receta, que ES el personaje
+    const valido = vaultHordeCharacterSaveArgsSchema.safeParse({
+      label: 'Lia',
+      recipe: { models: ['Prefect Pony'], appearance: '1girl, green eyes' },
+    });
+    expect(valido.success).toBe(true);
+    // crear manda el identificador vacio; editar manda el suyo
+    expect(valido.success && valido.data.characterId).toBe('');
+
+    // sin receta no hay personaje
+    expect(vaultHordeCharacterSaveArgsSchema.safeParse({ label: 'Lia' }).success).toBe(false);
+  });
+
+  it('la receta rechaza lo que AI Horde rechazaria despues', () => {
+    const base = { label: 'Lia', appearance: 'x' };
+    // un lado que no es multiplo de 64 lo rechaza su API; enterarse aqui evita
+    // gastar la espera de la cola para acabar en un 400
+    expect(
+      vaultHordeCharacterSaveArgsSchema.safeParse({
+        ...base,
+        recipe: { models: ['Prefect Pony'], appearance: 'x', width: 800 },
+      }).success,
+    ).toBe(false);
+    // su tope publicado es de cinco, y cada uno cuesta kudos aparte
+    expect(
+      vaultHordeCharacterSaveArgsSchema.safeParse({
+        ...base,
+        recipe: {
+          models: ['Prefect Pony'],
+          appearance: 'x',
+          loras: Array.from({ length: 6 }, (_, index) => ({ name: `l${index}` })),
+        },
+      }).success,
+    ).toBe(false);
+    // sin ningun modelo la peticion no tiene a quien pedirsela
+    expect(
+      vaultHordeCharacterSaveArgsSchema.safeParse({
+        ...base,
+        recipe: { models: [], appearance: 'x' },
+      }).success,
+    ).toBe(false);
+  });
+
+  it('un personaje sin proveedor declarado se lee como del de pago', () => {
+    // los que ya existen en una boveda son todos suyos: sin este defecto, una
+    // boveda anterior dejaria de poder leer su propia lista
+    const leido = vaultCharacterSummarySchema.parse({
+      characterId: '83cc7f03-5eb3-4d03-833f-56dfbe80cd7d',
+      modelId: 'anime-pure-v1',
+      description: '',
+      label: 'Una',
+      avatarObjectKey: null,
+      createdAt: '2026-09-02T08:50:37.000Z',
+    });
+    expect(leido.provider).toBe('xavira');
+    expect(leido.recipe).toBeNull();
   });
 
   it('el pie de foto de un adjunto es opcional y acotado', () => {

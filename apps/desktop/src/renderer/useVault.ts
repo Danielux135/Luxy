@@ -10,7 +10,7 @@
 // Nada de eso se persiste en localStorage, ni en un estado global, ni se envia
 // a ningun sitio.
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { ConversationMemoryStatus } from '@luxy/shared';
+import type { ConversationMemoryStatus, HordeRecipe } from '@luxy/shared';
 import type {
   vaultCompatibilityResultSchema,
   vaultMemoryListResultSchema,
@@ -35,6 +35,15 @@ export interface VaultCharacterView {
   label: string;
   avatarObjectKey: string | null;
   createdAt: string;
+  /** quién genera sus imágenes: el de pago o AI Horde, que es gratis */
+  provider: 'xavira' | 'horde';
+  /**
+   * su aspecto, cuando es de AI Horde.
+   *
+   * Allí no hay personajes en el servidor: esto **es** el personaje, y por eso
+   * la pantalla tiene que poder enseñarlo y corregirlo.
+   */
+  recipe: HordeRecipe | null;
 }
 
 export interface VaultAccountView {
@@ -55,6 +64,10 @@ export interface VaultStatusView {
   account: VaultAccountView;
   /** hay clave guardada del proveedor de imágenes; nunca la clave */
   mediaProviderConfigured: boolean;
+  /** hay clave guardada de AI Horde, el proveedor gratuito */
+  hordeConfigured: boolean;
+  /** esa clave es la anónima: funciona, pero comparte lo que genera */
+  hordeAnonymous: boolean;
 }
 
 const CLOSED: VaultStatusView = {
@@ -65,6 +78,8 @@ const CLOSED: VaultStatusView = {
   lockingInMs: null,
   account: { email: null, signedIn: false, expiresAt: null, openedWithRecoveryKey: false },
   mediaProviderConfigured: false,
+  hordeConfigured: false,
+  hordeAnonymous: false,
 };
 
 /** cada cuanto se refresca la cuenta atras del bloqueo automatico */
@@ -150,6 +165,25 @@ export interface VaultController {
   /** guarda la clave del proveedor de imágenes; el nombre lo pone el main */
   setMediaKey: (apiKey: string) => Promise<boolean>;
   deleteMediaKey: () => Promise<void>;
+  /** guarda la clave de AI Horde, el proveedor de imágenes gratuito */
+  setHordeKey: (apiKey: string) => Promise<boolean>;
+  deleteHordeKey: () => Promise<void>;
+  /** kudos y prioridad de la cuenta del horde; null si no se ha consultado */
+  hordeAccount: { username: string; kudos: number; concurrency: number; anonymous: boolean } | null;
+  readHordeAccount: () => Promise<void>;
+  /** modelos con workers AHORA MISMO; null hasta que se piden */
+  hordeModels: { name: string; count: number; eta: number; jobs: number }[] | null;
+  loadHordeModels: () => Promise<void>;
+  /**
+   * guarda o corrige un personaje de AI Horde. No cuesta nada y se puede
+   * repetir: allí un personaje **es** su receta.
+   */
+  saveHordeCharacter: (input: {
+    characterId: string;
+    label: string;
+    description: string;
+    recipe: HordeRecipe;
+  }) => Promise<string | null>;
   create: (password: string) => Promise<boolean>;
   unlock: (method: 'password' | 'recovery' | 'device', secret?: string) => Promise<boolean>;
   lock: () => Promise<void>;
@@ -171,7 +205,13 @@ export interface VaultController {
    * null si el modelo no pidió ninguna, que es lo normal. Existe para que la
    * interfaz pueda decir por qué no hay imagen: callarse parece un cuelgue.
    */
-  lastImage: { mediaId: string | null; costCredits: number | null; error: string | null } | null;
+  lastImage: {
+    mediaId: string | null;
+    costCredits: number | null;
+    /** en qué se cuenta: los créditos se compran con dinero y los kudos no */
+    costUnit: 'creditos' | 'kudos' | null;
+    error: string | null;
+  } | null;
   /**
    * que le paso al bloque de memoria en el ultimo turno.
    *
@@ -254,11 +294,18 @@ export interface VaultController {
   openMedia: (mediaId: string) => Promise<string | null>;
   generating: boolean;
   /** créditos declarados por el proveedor en la última generación */
-  lastCost: number | null;
+  lastCost: { amount: number; unit: 'creditos' | 'kudos' } | null;
   generateMedia: (input: {
     characterId: string;
     prompt: string;
     kind: 'image' | 'video';
+    /**
+     * parte de una imagen que ya está en esta conversación (img2img).
+     *
+     * Varía una imagen que ya salió bien; no lleva la cara del personaje a una
+     * escena nueva, que es otra cosa y AI Horde no sabe hacerla.
+     */
+    fromMediaId?: string;
   }) => Promise<boolean>;
   /**
    * crea un personaje. Con `withReferenceImage`, el proceso principal abre el
@@ -320,6 +367,16 @@ export function useVault(): VaultController {
   const [characterId, setCharacterId] = useState<string | null>(null);
   const [characterDescription, setCharacterDescription] = useState<string | null>(null);
   const [characters, setCharacters] = useState<VaultCharacterView[]>([]);
+  const [hordeAccount, setHordeAccount] = useState<{
+    username: string;
+    kudos: number;
+    concurrency: number;
+    anonymous: boolean;
+  } | null>(null);
+  // null significa «todavía no se ha preguntado»; [] significa «no hay ninguno»
+  const [hordeModels, setHordeModels] = useState<
+    { name: string; count: number; eta: number; jobs: number }[] | null
+  >(null);
   const [lastImage, setLastImage] = useState<VaultController['lastImage']>(null);
   const [lastMemoryStatus, setLastMemoryStatus] = useState<ConversationMemoryStatus | null>(null);
   const [memoryEpisodes, setMemoryEpisodes] = useState<MemoryEpisode[] | null>(null);
@@ -341,7 +398,10 @@ export function useVault(): VaultController {
   const [media, setMedia] = useState<PrivateMediaItem[]>([]);
   const [attaching, setAttaching] = useState(false);
   const [generating, setGenerating] = useState(false);
-  const [lastCost, setLastCost] = useState<number | null>(null);
+  const [lastCost, setLastCost] = useState<{
+    amount: number;
+    unit: 'creditos' | 'kudos';
+  } | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [lastSync, setLastSync] = useState<VaultController['lastSync']>(null);
   const mounted = useRef(true);
@@ -493,6 +553,64 @@ export function useVault(): VaultController {
     const value = await run(() => window.luxy.deleteVaultMediaKey());
     if (value !== null) setStatus(value);
   }, [run]);
+
+  const setHordeKey = useCallback(
+    async (apiKey: string): Promise<boolean> => {
+      const value = await run(() => window.luxy.setVaultHordeKey({ apiKey }));
+      if (value === null) return false;
+      setStatus(value);
+      // los kudos que hubiera en pantalla son de la clave anterior: dejarlos
+      // ahí sería enseñar el saldo de una cuenta que ya no es la configurada
+      setHordeAccount(null);
+      setHint(
+        value.hordeAnonymous
+          ? 'Clave anónima guardada. Funciona, pero la red te atiende la última y comparte lo que generes: una clave propia de aihorde.net es gratis y no comparte nada.'
+          : 'Clave de AI Horde guardada. Ya puedes crear un personaje gratuito.',
+      );
+      return true;
+    },
+    [run],
+  );
+
+  const deleteHordeKey = useCallback(async (): Promise<void> => {
+    const value = await run(() => window.luxy.deleteVaultHordeKey());
+    if (value !== null) setStatus(value);
+    setHordeAccount(null);
+  }, [run]);
+
+  const readHordeAccount = useCallback(async (): Promise<void> => {
+    // pasa por `run` para que un fallo se VEA. Antes se tragaba el error y
+    // borraba lo que hubiera en pantalla: pulsar el botón con una clave mala no
+    // producía nada, y la única lectura posible era que estaba roto
+    const value = await run(() => window.luxy.readVaultHordeAccount());
+    setHordeAccount(value);
+  }, [run]);
+
+  const loadHordeModels = useCallback(async (): Promise<void> => {
+    const result = await window.luxy.listVaultHordeModels();
+    setHordeModels(result.ok ? result.value.models : []);
+  }, []);
+
+  const saveHordeCharacter = useCallback(
+    async (input: {
+      characterId: string;
+      label: string;
+      description: string;
+      recipe: HordeRecipe;
+    }): Promise<string | null> => {
+      setError(null);
+      setHint(null);
+      const result = await window.luxy.saveVaultHordeCharacter(input);
+      if (!result.ok) {
+        setError(result.error);
+        setHint(result.hint);
+        return null;
+      }
+      setCharacters(result.value.characters);
+      return result.value.characterId;
+    },
+    [],
+  );
 
   const unlock = useCallback(
     async (method: 'password' | 'recovery' | 'device', secret?: string): Promise<boolean> => {
@@ -834,6 +952,7 @@ export function useVault(): VaultController {
       characterId: string;
       prompt: string;
       kind: 'image' | 'video';
+      fromMediaId?: string;
     }): Promise<boolean> => {
       if (openConversationId === null) {
         setError('abre o empieza una conversacion antes de generar');
@@ -851,7 +970,11 @@ export function useVault(): VaultController {
           setHint(result.hint);
           return false;
         }
-        setLastCost(result.value.costCredits);
+        setLastCost(
+          result.value.costCredits === null
+            ? null
+            : { amount: result.value.costCredits, unit: result.value.costUnit ?? 'creditos' },
+        );
         await reloadMedia();
         return true;
       } finally {
@@ -965,6 +1088,13 @@ export function useVault(): VaultController {
     logoutAccount,
     setMediaKey,
     deleteMediaKey,
+    setHordeKey,
+    deleteHordeKey,
+    hordeAccount,
+    readHordeAccount,
+    hordeModels,
+    loadHordeModels,
+    saveHordeCharacter,
     create,
     unlock,
     lock,
