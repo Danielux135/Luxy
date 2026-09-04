@@ -1,5 +1,35 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-09-04 12:20 — Claude — BUG-VAULT-SALIDA-001
+
+- Origen: Daniel dice que «en algun momento has quitado el boton de Cerrar
+  sesion y salir de la boveda privada».
+- **No lo quitamos.** `git diff 4d39abb..HEAD -- Vault.tsx` no toca ni una linea
+  de `logoutAccount`, `vault.lock`, `signedIn` ni `linked`: los dos botones
+  estan donde estaban. Pero la queja es correcta igualmente, y son dos cosas
+  distintas.
+- **1) Con la sesion caducada no habia forma de cerrar sesion.** `AccountSection`
+  tiene dos ramas: con sesion viva enseña «Cerrar sesion», y sin ella enseña
+  «Vuelve a entrar en tu cuenta» con un unico boton, **Entrar**. Es decir, quien
+  no quisiera volver a entrar se quedaba sin manera de soltar la cuenta de este
+  equipo: la unica salida de esa pantalla era la que no queria tomar. Añadido
+  «Cerrar sesion» tambien ahi. `AccountManager.logout()` ya lo permitia sin
+  sesion viva —solo avisa al servidor si la hay— asi que no hizo falta tocar el
+  proceso principal.
+- **2) «Cerrar ahora» no decia QUE se cierra.** Es el boton que cierra la boveda,
+  vive en la cabecera del panel «Boveda abierta» junto a «Sincronizar», y quien
+  busca la salida no lo reconoce como tal. Ahora dice **«Cerrar la boveda»**.
+- Hallazgo del mismo rato, y explica otra confusion: **cerrar la ventana de Luxy
+  no cierra Luxy**. `windows.ts:119-124` lo intercepta y solo oculta la ventana;
+  la aplicacion sigue viva en la bandeja del sistema. La salida real es «Salir»
+  en su icono, que es la que hace el apagado ordenado (`index.ts:434-448`). No
+  es un fallo, es el diseño, pero desde fuera se ve como un proceso que no se
+  muere.
+- Archivos: `apps/desktop/src/renderer/pages/Vault.tsx`.
+- Resultado real: **`npm run check` exit 0 — 134 archivos, 2.360 pruebas
+  superadas, 12 omitidas.**
+
+
 ### 2026-09-04 12:40 — Claude — UI-GLOSARIO-001
 
 - Origen: Daniel dice que hay muchos terminos que no entiende y pide que, al

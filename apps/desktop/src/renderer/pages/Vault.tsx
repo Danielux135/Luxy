@@ -2664,8 +2664,10 @@ function UnlockedPanel({ vault }: { vault: VaultController }): JSX.Element {
             >
               {vault.syncing ? 'Sincronizando…' : 'Sincronizar'}
             </button>
+            {/* «Cerrar ahora» no decía QUÉ se cierra, y quien busca la salida
+                de la bóveda no lo reconocía como tal */}
             <button className="btn" disabled={vault.busy} onClick={() => void vault.lock()}>
-              Cerrar ahora
+              Cerrar la bóveda
             </button>
           </>
         }
@@ -2885,7 +2887,26 @@ function AccountSection({ vault }: { vault: VaultController }): JSX.Element {
         <button className="btn btn--primary" disabled={!canSubmit} onClick={submit}>
           {vault.busy ? 'Un momento…' : linked ? 'Entrar' : 'Vincular'}
         </button>
+        {/* con la sesión caducada, entrar era la ÚNICA salida de esta pantalla:
+            quien no quisiera volver a entrar se quedaba sin forma de soltar la
+            cuenta de este equipo. Cerrar sesión no necesita sesión viva —sólo
+            avisa al servidor si la hay— y es lo que se busca aquí */}
+        {linked && (
+          <button
+            className="btn"
+            disabled={vault.busy}
+            onClick={() => void vault.logoutAccount()}
+          >
+            Cerrar sesión
+          </button>
+        )}
       </div>
+      {linked && (
+        <p className="field__hint">
+          Cerrar sesión suelta esta cuenta de este ordenador y cierra la bóveda.
+          Lo cifrado se queda aquí y se vuelve a abrir con la misma contraseña.
+        </p>
+      )}
     </Panel>
   );
 }
