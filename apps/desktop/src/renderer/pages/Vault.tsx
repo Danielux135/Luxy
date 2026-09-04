@@ -676,12 +676,12 @@ function InstructionsPanel({
   const imageBlock = imageBlockReason({
     characterId: characterValue,
     characterInVault: knownCharacter !== undefined,
-    // la clave que hace falta es la del proveedor de ESTE personaje. Preguntar
-    // siempre por la de Xavira dejaría «sin clave» a un personaje del horde que
-    // está perfectamente configurado, que es la misma regla que aplica el
-    // proceso principal al armar el prompt
+    // la clave que hace falta es la de quien le hace las fotos AHORA, no la de
+    // quien se las hacía cuando se creó: el personaje ya no pertenece a ningún
+    // proveedor y `imageProvider` puede cambiar sin tocar nada más. Es la misma
+    // regla que aplica el proceso principal al armar el prompt
     hasApiKey:
-      knownCharacter?.provider === 'horde'
+      knownCharacter?.imageProvider === 'horde'
         ? vault.status.hordeConfigured
         : vault.status.mediaProviderConfigured,
   });
@@ -747,8 +747,8 @@ function InstructionsPanel({
         <Notice tone="warn">
           Ese identificador no está en la bóveda de este equipo. Mientras siga así,
           esta conversación no podrá generar ni reenviar imágenes, y no se le
-          ofrecerá hacerlo. Dalo de alta en Personajes, con su identificador del
-          proveedor, o elige uno de la lista.
+          ofrecerá hacerlo. Dalo de alta abajo, en «Generar imagen o vídeo», o
+          elige uno de la lista.
         </Notice>
       )}
       {vault.characterDescription !== null && (
@@ -1127,11 +1127,131 @@ function hordeModelSummary(recipe: HordeRecipe | null): string {
 }
 
 /**
- * crear o corregir un personaje de AI Horde.
+ * con que se le hacen las fotos AHORA.
  *
- * Alli no hay personajes en ningun servidor: el personaje **es** esta receta,
+ * Ya no dice de quien es el personaje —no es de nadie: el personaje es lo
+ * duradero y el proveedor una propiedad suya—, sino con que se genera, que es
+ * lo unico que cambia al cambiar de proveedor.
+ */
+function activeLookSummary(character: VaultCharacterView): string {
+  if (character.imageProvider === 'horde') {
+    return `fotos gratis · ${hordeModelSummary(character.horde?.recipe ?? null)}`;
+  }
+  const modelId = character.xavira?.modelId ?? '';
+  return `fotos de pago · ${modelId === 'anime-pure-v1' ? 'anime' : 'realista'}`;
+}
+
+/**
+ * un personaje en la lista.
+ *
+ * Enseña **que sabe hacer**, no de quien es: las identidades que tiene, cual le
+ * hace las fotos ahora, y —cuando le falta una— lo que se puede hacer para
+ * dársela. Una identidad que no tiene no se enseña como etiqueta apagada,
+ * porque una etiqueta no dice que hacer al respecto.
+ */
+function CharacterRow({
+  vault,
+  character,
+  active,
+  onPick,
+  onEditHorde,
+}: {
+  vault: VaultController;
+  character: VaultCharacterView;
+  /** es quien responde en la conversacion abierta */
+  active: boolean;
+  onPick: () => void;
+  /** abre el formulario del horde con ESTE personaje, tenga aspecto o no */
+  onEditHorde: () => void;
+}): JSX.Element {
+  const name = character.label.length > 0 ? character.label : 'Sin nombre';
+  // sin las dos identidades no hay nada entre lo que elegir, y el proceso
+  // principal rechazaría el cambio de todas formas
+  const canSwitch = character.xavira !== null && character.horde !== null;
+
+  return (
+    <div
+      className="vault-list__item vault-list__item--character"
+      aria-current={active ? 'true' : undefined}
+    >
+      {character.avatarObjectKey !== null && (
+        <CharacterAvatar vault={vault} characterId={character.characterId} />
+      )}
+      <button className="vault-character__pick" onClick={onPick}>
+        <span className="vault-list__title">{name}</span>
+        <span className="vault-list__meta">{activeLookSummary(character)}</span>
+      </button>
+
+      <div className="vault-character__skills">
+        {character.xavira !== null && (
+          <Tag tone={character.imageProvider === 'xavira' ? 'ok' : 'idle'}>Xavira</Tag>
+        )}
+        {character.horde !== null && (
+          <Tag tone={character.imageProvider === 'horde' ? 'ok' : 'idle'}>AI Horde</Tag>
+        )}
+        {character.horde === null && (
+          <button className="btn btn--quiet" onClick={onEditHorde}>
+            Darle aspecto en AI Horde
+          </button>
+        )}
+      </div>
+
+      {canSwitch && (
+        <select
+          value={character.imageProvider}
+          aria-label={`Quién le hace las fotos a ${name}`}
+          onChange={(event) =>
+            void vault.setCharacterImageProvider(
+              character.characterId,
+              // el valor sale de estas dos opciones: comparar basta y evita
+              // afirmar un tipo sobre una cadena cualquiera del DOM
+              event.target.value === 'horde' ? 'horde' : 'xavira',
+            )
+          }
+        >
+          <option value="horde">Fotos: AI Horde</option>
+          <option value="xavira">Fotos: Xavira</option>
+        </select>
+      )}
+
+      {active ? (
+        <Tag tone="ok">en uso</Tag>
+      ) : (
+        <button className="btn btn--quiet" onClick={onPick}>
+          Usar
+        </button>
+      )}
+
+      {/* corregir el aspecto del horde es gratis y se puede repetir; el de
+          Xavira lo decide el al crearlo y despues no se puede cambiar */}
+      {character.horde !== null && (
+        <button className="btn btn--quiet" onClick={onEditHorde}>
+          Editar su aspecto
+        </button>
+      )}
+
+      <button
+        className="vault-character__forget"
+        title="Olvidar aquí. Su identidad en Xavira, si la tiene, sigue existiendo allí."
+        onClick={() => void vault.forgetCharacter(character.characterId)}
+      >
+        ×
+      </button>
+    </div>
+  );
+}
+
+/**
+ * dar aspecto en AI Horde a un personaje: uno nuevo, o uno que ya existe.
+ *
+ * Alli no hay personajes en ningun servidor: el aspecto **es** esta receta,
  * guardada cifrada en este equipo. Por eso editarla no cuesta nada y se puede
  * repetir hasta que la cara salga bien, al reves que en Xavira.
+ *
+ * `editing` puede llegar SIN receta: es alguien que ya existe —normalmente con
+ * identidad en Xavira— al que se le esta añadiendo su cara en el horde. En ese
+ * caso los campos nacen vacios pero conserva su `characterId`, su nombre y su
+ * descripcion, porque no se esta creando a nadie.
  *
  * El formulario se remonta con `key` cuando cambia a quien edita: asi el estado
  * inicial se lee una sola vez y no hace falta un efecto que lo sincronice.
@@ -1143,12 +1263,16 @@ function HordeCharacterForm({
   onCancel,
 }: {
   vault: VaultController;
-  /** a quien se corrige; `null` para crear uno nuevo */
+  /** a quien se le da o se le corrige el aspecto; `null` para crear uno nuevo */
   editing: VaultCharacterView | null;
   onSaved: (characterId: string, description: string) => void;
   onCancel: () => void;
 }): JSX.Element {
-  const base = editing?.recipe ?? null;
+  // el aspecto en el horde es una propiedad suya que puede no existir todavia:
+  // un personaje de Xavira llega aqui entero pero sin receta
+  const base = editing?.horde?.recipe ?? null;
+  /** se le esta estrenando la cara en el horde a alguien que ya existe */
+  const estrenando = editing !== null && editing.horde === null;
   const initial = recipeDefaultsFor('sdxl');
 
   const [label, setLabel] = useState(editing?.label ?? '');
@@ -1276,8 +1400,8 @@ function HordeCharacterForm({
     setSaving(true);
     void vault
       .saveHordeCharacter({
-        // vacio crea uno nuevo; con valor sustituye a ese, conservando sus
-        // imagenes y sus recuerdos
+        // vacio crea uno nuevo; con valor le da o le corrige el aspecto a ESE,
+        // sea del horde o de Xavira, sin tocar sus imagenes ni sus recuerdos
         characterId: editing?.characterId ?? '',
         label: label.trim(),
         description: text,
@@ -1292,11 +1416,22 @@ function HordeCharacterForm({
 
   return (
     <>
+      {editing !== null && estrenando && (
+        <Notice tone="idle">
+          {editing.label.length > 0 ? editing.label : 'Este personaje'} ya existe
+          en la bóveda: esto <strong>no crea a nadie nuevo</strong>. Conserva su
+          identificador, sus recuerdos y sus conversaciones; lo que escribas aquí
+          decide sólo cómo saldrá en las fotos que le haga AI Horde. Al
+          guardarlo, pasa a hacérselas él; puedes devolvérselas a Xavira cuando
+          quieras, desde la lista de personajes.
+        </Notice>
+      )}
+
       {/* el parrafo entero repetia la entrada del glosario; queda la frase que
           hay que leer sin hacer nada, y el «?» cuenta por que importa */}
       <p className="field__hint">
-        Aquí el personaje <strong>es</strong> esta receta, guardada cifrada en
-        este equipo.
+        En AI Horde el aspecto <strong>es</strong> esta receta, guardada cifrada
+        en este equipo.
         <Explica termino="personajeReceta" />
       </p>
 
@@ -1650,7 +1785,13 @@ function HordeCharacterForm({
 
       <div className="row">
         <button className="btn btn--primary" disabled={saving} onClick={save}>
-          {saving ? 'Guardando…' : editing === null ? 'Guardar personaje' : 'Guardar cambios'}
+          {saving
+            ? 'Guardando…'
+            : editing === null
+              ? 'Guardar personaje'
+              : estrenando
+                ? 'Darle este aspecto'
+                : 'Guardar cambios'}
         </button>
         {editing !== null && (
           <button className="btn btn--quiet" disabled={saving} onClick={onCancel}>
@@ -1670,9 +1811,10 @@ function HordeCharacterForm({
 /**
  * generacion de imagen y video.
  *
- * El personaje es obligatorio porque el proveedor lo exige para generar: es lo
- * que mantiene la misma apariencia entre generaciones. Se crea una vez y se
- * reutiliza; su identificador vive en el proveedor, no aqui.
+ * El personaje es obligatorio: es lo que mantiene la misma apariencia entre
+ * generaciones. Vive en la boveda con su `characterId`, que no cambia nunca, y
+ * el proveedor que le hace las fotos es una propiedad suya que se cambia cuando
+ * haga falta: cambiarla no le quita recuerdos, conversaciones ni imagenes.
  */
 function GeneratePanel({
   vault,
@@ -1709,11 +1851,12 @@ function GeneratePanel({
   // cadena vacia = empezar de cero, que es lo normal
   const [fromMediaId, setFromMediaId] = useState('');
 
-  // partir de una imagen solo existe en el horde: Xavira no tiene img2img
+  // partir de una imagen solo existe en el horde: Xavira no tiene img2img. Lo
+  // que decide es quien le hace las fotos AHORA, no que aspectos tenga guardados
   const hordeCharacter =
     vault.characters.find(
       (character) =>
-        character.characterId === characterId.trim() && character.provider === 'horde',
+        character.characterId === characterId.trim() && character.imageProvider === 'horde',
     ) ?? null;
   const sourceOptions = vault.media.filter((item) => item.mimeType.startsWith('image/'));
   // una eleccion que ya no esta en la lista —otra conversacion, un medio
@@ -1746,14 +1889,15 @@ function GeneratePanel({
       )}
       {!vault.status.mediaProviderConfigured && vault.status.hordeConfigured && (
         <Notice tone="idle">
-          Sólo está la clave gratuita de AI Horde: generan sus personajes, y sólo
-          imágenes. El vídeo lo hace Xavira, que está más abajo.
+          Sólo está la clave gratuita de AI Horde: pueden hacerse fotos los
+          personajes que tengan aspecto en el horde, y sólo imágenes. El vídeo lo
+          hace Xavira, que está más abajo.
         </Notice>
       )}
 
       <Field
         label="Personaje"
-        hint="El proveedor exige uno; es lo que mantiene la misma apariencia entre generaciones."
+        hint="Hace falta uno: es lo que mantiene la misma apariencia entre generaciones."
       >
         <input
           value={characterId}
@@ -1778,9 +1922,19 @@ function GeneratePanel({
         onToggle={(event) => setHordeFormOpen(event.currentTarget.open)}
       >
         <summary>
+          {/* tres titulos distintos porque son tres cosas distintas: crear a
+              alguien, darle cara en el horde a quien ya existe, o corregir la
+              que ya tiene. Decir «crear» en el segundo caso hacía temer que se
+              duplicaba el personaje */}
           {hordeEditing === null
             ? 'Crear un personaje gratis, con AI Horde'
-            : `Editar ${hordeEditing.label.length > 0 ? hordeEditing.label : 'este personaje'}`}
+            : hordeEditing.horde === null
+              ? `Darle aspecto en AI Horde a ${
+                  hordeEditing.label.length > 0 ? hordeEditing.label : 'este personaje'
+                }`
+              : `Corregir el aspecto de ${
+                  hordeEditing.label.length > 0 ? hordeEditing.label : 'este personaje'
+                }`}
         </summary>
 
         {!vault.status.hordeConfigured && (
@@ -1826,74 +1980,36 @@ function GeneratePanel({
         <>
           <div className="vault-list">
             {vault.characters.map((character) => (
-              <div
+              <CharacterRow
                 key={character.characterId}
-                className="vault-list__item vault-list__item--character"
-                aria-current={character.characterId === activeCharacterId ? 'true' : undefined}
-              >
-                {character.avatarObjectKey !== null && (
-                  <CharacterAvatar vault={vault} characterId={character.characterId} />
-                )}
-                <button
-                  className="vault-character__pick"
-                  onClick={() => {
-                    setCharacterId(character.characterId);
-                    onCharacterReady(character.characterId, character.description);
-                  }}
-                >
-                  <span className="vault-list__title">
-                    {character.label.length > 0 ? character.label : 'Sin nombre'}
-                  </span>
-                  <span className="vault-list__meta">
-                    {character.provider === 'horde'
-                      ? `gratis · AI Horde · ${hordeModelSummary(character.recipe)}`
-                      : `Xavira · ${character.modelId === 'anime-pure-v1' ? 'anime' : 'realista'}`}
-                  </span>
-                </button>
-                {character.characterId === activeCharacterId ? (
-                  <Tag tone="ok">en uso</Tag>
-                ) : (
-                  <button
-                    className="btn btn--quiet"
-                    onClick={() => {
-                      setCharacterId(character.characterId);
-                      onCharacterReady(character.characterId, character.description);
-                    }}
-                  >
-                    Usar
-                  </button>
-                )}
-                {/* editar solo tiene sentido en los del horde: alli el personaje
-                    es su receta y corregirla es gratis. En Xavira vive en su
-                    servidor y no se puede cambiar */}
-                {character.provider === 'horde' && (
-                  <button
-                    className="btn btn--quiet"
-                    onClick={() => {
-                      setHordeEditing(character);
-                      setHordeFormOpen(true);
-                    }}
-                  >
-                    Editar
-                  </button>
-                )}
-                <button
-                  className="vault-character__forget"
-                  title="Olvidar aquí. En el proveedor sigue existiendo."
-                  onClick={() => void vault.forgetCharacter(character.characterId)}
-                >
-                  ×
-                </button>
-              </div>
+                vault={vault}
+                character={character}
+                active={character.characterId === activeCharacterId}
+                onPick={() => {
+                  setCharacterId(character.characterId);
+                  onCharacterReady(character.characterId, character.description);
+                }}
+                onEditHorde={() => {
+                  setHordeEditing(character);
+                  setHordeFormOpen(true);
+                }}
+              />
             ))}
           </div>
           <p className="field__hint">
             Tus personajes guardados. Pulsa <strong>Usar</strong> para que sea
             quien responda en esta conversación: queda fijado al enviar el
-            próximo mensaje. Los de <strong>Xavira</strong> se guardan aquí
-            porque él <strong>no sabe listarlos</strong> y crearlos cuesta
-            créditos; los de AI Horde viven sólo aquí, así que se pueden
-            editar tantas veces como haga falta sin pagar nada.
+            próximo mensaje. Cada uno enseña qué sabe hacer —quién puede hacerle
+            fotos, con <strong>Xavira</strong>
+            <Explica termino="xavira" /> o con <strong>AI Horde</strong>
+            <Explica termino="aiHorde" />— y cuál se las hace ahora mismo.
+          </p>
+          <p className="field__hint">
+            Cambiar de proveedor <strong>no le quita nada</strong>: es el mismo
+            personaje, con sus recuerdos, sus conversaciones y las imágenes que
+            ya tiene. Lo único que cambia es de dónde salen las fotos nuevas —y
+            que su cara será distinta, porque cada proveedor la construye a su
+            manera.
           </p>
         </>
       )}
@@ -1912,7 +2028,7 @@ function GeneratePanel({
 
       <Field
         label="Estilo del personaje"
-        hint="Lo decide Xavira al crearlo y no se puede cambiar después: gobierna el aspecto de todo lo que genere."
+        hint="Lo decide Xavira al crearlo y después no se puede cambiar: gobierna el aspecto de lo que genere él."
       >
         <select
           value={modelId}
@@ -2026,10 +2142,11 @@ function GeneratePanel({
         </Notice>
       )}
       <p className="field__hint">
-        Esto crea un personaje en <strong>Xavira</strong>: su identificador vive
-        allí, no aquí, generar su avatar <strong>consume créditos</strong> y
+        Esto le da identidad en <strong>Xavira</strong>: el identificador lo pone
+        él, generar su avatar <strong>consume créditos</strong> y ese aspecto
         después no se puede cambiar. El de AI Horde, arriba, es gratis y se
-        corrige cuando quieras.
+        corrige cuando quieras; un personaje puede tener los dos y elegir cuál
+        le hace las fotos.
       </p>
 
       {hordeCharacter !== null && sourceOptions.length > 0 && (

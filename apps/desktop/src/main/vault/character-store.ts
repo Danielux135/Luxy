@@ -26,30 +26,53 @@ export function charactersFilePath(configDirectory: string): string {
   return join(configDirectory, 'vault', 'characters.json');
 }
 
-/** lo que se guarda de cada personaje, ya descifrado */
-export const vaultCharacterSchema = z.object({
+/** su identidad en el proveedor de pago, cuando la tiene */
+const xaviraIdentitySchema = z.object({
+  /**
+   * el identificador que devolvio SU API. No es el de la boveda.
+   *
+   * Confundirlos era el error de diseño anterior: el de la boveda es nuestro y
+   * no cambia nunca, y este pertenece a un servicio que puede dejar de usarse.
+   */
   characterId: z.string().min(1).max(128),
-  /**
-   * quien genera sus imagenes.
-   *
-   * `xavira` es el proveedor de pago, que guarda el personaje en su servidor y
-   * devuelve un identificador. `horde` es AI Horde, que es gratis y NO tiene
-   * personajes: ahi la identidad vive entera en `recipe`, aqui en local.
-   *
-   * El default conserva los personajes que ya existian, que son todos del
-   * proveedor de pago: sin el, una boveda anterior dejaria de leerse.
-   */
-  provider: z.enum(['xavira', 'horde']).default('xavira'),
-  /**
-   * la identidad visual, solo para `horde`.
-   *
-   * Es lo que hace que dos imagenes parezcan la misma persona, porque en esa
-   * red no hay nada que lo recuerde por nosotros. `null` en los de pago, donde
-   * ese trabajo lo hace su `characterId`.
-   */
-  recipe: hordeRecipeSchema.nullable().default(null),
-  /** modelo con el que se creo; no se puede cambiar despues */
+  /** modelo con el que se creo alli; no se puede cambiar despues */
   modelId: z.string().min(1).max(64),
+});
+
+/** su aspecto en AI Horde, cuando lo tiene */
+const hordeIdentitySchema = z.object({
+  /**
+   * lo que hace que dos imagenes parezcan la misma persona, porque en esa red
+   * no hay nada que lo recuerde por nosotros.
+   */
+  recipe: hordeRecipeSchema,
+});
+
+/**
+ * lo que se guarda de cada personaje, ya descifrado.
+ *
+ * REGLA CENTRAL: `characterId` es la identidad DURABLE y no cambia nunca. A el
+ * se agarran las conversaciones, los recuerdos y las imagenes ya generadas.
+ * De quien vengan las fotos es una propiedad suya que se cambia cuando se
+ * quiera, y cambiarla no le quita nada.
+ *
+ * El diseño anterior ataba el personaje a un proveedor, asi que usarlo en el
+ * otro obligaba a crear uno nuevo —identificador nuevo— y ahi se quedaban su
+ * historia y sus recuerdos. Ver `D-068`.
+ */
+export const vaultCharacterSchema = z.object({
+  /**
+   * clave durable, nuestra y solo nuestra. NO es la de ningun proveedor.
+   *
+   * En los personajes creados antes de `D-068` coincide con la de Xavira,
+   * porque entonces eran lo mismo. Se conserva tal cual a proposito: cambiarla
+   * dejaria sus conversaciones y sus recuerdos apuntando a nadie.
+   */
+  characterId: z.string().min(1).max(128),
+  /** quien da las fotos AHORA. Se cambia sin tocar nada mas del personaje */
+  imageProvider: z.enum(['xavira', 'horde']).default('xavira'),
+  xavira: xaviraIdentitySchema.nullable().default(null),
+  horde: hordeIdentitySchema.nullable().default(null),
   /** quien es, en texto, para el modelo que escribe */
   description: z.string().max(2000),
   /** etiqueta que pone el usuario para reconocerlo */
@@ -69,12 +92,48 @@ export type VaultCharacter = z.infer<typeof vaultCharacterSchema>;
 /**
  * lo que hace falta aportar para guardar uno.
  *
- * Es la ENTRADA del esquema, no la salida: los campos con valor por defecto
- * —`provider` y `recipe`— no hay que escribirlos. Sin esta distincion, añadir un
- * campo con default obligaria a tocar todas las llamadas que ya existen, que es
- * justo lo que el default esta evitando.
+ * Es la ENTRADA del esquema, no la salida: los campos con valor por defecto no
+ * hay que escribirlos. Sin esta distincion, añadir un campo con default
+ * obligaria a tocar todas las llamadas que ya existen, que es justo lo que el
+ * default esta evitando.
  */
 export type VaultCharacterInput = z.input<typeof vaultCharacterSchema>;
+
+/**
+ * lo que puede haber ESCRITO en disco, incluido lo anterior a `D-068`.
+ *
+ * Antes un personaje era de un proveedor: llevaba `provider`, `modelId` y, si
+ * era del horde, `recipe`. Aqui eso se traduce a la forma nueva **al leer**, sin
+ * reescribir el archivo y sin tocar `characterId`, que es lo unico que no se
+ * puede mover: sus conversaciones y sus recuerdos apuntan a el.
+ *
+ * En un personaje de Xavira anterior, la clave de la boveda ERA la de su API.
+ * La migracion la copia dentro de `xavira` y a partir de ahi el codigo usa esa
+ * y nunca la de la boveda, que es lo que permite que el mismo personaje exista
+ * tambien en el horde.
+ */
+export const storedCharacterSchema = vaultCharacterSchema
+  .extend({
+    provider: z.enum(['xavira', 'horde']).optional(),
+    modelId: z.string().min(1).max(64).optional(),
+    recipe: hordeRecipeSchema.nullable().optional(),
+  })
+  .transform((raw): VaultCharacter => {
+    const { provider, modelId, recipe, ...rest } = raw;
+    // ya esta en la forma nueva: no hay nada que traducir
+    if (rest.xavira !== null || rest.horde !== null) return rest;
+
+    const legacy = provider ?? 'xavira';
+    return {
+      ...rest,
+      imageProvider: legacy,
+      xavira:
+        legacy === 'xavira'
+          ? { characterId: rest.characterId, modelId: modelId ?? 'realistic-sharp-v1' }
+          : null,
+      horde: legacy === 'horde' && recipe != null ? { recipe } : null,
+    };
+  });
 
 const sealedFileSchema = z.object({
   version: z.literal(1),
@@ -87,9 +146,16 @@ const sealedFileSchema = z.object({
   }),
 });
 
+/**
+ * al LEER se admite tambien la forma anterior a `D-068`, que se traduce sola.
+ *
+ * Al escribir se usa siempre la nueva: `write()` guarda lo que devuelve esta
+ * lectura, asi que el archivo se pone al dia solo la proxima vez que se añada o
+ * se quite un personaje. Mientras tanto se sigue leyendo igual de bien.
+ */
 const listPayloadSchema = z.object({
   v: z.literal(1),
-  characters: z.array(vaultCharacterSchema),
+  characters: z.array(storedCharacterSchema),
 });
 
 /**

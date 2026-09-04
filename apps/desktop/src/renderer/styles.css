@@ -1683,10 +1683,15 @@ input[aria-invalid='true'] {
   border: 1px solid var(--line);
 }
 
+/* la ficha de un personaje ocupa la fila entera: ahora lleva sus identidades,
+   el cambiador de proveedor y las acciones, y a media anchura se partia en
+   varias lineas ilegibles */
 .vault-list__item--character {
   flex-direction: row;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
+  width: 100%;
 }
 
 .vault-character__pick {
@@ -1699,6 +1704,19 @@ input[aria-invalid='true'] {
   cursor: pointer;
   text-align: left;
   padding: 0;
+  /* empuja identidades y acciones al otro extremo, y encoge antes que ellas:
+     el nombre puede recortarse, un boton no */
+  flex: 1 1 140px;
+  min-width: 0;
+}
+
+/* que sabe hacer ese personaje: las identidades que tiene y la que usa. Se
+   envuelve porque donde falta una hay un boton, mas largo que una etiqueta */
+.vault-character__skills {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
 }
 
 .vault-character__forget {

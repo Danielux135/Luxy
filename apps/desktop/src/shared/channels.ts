@@ -85,6 +85,8 @@ export const IPC_INVOKE = {
   vaultHordeModels: 'luxy:vault:horde:models',
   /** guarda la receta de un personaje del horde. No llama a ninguna API */
   vaultHordeCharacterSave: 'luxy:vault:horde:character-save',
+  /** cambia quien le hace las fotos a un personaje, sin tocar nada mas */
+  vaultCharacterImageProvider: 'luxy:vault:character:image-provider',
   vaultSync: 'luxy:vault:sync',
 } as const;
 

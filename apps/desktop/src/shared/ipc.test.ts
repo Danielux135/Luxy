@@ -18,6 +18,7 @@ import {
   secretNameSchema,
   vaultCharacterImportArgsSchema,
   vaultCharacterSummarySchema,
+  vaultCharacterProviderArgsSchema,
   vaultHordeCharacterSaveArgsSchema,
   vaultCompatibilityArgsSchema,
   vaultMediaAttachArgsSchema,
@@ -157,19 +158,49 @@ describe('validacion de argumentos', () => {
     ).toBe(false);
   });
 
-  it('un personaje sin proveedor declarado se lee como del de pago', () => {
+  it('un personaje sin proveedor declarado se lee como de Xavira', () => {
     // los que ya existen en una boveda son todos suyos: sin este defecto, una
     // boveda anterior dejaria de poder leer su propia lista
     const leido = vaultCharacterSummarySchema.parse({
       characterId: '83cc7f03-5eb3-4d03-833f-56dfbe80cd7d',
-      modelId: 'anime-pure-v1',
       description: '',
       label: 'Una',
       avatarObjectKey: null,
       createdAt: '2026-09-02T08:50:37.000Z',
     });
-    expect(leido.provider).toBe('xavira');
-    expect(leido.recipe).toBeNull();
+    expect(leido.imageProvider).toBe('xavira');
+    expect(leido.horde).toBeNull();
+  });
+
+  it('un personaje puede existir en los dos sitios a la vez', () => {
+    // es lo que permite que el mismo personaje —con sus recuerdos y sus
+    // conversaciones— reciba sus fotos de uno o de otro sin volver a crearlo
+    const leido = vaultCharacterSummarySchema.parse({
+      characterId: '83cc7f03-5eb3-4d03-833f-56dfbe80cd7d',
+      description: '',
+      label: 'Lía',
+      avatarObjectKey: null,
+      createdAt: '2026-09-02T08:50:37.000Z',
+      imageProvider: 'horde',
+      xavira: { characterId: '83cc7f03-5eb3-4d03-833f-56dfbe80cd7d', modelId: 'anime-pure-v1' },
+      horde: { recipe: { models: ['Prefect Pony'], appearance: 'green eyes' } },
+    });
+    expect(leido.imageProvider).toBe('horde');
+    expect(leido.xavira?.modelId).toBe('anime-pure-v1');
+    expect(leido.horde?.recipe.models).toEqual(['Prefect Pony']);
+  });
+
+  it('cambiar de proveedor exige decir a cual, y solo eso', () => {
+    // el argumento no admite tocar nada mas del personaje: cambiar de proveedor
+    // no puede ser una puerta para reescribirle el nombre ni la descripcion
+    expect(
+      vaultCharacterProviderArgsSchema.safeParse({ characterId: 'per-1', provider: 'horde' })
+        .success,
+    ).toBe(true);
+    expect(
+      vaultCharacterProviderArgsSchema.safeParse({ characterId: 'per-1', provider: 'otro' })
+        .success,
+    ).toBe(false);
   });
 
   it('el pie de foto de un adjunto es opcional y acotado', () => {

@@ -9,7 +9,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { VaultService, VaultError, type DeviceKeyStore } from './vault-service.js';
 import { vaultFilePathFor } from './key-file.js';
-import { VaultCharacterStore, charactersFilePath } from './character-store.js';
+import {
+  VaultCharacterStore,
+  charactersFilePath,
+  storedCharacterSchema,
+} from './character-store.js';
 import { LocalBlobStore, mediaDirectory } from './blob-store.js';
 
 const PASSWORD = 'una frase larga de prueba';
@@ -30,7 +34,8 @@ function memoryDeviceKeys(): DeviceKeyStore {
 
 const character = (id: string, label = 'Una') => ({
   characterId: id,
-  modelId: 'anime-pure-v1',
+  // nacido en Xavira, que es de donde vienen todos los que ya existian
+  xavira: { characterId: id, modelId: 'anime-pure-v1' },
   description: 'Rasgos: género: mujer, color del pelo: rubio.',
   label,
   avatarObjectKey: null,
@@ -148,65 +153,165 @@ describe('personajes guardados', () => {
   // sobrevivir al cifrado igual que un identificador pagado.
   // -------------------------------------------------------------------------
 
-  it('un personaje que ya existia se lee como del proveedor de pago', async () => {
-    // el default es lo unico que impide que una boveda anterior deje de leerse
-    await store.add(vault, character('per-1'));
-    const [guardado] = await store.list(vault);
-    expect(guardado?.provider).toBe('xavira');
-    expect(guardado?.recipe).toBeNull();
-  });
-
   it('guarda la receta entera de un personaje del horde', async () => {
     await store.add(vault, {
-      ...character('horde-1', 'Lia'),
-      provider: 'horde',
-      modelId: 'Prefect Pony',
-      recipe: {
-        models: ['Prefect Pony', 'WAI-CUTE Pony'],
-        appearance: '1girl, long black hair, green eyes',
-        seed: '12345',
+      characterId: 'horde-1',
+      label: 'Lia',
+      description: '',
+      createdAt: new Date().toISOString(),
+      imageProvider: 'horde',
+      horde: {
+        recipe: {
+          models: ['Prefect Pony', 'WAI-CUTE Pony'],
+          appearance: '1girl, long black hair, green eyes',
+          seed: '12345',
+        },
       },
     });
 
     const [guardado] = await store.list(vault);
-    expect(guardado?.provider).toBe('horde');
+    expect(guardado?.imageProvider).toBe('horde');
     // sin los modelos exactos la peticion se queda en cola para siempre, y sin
     // la semilla la cara cambia en cada imagen
-    expect(guardado?.recipe?.models).toEqual(['Prefect Pony', 'WAI-CUTE Pony']);
-    expect(guardado?.recipe?.seed).toBe('12345');
+    expect(guardado?.horde?.recipe.models).toEqual(['Prefect Pony', 'WAI-CUTE Pony']);
+    expect(guardado?.horde?.recipe.seed).toBe('12345');
     // lo que no se escribio toma su valor por defecto en vez de quedar a medias
-    expect(guardado?.recipe?.width).toBe(1024);
-    expect(guardado?.recipe?.clipSkip).toBe(2);
-    expect(guardado?.recipe?.promptStyle).toBe('tags');
-  });
-
-  it('editar la receta conserva el identificador y no duplica el personaje', async () => {
-    // es lo que hace que las imagenes y los recuerdos que ya cuelgan de el
-    // sigan siendo suyos despues de retocarle la cara
-    await store.add(vault, {
-      ...character('horde-1', 'Lia'),
-      provider: 'horde',
-      recipe: { models: ['Prefect Pony'], appearance: 'green eyes' },
-    });
-    const despues = await store.add(vault, {
-      ...character('horde-1', 'Lia'),
-      provider: 'horde',
-      recipe: { models: ['Prefect Pony'], appearance: 'blue eyes' },
-    });
-
-    expect(despues).toHaveLength(1);
-    expect(despues[0]?.recipe?.appearance).toBe('blue eyes');
+    expect(guardado?.horde?.recipe.width).toBe(1024);
+    expect(guardado?.horde?.recipe.clipSkip).toBe(2);
+    expect(guardado?.horde?.recipe.promptStyle).toBe('tags');
   });
 
   it('el aspecto del personaje no queda en claro en el disco', async () => {
     // describe a alguien: saber que existe uno con ciertos rasgos ya dice mucho
     await store.add(vault, {
-      ...character('horde-1', 'Lia'),
-      provider: 'horde',
-      recipe: { models: ['Prefect Pony'], appearance: 'freckles and a scar' },
+      characterId: 'horde-1',
+      label: 'Lia',
+      description: '',
+      createdAt: new Date().toISOString(),
+      imageProvider: 'horde',
+      horde: { recipe: { models: ['Prefect Pony'], appearance: 'freckles and a scar' } },
     });
     const guardado = readFileSync(charactersFilePath(directory), 'utf8');
     expect(guardado).not.toContain('freckles');
     expect(guardado).not.toContain('Prefect Pony');
+  });
+
+  // -------------------------------------------------------------------------
+  // el mismo personaje en los dos sitios (D-068)
+  //
+  // Lo que se protege aqui es una sola cosa: que `characterId` NO cambie. A el
+  // se agarran las conversaciones, los recuerdos y las imagenes ya generadas,
+  // asi que moverlo es perder a la persona aunque el resto del registro este
+  // perfecto.
+  // -------------------------------------------------------------------------
+
+  it('darle un aspecto en el horde a uno de Xavira no crea a nadie nuevo', async () => {
+    await store.add(vault, character('83cc7f03-5eb3-4d03-833f-56dfbe80cd7d', 'Lia'));
+    const [antes] = await store.list(vault);
+
+    const despues = await store.add(vault, {
+      ...antes!,
+      imageProvider: 'horde',
+      horde: { recipe: { models: ['Prefect Pony'], appearance: 'green eyes' } },
+    });
+
+    // un solo personaje, con su identificador de siempre
+    expect(despues).toHaveLength(1);
+    expect(despues[0]?.characterId).toBe('83cc7f03-5eb3-4d03-833f-56dfbe80cd7d');
+    // y con las DOS identidades: la de Xavira no se pierde al añadir la otra
+    expect(despues[0]?.xavira?.characterId).toBe('83cc7f03-5eb3-4d03-833f-56dfbe80cd7d');
+    expect(despues[0]?.horde?.recipe.appearance).toBe('green eyes');
+    expect(despues[0]?.imageProvider).toBe('horde');
+  });
+
+  it('cambiar de proveedor no toca nada mas del personaje', async () => {
+    await store.add(vault, {
+      ...character('per-1', 'Lia'),
+      imageProvider: 'horde',
+      horde: { recipe: { models: ['Prefect Pony'], appearance: 'green eyes' } },
+    });
+    const [antes] = await store.list(vault);
+
+    const despues = await store.add(vault, { ...antes!, imageProvider: 'xavira' });
+    expect(despues[0]?.imageProvider).toBe('xavira');
+    // la receta sigue ahi para poder volver sin reescribirla
+    expect(despues[0]?.horde?.recipe.appearance).toBe('green eyes');
+    expect(despues[0]?.label).toBe('Lia');
+  });
+});
+
+describe('personajes escritos antes de D-068', () => {
+  it('uno de Xavira conserva su identificador y lo copia a su identidad', () => {
+    // ES el caso real de Daniel: su personaje se creo cuando la clave de la
+    // boveda y la de Xavira eran la misma cosa. Si esta traduccion se
+    // equivocara, sus conversaciones y sus recuerdos apuntarian a nadie
+    const leido = storedCharacterSchema.parse({
+      characterId: '83cc7f03-5eb3-4d03-833f-56dfbe80cd7d',
+      provider: 'xavira',
+      modelId: 'anime-pure-v1',
+      recipe: null,
+      description: 'Te llamas Lia.',
+      label: 'Lia',
+      avatarObjectKey: null,
+      createdAt: '2026-09-02T08:50:37.000Z',
+    });
+
+    expect(leido.characterId).toBe('83cc7f03-5eb3-4d03-833f-56dfbe80cd7d');
+    expect(leido.imageProvider).toBe('xavira');
+    expect(leido.xavira).toEqual({
+      characterId: '83cc7f03-5eb3-4d03-833f-56dfbe80cd7d',
+      modelId: 'anime-pure-v1',
+    });
+    // no tenia aspecto en el horde, y no se le inventa uno
+    expect(leido.horde).toBeNull();
+  });
+
+  it('uno del horde conserva su receta y no gana una identidad de Xavira', () => {
+    const leido = storedCharacterSchema.parse({
+      characterId: 'c0ffee00-0000-4000-8000-000000000000',
+      provider: 'horde',
+      modelId: 'Prefect Pony',
+      recipe: { models: ['Prefect Pony'], appearance: 'green eyes' },
+      description: '',
+      label: 'Lia',
+      avatarObjectKey: null,
+      createdAt: '2026-09-04T10:00:00.000Z',
+    });
+
+    expect(leido.imageProvider).toBe('horde');
+    expect(leido.horde?.recipe.models).toEqual(['Prefect Pony']);
+    // inventarle una identidad en Xavira mandaria su clave local a esa API
+    expect(leido.xavira).toBeNull();
+  });
+
+  it('uno sin proveedor declarado se lee como de Xavira', () => {
+    // los mas antiguos de todos, de antes de que hubiera dos proveedores
+    const leido = storedCharacterSchema.parse({
+      characterId: 'per-1',
+      modelId: 'realistic-sharp-v1',
+      description: '',
+      label: 'Una',
+      avatarObjectKey: null,
+      createdAt: '2026-09-01T10:00:00.000Z',
+    });
+    expect(leido.imageProvider).toBe('xavira');
+    expect(leido.xavira?.characterId).toBe('per-1');
+  });
+
+  it('uno ya escrito en la forma nueva no se vuelve a traducir', () => {
+    const leido = storedCharacterSchema.parse({
+      characterId: 'per-1',
+      imageProvider: 'horde',
+      xavira: { characterId: 'otro-de-xavira', modelId: 'anime-pure-v1' },
+      horde: { recipe: { models: ['Prefect Pony'], appearance: 'green eyes' } },
+      description: '',
+      label: 'Lia',
+      avatarObjectKey: null,
+      createdAt: '2026-09-04T12:00:00.000Z',
+    });
+    // la identidad de Xavira es SUYA y distinta de la clave de la boveda: si la
+    // traduccion se aplicara otra vez, la pisaria con la clave local
+    expect(leido.xavira?.characterId).toBe('otro-de-xavira');
+    expect(leido.imageProvider).toBe('horde');
   });
 });

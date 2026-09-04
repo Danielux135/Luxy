@@ -679,24 +679,52 @@ export const vaultMediaGenerateResultSchema = z.object({
  * guarde aquí no se recupera de ninguna manera.
  */
 export const vaultCharacterSummarySchema = z.object({
+  /**
+   * la clave DURABLE de la bóveda, no la de ningún proveedor.
+   *
+   * A ella se agarran sus conversaciones, sus recuerdos y sus imágenes, así que
+   * no cambia nunca. La de Xavira, cuando la tiene, va dentro de `xavira`.
+   */
   characterId: z.string(),
-  modelId: z.string(),
   description: z.string(),
   label: z.string(),
   /** hay avatar guardado; los bytes se piden aparte y van cifrados en disco */
   avatarObjectKey: z.string().nullable(),
   createdAt: z.string(),
-  /** quién genera sus imágenes: el de pago o AI Horde, que es gratis */
-  provider: z.enum(['xavira', 'horde']).default('xavira'),
   /**
-   * la receta con la que se repite su aspecto en AI Horde.
+   * quién le hace las fotos AHORA.
    *
-   * Viaja al renderer entera y a propósito: sin ella la pantalla no podría
+   * Es una propiedad del personaje que se cambia cuando se quiera. El personaje
+   * no depende de ella: sus conversaciones, sus recuerdos y sus imágenes se
+   * agarran a `characterId`, que no cambia nunca (`D-068`).
+   */
+  imageProvider: z.enum(['xavira', 'horde']).default('xavira'),
+  /** su identidad en Xavira, si la tiene. El identificador es el de SU API */
+  xavira: z
+    .object({ characterId: z.string(), modelId: z.string() })
+    .nullable()
+    .default(null),
+  /**
+   * su aspecto en AI Horde, si lo tiene.
+   *
+   * Viaja al renderer entero y a propósito: sin él la pantalla no podría
    * enseñar ni corregir con qué modelo y qué rasgos se está generando, que es
    * justo lo que hay que mirar cuando un personaje deja de parecerse a sí mismo.
    * No contiene ningún secreto.
    */
-  recipe: hordeRecipeSchema.nullable().default(null),
+  horde: z.object({ recipe: hordeRecipeSchema }).nullable().default(null),
+});
+
+/**
+ * cambia quién le hace las fotos a un personaje.
+ *
+ * No toca nada más: es lo que permite que Lía siga siendo Lía —con sus
+ * recuerdos y sus conversaciones— tanto si sus fotos las da Xavira como si las
+ * da AI Horde.
+ */
+export const vaultCharacterProviderArgsSchema = z.object({
+  characterId: z.string().min(1).max(128),
+  provider: z.enum(['xavira', 'horde']),
 });
 
 export const vaultCharacterListResultSchema = z.object({
@@ -1132,6 +1160,10 @@ export interface LuxyBridge {
   saveVaultHordeCharacter(
     args: z.infer<typeof vaultHordeCharacterSaveArgsSchema>,
   ): Promise<IpcResult<z.infer<typeof vaultCharacterCreateResultSchema>>>;
+  /** cambia quien le hace las fotos; el personaje y sus recuerdos siguen igual */
+  setVaultCharacterImageProvider(
+    args: z.infer<typeof vaultCharacterProviderArgsSchema>,
+  ): Promise<IpcResult<z.infer<typeof vaultCharacterListResultSchema>>>;
   createVault(password: string): Promise<IpcResult<z.infer<typeof vaultCreateResultSchema>>>;
   unlockVault(
     args: z.infer<typeof vaultUnlockArgsSchema>,

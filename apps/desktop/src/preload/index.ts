@@ -76,6 +76,8 @@ const bridge: LuxyBridge = {
   listVaultHordeModels: () => ipcRenderer.invoke(IPC_INVOKE.vaultHordeModels),
   saveVaultHordeCharacter: (args: unknown) =>
     ipcRenderer.invoke(IPC_INVOKE.vaultHordeCharacterSave, args),
+  setVaultCharacterImageProvider: (args: unknown) =>
+    ipcRenderer.invoke(IPC_INVOKE.vaultCharacterImageProvider, args),
   createVault: (password: string) => ipcRenderer.invoke(IPC_INVOKE.vaultCreate, { password }),
   unlockVault: (args: unknown) => ipcRenderer.invoke(IPC_INVOKE.vaultUnlock, args),
   lockVault: () => ipcRenderer.invoke(IPC_INVOKE.vaultLock),

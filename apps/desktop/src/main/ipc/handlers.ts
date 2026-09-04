@@ -79,6 +79,7 @@ import {
   vaultMediaKeyArgsSchema,
   vaultHordeKeyArgsSchema,
   vaultHordeCharacterSaveArgsSchema,
+  vaultCharacterProviderArgsSchema,
   vaultDeviceUnlockSetArgsSchema,
   vaultPasswordArgsSchema,
   vaultUnlockArgsSchema,
@@ -1470,12 +1471,12 @@ export function registerIpcHandlers(context: HandlerContext): void {
       // creditos, su identificador solo llega una vez y la API no sabe
       // listarlos: si no se guarda en este instante, se paga y se pierde
       const characters = await context.characters.add(context.vault, {
+        // la clave de la boveda de un personaje nuevo la pone su proveedor
+        // porque es la unica que hay; a partir de aqui es NUESTRA y no cambia,
+        // aunque despues se le añada un aspecto en el horde
         characterId: created.characterId,
-        // el proveedor de pago guarda la identidad en su servidor, asi que aqui
-        // no hay receta que conservar
-        provider: 'xavira',
-        recipe: null,
-        modelId: args.modelId,
+        imageProvider: 'xavira',
+        xavira: { characterId: created.characterId, modelId: args.modelId },
         description: args.description,
         label: args.label.trim(),
         avatarObjectKey,
@@ -1522,9 +1523,8 @@ export function registerIpcHandlers(context: HandlerContext): void {
 
     const characters = await context.characters.add(context.vault, {
       characterId: args.characterId.trim(),
-      provider: 'xavira',
-      recipe: null,
-      modelId: args.modelId,
+      imageProvider: 'xavira',
+      xavira: { characterId: args.characterId.trim(), modelId: args.modelId },
       description: args.description,
       label: args.label.trim(),
       avatarObjectKey,
@@ -1535,16 +1535,17 @@ export function registerIpcHandlers(context: HandlerContext): void {
   });
 
   /**
-   * guarda o corrige un personaje de AI Horde.
+   * da a un personaje su aspecto en AI Horde, o lo corrige.
    *
    * No llama a ninguna API y no cuesta nada, porque en el horde un personaje NO
    * existe fuera de aqui: es su receta. Eso cambia una cosa importante respecto
-   * al proveedor de pago, donde equivocarse cuesta creditos y el aspecto no se
-   * puede cambiar: aqui se edita hasta que la cara salga bien.
+   * a Xavira, donde equivocarse cuesta creditos y el aspecto no se puede
+   * cambiar: aqui se edita hasta que la cara salga bien.
    *
-   * Editar CONSERVA el identificador. Es lo que hace que las imagenes ya
-   * generadas y los recuerdos sigan siendo de esa misma persona en vez de
-   * quedarse huerfanos con cada retoque.
+   * Y sirve para un personaje QUE YA EXISTE, aunque naciera en Xavira. Ese es
+   * el punto de `D-068`: darle un aspecto en el horde no crea a nadie nuevo, le
+   * añade una segunda forma de hacerle fotos. Conserva su `characterId`, y con
+   * el sus conversaciones, sus recuerdos y sus imagenes.
    */
   handle(IPC_INVOKE.vaultHordeCharacterSave, vaultHordeCharacterSaveArgsSchema, async (args) => {
     if (!context.vault.isUnlocked()) throw new VaultError('la boveda esta bloqueada');
@@ -1555,23 +1556,16 @@ export function registerIpcHandlers(context: HandlerContext): void {
     if (args.characterId.length > 0 && existing === undefined) {
       throw new VaultError('ese personaje ya no esta en la boveda');
     }
-    if (existing !== undefined && existing.provider !== 'horde') {
-      // cambiar de proveedor a un personaje existente no es editarlo: seria
-      // otra persona con el mismo nombre, y la receta no sirve alli
-      throw new VaultError(
-        'ese personaje es del proveedor de pago',
-        'crea uno nuevo de AI Horde en vez de convertir este',
-      );
-    }
-
     const characterId = existing?.characterId ?? randomUUID();
     const characters = await context.characters.add(context.vault, {
       characterId,
-      provider: 'horde',
-      recipe: args.recipe,
-      // el horde no tiene modelos de personaje: se guarda el primero de la
-      // receta para que la lista pueda decir con que se esta generando
-      modelId: args.recipe.models[0] ?? 'horde',
+      // estrenar el aspecto lo activa; corregirlo despues NO cambia de quien
+      // vienen las fotos, que es una decision aparte y del usuario
+      imageProvider: existing?.horde == null ? 'horde' : existing.imageProvider,
+      // lo que tuviera en Xavira se conserva intacto: es la otra mitad de la
+      // misma persona, no algo que este reemplazando
+      xavira: existing?.xavira ?? null,
+      horde: { recipe: args.recipe },
       description: args.description,
       label: args.label.trim(),
       avatarObjectKey: existing?.avatarObjectKey ?? null,
@@ -1582,6 +1576,51 @@ export function registerIpcHandlers(context: HandlerContext): void {
     context.log('personaje de AI Horde guardado', { modelos: args.recipe.models.length });
     return { characterId, characters };
   });
+
+  /**
+   * cambia quien le hace las fotos a un personaje.
+   *
+   * Es lo unico que hace: no toca su nombre, ni su descripcion, ni su avatar, y
+   * sobre todo no toca su `characterId`, que es a lo que se agarran sus
+   * conversaciones, sus recuerdos y las imagenes que ya tiene. Cambiar de
+   * proveedor no es cambiar de persona (`D-068`).
+   *
+   * Se exige que la identidad de destino EXISTA. Poner `horde` sin receta
+   * dejaria al personaje sin poder generar nada, y el fallo aparecería un turno
+   * despues, con la foto ya prometida.
+   */
+  handle(
+    IPC_INVOKE.vaultCharacterImageProvider,
+    vaultCharacterProviderArgsSchema,
+    async (args) => {
+      if (!context.vault.isUnlocked()) throw new VaultError('la boveda esta bloqueada');
+
+      const existing = (await context.characters.list(context.vault)).find(
+        (entry) => entry.characterId === args.characterId,
+      );
+      if (existing === undefined) throw new VaultError('ese personaje no esta en la boveda');
+
+      if (args.provider === 'horde' && existing.horde === null) {
+        throw new VaultError(
+          'ese personaje todavia no tiene aspecto en AI Horde',
+          'creale uno con «Darle aspecto en AI Horde» y podras cambiar cuando quieras',
+        );
+      }
+      if (args.provider === 'xavira' && existing.xavira === null) {
+        throw new VaultError(
+          'ese personaje no existe en Xavira',
+          'nacio en AI Horde; crearlo en Xavira cuesta creditos y le da otra cara',
+        );
+      }
+
+      const characters = await context.characters.add(context.vault, {
+        ...existing,
+        imageProvider: args.provider,
+      });
+      context.log('proveedor de imagen cambiado', { proveedor: args.provider });
+      return { characters };
+    },
+  );
 
   /**
    * las ultimas instrucciones que se usaron con este personaje.
@@ -1798,13 +1837,22 @@ export function registerIpcHandlers(context: HandlerContext): void {
     // el proveedor es del PERSONAJE y no de la conversacion: dos personajes de
     // la misma boveda pueden generarse en sitios distintos, y mezclarlos
     // significaria mandar la receta de uno a la API del otro
-    if (character?.provider === 'horde') {
-      return generateHordeImage({ ...input, character });
+    if (character?.imageProvider === 'horde') {
+      return generateHordeImage({
+        ...input,
+        character: { characterId: character.characterId, recipe: character.horde?.recipe ?? null },
+      });
     }
 
     const controller = new AbortController();
     const options = mediaProviderOptions(controller.signal);
-    const args = input;
+    // el identificador que entiende SU API vive en `xavira`, no en la clave de
+    // la boveda. En un personaje anterior a `D-068` coinciden; en uno nacido en
+    // el horde al que se le añade Xavira despues, no
+    const args = {
+      ...input,
+      characterId: character?.xavira?.characterId ?? input.characterId,
+    };
 
     try {
       const started =
@@ -1991,7 +2039,7 @@ export function registerIpcHandlers(context: HandlerContext): void {
     // la clave que hace falta es la del proveedor de ESTE personaje. Preguntar
     // siempre por la de pago dejaba sin imagenes a un personaje del horde que
     // estaba perfectamente configurado
-    const imageProvider = character?.provider ?? 'xavira';
+    const imageProvider = character?.imageProvider ?? 'xavira';
     const providerSecret =
       imageProvider === 'horde' ? VAULT_HORDE_API_SECRET : VAULT_MEDIA_API_SECRET;
 
@@ -2062,8 +2110,8 @@ export function registerIpcHandlers(context: HandlerContext): void {
       // los modelos de anime rinden peor con prosa y los realistas peor con
       // etiquetas sueltas: lo dice la documentacion del proveedor
       imagePromptStyle: imagePromptStyleFor(imageProvider, {
-        xaviraModelId: character?.modelId ?? null,
-        recipe: character?.recipe ?? null,
+        xaviraModelId: character?.xavira?.modelId ?? null,
+        recipe: character?.horde?.recipe ?? null,
       }),
     });
 

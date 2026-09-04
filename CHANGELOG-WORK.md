@@ -1,5 +1,52 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-09-04 13:30 — Claude — F11-HORDE-003
+
+- Origen, con sus palabras: «quiero que Lia pueda enviarme imagenes desde Horde,
+  sin tener que volver a crear el personaje. NUNCA quiero que Lia se pierda
+  entre modelos: el personaje persiste, con sus memorias, todo».
+- **El diseño de `D-064` no lo permitia, y estaba mal.** Ataba el personaje a su
+  proveedor: usar a Lia en el otro obligaba a crear una nueva, con identificador
+  nuevo, y ahi se quedaban sus conversaciones, sus recuerdos y sus imagenes. El
+  error de fondo era haber usado el identificador de un proveedor como clave
+  propia: coincidian, asi que parecian lo mismo. Ver `D-068`.
+- Forma nueva: `characterId` es la identidad DURABLE y no cambia nunca;
+  `imageProvider` dice quien le hace las fotos AHORA; `xavira` y `horde` guardan
+  cada identidad por separado. Un personaje puede existir en los dos sitios, en
+  uno, o cambiar de sitio, sin que su historia se entere.
+- Comprobado ANTES de tocar nada a que se agarran los recuerdos:
+  `latestCharacterId` en las conversaciones y `conversationsOf` en
+  `private-memory.ts` usan el `characterId` de la boveda. Mientras ese no se
+  mueva, no se pierde nada. Es el invariante que sostiene todo lo demas.
+- **La migracion es lo delicado y esta probada aparte.** Lo escrito antes lleva
+  `provider`, `modelId` y `recipe`, y se traduce AL LEER, sin reescribir el
+  archivo. En un personaje de Xavira anterior la clave de la boveda ERA la de su
+  API: se copia dentro de `xavira` y desde ahi el codigo usa esa y nunca la
+  local. Hay una prueba con el identificador REAL del personaje de Daniel,
+  porque equivocarse ahi no da un error: da un personaje que ya no recuerda nada.
+- Interfaz: la lista de personajes deja de decir de quien es cada uno y pasa a
+  decir que sabe hacer —sus identidades, con la activa marcada—, con un
+  selector para cambiar y un boton «Darle aspecto en AI Horde» cuando le falta.
+  El formulario del horde acepta ahora un personaje que YA existe y conserva su
+  identificador, su nombre y su descripcion.
+- Quitado el guardian que decia «ese personaje es del proveedor de pago, crea
+  uno nuevo»: era exactamente lo contrario de lo que hay que hacer.
+- Lo que NO resuelve, y la pantalla lo dice antes de cambiar: **la cara no se
+  traslada**. Cada proveedor construye la identidad a su manera y no hay forma
+  de convertir una en otra. Lia sigue siendo Lia con todo lo suyo, pero sus
+  fotos de un sitio y de otro no seran la misma cara.
+- Archivos: `character-store.ts` (+4 pruebas de migracion), `ipc.ts` (+3
+  pruebas), `channels.ts`, `preload/index.ts`, `handlers.ts`, `useVault.ts`,
+  `Vault.tsx`, `styles.css`.
+- Resultado real: **`npm run check` exit 0 — 134 archivos, 2.366 pruebas
+  superadas, 12 omitidas.**
+- Sin ver en pantalla, y con un hueco conocido: **no hay forma de darle
+  identidad en Xavira a un personaje que no la tiene.** Crear alli cuesta
+  creditos y da otra cara, asi que no se ofrece como si fuera gratis; hoy el
+  camino es crear uno nuevo en Xavira a proposito. Si hace falta, es una accion
+  aparte y con su aviso.
+
+
 ### 2026-09-04 12:20 — Claude — BUG-VAULT-SALIDA-001
 
 - Origen: Daniel dice que «en algun momento has quitado el boton de Cerrar

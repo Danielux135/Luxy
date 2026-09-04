@@ -29,21 +29,23 @@ type MemoryEpisode = z.infer<typeof vaultMemoryListResultSchema>['episodes'][num
  */
 /** un personaje guardado. Crearlo cuesta créditos: por eso se guarda */
 export interface VaultCharacterView {
+  /** la clave durable de la bóveda; a ella se agarran recuerdos e imágenes */
   characterId: string;
-  modelId: string;
   description: string;
   label: string;
   avatarObjectKey: string | null;
   createdAt: string;
-  /** quién genera sus imágenes: el de pago o AI Horde, que es gratis */
-  provider: 'xavira' | 'horde';
+  /** quién le hace las fotos AHORA; se cambia sin tocar nada más (`D-068`) */
+  imageProvider: 'xavira' | 'horde';
+  /** su identidad en Xavira, si la tiene. El identificador es el de SU API */
+  xavira: { characterId: string; modelId: string } | null;
   /**
-   * su aspecto, cuando es de AI Horde.
+   * su aspecto en AI Horde, si lo tiene.
    *
-   * Allí no hay personajes en el servidor: esto **es** el personaje, y por eso
-   * la pantalla tiene que poder enseñarlo y corregirlo.
+   * Allí no hay personajes en el servidor: esto **es** su cara, y por eso la
+   * pantalla tiene que poder enseñarlo y corregirlo.
    */
-  recipe: HordeRecipe | null;
+  horde: { recipe: HordeRecipe } | null;
 }
 
 export interface VaultAccountView {
@@ -184,6 +186,16 @@ export interface VaultController {
     description: string;
     recipe: HordeRecipe;
   }) => Promise<string | null>;
+  /**
+   * cambia quién le hace las fotos a un personaje.
+   *
+   * No toca nada más: el personaje, sus recuerdos y sus conversaciones siguen
+   * siendo los mismos. Falla si todavía no tiene identidad en el destino.
+   */
+  setCharacterImageProvider: (
+    characterId: string,
+    provider: 'xavira' | 'horde',
+  ) => Promise<boolean>;
   create: (password: string) => Promise<boolean>;
   unlock: (method: 'password' | 'recovery' | 'device', secret?: string) => Promise<boolean>;
   lock: () => Promise<void>;
@@ -1031,6 +1043,22 @@ export function useVault(): VaultController {
     [],
   );
 
+  const setCharacterImageProvider = useCallback(
+    async (characterId: string, provider: 'xavira' | 'horde'): Promise<boolean> => {
+      setError(null);
+      setHint(null);
+      const result = await window.luxy.setVaultCharacterImageProvider({ characterId, provider });
+      if (!result.ok) {
+        setError(result.error);
+        setHint(result.hint);
+        return false;
+      }
+      setCharacters(result.value.characters);
+      return true;
+    },
+    [],
+  );
+
   const readCharacterInstructions = useCallback(
     async (characterId: string): Promise<string | null> => {
       const result = await window.luxy.readVaultCharacterInstructions({ characterId });
@@ -1095,6 +1123,7 @@ export function useVault(): VaultController {
     hordeModels,
     loadHordeModels,
     saveHordeCharacter,
+    setCharacterImageProvider,
     create,
     unlock,
     lock,

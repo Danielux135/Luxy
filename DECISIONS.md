@@ -1759,3 +1759,52 @@ Dos detalles del contrato que no se adivinan y que costaría caro equivocar:
 `source_image` va en la **raíz** del cuerpo y `denoising_strength` **dentro de
 `params`**; ponerlos al revés hace que el servidor ignore la imagen en silencio
 y devuelva una generación de cero, sin ningún error.
+
+## D-068 — el personaje es lo duradero; el proveedor de imagen es una propiedad suya
+
+Fecha: 2026-09-04
+
+Estado: aceptada, implementada
+
+Lo dijo Daniel con todas las letras: «quiero que Lía pueda enviarme imágenes
+desde Horde, sin tener que volver a crear el personaje. NUNCA quiero que Lía se
+pierda entre modelos: el personaje persiste, con sus memorias, todo. Lo que
+podemos cambiar es qué proveedor nos da las fotos».
+
+El diseño de `D-064` no lo permitía, y estaba mal por un motivo concreto: ataba
+el personaje a su proveedor. Un personaje **era** de Xavira o del horde, así que
+usar a Lía en el otro obligaba a crear una nueva —identificador nuevo— y ahí se
+quedaban sus conversaciones, sus recuerdos y sus imágenes. El identificador es
+la costura por la que todo eso cuelga.
+
+La forma nueva separa las dos cosas:
+
+- `characterId` es la identidad **durable**, nuestra, y **no cambia nunca**. A
+  ella se agarran las conversaciones (`latestCharacterId`), los episodios de
+  memoria (`conversationsOf`) y los medios generados.
+- `imageProvider` dice quién le hace las fotos **ahora**, y se cambia cuando se
+  quiera sin tocar nada más.
+- `xavira` y `horde` guardan cada identidad por separado: la primera con el
+  identificador que devolvió **su** API, la segunda con la receta local.
+
+El error de fondo que esto corrige es haber usado el identificador de un
+proveedor como clave propia. Coincidían, así que parecían la misma cosa; pero
+uno es nuestro y el otro pertenece a un servicio que puede dejar de usarse. Al
+separarlos, un personaje puede existir en los dos sitios, en uno, o cambiar de
+sitio, sin que su historia se entere.
+
+**La migración es lo delicado, y por eso está probada aparte.** Lo escrito en
+disco antes de hoy lleva `provider`, `modelId` y `recipe`; se traduce **al
+leer**, sin reescribir el archivo y sin tocar `characterId`. En un personaje de
+Xavira anterior, la clave de la bóveda ERA la de su API: la traducción la copia
+dentro de `xavira` y a partir de ahí el código usa esa y nunca la de la bóveda.
+Hay una prueba con el identificador real del personaje de Daniel, porque
+equivocarse ahí no da un error: da un personaje que ya no recuerda nada.
+
+Lo que **no** resuelve, y hay que decirlo: **la cara no se traslada**. Cada
+proveedor construye la identidad a su manera —un identificador en su servidor
+allí, una receta local aquí— y no hay forma de convertir una en otra. Lía
+seguirá siendo Lía, con su nombre, su personalidad y todo lo que han hablado;
+pero sus fotos de Xavira y sus fotos del horde no serán la misma cara. Eso es
+una limitación de los generadores, no del diseño, y la pantalla lo avisa antes
+de cambiar en vez de dejar que se descubra en la primera foto.
