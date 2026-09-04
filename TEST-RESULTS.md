@@ -1,5 +1,80 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-04 — F11-HORDE-001, AI Horde entero sin gastar un kudo
+
+`npm run check` exit 0.
+
+```
+Test Files  132 passed (132)
+     Tests   2340 passed | 12 skipped (2352)
+```
+
+Son 2.340 tras la revision adversarial, que añadio cuatro pruebas: la censura
+propia de un worker, la cancelacion que ahora si se envia al abandonar, el
+`dry_run` sin identificador y el secreto reservado que un proveedor no puede
+reclamar.
+
+**Actualizacion del mismo dia, tras `F11-HORDE-002`** (LoRAs e img2img):
+
+```
+Test Files  133 passed (133)
+     Tests   2356 passed | 12 skipped (2368)
+```
+
+Diez pruebas mas, y las que importan son las dos que fijan **donde va cada
+campo**: `source_image` y `source_processing` en la RAIZ del cuerpo,
+`denoising_strength` DENTRO de `params`. Cada una comprueba las dos ubicaciones
+—que esta donde debe y que NO esta en la otra—, porque el error de ponerlo al
+reves no produce ningun fallo: el servidor ignora la imagen en silencio y
+devuelve una generacion de cero. Ademas: prefijo `data:` rechazado sin llegar a
+la red, imagen de mas de 5 MB rechazada igual, y `denoisingStrength` fuera de
+rango.
+
+El archivo 133 no es nuestro: es `System.test.ts`, del commit `30fa1cb` de la
+otra sesion que trabaja en este worktree.
+
+Build de los cuatro paquetes correcto. `npx tsc -b tsconfig.build.json` limpio.
+
+**Pruebas nuevas: 64.**
+
+| archivo | pruebas | que fijan |
+| --- | --- | --- |
+| `apps/agent/src/providers/horde.test.ts` | 40 | el transporte entero, con `fetch` falso |
+| `packages/shared/src/vault-image-provider.test.ts` | 15 | la receta y como se compone el prompt |
+| `apps/desktop/src/main/vault/character-store.test.ts` | +4 | la receta cifrada y editar sin duplicar |
+| `apps/desktop/src/shared/ipc.test.ts` | +3 | el contrato del personaje del horde |
+| `apps/desktop/src/renderer/http-provider-config.test.ts` | +2 | los proveedores conocidos |
+
+**Ninguna llama a la red.** Hay una prueba que espia `globalThis.fetch` y
+comprueba que una anchura invalida se rechaza **sin llegar a llamarlo**: el
+horde cobra kudos por peticion, asi que validar antes de salir no es una
+optimizacion, es no pagar por un 400.
+
+Lo que fijan las que importan:
+
+- la cabecera es `apikey` y no `Authorization`, y viaja `Client-Agent`;
+- `censor_nsfw` se manda SIEMPRE y en `false`. Su swagger dice que el defecto es
+  `false` y su servidor dice que es `True`: sin mandarlo, la imagen puede llegar
+  censurada en negro;
+- el bucle sondea `/generate/check` y llama a `/generate/status` **una sola
+  vez**, porque el segundo tiene limite de diez por minuto;
+- `is_possible: false` aborta pronto en vez de esperar diez minutos a algo que
+  hoy no puede salir;
+- `gen_metadata` con `censorship`/`csam` produce un error propio que lo dice y
+  **no reintenta**;
+- el campo `img` se acepta en sus dos formas —URL de R2 y base64— y una URL
+  `http` se rechaza;
+- el aspecto del personaje y el nombre de su modelo **no aparecen en claro** en
+  `characters.json`;
+- un personaje guardado antes de este cambio se lee como del proveedor de pago,
+  con `recipe: null`: sin ese defecto, una boveda anterior dejaria de leer su
+  propia lista.
+
+**Lo que estas pruebas NO demuestran:** que AI Horde responda lo que su
+documentacion dice. Demuestran que contrato se envia. Verificarlo contra la red
+real es `LA-038`.
+
+
 ### 2026-09-03 — llamadas duplicadas: Daniel tenia razon, y eran DOS cosas
 
 Daniel: «no sera que Luxy llama sin querer dos veces?». Si, y ademas se habia

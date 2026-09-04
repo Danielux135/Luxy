@@ -1621,3 +1621,141 @@ el café. Aqui el inventor no fue el modelo improvisando, sino **una linea del
 system prompt**. Cualquier cosa que el sistema afirme sin querer acaba siendo
 historia, asi que el prompt fijo merece la misma desconfianza que la salida del
 modelo.
+
+## D-064 — un personaje del horde ES su receta, y por eso vive cifrado en local
+
+Fecha: 2026-09-04
+
+Estado: aceptada, implementada
+
+Luxy solo sabia generar imagenes con un proveedor de pago que guarda el
+personaje **en su servidor** y devuelve un identificador. Ese identificador es
+lo que mantiene la misma cara entre generaciones, y por eso el almacen de
+personajes existia: crear uno cuesta creditos y la API no sabe listarlos.
+
+AI Horde es gratis y **no tiene personajes**. No hay nada al otro lado que
+recuerde a nadie: cada peticion es independiente. Habia dos formas de encajarlo:
+
+1. mandar solo la escena, como al proveedor de pago, y aceptar que la cara
+   cambie en cada imagen;
+2. guardar aqui la identidad entera y anteponerla a cada escena.
+
+Se eligio la segunda. Un personaje del horde **es** una receta —modelos,
+aspecto fijo en ingles, ropa, negativo, semilla, tamaño, pasos, clipSkip— y se
+guarda en el mismo almacen cifrado que los de pago, con `provider: 'horde'`.
+
+Tres consecuencias que no son evidentes:
+
+- **Editarlo no cuesta nada y conserva el identificador.** En el de pago el
+  aspecto no se puede cambiar y equivocarse cuesta creditos; aqui se corrige
+  hasta que la cara salga bien. Conservar el identificador es lo que hace que
+  las imagenes y los recuerdos que ya cuelgan de el sigan siendo suyos.
+- **La identidad va PRIMERO en el prompt.** Los primeros tokens pesan mas: si la
+  escena se adelanta, el aspecto se diluye y la cara deja de repetirse.
+- **La receta describe a una persona, asi que se cifra** igual que todo lo
+  demas. Una prueba afirma que ni el aspecto ni el modelo aparecen en claro en
+  `characters.json`.
+
+El campo `provider` lleva `default('xavira')` a proposito: sin el, una boveda
+anterior dejaria de poder leer su propia lista de personajes.
+
+## D-065 — la clave anonima del horde funciona, pero no se pone sola
+
+Fecha: 2026-09-04
+
+Estado: aceptada, implementada
+
+AI Horde admite la clave anonima `0000000000`. Genera igual y no exige
+registrarse, asi que la tentacion era ponerla por defecto y que todo funcionara
+sin pedirle nada al usuario.
+
+No se hace, por un motivo que no es de comodidad: **con la clave anonima el
+servidor fuerza `shared: true`**, es decir, dona lo generado a un conjunto de
+datos publico, y ademas atiende esas peticiones las ultimas. Luxy manda
+`shared: false` siempre, pero con esa clave el horde lo ignora.
+
+Una boveda cuya razon de ser es que nadie mas lea lo que hay dentro no puede
+regalar por defecto lo que genera. Asi que:
+
+- sin clave guardada, generar con el horde **falla con una explicacion**, no se
+  cae en la anonima;
+- la clave anonima **se puede escribir a mano** —es una eleccion legitima y
+  gratis— y entonces el estado la marca (`hordeAnonymous`) y la pantalla avisa
+  de lo que implica;
+- el aviso dice lo que cuesta arreglarlo: una clave propia de aihorde.net es
+  gratis, no pide tarjeta y no comparte nada.
+
+La regla general que deja: **un valor por defecto no puede tomar por el usuario
+una decision sobre sus datos.** Ahorrarle un paso no vale filtrar su contenido.
+
+## D-066 — la clave que hace falta es la del proveedor de ESE personaje
+
+Fecha: 2026-09-04
+
+Estado: aceptada, implementada
+
+`imageBlockReason` decide si una conversacion privada puede ofrecer imagenes, y
+lo consultan los dos lados —el proceso principal para armar el prompt y la
+pantalla para avisar antes de enviar—. Su tercera condicion era «hay clave del
+proveedor de imagenes», en singular, porque solo habia uno.
+
+Con dos proveedores esa pregunta ya no significa nada por si sola: un personaje
+del horde perfectamente configurado se quedaba sin imagenes porque faltaba la
+clave del de pago, y el aviso mandaba a Conexiones, donde no habia nada que
+arreglar.
+
+El proveedor es **del personaje**, no de la conversacion ni de la maquina: dos
+personajes de la misma boveda pueden generarse en sitios distintos. Asi que la
+regla se mantiene igual —la funcion no cambio— y lo que cambia es quien
+responde a su pregunta: el llamador mira la clave que corresponde al
+`provider` del personaje, y el mensaje de bloqueo se elige por lo mismo. Es la
+continuacion directa de `BUG-VAULT-CHARACTER-001`: un aviso que manda a
+arreglar lo que no esta roto es peor que no avisar.
+
+## D-067 — en AI Horde la identidad la fijan los pesos, no una imagen
+
+Fecha: 2026-09-04
+
+Estado: aceptada, implementada
+
+Daniel preguntó lo que pregunta cualquiera al ver que un personaje del horde no
+tiene memoria: si se puede subir una imagen de referencia para que salga
+coherente. Se comprobó contra su swagger vivo 2.6, sus 178 modelos y los 18
+workers conectados.
+
+**No existe ningún mecanismo de identidad por imagen.** Las cadenas
+`ipadapter`, `ip_adapter`, `faceid`, `instantid`, `photomaker`, `pulid`,
+`reactor`, `insightface`, `faceswap` y `kontext` no aparecen en su swagger. Y no
+hay ningún modelo de edición por instrucción servido: recorridos los 178
+nombres, cero contienen `kontext`, `edit` o `instruct`.
+
+Sí se puede mandar una imagen de entrada, pero eso es img2img, inpainting o
+remix, y ninguna hace lo que se espera: img2img conserva **píxeles** —con
+denoising bajo devuelve casi lo mismo, con denoising alto pierde la cara— y
+remix conserva **concepto**, no rasgos. No hay punto intermedio que dé «misma
+cara, escena nueva».
+
+Lo que sí fija una identidad ahí son los **pesos**: un LoRA de personaje
+publicado en CivitAI. Estaba soportado en el esquema y en el adaptador desde el
+primer día y no había ningún campo en la pantalla para escribirlo, que era el
+hueco real.
+
+Consecuencias de diseño:
+
+- **El editor de LoRAs es la respuesta a la pregunta**, y dice lo que cuesta:
+  +3 kudos por LoRA y sólo 9 de los 18 workers los aceptan, así que pedir uno
+  reduce a la mitad quién puede atenderte.
+- **img2img se implementa igual, pero anunciado por lo que es**: varía una
+  imagen que ya salió bien. La interfaz lo dice con esas palabras. Vender esto
+  como coherencia de personaje sería la clase de promesa que produce el
+  «funciona mal» de dentro de dos semanas.
+- **ControlNet no se implementa.** El fichero de baselines dice
+  `controlnet: true` para SDXL, pero el gate real del worker sólo incluye SD1 y
+  SD2: un Pony o un Illustrious con `control_type` vuelve con
+  `ControlNetMismatch`. Habría sido código que falla siempre en los modelos que
+  de verdad se usan.
+
+Dos detalles del contrato que no se adivinan y que costaría caro equivocar:
+`source_image` va en la **raíz** del cuerpo y `denoising_strength` **dentro de
+`params`**; ponerlos al revés hace que el servidor ignore la imagen en silencio
+y devuelva una generación de cero, sin ningún error.

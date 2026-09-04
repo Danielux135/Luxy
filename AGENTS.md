@@ -93,6 +93,12 @@ lo pida explícitamente.
   `config.json`; las URLs remotas exigen HTTPS y HTTP sólo se admite en loopback.
 - El catálogo real de una conexión consulta sólo `/v1/models`; no sondea rutas
   tentativas de precios (`D-022`).
+- Las imágenes de la bóveda tienen **dos** proveedores y el proveedor es del
+  **personaje**, no de la máquina: el de pago guarda la identidad en su servidor
+  y AI Horde no tiene personajes, así que allí la identidad es una receta local
+  y cifrada (`D-064`). La clave de AI Horde no se rellena sola con la anónima:
+  con ella el servidor fuerza `shared` y dona lo generado (`D-065`). Ver
+  `docs/IMAGENES-GRATIS.md`.
 - Prohibida cualquier automatización de navegador (Selenium, Playwright) y de
   las interfaces web de Claude o ChatGPT.
 - Claude Code y Codex CLI se usan con la **sesión local** del ordenador.

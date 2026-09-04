@@ -1,5 +1,170 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-09-04 12:05 — Claude — F11-HORDE-002
+
+- Origen: Daniel pregunta si se puede subir una imagen de referencia al horde
+  para que el personaje sea coherente. La respuesta corta era «no», pero merecia
+  comprobarse antes de decirla.
+- Investigacion (cuatro agentes, contra el swagger vivo 2.6, la lista viva de
+  modelos y los 18 workers conectados): **AI Horde no tiene NINGUN mecanismo de
+  identidad por imagen.** Ni IP-Adapter, ni FaceID, ni InstantID, ni PhotoMaker,
+  ni face-swap: ninguna de esas cadenas aparece en su swagger. Ni un solo modelo
+  de edicion por instruccion servido por nadie —recorridos los 178 nombres, cero
+  con `kontext`, `edit` o `instruct`—. `Qwen-Image_fp8` es el modelo base, no
+  Qwen-Image-Edit.
+- Dos hallazgos que corrigen lo que parecia obvio:
+  1. **`source_image` va en la RAIZ del cuerpo y `denoising_strength` dentro de
+     `params`.** Confundirlo hace que el servidor ignore la imagen en silencio y
+     devuelva una generacion de cero, sin ningun error.
+  2. **ControlNet no sirve en los modelos anime.** El fichero de baselines dice
+     `controlnet: true` para SDXL, pero el gate real del worker
+     (`BRIDGE_BASELINE_FEATURES[...][CONTROL_TYPE]`) solo incluye SD1 y SD2: un
+     Pony o un Illustrious con `control_type` vuelve con `ControlNetMismatch`.
+     Por eso NO se ha implementado.
+- **Lo unico que fija de verdad una identidad ahi son los pesos:** un LoRA de
+  personaje publicado en CivitAI. Ya estaba soportado en el esquema y en el
+  adaptador desde `F11-HORDE-001`, y **no habia ningun campo en la pantalla para
+  escribirlo**. Ese era el hueco real.
+- Hecho:
+  - **Editor de LoRAs** en el formulario del personaje: hasta 5, con `name`,
+    `isVersion`, pesos `model` y `clip`, y `injectTrigger`. Dice lo que cuesta:
+    +3 kudos cada uno y **solo 9 de los 18 workers** los aceptan, asi que pedir
+    uno reduce a la mitad quien puede atenderte.
+  - **img2img**: `sourceImage`, `sourceProcessing` y `denoisingStrength` en el
+    contrato compartido; `source_image` y `source_processing` en la raiz del
+    cuerpo y `denoising_strength` en `params`, con validacion ANTES de la red
+    —prefijo `data:`, 5 MB decodificados, rango 0,01..1—.
+  - `fromMediaId` de punta a punta: la pantalla elige una imagen de la
+    conversacion, `handlers.ts` la descifra en memoria y la manda en base64 puro
+    en el CUERPO. Nunca una URL publica, por el mismo motivo que `D-042`.
+  - **Solo webp** como imagen de partida: es lo que documenta la API y lo que el
+    propio horde devuelve. Un PNG adjunto se rechaza diciendolo, en vez de
+    mandarlo y esperar a ver.
+  - La interfaz dice **lo que esto no hace**: varia una imagen que ya salio
+    bien, no lleva la cara a una escena nueva.
+- Archivos: `vault-image-provider.ts` (+ pruebas), `horde.ts` (+ pruebas),
+  `ipc.ts`, `handlers.ts`, `useVault.ts`, `Vault.tsx`, `styles.css`,
+  `docs/IMAGENES-GRATIS.md`.
+- Resultado real: **`npm run check` exit 0 — 133 archivos, 2.356 pruebas
+  superadas, 12 omitidas.**
+- **Convivencia con otra sesion en el mismo worktree.** Daniel avisa de que otra
+  IA trabaja aqui a la vez, contra lo que dice `AI-WORK-PROTOCOL.md`. Comprobado:
+  su commit `30fa1cb` toca cuatro archivos y ninguno de los mios; en
+  `redact.test.ts` coincidimos pero en zonas distintas (su prueba de contadores
+  hacia la 136, la nuestra de la clave anonima hacia la 78). Su renombrado de
+  `inputTokens`/`outputTokens` a `tokensIn`/`tokensOut` es **solo en la linea de
+  registro**, no en `LocalTurnResult`, asi que `handlers.ts` no se ve afectado.
+- Sigue sin verificar: nada contra AI Horde real ni visto en pantalla
+  (`LA-038`). En concreto, que un LoRA llegue bien al worker y que
+  `source_image` en la raiz produzca de verdad una variacion.
+
+
+### 2026-09-04 10:30 — Claude — F11-HORDE-001 (revision adversarial)
+
+- Origen: revision del cambio por cuatro dimensiones —correccion, seguridad,
+  contrato y interfaz— con cada hallazgo pasado por un verificador que intentaba
+  REFUTARLO. **26 candidatos, 12 confirmados.** Los otros 14 se cayeron al leer
+  el codigo, que es exactamente para lo que existe ese paso.
+- Arreglados los ocho que eran defectos distintos (varios hallazgos apuntaban al
+  mismo):
+
+  1. **Un worker que censura por su cuenta pasaba por bueno.** Solo se bloqueaba
+     `gen_metadata` con `csam`; el filtro propio de un worker no deja metadato,
+     solo marca `censored` y devuelve una imagen negra. Se cifraba y se guardaba
+     como la foto del personaje, con los kudos gastados y sin explicacion. Ahora
+     `assertNotCensored` mira tambien esa bandera, con un mensaje distinto:
+     el de la red no se reintenta y el de un worker si.
+  2. **Abandonar la espera dejaba la peticion viva.** `awaitImage` salia por
+     excepcion en `faulted`, en `is_possible: false`, al agotar el tiempo y al
+     cancelar, y no hacia el `DELETE`. La peticion seguia diez minutos ocupando
+     un hueco de concurrencia que el usuario creia libre, y `cancelImage` era
+     codigo muerto. Ahora se cancela en todas esas salidas, **con una señal
+     propia** —la del usuario ya esta abortada y con ella el DELETE no llegaria
+     a salir— y **no** cuando la peticion ya habia terminado, para no gastar
+     cuota del limite de diez por minuto.
+  3. **`configSave` no aplicaba `RESERVED_SECRET_NAMES`.** Era el hallazgo
+     grave, y es ANTERIOR a este cambio: `secretSet` y `secretDelete` si
+     comprobaban la reserva, pero por `configSave` bastaba declarar un proveedor
+     HTTP con `apiKeyEnv: 'VAULT_HORDE_API_KEY'` para pisar la clave de la
+     boveda y, peor, para que `reconfigureAgent` se la entregara al agente, que
+     la mandaria como `Authorization` al endpoint de ese mismo proveedor. Afecta
+     igual a `VAULT_MEDIA_API_KEY`, `VAULT_ACCOUNT_SESSION` y
+     `VAULT_DEVICE_KEY`. Ahora se rechaza la configuracion entera antes de
+     escribir nada.
+  4. **La clave anonima corrompia `redact()`.** `0000000000` tiene diez
+     caracteres, asi que entraba en el registro de secretos y a partir de ahi
+     `redact()` tapaba ese numero en cualquier texto del proceso, empezando por
+     la pista que explica como usarla. `SecretRegistry.add` rechaza ahora un
+     valor sin ninguna variacion: no puede ser un secreto.
+  5. **Editar un personaje secuestraba la conversacion.** `onSaved` adoptaba
+     siempre el personaje guardado, asi que corregirle el pelo a otro cambiaba
+     quien responde. Crear si lo adopta; editar, no.
+  6. **Los kudos se anunciaban como «creditos».** En una pantalla donde el otro
+     proveedor cobra dinero de verdad, «12 creditos» tras una generacion gratuita
+     se lee como que la opcion gratis esta cobrando. La unidad viaja ahora con
+     el numero (`costUnit`) hasta la pantalla.
+  7. **«Ver mis kudos» fallaba en silencio.** No pasaba por `run()`: con una
+     clave mala no salia ni error ni aviso y ademas borraba lo que hubiera.
+  8. **Al sustituir la clave se seguian viendo los kudos de la anterior.**
+
+- Ademas, `dry_run` ya no exige identificador: el horde no encola nada con el,
+  asi que no tiene id que devolver, y su prueba fabricaba uno. Sin dry run el id
+  sigue siendo obligatorio, con su propio error.
+- Archivos: `horde.ts`, `horde.test.ts`, `redact.ts`, `redact.test.ts`,
+  `handlers.ts`, `config-store.test.ts`, `ipc.ts`, `useVault.ts`, `Vault.tsx`.
+- Resultado real: **`npm run check` exit 0 — 132 archivos, 2.340 pruebas
+  superadas, 12 omitidas.**
+- Lo que sigue sin verificar: lo mismo de antes. Nada se ha ejecutado contra la
+  red real de AI Horde ni se ha visto en pantalla (`LA-038`).
+
+
+### 2026-09-04 09:55 — Claude — F11-HORDE-001
+
+- Estado anterior: la boveda privada solo sabia generar imagenes con un
+  proveedor de PAGO. Daniel pidio generar NSFW anime y realista **sin gastar un
+  euro**, y probar Cohere y AI Horde. El texto se queda con DeepSeek.
+- Objetivo: AI Horde como proveedor de imagenes gratuito dentro de Privado, bajo
+  la boveda; y Cohere utilizable como conexion de texto.
+- Investigacion previa (ocho agentes, sin tocar codigo): contrato de AI Horde
+  contra su swagger vivo y su codigo fuente, catalogo de modelos NSFW contra
+  `/v2/status/models`, contrato de Cohere, y mapa de los cuatro puntos del
+  codigo que asumian el proveedor de pago.
+- Hallazgo que decidio el diseño: **AI Horde no tiene personajes.** No hay nada
+  al otro lado que recuerde una cara. Por eso un personaje del horde es una
+  RECETA local y cifrada (`D-064`).
+- Hallazgo que decidio la politica de claves: **con la clave anonima el servidor
+  fuerza `shared`**, o sea que dona las imagenes a un conjunto de datos publico.
+  No se pone sola (`D-065`).
+- Hallazgo sobre Cohere: **ya funciona hoy sin tocar codigo** por Ajustes →
+  Conexiones → Proveedores HTTP con base `https://api.cohere.ai/compatibility/v1`.
+  Lo unico que faltaba era no tener que recordar esa URL: se añadio un selector
+  de proveedores conocidos. `safety_mode` NO viaja por la capa de
+  compatibilidad; su defecto es CONTEXTUAL y se obtiene de facto sin poder
+  elegirlo. Sus Terminos prohiben contenido pornografico, y eso queda escrito en
+  `docs/PROVIDERS.md` sin recomendar rodearlo.
+- Archivos nuevos: `apps/agent/src/providers/horde.ts` (+ pruebas, 40),
+  `packages/shared/src/vault-image-provider.ts` (+ pruebas, 15),
+  `docs/IMAGENES-GRATIS.md`.
+- Archivos modificados: `handlers.ts` (opciones del horde, generacion, alta de
+  personaje, claves, kudos, catalogo en vivo, mensaje de bloqueo por proveedor),
+  `character-store.ts` (`provider` y `recipe`, con default para no romper una
+  boveda anterior), `ipc.ts`, `channels.ts`, `preload/index.ts`, `useVault.ts`,
+  `Vault.tsx`, `Config.tsx`, `http-provider-config.ts`, `styles.css`,
+  `docs/PROVIDERS.md`.
+- Comandos ejecutados: `npx tsc -b tsconfig.build.json` (limpio, varias veces),
+  `npx vitest run` por archivo, y `npm run check` completo.
+- Resultado real: **`npm run check` exit 0 — 132 archivos, 2.336 pruebas
+  superadas, 12 omitidas.** Build de los cuatro paquetes correcto.
+- Decisiones: `D-064`, `D-065`, `D-066`.
+- **Lo que NO esta verificado:** nada de esto se ha ejecutado contra la API real
+  de AI Horde ni se ha visto en pantalla. El contrato esta implementado tal y
+  como lo publica su swagger; las pruebas demuestran que se envia, no que la red
+  responda lo que se espera. Queda como `LA-038`.
+- Siguiente paso exacto: sacar una clave gratuita en aihorde.net, guardarla en
+  Privado, crear un personaje del horde y pedir una imagen dentro de una
+  conversacion.
+
+
 ### 2026-09-02 21:30 — Claude — VAULT-ROLEPLAY-001
 
 - Origen: revision de una conversacion privada real aportada por Daniel. Cinco

@@ -271,6 +271,12 @@ inyección de shell, pero no convierte en seguro el código que la prueba import
   `config.json`; las URLs remotas exigen HTTPS y HTTP sólo se admite en loopback.
 - El catálogo real de una conexión consulta sólo `/v1/models`; no sondea rutas
   tentativas de precios (`D-022`).
+- Las imágenes de la bóveda tienen **dos** proveedores y el proveedor es del
+  **personaje**, no de la máquina: el de pago guarda la identidad en su servidor
+  y AI Horde no tiene personajes, así que allí la identidad es una receta local
+  y cifrada (`D-064`). La clave de AI Horde no se rellena sola con la anónima:
+  con ella el servidor fuerza `shared` y dona lo generado (`D-065`). Ver
+  `docs/IMAGENES-GRATIS.md`.
 - No automatizar las páginas web de Claude ni de ChatGPT. Nada de navegadores.
 - Claude Code y Codex CLI se usan con **la sesión local autenticada**.
 - **Nunca `--dangerously-skip-permissions`** ni el equivalente de Codex.

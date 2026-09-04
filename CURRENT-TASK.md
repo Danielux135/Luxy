@@ -1,5 +1,121 @@
 # Luxy — tarea activa
 
+## F11-HORDE-001 — imagenes NSFW gratis con AI Horde
+
+Estado: **`done` — Claude, 2026-09-04. Sin commit.** Queda `LA-038`, que es
+probarlo contra la red real: trabajo de Daniel.
+
+Daniel pidio generar imagenes NSFW —anime y realistas— **sin gastar un euro**, y
+probar Cohere y AI Horde. El texto se queda con DeepSeek, que le va bien.
+
+Todo lo de roleplay vive en **Privado**, bajo la boveda, como corresponde.
+
+### Lo que decidio el diseño
+
+**AI Horde no tiene personajes.** El proveedor de pago guarda el personaje en su
+servidor y devuelve un identificador; eso es lo que mantiene la misma cara entre
+generaciones. En el horde no hay nada al otro lado que recuerde a nadie.
+
+Asi que un personaje del horde **es** una receta local y cifrada: modelos,
+aspecto fijo en ingles, ropa, negativo, semilla, tamaño, pasos y `clipSkip`. Ver
+`D-064`. De ahi salen tres cosas que el de pago no tiene: editarlo es gratis,
+conserva su identificador —y con el sus imagenes y sus recuerdos—, y la
+identidad va **primero** en el prompt, porque los primeros tokens pesan mas.
+
+**La clave anonima no se pone sola.** `0000000000` funciona, pero con ella el
+servidor **fuerza `shared`**: dona lo generado a un conjunto de datos publico.
+Una boveda que existe para que nadie lea lo de dentro no puede regalar por
+defecto lo que produce. Se puede escribir a mano y entonces la pantalla avisa de
+lo que implica. Ver `D-065`.
+
+**La clave que hace falta es la del proveedor de ESE personaje.** `D-066`.
+
+### Piezas
+
+| pieza | donde | pruebas |
+| --- | --- | --- |
+| transporte del horde | `apps/agent/src/providers/horde.ts` | 40 |
+| receta y catalogo curado | `packages/shared/src/vault-image-provider.ts` | 15 |
+| almacen de personajes | `character-store.ts`, `provider` + `recipe` | 4 nuevas |
+| contrato IPC | `ipc.ts`, `channels.ts`, `preload` | 3 nuevas |
+| generacion y claves | `handlers.ts` | — |
+| pantalla Privado | `Vault.tsx`, `styles.css` | — |
+| proveedores conocidos | `http-provider-config.ts`, `Config.tsx` | 2 nuevas |
+
+El adaptador respeta el contrato tal y como lo publica su swagger vivo:
+cabecera `apikey` (no `Authorization`), `censor_nsfw` **siempre explicito**
+—porque el swagger dice `false` y el servidor dice `True`—, sondeo por
+`/generate/check` y una sola llamada a `/generate/status`, que tiene limite de
+diez por minuto, y las dos formas del campo `img` (URL de R2 que caduca a los
+1800 s, o base64).
+
+### Cohere
+
+**Ya funcionaba sin tocar codigo.** Se da de alta en Ajustes → Conexiones →
+Proveedores HTTP con base `https://api.cohere.ai/compatibility/v1` —el host es
+`.ai`, la API nativa es `.com` y no habla este contrato—. Lo unico que se añadio
+es un selector de proveedores conocidos para no tener que recordar esa URL, con
+Cohere, DeepSeek, Groq, Mistral y OpenRouter.
+
+Dos cosas que conviene saber antes de gastar la clave, y que estan escritas en
+`docs/PROVIDERS.md`: `safety_mode` **no viaja** por la capa de compatibilidad
+—su defecto es `CONTEXTUAL` y se obtiene de facto, sin poder elegirlo— y sus
+Terminos de Uso prohiben contenido pornografico, aunque su politica de uso solo
+prohiba expresamente lo relacionado con menores. Es contradictorio; no es una
+base solida para roleplay adulto.
+
+### Pruebas
+
+`npm run check` exit 0: **132 archivos, 2.340 pruebas superadas, 12 omitidas.**
+
+Una revision adversarial por cuatro dimensiones confirmo 12 hallazgos de 26 y
+dejo ocho arreglos: la censura propia de un worker, la cancelacion que nunca se
+enviaba, el agujero de `configSave` con los secretos reservados, la clave
+anonima corrompiendo `redact()`, editar un personaje secuestrando la
+conversacion, los kudos llamados «creditos», y dos avisos que fallaban en
+silencio. Ver `CHANGELOG-WORK.md` del 2026-09-04 10:30.
+
+### Lo que NO esta verificado
+
+Nada de esto se ha ejecutado contra la API real de AI Horde ni se ha visto en
+pantalla. Las pruebas demuestran **que contrato se envia**, no que la red
+responda lo que se espera. Es `LA-038`.
+
+### F11-HORDE-002 — LoRAs e imagen de partida — **hecha**
+
+Salio de una pregunta de Daniel: si se puede subir una imagen de referencia para
+que el personaje sea coherente. **No**, y la comprobacion contra el swagger vivo
+y los 178 modelos esta en `D-067`: AI Horde no tiene ningun mecanismo de
+identidad por imagen, ni un solo worker sirviendo un modelo de edicion por
+instruccion.
+
+Lo que si fija la identidad son los pesos, y ese era el hueco: **el campo de
+LoRA no existia en la pantalla** aunque el esquema y el adaptador ya lo
+soportaban. Hecho, con lo que cuesta escrito al lado: +3 kudos por LoRA y solo 9
+de los 18 workers los aceptan.
+
+Hecho tambien **img2img**, anunciado por lo que es —varia una imagen que ya
+salio bien, no lleva la cara a una escena nueva— con `fromMediaId` de punta a
+punta: la pantalla elige un medio de la conversacion y el proceso principal lo
+descifra en memoria y lo manda en base64 puro en el CUERPO, nunca por URL.
+
+Dos detalles del contrato que no se adivinan: `source_image` va en la RAIZ y
+`denoising_strength` dentro de `params`. Al reves, el servidor ignora la imagen
+en silencio. Hay una prueba por cada ubicacion.
+
+**ControlNet NO se implemento**: su gate real solo admite SD1 y SD2, asi que en
+Pony o Illustrious vuelve con `ControlNetMismatch`. Habria sido codigo que falla
+siempre justo en los modelos que se usan.
+
+`npm run check` exit 0: **133 archivos, 2.356 pruebas superadas, 12 omitidas.**
+
+### Siguiente paso exacto
+
+Sacar la clave gratuita en aihorde.net, guardarla en Privado, crear un personaje
+del horde y pedir una imagen dentro de una conversacion privada.
+
+---
+
 ## F10-MEMORY-001 — memoria episodica del personaje
 
 Estado: **`done` — 2026-09-03, verificado de punta a punta.** Sin push.

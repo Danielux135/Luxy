@@ -1,6 +1,55 @@
 # Luxy — estado canónico del proyecto
 
-Última actualización: **2026-09-02 — VAULT-ROLEPLAY-001, cinco fallos de la conversación privada**
+Última actualización: **2026-09-04 — F11-HORDE-001, imágenes sin pagar**
+
+La bóveda privada ya no depende de un proveedor de pago para generar imágenes.
+**AI Horde** entra como segundo proveedor: es gratis de verdad, no pide método
+de pago y admite contenido adulto anime y realista. Vive en Privado, bajo la
+bóveda, como todo lo de roleplay.
+
+Lo que cambió el diseño: **AI Horde no tiene personajes.** El de pago guarda la
+identidad en su servidor detrás de un identificador; aquí no hay nada al otro
+lado que recuerde una cara. Así que un personaje del horde **es** su receta
+—modelos, aspecto fijo, semilla, tamaño—, guardada cifrada en local. Editarla no
+cuesta nada y conserva el identificador, con lo que las imágenes y los recuerdos
+que ya cuelgan de él siguen siendo suyos (`D-064`).
+
+Lo que decidió la política de claves: con la clave anónima `0000000000` el
+servidor **fuerza `shared`**, es decir, dona lo generado a un conjunto de datos
+público. No se pone sola; se puede escribir a mano y entonces la pantalla avisa
+de lo que implica (`D-065`). Y la clave que hace falta es la del proveedor de
+**ese** personaje, no la de la máquina (`D-066`).
+
+**Cohere ya funcionaba sin tocar código** por Ajustes → Conexiones → Proveedores
+HTTP. Lo único que se añadió es un selector de proveedores conocidos —Cohere,
+DeepSeek, Groq, Mistral y OpenRouter— para no tener que recordar la URL base.
+`safety_mode` no viaja por su capa de compatibilidad y sus Términos prohíben
+contenido pornográfico: está escrito en `docs/PROVIDERS.md` sin recomendar
+rodearlo.
+
+Guía nueva para el usuario: `docs/IMAGENES-GRATIS.md`.
+
+Una revision adversarial posterior —26 hallazgos candidatos, 12 confirmados—
+dejo ocho arreglos, entre ellos uno de seguridad ANTERIOR a este cambio: por
+`configSave` se podia declarar un proveedor HTTP con el `apiKeyEnv` de un
+secreto reservado y conseguir que el agente se lo entregara. Ver el registro
+del 2026-09-04 10:30.
+
+Despues, `F11-HORDE-002`: el editor de LoRAs —lo unico que fija de verdad la
+cara de un personaje en esa red— y partir de una imagen anterior (img2img).
+AI Horde **no tiene ningun mecanismo de identidad por imagen**, comprobado
+contra su swagger y sus 178 modelos, asi que la interfaz lo dice en vez de
+prometerlo (`D-067`).
+
+`npm run check` verde: **133 archivos, 2.356 pruebas superadas, 12 omitidas.**
+
+**No verificado, y es lo único que queda:** nada se ha ejecutado contra la red
+real de AI Horde ni se ha visto en pantalla. Las pruebas fijan qué contrato se
+envía, no que la red responda lo que se espera. Es `LA-038`.
+
+---
+
+Última actualización anterior: **2026-09-02 — VAULT-ROLEPLAY-001, cinco fallos de la conversación privada**
 
 Revisión de una conversación real: cinco síntomas con cinco causas distintas y
 ninguna del modelo. El proveedor elegido y las instrucciones a medio escribir

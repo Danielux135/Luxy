@@ -1,5 +1,58 @@
 # Luxy — acciones locales de Daniel
 
+## LA-038 — probar AI Horde de verdad: clave, personaje y una imagen
+
+Estado: `pending` — abierta el 2026-09-04.
+
+Todo `F11-HORDE-001` está implementado y probado con `fetch` falso, y **nada se
+ha ejecutado contra la red real ni se ha visto en pantalla**. Las pruebas fijan
+qué contrato se envía; no que AI Horde responda lo que su documentación dice.
+
+Qué hacer, en este orden:
+
+1. **Sacar la clave**, gratis, en https://aihorde.net. No pide tarjeta.
+   Registrarse da algunos kudos de partida, que es lo que decide tu puesto en la
+   cola. La clave anónima `0000000000` también vale, pero con ella la red te
+   atiende la última y **dona lo que generes** a un conjunto de datos público:
+   úsala sólo para una prueba de un minuto, nunca para lo que quieras guardar.
+2. **Guardarla** en Studio → Privado → «Gratis: AI Horde». Pulsa «Ver mis kudos»
+   para confirmar que la clave vale: si responde con tu nombre de usuario, está
+   bien.
+3. **Crear un personaje.** En «Generar imagen o vídeo» → «Personaje de AI
+   Horde». Elige estilo, marca **dos o tres modelos** —suma sus workers y no
+   cuesta más— y escribe el aspecto **en inglés**. Pulsa «Ver disponibilidad»
+   antes: un modelo con cero workers deja la petición en cola hasta que caduca,
+   a los diez minutos.
+4. **Fijar una semilla.** Sin ella la cara cambia bastante entre imágenes.
+5. **Pedir una imagen dentro de una conversación privada**, no desde el panel
+   manual: es el camino que de verdad importa.
+
+5b. **Probar un LoRA de personaje.** Busca uno en CivitAI que encaje con el
+   estilo del modelo que uses, copia el id de la pagina (o el de la version, y
+   entonces marca la casilla) y ponlo en el apartado «LoRA de personaje» del
+   formulario. Es lo unico que fija de verdad la cara entre escenas. Ojo: solo
+   9 de los 18 workers aceptan LoRAs, asi que la espera sube.
+6. **Probar partir de una imagen.** Con una imagen ya generada en la
+   conversacion, eligela en «Partir de una imagen» y genera otra escena. Mira si
+   conserva la cara con el 0,45 por defecto y prueba tambien 0,3 y 0,6. Esto
+   varia una imagen; no lleva la cara a una escena nueva, y conviene comprobar
+   con tus ojos hasta donde llega.
+
+Qué mirar y anotar:
+
+- cuánto tarda de verdad, que es lo único que la documentación no puede
+  prometer: puede ir de veinte segundos a varios minutos según la cola;
+- si el aspecto se repite entre dos imágenes del mismo personaje;
+- si algún modelo de la lista curada ya no existe o se quedó sin workers —los
+  nombres están verificados el 2026-09-04 y el ecosistema se mueve—;
+- qué mensaje sale cuando falla, que es lo que hay que poder arreglar sin leer
+  el código.
+
+Detalle que puede confundir: la pantalla enseña «kudos» donde el proveedor de
+pago enseña «créditos». No son dinero, no se compran y no se agotan de golpe:
+con cero kudos se sigue generando, sólo que esperando más.
+
+
 ## LA-037 — probar el roleplay y ajustar el tono, que es tuyo
 
 Estado: `pending` — abierta el 2026-09-02.
