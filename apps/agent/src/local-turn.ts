@@ -38,6 +38,18 @@ export interface LocalTurnResult {
   durationMs: number;
   inputTokens: number | null;
   outputTokens: number | null;
+  /**
+   * cuantas veces se llamo al modelo para producir ESTA respuesta.
+   *
+   * Mas de una significa que hubo un reintento, y con esta pasarela cada
+   * reintento se cobra entero aunque no devuelva nada. El contador ya existia
+   * en la metadata del trabajo y se perdia aqui, que es justo donde hacia
+   * falta: sin el, dos llamadas y una respuesta son indistinguibles de una
+   * llamada y una respuesta.
+   */
+  modelCalls: number | null;
+  /** como termino de verdad; `completed` no garantiza respuesta entera */
+  responseOutcome: string | null;
 }
 
 export interface LocalTurnDeps {
@@ -120,13 +132,32 @@ export async function runLocalTurn(
     },
   });
 
-  return toLocalResult(outcome);
+  const result = toLocalResult(outcome);
+
+  // una linea por turno privado, con CONTADORES y nada mas: ni prompt, ni
+  // respuesta, ni de que conversacion. Existe porque el camino privado no
+  // pasa por la cola y por tanto no dejaba rastro de ninguna clase: un
+  // reintento silencioso —los unicos que avisan son los 429— gastaba una
+  // llamada de pasarela sin que nadie pudiera verlo despues.
+  deps.logger.info('turno privado terminado', {
+    outcome: result.outcome,
+    responseOutcome: result.responseOutcome,
+    modelCalls: result.modelCalls,
+    durationMs: result.durationMs,
+    inputTokens: result.inputTokens,
+    outputTokens: result.outputTokens,
+    model: result.executedModel,
+  });
+
+  return result;
 }
 
 function toLocalResult(outcome: JobOutcome): LocalTurnResult {
   if (outcome.kind === 'completed') {
     const result = outcome.result;
     return {
+      modelCalls: result.callMetrics?.modelCalls ?? null,
+      responseOutcome: result.responseOutcome ?? null,
       outcome: 'completed',
       // en una conversacion `summary` no es un resumen: es LA respuesta (D-020)
       text: result.summary,
@@ -140,6 +171,9 @@ function toLocalResult(outcome: JobOutcome): LocalTurnResult {
 
   if (outcome.kind === 'cancelled') {
     return {
+      // un corte no llega a producir metadata: el trabajo no se completo
+      modelCalls: null,
+      responseOutcome: 'cancelled',
       outcome: 'cancelled',
       // se conserva lo que el modelo ya habia escrito: tirarlo obligaria a
       // volver a pagar el prompt entero para recuperar lo mismo (D-016)
@@ -153,6 +187,8 @@ function toLocalResult(outcome: JobOutcome): LocalTurnResult {
   }
 
   return {
+    modelCalls: null,
+    responseOutcome: 'failed',
     outcome: 'failed',
     text: '',
     error: outcome.errorMessage,

@@ -31,7 +31,7 @@ function config(): AgentConfig {
  * `text`: devolver la forma equivocada hacia fallar el turno con un
  * "Cannot read properties of undefined", que es justo lo que paso al escribirlo.
  */
-function fakeProvider(text: string): ProviderExecution {
+function fakeProvider(text: string, modelCalls = 1): ProviderExecution {
   return {
     id: 'claude',
     displayName: 'Proveedor de prueba',
@@ -45,6 +45,7 @@ function fakeProvider(text: string): ProviderExecution {
       cancelled: false,
       errorMessage: null,
       usage: { inputTokens: 10, outputTokens: 20 },
+      callMetrics: { modelCalls, toolCalls: 0 },
     }),
   } as unknown as ProviderExecution;
 }
@@ -188,6 +189,58 @@ describe('aislamiento del gateway', () => {
       onProgress: (type) => progreso.push(type),
     });
     expect(progreso.length).toBeGreaterThan(0);
+  });
+
+  it('dice cuantas veces se llamo al modelo, no solo que respondio', async () => {
+    // con esta pasarela cada intento se cobra entero aunque devuelva vacio, y
+    // el unico reintento que avisa es el de un 429. Sin este contador, dos
+    // llamadas cobradas y una son indistinguibles desde Luxy
+    const result = await runLocalTurn(input, new AbortController().signal, {
+      config: config(),
+      logger,
+      getProvider: () => fakeProvider('respondio al segundo intento', 2),
+      worktreesDirectory: 'C:/no/se/usa',
+      apiKeyFor: () => undefined,
+      onProgress: () => undefined,
+    });
+
+    expect(result.modelCalls).toBe(2);
+  });
+
+  it('deja una linea en el registro con contadores y sin contenido', async () => {
+    // el camino privado no pasa por la cola, asi que no dejaba NINGUN rastro:
+    // preguntar «por que se gasto esa llamada» no tenia donde mirarse
+    const lineas: { message: string; fields: Record<string, unknown> }[] = [];
+    const espia = {
+      info: (message: string, fields: Record<string, unknown> = {}) =>
+        lineas.push({ message, fields }),
+      warn: () => undefined,
+      error: () => undefined,
+      debug: () => undefined,
+    } as unknown as AgentLogger;
+
+    await runLocalTurn(
+      { ...input, prompt: 'un secreto que no debe salir' },
+      new AbortController().signal,
+      {
+        config: config(),
+        logger: espia,
+        getProvider: () => fakeProvider('una respuesta que tampoco', 2),
+        worktreesDirectory: 'C:/no/se/usa',
+        apiKeyFor: () => undefined,
+        onProgress: () => undefined,
+      },
+    );
+
+    const turno = lineas.find((linea) => linea.message === 'turno privado terminado');
+    expect(turno).toBeDefined();
+    expect(turno!.fields['modelCalls']).toBe(2);
+    expect(turno!.fields['outcome']).toBe('completed');
+
+    // lo importante del registro es lo que NO lleva
+    const volcado = JSON.stringify(lineas);
+    expect(volcado).not.toContain('un secreto que no debe salir');
+    expect(volcado).not.toContain('una respuesta que tampoco');
   });
 
   it('descargar un adjunto es un error explicito, no una llamada silenciosa', () => {
