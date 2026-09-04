@@ -1,5 +1,35 @@
 # Luxy — acciones locales de Daniel
 
+## LA-041 — PowerShell 7 está instalada, pero no es la que corre por defecto
+
+Estado: `informativa` — anotada el 2026-09-04.
+
+**Se instaló y no se registró, y por eso se olvidó.** El paquete
+`Microsoft.PowerShell 7.6.5.0` se instaló el 2026-09-04 a las 09:18:51, después
+de que Daniel pidiera resolver los errores de consola. No quedó en ningún
+documento, así que en la misma sesión se le volvió a dar un comando con `&&`
+—sintaxis de PowerShell 7— dando por hecho que sólo tenía la 5.1.
+
+**Instalarla no arregla el problema por sí sola, y este es el motivo:**
+
+- `powershell.exe` es y seguirá siendo **5.1**. Windows mantiene las dos a la
+  vez a propósito; la 7 no sustituye a la vieja, se pone al lado.
+- PowerShell 7 es **otro ejecutable**, `pwsh`. Comprobado:
+  `pwsh -NoProfile -Command "$PSVersionTable.PSVersion"` → `7.6.5`.
+- El botón de ejecutar de la aplicación y las llamadas del agente van al shell
+  por defecto, que sigue siendo el 5.1. En `~/.claude/settings.json` **no hay
+  ningún ajuste de shell**: sólo hooks.
+
+**Qué vale hoy, sin tocar nada:**
+
+- un comando por bloque, sin `&&`; o
+- `;` como separador, que sí entiende la 5.1 —pero ejecuta el segundo aunque
+  falle el primero, que no es lo mismo—; o
+- escribirlo explícitamente para la 7: `pwsh -NoProfile -Command "..."`.
+
+Lo que NO se ha hecho, porque es una decisión suya y toca la configuración del
+equipo: poner `pwsh` como terminal por defecto de Windows o de la aplicación.
+
 ## LA-040 — usar Mistral: leer su catálogo y elegir un modelo con vista
 
 Estado: `pending` — abierta el 2026-09-04.
