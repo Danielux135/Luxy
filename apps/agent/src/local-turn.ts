@@ -144,8 +144,11 @@ export async function runLocalTurn(
     responseOutcome: result.responseOutcome,
     modelCalls: result.modelCalls,
     durationMs: result.durationMs,
-    inputTokens: result.inputTokens,
-    outputTokens: result.outputTokens,
+    // `tokensIn` y no `inputTokens` a proposito: la redaccion tapa cualquier
+    // clave que acabe en Token(s), y hace bien. Son contadores, no secretos,
+    // asi que se renombra el campo en vez de aflojar la regla
+    tokensIn: result.inputTokens,
+    tokensOut: result.outputTokens,
     model: result.executedModel,
   });
 

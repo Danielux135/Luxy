@@ -89,7 +89,12 @@ export function LogsPage(): JSX.Element {
             {visibles.map((line, index) => (
               <li key={index}>
                 <time>{extraerHora(line)}</time>
-                <span className="scroller">{extraerMensaje(line)}</span>
+                <span className="scroller">
+                  {extraerMensaje(line)}
+                  {extraerCampos(line) !== '' && (
+                    <span className="muted"> · {extraerCampos(line)}</span>
+                  )}
+                </span>
               </li>
             ))}
           </ul>
@@ -110,6 +115,35 @@ function extraerMensaje(line: string): string {
   const match = /"msg":"((?:[^"\\]|\\.)*)"/.exec(line);
   return match === null ? line : match[1]!.replace(/\\"/g, '"');
 }
+
+/**
+ * lo que la linea lleva ADEMAS del mensaje.
+ *
+ * Se mostraba solo `msg`, y los campos —cuantas llamadas costo un turno, con
+ * que modelo, cuanto tardo— quedaban escritos en el archivo y no se veian aqui.
+ * Eso convertia el registro en una lista de titulares: para saber por que se
+ * habia gastado una llamada habia que abrir el archivo a mano.
+ */
+export function extraerCampos(line: string): string {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(line);
+  } catch {
+    return '';
+  }
+  if (parsed === null || typeof parsed !== 'object') return '';
+
+  return Object.entries(parsed as Record<string, unknown>)
+    .filter(([clave, valor]) => !OCULTOS.has(clave) && valor !== null && valor !== undefined)
+    .map(
+      ([clave, valor]) =>
+        `${clave}=${typeof valor === 'object' ? JSON.stringify(valor) : String(valor)}`,
+    )
+    .join(' · ');
+}
+
+/** ya se pintan aparte, o no dicen nada que no diga la fila entera */
+const OCULTOS = new Set(['ts', 'level', 'msg']);
 
 // -----------------------------------------------------------------------------
 

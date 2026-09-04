@@ -125,6 +125,16 @@ describe('redactDeep', () => {
     expect(output.keyboard).toBe('teclado');
   });
 
+  it('un contador que acaba en Tokens SI se tapa: por eso no se llaman asi', () => {
+    // `inputTokens` es un numero, no un secreto, pero la regla no puede
+    // distinguirlo del nombre de una clave y hace bien en no intentarlo. Los
+    // registros que quieran publicar contadores usan otro nombre; esta prueba
+    // fija las dos mitades de esa decision
+    const output = redactDeep({ inputTokens: 10, tokensIn: 10 }) as Record<string, unknown>;
+    expect(output['inputTokens']).toBe('[REDACTADO]');
+    expect(output['tokensIn']).toBe(10);
+  });
+
   it('conserva valores que no son cadenas', () => {
     const output = redactDeep({ contador: 42, activo: true, vacio: null }) as Record<string, unknown>;
     expect(output).toEqual({ contador: 42, activo: true, vacio: null });
