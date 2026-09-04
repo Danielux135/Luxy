@@ -3537,6 +3537,26 @@ function MemoryPanel({
               >
                 {excluded ? 'Volver a recordar' : 'Excluir esta conversación'}
               </button>
+              {/* sin esto, mejorar el catalogador no arregla los catálogos que
+                  ya existen: sólo se aplicaría a las conversaciones nuevas, y
+                  las que salieron mal se quedarían mal para siempre */}
+              <button
+                className="btn btn--quiet"
+                disabled={vault.catalogingMemory}
+                title="Vuelve a partir esta conversación en momentos, con el modelo elegido arriba"
+                onClick={() => {
+                  void vault
+                    .syncCatalog({
+                      provider,
+                      model: model.length === 0 ? null : model,
+                      projectAlias: project,
+                      conversationId: episode.conversationId,
+                    })
+                    .then(() => vault.loadMemory());
+                }}
+              >
+                {vault.catalogingMemory ? 'Repasando…' : 'Repasar sus momentos'}
+              </button>
             </div>
             {open === episode.id && (
               <div className="vault-thread">
