@@ -688,7 +688,17 @@ export const vaultVisionProbeResultSchema = z.object({
   /** para verla al lado del texto; `null` si es demasiado grande */
   dataUrl: z.string().nullable(),
   caption: z.string().nullable(),
-  failure: z.enum(['vacio', 'negativa']).nullable(),
+  /**
+   * por qué no hubo descripción.
+   *
+   * `fallo` es distinto de `vacio` y separarlos importa: la llamada puede
+   * romperse —clave, red, un 400 del proveedor— y devolver texto vacío. Al
+   * contarlo como «no contestó nada» se le decía al usuario que reintentara
+   * algo que no va a funcionar, y el motivo real no aparecía por ningún lado.
+   */
+  failure: z.enum(['vacio', 'negativa', 'fallo']).nullable(),
+  /** el mensaje del fallo cuando lo hay; nunca una traza */
+  error: z.string().nullable(),
   /** el modelo que respondió de verdad, que puede no ser el pedido */
   executedModel: z.string().nullable(),
 });

@@ -600,13 +600,14 @@ describe('banco de pruebas de vision', () => {
       dataUrl: null,
       caption: null,
       failure: null,
+      error: null,
       executedModel: null,
     });
     expect(cancelado.success).toBe(true);
   });
 
-  it('distingue no contestar de negarse', () => {
-    for (const failure of ['vacio', 'negativa', null]) {
+  it('distingue no contestar de negarse, y las dos de que la llamada falle', () => {
+    for (const failure of ['vacio', 'negativa', 'fallo', null]) {
       const resultado = vaultVisionProbeResultSchema.safeParse({
         cancelled: false,
         fileName: 'foto.webp',
@@ -615,6 +616,9 @@ describe('banco de pruebas de vision', () => {
         dataUrl: null,
         caption: null,
         failure,
+        // un turno FALLIDO se contaba como «no contestó nada»: eso pedía
+        // repetir algo que no puede funcionar y escondía el motivo real
+        error: failure === 'fallo' ? 'HTTP 400 del proveedor' : null,
         executedModel: 'mistral-small-latest',
       });
       expect(resultado.success).toBe(true);
@@ -628,6 +632,7 @@ describe('banco de pruebas de vision', () => {
         dataUrl: null,
         caption: null,
         failure: 'lo-que-sea',
+        error: null,
         executedModel: null,
       }).success,
     ).toBe(false);

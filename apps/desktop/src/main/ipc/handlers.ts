@@ -1480,6 +1480,15 @@ export function registerIpcHandlers(context: HandlerContext): void {
       images: [{ mimeType, base64: Buffer.from(bytes).toString('base64') }],
     });
 
+    // un turno que FALLA no es un modelo que no contesta: contarlo igual pedia
+    // repetir algo que no puede funcionar y escondia el motivo
+    if (run.outcome !== 'completed') {
+      throw new VaultError(
+        run.error ?? `la llamada termino como ${run.outcome}`,
+        'no es que el modelo no supiera describirla: la llamada no llego a completarse',
+      );
+    }
+
     // una negativa llega como un turno normal y parece una descripcion rara
     const refused = classifyReply(run.text).kind === 'refused';
     const described = parseDescribeResponse(run.text, refused);
@@ -1534,6 +1543,7 @@ export function registerIpcHandlers(context: HandlerContext): void {
         dataUrl: null,
         caption: null,
         failure: null,
+        error: null,
         executedModel: null,
       };
     }
@@ -1553,6 +1563,33 @@ export function registerIpcHandlers(context: HandlerContext): void {
       images: [{ mimeType, base64: Buffer.from(bytes).toString('base64') }],
     });
 
+    const preview =
+      bytes.length > VAULT_PREVIEW_MAX_BYTES
+        ? null
+        : `data:${mimeType};base64,${Buffer.from(bytes).toString('base64')}`;
+
+    // un turno que FALLA no es un modelo que no contesta.
+    //
+    // Se estaba contando igual, y con eso la pantalla decia «no contesto nada,
+    // vuelve a intentarlo» ante un error de la llamada —clave, red, un 400 del
+    // proveedor—: pedia repetir algo que no puede funcionar y escondia el
+    // motivo, que es lo unico que permite arreglarlo.
+    if (run.outcome !== 'completed') {
+      context.log('prueba de vision fallida', { outcome: run.outcome });
+      return {
+        cancelled: false,
+        fileName: basename(filePath),
+        mimeType,
+        byteSize: bytes.length,
+        dataUrl: preview,
+        caption: null,
+        failure: 'fallo' as const,
+        // el mensaje del proveedor ya pasa por `redact` aguas arriba
+        error: run.error ?? `el turno termino como ${run.outcome}`,
+        executedModel: run.executedModel ?? args.model,
+      };
+    }
+
     const refused = classifyReply(run.text).kind === 'refused';
     const described = parseDescribeResponse(run.text, refused);
 
@@ -1563,12 +1600,10 @@ export function registerIpcHandlers(context: HandlerContext): void {
       fileName: basename(filePath),
       mimeType,
       byteSize: bytes.length,
-      dataUrl:
-        bytes.length > VAULT_PREVIEW_MAX_BYTES
-          ? null
-          : `data:${mimeType};base64,${Buffer.from(bytes).toString('base64')}`,
+      dataUrl: preview,
       caption: described.caption,
       failure: described.failure,
+      error: null,
       executedModel: run.executedModel ?? args.model,
     };
   });

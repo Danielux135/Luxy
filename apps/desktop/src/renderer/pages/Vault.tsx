@@ -2396,6 +2396,16 @@ function VisionBench({
                 haya atragantado ésta: vuelve a intentarlo antes de descartarlo.
               </Notice>
             )}
+            {probe.failure === 'fallo' && (
+              /* distinto de «no contestó»: la llamada no llegó a completarse,
+                 así que repetirla igual no va a cambiar nada */
+              <Notice tone="fault">
+                La llamada falló: {probe.error}
+                <br />
+                No es que el modelo no supiera describirla. Repetir lo mismo no
+                lo arregla.
+              </Notice>
+            )}
           </div>
         </div>
       )}
