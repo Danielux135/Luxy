@@ -1019,6 +1019,51 @@ function esLimiteDePlan(error: unknown): boolean {
   );
 }
 
+/**
+ * lo que dijo el PROVEEDOR, sacado del cuerpo de su respuesta.
+ *
+ * `httpError` guarda el cuerpo en el mensaje como `"<status>: <cuerpo>"`, y las
+ * ramas de abajo lo sustituian entero por prosa nuestra. Con un 429 eso es
+ * grave: nuestra frase dice «espera un poco», y si el motivo real es otro
+ * —una cuenta sin verificar, un plan que no incluye ese modelo— esperar no
+ * arregla nada y el usuario se queda sin la unica pista que sirve.
+ *
+ * Devuelve `null` cuando no hay nada legible que añadir.
+ */
+export function providerSaid(error: unknown): string | null {
+  // `retryWithBackoff` envuelve el error, y su mensaje es NUESTRO —«la
+  // operacion fallo tras 3 intentos»—. Sin desenvolver, esa frase se le
+  // atribuia al proveedor, que es peor que no decir nada
+  const interno = (error as { lastError?: unknown } | null)?.lastError;
+  const fuente = interno ?? error;
+  const bruto = fuente instanceof Error ? fuente.message : String(fuente ?? '');
+
+  // solo cuenta como «lo dijo el proveedor» lo que vino en una respuesta HTTP,
+  // que `httpError` formatea como `"<status>: <cuerpo>"`
+  const encaja = /^(\d{3}): ([\s\S]*)$/.exec(bruto.trim());
+  if (encaja === null) return null;
+  const cuerpo = (encaja[2] ?? '').trim();
+  if (cuerpo.length === 0) return null;
+
+  // si es JSON, casi siempre lo util esta en `message` o en `error.message`:
+  // enseñar la llave entera es ruido, y a veces incluye la peticion completa
+  try {
+    const json = JSON.parse(cuerpo) as Record<string, unknown>;
+    const anidado = json['error'];
+    const mensaje =
+      (typeof json['message'] === 'string' ? json['message'] : null) ??
+      (typeof anidado === 'object' && anidado !== null
+        ? ((anidado as Record<string, unknown>)['message'] as string | undefined)
+        : typeof anidado === 'string'
+          ? anidado
+          : undefined);
+    if (typeof mensaje === 'string' && mensaje.trim().length > 0) return mensaje.trim().slice(0, 300);
+  } catch {
+    // no era JSON: vale el texto tal cual
+  }
+  return cuerpo.slice(0, 300);
+}
+
 /** convierte un fallo http en un mensaje claro para telegram */
 export function describeHttpError(error: unknown, displayName: string): string {
   const status = statusOf(error);
@@ -1044,11 +1089,19 @@ export function describeHttpError(error: unknown, displayName: string): string {
     );
   }
   if (status === 429) {
+    // lo que diga el proveedor va PRIMERO y sin adornar: un 429 no siempre es
+    // frecuencia. Tambien lo devuelven algunas cuentas sin verificar y algunos
+    // planes que no incluyen ese modelo, y ahi «espera un poco» es un consejo
+    // que no arregla nada y manda a esperar para siempre.
+    const dijo = providerSaid(error);
     return (
-      `${displayName} esta limitando las peticiones por frecuencia.\n\n` +
+      `${displayName} devolvio 429.\n\n` +
+      (dijo === null ? '' : `Dijo: «${dijo}»\n\n`) +
       'Luxy agoto sus reintentos para esta ejecucion. Si el proveedor indico ' +
-      '`Retry-After`, ya respeto esa espera; si no, los reintentos son cortos. ' +
-      'Espera un poco antes de crear otro trabajo o usa otro modelo.'
+      '`Retry-After`, ya respeto esa espera; si no, los reintentos son cortos.\n\n' +
+      'Si el mensaje de arriba habla de frecuencia, espera y repite. Si habla de ' +
+      'la cuenta, del plan o de una verificacion pendiente, esperar no sirve: hay ' +
+      'que arreglarlo en el proveedor.'
     );
   }
   // 524 y 504 son timeouts del borde de Cloudflare delante del proveedor: el

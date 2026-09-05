@@ -15,6 +15,7 @@ import {
 } from './codex.js';
 import {
   describeHttpError,
+  providerSaid,
   parseRetryAfter,
   HttpApiProvider,
   MemoryBudgetStore,
@@ -358,7 +359,33 @@ describe('describeHttpError', () => {
 
   it('explica el rate limit', () => {
     const error = Object.assign(new Error('429'), { status: 429 });
-    expect(describeHttpError(error, 'GLM')).toContain('limitando');
+    expect(describeHttpError(error, 'GLM')).toContain('429');
+  });
+
+  // POR QUE EXISTE: la rama del 429 sustituia el cuerpo entero por prosa
+  // nuestra —«espera un poco»—. Con Mistral llego un 429 real y esa frase
+  // mandaba a esperar sin decir por que, cuando el motivo puede ser una cuenta
+  // sin verificar o un plan que no incluye el modelo: ahi esperar no arregla nada
+  it('el 429 incluye lo que dijo el proveedor', () => {
+    const error = Object.assign(new Error('429: {"message":"cuota agotada en tu plan"}'), {
+      status: 429,
+    });
+    const texto = describeHttpError(error, 'Mistral');
+    expect(texto).toContain('cuota agotada en tu plan');
+    expect(texto).toContain('esperar no sirve');
+  });
+
+  it('saca el mensaje del cuerpo aunque venga anidado o suelto', () => {
+    expect(providerSaid(new Error('429: {"error":{"message":"needs verification"}}'))).toBe(
+      'needs verification',
+    );
+    expect(providerSaid(new Error('429: {"error":"capacity exceeded"}'))).toBe('capacity exceeded');
+    expect(providerSaid(new Error('429: Too Many Requests'))).toBe('Too Many Requests');
+  });
+
+  it('sin cuerpo no se inventa un mensaje del proveedor', () => {
+    expect(providerSaid(new Error('429: '))).toBeNull();
+    expect(providerSaid(undefined)).toBeNull();
   });
 
   it('explica un error del servidor', () => {
@@ -388,15 +415,25 @@ describe('describeHttpError', () => {
     expect(mensaje).not.toContain('CustomerId');
   });
 
-  it('un 429 envuelto sigue reconociendose como limite de frecuencia', () => {
+  it('un 429 envuelto sigue reconociendose, y lo que dijo el proveedor se atribuye bien', () => {
     // el envoltorio del reintento escondia el status y todo acababa en la rama
-    // generica, que enseña el cuerpo crudo de la respuesta
+    // generica. Eso sigue arreglado.
+    //
+    // Lo que SI cambio, el 2026-09-05 y a proposito: antes se ocultaba el
+    // cuerpo de la respuesta. Con Mistral eso dejo a Daniel cuatro intentos a
+    // ciegas, porque un 429 no siempre es frecuencia —tambien lo devuelven una
+    // cuenta sin verificar o un plan que no incluye el modelo— y el motivo
+    // venia justo ahi. Ahora se enseña, DESPUES de la explicacion en español y
+    // marcado como suyo.
     const original = Object.assign(new Error('429: 您的请求频率过高'), { status: 429 });
     const envuelto = new RetryError('la operacion fallo tras 3 intentos', 3, original);
 
     const mensaje = describeHttpError(envuelto, 'KAT Coder Pro v2.5');
-    expect(mensaje).toContain('limitando las peticiones por frecuencia');
-    expect(mensaje).not.toContain('您的请求频率过高');
+    expect(mensaje).toContain('429');
+    expect(mensaje).toContain('您的请求频率过高');
+    // y NUNCA el texto del envoltorio, que es nuestro: atribuirselo al
+    // proveedor es peor que no decir nada
+    expect(mensaje).not.toContain('la operacion fallo tras 3 intentos');
   });
 });
 
