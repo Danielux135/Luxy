@@ -393,7 +393,15 @@ export const vaultConversationSendResultSchema = z.object({
    * lo correcto— y el usuario solo lo nota semanas despues, como «se le olvidan
    * cosas», sin poder atribuirlo al cambio de modelo.
    */
-  memoryStatus: conversationMemoryStatusSchema,
+  /**
+   * cómo salió el bloque de memoria de ESTE turno.
+   *
+   * `null` cuando la llamada ni siquiera llegó a completarse. No es lo mismo
+   * que `absent`: un turno fallido dejaba `absent`, y la pantalla lo leía como
+   * «ese modelo no está escribiendo bien el bloque de memoria», culpando al
+   * modelo de algo que nunca ocurrió. El error de la llamada ya lo explica.
+   */
+  memoryStatus: conversationMemoryStatusSchema.nullable(),
   /**
    * si el mensaje del usuario sobrevivio a este turno.
    *

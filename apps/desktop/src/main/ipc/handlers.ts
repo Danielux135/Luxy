@@ -2395,7 +2395,14 @@ export function registerIpcHandlers(context: HandlerContext): void {
     // se calculaba y se tiraba. Un modelo que escribe mal el bloque deja de
     // actualizar la memoria sin que nadie lo vea: la conversacion sigue
     // funcionando y solo semanas despues parece que «se le olvidan cosas»
-    let memoryStatus: ConversationMemoryStatus = 'absent';
+    // `null` cuando la llamada ni siquiera llego a completarse.
+    //
+    // Antes se quedaba en `absent`, y la pantalla lo enseñaba como «este turno
+    // no aporto memoria nueva; si se repite, ese modelo no esta escribiendo
+    // bien el bloque». Con un 429 del proveedor eso culpa al modelo de algo que
+    // nunca ocurrio, y encima al lado del error de verdad.
+    let memoryStatus: ConversationMemoryStatus | null =
+      result.outcome === 'failed' ? null : 'absent';
 
     let wroteReply = false;
     if (result.outcome !== 'failed' && result.text.length > 0) {
