@@ -68,11 +68,39 @@ function httpError(response: Response, body: string): Error {
   const error = new Error(`${response.status}: ${body.slice(0, 300)}`) as Error & {
     status?: number;
     retryAfterMs?: number;
+    rateLimit?: string;
   };
   error.status = response.status;
   const retryAfter = parseRetryAfter(response.headers.get('retry-after'));
   if (retryAfter !== null) error.retryAfterMs = retryAfter;
+  const limites = collectRateLimitHeaders(response.headers);
+  if (limites !== null) error.rateLimit = limites;
   return error;
+}
+
+/**
+ * las cabeceras de limite que devuelve el proveedor, tal cual.
+ *
+ * POR QUE EXISTE: un 429 puede ser «vas demasiado rapido» o «tu cuota es cero»,
+ * y el cuerpo dice lo mismo en los dos casos —«Rate limit exceeded»—. Los
+ * numeros SI los distinguen: un limite de 0 no es un limite alcanzado, es una
+ * cuenta sin cuota, y eso no se arregla esperando.
+ *
+ * No hay lista de nombres porque cada pasarela usa los suyos: se recoge lo que
+ * lleve `ratelimit` en el nombre. No son secretos —son cuotas y contadores— y
+ * aun asi pasan por `redact` como todo lo que se enseña.
+ */
+export function collectRateLimitHeaders(headers: Headers): string | null {
+  const encontradas: string[] = [];
+  headers.forEach((valor, nombre) => {
+    if (!/ratelimit|retry-after/i.test(nombre)) return;
+    // un valor larguisimo aqui seria una cabecera que no es lo que creemos
+    encontradas.push(`${nombre}=${valor.slice(0, 40)}`);
+  });
+  if (encontradas.length === 0) return null;
+  // orden estable: las pasarelas no lo garantizan y un mensaje que cambia de
+  // orden entre llamadas no se puede comparar
+  return encontradas.sort().slice(0, 12).join(' · ');
 }
 
 /** `Retry-After` en segundos o como fecha HTTP; null si no es util */
@@ -983,6 +1011,15 @@ export class HttpApiProvider implements ProviderExecution {
  * se perdia: un 429 acababa en la rama generica y al usuario le llegaba el JSON
  * crudo del proveedor, en chino, en vez de una frase util.
  */
+/** las cabeceras de limite, mirando tambien dentro de un error envuelto */
+function rateLimitOf(error: unknown): string | undefined {
+  const directo = (error as { rateLimit?: unknown } | null)?.rateLimit;
+  if (typeof directo === 'string') return directo;
+  const interno = (error as { lastError?: unknown } | null)?.lastError;
+  const anidado = (interno as { rateLimit?: unknown } | null)?.rateLimit;
+  return typeof anidado === 'string' ? anidado : undefined;
+}
+
 function statusOf(error: unknown): number | undefined {
   const directo = (error as { status?: unknown } | null)?.status;
   if (typeof directo === 'number') return directo;
@@ -1102,14 +1139,18 @@ export function describeHttpError(error: unknown, displayName: string): string {
     // planes que no incluyen ese modelo, y ahi «espera un poco» es un consejo
     // que no arregla nada y manda a esperar para siempre.
     const dijo = providerSaid(error);
+    // los NUMEROS distinguen «vas rapido» de «tu cuota es cero», que el cuerpo
+    // no distingue: los dos dicen «Rate limit exceeded»
+    const limites = rateLimitOf(error) ?? null;
     return (
       `${displayName} devolvio 429.\n\n` +
       (dijo === null ? '' : `Dijo: «${dijo}»\n\n`) +
+      (limites === null ? '' : `Limites que devolvio: ${limites}\n\n`) +
       'Luxy agoto sus reintentos para esta ejecucion. Si el proveedor indico ' +
       '`Retry-After`, ya respeto esa espera; si no, los reintentos son cortos.\n\n' +
-      'Si el mensaje de arriba habla de frecuencia, espera y repite. Si habla de ' +
-      'la cuenta, del plan o de una verificacion pendiente, esperar no sirve: hay ' +
-      'que arreglarlo en el proveedor.'
+      'Si los numeros de arriba traen un limite mayor que cero, es frecuencia: ' +
+      'espera y repite. Si el limite es CERO, o no hay numeros, no es velocidad: ' +
+      'es que esa cuenta no tiene cuota, y eso se arregla en el proveedor.'
     );
   }
   // 524 y 504 son timeouts del borde de Cloudflare delante del proveedor: el

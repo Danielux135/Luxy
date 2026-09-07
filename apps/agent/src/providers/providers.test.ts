@@ -17,6 +17,7 @@ import {
 import {
   describeHttpError,
   providerSaid,
+  collectRateLimitHeaders,
   parseRetryAfter,
   HttpApiProvider,
   MemoryBudgetStore,
@@ -395,7 +396,8 @@ describe('describeHttpError', () => {
     });
     const texto = describeHttpError(error, 'Mistral');
     expect(texto).toContain('cuota agotada en tu plan');
-    expect(texto).toContain('esperar no sirve');
+    // y sigue explicando que un 429 no siempre se arregla esperando
+    expect(texto).toContain('no tiene cuota');
   });
 
   it('saca el mensaje del cuerpo aunque venga anidado o suelto', () => {
@@ -1542,5 +1544,48 @@ describe('imagenes para Claude Code', () => {
       'image',
       'image',
     ]);
+  });
+});
+
+describe('cabeceras de limite en un 429', () => {
+  // POR QUE: el cuerpo dice «Rate limit exceeded» tanto si vas rapido como si
+  // tu cuota es CERO. Los numeros son lo unico que distingue «espera» de
+  // «arreglalo en tu cuenta», y los estabamos tirando.
+  it('recoge las que hablan de limite, ordenadas', () => {
+    const headers = new Headers({
+      'content-type': 'application/json',
+      'ratelimitbysize-limit': '0',
+      'ratelimitbysize-remaining': '0',
+      'x-ratelimit-limit-tokens': '500000',
+      'retry-after': '30',
+    });
+    const texto = collectRateLimitHeaders(headers);
+    expect(texto).toContain('ratelimitbysize-limit=0');
+    expect(texto).toContain('retry-after=30');
+    // nada que no sea un limite
+    expect(texto).not.toContain('content-type');
+  });
+
+  it('sin cabeceras de limite devuelve null, no una cadena vacia', () => {
+    expect(collectRateLimitHeaders(new Headers({ 'content-type': 'application/json' }))).toBeNull();
+  });
+
+  it('el mensaje del 429 los enseña y explica que significa un cero', () => {
+    const error = Object.assign(new Error('429: {"message":"Rate limit exceeded"}'), {
+      status: 429,
+      rateLimit: 'ratelimitbysize-limit=0 · ratelimitbysize-remaining=0',
+    });
+    const texto = describeHttpError(error, 'Mistral');
+    expect(texto).toContain('ratelimitbysize-limit=0');
+    expect(texto).toContain('no tiene cuota');
+  });
+
+  it('tambien con el error envuelto por el reintento', () => {
+    const original = Object.assign(new Error('429: {"message":"Rate limit exceeded"}'), {
+      status: 429,
+      rateLimit: 'ratelimitbysize-limit=0',
+    });
+    const envuelto = new RetryError('la operacion fallo tras 3 intentos', 3, original);
+    expect(describeHttpError(envuelto, 'Mistral')).toContain('ratelimitbysize-limit=0');
   });
 });
