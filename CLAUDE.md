@@ -174,6 +174,26 @@ defecto (`LA-041`); si de verdad hace falta, se escribe
 en `Restricted`, así que `npx` falla: se usan los atajos
 `node_modules\.bin\*.cmd`.
 
+**7. Un JSON dentro de un comando para Windows necesita `--%`.** PowerShell se
+come las comillas escapadas antes de que las vea el programa: un
+`curl.exe -d "{\"a\":1}"` llega roto y el servidor contesta «JSON decode error».
+El token de parada `--%` hace que todo lo que va detrás se pase **literal**:
+
+```
+curl.exe --% -X POST https://ejemplo/api -H "Content-Type: application/json" -d "{\"a\":1}"
+```
+
+Con `--%` no se expanden variables de PowerShell, asi que lo que vaya detras
+tiene que ir escrito tal cual. Si hace falta una variable —una clave, por
+ejemplo—, la alternativa es dejar el cuerpo en un archivo y usar
+`--data-binary "@archivo.json"`, que no tiene este problema.
+
+**8. Nunca escribas un secreto dentro de un comando que le pasas a Daniel.**
+Queda en su historial de consola y, si lo pega para enseñar el resultado, queda
+tambien en la conversacion. Paso: se le dio un `curl` con la clave de API
+incrustada y acabo expuesta y hubo que rotarla. Se pide aparte
+(`$k = Read-Host`) o se deja fuera del comando.
+
 ## Convenciones
 
 **TypeScript**

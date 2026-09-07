@@ -1,5 +1,43 @@
 # Luxy — acciones locales de Daniel
 
+## LA-044 — Mistral: cuota cero, y hay que escribir a su soporte
+
+Estado: `pending` — abierta el 2026-09-07. **Luxy no tiene nada que arreglar aquí.**
+
+Dos días persiguiendo un 429 de Mistral. Queda cerrado con una prueba hecha
+fuera de Luxy, desde PowerShell:
+
+```
+curl.exe --% -i -X POST https://api.mistral.ai/v1/chat/completions ...
+
+HTTP/1.1 429 Too Many Requests
+x-ratelimit-limit-req-minute: 0
+x-ratelimit-remaining-req-minute: 0
+{"object":"error","message":"Rate limit exceeded","type":"rate_limited","code":"1300"}
+```
+
+**El límite no está agotado: el límite ES cero.** Y contradice el propio panel
+de Mistral, que para `mistral-medium-latest` publica 1,00 solicitudes/segundo y
+20.000 tokens/minuto en la misma organización.
+
+Descartado, con evidencia:
+
+- **no es Luxy** — el `curl` de arriba no la usa para nada;
+- **no es la clave** — se rotó y da igual; y un 422 anterior demuestra que la
+  autenticación pasa (una clave mala daría 401);
+- **no es el modelo** — falla con `mistral-small-latest` y con
+  `mistral-medium-latest`, que sí está en su tabla de límites;
+- **no es la imagen** — un mensaje de texto suelto falla igual;
+- **no es frecuencia** — falla con llamadas separadas por horas;
+- **no es el permiso de entrenamiento** — ya estaba activado desde el principio.
+
+Qué hacer: escribirle al soporte de Mistral desde el botón de su panel, pegando
+el bloque de arriba y añadiendo que `GET /v1/models` responde 200 con 46 modelos
+con esa misma clave. La contradicción entre su panel y su API es el argumento.
+
+**Pendiente aparte:** la clave `94IS…` se pegó en una conversación y hay que
+darla por comprometida. Rotarla y borrar la anterior.
+
 ## LA-043 — probar de verdad si un modelo ve una foto
 
 Estado: `pending` — abierta el 2026-09-04.
