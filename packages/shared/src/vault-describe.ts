@@ -46,8 +46,40 @@ export function buildDescribePrompt(): string {
 }
 
 /** por que no se pudo escribir un pie de foto */
-export const DESCRIBE_FAILURES = ['vacio', 'negativa'] as const;
+export const DESCRIBE_FAILURES = ['vacio', 'negativa', 'sin-imagen'] as const;
 export type DescribeFailure = (typeof DESCRIBE_FAILURES)[number];
+
+/**
+ * el modelo contesta que NO le ha llegado ninguna imagen.
+ *
+ * No es una negativa ni una respuesta vacia: es una respuesta perfectamente
+ * formada que dice que no hay nada que mirar, y por eso se colaba como pie de
+ * foto valido. Paso de verdad: Claude Code descarta las imagenes en silencio
+ * —su transporte es un CLI y no tiene por donde mandarlas— y contesto «No hay
+ * ninguna imagen adjunta en esta conversacion». Eso se habria guardado como lo
+ * que SE VE en una foto de la boveda, que es exactamente `D-061` una capa antes.
+ *
+ * Se comprueba sobre el texto normalizado y sin acentos: un modelo escribe
+ * «imagen adjunta» o «imagen adjunta» segun le da.
+ */
+const SIN_IMAGEN = [
+  /no (hay|veo|se) (ninguna |nada de |)imagen/,
+  /no (he |)recib\w* (ninguna |)imagen/,
+  /no (puedo|logro) ver (ninguna |la |)imagen/,
+  /ninguna imagen (adjunta|adjuntada|en esta conversacion)/,
+  /no (hay|se ha) (adjuntado|adjunto)/,
+  /(there is |i see |)no image (attached|provided|in this)/,
+  /i (don't|do not|cannot|can't) see (an |any |the )?image/,
+];
+
+/** true si la respuesta dice que no le llego ninguna imagen */
+export function saysNoImage(text: string): boolean {
+  const plano = text
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase();
+  return SIN_IMAGEN.some((patron) => patron.test(plano));
+}
 
 export interface DescribeResult {
   caption: string | null;
@@ -68,5 +100,9 @@ export function parseDescribeResponse(text: string, refused = false): DescribeRe
   const limpio = text.replace(/\s+/g, ' ').trim();
   if (limpio.length === 0) return { caption: null, failure: 'vacio' };
   if (refused) return { caption: null, failure: 'negativa' };
+  // antes que nada: una respuesta que dice que no hay imagen NO es un pie de
+  // foto, por muy bien escrita que este. Guardarla haria que el personaje
+  // creyera que la foto ES esa frase
+  if (saysNoImage(limpio)) return { caption: null, failure: 'sin-imagen' };
   return { caption: limpio.slice(0, MAX_CAPTION_CHARS), failure: null };
 }

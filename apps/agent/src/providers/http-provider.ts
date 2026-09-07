@@ -209,6 +209,14 @@ const CONVERSATION_SYSTEM_PROMPT = [
 export class HttpApiProvider implements ProviderExecution {
   readonly id: ProviderId;
   readonly displayName: string;
+  /**
+   * el contrato de chat completions lleva imagenes como partes del mensaje.
+   *
+   * Que el transporte pueda llevarlas no dice nada de si el MODELO sabe
+   * mirarlas: eso lo declara el catalogo (`image_input`) y, en ultima
+   * instancia, lo dice el proveedor cuando se le pregunta.
+   */
+  readonly acceptsImages = true;
 
   constructor(
     private readonly config: HttpProviderConfig,

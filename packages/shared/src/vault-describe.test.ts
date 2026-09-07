@@ -9,6 +9,7 @@ import {
   MAX_CAPTION_CHARS,
   buildDescribePrompt,
   parseDescribeResponse,
+  saysNoImage,
 } from './vault-describe.js';
 
 describe('lo que se le pide al describidor', () => {
@@ -66,5 +67,53 @@ describe('lo que vuelve del describidor', () => {
     const { caption, failure } = parseDescribeResponse(largo);
     expect(failure).toBeNull();
     expect(caption).toHaveLength(MAX_CAPTION_CHARS);
+  });
+});
+
+describe('una respuesta que dice que no hay imagen', () => {
+  // POR QUE EXISTE, y no es hipotetico: Claude Code descarta las imagenes en
+  // silencio —su transporte es un CLI— y contesto «No hay ninguna imagen
+  // adjunta en esta conversacion, asi que no puedo describirla». Eso es una
+  // respuesta bien formada, asi que pasaba por pie de foto valido y se habria
+  // guardado como lo que SE VE en una foto de la boveda. Es `D-061` una capa
+  // antes y repetido en cada imagen.
+  it('no se acepta como pie de foto', () => {
+    const respuesta =
+      'No hay ninguna imagen adjunta en esta conversación, así que no puedo describirla. ' +
+      'Si la envías de nuevo, redacto el pie de foto siguiendo las reglas indicadas.';
+    expect(parseDescribeResponse(respuesta)).toEqual({ caption: null, failure: 'sin-imagen' });
+  });
+
+  it('reconoce las formas habituales, con y sin acentos, en dos idiomas', () => {
+    for (const texto of [
+      'No hay ninguna imagen adjunta',
+      'No veo ninguna imagen en esta conversacion',
+      'No he recibido ninguna imagen',
+      'No puedo ver la imagen que mencionas',
+      'There is no image attached to this conversation',
+      "I don't see an image here",
+    ]) {
+      expect(saysNoImage(texto)).toBe(true);
+    }
+  });
+
+  it('NO confunde una descripcion normal que menciona imagenes', () => {
+    // el falso positivo que importa: una descripcion legitima no puede
+    // descartarse por nombrar la palabra
+    for (const texto of [
+      'Un gato atigrado sentado sobre una piedra, con ramas secas al fondo.',
+      'Una imagen de estilo anime: chica de pelo castano en primer plano.',
+      'Dos personas de espaldas frente al mar al atardecer.',
+      'Captura de pantalla de un editor de codigo con texto en varias lineas.',
+    ]) {
+      expect(saysNoImage(texto)).toBe(false);
+      expect(parseDescribeResponse(texto).caption).not.toBeNull();
+    }
+  });
+
+  it('una negativa sigue siendo una negativa, no «sin imagen»', () => {
+    // se arreglan distinto: una negativa pide cambiar de modelo; «sin imagen»
+    // pide cambiar de PROVEEDOR, porque el transporte no la lleva
+    expect(parseDescribeResponse('No puedo ayudarte con eso.', true).failure).toBe('negativa');
   });
 });

@@ -218,6 +218,19 @@ export interface ProviderCallMetrics {
 export interface ProviderExecution {
   readonly id: ProviderId;
   readonly displayName: string;
+  /**
+   * este transporte sabe llevar imagenes hasta el modelo.
+   *
+   * Ausente o `false` significa que NO, y hay que creerselo: los CLI locales
+   * —Claude Code, Codex— reciben el prompt por stdin y no tienen por donde
+   * mandar una imagen, asi que la descartaban en SILENCIO. El turno salia
+   * «completado» y el modelo contestaba «no hay ninguna imagen adjunta», que
+   * es una respuesta valida y se colaba como pie de foto.
+   *
+   * Se declara aqui, en el transporte, y no se deduce del identificador del
+   * proveedor: el dia que un CLI acepte imagenes, lo dice el.
+   */
+  readonly acceptsImages?: boolean;
   /** comprueba si el proveedor puede usarse en esta maquina */
   detect(): Promise<ToolPresence>;
   /** ejecuta la tarea dentro de un directorio de trabajo aislado */

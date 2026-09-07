@@ -706,6 +706,20 @@ export async function runJob(
     // fallaba con un error de Claude.
     const modeloElegido = resolveJobModel(job, deps.config);
     executedModel = modeloElegido;
+
+    // pedir una imagen a un transporte que no puede llevarla se falla AQUI, sin
+    // gastar la llamada.
+    //
+    // Antes la imagen se descartaba en silencio: el turno salia «completado» y
+    // el modelo contestaba «no hay ninguna imagen adjunta». Esa frase es una
+    // respuesta valida, asi que se guardaba como pie de foto de una imagen de
+    // la boveda, y ahi el personaje creia que la foto ES esa frase.
+    if (deps.images !== undefined && deps.images.length > 0 && provider.acceptsImages !== true) {
+      throw new Error(
+        `${provider.displayName} no puede recibir imagenes: su transporte es un CLI local y ` +
+          'solo acepta texto. Elige un proveedor HTTP con un modelo que sepa mirar.',
+      );
+    }
     deps.emit(
       'phase',
       `ejecutando ${provider.displayName}` +

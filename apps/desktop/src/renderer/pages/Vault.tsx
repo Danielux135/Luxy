@@ -2419,6 +2419,17 @@ function VisionBench({
                 lo arregla.
               </Notice>
             )}
+            {probe.failure === 'sin-imagen' && (
+              /* el caso que estuvo pasando por bueno: el modelo contesta con una
+                 frase perfecta diciendo que no le ha llegado nada. Como pie de
+                 foto habría hecho creer al personaje que la imagen ES esa frase */
+              <Notice tone="fault">
+                Ese modelo contestó que <strong>no le llegó ninguna imagen</strong>.
+                Los proveedores locales —Claude Code y Codex— reciben el texto por
+                la consola y no tienen por dónde mandar una foto. Necesitas un
+                proveedor <strong>HTTP</strong> con un modelo que sepa mirar.
+              </Notice>
+            )}
           </div>
         </div>
       ))}

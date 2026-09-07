@@ -216,6 +216,10 @@ describe('imagenes del turno privado', () => {
     return {
       id: 'claude',
       displayName: 'Proveedor de prueba',
+      // declara que su transporte lleva imagenes, como el de chat completions.
+      // Sin esto el turno se rechaza antes de gastar la llamada, que es justo
+      // lo que comprueba la prueba de mas abajo
+      acceptsImages: true,
       detect: async () => ({ available: true, version: 'falso' }),
       run: async (request: ProviderRunRequest) => {
         capturado.request = request;
@@ -258,6 +262,76 @@ describe('imagenes del turno privado', () => {
     );
 
     expect(capturado.request?.images).toEqual([{ mimeType: 'image/webp', base64: 'AAAA' }]);
+  });
+
+  it('un proveedor que no lleva imagenes falla ANTES de gastar la llamada', async () => {
+    // POR QUE, y paso de verdad: Claude Code y Codex reciben el prompt por
+    // stdin y no tienen por donde mandar una imagen, asi que la descartaban en
+    // SILENCIO. El turno salia «completado» y el modelo contestaba «no hay
+    // ninguna imagen adjunta»; esa frase se guardaba como pie de foto de una
+    // imagen de la boveda, y el personaje creia que la foto ES esa frase.
+    const capturado: { request: ProviderRunRequest | null } = { request: null };
+    const sinImagenes = {
+      ...spyProvider(capturado),
+      acceptsImages: false,
+    } as unknown as ProviderExecution;
+
+    const resultado = await runLocalTurn(
+      {
+        localTurnId: TURN_ID,
+        provider: 'claude',
+        model: null,
+        projectAlias: 'privado',
+        prompt: 'que ves',
+        images: [{ mimeType: 'image/webp', base64: 'AAAA' }],
+      },
+      new AbortController().signal,
+      {
+        config: config(),
+        logger,
+        getProvider: () => sinImagenes,
+        worktreesDirectory: 'C:/no/se/usa',
+        apiKeyFor: () => undefined,
+        onProgress: () => undefined,
+      },
+    );
+
+    expect(resultado.outcome).toBe('failed');
+    expect(resultado.error).toContain('no puede recibir imagenes');
+    // y la llamada NO se hizo: es la mitad del arreglo
+    expect(capturado.request).toBeNull();
+  });
+
+  it('un turno SIN imagenes funciona con ese mismo proveedor', async () => {
+    // no se puede romper el camino normal por arreglar el de las imagenes:
+    // Claude y Codex siguen siendo los proveedores de texto de siempre
+    const capturado: { request: ProviderRunRequest | null } = { request: null };
+    const sinImagenes = {
+      ...spyProvider(capturado),
+      acceptsImages: false,
+    } as unknown as ProviderExecution;
+
+    const resultado = await runLocalTurn(
+      {
+        localTurnId: TURN_ID,
+        provider: 'claude',
+        model: null,
+        projectAlias: 'privado',
+        prompt: 'hola',
+      },
+      new AbortController().signal,
+      {
+        config: config(),
+        logger,
+        getProvider: () => sinImagenes,
+        worktreesDirectory: 'C:/no/se/usa',
+        apiKeyFor: () => undefined,
+        onProgress: () => undefined,
+      },
+    );
+
+    expect(resultado.outcome).toBe('completed');
+    expect(capturado.request).not.toBeNull();
   });
 
   it('un turno sin imagenes no manda el campo', async () => {
