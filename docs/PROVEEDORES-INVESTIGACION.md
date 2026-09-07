@@ -1,0 +1,326 @@
+<!-- generado por una investigacion con 13 agentes el 2026-09-07 -->
+
+# Proveedores de IA para el roleplay privado — investigacion 2026-09-07
+
+Investigacion pedida por Daniel: APIs gratuitas de chat, vision, imagen, video
+y demas, utiles para lo que Luxy hace en la boveda privada.
+
+**Como leer esto.** Cada hallazgo paso por un verificador adversarial cuyo
+trabajo era refutarlo, no confirmarlo. Lo refutado se cayo; lo que quedo dudoso
+va etiquetado como **no confirmado** y no sostiene ninguna recomendacion.
+
+Los cuatro criterios, en este orden:
+
+1. **Gratis de verdad.** «Gratis pero pide tarjeta» NO cuenta — es lo que hizo
+   descartar Mistral el mismo dia de esta investigacion (`LA-044`).
+2. **Politica de contenido leida**, no supuesta ni sacada de un blog.
+3. **Privacidad.** Si el nivel gratuito se paga con los datos, descalifica
+   igual que la tarjeta: aqui el contenido es de una boveda cifrada.
+4. **Enchufable**: contrato `chat completions`, o local en loopback.
+
+Vetados por politica del repositorio y fuera del estudio: la API de OpenAI y la
+de Anthropic.
+
+---
+
+{
+  "summary": "Investiga APIs y modelos gratuitos (chat, vision, imagen, video, local) que sirvan al roleplay privado de Luxy, con verificacion adversarial",
+  "agentCount": 13,
+  "logs": [],
+  "result": {
+    "sintesis": "# Recomendación final — proveedores de IA para Luxy\n\nEsto es la síntesis después de pasar cada hallazgo por el verificador. Lo que el verificador refutó, se ha caído. Lo que quedó dudoso, va etiquetado como **no confirmado** y no se apoya ninguna decisión en ello.\n\nAntes de nada, tres cosas que cambian el marco:\n\n- **La trampa que rechazaste con Mistral aparece otra vez, dos veces en su forma literal** (OVHcloud y Cerebras piden método de pago guardado para activar el crédito \"gratis\") **y varias veces en una forma peor: se paga con los datos.** OpenRouter `:free` y el nivel gratuito de Gemini no piden tarjeta — piden el contenido. Para una bóveda privada eso descalifica igual de duro que la tarjeta, y así lo trato aquí.\n- **\"La política lo permite\" y \"el modelo lo hace\" son cosas distintas.** Se han separado en cada ficha. Ningún modelo alojado se ha probado con una imagen o un prompt real; nadie puede afirmar que colaborarán.\n- **En local no hay proveedor ni tarjeta, pero sí licencia de pesos.** Es el equivalente local de la política de contenido, y ahí ha caído el candidato que parecía el número uno.\n\n---\n\n## 1. VISIÓN (tu bloqueo actual) — la respuesta es local\n\nClaude Code se niega con NSFW y ese es el hueco. **No se cierra con ningún servicio alojado gratuito.** Se cierra en tu PC.\n\n### En tu PC (recomendado)\n\n**KoboldCpp + ToriiGate-0.5 — el camino con menos incógnitas**\nUn `.exe` portable para Windows, sin instalar ni compilar. Sin tarjeta, sin cuenta. **Política de contenido: ninguna, porque no hay proveedor**; ToriiGate-0.5 es **licencia MIT**, que no impone ninguna restricción de uso, y su propia ficha dice \"No censorship\" y que \"no requiere jailbreaks\" para estas imágenes. Se enchufa como una Conexión HTTP más en Studio apuntando a `http://127.0.0.1:5001/v1` — Luxy ya acepta http sin TLS en loopback. Pesa poco: Q4_K_M 3,07 GB + mmproj 364 MB, cabe en una GPU de 6 GB.\n*Sesgo real: está especializado en arte digital, anime y cómic. Para fotografía realista no es la mejor elección.*\n\n**llama.cpp (llama-server) — el camino de servicio permanente**\nMismo planteamiento, mejor para dejarlo corriendo en segundo plano. Su documentación oficial confirma multimodal por `/chat/completions` compatible con OpenAI, la forma de objeto `{url}` que Luxy usa por defecto, y el puerto 8080 en 127.0.0.1. Los zips de Windows con CUDA de la release actual son `llama-b10839-bin-win-cuda-12.4-x64.zip` (y hay que bajar además el `cudart-*` aparte).\n\n**Ollama — la opción de menor fricción para probar hoy**\n`ollama run huihui_ai/qwen3-vl-abliterated:8b-instruct` y ya tienes visión sin negativas. Apache 2.0. Es además tu mejor apuesta **para pies de foto en español**, porque Qwen3-VL sí es genuinamente multilingüe mientras los captioners especializados están centrados en inglés. Conexión a `http://127.0.0.1:11434/v1`.\n**Corrección importante frente a lo que se te pudo decir antes: NO hay que configurar `imageUrlFormat='string'` para Ollama.** Leído en su código fuente (`openai.go`, `FromChatRequest`), Ollama prueba **primero** la forma de objeto y solo cae a la cadena como respaldo. Déjalo en el valor por defecto de Luxy (`'object'`). Documentar una excepción que no existe habría añadido una trampa de configuración.\n\n### El caso JoyCaption — hay que decirlo claro\n\nJoyCaption Beta One es, técnicamente, el mejor captioner NSFW de foto realista que existe: su ficha dice literalmente \"Equal coverage of SFW and NSFW concepts\" y está entrenado a propósito para esto. **Pero su presentación como \"open weights, no restrictions\" es marketing del README, no un instrumento de licencia.** El repositorio contiene `LLAMA_LICENSE` y `LLAMA_USE_POLICY.md`, y el campo `license` de la ficha está vacío: se distribuye bajo la Llama 3.1 Community License y su Acceptable Use Policy — exactamente la misma familia de restricciones por la que se descarta Llama. **JoyCaption no es la alternativa limpia frente a Llama: es Llama.**\n\nPara un uso privado, local y no distribuido, esa cláusula es prácticamente inaplicable. Pero es tu decisión, y es una decisión de **riesgo asumido**, no de \"no hay restricciones\". Si tu criterio es evitar licencias con restricciones de uso ambiguas, JoyCaption cae y quedan en pie ToriiGate (MIT) y la familia Qwen (Apache 2.0). Si aceptas el riesgo, el mmproj está en `concedo/llama-joycaption-beta-one-hf-llava-mmproj-gguf` (878 MB, no ~600) — es del autor de KoboldCpp y está hecho para KoboldCpp.\n\n### En la nube (respaldo, con reservas)\n\n**Groq (`qwen/qwen3.6-27b`)** — el mejor de los alojados. Su AI policy solo prohíbe, en materia sexual, contenido sexualmente explícito **\"that is illegal\"**; no hay prohibición categórica de ficción adulta lícita. No retiene datos por defecto (logs 30 días). Contrato `chat completions` puro, cero código.\nTres avisos honestos: **(a) que no pida tarjeta NO está confirmado en ninguna página de Groq** — solo en blogs agregadores, que es justo la clase de fuente que aquí no vale; compruébalo en el alta antes de invertir tiempo. **(b)** El no-entrenamiento sí está confirmado, pero en el Services Agreement, no en la página que se citaba. **(c)** La política permite; el modelo lleva su propio alineamiento y probablemente se niegue. No lo des por resuelto sin probarlo.\nCuello de botella real: 8K tokens/minuto y 2.048 tokens por imagen ≈ 3 imágenes por minuto.\n\n**Cloudflare Workers AI** — 10.000 neurons/día sin tarjeta (verificado: `llama-3.2-11b-vision-instruct` **no** está en la lista de modelos que exigen método de pago). Sus términos no dicen nada de contenido adulto y prohíben explícitamente entrenar con tu contenido. Pero su capa compatible con OpenAI **no documenta imágenes ni `image_url`**, así que no se sabe si funciona. Dato nuevo que merece una mirada: el catálogo ya incluye **`moondream3.1-9B-A2B` servido por Cloudflare**, lo que permitiría usar Moondream sin aceptar los términos de M87 Labs que lo descalifican. Nadie lo ha evaluado.\n\n**AI Horde `interrogate`/`caption`** — gratis de verdad, sin tarjeta, y la fontanería ya existe en `apps/agent`. Su FAQ dice palabra por palabra: *\"Horde-wide, we censor only one type of generation: CSAM Images\"*. Pero el caption es BLIP: frases cortas, genéricas y pudorosas con contenido adulto. Y un worker voluntario puede ver la imagen (la FAQ lo admite: \"Technically, yes\"). Respaldo degradado, no solución.\n\n### Descartados en visión\n\n| Proveedor | Motivo |\n|---|---|\n| **Google / Gemini** | Doble: su política prohíbe *\"Sexually explicit content — for example, content created for the purpose of pornography\"* (cita correcta en `policies.google.com/terms/generative-ai/use-policy`, no en la URL de soporte), **y** el nivel gratuito usa tu contenido para mejorar productos con revisores humanos leyéndolo. |\n| **Moondream Cloud** | Sus términos prohíben contenido *\"vulgar, obscene\"* (4.2) y *\"obscene, pornographic\"* (5.5). Corrección: **sí habla chat completions** en `api.moondream.ai/v1`, al contrario de lo que se creía — pero da igual, la cláusula lo descalifica. Vía local o vía Cloudflare, sí. |\n| **OpenRouter `:free`** | Usar modelos gratuitos obliga a habilitar el enrutado hacia proveedores que pueden entrenar con tus datos; su propia doc confirma ajustes separados para free y de pago. *(La acusación más grave — que publican prompts en datasets públicos — no ha podido leerla nadie: ese artículo devuelve 403. Queda como no verificado.)* |\n| **Venice.ai** | La API es de pago, sin nivel gratuito. Y sus términos hacen garantizar que tu contenido no es \"pornographic\" — contradice su propia marca. |\n| **NVIDIA NIM** | En la línea de texto sí se pudo leer el PDF: cláusula 4.11 literal, *\"You will not use the API Service to create or distribute to others any defamatory, obscene, pornographic, vulgar, offensive, or violent content.\"* Descartado con la cita delante. Además \"trial purposes only, without use in production\". |\n| **Chutes / SiliconFlow / Alibaba** | Fin del gratuito, teléfono chino + identidad real, y caducidad a 90 días respectivamente. |\n| **Pollinations** | Reabierto por el verificador (el argumento de \"solo hay modelos frontera\" era falso: hay qwen3-vl, llama-4, mistral). Pero sigue sin política de retención localizable y por diseño es pasarela a terceros. Para la bóveda, probablemente descartado igual — ahora por el motivo correcto. |\n\n---\n\n## 2. IMAGEN — ya tienes lo mejor gratis; lo que falta es identidad de personaje\n\n**No existe hoy ningún servicio alojado que cumpla las cuatro condiciones y aporte algo sobre AI Horde.** Sogni AI tiene el mejor catálogo NSFW pero su FAQ exige \"a verified payment method\" para gastar el Spark gratuito — la trampa de Mistral. Comfy Cloud dice literalmente \"No payments. No credit card required.\" pero su nivel gratuito es interfaz, no API.\n\n**Lo que sí aportaría algo: ComfyUI en local (`127.0.0.1:8188`).** No por generar mejor, sino porque cubre exactamente lo que tu propio código admite que falta — `vault-image-provider.ts:64-65` dice que AI Horde no tiene \"ni IP-Adapter, ni FaceID, ni un modelo de edición por instrucción\". Con IP-Adapter FaceID o Qwen-Image-Edit (Apache 2.0, 20B) resuelves \"este personaje, en esta escena nueva\", que es el problema que la receta local de D-064 apaña pero no resuelve. Rutas verificadas en doc oficial: `POST /prompt`, `GET /history`, `GET /view`, `WS /ws`. Arranca por defecto en 127.0.0.1:8188, que es justo lo que exige la regla de loopback.\n*Si prefieres un adaptador barato de escribir: Forge expone `/sdapi/v1/txt2img` con `--api` (verificado en la wiki oficial de A1111), puerto 7860, JSON plano y base64 — mucho más parecido a lo que ya construyes para AI Horde que el grafo de nodos de ComfyUI.*\n\n**Dato caducado que te ahorra una tarde:** desde abril de 2026 Civitai se partió en dos dominios. `civitai.com` es SFW-only; los checkpoints X/XXX y sus LoRA están en **`civitai.red`**. Activar toggles en el dominio verde ya no sirve. Y su ToS prohíbe porno en la Sección 9 \"User Content\" — no es lenguaje de procesador de pagos como se sospechaba. **Qué términos rigen `civitai.red` no lo ha encontrado nadie**, así que no se puede afirmar que su API permita NSFW.\n\nDescartados: **Tensor.art** (SFW-only desde el 27/11/2025, el NSFW se fue a una plataforma de pago), **Pollinations** (`private` por defecto es **false** — publica en un feed público), **Cloudflare** (los FLUX llevan filtros NSFW a la entrada y a la salida según su model card), **getimg.ai** (su página de precios hoy no muestra ningún plan gratuito).\n**Modal queda reabierto:** se descartó por una tarjeta que su página de precios no exige (\"$30/month free credits\" en Starter, sin condición declarada). Pero sus términos prohíben material *\"indecent or obscene\"*, así que el bloqueo real es otro y sigue sin resolver.\n\n---\n\n## 3. TEXTO — ya tienes DeepSeek; esto es la red de seguridad\n\n**AI Horde por el puente OpenAI (`https://oai.aihorde.net/v1`) es el mejor hallazgo de todo el informe.** Es el único que cumple las cuatro condiciones a la vez:\n- Gratis de verdad, y **no hay pasarela de pago que pueda pedir tarjeta**: su README dice *\"Kudos can never be bought or sold — this is strictly against the Terms of Service\"*.\n- Política que **permite en positivo**: *\"Other than this one instance, the horde does not censor text generations at all\"* (la instancia es el filtro anti-CSAM en imágenes).\n- Contrato `chat completions` con `/v1/models` — cumple D-022, cero código, se añade desde Conexiones.\n- **Ya tienes cuenta y clave por las imágenes: es el mismo monedero de kudos.**\n\nY el catálogo, consultado en vivo, es de finetunes de rol, no de asistentes: Cydonia-24B, Skyfall-31B, Rocinante-X-12B, mini-magnum-12b, Violet-Lotus, Impish_Bloodmoon, Forgotten-Safeword-22B, Behemoth-X-123B.\n**Su pega, sin adornos: el cómputo lo pone un voluntario que técnicamente puede leer y guardar tu prompt.** Su FAQ lo admite (\"Technically, yes\"). El worker no sabe quién eres, pero ve el texto. Úsalo para lo explícito **no íntimo**; para lo íntimo de verdad, local.\n\n**Local para lo íntimo:** Ollama o LM Studio — ambos con `/v1/models` **verificado en documentación oficial**, que es lo que Luxy exige para catalogar. **KoboldCpp queda pendiente de una comprobación de diez segundos:** ninguna fuente primaria documenta que exponga `GET /v1/models` en formato OpenAI, y el verificador comprobó en `apps/desktop/src/main/ipc/handlers.ts` que sin eso la conexión no pasa ni el test ni el catálogo. Ejecuta `curl http://localhost:5001/v1/models` antes de elegirlo.\n\n**Groq como respaldo limpio** para narrativa no explícita: no entrena, no retiene por defecto, política permisiva. Mismo aviso de la tarjeta sin confirmar.\n\n**Descartado y anotado:** **Cerebras** — el verificador lo tumbó y va al mismo cajón que Mistral. Literal de su documentación: *\"If you skip adding a payment method at sign-up, Playground and API access remain inactive until you do\"*, con crédito de 5 $ que caduca a 30 días. Los blogs que dicen \"1M tokens/día gratis sin tarjeta para siempre\" son falsos. **No hace falta que abras cuenta para saberlo.**\n**OVHcloud** — misma trampa, y es una pena porque su política de datos era la mejor de todas (no entrenan, retención cero, UE). Si algún día aceptas poner tarjeta, sube muchos puestos.\n\n---\n\n## 4. VÍDEO — hoy no hay. Sin adornos.\n\n**El vídeo generativo gratuito, sin tarjeta y sin censura no existe como servicio alojado.** Tres muros verificados: la política (fal prohíbe expresamente *\"any other harmful, violent, or sexually explicit content\"*, y fal está detrás de medio catálogo ajeno; Alibaba modera entrada **y** salida), el dinero (los nueve modelos de vídeo de Pollinations están marcados `\"paid_only\":true` mientras la imagen es gratis), y los procesadores de pago (Civitai perdió el suyo, Tensor.art movió el NSFW tras un muro de pago).\n\n**Confirmación negativa que te ahorra tiempo:** revisadas las 59 rutas del swagger de AI Horde, **no hay ninguna de vídeo, ni reservada.** El Horde no va a cubrir este hueco.\n\n**Corrección importante — Venice sí tiene vídeo, y es la mejor pista:** el hallazgo original decía que no. Es falso y estaba caducado. `GET api.venice.ai/api/v1/models?type=video` devuelve ~131 modelos, y un subconjunto lleva `\"uncensored\":true` (wan-3-0, wan-2-7, seedance-1-5-pro, longcat, ovi, minimax-h3-max). Hay image-to-video, así que **la identidad del personaje se heredaría de la imagen que la bóveda ya genera**. Cuatro reservas que van en la misma frase: **(1)** no es chat completions, es cola asíncrona propia (`POST /video/queue`, sondeo de `/video/retrieve`) — adaptador obligatorio; **(2)** **no es gratis** — créditos con tarjeta, cripto o staking; **(3)** su ToS prohíbe lo \"pornographic\" pese al flag `uncensored`, y la API devuelve 422 por política — el flag es metadato del modelo, no una bendición contractual; **(4)** `\"privacy\":\"anonymized\"` significa que Venice te oculta al proveedor, pero el proveedor ve el prompt.\n\n**Si quieres vídeo hoy, es local.** Y la expectativa realista importa: clips de 5 segundos, 480p, minutos de espera. **FramePack** es el suelo del hardware de usuario — 6 GB de VRAM, consumo constante aunque el clip sea largo, y **es Apache-2.0** (el archivo LICENSE existe, aunque el README no lo mencione: eso no es silencio legal, es una licencia limpia). Es image-to-video, así que parte de la imagen que ya generas. **Wan 2.1/2.2** en ComfyUI es Apache 2.0 con una cláusula de uso responsable que va sobre **compartir** — y aquí nada sale del PC. **HunyuanVideo queda descartado**: su LICENSE excluye territorialmente a la Unión Europea, en mayúsculas. No es política de contenido, es que la licencia no te concede derechos.\n\nSi esto se integra, tiene que ser un **trabajo asíncrono con aviso al terminar**, nunca dentro del turno.\n\n---\n\n## 5. INFRAESTRUCTURA — dos arreglos baratos que no buscabas\n\n**El más rentable de todo el informe, y salió de leer tu código, no de la web:** `media-adapters.ts:89` tiene `DEFAULT_VOICE = 'cixingnansheng'` — **una voz china** — con un comentario explicando que se eligió porque 'alloy' devolvía `voice_id_invalid`. Tu TTS funciona, pero habla con la voz que quedaba.\n**Kokoro-82M** (Apache 2.0) trae **ef_dora, em_alex y em_santa en castellano**, corre en CPU, y su wrapper expone la **misma ruta `/v1/audio/speech`** que ya llamas. Es cambiar un baseUrl y una constante — y de paso el texto de la bóveda deja de salir del equipo, que hoy sí ocurre. *Matiz honesto: las voces españolas aparecen en VOICES.md **sin nota de calidad**, al contrario que las inglesas. Existen; escúchalas antes de fijarlas.*\n\n**Segundo: el ASR roto.** `ADAPTER_VERIFICATION` marca `transcription: { verified: false }`. **whisper.cpp** lo cierra: sin cuenta, sin tarjeta, sin política, y Whisper transcribe fonemas — no se niega. Un detalle que no es cosmético: **su ruta por defecto es `/inference`, no `/v1/audio/transcriptions`**. Hay que arrancar con `--inference-path /v1/audio/transcriptions` (el flag está documentado). \"Solo cambia el baseUrl\" era falso.\n\n**Groq como plan B de ASR**, con **corrección de límites**: las cifras que circulan (30 RPM / 14.400 RPD) son del tier de **texto**. Para whisper son **20 RPM, 2.000 peticiones/día y 28.800 segundos de audio/día** = 8 horas diarias. La unidad no son tokens, son segundos.\n\n**Dos trampas del mismo género que Mistral, para que consten:**\n- **AssemblyAI**: 50 $ gratis, sin tarjeta, y su propia FAQ dice *\"Free users do not have the ability to opt out of the model improvement program.\"* El nivel gratuito se paga con los datos.\n- **Deepgram**: 200 $ sin tarjeta (esto sí verificado en su web). Pero sus términos son **opt-out por defecto**: entrenan salvo que pongas `mip_opt_out=true` en **cada** petición. Una que se olvide y ese audio entra.\n- **DeepL**: se había descartado \"por pedir tarjeta\". **Eso no está probado** — su página oficial dice que no la pide, y la acusación venía de terceros. Sigue fuera, pero por motivos válidos (API propia, no habla chat completions), no por una tarjeta inventada. Conviene no ensuciar el precedente de Mistral, que sí es un rechazo real.\n\n**Lo que es adorno y no deberías tocar:** embeddings (tu `turn-index.ts` ya razonó por qué, y Ollama solo elimina una de sus tres objeciones); moderación con **Llama Guard**, que es peor que adorno — su taxonomía define S12 = Sexual Content e incluye la erótica explícitamente, así que marcaría **cada turno** de la bóveda; y **Cloudflare Workers AI**, que es la tentación más seductora precisamente porque tu cuenta ya existe — y meter el audio de la bóveda por el Worker convertiría tu \"única pieza pública\" en la que ve el contenido privado.\n\n---\n\n## Lo que haría yo, en orden\n\n1. **Prueba de humo de visión, 15 minutos, sin tocar Luxy.** Descarga KoboldCpp (`.exe`), ToriiGate-0.5 Q4_K_M + su mmproj, arranca, y pásale una imagen con el texto de `buildDescribePrompt()`. Responde de golpe las dos preguntas abiertas: si describe sin negarse, y si lo hace en español.\n2. Si el español falla: `ollama run huihui_ai/qwen3-vl-abliterated:8b-instruct` y compara. Conexión con el `imageUrlFormat` por defecto.\n3. **Da de alta AI Horde texto** (`https://oai.aihorde.net/v1`) como Conexión. Cero código, misma clave que ya tienes, y te da modelos de rol de 24B-123B que no puedes ejecutar en casa.\n4. **Cambia `DEFAULT_VOICE` a una voz española de Kokoro.** Es la mejora más barata que hay.\n5. **Decisión numerada pendiente, y no es un detalle:** D-064 dice que el proveedor de imágenes de la bóveda es del **personaje**. Un servidor de visión local es intrínsecamente de la **máquina** — si el turno cae en el portátil y llama-server solo corre en el sobremesa, no hay visión. Hay que modelarlo como capacidad de máquina, que la selección de máquina en `shared` lo tenga en cuenta, y decidir qué pasa cuando la máquina elegida no lo tiene levantado.\n\n## Huecos que siguen abiertos\n\n- **Si Groq pide tarjeta.** Es el candidato alojado número uno y su gratuidad se apoya solo en blogs. Se cierra dándote de alta y mirando si aparece un paso de facturación. Dado lo de Mistral, es el hueco más caro de la lista.\n- **Si los modelos alojados aceptan de hecho NSFW.** Nadie lo ha probado. Es la única prueba barata: una imagen, tres peticiones.\n- **Qué términos rigen `civitai.red`.** Sin eso no se puede afirmar ni negar que su API permita NSFW.\n- **El default de `safe` en Pollinations** no está documentado. No lo des por `false`: mándalo explícito.\n- **Rendimiento local real.** Nadie ha ejecutado nada en tu equipo. **Toda la recomendación local depende de un dato que no tengo: qué GPU tienes y cuánta VRAM.**\n\nY una nota de método: cuatro citas van a acabar en `DECISIONS.md` (Groq AI policy, AI Horde FAQ, Venice 10.9.c y Moondream 4.2/5.5). Todas se leyeron con herramientas que resumen. **Antes de fijarlas, ábrelas tú y confirma la transcripción literal.**",
+    "lineas": 6
+  },
+  "workflowProgress": [
+    {
+      "type": "workflow_phase",
+      "index": 1,
+      "title": "Investigar"
+    },
+    {
+      "type": "workflow_phase",
+      "index": 2,
+      "title": "Verificar"
+    },
+    {
+      "type": "workflow_phase",
+      "index": 3,
+      "title": "Sintetizar"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 1,
+      "label": "investiga:vision",
+      "phaseIndex": 1,
+      "phaseTitle": "Investigar",
+      "agentId": "a213818b190f7a691",
+      "model": "claude-opus-5",
+      "state": "done",
+      "startedAt": 1788779179416,
+      "queuedAt": 1788779177805,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "CONCLUSION CORTA: el hueco de vision NO se cierra bien con …",
+      "promptPreview": "CONTEXTO DEL PROYECTO (Luxy) — leelo entero antes de buscar:\n\nLuxy es un agente personal en Windows con una boveda privada cifrada donde el\nusuario (Daniel) hace roleplay adulto. Necesita proveedores de IA para eso.\n\nRESTRICCIONES DURAS, no negociables:\n- PROHIBIDO proponer la API de OpenAI y la de Anthropic. Estan vetadas por\n  politica del repositorio. No las incluyas ni como comparacion.\n- Un p…",
+      "lastProgressAt": 1788779953854,
+      "tokens": 126392,
+      "toolCalls": 79,
+      "durationMs": 774436,
+      "resultPreview": "{\"proveedores\":[{\"nombre\":\"llama.cpp (llama-server) + JoyCaption Beta One GGUF — LOCAL\",\"categoria\":\"local\",\"url\":\"https://github.com/ggml-org/llama.cpp/blob/master/docs/multimodal.md\",\"gratis\":\"Gratis del todo y para siempre: software libre + pesos abiertos descargados de Hugging Face. No hay cuenta, ni cuota, ni servicio remoto. JoyCaption Beta One en GGUF va de IQ1_S (2,53 GB) a BF16 (16,1 GB);…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 2,
+      "label": "investiga:vision-local",
+      "phaseIndex": 1,
+      "phaseTitle": "Investigar",
+      "agentId": "a963906e0e7ad45fd",
+      "model": "claude-opus-5",
+      "state": "done",
+      "startedAt": 1788779179483,
+      "queuedAt": 1788779177806,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "RESUMEN EN UNA FRASE: el hueco de vision NSFW se cierra hoy…",
+      "promptPreview": "CONTEXTO DEL PROYECTO (Luxy) — leelo entero antes de buscar:\n\nLuxy es un agente personal en Windows con una boveda privada cifrada donde el\nusuario (Daniel) hace roleplay adulto. Necesita proveedores de IA para eso.\n\nRESTRICCIONES DURAS, no negociables:\n- PROHIBIDO proponer la API de OpenAI y la de Anthropic. Estan vetadas por\n  politica del repositorio. No las incluyas ni como comparacion.\n- Un p…",
+      "lastProgressAt": 1788779899713,
+      "tokens": 111828,
+      "toolCalls": 53,
+      "durationMs": 716925,
+      "resultPreview": "{\"proveedores\":[{\"nombre\":\"llama.cpp / llama-server (ggml-org)\",\"categoria\":\"local\",\"url\":\"https://github.com/ggml-org/llama.cpp/blob/master/docs/multimodal.md\",\"gratis\":\"Software libre (MIT). Binarios precompilados para Windows x64 con CUDA (llama-*-bin-win-cu12-x64.zip) en la pagina de releases. Coste cero: ni cuenta, ni registro, ni telemetria de cuenta.\",\"tarjeta\":\"No. No hay cuenta que crear.…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 3,
+      "label": "investiga:texto",
+      "phaseIndex": 1,
+      "phaseTitle": "Investigar",
+      "agentId": "a0a00262f67b9b430",
+      "model": "claude-opus-5",
+      "state": "done",
+      "startedAt": 1788779179617,
+      "queuedAt": 1788779177806,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "RESUMEN EJECUTIVO — qué haría yo, en orden 1) AI Horde text…",
+      "promptPreview": "CONTEXTO DEL PROYECTO (Luxy) — leelo entero antes de buscar:\n\nLuxy es un agente personal en Windows con una boveda privada cifrada donde el\nusuario (Daniel) hace roleplay adulto. Necesita proveedores de IA para eso.\n\nRESTRICCIONES DURAS, no negociables:\n- PROHIBIDO proponer la API de OpenAI y la de Anthropic. Estan vetadas por\n  politica del repositorio. No las incluyas ni como comparacion.\n- Un p…",
+      "lastProgressAt": 1788780353515,
+      "tokens": 148355,
+      "toolCalls": 79,
+      "durationMs": 1170726,
+      "resultPreview": "{\"proveedores\":[{\"nombre\":\"AI Horde — texto, vía el puente OpenAI oficial (oai.aihorde.net)\",\"categoria\":\"texto\",\"url\":\"https://oai.aihorde.net/\",\"gratis\":\"Gratis del todo, sin créditos ni caducidad. Es cómputo donado por voluntarios y se paga con «kudos», que no son dinero y no se pueden comprar. Con la clave anónima 0000000000 se genera sin cuenta, a la prioridad más baja de la cola. Con cuenta …"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 4,
+      "label": "investiga:imagen",
+      "phaseIndex": 1,
+      "phaseTitle": "Investigar",
+      "agentId": "a1fad535768ba067d",
+      "model": "claude-opus-5",
+      "state": "done",
+      "startedAt": 1788779179580,
+      "queuedAt": 1788779177806,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "RESUMEN HONESTO: no existe, a dia de hoy, ningun servicio A…",
+      "promptPreview": "CONTEXTO DEL PROYECTO (Luxy) — leelo entero antes de buscar:\n\nLuxy es un agente personal en Windows con una boveda privada cifrada donde el\nusuario (Daniel) hace roleplay adulto. Necesita proveedores de IA para eso.\n\nRESTRICCIONES DURAS, no negociables:\n- PROHIBIDO proponer la API de OpenAI y la de Anthropic. Estan vetadas por\n  politica del repositorio. No las incluyas ni como comparacion.\n- Un p…",
+      "lastProgressAt": 1788780048333,
+      "tokens": 117847,
+      "toolCalls": 58,
+      "durationMs": 865544,
+      "resultPreview": "{\"proveedores\":[{\"nombre\":\"ComfyUI en local (servidor HTTP en 127.0.0.1:8188)\",\"categoria\":\"local\",\"url\":\"https://docs.comfy.org/development/comfyui-server/comms_routes\",\"gratis\":\"Totalmente gratis y sin cuenta: es software que corre en el PC de Daniel. El coste es electricidad y VRAM, no dinero ni creditos.\",\"tarjeta\":\"No. No hay registro, ni pasarela de pago, ni terminos de servicio que aceptar.…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 5,
+      "label": "investiga:video",
+      "phaseIndex": 1,
+      "phaseTitle": "Investigar",
+      "agentId": "aa348a67e748f2d0e",
+      "model": "claude-opus-5",
+      "state": "done",
+      "startedAt": 1788779179773,
+      "queuedAt": 1788779177807,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "RESPUESTA CORTA, SIN RELLENO: el video generativo gratuito,…",
+      "promptPreview": "CONTEXTO DEL PROYECTO (Luxy) — leelo entero antes de buscar:\n\nLuxy es un agente personal en Windows con una boveda privada cifrada donde el\nusuario (Daniel) hace roleplay adulto. Necesita proveedores de IA para eso.\n\nRESTRICCIONES DURAS, no negociables:\n- PROHIBIDO proponer la API de OpenAI y la de Anthropic. Estan vetadas por\n  politica del repositorio. No las incluyas ni como comparacion.\n- Un p…",
+      "lastProgressAt": 1788780008683,
+      "tokens": 117712,
+      "toolCalls": 59,
+      "durationMs": 825892,
+      "resultPreview": "{\"proveedores\":[{\"nombre\":\"ComfyUI local (Wan 2.1 / Wan 2.2, pesos Apache 2.0)\",\"categoria\":\"local\",\"gratis\":\"Totalmente. Software gratis (GPL-3.0) y pesos Wan bajo Apache 2.0. Cero coste por generacion, sin cuenta, sin cuota. Solo electricidad y disco (~30-60 GB por familia de modelos).\",\"tarjeta\":\"No. No hay registro ni pasarela de pago en ninguna parte del flujo.\",\"nsfw\":\"El unico camino sin ce…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 6,
+      "label": "investiga:infraestructura",
+      "phaseIndex": 1,
+      "phaseTitle": "Investigar",
+      "agentId": "afe5df4f536a1b5da",
+      "model": "claude-opus-5",
+      "state": "done",
+      "startedAt": 1788779179645,
+      "queuedAt": 1788779177807,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "QUE SIRVE DE VERDAD Y QUE ES ADORNO — el veredicto que pedi…",
+      "promptPreview": "CONTEXTO DEL PROYECTO (Luxy) — leelo entero antes de buscar:\n\nLuxy es un agente personal en Windows con una boveda privada cifrada donde el\nusuario (Daniel) hace roleplay adulto. Necesita proveedores de IA para eso.\n\nRESTRICCIONES DURAS, no negociables:\n- PROHIBIDO proponer la API de OpenAI y la de Anthropic. Estan vetadas por\n  politica del repositorio. No las incluyas ni como comparacion.\n- Un p…",
+      "lastProgressAt": 1788779833978,
+      "tokens": 112271,
+      "toolCalls": 54,
+      "durationMs": 651188,
+      "resultPreview": "{\"proveedores\":[{\"nombre\":\"whisper.cpp (whisper-server)\",\"categoria\":\"local\",\"url\":\"https://github.com/ggml-org/whisper.cpp\",\"gratis\":\"Software libre completo. No hay nivel gratuito porque no hay servicio: se compila y corre en el PC. Modelos GGUF (tiny/base/small/medium/large-v3-turbo) descargables sin cuenta.\",\"tarjeta\":\"No. No hay cuenta, ni registro, ni pasarela de pago. Evidencia: es un repos…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 7,
+      "label": "verifica:infraestructura",
+      "phaseIndex": 2,
+      "phaseTitle": "Verificar",
+      "agentId": "a22236ea50b2fee7f",
+      "model": "claude-opus-5",
+      "state": "done",
+      "startedAt": 1788779837372,
+      "queuedAt": 1788779835592,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "NO COMPROBADO, por orden de importancia: 1. TARJETA EN GROQ…",
+      "promptPreview": "CONTEXTO DEL PROYECTO (Luxy) — leelo entero antes de buscar:\n\nLuxy es un agente personal en Windows con una boveda privada cifrada donde el\nusuario (Daniel) hace roleplay adulto. Necesita proveedores de IA para eso.\n\nRESTRICCIONES DURAS, no negociables:\n- PROHIBIDO proponer la API de OpenAI y la de Anthropic. Estan vetadas por\n  politica del repositorio. No las incluyas ni como comparacion.\n- Un p…",
+      "lastProgressAt": 1788780290897,
+      "tokens": 103994,
+      "toolCalls": 45,
+      "durationMs": 453524,
+      "resultPreview": "{\"revisados\":[{\"nombre\":\"whisper.cpp (whisper-server)\",\"veredicto\":\"confirmado\",\"motivo\":\"Verificado en fuente primaria, y en un punto SUBE de confianza. El README dice literalmente «whisper-server HTTP transcription server with OAI-like API»; licencia MIT confirmada en el badge; lista de modelos confirmada (y mas amplia de lo citado: tiny.en, tiny, base.en, base, small.en, small, medium.en, mediu…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 8,
+      "label": "verifica:vision-local",
+      "phaseIndex": 2,
+      "phaseTitle": "Verificar",
+      "agentId": "a54279f1fe689ca83",
+      "model": "claude-opus-5",
+      "state": "done",
+      "startedAt": 1788779904356,
+      "queuedAt": 1788779902703,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "NO COMPROBADO, y por orden de importancia: 1. NINGUNA PRUEB…",
+      "promptPreview": "CONTEXTO DEL PROYECTO (Luxy) — leelo entero antes de buscar:\n\nLuxy es un agente personal en Windows con una boveda privada cifrada donde el\nusuario (Daniel) hace roleplay adulto. Necesita proveedores de IA para eso.\n\nRESTRICCIONES DURAS, no negociables:\n- PROHIBIDO proponer la API de OpenAI y la de Anthropic. Estan vetadas por\n  politica del repositorio. No las incluyas ni como comparacion.\n- Un p…",
+      "lastProgressAt": 1788780307629,
+      "tokens": 96936,
+      "toolCalls": 40,
+      "durationMs": 403272,
+      "resultPreview": "{\"revisados\":[{\"nombre\":\"llama.cpp / llama-server (ggml-org)\",\"veredicto\":\"confirmado\",\"motivo\":\"Lo esencial resiste y de hecho sale REFORZADO. Verificado en docs/multimodal.md (raw de master): la frase «llama-server via OpenAI-compatible /chat/completions API» es textual, y los flags --mmproj, --no-mmproj y --no-mmproj-offload existen. Lo que el autor marcaba como NO verificado ya lo esta: tools/…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 9,
+      "label": "verifica:vision",
+      "phaseIndex": 2,
+      "phaseTitle": "Verificar",
+      "agentId": "a05e947a695c0bff0",
+      "model": "claude-opus-5",
+      "state": "done",
+      "startedAt": 1788779956981,
+      "queuedAt": 1788779955406,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "QUE NO HE PODIDO COMPROBAR, y por que importa: 1. GROQ SIN …",
+      "promptPreview": "CONTEXTO DEL PROYECTO (Luxy) — leelo entero antes de buscar:\n\nLuxy es un agente personal en Windows con una boveda privada cifrada donde el\nusuario (Daniel) hace roleplay adulto. Necesita proveedores de IA para eso.\n\nRESTRICCIONES DURAS, no negociables:\n- PROHIBIDO proponer la API de OpenAI y la de Anthropic. Estan vetadas por\n  politica del repositorio. No las incluyas ni como comparacion.\n- Un p…",
+      "lastProgressAt": 1788780457789,
+      "tokens": 105031,
+      "toolCalls": 56,
+      "durationMs": 500806,
+      "resultPreview": "{\"revisados\":[{\"nombre\":\"llama.cpp (llama-server) + JoyCaption Beta One GGUF — LOCAL\",\"veredicto\":\"dudoso\",\"motivo\":\"El nucleo tecnico SI se confirma en fuente primaria (docs/multimodal.md de ggml-org/llama.cpp): llama-server hace multimodal «via OpenAI-compatible /chat/completions API», usa «-m model.gguf option with --mmproj file.gguf», y «By default, multimodal projector will be offloaded to GP…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 10,
+      "label": "verifica:video",
+      "phaseIndex": 2,
+      "phaseTitle": "Verificar",
+      "agentId": "ad55361266e033bd2",
+      "model": "claude-opus-5",
+      "state": "done",
+      "startedAt": 1788780011802,
+      "queuedAt": 1788780010223,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "QUE NO PUDE COMPROBAR, por orden de importancia: 1. Venice:…",
+      "promptPreview": "CONTEXTO DEL PROYECTO (Luxy) — leelo entero antes de buscar:\n\nLuxy es un agente personal en Windows con una boveda privada cifrada donde el\nusuario (Daniel) hace roleplay adulto. Necesita proveedores de IA para eso.\n\nRESTRICCIONES DURAS, no negociables:\n- PROHIBIDO proponer la API de OpenAI y la de Anthropic. Estan vetadas por\n  politica del repositorio. No las incluyas ni como comparacion.\n- Un p…",
+      "lastProgressAt": 1788780552183,
+      "tokens": 113343,
+      "toolCalls": 63,
+      "durationMs": 540380,
+      "resultPreview": "{\"revisados\":[{\"nombre\":\"ComfyUI local (Wan 2.1 / Wan 2.2, pesos Apache 2.0)\",\"veredicto\":\"confirmado\",\"motivo\":\"Todo lo comprobable resiste. ComfyUI: la API de GitHub devuelve SPDX 'GPL-3.0' para comfyanonymous/ComfyUI. Rutas: docs.comfy.org/development/comfyui-server/comms_routes lista las 31 rutas HTTP + '/ws', incluidas POST /prompt, GET /history/{prompt_id}, GET /view. Wan2.1 y Wan2.2 READMEs…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 11,
+      "label": "verifica:imagen",
+      "phaseIndex": 2,
+      "phaseTitle": "Verificar",
+      "agentId": "a668ca38e91e220ec",
+      "model": "claude-opus-5",
+      "state": "done",
+      "startedAt": 1788780053791,
+      "queuedAt": 1788780052065,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "QUE NO PUDE COMPROBAR Y POR QUE, para que no se lea este in…",
+      "promptPreview": "CONTEXTO DEL PROYECTO (Luxy) — leelo entero antes de buscar:\n\nLuxy es un agente personal en Windows con una boveda privada cifrada donde el\nusuario (Daniel) hace roleplay adulto. Necesita proveedores de IA para eso.\n\nRESTRICCIONES DURAS, no negociables:\n- PROHIBIDO proponer la API de OpenAI y la de Anthropic. Estan vetadas por\n  politica del repositorio. No las incluyas ni como comparacion.\n- Un p…",
+      "lastProgressAt": 1788780451101,
+      "tokens": 96367,
+      "toolCalls": 40,
+      "durationMs": 397309,
+      "resultPreview": "{\"revisados\":[{\"nombre\":\"ComfyUI en local (servidor HTTP en 127.0.0.1:8188)\",\"veredicto\":\"confirmado\",\"motivo\":\"Las seis rutas estan literalmente en la documentacion oficial (docs.comfy.org/development/comfyui-server/comms_routes): POST /prompt («submit a prompt to the queue», devuelve prompt_id y number), GET /history, GET /view, POST /upload/image, POST /upload/mask y el WebSocket /ws. La pagina…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 12,
+      "label": "verifica:texto",
+      "phaseIndex": 2,
+      "phaseTitle": "Verificar",
+      "agentId": "aadd83d155a50b7f7",
+      "model": "claude-opus-5",
+      "state": "done",
+      "startedAt": 1788780356555,
+      "queuedAt": 1788780355042,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "RESUMEN DE LA REVISIÓN: de 16 hallazgos, 12 confirmados, 3 …",
+      "promptPreview": "CONTEXTO DEL PROYECTO (Luxy) — leelo entero antes de buscar:\n\nLuxy es un agente personal en Windows con una boveda privada cifrada donde el\nusuario (Daniel) hace roleplay adulto. Necesita proveedores de IA para eso.\n\nRESTRICCIONES DURAS, no negociables:\n- PROHIBIDO proponer la API de OpenAI y la de Anthropic. Estan vetadas por\n  politica del repositorio. No las incluyas ni como comparacion.\n- Un p…",
+      "lastProgressAt": 1788780799039,
+      "tokens": 106173,
+      "toolCalls": 51,
+      "durationMs": 442483,
+      "resultPreview": "{\"revisados\":[{\"nombre\":\"AI Horde — texto vía puente oai.aihorde.net\",\"veredicto\":\"confirmado\",\"motivo\":\"Intenté tumbarlo por los cuatro flancos y aguantó. (1) Contrato: descargué https://oai.aihorde.net/openapi.json y las rutas son exactamente /v1/models, /v1/chat/completions, /v1/responses, /heartbeat y /. No es parecido supuesto: /v1/models existe, que es lo que Luxy exige. (2) NSFW leído en po…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 13,
+      "label": "sintesis",
+      "phaseIndex": 3,
+      "phaseTitle": "Sintetizar",
+      "agentId": "a20c81796f17b5dd8",
+      "model": "claude-opus-5",
+      "state": "done",
+      "startedAt": 1788780804477,
+      "queuedAt": 1788780800661,
+      "attempt": 1,
+      "lastToolName": "Bash",
+      "lastToolSummary": "echo ok",
+      "promptPreview": "CONTEXTO DEL PROYECTO (Luxy) — leelo entero antes de buscar:\n\nLuxy es un agente personal en Windows con una boveda privada cifrada donde el\nusuario (Daniel) hace roleplay adulto. Necesita proveedores de IA para eso.\n\nRESTRICCIONES DURAS, no negociables:\n- PROHIBIDO proponer la API de OpenAI y la de Anthropic. Estan vetadas por\n  politica del repositorio. No las incluyas ni como comparacion.\n- Un p…",
+      "lastProgressAt": 1788780935585,
+      "tokens": 231024,
+      "toolCalls": 1,
+      "durationMs": 131107,
+      "resultPreview": "# Recomendación final — proveedores de IA para Luxy\n\nEsto es la síntesis después de pasar cada hallazgo por el verificador. Lo que el verificador refutó, se ha caído. Lo que quedó dudoso, va etiquetado como **no confirmado** y no se apoya ninguna decisión en ello.\n\nAntes de nada, tres cosas que cambian el marco:\n\n- **La trampa que rechazaste con Mistral aparece otra vez, dos veces en su forma lite…"
+    }
+  ],
+  "totalTokens": 1587273,
+  "totalToolCalls": 678
+}
