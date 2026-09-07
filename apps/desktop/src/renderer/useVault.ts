@@ -93,6 +93,15 @@ const CLOSED: VaultStatusView = {
   hordeAnonymous: false,
 };
 
+/**
+ * cuantas pruebas de vision se conservan a la vista.
+ *
+ * Son imagenes descifradas en memoria: guardarlas todas llenaria la pantalla
+ * de copias que ya nadie mira. Cuatro bastan para comparar modelos, que es
+ * para lo que existe el banco.
+ */
+const MAX_PROBES = 4;
+
 /** cada cuanto se refresca la cuenta atras del bloqueo automatico */
 const TICK_MS = 5000;
 
@@ -237,7 +246,19 @@ export interface VaultController {
   }) => Promise<VisionProbe | null>;
   probingVision: boolean;
   /** lo último que devolvió el banco de pruebas; no se guarda en disco */
-  lastProbe: VisionProbe | null;
+  /**
+   * lo que ha devuelto el banco de pruebas, de lo más reciente a lo más viejo.
+   *
+   * Una lista y no el último: el banco existe para COMPARAR modelos, y
+   * guardando sólo uno el siguiente intento borraba el anterior. Pasó de
+   * verdad: Claude describió una imagen y, treinta y dos segundos después, el
+   * 429 de Mistral se llevó esa descripción de la pantalla sin que se leyera.
+   *
+   * No se persiste en ningún sitio y muere al cerrar la bóveda.
+   */
+  probes: VisionProbe[];
+  /** olvida lo probado hasta ahora; nada de esto estaba guardado */
+  clearProbes: () => void;
   /**
    * cambia quién le hace las fotos a un personaje.
    *
@@ -442,7 +463,7 @@ export function useVault(): VaultController {
   const [describingMedia, setDescribingMedia] = useState(false);
   const [probingVision, setProbingVision] = useState(false);
   // lo ultimo que devolvio el banco de pruebas; no se guarda en ningun sitio
-  const [lastProbe, setLastProbe] = useState<VisionProbe | null>(null);
+  const [probes, setProbes] = useState<VisionProbe[]>([]);
   const [hordeAccount, setHordeAccount] = useState<{
     username: string;
     kudos: number;
@@ -493,6 +514,9 @@ export function useVault(): VaultController {
         setConversations([]);
         setTurns([]);
         setMedia([]);
+        // las pruebas de vision no salen de la boveda, pero son imagenes
+        // descifradas en memoria y la regla de arriba dice TODO
+        setProbes([]);
         setInstructions(null);
         setOpenConversationId(null);
       }
@@ -610,6 +634,7 @@ export function useVault(): VaultController {
     setConversations([]);
     setTurns([]);
     setMedia([]);
+    setProbes([]);
     setInstructions(null);
     setOpenConversationId(null);
   }, [run]);
@@ -984,7 +1009,12 @@ export function useVault(): VaultController {
         }
         // cerrar el diálogo sin elegir no es un resultado: deja lo anterior
         if (result.value.cancelled) return null;
-        if (mounted.current) setLastProbe(result.value);
+        // se apila delante y se recortan las viejas: comparar tres o cuatro
+        // es el caso real, y guardarlas todas llena la pantalla de imágenes
+        // descifradas sin que nadie las mire
+        if (mounted.current) {
+          setProbes((previas) => [result.value, ...previas].slice(0, MAX_PROBES));
+        }
         return result.value;
       } finally {
         if (mounted.current) setProbingVision(false);
@@ -992,6 +1022,10 @@ export function useVault(): VaultController {
     },
     [],
   );
+
+  const clearProbes = useCallback((): void => {
+    setProbes([]);
+  }, []);
 
   const attachMedia = useCallback(async (caption: string): Promise<void> => {
     if (openConversationId === null) {
@@ -1279,7 +1313,8 @@ export function useVault(): VaultController {
     describingMedia,
     probeVision,
     probingVision,
-    lastProbe,
+    probes,
+    clearProbes,
     create,
     unlock,
     lock,

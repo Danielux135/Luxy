@@ -2308,10 +2308,18 @@ function VisionBench({
   // un modelo de otra familia no existe para este proveedor: mandarlo gasta la
   // llamada y devuelve `unrecognized_model`
   const modelo = modelForProvider(models, elegido, model.length === 0 ? null : model) ?? '';
-  const probe = vault.lastProbe;
 
   return (
-    <Panel title="Probar la vista de un modelo">
+    <Panel
+      title="Probar la vista de un modelo"
+      actions={
+        vault.probes.length > 0 && (
+          <button className="btn btn--quiet" onClick={vault.clearProbes}>
+            Limpiar
+          </button>
+        )
+      }
+    >
       <p className="page__lede">
         Elige una imagen de tu disco y mira qué dice de ella. <strong>No se guarda
         nada</strong>: ni en la bóveda, ni en la conversación, ni como pie de
@@ -2373,8 +2381,13 @@ function VisionBench({
         </button>
       </div>
 
-      {probe !== null && (
-        <div className="vision-probe">
+      {/* las últimas pruebas, la más reciente arriba.
+          Antes sólo se guardaba la última, y con eso el banco no servía para lo
+          que existe: Claude describió una imagen y el 429 de Mistral, treinta y
+          dos segundos después, se llevó esa descripción de la pantalla sin que
+          se llegara a leer. */}
+      {vault.probes.map((probe, indice) => (
+        <div className="vision-probe" key={`${probe.fileName ?? 'sin-nombre'}-${indice}`}>
           {probe.dataUrl !== null && (
             <img className="vision-probe__image" src={probe.dataUrl} alt="" />
           )}
@@ -2408,7 +2421,7 @@ function VisionBench({
             )}
           </div>
         </div>
-      )}
+      ))}
     </Panel>
   );
 }
