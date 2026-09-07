@@ -516,3 +516,194 @@ devolvio la sintesis:
   "totalTokens": 624104,
   "totalToolCalls": 212
 }
+
+
+---
+
+# Anexo — 2026-09-07, tercera vuelta: Alibaba Cloud Model Studio (Qwen)
+
+Daniel encuentra la consola de Model Studio en Singapur y pide investigarla:
+https://modelstudio.console.alibabacloud.com/ap-southeast-1
+
+Siete agentes. **Veredicto: no sirve.** La causa no es el precio ni la tarjeta:
+es una criba de contenido ANTES de la inferencia que Alibaba documenta en su
+propia tabla de errores, y cuyo unico remedio documentado es cambiar la imagen
+o abrir un ticket.
+
+Leccion de metodo que deja este caso, y que conviene aplicar al siguiente
+candidato: **la moderacion se pregunta la PRIMERA, no la ultima.** Un nivel
+gratuito generoso no compensa un filtro obligatorio, y aqui las cuotas eran lo
+mas visible de la pagina.
+
+{
+  "summary": "Investiga si Alibaba Cloud Model Studio (Qwen, Singapur) sirve para la vision NSFW de Luxy: coste real, tarjeta, moderacion y contrato",
+  "agentCount": 7,
+  "logs": [],
+  "result": {
+    "sintesis": "**No te sirve, y no por el precio: te sirve el contrato y probablemente hasta el alta sin tarjeta, pero Model Studio criba la imagen de entrada ANTES de que el modelo la mire, y el propio texto de error de Alibaba nombra «porn» como una de las categorías de esa criba.** Para tu caso —mandar una imagen de ficción adulta y pedir un pie de foto— eso no es un riesgo teórico: es literalmente el escenario que describe su documentación de errores. Descártala.\n\n---\n\n## 1. La moderación (lo que decide, y es del proveedor, no de blogs)\n\nFuente: la tabla oficial de códigos de error de Model Studio, verificada en los dos espejos (`alibabacloud.com/help/en/model-studio/error-code` y `help.aliyun.com/en/model-studio/error-code`).\n\n- Existe un filtro de plataforma llamado **Green Net (绿网)** en la propia ruta de inferencia. Código `400 - DataInspectionFailed` / `data_inspection_failed`, con **tres** variantes literales: «Input or output data may contain inappropriate content.», «Input data...», «Output data...». **Entrada Y salida, dicho por ellos**, no deducido.\n- La fila específica de imagen: «*Qwen rejected the input image before model inference; no actual ad/porn/OCR result was produced*». La causa documentada dice que es un «pre-inference content-compliance check on **multimodal input images**» — general, no de un modelo concreto (se intentó refutar por ahí y falló).\n- **La solución oficial que documenta Alibaba para ese bloqueo es: cambia la imagen, o abre un ticket de soporte.** No documentan ningún interruptor. Ésa es la frase más concluyente de toda la página.\n- La única palanca que sí existe, la cabecera `X-DashScope-DataInspection`, es **lo contrario** de un apagado: activa una capa *adicional* de pago (AI Guardrails), sólo admite el valor `\"cip\"` y se factura con mínimo de 1.000 tokens por comprobación. La capa base opera aparte.\n- El truco `\"disable\"` que circula por foros: **no verificable**. Sale de un issue de GitHub cerrado como «not planned», sin enlace a documentación de Alibaba y sin nadie que confirme que funcione. Y hay desinformación activa: un resumen de buscador lo atribuía a la documentación de LiteLLM, y allí esa cabecera no aparece. No lo persigas.\n- Al dispararse no hay degradación suave: **HTTP 400 y no hay respuesta**. Mismo status que un parámetro mal formado, así que habría que discriminar por el substring `DataInspectionFailed`.\n- ¿Es más laxo en Singapur? **Silencio documental**, y silencio no es permiso. La tabla de errores no excluye ap-southeast-1, y hay reportes de terceros (no del proveedor) de `InternalError.Algo.DataInspectionFailed` en `dashscope-intl.aliyuncs.com`, incluso falsos positivos sobre código benigno.\n\n**Corrección al primer pase:** la cita que se atribuía a la página de monitorización (model-telemetry) no existe ahí; esa página sólo dice «Number of content moderation blocks». La conclusión era correcta, la fuente no. La buena es `error-code`.\n\n## 2. La política (pregunta distinta, y aquí también en contra)\n\nSeparado a propósito: una cosa es qué permite el contrato y otra qué hará el sistema. Aquí coinciden las dos, que es el peor caso.\n\n- **Terms of Use internacional §2.3(c)** y **Membership Agreement §2.9(c)**: prohíben poner a disposición en la Plataforma material «defamatory, **obscene**, abusive...».\n- **Membership Agreement §3.2(e)(ii)**: «*is obscene or contains or infers any **pornography** or sex-related merchandising or any other content that otherwise promotes sexually explicit materials*».\n- **Términos propios de Model Studio** (bailian-service-notes), sobre lo que TÚ envías: «*avoid entering any content that may violate laws or **public order and good morals***». Es vaga, pero está en el documento correcto (la que apunta a la entrada de la API).\n- **Product Terms §3.4 y §3.6**: derecho a vigilar el uso y a suspender o terminar la cuenta.\n\nMatiz honesto: la cláusula que nombra «pornography» está redactada para *Member Content* publicado en la plataforma, y es discutible que un prompt privado a la API caiga ahí. **No existe** una política de uso aceptable específica de Model Studio con catálogo de conductas: eso es silencio, no permiso. Y queda un hueco: el Artículo 4.48 de los Product Terms (la sección propia de Model Studio) no se ha podido recuperar.\n\nCriterio 4, como dato y no como descarte: **no entrenan con tus datos** («will never use your data for model training»). Juega a tu favor y da igual.\n\n## 3. La tarjeta (sin resolver, y ya no importa)\n\n- La documentación **no** exige tarjeta para registrarse ni para activar Model Studio; la verificación de identidad la acotan ellos mismos con el paréntesis «(for China region)», y Singapur no es China continental. La evidencia más fuerte a favor: la página de errores describe la causa de `AllocationQuota.FreeTierOnly` como «*New unverified users exhaust free quota and make requests*» — o sea, dan por hecho que un usuario **no verificado** llama.\n- **Pero** no hay ninguna página de Alibaba que diga «no se requiere tarjeta». Esa frase sale de blogs: **no verificable**. Y existe un error documentado, `BASIC_INFO_UNCOMPLETED`, cuya causa es «*you haven't completed all your personal information, including a **valid payment method***», sin que se haya podido localizar en qué operación salta. Es el mismo patrón que te quemó con Mistral.\n- Veredicto de este criterio: **probable que pase, no verificado**. Sólo lo cerraría intentar el alta, y no merece la pena intentarla.\n- Por si algún día vuelve el tema: añadir tarjeta dispara una retención temporal de 1 USD y **no aceptan tarjetas virtuales**.\n\n## 4. El contrato (sale bien; es lo único bueno)\n\n- Chat completions compatible con OpenAI: **sí**, `POST {base}/chat/completions`, con `Authorization: Bearer` a secas. Encaja tal cual con Proveedores HTTP.\n- **Imágenes en base64: sí, documentado** — `{\"type\":\"image_url\",\"image_url\":{\"url\":\"data:image/png;base64,...\"}}`. No exige URL pública, así que tu bóveda cifrada no tendría que publicar nada. Era el punto que más podía romperse y no se rompe. Límite 10 MB ya codificado (5 MB en algunos modelos); JPEG, PNG, BMP, WEBP.\n- URL base Singapur: `https://dashscope-intl.aliyuncs.com/compatible-mode/v1` (heredado, vivo, sin fecha de retirada) o `https://{WorkspaceId}.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1`. Ojo: el dominio `token-plan.*` que alguien podría recomendarte está descrito por Alibaba como «*for interactive AI coding tools only — not for backend services*», es decir, excluye justo el uso de Luxy.\n- **`/v1/models`: no documentado.** El listado oficial es `GET /api/v1/models` con envoltorio DashScope, no forma OpenAI. La ruta compatible existe (devuelve 401, mientras una ruta inventada devuelve 404) pero su forma no está verificada. Corrección útil: **esto no bloquearía a Luxy**. En `packages/shared/src/models/registry.ts` una lista vacía se trata como «no se sabe», no como «no disponible», y `catalog-fetch.ts` devuelve lista vacía sin error ante un envoltorio ajeno. Catálogo vacío y modelo escrito a mano, nada más.\n\n## 5. Las cifras del gratis (últimas, porque no deciden)\n\n1.000.000 de tokens **por modelo** (los de visión incluidos), **90 días** desde la activación, sólo región Singapur con ámbito International, sólo inferencia en tiempo real. Caduca los uses o no: es una prueba con fecha de caducidad, no un nivel gratuito permanente. Si algún día se pagara, `qwen3-vl-flash` cuesta 0,05 USD por millón de entrada. Nada de esto compensa el punto 1. Aviso menor: los identificadores de snapshot que circulan (`qwen3-vl-plus-2025-12-19` y similares) no están confirmados; el catálogo rota rápido.\n\n---\n\n**Resumen operativo:** no abras cuenta. El bloqueo ocurre antes de la inferencia, cubre entrada y salida, y el único recurso que el propio proveedor documenta es cambiar el contenido o abrir un ticket. Para el siguiente candidato, haz de la moderación la **primera** pregunta y no la última: aquí el precio, el contrato y hasta el base64 estaban bien, y aun así no vale para nada."
+  },
+  "workflowProgress": [
+    {
+      "type": "workflow_phase",
+      "index": 1,
+      "title": "Investigar"
+    },
+    {
+      "type": "workflow_phase",
+      "index": 2,
+      "title": "Verificar"
+    },
+    {
+      "type": "workflow_phase",
+      "index": 3,
+      "title": "Sintetizar"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 1,
+      "label": "investiga:acceso",
+      "phaseIndex": 1,
+      "phaseTitle": "Investigar",
+      "agentId": "af1a97bc52da6c5cb",
+      "model": "claude-opus-5",
+      "state": "done",
+      "startedAt": 1788790748685,
+      "queuedAt": 1788790747030,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "Mi línea era acceso y coste real de Alibaba Cloud Model Stu…",
+      "promptPreview": "OBJETIVO. Daniel ha encontrado esta pagina y quiere saber si le sirve:\nhttps://modelstudio.console.alibabacloud.com/ap-southeast-1  (tab API)\n\nEs **Alibaba Cloud Model Studio** (antes DashScope / Bailian), el servicio que\nsirve los modelos **Qwen**, en la region internacional ap-southeast-1\n(Singapur). Esa URL es una consola que exige cuenta: la investigacion tiene que\napoyarse en la DOCUMENTACION…",
+      "lastProgressAt": 1788791075672,
+      "tokens": 78482,
+      "toolCalls": 28,
+      "durationMs": 326985,
+      "resultPreview": "{\"resumen\":\"Mi línea era acceso y coste real de Alibaba Cloud Model Studio (región Singapur, ap-southeast-1). Resultado: en lo económico es de lo mejor que hemos visto. El alta en alibabacloud.com sólo pide correo, contraseña, tipo de cuenta, país y verificación de móvil o correo; la tarjeta y la verificación de identidad son pasos POSTERIORES y, según la documentación de Alibaba, sólo obligatorio…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 2,
+      "label": "investiga:moderacion",
+      "phaseIndex": 1,
+      "phaseTitle": "Investigar",
+      "agentId": "a573b9b1eb9853408",
+      "model": "claude-opus-5",
+      "state": "done",
+      "startedAt": 1788790748702,
+      "queuedAt": 1788790747031,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "Mi línea era moderación y política de contenido, y la respu…",
+      "promptPreview": "OBJETIVO. Daniel ha encontrado esta pagina y quiere saber si le sirve:\nhttps://modelstudio.console.alibabacloud.com/ap-southeast-1  (tab API)\n\nEs **Alibaba Cloud Model Studio** (antes DashScope / Bailian), el servicio que\nsirve los modelos **Qwen**, en la region internacional ap-southeast-1\n(Singapur). Esa URL es una consola que exige cuenta: la investigacion tiene que\napoyarse en la DOCUMENTACION…",
+      "lastProgressAt": 1788791166141,
+      "tokens": 93369,
+      "toolCalls": 38,
+      "durationMs": 412720,
+      "resultPreview": "{\"resumen\":\"Mi línea era moderación y política de contenido, y la respuesta es concluyente en contra. Alibaba Cloud Model Studio aplica un filtro de contenido en la propia ruta de inferencia, sobre ENTRADA y SALIDA, documentado por el proveedor con su propio código de error (`DataInspectionFailed`). Lo más grave para el caso de Daniel: la documentación de códigos de error describe explícitamente u…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 3,
+      "label": "investiga:contrato",
+      "phaseIndex": 1,
+      "phaseTitle": "Investigar",
+      "agentId": "a8cb2cad41b80d71f",
+      "model": "claude-opus-5",
+      "state": "done",
+      "startedAt": 1788790748697,
+      "queuedAt": 1788790747032,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "Model Studio sí ofrece modo compatible con OpenAI y sí acep…",
+      "promptPreview": "OBJETIVO. Daniel ha encontrado esta pagina y quiere saber si le sirve:\nhttps://modelstudio.console.alibabacloud.com/ap-southeast-1  (tab API)\n\nEs **Alibaba Cloud Model Studio** (antes DashScope / Bailian), el servicio que\nsirve los modelos **Qwen**, en la region internacional ap-southeast-1\n(Singapur). Esa URL es una consola que exige cuenta: la investigacion tiene que\napoyarse en la DOCUMENTACION…",
+      "lastProgressAt": 1788791257986,
+      "tokens": 95877,
+      "toolCalls": 34,
+      "durationMs": 504566,
+      "resultPreview": "{\"resumen\":\"Model Studio sí ofrece modo compatible con OpenAI y sí acepta imágenes como data URI en base64, que es justo lo que necesita una bóveda cifrada: nada tiene que publicarse en internet. Técnicamente se enchufa a Luxy casi sin fricción. Dos reservas de contrato: (1) el catálogo de modelos documentado NO tiene forma OpenAI, es un endpoint DashScope propio en /api/v1/models con envoltorio d…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 4,
+      "label": "verifica:acceso",
+      "phaseIndex": 2,
+      "phaseTitle": "Verificar",
+      "agentId": "a88c17fef73676311",
+      "model": "claude-opus-5",
+      "state": "done",
+      "startedAt": 1788791078863,
+      "queuedAt": 1788791077253,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "PARCIALMENTE CONFIRMADO, con una correccion de cita y una b…",
+      "promptPreview": "OBJETIVO. Daniel ha encontrado esta pagina y quiere saber si le sirve:\nhttps://modelstudio.console.alibabacloud.com/ap-southeast-1  (tab API)\n\nEs **Alibaba Cloud Model Studio** (antes DashScope / Bailian), el servicio que\nsirve los modelos **Qwen**, en la region internacional ap-southeast-1\n(Singapur). Esa URL es una consola que exige cuenta: la investigacion tiene que\napoyarse en la DOCUMENTACION…",
+      "lastProgressAt": 1788791588297,
+      "tokens": 104386,
+      "toolCalls": 45,
+      "durationMs": 509432,
+      "resultPreview": "{\"tarjetaConfirmada\":\"PARCIALMENTE CONFIRMADO, con una correccion de cita y una bandera roja sin cerrar.\\n\\nLO QUE SE SOSTIENE (lo he vuelto a leer en las paginas del proveedor):\\n- Alta: help/en/account/step-1-register-an-alibaba-cloud-account confirma que el registro pide correo, contrasena, Account Type, Country/Region y verificacion de movil o correo, y que anadir informacion de pago es una fa…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 5,
+      "label": "verifica:moderacion",
+      "phaseIndex": 2,
+      "phaseTitle": "Verificar",
+      "agentId": "a126c4cf5b01ef3dc",
+      "model": "claude-opus-5",
+      "state": "done",
+      "startedAt": 1788791169364,
+      "queuedAt": 1788791167713,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "NO CONFIRMADO (no era mi linea, pero lo crucé). Lo que dice…",
+      "promptPreview": "OBJETIVO. Daniel ha encontrado esta pagina y quiere saber si le sirve:\nhttps://modelstudio.console.alibabacloud.com/ap-southeast-1  (tab API)\n\nEs **Alibaba Cloud Model Studio** (antes DashScope / Bailian), el servicio que\nsirve los modelos **Qwen**, en la region internacional ap-southeast-1\n(Singapur). Esa URL es una consola que exige cuenta: la investigacion tiene que\napoyarse en la DOCUMENTACION…",
+      "lastProgressAt": 1788791474407,
+      "tokens": 84542,
+      "toolCalls": 26,
+      "durationMs": 305041,
+      "resultPreview": "{\"tarjetaConfirmada\":\"NO CONFIRMADO (no era mi linea, pero lo crucé). Lo que dice el proveedor y lo que calla:\\n\\nCONFIRMADO en doc del proveedor (https://www.alibabacloud.com/help/en/model-studio/new-free-quota): la cuota gratis se concede automaticamente al activar Model Studio, «The free quota is valid for 90 days, starting from the date you activate Alibaba Cloud Model Studio, the model is rel…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 6,
+      "label": "verifica:contrato",
+      "phaseIndex": 2,
+      "phaseTitle": "Verificar",
+      "agentId": "a36f520556d426b9a",
+      "model": "claude-opus-5",
+      "state": "done",
+      "startedAt": 1788791261044,
+      "queuedAt": 1788791259459,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "NO VERIFICADO, y sigue sin verificar. Mi línea era el contr…",
+      "promptPreview": "OBJETIVO. Daniel ha encontrado esta pagina y quiere saber si le sirve:\nhttps://modelstudio.console.alibabacloud.com/ap-southeast-1  (tab API)\n\nEs **Alibaba Cloud Model Studio** (antes DashScope / Bailian), el servicio que\nsirve los modelos **Qwen**, en la region internacional ap-southeast-1\n(Singapur). Esa URL es una consola que exige cuenta: la investigacion tiene que\napoyarse en la DOCUMENTACION…",
+      "lastProgressAt": 1788791564527,
+      "tokens": 81693,
+      "toolCalls": 21,
+      "durationMs": 303481,
+      "resultPreview": "{\"tarjetaConfirmada\":\"NO VERIFICADO, y sigue sin verificar. Mi línea era el contrato; no he leído la página de alta de Alibaba Cloud ni he creado cuenta, así que no afirmo ni que pida tarjeta ni que no. El hallazgo hace bien en negarse a afirmarlo.\\n\\nConfirmo la degradación del dato colateral: la cuota gratuita de 90 días (y las cifras de 1M/1M o 70M/100M tokens) sale de blogs y agregadores, NO d…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 7,
+      "label": "sintesis",
+      "phaseIndex": 3,
+      "phaseTitle": "Sintetizar",
+      "agentId": "a9e3360afbdeaec7a",
+      "model": "claude-opus-5",
+      "state": "done",
+      "startedAt": 1788791591777,
+      "queuedAt": 1788791589840,
+      "attempt": 1,
+      "promptPreview": "OBJETIVO. Daniel ha encontrado esta pagina y quiere saber si le sirve:\nhttps://modelstudio.console.alibabacloud.com/ap-southeast-1  (tab API)\n\nEs **Alibaba Cloud Model Studio** (antes DashScope / Bailian), el servicio que\nsirve los modelos **Qwen**, en la region internacional ap-southeast-1\n(Singapur). Esa URL es una consola que exige cuenta: la investigacion tiene que\napoyarse en la DOCUMENTACION…",
+      "lastProgressAt": 1788791686583,
+      "tokens": 89984,
+      "toolCalls": 0,
+      "durationMs": 94803,
+      "resultPreview": "**No te sirve, y no por el precio: te sirve el contrato y probablemente hasta el alta sin tarjeta, pero Model Studio criba la imagen de entrada ANTES de que el modelo la mire, y el propio texto de error de Alibaba nombra «porn» como una de las categorías de esa criba.** Para tu caso —mandar una imagen de ficción adulta y pedir un pie de foto— eso no es un riesgo teórico: es literalmente el escenar…"
+    }
+  ],
+  "totalTokens": 628333,
+  "totalToolCalls": 192
+}
