@@ -707,3 +707,328 @@ mas visible de la pagina.
   "totalTokens": 628333,
   "totalToolCalls": 192
 }
+
+
+---
+
+# Anexo — 2026-09-07, cuarta vuelta: proveedores de nicho «tipo Xavira»
+
+Daniel: «investiga alternativas no tan conocidas, indaga profundamente en la
+web, tipo paginas como Xavira, tiene que haber buenas alternativas con al menos
+un poco de credito de prueba».
+
+Trece agentes, seis frentes, 880 busquedas. Se partio del adaptador real
+`apps/agent/src/providers/xavira.ts` para fijar la FORMA que habia que buscar
+—personaje persistente + cola asincrona con sondeo— y se entro por puertas
+laterales, no por listas de «mejores APIs gratis»: el indice de conexiones de
+SillyTavern, comunidades de captioning y de LoRA, directorios de APIs adultas y
+comparativas de usuarios.
+
+**Aviso de proceso:** el agente de sintesis quedo marcado por el clasificador de
+seguridad. Revisado el texto entero: es analisis de terminos de servicio y de
+contratos de API, sin instrucciones ni recomendaciones de rodear el filtro de
+nadie. Se conserva por su valor, con esta nota.
+
+**La leccion de metodo, que vale mas que cualquier proveedor concreto:** lo que
+decide no es «¿tiene filtro?», sino **como esta redactada la prohibicion
+sexual**. Hay dos familias: los que prohiben una CATEGORIA («obscene»,
+«pornographic», «sexually explicit») —ahi no hay nada que hacer, den el credito
+que den— y los que prohiben CONDUCTAS y por tanto enumeran lo sexual prohibido
+(menores, y contenido intimo de persona identificable sin consentimiento),
+dejando el resto fuera a proposito. Buscar por esa forma de redaccion, y no por
+la palabra «uncensored», es lo que rindio.
+
+# Recomendación final\n\nTodo lo que sigue ha pasado por el verificador. Lo refutado se ha caído, lo dudoso va etiquetado. Cuando digo «silencio» quiero decir silencio, no permiso.\n\n**La regla que ha decidido casi todo.** No es «¿tiene filtro?», es **cómo está redactada la prohibición sexual**. Hay dos familias: los que prohíben una *categoría* («obscene», «pornographic», «sexually explicit», «indecent») — ahí no hay nada que hacer, dé el crédito que dé; y los que prohíben *conductas* y por tanto **enumeran** lo sexual prohibido (menores, y contenido íntimo de persona identificable sin consentimiento), dejando el resto fuera a propósito. Buscar por esa forma de redacción, y no por la palabra «uncensored», es lo que ha rendido.\n\n---\n\n## 1. VISIÓN — el frente que te desbloquea\n\nLos dos finalistas **no documentan filtro sobre la imagen de entrada**, que era la pregunta clave. Ninguno de los dos entrega crédito de prueba verificado sin tarjeta: hay que decirlo.\n\n**Replicate** — https://replicate.com · política: la mejor escrita de toda la investigación\nMarketplace con API de predicciones (crear → id → sondear), forma casi calcada a Xavira. Sin moderación propia: §2.7(d)(v) prohíbe sólo «to create **non-consensual** nudity or **illegal** pornographic content», y §8.6 reconoce en mayúsculas que el servicio genera contenido «PORNOGRAPHIC, LASCIVIOUS… OR RELATED TO FETISHES» y que no lo vigila. Modelo: `nsfw-api/joycaption-beta-one` — **0,010 $ por ejecución y ~11 s** (el informe original citaba 0,14 $/145 s: era la pre-alpha, dato corregido). Crédito: la colección «Try for Free» se usa sin tarjeta pero **no incluye captioning**; para JoyCaption hay que añadir tarjeta y crédito prepago (válido 1 año, no reembolsable). Base64 hasta 1 MB en data URI, por encima subida directa hasta 100 MB — la bóveda nunca publica nada. Dos asperezas: ese modelo recibe un **ZIP**, no una imagen suelta, y ambos figuran «Cold» (la primera llamada paga arranque). Requiere adaptador; el de Xavira sirve de plantilla.\n\n**Featherless AI** — https://featherless.ai · política: silencio, pero el más fuerte que existe\nHosting serverless de 40.000+ modelos de Hugging Face. Leí el ToS canónico entero: **ni una cláusula sobre contenido sexual, adulto o NSFW**; la única frase del tema es «Models accessed via Featherless may produce content that is not suitable for minors». Y no sólo alojan: **comercializan** categorías «Uncensored Models», «Abliterated Models» y «LLMs for Roleplay» en su propio pie de página. Modelo a pedir: `shutkit/Qwen2.5-VL-7B-NSFW-Caption-V3-abliterated`, vivo y «Warm», hecho a propósito para describir imágenes adultas. **Chat completions + base64 confirmado en /docs/vision → entra por Conexiones de Studio sin escribir una línea.** Cuatro correcciones duras del verificador: (a) **el plan de 10 $ ya no existe** — hoy son CHAT 25 $/mes y DEVELOPER 50 $/mes; (b) el plan CHAT **excluye por contrato tu caso**: «Not for reselling, **app/API traffic**, background automation»; el conforme es DEVELOPER, **50 $/mes**; (c) los 100.000 tokens de prueba **no se verifican en su web** (/pricing da 404, «free» aparece una sola vez en todo el sitio) — vienen de un issue de GitHub ajeno; (d) su ToS traspasa las políticas de los modelos, así que hay que quedarse en el Qwen abliterado (Apache-2.0) y **no** usar gemma-3, que arrastra la Gemma Prohibited Use Policy y sí prohíbe lo sexual explícito. El ToS lleva sin tocarse desde junio de 2024.\n\n**Aparcado, no descartado — Runware** (https://runware.ai): su ToS es de los pocos que acotan lo sexual **exclusivamente a menores**, el registro no pide tarjeta (formulario comprobado) y da 2 $ gratis. Pero su catálogo actual de Image-to-Text son **modelos propietarios de Claude, GPT y Gemini** — choca con el veto del repositorio y el modelo se negaría igual. Además el `taskType` real es `caption`, no `imageCaption`, exige campo `model`, y la URL de documentación que circula da 404. Si algún día aparece un VLM abierto en su catálogo comunitario (300k+), recupera de golpe todo lo perdido.\n\n**Descartados en visión, no reabrir:** PiAPI (su política **sí existía**, en `/nsfw-policy`, y prohíbe expresamente «Pornographic, sexually explicit, or other adult sexual content… generate, **transform**, store» aplicado a «uploaded files» — es el caso Alibaba otra vez), Inference.net («your User Content does not include nudity» — prohíbe lo que *subes*), Electron Hub (moderación obligatoria en mayúsculas, extendida a «real or **fictional** persons»), Novita («Is sexually explicit.»), FriendliAI (GPU dedicada de un solo inquilino, inviable económicamente; su política era en realidad favorable), Chutes (su propia FAQ: «We do not offer a free tier at this time»), Pollinations (sus modelos de visión son proxies a OpenAI y Anthropic).\n\n---\n\n## 2. IMAGEN\n\nYa tienes AI Horde gratis. Lo que sigue sólo aporta si mejora calidad, latencia o coherencia de personaje.\n\n**Wiro AI** — https://wiro.ai · prometedor **con una discrepancia grave sin resolver**\nMarketplace pequeño (Wiro AI Inc., California) con dos modelos vendidos como *Uncensored* (Seedream 5.0 Lite y 4.5), forma asíncrona idéntica a Xavira (`POST /Run/{owner}/{model}` → `taskid` → `POST /Task/Detail`, o `/sync`, o webhook) **y además** pasarela chat completions en `llm.wiro.ai/v1` con `/v1/models` vivo (responde 401, no 404) — cubre D-022. La ficha del modelo dice «No explicit safety measures implemented». Crédito anunciado: 50 y 200 generaciones, «No credit card required». Precio real **0,04 $/imagen**, no 0,03. El bloqueo de base64 estaba exagerado: el Run acepta multipart con ficheros, así que **no hace falta dejar la cara del personaje en su CDN público**.\n**Lo que hay que decirte antes de meter nada ahí, y son dos cosas:** (1) **tres verificadores no coinciden sobre si su ToS existe**. Uno lo leyó entero con navegador y trae citas literales (fechado 27-02-2026, sin cláusula de adulto, con CSAM y NCII enumerados). Otros dos, también con navegador real, reportan que **el ToS, la Política de Privacidad y las Service Credit Terms renderizan vacías** — sólo cabecera y pie. No puedo resolverlo desde aquí. Mientras no se resuelva, su permiso es marketing, no contrato. (2) Los modelos son `owner-slug = bytedance` y su ToS incluye «Third-Party Model Additional Terms»: **los términos de ByteDance sobre Seedream te vinculan a través de Wiro y nadie los ha leído**. Es la forma exacta del fallo de Alibaba entrando por la puerta de atrás.\n\n**Dezgo** — https://dezgo.com · **rehabilitado**: el descarte era un error de lectura\nSe había descartado citando «pornographic, X-RATED, obscene». Esa frase **no es una prohibición**: es el punto (VIII) de una enumeración dentro de la cláusula **LIMITATION OF LIABILITY** — un descargo que de hecho presupone que ese contenido existe. Su lista real de prohibiciones al usuario («RULES OF USER CONDUCT») no dice **nada** sobre adulto entre adultos. Está en silencio, igual que Wiro. Contras: ToS sin tocar desde 2023-02-05, sin coherencia de personaje, y no pude confirmar en fuente el nivel gratuito a 512x512 ni el depósito mínimo. Vale como banco de pruebas barato, no como cimiento.\n\n**Runware para imagen**: aquí sí aloja lo que interesa — Pony Diffusion XL, NoobAI XL, Illustrious XL — más herramientas de consistencia facial (PhotoMaker, PuLID, IP-Adapter), que es justo lo que a AI Horde le falta. Política acotada a menores, 2 $ gratis, registro sin tarjeta. Dudoso sólo porque no se ha comprobado si el crédito se libera sin añadir tarjeta.\n\n**NovelAI** (https://novelai.net) sólo si quieres **anime** con personaje coherente: Vibe Transfer es exactamente el patrón D-064 (identidad como receta local cifrable). Reservas serias: su ToS es **silencio total** sobre lo adulto, la API no es oficial para terceros (puede romperse sin aviso), y **el base64 del Vibe Transfer no lo respalda la fuente que se citó**. Prueba real confirmada en su documentación: 50 generaciones de texto + 30 de imagen con correo verificado, sin tarjeta. Luego 10 $/mes (Tablet).\n\n**Descartados en imagen:** Astria (prohíbe «nudity… or content otherwise meant to arouse sexual excitement», y duele porque su recurso `/tunes` era el mejor diseño de personaje persistente que he visto, con 20 $ de crédito sin tarjeta), ModelsLab (su propia página: «paid-only — there is no free tier, no free credits and no trial plan»), PixAI (moderación obligatoria: «Sensitive content created using realistic models is not allowed», con revisión de IA y cierre de cuenta), Segmind (por su propia boca: «Standard restrictions remain in place for **fully nude** and illegal content»), Novita, getimg.ai, RunDiffusion, Sozee (sin API pública).\n\n---\n\n## 3. VÍDEO — el frente que se queda sin ganador\n\n**Digo lo que hay: no existe un solo proveedor de vídeo adulto con API, política que lo permita y crédito de prueba a la vez.** Todos fallan uno de los tres. Los dos que resisten:\n\n**NanoGPT** — https://nano-gpt.com · el más barato de probar, y el único intacto tras la revisión\nPasarela de ~1.000 modelos. Moderación **opt-in y de pago**: «you can opt in to a paid input safety preflight by sending the `moderation` header» — si no la mandas, no hay preflight. Política que enumera: prohíbe menores y contenido íntimo de **persona identificable** sin consentimiento, nada más. Entrada `imageDataUrl` en **base64 hasta 4 MB**, sondeo claro (`GET /api/video/status?requestId=`). Coste de entrada: **0,10 $ en cripto sin tarjeta** (1 $ con tarjeta) — no es crédito de prueba, es saldo comprado, pero son diez céntimos. Debilidad real y no menor: es un router, y su propio ToS dice «If Model Terms conflict with these Terms, **the Model Terms control**». Hay que quedarse en rutas abiertas (Hunyuan, WAN) y leer los términos de ese upstream.\n\n**HotAPI** — https://hotapi.ai · el mejor encaje estructural, con tres peros\nPasarela sólo de modelos sin censura (Dark Enlightenment Limited, Hong Kong), documentos legales de 2026-08-31. Contrato calcado a Xavira: `POST /v1/{model}` → `task_id` → `GET /v1/tasks/{id}`, webhooks HMAC, `GET /v1/models`, y además `/v1/chat/completions` compatible con OpenAI. **Base64 confirmado literal en el fotograma inicial de todos sus modelos i2v.** AUP que no prohíbe lo adulto y que lo presupone al exigir «Verify the age of your users wherever adult-adjacent content can be generated». Los peros, los tres del verificador: (1) la cita estrella estaba **truncada** — la frase entera es «Enforcement is not automated review of every request, **and you should not read our silence as approval**»; (2) admite por escrito **filtro aguas arriba**: «Model capabilities, pricing, **safety filters**… are controlled by the upstream providers», y los modelos son de ByteDance y Alibaba — el mismo Alibaba que ya descartaste por criba previa; (3) su ToS §1 dice «It is **not a consumer content product**» y exige aceptar en nombre de una organización. Sin crédito de prueba: mínimo 20 $ y **sólo en cripto** («Card payments… are currently unavailable»). Sus propios ToS contemplan «promotional credits… from a support grant»: merece escribir a support@hotapi.ai antes de poner dinero.\n\n**Sogni** cae aquí y hay que corregir el motivo: `disableNSFWFilter` **no es un interruptor** — la documentación dice «request the alternate content policy for this project; **the server remains authoritative**». Y sus créditos gratuitos no alcanzan a los modelos de vídeo. **NamiFusion** tiene un modelo i2v propio y picante (Nami Wan 2.7 I2V Spicy Prime) y política que no lo prohíbe, pero su documentación de API vive tras login y su crédito es «eligible new accounts **may** receive»: hasta que alguien cree la cuenta, es dudoso.\n\n**Descartados en vídeo:** A2E.ai (encabeza todas las listas de «i2v sin censura» y su ToS dedica una sección entera en mayúsculas a prohibir el desnudo, con la excepción autoanulada), PiAPI, Eternal AI (el más parecido a Xavira de todo el informe — personaje persistente por ID, imagen, vídeo, base64, precios ridículos — y su Content Policy exige contenido **«G-rated»**), ModelsLab (init_image exige URL pública), ComfyICU (prohíbe la pornografía explícita **y** publica lo generado en el nivel gratuito), RunDiffusion. Conclusión de categoría: **alquilar GPU no esquiva la política, sólo la traslada del fabricante del modelo al arrendador**, y los dos arrendadores leídos la prohíben.\n\n**Tres avisos si algún día se escribe el adaptador de vídeo:** las URLs de salida caducan a 24 h en casi todos (descargar los bytes a la bóveda de inmediato, nunca guardar la URL); varios cobran **al enviar** la tarea, no al terminarla, lo que agrava la regla de no reintentar un corte que ya produjo salida; y HotAPI prohíbe expresamente reenrutar una petición rechazada a otro proveedor — la lógica de reintento debe distinguir fallo técnico de rechazo por política.\n\n---\n\n## 4. TEXTO — ya tienes DeepSeek; esto es lo que aportaría algo\n\n**DreamGen** — https://dreamgen.com · **la API está viva, y la política es la mejor redactada del lote**\nServicio pequeño con modelos propios afinados para rol (familia Lucid). Se creía muerta tras la migración a V2 porque su documentación de API desapareció del sitio. **Comprobado contra el servidor, no contra documentación:** `GET https://dreamgen.com/api/openai/v1/models` devuelve **200** sin clave, con `lucid-v1-medium` y `lucid-v1-extra-large`. Es chat completions con `/v1/models` vivo: **cumple D-022 y entra por Conexiones sin adaptador**. Política: la única prohibición de todo el terreno sexual es «Depicts, describes, or promotes sexual content involving minors, **including fictional minors**». Nada más. Que enumeren eso y sólo eso es la señal más limpia del informe. Contras: se reservan revisión discrecional («review, monitor, or remove any User Content that we determine, in our sole discretion, **objectionable**»), la licencia es «personal, non-commercial use», y **su página de precios ya no muestra nivel gratuito** — el crédito mensual renovable sale sólo de la documentación de SillyTavern, que está desactualizada. Hay que registrarse para saberlo.\n\n**Arli AI** — https://www.arliai.com · el único con nivel gratuito permanente declarado\nServicio pequeño construido para rol (su propia web lista SillyTavern, JanitorAI, RisuAI como frontends). Su cláusula de uso aceptable es corta y cerrada — «unlawful, illegal, fraudulent, or harmful… hate, harassment, violence, political manipulation, spam, or malware» — y **no menciona el contenido adulto en ninguna parte**; el servicio es 18+ por contrato y zero-log. `GET /v1/models` **existe** (401 con clave ausente frente a 404 en ruta inventada: prueba de control hecha). Free 0 $: «5 times / 2 days trial of all models», 12K de contexto, 1 petición simultánea, sin imagen. Además API de imagen con contrato SDNext. **Dos correcciones:** el argumento «no pueden moderar» está inflado — su zero-log dice que no *almacenan*, no que no puedan mirar; un clasificador en streaming no violaría esa cláusula. Y **queda abierto si el plan Free entrega clave de API o es sólo interfaz web**, que es literalmente lo que hundió a Infermatic.\n\n**Nomi.ai** — https://nomi.ai · el único self-serve con **personajes persistentes en servidor**\nAPI pública y documentada: `GET /v1/nomis`, `POST /v1/nomis/{uuid}/chat`, más salas multi-personaje. Es lo más «Xavira de texto» que existe sin ser B2B. Pero su ToS es **silencio absoluto** sobre contenido adulto (sólo 18+), y la cuenta gratuita limita a 1 compañero con mensajes de 400 caracteres — probablemente inservible para rol largo sin pagar ~16 $/mes. Merece un correo preguntando por escrito.\n\n**RedPill** (https://redpill.ai): inferencia dentro de enclaves TEE con atestación criptográfica, y su catálogo incluye «Phala: Gemma-4 26B-A4B **Uncensored (Heretic)**». Hoy no sirve (el gratuito es chat, no API; política en silencio total), pero es la respuesta correcta a «quiero un proveedor alojado donde lo íntimo no dependa de una promesa contractual sino de una prueba».\n\n**Descartados en texto, con motivo:** Mancer (portada «No filters, No guidelines, No constraints» y contrato «is obscene, lewd, or offensive **(as determined by Company)**» — y además el servicio está congelado: ToS de junio 2024, modelo más reciente de 2023), Infermatic (su tabla de precios dice literalmente «No API / ChapGPT Style Interface» en el plan gratis), Chub AI (la cita «Chub is uncensored… nor the type of interactions you are allowed to have» es real y está en su documentación, pero **su ToS renderiza vacío**: el único permiso escrito vive fuera de contrato, y no hay nivel gratuito), DeepInfra (su página de precios: «You have to add a card or pre-pay or you won't be able to use our services» — anotado en la lista corta del día que aceptes tarjeta, porque es el único con contrato limpio **y** retención cero verificada), Featherless para texto (25/50 $, sin nada gratis), uncensored.chat (`/terms` da 404, sin entidad legal, sólo cripto no reembolsable: mandar la bóveda a un operador anónimo sin contrato no es un riesgo económico), abliteration.ai (existe, tiene entidad en Delaware y su política no te prohíbe nada, pero el nivel gratuito son **500 tokens**), Electron Hub, Together, Fireworks, SiliconFlow, Hyperbolic, Nebius, fal, Modal, Baseten, RunPod, Lambda, GMI Cloud, Nscale, Atlas Cloud. **kluster.ai está muerto**: el dominio ni resuelve (ENOTFOUND), aunque siga listado como vivo en directorios.\n\n---\n\n## 5. El personaje persistente: el hueco real, y ya sabes vivir con él\n\nDe todo lo investigado, **ningún proveedor que permita contenido adulto ofrece un recurso de personaje persistente en su servidor y sea alcanzable**. Los que lo tienen bien diseñado —Astria `/tunes`, ModelsLab dreambooth, PixAI LoRA— prohíben, callan o cobran por adelantado. La única excepción con **autorización explícita por escrito** que ha aparecido en toda la investigación es **OhAPI (oh.xyz)**, cuyo ToS público dice: «For the avoidance of doubt, **lawful consensual adult content is not prohibited solely because it is sexually explicit**». Es el clon exacto de Xavira, con personajes y salas como objetos de primera clase. Se cae por precio y por forma: depósito mínimo 50 $, planes desde **4.999 $/mes**, y el contrato exige aceptar en nombre de una persona jurídica. (Corrección importante: se había descartado por «no publica política» y «sólo socios aprobados» — **ambas cosas son falsas**, y la fuente de esas dos afirmaciones era la página de comparativas de un competidor directo.)\n\nConclusión práctica: **D-064 no era un apaño, es el único patrón disponible en este nicho.** La identidad como receta local y cifrada es lo que hacen también Wiro (imagen de referencia), NovelAI (Vibe Transfer) y todos los i2v de vídeo. No hay que cambiar la arquitectura.\n\n---\n\n## 6. Dos avisos que no pertenecen a ningún frente\n\n**El ToS de Wiro AI.** Es la única discrepancia que no he podido cerrar y afecta al mejor candidato de imagen: un verificador lo leyó entero y cita cláusulas literales; otros dos, también con navegador real, informan de que **las tres páginas legales (términos, privacidad y condiciones de crédito) renderizan vacías**. Antes de apoyar nada en Wiro, hay que resolver esto —pedírselo por correo vale— y de paso preguntarles si los «Third-Party Model Additional Terms» de ByteDance aplican a los modelos marcados *Uncensored*.\n\n**DeepSeek, que es lo que usas hoy.** Un rastreador de políticas de terceros sostiene que sus términos prohíben contenido «pornographic, obscene, or sexually explicit». **No está verificado contra el documento original** y no lo doy por bueno. Pero si se confirma, la pieza de texto que ya está en producción descansa sobre una política que prohíbe su uso principal. Merece una comprobación directa, y es barata.\n\n---\n\n## 7. Por dónde empezar\n\n**Regístrate en Featherless AI y pídele a `shutkit/Qwen2.5-VL-7B-NSFW-Caption-V3-abliterated` que describa una imagen real de la bóveda.**\n\nPor qué esa y no otra: es lo que **desbloquea visión**, que es el frente parado; el registro cuesta cero y responde de una vez la única pregunta que no he podido cerrar (si los 100.000 tokens de prueba existen de verdad); es **chat completions con base64 confirmado**, así que entra por Conexiones de Studio sin escribir una línea de código ni un adaptador; su ToS es el único que he podido leer palabra por palabra sin encontrar ni una cláusula sobre contenido adulto, respaldado por un catálogo que **comercializa** modelos abliterados y de rol; y el modelo no es un generalista al que hay que convencer, está construido para no negarse.\n\nY con una imagen real cierras de una sola llamada la distinción que ninguna lectura de términos puede cerrar: **que la política lo permita no significa que el modelo colabore.** Eso sólo lo dice el banco de pruebas.\n\nSi el registro no entrega tokens gratis o el plan conforme resulta ser el de 50 $/mes, el plan B es **Replicate**: la mejor política escrita de todo el informe, 0,01 $ y 11 segundos por imagen. Cuesta una tarjeta y un adaptador, y el de Xavira sirve de plantilla.\n\nNada de lo anterior pasa por encima del filtro de nadie: los que prohíben este uso están descartados y documentados justo para que no se reabran ni se intente rodearlos.",
+    "frentes": 6
+  },
+  "workflowProgress": [
+    {
+      "type": "workflow_phase",
+      "index": 1,
+      "title": "Investigar"
+    },
+    {
+      "type": "workflow_phase",
+      "index": 2,
+      "title": "Verificar"
+    },
+    {
+      "type": "workflow_phase",
+      "index": 3,
+      "title": "Sintetizar"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 1,
+      "label": "busca:vision",
+      "phaseIndex": 1,
+      "phaseTitle": "Investigar",
+      "agentId": "a4eccd5a5a236e75c",
+      "model": "claude-opus-5",
+      "state": "done",
+      "startedAt": 1788793244431,
+      "queuedAt": 1788793242835,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "No partí de listas de \"mejores APIs gratis\". Entré por cuat…",
+      "promptPreview": "QUE ES LUXY. Un agente personal en Windows con una boveda cifrada donde Daniel\nhace roleplay adulto. Necesita proveedores de IA para eso.\n\nLO QUE PIDE AHORA, con sus palabras: «investiga alternativas no tan conocidas,\nindaga profundamente en la web, tipo paginas como Xavira, tiene que haber\nbuenas alternativas con al menos un poco de credito de prueba».\n\nQUE ES \"TIPO XAVIRA\". Xavira es el proveedo…",
+      "lastProgressAt": 1788794081539,
+      "tokens": 126735,
+      "toolCalls": 80,
+      "durationMs": 837107,
+      "resultPreview": "{\"comoLoEncontre\":\"No partí de listas de \\\"mejores APIs gratis\\\". Entré por cuatro puertas laterales:\\n\\n1. **La comunidad de captioning / entrenamiento de LoRA.** Fue la pista más productiva, tal y como sugería el encargo. Quien etiqueta datasets adultos necesita un VLM que no se niegue, y esa comunidad construyó uno: **JoyCaption** (github.com/fpgaminer/joycaption), descrito por su autor como \\\"…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 2,
+      "label": "busca:imagen",
+      "phaseIndex": 1,
+      "phaseTitle": "Investigar",
+      "agentId": "a0c2cc5306eb63acc",
+      "model": "claude-opus-5",
+      "state": "done",
+      "startedAt": 1788793244566,
+      "queuedAt": 1788793242835,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "Partí del adaptador real apps/agent/src/providers/xavira.ts…",
+      "promptPreview": "QUE ES LUXY. Un agente personal en Windows con una boveda cifrada donde Daniel\nhace roleplay adulto. Necesita proveedores de IA para eso.\n\nLO QUE PIDE AHORA, con sus palabras: «investiga alternativas no tan conocidas,\nindaga profundamente en la web, tipo paginas como Xavira, tiene que haber\nbuenas alternativas con al menos un poco de credito de prueba».\n\nQUE ES \"TIPO XAVIRA\". Xavira es el proveedo…",
+      "lastProgressAt": 1788794476100,
+      "tokens": 155042,
+      "toolCalls": 89,
+      "durationMs": 1228331,
+      "resultPreview": "{\"comoLoEncontre\":\"Partí del adaptador real apps/agent/src/providers/xavira.ts para fijar la forma a buscar (recurso de personaje persistente + cola asíncrona con sondeo). Luego busqué en directorios de APIs para adultos (aihaven.com/nsfw-api, hotapi.ai/en/blog/uncensored-ai-api-guide, nsfwcoders.com/blogs/api), comparativas de proveedores sin censura, listas de créditos gratis (getaiperks.com) y …"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 3,
+      "label": "busca:video",
+      "phaseIndex": 1,
+      "phaseTitle": "Investigar",
+      "agentId": "a42d6c1b40484822e",
+      "model": "claude-opus-5",
+      "state": "done",
+      "startedAt": 1788793244603,
+      "queuedAt": 1788793242835,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "No me fie de las listas de «mejores generadores NSFW» que c…",
+      "promptPreview": "QUE ES LUXY. Un agente personal en Windows con una boveda cifrada donde Daniel\nhace roleplay adulto. Necesita proveedores de IA para eso.\n\nLO QUE PIDE AHORA, con sus palabras: «investiga alternativas no tan conocidas,\nindaga profundamente en la web, tipo paginas como Xavira, tiene que haber\nbuenas alternativas con al menos un poco de credito de prueba».\n\nQUE ES \"TIPO XAVIRA\". Xavira es el proveedo…",
+      "lastProgressAt": 1788794437919,
+      "tokens": 196003,
+      "toolCalls": 106,
+      "durationMs": 1190149,
+      "resultPreview": "{\"proveedores\":[{\"nombre\":\"HotAPI\",\"url\":\"https://hotapi.ai\",\"queEs\":\"Pasarela de API pequeña y especializada SOLO en modelos sin censura (imagen, video, voz, chat), operada por Dark Enlightenment Limited (Hong Kong). Es lo mas parecido a Xavira que he encontrado: 16 modelos, endpoints dedicados por modelo, cola asincrona con sondeo o webhook firmado. No es un generalista: su producto ES el conten…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 4,
+      "label": "busca:texto",
+      "phaseIndex": 1,
+      "phaseTitle": "Investigar",
+      "agentId": "a21366ccb2b290233",
+      "model": "claude-opus-5",
+      "state": "done",
+      "startedAt": 1788793244867,
+      "queuedAt": 1788793242835,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "No parti de listas de \"mejores APIs gratis\": esas devuelven…",
+      "promptPreview": "QUE ES LUXY. Un agente personal en Windows con una boveda cifrada donde Daniel\nhace roleplay adulto. Necesita proveedores de IA para eso.\n\nLO QUE PIDE AHORA, con sus palabras: «investiga alternativas no tan conocidas,\nindaga profundamente en la web, tipo paginas como Xavira, tiene que haber\nbuenas alternativas con al menos un poco de credito de prueba».\n\nQUE ES \"TIPO XAVIRA\". Xavira es el proveedo…",
+      "lastProgressAt": 1788794163481,
+      "tokens": 118291,
+      "toolCalls": 63,
+      "durationMs": 915711,
+      "resultPreview": "{\"comoLoEncontre\":\"No parti de listas de \\\"mejores APIs gratis\\\": esas devuelven siempre los mismos gigantes y ya estan descartados. Entre en el ecosistema por donde lo hacen los usuarios de rol.\\n\\n1. **El indice de conexiones de SillyTavern** (https://docs.sillytavern.app/usage/api-connections/) resulto ser el mejor directorio de proveedores de nicho que existe: es la lista de servicios que la c…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 5,
+      "label": "busca:marketplaces",
+      "phaseIndex": 1,
+      "phaseTitle": "Investigar",
+      "agentId": "a3dcfec4b868c9b3c",
+      "model": "claude-opus-5",
+      "state": "done",
+      "startedAt": 1788793244646,
+      "queuedAt": 1788793242835,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "Partí de la lista encargada (DeepInfra, Together, Fireworks…",
+      "promptPreview": "QUE ES LUXY. Un agente personal en Windows con una boveda cifrada donde Daniel\nhace roleplay adulto. Necesita proveedores de IA para eso.\n\nLO QUE PIDE AHORA, con sus palabras: «investiga alternativas no tan conocidas,\nindaga profundamente en la web, tipo paginas como Xavira, tiene que haber\nbuenas alternativas con al menos un poco de credito de prueba».\n\nQUE ES \"TIPO XAVIRA\". Xavira es el proveedo…",
+      "lastProgressAt": 1788794384354,
+      "tokens": 148284,
+      "toolCalls": 122,
+      "durationMs": 1136584,
+      "resultPreview": "{\"proveedores\":[{\"nombre\":\"Mancer\",\"url\":\"https://mancer.tech/\",\"queEs\":\"Servicio pequeño y veterano de inferencia sobre pesos abiertos, nacido dentro de la comunidad de roleplay (SillyTavern lo trae integrado de fábrica como tipo de API). No es un gigante generalista: sirve un catálogo corto de fine-tunes de roleplay con saldo por créditos, sin suscripción.\",\"moderacion\":\"Es el único de todo el f…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 6,
+      "label": "busca:companion",
+      "phaseIndex": 1,
+      "phaseTitle": "Investigar",
+      "agentId": "a142390c358bc258a",
+      "model": "claude-opus-5",
+      "state": "done",
+      "startedAt": 1788793244966,
+      "queuedAt": 1788793242835,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "Frente asignado: ecosistema companion/roleplay con API. Rut…",
+      "promptPreview": "QUE ES LUXY. Un agente personal en Windows con una boveda cifrada donde Daniel\nhace roleplay adulto. Necesita proveedores de IA para eso.\n\nLO QUE PIDE AHORA, con sus palabras: «investiga alternativas no tan conocidas,\nindaga profundamente en la web, tipo paginas como Xavira, tiene que haber\nbuenas alternativas con al menos un poco de credito de prueba».\n\nQUE ES \"TIPO XAVIRA\". Xavira es el proveedo…",
+      "lastProgressAt": 1788794445934,
+      "tokens": 158946,
+      "toolCalls": 98,
+      "durationMs": 1198163,
+      "resultPreview": "{\"comoLoEncontre\":\"Frente asignado: ecosistema companion/roleplay con API. Rutas seguidas, en este orden: (1) directorios y listas de la comunidad — `zukixa/cool-ai-stuff` (el directorio de APIs de IA más citado en Discords de roleplay), `mnfst/awesome-free-llm-apis`, free-llm.com; (2) la lista de backends soportados por SillyTavern (docs.sillytavern.app/usage/api-connections/), que es de facto el…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 7,
+      "label": "verifica:vision",
+      "phaseIndex": 2,
+      "phaseTitle": "Verificar",
+      "agentId": "a7bab2020cc3a20fd",
+      "model": "claude-opus-5",
+      "state": "done",
+      "startedAt": 1788794084504,
+      "queuedAt": 1788794083013,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "TRES COSAS QUE NO HE PODIDO CERRAR Y QUE EXIGEN CREAR CUENT…",
+      "promptPreview": "QUE ES LUXY. Un agente personal en Windows con una boveda cifrada donde Daniel\nhace roleplay adulto. Necesita proveedores de IA para eso.\n\nLO QUE PIDE AHORA, con sus palabras: «investiga alternativas no tan conocidas,\nindaga profundamente en la web, tipo paginas como Xavira, tiene que haber\nbuenas alternativas con al menos un poco de credito de prueba».\n\nQUE ES \"TIPO XAVIRA\". Xavira es el proveedo…",
+      "lastProgressAt": 1788794793035,
+      "tokens": 139118,
+      "toolCalls": 69,
+      "durationMs": 708530,
+      "resultPreview": "{\"revisados\":[{\"nombre\":\"Featherless AI\",\"existe\":\"confirmado\",\"moderacion\":\"confirmado\",\"tarjeta\":\"no verificable\",\"politica\":\"confirmado\",\"veredictoFinal\":\"prometedor\",\"correccion\":\"POLITICA CONFIRMADA AL PIE DE LA LETRA. Lei el documento canonico entero en navegador (featherless.ai/legal/terms-of-service; /terms redirige alli). No hay ninguna clausula sobre contenido sexual, adulto, pornografic…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 8,
+      "label": "verifica:texto",
+      "phaseIndex": 2,
+      "phaseTitle": "Verificar",
+      "agentId": "a0998544dd6191736",
+      "model": "claude-opus-5",
+      "state": "done",
+      "startedAt": 1788794166885,
+      "queuedAt": 1788794165064,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "HUECOS QUE NO HE PODIDO CERRAR, y por que. 1. **`GET /v1/mo…",
+      "promptPreview": "QUE ES LUXY. Un agente personal en Windows con una boveda cifrada donde Daniel\nhace roleplay adulto. Necesita proveedores de IA para eso.\n\nLO QUE PIDE AHORA, con sus palabras: «investiga alternativas no tan conocidas,\nindaga profundamente en la web, tipo paginas como Xavira, tiene que haber\nbuenas alternativas con al menos un poco de credito de prueba».\n\nQUE ES \"TIPO XAVIRA\". Xavira es el proveedo…",
+      "lastProgressAt": 1788794690569,
+      "tokens": 110170,
+      "toolCalls": 50,
+      "durationMs": 523683,
+      "resultPreview": "{\"revisados\":[{\"nombre\":\"Arli AI\",\"existe\":\"confirmado\",\"moderacion\":\"no verificable\",\"tarjeta\":\"no verificable\",\"politica\":\"confirmado\",\"veredictoFinal\":\"prometedor\",\"correccion\":\"POLITICA CONFIRMADA LITERALMENTE. La clausula de uso aceptable en https://www.arliai.com/terms es exactamente la citada: «You agree not to use the Services for unlawful, illegal, fraudulent, or harmful activities, inclu…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 9,
+      "label": "verifica:marketplaces",
+      "phaseIndex": 2,
+      "phaseTitle": "Verificar",
+      "agentId": "a1060434afef59bbc",
+      "model": "claude-opus-5",
+      "state": "done",
+      "startedAt": 1788794387929,
+      "queuedAt": 1788794385924,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "QUE CAMBIA EL ORDEN DEL FRENTE, en una linea: Infermatic ca…",
+      "promptPreview": "QUE ES LUXY. Un agente personal en Windows con una boveda cifrada donde Daniel\nhace roleplay adulto. Necesita proveedores de IA para eso.\n\nLO QUE PIDE AHORA, con sus palabras: «investiga alternativas no tan conocidas,\nindaga profundamente en la web, tipo paginas como Xavira, tiene que haber\nbuenas alternativas con al menos un poco de credito de prueba».\n\nQUE ES \"TIPO XAVIRA\". Xavira es el proveedo…",
+      "lastProgressAt": 1788794956994,
+      "tokens": 109701,
+      "toolCalls": 52,
+      "durationMs": 569063,
+      "resultPreview": "{\"revisados\":[{\"nombre\":\"Mancer\",\"existe\":\"confirmado\",\"moderacion\":\"confirmado\",\"tarjeta\":\"confirmado\",\"politica\":\"confirmado\",\"veredictoFinal\":\"prometedor\",\"correccion\":\"Todo sostenido en fuente, y el servicio esta VIVO hoy: https://neuro.mancer.tech/models responde con sello «Data fetched 2026-09-07». El modelo gratis existe y es MythoLite, listado literalmente «FREE FREE» (entrada y salida) ju…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 10,
+      "label": "verifica:video",
+      "phaseIndex": 2,
+      "phaseTitle": "Verificar",
+      "agentId": "aaa6cad7183aa86e4",
+      "model": "claude-opus-5",
+      "state": "done",
+      "startedAt": 1788794441187,
+      "queuedAt": 1788794439433,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "QUE NO HE PODIDO CERRAR, y conviene no darlo por resuelto: …",
+      "promptPreview": "QUE ES LUXY. Un agente personal en Windows con una boveda cifrada donde Daniel\nhace roleplay adulto. Necesita proveedores de IA para eso.\n\nLO QUE PIDE AHORA, con sus palabras: «investiga alternativas no tan conocidas,\nindaga profundamente en la web, tipo paginas como Xavira, tiene que haber\nbuenas alternativas con al menos un poco de credito de prueba».\n\nQUE ES \"TIPO XAVIRA\". Xavira es el proveedo…",
+      "lastProgressAt": 1788794874024,
+      "tokens": 113139,
+      "toolCalls": 36,
+      "durationMs": 432836,
+      "resultPreview": "{\"revisados\":[{\"nombre\":\"HotAPI\",\"existe\":\"confirmado\",\"moderacion\":\"confirmado\",\"tarjeta\":\"confirmado\",\"politica\":\"confirmado\",\"veredictoFinal\":\"prometedor\",\"correccion\":\"Servicio vivo y leido entero en navegador (WebFetch recibe 403; hay que usar navegador). AUP y ToS fechados 2026-08-31, verificados. CORRECCION 1, la mas importante: el informe TRUNCO la cita clave. La frase real de la AUP §4 es…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 11,
+      "label": "verifica:companion",
+      "phaseIndex": 2,
+      "phaseTitle": "Verificar",
+      "agentId": "a7ce46d5ef4648be0",
+      "model": "claude-opus-5",
+      "state": "done",
+      "startedAt": 1788794449328,
+      "queuedAt": 1788794447517,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "LO QUE NO HE PODIDO COMPROBAR Y HAY QUE RESOLVER ANTES DE D…",
+      "promptPreview": "QUE ES LUXY. Un agente personal en Windows con una boveda cifrada donde Daniel\nhace roleplay adulto. Necesita proveedores de IA para eso.\n\nLO QUE PIDE AHORA, con sus palabras: «investiga alternativas no tan conocidas,\nindaga profundamente en la web, tipo paginas como Xavira, tiene que haber\nbuenas alternativas con al menos un poco de credito de prueba».\n\nQUE ES \"TIPO XAVIRA\". Xavira es el proveedo…",
+      "lastProgressAt": 1788794991383,
+      "tokens": 125742,
+      "toolCalls": 66,
+      "durationMs": 542053,
+      "resultPreview": "{\"revisados\":[{\"nombre\":\"Wiro AI\",\"existe\":\"confirmado\",\"moderacion\":\"no verificable\",\"tarjeta\":\"refutado\",\"politica\":\"confirmado\",\"veredictoFinal\":\"dudoso\",\"correccion\":\"EMPRESA REAL, PERO SIN NINGUN DOCUMENTO LEGAL. Confirmo que existe y esta viva: startup de Estambul fundada en 2023, respaldada por Y Combinator, 27 empleados (pitchbook.com/profiles/company/596112-22, crunchbase.com/organization…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 12,
+      "label": "verifica:imagen",
+      "phaseIndex": 2,
+      "phaseTitle": "Verificar",
+      "agentId": "afd7aac104f1abce9",
+      "model": "claude-opus-5",
+      "state": "done",
+      "startedAt": 1788794479202,
+      "queuedAt": 1788794477588,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "LO QUE CAMBIA EL ORDEN DE PRIORIDADES. Tres hallazgos se ca…",
+      "promptPreview": "QUE ES LUXY. Un agente personal en Windows con una boveda cifrada donde Daniel\nhace roleplay adulto. Necesita proveedores de IA para eso.\n\nLO QUE PIDE AHORA, con sus palabras: «investiga alternativas no tan conocidas,\nindaga profundamente en la web, tipo paginas como Xavira, tiene que haber\nbuenas alternativas con al menos un poco de credito de prueba».\n\nQUE ES \"TIPO XAVIRA\". Xavira es el proveedo…",
+      "lastProgressAt": 1788795144890,
+      "tokens": 149364,
+      "toolCalls": 49,
+      "durationMs": 665688,
+      "resultPreview": "{\"revisados\":[{\"nombre\":\"Wiro AI\",\"existe\":\"confirmado\",\"moderacion\":\"confirmado\",\"tarjeta\":\"confirmado\",\"politica\":\"confirmado\",\"veredictoFinal\":\"prometedor\",\"correccion\":\"AGUANTA, y sale reforzado, pero con tres correcciones y un agujero nuevo. VERIFICADO EN FUENTE: lei el ToS entero (no lo daba WebFetch, hubo que renderizarlo con navegador). «Last Updated: February 27, 2026» exacto. La lista de…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 13,
+      "label": "sintesis",
+      "phaseIndex": 3,
+      "phaseTitle": "Sintetizar",
+      "agentId": "a62757d0a7318cb0b",
+      "model": "claude-opus-5",
+      "state": "done",
+      "startedAt": 1788795150069,
+      "queuedAt": 1788795146368,
+      "attempt": 1,
+      "promptPreview": "QUE ES LUXY. Un agente personal en Windows con una boveda cifrada donde Daniel\nhace roleplay adulto. Necesita proveedores de IA para eso.\n\nLO QUE PIDE AHORA, con sus palabras: «investiga alternativas no tan conocidas,\nindaga profundamente en la web, tipo paginas como Xavira, tiene que haber\nbuenas alternativas con al menos un poco de credito de prueba».\n\nQUE ES \"TIPO XAVIRA\". Xavira es el proveedo…",
+      "lastProgressAt": 1788795380282,
+      "tokens": 260322,
+      "toolCalls": 0,
+      "durationMs": 230212,
+      "resultPreview": "# Recomendación final\n\nTodo lo que sigue ha pasado por el verificador. Lo refutado se ha caído, lo dudoso va etiquetado. Cuando digo «silencio» quiero decir silencio, no permiso.\n\n**La regla que ha decidido casi todo.** No es «¿tiene filtro?», es **cómo está redactada la prohibición sexual**. Hay dos familias: los que prohíben una *categoría* («obscene», «pornographic», «sexually explicit», «indec…"
+    }
+  ],
+  "totalTokens": 1910857,
+  "totalToolCalls": 880
+}
