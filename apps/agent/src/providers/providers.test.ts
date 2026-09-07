@@ -4,6 +4,7 @@ import {
   buildClaudeArgs,
   parseClaudeStreamLine,
   buildClaudeError,
+  buildClaudeImageInput,
   type ClaudeCapabilities,
 } from './claude.js';
 import {
@@ -50,6 +51,28 @@ Options:
   -p, --print                  Print response and exit
   --verbose                    Override verbose mode setting
   --max-turns <n>              Limit turns
+`;
+
+/**
+ * ayuda real recortada de Claude Code 2.1.250, leida del binario instalado el
+ * 2026-09-07.
+ *
+ * Va aparte y no se añade a la de 2.1.183: esa es la ayuda de OTRA version, y
+ * retocarla para que pase una prueba seria fingir que una version antigua
+ * admite un flag que no tiene. La deteccion de capacidades existe justo para
+ * distinguirlas.
+ */
+const CLAUDE_HELP_2_1_250 = `
+Usage: claude [options] [command] [prompt]
+Options:
+  --disallowedTools <tools...> Tools to disallow
+  --model <model>              Model for the current session
+  --input-format <format>      Input format (only works with --print): "text" (default), or "stream-json" (realtime streaming input) (choices: "text", "stream-json")
+  --restricted                 Restricted mode: removes the built-in tools that run commands or code
+  --output-format <format>     Output format (only works with --print): "text", "json", or "stream-json" (choices: "text", "json", "stream-json")
+  --permission-mode <mode>     Permission mode to use for the session
+  -p, --print                  Print response and exit
+  --verbose                    Override verbose mode setting
 `;
 
 // ayuda real recortada de codex-cli 0.141.0
@@ -1422,5 +1445,102 @@ describe('mensajes de error del proveedor http', () => {
   it('un 500 de verdad sigue siendo un error interno', () => {
     const err = Object.assign(new Error('500'), { status: 500 });
     expect(describeHttpError(err, 'X')).toContain('error interno');
+  });
+});
+
+describe('imagenes para Claude Code', () => {
+  const caps = parseClaudeCapabilities(CLAUDE_HELP_2_1_250);
+
+  it('detecta --input-format, que es lo unico que permite adjuntarlas', () => {
+    expect(caps.inputFormat).toBe(true);
+    // la 2.1.183 no lo tenia: por eso la deteccion no se puede dar por hecha
+    expect(parseClaudeCapabilities(CLAUDE_HELP).inputFormat).toBe(false);
+    expect(parseClaudeCapabilities('  -p, --print\n').inputFormat).toBe(false);
+  });
+
+  it('con imagenes pide la entrada en stream-json', () => {
+    const args = buildClaudeArgs({ prompt: 'que ves', capabilities: caps, withImages: true });
+    expect(args[args.indexOf('--input-format') + 1]).toBe('stream-json');
+    // la CLI EXIGE que la salida lo sea tambien: comprobado contra el binario,
+    // «--input-format=stream-json requires output-format=stream-json»
+    expect(args[args.indexOf('--output-format') + 1]).toBe('stream-json');
+  });
+
+  it('sin imagenes no cambia el formato de entrada', () => {
+    // el camino de texto es el de siempre y no puede romperse por esto
+    const args = buildClaudeArgs({ prompt: 'hola', capabilities: caps });
+    expect(args).not.toContain('--input-format');
+    expect(args).not.toContain('--restricted');
+  });
+
+  it('describir usa --restricted en vez del modo plan', () => {
+    // con `--permission-mode plan` Claude remataba la descripcion con «esto no
+    // requiere planificacion ni cambios de codigo», y esa frase acababa dentro
+    // del pie de foto. Comprobado con el binario 2.1.250
+    const args = buildClaudeArgs({
+      prompt: 'que ves',
+      capabilities: caps,
+      readOnly: true,
+      withImages: true,
+    });
+    expect(args).toContain('--restricted');
+    expect(args).not.toContain('--permission-mode');
+    // y las herramientas de escritura siguen bloqueadas aparte
+    expect(args.join(' ')).toContain('--disallowedTools');
+    expect(args.join(' ')).toContain('Write');
+  });
+
+  it('una version sin --restricted conserva el modo plan', () => {
+    // no se deja el turno sin aislamiento por no tener el flag nuevo: se
+    // prefiere la coletilla a quitarle la barrera
+    const sinFlag = { ...caps, restricted: false };
+    const args = buildClaudeArgs({
+      prompt: 'que ves',
+      capabilities: sinFlag,
+      readOnly: true,
+      withImages: true,
+    });
+    expect(args).not.toContain('--restricted');
+    expect(args[args.indexOf('--permission-mode') + 1]).toBe('plan');
+  });
+
+  it('el mensaje lleva el texto y la imagen como bloques', () => {
+    const linea = buildClaudeImageInput('describe esto', [
+      { mimeType: 'image/webp', base64: 'AAAA' },
+    ]);
+    expect(linea.endsWith('\n')).toBe(true);
+
+    const mensaje = JSON.parse(linea) as {
+      message: { content: { type: string; text?: string; source?: Record<string, string> }[] };
+    };
+    expect(mensaje.message.content[0]).toEqual({ type: 'text', text: 'describe esto' });
+    expect(mensaje.message.content[1]?.source).toEqual({
+      type: 'base64',
+      media_type: 'image/webp',
+      data: 'AAAA',
+    });
+  });
+
+  it('quita el prefijo data: del base64', () => {
+    // colarlo dentro da un error de «imagen corrupta» que no explica nada:
+    // el tipo ya viaja en media_type
+    const linea = buildClaudeImageInput('x', [
+      { mimeType: 'image/png', base64: 'data:image/png;base64,QUJD' },
+    ]);
+    const mensaje = JSON.parse(linea) as { message: { content: { source?: { data?: string } }[] } };
+    expect(mensaje.message.content[1]?.source?.data).toBe('QUJD');
+  });
+
+  it('varias imagenes van como varios bloques, y el texto primero', () => {
+    const linea = buildClaudeImageInput('dos', [
+      { mimeType: 'image/png', base64: 'AA' },
+      { mimeType: 'image/webp', base64: 'BB' },
+    ]);
+    const mensaje = JSON.parse(linea) as { message: { content: { type: string }[] } };
+    expect(mensaje.message.content.map((bloque) => bloque.type)).toEqual([
+      'text',
+      'image',
+      'image',
+    ]);
   });
 });
