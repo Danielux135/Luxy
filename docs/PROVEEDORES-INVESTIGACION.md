@@ -1032,3 +1032,29 @@ la palabra «uncensored», es lo que rindio.
   "totalTokens": 1910857,
   "totalToolCalls": 880
 }
+
+---
+
+## Cierre verificado por Daniel — Featherless AI queda descartada (2026-09-07)
+
+Daniel creo la cuenta. **`/account/api-keys` dice literalmente «No API Keys —
+Choose a plan to create API keys».** No hay forma de generar una clave sin
+suscribirse.
+
+Con eso se cierra el unico hueco que el verificador no pudo cerrar: **los
+100.000 tokens de prueba no existen**, o no dan acceso a la API. La fuente era
+un issue de GitHub ajeno, y era falsa.
+
+Y se confirma la otra correccion, leida al pie de su propia pagina de planes:
+
+> «Chat plan is for interactive, human-driven use by the purchaser. **Not for
+> reselling, app/API traffic, background automation**, or benchmarking. Misuse
+> may lead to cancellation without refund.»
+
+O sea que el plan de 25 $ **excluye por contrato el uso de Luxy**. El unico
+plan conforme es **Developer, 50 $/mes**. No es «un poco de credito de prueba».
+
+**Patron que ya van tres veces** (Infermatic, Featherless, y en su version de
+tarjeta Mistral/Cerebras/OVHcloud): en este nicho, el nivel gratuito es
+interfaz web para personas, y la API empieza donde empieza el pago. Conviene
+darlo por norma y no por excepcion en la proxima investigacion.
