@@ -324,3 +324,195 @@ de Anthropic.
   "totalTokens": 1587273,
   "totalToolCalls": 678
 }
+
+
+---
+
+# Anexo — 2026-09-07, segunda vuelta: solo vision alojada
+
+Daniel acota los criterios despues de leer lo anterior:
+
+- **no quiere modelos locales**, solo servicios alojados;
+- **le da igual que entrenen con sus datos**: «es un chat explicito, no secretos
+  nucleares».
+
+Eso retira el filtro de privacidad —que habia descartado a OpenRouter y a
+Cloudflare— pero **no** el de politica de contenido: Gemini, NVIDIA NIM y
+Moondream Cloud siguen fuera porque sus terminos lo prohiben con cita, y eso no
+depende de lo que a uno le parezca.
+
+Siete agentes sobre las tres candidatas supervivientes. Conclusion, tal cual la
+devolvio la sintesis:
+
+{
+  "summary": "Que APIs de vision alojadas, gratis y sin tarjeta permiten describir contenido adulto, ignorando el entrenamiento con datos",
+  "agentCount": 7,
+  "logs": [],
+  "result": {
+    "sintesis": "Ninguna de las tres cumple los tres criterios duros con certeza: la que mejor acredita el acceso gratis sin tarjeta no tiene política que permita el contenido (solo silencio), y la única política verificada que sí lo permite está en un proveedor cuyo acceso gratis sin tarjeta no se ha podido confirmar. Lo que sigue es orden de prueba, no una vía garantizada.\n\n## 1. Groq — la primera a probar (veredicto del verificador: DUDOSO)\n\n- **Gratis sin tarjeta: lo mejor acreditado del expediente, aunque no literal.** Cuatro páginas del propio Groq coinciden: existe un plan Free de $0 permanente, el método de pago se pide para *subir* a Developer («To upgrade from the Free tier to the Developer tier, you'll need to provide a valid payment method»), y el quickstart va de crear API key a llamar sin ningún paso de facturación. Groq **nunca escribe** «no credit card required»: es implicación estructural, no cita.\n- **Política: NO VERIFICABLE como permiso.** Aquí el verificador tumbó el hallazgo original. Sí existe el punto 5, «...sexually explicit content **that is illegal**», que acota la prohibición. Pero el punto 2 de la misma lista, que el informe no citó, prohíbe usar el servicio «for any illegal, **offensive**, invasive, discriminatory, dangerous, harmful...». «Offensive» va sin calificar: es cláusula paraguas discrecional. Groq no prohíbe, pero tampoco permite. Es silencio bien delimitado, no un sí.\n- **Contrato: CONFIRMADO por documentación, no por parecido.** `https://api.groq.com/openai/v1/chat/completions` con partes `image_url` y data URI base64 (sirve para la bóveda, sin publicar nada), y `/v1/models` documentado. Cumple el criterio 3 y D-022 sin sondear rutas.\n- **Punto débil estructural:** los dos modelos con vista (`qwen/qwen3.6-27b`, `qwen/qwen3.8-27b`) están en **Preview**, no en producción: «may be discontinued at short notice». Groq no tiene hoy ningún modelo de visión en producción.\n- **Volumen real:** el cuello es el TPM, no el RPM. 8K TPM ÷ 2048 tokens por imagen = 3 imágenes por minuto; ~200K TPD ≈ 80-90 al día. Y ojo: las «5 imágenes por petición» son del modelo, no del plan gratis — en Free no caben (5 × 2048 = 10.240 > 8K TPM).\n\n**Qué hacer para probarla, en una línea:** crear cuenta en console.groq.com, generar la API key en /keys y mandar una imagen real de la bóveda en base64 a `qwen/qwen3.6-27b` pidiendo pie de foto — esa única llamada confirma de paso que el alta no pide tarjeta.\n\n## 2. OpenRouter — segunda conexión en paralelo (DUDOSO)\n\n- **Gratis sin tarjeta: NO VERIFICABLE.** La cita que lo sostenía («The free tier needs no credit card») **no existe** en el blog al que se atribuía; lo que hay es una tabla comparativa que marca «No» en la columna Credit Card para Mistral, Cerebras y NVIDIA NIM — justo los que Daniel descartó en persona por pedir tarjeta. Fuente refutada por los propios datos de Daniel. Los indicios de primera parte (fila «Less than 10 créditos», 402 solo con saldo negativo) son indirectos, y los Terms dicen lo contrario: «OpenRouter requires users to purchase Credits to make API calls».\n- **Política: silencio DELEGADO.** OpenRouter no tiene cláusula de contenido adulto y traslada la responsabilidad por escrito: «You are solely responsible for reviewing the Model Terms applicable to each Model». La política real es la del proveedor de destino, y 5 de los 8 modelos gratis con vista los sirven Google AI Studio, Nvidia o AtlasCloud: los vetos ya ganados entrando por la puerta de atrás.\n- **Lo único positivamente favorable de todo el expediente:** Thinking Machines (`thinkingmachines/inkling:free`), con carve-out verificado literal — «...generate or manipulate sexually explicit content **for purposes other than** scientific, educational, documentary, or artistic purposes» — y además prohíbe «generate or manipulate», no describir.\n- **Contrato: CONFIRMADO en vivo.** `/v1/models` público, `architecture.input_modalities.includes(\"image\")` como filtro, formato `image_url` documentado. 20 RPM / 50 peticiones al día sin comprar nada.\n\n**Pendiente antes de usar `minimax/minimax-m3:free`** (el candidato con mejor pronóstico de colaboración): su proveedor es GMICloud y **su política no se ha podido leer** — sus tres documentos legales se renderizan por JavaScript y devuelven solo navegación. La cita «obscene» que se le atribuía no está verificada, y nadie ha abierto su Acceptable Use Policy dedicada, que es exactamente donde AtlasCloud escondía su veto. Hay que abrirla con un navegador de verdad antes de tocar ese modelo.\n\n## 3. Cloudflare Workers AI — descartada (NO SIRVE)\n\nFalla por lo técnico y está confirmado: **no expone `/v1/models`**. Su catálogo es `/ai/models/search`, con sobre propietario; `packages/shared/src/models/catalog-fetch.ts` espera la forma OpenAI `{data:[{id}]}`, así que la conexión ni se daría de alta. Además, y contra lo que decía el informe original, su política **no permite**: la lista de contenido prohibido es abierta («includes but is not limited to») y a su sola discreción — silencio, no permiso. No reabrirla por la vía de un adaptador nativo.\n\n## Política ≠ colaboración del modelo\n\nSon dos preguntas distintas y solo la primera está cerrada:\n\n| Modelo | La política | El modelo colaborará |\n|---|---|---|\n| `qwen/qwen3.6-27b` (Groq) | silencio, con cláusula «offensive» genérica encima | no probado; Qwen3-VL tiene fama de negarse (indicio: existen finetunes «NSFW-Caption» para arreglarlo — **no verificado**) |\n| `thinkingmachines/inkling:free` | **la mejor y verificada** (carve-out artístico) | mal pronóstico: laboratorio frontera, alineamiento fuerte |\n| `minimax/minimax-m3:free` | **desconocida** (GMICloud ilegible) | mejor pronóstico: pesos abiertos servidos por un tercero |\n\nNingún modelo gratis con vista del expediente es un modelo sin censura. Esto solo lo cierra el banco de pruebas de Luxy, con una imagen real.\n\n**Si un modelo se niega, se cambia de modelo, no de prompt.** El punto 13 de la política de Groq prohíbe «to intentionally circumvent any aspect of the Cloud Services... including abuse protections or safety mechanisms». Insistir para rodear una negativa es lo único que convertiría un silencio tolerable en un incumplimiento claro.\n\n## Dos comprobaciones antes de escribir código\n\n1. Alta en Groq: mirar si en algún punto pide tarjeta **o verificación por SMS** (esto último no lo dice ninguna página del proveedor; queda abierto).\n2. Abrir con navegador la Acceptable Use Policy de GMICloud, si se quiere usar MiniMax.\n\n## Nota de diseño para Luxy\n\nConfirmado en ambos catálogos: **no existe ningún campo de moderación ni de política de contenido** (`is_moderated`, `data_policy`, nada). Luxy puede autodetectar visión, pero la política hay que fijarla a mano por modelo y proveedor. En OpenRouter, además, fijar `provider.order` con `allow_fallbacks: false`, o una imagen de la bóveda puede acabar un día en Google AI Studio porque añadieron ese endpoint al modelo gratis. Y descartar `openrouter/free`: elige modelo al azar, es decir, política no determinista en cada llamada."
+  },
+  "workflowProgress": [
+    {
+      "type": "workflow_phase",
+      "index": 1,
+      "title": "Investigar"
+    },
+    {
+      "type": "workflow_phase",
+      "index": 2,
+      "title": "Verificar"
+    },
+    {
+      "type": "workflow_phase",
+      "index": 3,
+      "title": "Sintetizar"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 1,
+      "label": "investiga:openrouter",
+      "phaseIndex": 1,
+      "phaseTitle": "Investigar",
+      "agentId": "a45a7561f4c3f72a8",
+      "model": "claude-opus-5",
+      "state": "done",
+      "startedAt": 1788788424633,
+      "queuedAt": 1788788422961,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "NO exige tarjeta, pero con una contradiccion en su propia d…",
+      "promptPreview": "CONTEXTO. Luxy es un agente personal en Windows con una boveda cifrada donde\nDaniel hace roleplay adulto. Necesita VISION: pasarle una imagen a un modelo y\nrecibir una descripcion, para usarla como pie de foto.\n\nDECISION QUE DANIEL ACABA DE TOMAR y que cambia los criterios:\n- **NO quiere modelos locales.** Nada de Ollama, LM Studio, KoboldCpp,\n  llama.cpp ni ComfyUI. Solo servicios alojados. No lo…",
+      "lastProgressAt": 1788788813034,
+      "tokens": 83822,
+      "toolCalls": 29,
+      "durationMs": 384950,
+      "resultPreview": "{\"tarjeta\":\"NO exige tarjeta, pero con una contradiccion en su propia documentacion que conviene conocer.\\n\\nA FAVOR (docs de limites, openrouter.ai/docs/api-reference/limits): la tabla de limites de modelos `:free` tiene una fila explicita para cuentas con «Less than 10» creditos comprados (50 peticiones/dia). Esa fila solo tiene sentido si una cuenta que nunca ha pagado funciona. Ademas: «If you…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 2,
+      "label": "investiga:cloudflare",
+      "phaseIndex": 1,
+      "phaseTitle": "Investigar",
+      "agentId": "a6e1f2e1c48c9b66d",
+      "model": "claude-opus-5",
+      "state": "done",
+      "startedAt": 1788788424549,
+      "queuedAt": 1788788422961,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "NO pide tarjeta. Confirmado en la fuente del proveedor (doc…",
+      "promptPreview": "CONTEXTO. Luxy es un agente personal en Windows con una boveda cifrada donde\nDaniel hace roleplay adulto. Necesita VISION: pasarle una imagen a un modelo y\nrecibir una descripcion, para usarla como pie de foto.\n\nDECISION QUE DANIEL ACABA DE TOMAR y que cambia los criterios:\n- **NO quiere modelos locales.** Nada de Ollama, LM Studio, KoboldCpp,\n  llama.cpp ni ComfyUI. Solo servicios alojados. No lo…",
+      "lastProgressAt": 1788788866826,
+      "tokens": 94553,
+      "toolCalls": 42,
+      "durationMs": 442276,
+      "resultPreview": "{\"tarjeta\":\"NO pide tarjeta. Confirmado en la fuente del proveedor (docs de precios de Workers AI): «Our free allocation allows anyone to use a total of 10,000 Neurons per day at no charge». En la tabla de planes, \\\"Workers Free\\\" incluye \\\"10,000 Neurons per day\\\" y el precio del excedente aparece como «N/A - Upgrade to Workers Paid». Eso es mejor que un free tier normal: al agotarse corta en sec…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 3,
+      "label": "investiga:groq",
+      "phaseIndex": 1,
+      "phaseTitle": "Investigar",
+      "agentId": "a403e81d21bef96e4",
+      "model": "claude-opus-5",
+      "state": "done",
+      "startedAt": 1788788424630,
+      "queuedAt": 1788788422961,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "GROQ — SÍ se puede usar gratis sin tarjeta, y por fin hay f…",
+      "promptPreview": "CONTEXTO. Luxy es un agente personal en Windows con una boveda cifrada donde\nDaniel hace roleplay adulto. Necesita VISION: pasarle una imagen a un modelo y\nrecibir una descripcion, para usarla como pie de foto.\n\nDECISION QUE DANIEL ACABA DE TOMAR y que cambia los criterios:\n- **NO quiere modelos locales.** Nada de Ollama, LM Studio, KoboldCpp,\n  llama.cpp ni ComfyUI. Solo servicios alojados. No lo…",
+      "lastProgressAt": 1788788888565,
+      "tokens": 97403,
+      "toolCalls": 45,
+      "durationMs": 460483,
+      "resultPreview": "{\"tarjeta\":\"GROQ — SÍ se puede usar gratis sin tarjeta, y por fin hay fuente del proveedor (no un blog).\\n\\nLa prueba está en las Billing FAQs de Groq (console.groq.com/docs/billing-faqs), literal:\\n\\n«To upgrade from the Free tier to the Developer tier, you'll need to provide a valid payment method (credit card, US bank account, or SEPA debit account).»\\n\\nLéelo al revés: el método de pago se exi…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 4,
+      "label": "verifica:openrouter",
+      "phaseIndex": 2,
+      "phaseTitle": "Verificar",
+      "agentId": "a7fb62b363cd5b0ca",
+      "model": "claude-opus-5",
+      "state": "done",
+      "startedAt": 1788788816520,
+      "queuedAt": 1788788814882,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "NO VERIFICABLE (no \"confirmado\"). La conclusion probablemen…",
+      "promptPreview": "CONTEXTO. Luxy es un agente personal en Windows con una boveda cifrada donde\nDaniel hace roleplay adulto. Necesita VISION: pasarle una imagen a un modelo y\nrecibir una descripcion, para usarla como pie de foto.\n\nDECISION QUE DANIEL ACABA DE TOMAR y que cambia los criterios:\n- **NO quiere modelos locales.** Nada de Ollama, LM Studio, KoboldCpp,\n  llama.cpp ni ComfyUI. Solo servicios alojados. No lo…",
+      "lastProgressAt": 1788789171459,
+      "tokens": 83742,
+      "toolCalls": 28,
+      "durationMs": 354937,
+      "resultPreview": "{\"tarjetaConfirmada\":\"NO VERIFICABLE (no \\\"confirmado\\\"). La conclusion probablemente sea cierta, pero la cita que la sostenia esta rota.\\n\\nLO QUE SI COMPROBE, primera parte y textual:\\n- openrouter.ai/docs/api-reference/limits: la tabla existe tal cual. Fila \\\"Credits Purchased: Less than 10\\\" -> \\\"20\\\" RPM / \\\"50\\\" RPD; fila \\\"At least 10\\\" -> 20 / 1000. Y textual: «If your account has a negati…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 5,
+      "label": "verifica:cloudflare",
+      "phaseIndex": 2,
+      "phaseTitle": "Verificar",
+      "agentId": "ae4bd3d0f9f98d141",
+      "model": "claude-opus-5",
+      "state": "done",
+      "startedAt": 1788788870184,
+      "queuedAt": 1788788868463,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "CONFIRMADO en lo principal, REFUTADO en el matiz que el hal…",
+      "promptPreview": "CONTEXTO. Luxy es un agente personal en Windows con una boveda cifrada donde\nDaniel hace roleplay adulto. Necesita VISION: pasarle una imagen a un modelo y\nrecibir una descripcion, para usarla como pie de foto.\n\nDECISION QUE DANIEL ACABA DE TOMAR y que cambia los criterios:\n- **NO quiere modelos locales.** Nada de Ollama, LM Studio, KoboldCpp,\n  llama.cpp ni ComfyUI. Solo servicios alojados. No lo…",
+      "lastProgressAt": 1788789306735,
+      "tokens": 94678,
+      "toolCalls": 41,
+      "durationMs": 436549,
+      "resultPreview": "{\"tarjetaConfirmada\":\"CONFIRMADO en lo principal, REFUTADO en el matiz que el hallazgo subraya («sin peros»).\\n\\nVerificado en fuentes del proveedor, no en blogs:\\n- developers.cloudflare.com/workers-ai/platform/pricing/: «Our free allocation allows anyone to use a total of 10,000 Neurons per day at no charge». La cita existe y es literal.\\n- developers.cloudflare.com/workers/platform/pricing/: «B…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 6,
+      "label": "verifica:groq",
+      "phaseIndex": 2,
+      "phaseTitle": "Verificar",
+      "agentId": "ab61840d6d982e755",
+      "model": "claude-opus-5",
+      "state": "done",
+      "startedAt": 1788788896382,
+      "queuedAt": 1788788892807,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "CONFIRMADO CON RESERVA — no he podido refutarlo, y además h…",
+      "promptPreview": "CONTEXTO. Luxy es un agente personal en Windows con una boveda cifrada donde\nDaniel hace roleplay adulto. Necesita VISION: pasarle una imagen a un modelo y\nrecibir una descripcion, para usarla como pie de foto.\n\nDECISION QUE DANIEL ACABA DE TOMAR y que cambia los criterios:\n- **NO quiere modelos locales.** Nada de Ollama, LM Studio, KoboldCpp,\n  llama.cpp ni ComfyUI. Solo servicios alojados. No lo…",
+      "lastProgressAt": 1788789207722,
+      "tokens": 78489,
+      "toolCalls": 27,
+      "durationMs": 311338,
+      "resultPreview": "{\"tarjetaConfirmada\":\"CONFIRMADO CON RESERVA — no he podido refutarlo, y además he encontrado una fuente primaria NUEVA que el hallazgo no tenía. Pero la frase literal sigue sin existir.\\n\\nLo que he verificado yo mismo en páginas de Groq:\\n\\n1. console.groq.com/settings/billing/plans (página de planes del propio console, se renderiza sin sesión). Tarjeta del plan Free, textos exactos: «Free» · «$…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 7,
+      "label": "sintesis",
+      "phaseIndex": 3,
+      "phaseTitle": "Sintetizar",
+      "agentId": "a4a82147f842ee351",
+      "model": "claude-opus-5",
+      "state": "done",
+      "startedAt": 1788789312772,
+      "queuedAt": 1788789310859,
+      "attempt": 1,
+      "promptPreview": "CONTEXTO. Luxy es un agente personal en Windows con una boveda cifrada donde\nDaniel hace roleplay adulto. Necesita VISION: pasarle una imagen a un modelo y\nrecibir una descripcion, para usarla como pie de foto.\n\nDECISION QUE DANIEL ACABA DE TOMAR y que cambia los criterios:\n- **NO quiere modelos locales.** Nada de Ollama, LM Studio, KoboldCpp,\n  llama.cpp ni ComfyUI. Solo servicios alojados. No lo…",
+      "lastProgressAt": 1788789386366,
+      "tokens": 91417,
+      "toolCalls": 0,
+      "durationMs": 73592,
+      "resultPreview": "Ninguna de las tres cumple los tres criterios duros con certeza: la que mejor acredita el acceso gratis sin tarjeta no tiene política que permita el contenido (solo silencio), y la única política verificada que sí lo permite está en un proveedor cuyo acceso gratis sin tarjeta no se ha podido confirmar. Lo que sigue es orden de prueba, no una vía garantizada.\n\n## 1. Groq — la primera a probar (vere…"
+    }
+  ],
+  "totalTokens": 624104,
+  "totalToolCalls": 212
+}
