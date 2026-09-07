@@ -1,8 +1,14 @@
 # Luxy — acciones locales de Daniel
 
-## LA-044 — Mistral: cuota cero, y hay que escribir a su soporte
+## LA-044 — Mistral: descartado. La API nunca estuvo activada
 
-Estado: `pending` — abierta el 2026-09-07. **Luxy no tiene nada que arreglar aquí.**
+Estado: **`cerrada` — 2026-09-07. Decision de Daniel: no se usa Mistral.**
+
+La causa era `Suscripcion -> API Pay-as-you-go`, **sin activar**. Las claves
+autentican porque son de la organizacion, y `/v1/models` responde porque listar
+el catalogo no consume plan; la inferencia recibia `limit: 0` porque no habia
+plan de API. El boton existe, incluye 10 $/mes de uso, **y exige tarjeta**.
+Daniel decide no ponerla, asi que Mistral queda fuera como proveedor de vision.
 
 Dos días persiguiendo un 429 de Mistral. Queda cerrado con una prueba hecha
 fuera de Luxy, desde PowerShell:

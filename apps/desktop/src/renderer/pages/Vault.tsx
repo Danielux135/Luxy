@@ -2301,8 +2301,15 @@ function VisionBench({
   /** el de la conversación, sólo como punto de partida razonable */
   conversationProvider: string;
 }): JSX.Element {
-  const [provider, setProvider] = useState<string | null>(null);
-  const [model, setModel] = useState('');
+  // vive en el compositor y no aquí: el mismo modelo que se prueba es el que
+  // usa después «Describir con IA» sobre los archivos guardados, y una
+  // preferencia que se pierde al cambiar de panel no sirve para eso
+  const provider = vault.composer.visionProvider;
+  const model = vault.composer.visionModel ?? '';
+  const setProvider = (value: string): void =>
+    vault.setComposer({ visionProvider: value, visionModel: null });
+  const setModel = (value: string): void =>
+    vault.setComposer({ visionModel: value.length === 0 ? null : value });
   const elegido = provider ?? conversationProvider;
   const familyModels = modelsForProvider(models, elegido) as ModelDefinition[];
   // un modelo de otra familia no existe para este proveedor: mandarlo gasta la
@@ -2695,7 +2702,13 @@ function MediaViewer({
   const isImage = item.mimeType.startsWith('image/');
   const caption = item.caption ?? '';
   const editing = draft !== null;
-  const chosen = model.length === 0 ? provider : model;
+  // quién mira, que no tiene por qué ser quién conversa. Sin elegir en el banco
+  // de pruebas se usa el de la conversación, como toda la vida
+  const vision = {
+    provider: vault.composer.visionProvider ?? provider,
+    model: vault.composer.visionModel ?? (model.length === 0 ? null : model),
+  };
+  const chosen = vision.model ?? vision.provider;
 
   return (
     <div
@@ -2791,8 +2804,11 @@ function MediaViewer({
                   void vault
                     .describeMedia({
                       mediaId: item.mediaId,
-                      provider,
-                      model: model.length === 0 ? null : model,
+                      // el de VISIÓN, no el de la conversación: elegir un modelo
+                      // con vista para describir una foto no puede cambiar quién
+                      // encarna al personaje. Sin elegir ninguno, el de siempre
+                      provider: vision.provider,
+                      model: vision.model,
                       projectAlias: project,
                     })
                     // con descripcion ya esta guardada y la lista se recarga sola:
@@ -2809,9 +2825,13 @@ function MediaViewer({
         {isImage && !editing && (
           <p className="field__hint">
             Describir gasta una llamada a <Tag tone="idle">{chosen}</Tag> y necesita
-            un modelo que sepa <strong>mirar</strong> imágenes: no todos los de la
-            lista lo son. Lo que escriba se puede corregir a mano, porque es
-            exactamente lo que lee después el personaje.
+            un modelo que sepa <strong>mirar</strong> imágenes. Se elige abajo, en{' '}
+            <strong>Probar la vista de un modelo</strong>, y es independiente del
+            de la conversación: cambiarlo no toca a tu personaje.
+            {vault.composer.visionProvider === null &&
+              ' Sin elegir ninguno se usa el de la conversación.'}{' '}
+            Lo que escriba se puede corregir a mano, porque es exactamente lo que
+            lee después el personaje.
           </p>
         )}
 

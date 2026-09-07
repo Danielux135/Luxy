@@ -160,6 +160,18 @@ export interface VaultComposer {
   characterDescription: string | null;
   /** pie de foto que acompañara al proximo adjunto */
   caption: string;
+  /**
+   * quién MIRA las imágenes, aparte de quién lleva la conversación.
+   *
+   * Son dos cosas distintas y compartían selector: elegir un modelo con vista
+   * para describir una foto cambiaba también quién encarna al personaje. Con
+   * esto, Lía sigue en su modelo y las fotos las mira otro.
+   *
+   * `null` significa «el mismo de la conversación», que es el comportamiento de
+   * siempre y sigue siendo un valor legítimo.
+   */
+  visionProvider: string | null;
+  visionModel: string | null;
 }
 
 /**
@@ -174,7 +186,10 @@ const EMPTY_DRAFT = {
   characterId: null,
   characterDescription: null,
   caption: '',
-} satisfies Omit<VaultComposer, 'provider' | 'model' | 'project'>;
+} satisfies Omit<
+  VaultComposer,
+  'provider' | 'model' | 'project' | 'visionProvider' | 'visionModel'
+>;
 
 export interface VaultController {
   status: VaultStatusView;
@@ -490,6 +505,10 @@ export function useVault(): VaultController {
     provider: null,
     model: null,
     project: null,
+    // quien mira las imagenes es una preferencia de la herramienta, no
+    // de la conversacion: no se borra al cambiar de hilo
+    visionProvider: null,
+    visionModel: null,
     ...EMPTY_DRAFT,
   });
   const [media, setMedia] = useState<PrivateMediaItem[]>([]);
