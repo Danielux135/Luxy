@@ -4,7 +4,7 @@
 // pantalla no muestra NADA de su contenido. Ni titulos, ni recuentos, ni "tu
 // ultima conversacion fue el martes". No es que se oculte: es que el renderer
 // no lo tiene, porque el proceso principal no puede descifrarlo sin la llave.
-import { useEffect, useMemo, useState, type JSX } from 'react';
+import { useEffect, useMemo, useRef, useState, type JSX } from 'react';
 import { Empty, Explica, Field, Notice, Panel, Readout, Skeleton, Tag } from '../ui/primitives.js';
 import {
   describeWhen,
@@ -29,6 +29,7 @@ import {
   describeConversationMemoryStatus,
   describeHordeCharacter,
   hordeRecipeSchema,
+  mixedBaselineWarning,
   recipeDefaultsFor,
   type HordeBaseline,
   type HordeLora,
@@ -1269,10 +1270,13 @@ function CharacterRow({
       )}
 
       {/* corregir el aspecto del horde es gratis y se puede repetir; el de
-          Xavira lo decide el al crearlo y despues no se puede cambiar */}
+          Xavira lo decide el al crearlo y despues no se puede cambiar.
+          Y se DICE de cual: un personaje con las dos identidades tiene dos
+          aspectos, el formulario de Xavira esta justo debajo en la misma
+          pantalla, y «Editar su aspecto» a secas se leia como el de Xavira */}
       {character.horde !== null && (
         <button className="btn btn--quiet" onClick={onEditHorde}>
-          Editar su aspecto
+          Editar su aspecto en AI Horde
         </button>
       )}
 
@@ -1511,7 +1515,7 @@ function HordeCharacterForm({
 
       <Field
         label={`Modelos (hasta ${HORDE_MAX_MODELS})`}
-        hint="Marcar varios suma sus workers y acorta la espera; no cuesta kudos de más."
+        hint="Marcar varios de la MISMA familia suma sus workers y acorta la espera; no cuesta kudos de más."
         explica="modeloImagen"
       >
         <div className="vault-models">
@@ -1543,6 +1547,13 @@ function HordeCharacterForm({
           })}
         </div>
       </Field>
+
+      {/* mezclar familias es el fallo que la propia pantalla invitaba a cometer
+          —«marcar varios acorta la espera»— y su sintoma no se parece a un
+          fallo: sale una imagen, pero de otra persona */}
+      {mixedBaselineWarning(models) !== null && (
+        <Notice tone="warn">{mixedBaselineWarning(models)}</Notice>
+      )}
 
       <div className="row">
         <button
@@ -1894,6 +1905,18 @@ function GeneratePanel({
   // El desplegable va controlado porque «Editar» tiene que abrirlo desde fuera
   const [hordeEditing, setHordeEditing] = useState<VaultCharacterView | null>(null);
   const [hordeFormOpen, setHordeFormOpen] = useState(false);
+  // el formulario del horde vive ENCIMA de la lista de personajes, y su boton
+  // «Editar su aspecto» esta DENTRO de la lista. Pulsarlo lo desplegaba fuera
+  // de la pantalla, hacia arriba: no pasaba nada donde estabas mirando. Daniel
+  // bajo buscandolo y se encontro el formulario de Xavira, que si esta debajo,
+  // y creyo que el boton llevaba al proveedor equivocado
+  const hordeForm = useRef<HTMLDetailsElement | null>(null);
+  const [scrollToHorde, setScrollToHorde] = useState(false);
+  useEffect(() => {
+    if (!scrollToHorde) return;
+    setScrollToHorde(false);
+    hordeForm.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [scrollToHorde]);
   // cadena vacia = empezar de cero, que es lo normal
   const [fromMediaId, setFromMediaId] = useState('');
 
@@ -1963,6 +1986,7 @@ function GeneratePanel({
       </details>
 
       <details
+        ref={hordeForm}
         className="vault-generate"
         open={hordeFormOpen}
         onToggle={(event) => setHordeFormOpen(event.currentTarget.open)}
@@ -2038,6 +2062,9 @@ function GeneratePanel({
                 onEditHorde={() => {
                   setHordeEditing(character);
                   setHordeFormOpen(true);
+                  // y llevar la vista hasta el: se despliega mas arriba de
+                  // donde esta el boton, asi que sin esto no se ve nada
+                  setScrollToHorde(true);
                 }}
               />
             ))}

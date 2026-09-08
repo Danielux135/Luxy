@@ -357,3 +357,39 @@ export function imagePromptStyleFor(
   // el unico modelo de anime del proveedor de pago; el resto son realistas
   return options.xaviraModelId === 'anime-pure-v1' ? 'tags' : 'prose';
 }
+
+/** la familia de un modelo conocido, por nombre EXACTO. `null` si no esta en las listas */
+export function baselineOf(model: string): HordeBaseline | null {
+  for (const entry of [...HORDE_ANIME_MODELS, ...HORDE_REALISTIC_MODELS]) {
+    if (entry.name === model) return entry.baseline;
+  }
+  return null;
+}
+
+/**
+ * aviso cuando los modelos elegidos NO son de la misma familia.
+ *
+ * PASO DE VERDAD, y produjo una imagen que no se parecia en nada al personaje.
+ * Daniel marco cuatro modelos —dos SDXL y dos SD1— porque la propia pantalla
+ * anima a marcar varios: «suma sus workers y acorta la espera». Lo que no decia
+ * es que la receta tiene UN tamaño y UN clipSkip, y que esos valores solo
+ * pueden estar bien para una familia.
+ *
+ * Marcar varios sigue siendo buena idea: es gratis y acorta la cola. Pero
+ * dentro de la misma familia. Repartir el trabajo entre un SDXL y un SD1
+ * significa que la mitad de las veces se le pide a un modelo entrenado a 512
+ * que dibuje a 1024, y eso devuelve cuerpos deformes, personajes duplicados y
+ * un aspecto que no es el del personaje.
+ *
+ * Es un AVISO y no un bloqueo: quien sepa lo que hace puede querer mezclar, y
+ * la lista de modelos del horde cambia sin avisarnos.
+ */
+export function mixedBaselineWarning(models: readonly string[]): string | null {
+  const familias = new Set<HordeBaseline>();
+  for (const model of models) {
+    const baseline = baselineOf(model);
+    if (baseline !== null) familias.add(baseline);
+  }
+  if (familias.size < 2) return null;
+  return 'Has marcado modelos SDXL y SD1 a la vez, y la receta solo tiene un tamaño y un clipSkip: no pueden estar bien para los dos. Cuando al horde le toque un SD1 con medidas de SDXL, devolvera cuerpos deformes y una cara que no es la suya. Marca varios de la MISMA familia: suma sus workers igual.';
+}

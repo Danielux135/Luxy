@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  baselineOf,
+  mixedBaselineWarning,
   buildHordeRequest,
   describeHordeCharacter,
   HORDE_ANIME_MODELS,
@@ -210,5 +212,49 @@ describe('catalogos de modelos', () => {
     const names = [...HORDE_ANIME_MODELS, ...HORDE_REALISTIC_MODELS].map((model) => model.name);
     expect(new Set(names).size).toBe(names.length);
     for (const name of names) expect(name).toBe(name.trim());
+  });
+});
+
+// PASO DE VERDAD el 2026-09-08. Daniel marco cuatro modelos —WAI-NSFW-illustrious-SDXL,
+// WAI-ANI-NSFW-PONYXL, Grapefruit Hentai y Hentai Diffusion— porque la pantalla anima a
+// marcar varios: «suma sus workers y acorta la espera». Los dos ultimos son SD1 y los dos
+// primeros SDXL. La imagen que volvio no se parecia en nada a su personaje.
+describe('mezclar familias de modelos', () => {
+  it('dos SDXL no son una mezcla', () => {
+    expect(mixedBaselineWarning(['WAI-NSFW-illustrious-SDXL', 'WAI-ANI-NSFW-PONYXL'])).toBeNull();
+  });
+
+  it('dos SD1 tampoco', () => {
+    expect(mixedBaselineWarning(['Grapefruit Hentai', 'Hentai Diffusion'])).toBeNull();
+  });
+
+  it('la seleccion REAL de Daniel avisa', () => {
+    const aviso = mixedBaselineWarning([
+      'WAI-NSFW-illustrious-SDXL',
+      'WAI-ANI-NSFW-PONYXL',
+      'Grapefruit Hentai',
+      'Hentai Diffusion',
+    ]);
+    expect(aviso).not.toBeNull();
+    expect(aviso).toContain('SDXL');
+    expect(aviso).toContain('SD1');
+  });
+
+  it('un solo modelo nunca avisa', () => {
+    expect(mixedBaselineWarning(['Grapefruit Hentai'])).toBeNull();
+    expect(mixedBaselineWarning([])).toBeNull();
+  });
+
+  it('un nombre desconocido no inventa familia ni avisa por su cuenta', () => {
+    // la lista del horde cambia sin avisarnos: lo que no conocemos se calla en
+    // vez de afirmar que mezcla
+    expect(mixedBaselineWarning(['Modelo Que No Existe'])).toBeNull();
+    expect(baselineOf('Modelo Que No Existe')).toBeNull();
+  });
+
+  it('conoce la familia de los modelos de las dos listas', () => {
+    expect(baselineOf('WAI-NSFW-illustrious-SDXL')).toBe('sdxl');
+    expect(baselineOf('Grapefruit Hentai')).toBe('sd1');
+    expect(baselineOf('Realistic Vision')).toBe('sd1');
   });
 });
