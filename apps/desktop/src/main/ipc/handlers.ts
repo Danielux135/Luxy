@@ -150,6 +150,7 @@ import {
   type HordeQueueProgress,
 } from '../../shared/horde-progress.js';
 import { IPC_EVENT } from '../../shared/channels.js';
+import { mergeLogLines } from '../../shared/log-merge.js';
 import {
   IMAGE_EXTENSIONS,
   VIDEO_EXTENSIONS,
@@ -277,15 +278,24 @@ function handle<S extends z.ZodTypeAny, T>(
   });
 }
 
-/** ultimas lineas del log. ya salen redactadas del logger del agente */
+/**
+ * ultimas lineas del log. ya salen redactadas de los dos loggers.
+ *
+ * Son DOS archivos y se leen juntos: `luxy.log` lo escribe el agente y
+ * `studio.log` el proceso principal. Son las dos mitades de la misma historia
+ * —Studio decide si un turno puede ofrecer imagenes, el agente cuenta como
+ * termino la llamada— y separarlos fue justo lo que impidio diagnosticar un
+ * fallo hoy.
+ */
 function tailLogFile(directory: string, count: number): string[] {
-  const file = join(directory, 'luxy.log');
-  if (!existsSync(file)) return [];
-  const content = readFileSync(file, 'utf8');
-  return content
-    .split(/\r?\n/)
-    .filter((line) => line.length > 0)
-    .slice(-count);
+  const leer = (name: string): string[] => {
+    const file = join(directory, name);
+    if (!existsSync(file)) return [];
+    return readFileSync(file, 'utf8')
+      .split(/\r?\n/)
+      .filter((line) => line.length > 0);
+  };
+  return mergeLogLines([leer('luxy.log'), leer('studio.log')], count);
 }
 
 /**
@@ -2487,6 +2497,13 @@ export function registerIpcHandlers(context: HandlerContext): void {
       // tarde: un personaje fijado que la boveda no conoce
       personajeEnBoveda: character !== undefined,
       puedeGenerar: canGenerateImage,
+      // el MOTIVO, no solo el booleano: los tres se arreglan en sitios
+      // distintos —el identificador, la lista de personajes, o la clave— y
+      // saber cual era habria ahorrado dos diagnosticos equivocados
+      motivoBloqueo: imageBlock,
+      // y de quien seria la clave que falta: un personaje del horde sin clave
+      // del horde no se distingue de uno de Xavira sin la suya
+      proveedorImagen: imageProvider,
       imagenesDisponibles: existingImages.length,
     });
 

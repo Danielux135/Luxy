@@ -2267,3 +2267,46 @@ Dos consumidores, con reglas distintas a propósito:
 
 El canal es el patrón de `vaultLocked`, que ya existía; lo único nuevo es el
 canal y su carga.
+
+## D-080 — el proceso principal también deja rastro, y los dos logs se leen juntos
+
+Fecha: 2026-09-08
+
+Estado: aceptada, implementada
+
+`context.log` del proceso principal era esto:
+
+```ts
+if (isDev) console.log(`[luxy] ${message}`, fields);
+```
+
+**No escribía en ningún sitio.** `electron.exe` es un binario de subsistema
+gráfico y no hereda consola, así que ni siquiera en desarrollo se veía. Y todo
+el camino de imágenes de la bóveda vive en el proceso principal.
+
+Lo que costó: **dos diagnósticos equivocados seguidos** sobre por qué un
+personaje no mandaba una foto. La línea que lo habría resuelto en diez segundos
+—si el turno podía ofrecer imágenes y cuántas había— se calculaba y se perdía.
+Es el mismo patrón que `D-073` y `D-079`: el dato existe y no llega a nadie.
+
+Ahora hay `studio.log`, al lado de `luxy.log`, en la misma carpeta.
+
+**Compartir carpeta era la parte peligrosa.** El nombre estaba cableado en tres
+sitios que tenían que moverse juntos —el archivo, el nombre al rotar y el patrón
+de limpieza— y ese último **borra**. Cambiar sólo el primero habría dejado al
+logger de Studio llevándose por delante los archivos rotados del agente, que es
+justo donde se mira cuando algo falla. El nombre base es un parámetro y los tres
+derivan de él, con el patrón escapado. Hay una prueba que lo fija.
+
+**Y se leen juntos.** `tailLogFile` funde los dos por marca de tiempo en vez de
+enseñar uno. Son las dos mitades de la misma historia: Studio decide si el turno
+puede ofrecer imágenes, el agente cuenta cómo terminó la llamada. Además los dos
+mensajes se parecen tanto —«turno privado» y «turno privado terminado»— que ya
+indujeron a error una vez; en orden se leen como lo que son.
+
+Una línea sin marca de tiempo **no se descarta**: se queda pegada detrás de la
+última que sí la tenía. Es el ruido que explica un fallo, y tirarlo por no
+encajar en el formato sería perder lo único que quedaba de una salida rara.
+
+La línea del turno lleva ahora el **motivo** del bloqueo y el **proveedor**, no
+sólo el booleano: los tres motivos se arreglan en sitios distintos.

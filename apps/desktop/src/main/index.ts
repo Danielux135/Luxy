@@ -8,6 +8,7 @@ import { shouldShowDesktopNotification } from './notification-policy.js';
 import { join } from 'node:path';
 import { resolveStoredConfig } from '@luxy/shared';
 import { AgentController, resolveAgentEntry } from './agent-controller.js';
+import { AgentLogger } from '@luxy/agent/dist/logger.js';
 import { ConfigStore, configFilePathFor } from './config-store.js';
 import { MACHINE_TOKEN_SECRET, SecretStore, createSafeStorageBackend } from './secure-storage.js';
 import { VaultService } from './vault/vault-service.js';
@@ -173,10 +174,29 @@ async function reconfigureAgent(): Promise<void> {
   await controller.configure(resolved, secrets);
 }
 
+/**
+ * el log del proceso principal, en su propio archivo.
+ *
+ * ANTES ESTO NO ESCRIBIA EN NINGUN SITIO: era un `console.log` bajo `isDev`, y
+ * electron.exe es un binario de subsistema grafico que no hereda consola, asi
+ * que ni en desarrollo se veia. Todo el camino de imagenes de la boveda vive
+ * aqui, en el proceso principal, y era invisible.
+ *
+ * Lo que costo: dos diagnosticos equivocados seguidos sobre por que un
+ * personaje no mandaba una foto. La linea que lo habria resuelto en diez
+ * segundos —si el turno podia ofrecer imagenes y cuantas habia— se calculaba y
+ * se perdia.
+ *
+ * Archivo APARTE del agente, con su propio nombre base: comparten carpeta, y el
+ * logger rota y BORRA los archivos que casan con su patron. Con el nombre
+ * cableado, uno se habria llevado por delante los rotados del otro.
+ */
+const studioLogger = new AgentLogger('info', logsDirectory(), isDev, 'studio');
+
 function log(message: string, fields: Record<string, unknown> = {}): void {
-  // en una app de Windows sin consola esto no se ve, pero sigue siendo util
-  // durante el desarrollo. el log real lo escribe el agente en su archivo.
-  if (isDev) console.log(`[luxy] ${message}`, fields);
+  // pasa por `redact()` dentro del logger, igual que el del agente: aqui solo
+  // se escriben contadores y decisiones, nunca contenido de la boveda
+  studioLogger.info(message, fields);
 }
 
 function notify(title: string, body: string): void {

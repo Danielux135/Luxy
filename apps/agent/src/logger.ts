@@ -17,17 +17,39 @@ export interface LogFields {
   [key: string]: unknown;
 }
 
+/** el nombre por defecto: es el log del AGENTE y asi se ha llamado siempre */
+export const DEFAULT_LOG_BASENAME = 'luxy';
+
+/** escapa lo que pueda tener significado dentro de una expresion regular */
+function escapeForRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 export class AgentLogger {
   private readonly file: string;
+  /** solo los rotados de ESTE log; nunca los de otro que comparta carpeta */
+  private readonly rotatedPattern: RegExp;
   private readonly recent: string[] = [];
 
   constructor(
     private readonly minLevel: LogLevel = 'info',
     private readonly directory: string = logsDir(),
     private readonly toConsole = true,
+    /**
+     * nombre base del archivo, sin extension.
+     *
+     * PARAMETRIZARLO NO ES GENERALIDAD GRATUITA: Studio necesita su propio log
+     * en la MISMA carpeta que el del agente, y el nombre estaba cableado en
+     * tres sitios que tenian que moverse juntos —el archivo, el nombre al rotar
+     * y el patron de limpieza—. Cambiar solo el primero dejaba a un logger
+     * borrando los archivos rotados del otro, porque la limpieza filtraba por
+     * `luxy-*.log` a secas y despues los BORRA.
+     */
+    private readonly baseName: string = DEFAULT_LOG_BASENAME,
   ) {
     mkdirSync(this.directory, { recursive: true });
-    this.file = join(this.directory, 'luxy.log');
+    this.file = join(this.directory, `${this.baseName}.log`);
+    this.rotatedPattern = new RegExp(`^${escapeForRegExp(this.baseName)}-.*\\.log$`);
   }
 
   private rotateIfNeeded(): void {
@@ -41,10 +63,10 @@ export class AgentLogger {
 
     try {
       const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-      renameSync(this.file, join(this.directory, `luxy-${stamp}.log`));
+      renameSync(this.file, join(this.directory, `${this.baseName}-${stamp}.log`));
       // se conservan solo los ultimos archivos rotados
       const rotated = readdirSync(this.directory)
-        .filter((name) => /^luxy-.*\.log$/.test(name))
+        .filter((name) => this.rotatedPattern.test(name))
         .sort()
         .reverse();
       for (const name of rotated.slice(MAX_LOG_FILES)) {
