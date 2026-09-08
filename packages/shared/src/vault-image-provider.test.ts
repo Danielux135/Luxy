@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   baselineOf,
   mixedBaselineWarning,
+  stripConflictingTraits,
   buildHordeRequest,
   describeHordeCharacter,
   HORDE_ANIME_MODELS,
@@ -256,5 +257,75 @@ describe('mezclar familias de modelos', () => {
     expect(baselineOf('WAI-NSFW-illustrious-SDXL')).toBe('sdxl');
     expect(baselineOf('Grapefruit Hentai')).toBe('sd1');
     expect(baselineOf('Realistic Vision')).toBe('sd1');
+  });
+});
+
+// PASO DE VERDAD, y es la razon de que esto sea codigo y no una linea de prompt.
+// Primero se le PIDIO al modelo que no describiera los rasgos fijos, rasgo por
+// rasgo y explicando el motivo. Siguio haciendolo: en una generacion POSTERIOR
+// al arreglo, la receta decia «light brown hair, blue eyes» y la escena «dark
+// hair wild across pillow». Salio morena.
+describe('la escena no puede contradecir el color de pelo ni de ojos', () => {
+  const ASPECTO = 'light brown hair, blue eyes, pale skin, slim body';
+
+  it('quita el color y CONSERVA la escena', () => {
+    // el pelo revuelto sobre la almohada es escena y es suyo; el color, no
+    expect(stripConflictingTraits('dark hair wild across pillow', ASPECTO)).toBe(
+      'hair wild across pillow',
+    );
+  });
+
+  it('tambien con varias palabras de color encadenadas', () => {
+    expect(stripConflictingTraits('long dark brown hair, arched back', ASPECTO)).toBe(
+      'long hair, arched back',
+    );
+  });
+
+  it('los ojos igual', () => {
+    expect(stripConflictingTraits('golden eyes locked on viewer', ASPECTO)).toBe(
+      'eyes locked on viewer',
+    );
+  });
+
+  it('lo que no es un rasgo NO se toca, aunque lleve un color', () => {
+    // este es el riesgo del arreglo: comerse media escena
+    const escena = 'tangled white sheets, warm golden bedroom light, red curtains';
+    expect(stripConflictingTraits(escena, ASPECTO)).toBe(escena);
+  });
+
+  it('si la receta no habla del pelo, la escena manda', () => {
+    // sin aspecto fijo que respetar, lo que diga la escena es la unica fuente
+    expect(stripConflictingTraits('dark hair wild across pillow', 'blue eyes')).toBe(
+      'dark hair wild across pillow',
+    );
+  });
+
+  it('no deja comas huerfanas ni dobles espacios', () => {
+    expect(stripConflictingTraits('naked, black hair, arched back', ASPECTO)).toBe(
+      'naked, hair, arched back',
+    );
+  });
+
+  it('la escena real de Daniel, entera', () => {
+    const escena =
+      'petite japanese woman 18, naked, legs wrapped around partner, arched back, ' +
+      'exposed neck, sweaty flushed skin, dark hair wild across pillow, ' +
+      'mouth open in pleasure, glistening eyes locked on viewer';
+    const limpia = stripConflictingTraits(escena, ASPECTO);
+    expect(limpia).toContain('hair wild across pillow');
+    expect(limpia).not.toContain('dark hair');
+    // «glistening» no es un color: la escena conserva lo suyo
+    expect(limpia).toContain('glistening eyes locked on viewer');
+  });
+
+  it('buildHordeRequest lo aplica de verdad', () => {
+    const peticion = buildHordeRequest({
+      recipe: recipe({ appearance: ASPECTO, outfit: '' }),
+      prompt: 'dark hair wild across pillow',
+      extraNegative: '',
+      shared: false,
+    });
+    expect(peticion.prompt).toContain('light brown hair');
+    expect(peticion.prompt).not.toContain('dark hair');
   });
 });

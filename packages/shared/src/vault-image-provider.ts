@@ -263,8 +263,14 @@ export function buildHordeRequest(input: {
 }): HordeImageRequest {
   const { recipe } = input;
   // la identidad va PRIMERO: los primeros tokens pesan mas, y si la escena se
-  // adelanta, el aspecto fijo se diluye y la cara deja de repetirse
-  const positive = [recipe.appearance, recipe.outfit, input.prompt]
+  // adelanta, el aspecto fijo se diluye y la cara deja de repetirse.
+  //
+  // Y ademas se le quita a la escena el color de pelo y de ojos, porque ir
+  // primero NO basta: comprobado con un prompt real, «light brown hair» delante
+  // y «dark hair» detras produjo una morena. Pedirselo al modelo tampoco basta;
+  // se le pidio y lo siguio haciendo.
+  const escena = stripConflictingTraits(input.prompt, recipe.appearance);
+  const positive = [recipe.appearance, recipe.outfit, escena]
     .map((part) => part.trim())
     .filter((part) => part.length > 0)
     .join(', ');
@@ -392,4 +398,79 @@ export function mixedBaselineWarning(models: readonly string[]): string | null {
   }
   if (familias.size < 2) return null;
   return 'Has marcado modelos SDXL y SD1 a la vez, y la receta solo tiene un tamaño y un clipSkip: no pueden estar bien para los dos. Cuando al horde le toque un SD1 con medidas de SDXL, devolvera cuerpos deformes y una cara que no es la suya. Marca varios de la MISMA familia: suma sus workers igual.';
+}
+
+/**
+ * colores de pelo y de ojos que un modelo escribe sin pensarlo.
+ *
+ * Lista cerrada y en ingles: el prompt del generador SIEMPRE va en ingles, y
+ * una lista corta que se queda corta es mejor que una expresion que se coma
+ * media escena.
+ */
+const TRAIT_COLORS = [
+  'black',
+  'dark',
+  'darker',
+  'blonde',
+  'blond',
+  'brown',
+  'light brown',
+  'dark brown',
+  'auburn',
+  'ginger',
+  'red',
+  'redhead',
+  'orange',
+  'silver',
+  'white',
+  'grey',
+  'gray',
+  'pink',
+  'blue',
+  'green',
+  'purple',
+  'violet',
+  'golden',
+  'amber',
+  'hazel',
+  'crimson',
+];
+
+/**
+ * quita de la ESCENA el color de pelo y de ojos cuando la receta ya lo dice.
+ *
+ * POR QUE EN CODIGO Y NO EN EL PROMPT, que es lo que se intento primero: se le
+ * pidio al modelo que no describiera los rasgos fijos, rasgo por rasgo y
+ * explicando el motivo, y lo siguió haciendo. Comprobado con el prompt guardado
+ * de una generacion POSTERIOR al arreglo: la receta decia «light brown hair,
+ * blue eyes» y la escena «dark hair wild across pillow». Salio morena.
+ *
+ * Los dos textos van al mismo prompt y compiten; gana cualquiera. Como la
+ * identidad es de la receta por definicion, el desempate no es una opinion y no
+ * hace falta que lo acierte un modelo.
+ *
+ * SE QUITA SOLO EL COLOR, no la frase: «dark hair wild across pillow» pasa a
+ * «hair wild across pillow». El pelo revuelto sobre la almohada es la escena y
+ * es suyo; de que color es, no.
+ *
+ * Y solo cuando la receta habla de eso: si el aspecto fijo no dice nada del
+ * pelo, lo que diga la escena es la unica fuente que hay y se respeta.
+ */
+export function stripConflictingTraits(scene: string, appearance: string): string {
+  const fijo = appearance.toLowerCase();
+  const partes = TRAIT_COLORS.map((color) => color.replace(/ /g, '\\s+')).join('|');
+  let salida = scene;
+  for (const rasgo of ['hair', 'eyes'] as const) {
+    if (!fijo.includes(rasgo)) continue;
+    // el color puede venir con varias palabras («light brown hair») y a veces
+    // encadenado («long dark messy hair»): se repite el grupo hasta el rasgo
+    const patron = new RegExp(`\\b(?:(?:${partes})\\s+)+(?=\\w*\\s*${rasgo}\\b)`, 'gi');
+    salida = salida.replace(patron, '');
+  }
+  // la limpieza puede dejar comas huerfanas o dobles espacios
+  return salida
+    .replace(/\s{2,}/g, ' ')
+    .replace(/,\s*,/g, ',')
+    .replace(/^\s*,\s*/, '')
+    .trim();
 }

@@ -155,6 +155,25 @@ con comillas dobles, lanzó vitest de verdad y dejó el shell colgado seis horas
 esperando a que alguien cerrase la sustitución. El delimitador entrecomillado es
 lo único que lo impide.
 
+**2 bis. El heredoc SE COME las barras invertidas, aunque el delimitador vaya
+entrecomillado.** Es del entorno, no de bash, y contradice lo que uno espera de
+un heredoc citado. Pasó dos veces el mismo día: `'\Luxy\config.json'` llegó
+como `'\Luxy\config.json'` y Node lo leyó como `LuxyconfigDjson`; y un
+`new RegExp('\b(?:...)\s+')` llegó como `'b(?:...)s+'`, que compila sin error
+y no casa con nada. Lo segundo es peor: **el archivo se guarda, el typecheck
+pasa y sólo lo caza una prueba.**
+
+Reglas prácticas:
+
+- para escribir CÓDIGO con barras invertidas —expresiones regulares, rutas de
+  Windows, secuencias de escape— usa las herramientas de edición de archivos, no
+  el heredoc;
+- si tiene que ser por consola, escribe el código sin barras: `path.join()` en
+  vez de rutas literales, y clases de carácter (`[ ]`, `[0-9]`) en vez de `\s` y
+  `\d`;
+- y comprueba lo escrito con un `grep` del archivo, no del comando: lo que
+  importa es lo que quedó en disco.
+
 **3. Rutas absolutas en `cd`.** El directorio de trabajo no persiste entre
 llamadas como uno espera, y un `cd` relativo falla sin más.
 
