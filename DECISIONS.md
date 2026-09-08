@@ -1949,3 +1949,45 @@ pruebas no guarda nada, así que esa descripción falsa **nunca llegó a la
 bóveda**. Y el panel de «lo que pensó antes de responder» —que existe porque
 Daniel pidió que no se tirara— es lo único que permitió entender la causa en vez
 de apretar el prompt contra un síntoma.
+
+## D-072 — un recorte nuestro se marca; el del modelo no se disfraza
+
+Fecha: 2026-09-08
+
+Estado: aceptada, implementada
+
+Dos veces seguidas Daniel leyó un texto que acababa a mitad de palabra y no
+pudo saber quién lo había cortado:
+
+- primero una descripción que nunca llegó a escribirse, porque el modelo agotó
+  su salida razonando (`solo-razono`);
+- después un razonamiento cortado en seco por nuestro tope de 4.000 caracteres:
+  *«se recorta lo que piensa»*.
+
+**Son dos averías distintas y se arreglan distinto**: una pide cambiar de modelo
+o darle más salida, la otra subir un número nuestro. Un corte sin marcar las
+vuelve indistinguibles, y manda a la solución equivocada.
+
+La regla, desde ahora: **si el corte es nuestro, se dice**. `trimWithMark`
+recorta por la última frontera de palabra y añade una marca, que cabe **dentro**
+del tope —si sobresaliera, el tope dejaría de serlo y el esquema de destino
+podría rechazar el registro entero—.
+
+Las dos marcas son distintas a propósito:
+
+| Texto | Marca | Por qué |
+| --- | --- | --- |
+| razonamiento | `[…recortado por Luxy: el razonamiento seguía]` | sólo se enseña, nunca se guarda: se puede explicar |
+| pie de foto | `…` | **se guarda y lo lee el personaje** como «lo que se ve en la imagen»: una nota nuestra ahí dentro la leería como contenido, que es `D-061` otra vez |
+
+Los dos topes suben, y por medición:
+
+- **pie de foto, 1.500 → 1.900.** La primera descripción buena de verdad ocupó
+  1.354, el 90% del tope. Una imagen con más cosas dentro lo pasaba, y pasarlo
+  significa guardar una frase cortada por la mitad como si fuera el archivo. El
+  esquema del medio admite 2.000: quedan 100 de margen.
+- **razonamiento, 4.000 → 20.000.** Un modelo que razona en voz alta redacta el
+  borrador entero de la descripción dentro del bloque y luego la escribe otra
+  vez: el razonamiento sale **más largo** que la respuesta, no más corto. Esto
+  no se archiva —vive en memoria, viaja por IPC una vez y se pinta en un
+  desplegable—, así que el tope sólo existe para que no crezca sin límite.

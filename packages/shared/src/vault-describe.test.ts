@@ -6,12 +6,15 @@
 // hechos. Es el fallo de `D-061`, y este modulo existe para no repetirlo.
 import { describe, it, expect } from 'vitest';
 import {
+  CAPTION_TRIM_MARK,
   MAX_CAPTION_CHARS,
   buildDescribePrompt,
   MAX_REASONING_CHARS,
+  REASONING_TRIM_MARK,
   parseDescribeResponse,
   saysNoImage,
   splitReasoning,
+  trimWithMark,
 } from './vault-describe.js';
 
 describe('lo que se le pide al describidor', () => {
@@ -132,6 +135,45 @@ describe('lo que vuelve del describidor', () => {
     const { caption, failure } = parseDescribeResponse(largo);
     expect(failure).toBeNull();
     expect(caption).toHaveLength(MAX_CAPTION_CHARS);
+    expect(caption?.endsWith(CAPTION_TRIM_MARK)).toBe(true);
+  });
+
+  it('el pie de foto SOLO se marca con puntos: lo lee el personaje como contenido', () => {
+    // una nota nuestra dentro del pie de foto —«recortado por Luxy»— acabaria
+    // leida como algo que se ve en la imagen. Es `D-061` otra vez
+    const { caption } = parseDescribeResponse('palabra '.repeat(MAX_CAPTION_CHARS));
+    expect(caption).not.toContain('Luxy');
+    expect(caption).not.toContain('recortado');
+  });
+
+  it('cabe entero y no se le añade nada', () => {
+    expect(parseDescribeResponse('Un gato sobre una piedra.').caption).toBe(
+      'Un gato sobre una piedra.',
+    );
+  });
+});
+
+describe('recortar diciendo quien recorto', () => {
+  it('lo que cabe se devuelve tal cual', () => {
+    expect(trimWithMark('corto', 10, '…')).toBe('corto');
+  });
+
+  it('la marca cabe dentro del tope, no se le suma', () => {
+    // si sobresaliera, el tope dejaria de serlo y el esquema de destino podria
+    // rechazar el registro entero por pasarse de largo
+    expect(trimWithMark('x'.repeat(50), 10, '[mas]')).toHaveLength(10);
+  });
+
+  it('corta por la frontera de palabra', () => {
+    expect(trimWithMark('uno dos tres cuatro cinco', 16, '…')).toBe('uno dos tres…');
+  });
+
+  it('sin espacios cerca del final corta en seco antes que devolver casi nada', () => {
+    // un espacio suelto al principio y despues una cadena continua dejaria un
+    // resultado inservible si se respetase siempre la frontera de palabra
+    const r = trimWithMark(`a ${'x'.repeat(200)}`, 50, '…');
+    expect(r).toHaveLength(50);
+    expect(r).toContain('xxx');
   });
 });
 
@@ -240,7 +282,24 @@ describe('el modelo que piensa en voz alta', () => {
 
   it('el razonamiento se recorta: es para leerlo, no para archivarlo', () => {
     const largo = `<think>${'x'.repeat(MAX_REASONING_CHARS + 500)}</think>Un gato.`;
+    // el tope sigue siendo un tope: la marca cabe DENTRO, no se le suma
     expect(parseDescribeResponse(largo).reasoning).toHaveLength(MAX_REASONING_CHARS);
+  });
+
+  it('un recorte NUESTRO se marca, para no confundirlo con un modelo cortado', () => {
+    // es la averia que Daniel vio dos veces: un texto que acaba a mitad de
+    // palabra no dice quien lo corto, y las dos causas se arreglan distinto
+    const largo = `<think>${'palabra '.repeat(MAX_REASONING_CHARS)}</think>Un gato.`;
+    const { reasoning } = parseDescribeResponse(largo);
+    expect(reasoning).toContain('recortado por Luxy');
+    // y corta por la frontera de palabra: la ultima que queda esta entera
+    expect(reasoning?.replace(REASONING_TRIM_MARK, '')).toMatch(/palabra$/);
+  });
+
+  it('lo que cabe entero no lleva marca ninguna', () => {
+    // la marca es informacion sobre un corte: sin corte, seria ruido
+    const r = parseDescribeResponse('<think>lo justo</think>Un gato.');
+    expect(r.reasoning).toBe('lo justo');
   });
 
   it('splitReasoning permite clasificar la negativa sobre lo VISIBLE', () => {

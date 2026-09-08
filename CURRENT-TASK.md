@@ -1,5 +1,40 @@
 # Luxy — tarea activa
 
+## F16-DESCRIBIDOR-001 — el describidor de imagenes de la boveda
+
+Estado: **`done` en codigo, `pendiente de prueba real` — Claude, 2026-09-08.**
+
+Siete arreglos seguidos sobre el mismo camino: pedirle a un modelo con vista que
+escriba el pie de foto de una imagen guardada. Detalle commit a commit en
+`CHANGELOG-WORK.md`, entrada del 2026-09-08 11:05.
+
+Lo ultimo, `D-072`: un recorte nuestro se marca y corta por frontera de palabra;
+los topes suben a 1.900 (pie de foto) y 20.000 (razonamiento). `npm run check`
+exit 0, 2.523 pasadas.
+
+### Lo que falta, y es de Daniel
+
+1. **Volver a describir la misma foto** y comprobar que el razonamiento llega
+   entero, con la marca al final si se recorta.
+2. **Probar una foto SIN personas.** Es el caso que `788080a` arreglo —el prompt
+   daba por hecho que habia alguien— y no se ha probado ni una vez.
+3. **Elegir `qwen/qwen3.6-27b` a mano** en el banco. `llama-3.3-70b-versatile`
+   no esta en el catalogo de Groq; el modelo por defecto de la conexion es el
+   que se enredaba razonando.
+
+### Bloqueado, no olvidado
+
+Redimensionar la imagen antes de enviarla —la causa de fondo del troceado que
+describe `D-071`— sigue sin poderse hacer: `nativeImage` no decodifica webp
+(`D-069`).
+
+### Deuda del entorno
+
+Tres claves de API quedaron expuestas en la conversacion (Mistral x2, Groq x1).
+Daniel dijo que las rotaria. La rama `copia-antes-de-limpiar` se puede borrar
+cuando de por bueno el reescrito de historial. Hay 41 commits sin subir.
+
+
 ## BUG-CATALOGO-ORIGEN-001 — el catalogo solo sabia preguntarle a una conexion
 
 Estado: **`done` — Claude, 2026-09-04.** Falta probarlo contra Mistral: `LA-040`.

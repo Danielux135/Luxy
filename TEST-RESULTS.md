@@ -1,5 +1,33 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-08 — F16-DESCRIBIDOR-001
+
+`npm run check` exit 0.
+
+```
+Test Files  141 passed (141)
+     Tests   2523 passed | 12 skipped (2535)
+```
+
+Ocho nuevas en `vault-describe.test.ts`. Cuatro cubren `trimWithMark` sola y
+cuatro el efecto en el describidor. Las dos que importan:
+
+- **la marca cabe DENTRO del tope**, no se le suma. Si sobresaliera, el tope
+  dejaria de serlo y el esquema del medio —2.000 caracteres— podria rechazar el
+  registro entero por pasarse de largo.
+- **el pie de foto se marca SOLO con puntos suspensivos**, y se comprueba que no
+  contiene «Luxy» ni «recortado». Ese texto se guarda y lo lee despues el
+  personaje como «lo que se ve en la imagen»: una nota nuestra ahi dentro la
+  leeria como contenido, que es `D-061` otra vez. El razonamiento si lleva
+  marca explicita, porque solo se enseña y nunca se guarda.
+
+Tambien se fija el caso degenerado: un texto casi sin espacios —un base64— no
+puede quedar reducido a nada por respetar la frontera de palabra. Se sacrifica
+como mucho la mitad de lo que cabia; pasado eso, corte en seco.
+
+Lo que estas pruebas NO cubren, y hay que decirlo: que el razonamiento llegue
+entero de verdad. Eso depende de un modelo real y solo se ve probando.
+
 ### 2026-09-04 — F15-BANCO-VISION-001
 
 `npm run check` exit 0.

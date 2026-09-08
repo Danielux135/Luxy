@@ -22,15 +22,23 @@
  *
  * Eran 600, pensados para «una o dos frases». Daniel pidio que se explayara:
  * con el detalle que ahora se le pide —encuadre, rasgos, ropa, postura,
- * escenario, luz y estilo— una descripcion honesta de una imagen con varias
- * viñetas no cabe en 600 caracteres, y recortarla la dejaba a mitad de frase.
+ * escenario, luz y estilo— una descripcion honesta no cabe en 600 caracteres,
+ * y recortarla la dejaba a mitad de frase.
  *
- * Sigue habiendo tope, y por debajo de los 2.000 que admite el esquema del
- * medio: un pie de foto que se dispara no es mas informacion, es un modelo
- * rellenando. El recorte es la ultima red, no el criterio: quien evita el
- * relleno es el prompt, que manda OMITIR lo que no se distingue.
+ * De 1.500 a 1.900 por MEDICION, no por si acaso: la primera descripcion buena
+ * de verdad —una ilustracion de una figura y su habitacion— ocupo 1.354, el 90%
+ * del tope. Una imagen con mas cosas dentro lo pasaba, y pasarlo significa
+ * guardar una frase cortada a la mitad como si fuera lo que se ve en el
+ * archivo. El limite del esquema del medio son 2.000: quedan 100 de margen.
+ *
+ * Sigue habiendo tope: un pie de foto que se dispara no es mas informacion, es
+ * un modelo rellenando. El recorte es la ultima red, no el criterio: quien
+ * evita el relleno es el prompt, que manda OMITIR lo que no se distingue.
  */
-export const MAX_CAPTION_CHARS = 1500;
+export const MAX_CAPTION_CHARS = 1900;
+
+/** lo que se añade a un pie de foto recortado: avisa sin afirmar nada */
+export const CAPTION_TRIM_MARK = '…';
 
 /**
  * que se le pide al describidor.
@@ -148,8 +156,49 @@ export interface DescribeResult {
   reasoning: string | null;
 }
 
-/** tope de lo que se conserva del razonamiento: es para leerlo, no para archivarlo */
-export const MAX_REASONING_CHARS = 4000;
+/**
+ * tope de lo que se conserva del razonamiento: es para leerlo, no para archivarlo.
+ *
+ * Eran 4.000 y se quedaban cortos en el caso que MAS importa. Un modelo que
+ * razona en voz alta redacta el borrador entero de la descripcion dentro del
+ * bloque y luego la escribe otra vez: el razonamiento acaba siendo mas largo
+ * que la respuesta, no mas corto. Con 4.000 se cortaba justo por el borrador,
+ * que es la parte que explica de donde sale cada frase.
+ *
+ * Se sube a 20.000 porque esto NO se archiva: vive en memoria, viaja por IPC
+ * una vez y se pinta en un desplegable. El tope existe para que un razonamiento
+ * desbocado no crezca sin limite, no para ahorrar sitio.
+ */
+export const MAX_REASONING_CHARS = 20000;
+
+/** lo que se añade a un razonamiento recortado, para que se sepa quien lo corto */
+export const REASONING_TRIM_MARK = '\n\n[…recortado por Luxy: el razonamiento seguía]';
+
+/**
+ * recorta marcando el corte, y por la ultima frontera de palabra.
+ *
+ * La marca no es decoracion. Un texto cortado en seco es INDISTINGUIBLE de un
+ * modelo que se quedo sin espacio de salida, y son dos averias distintas que se
+ * arreglan distinto: una pide subir un tope nuestro, la otra cambiar de modelo
+ * o darle mas salida. Paso de verdad las dos veces —primero con una descripcion
+ * que nunca llego a escribirse, despues con un razonamiento truncado que
+ * parecia haberse cortado solo— asi que la regla es: si el corte es nuestro, se
+ * dice.
+ *
+ * La marca cabe DENTRO del tope; si sobresaliera, el tope no seria un tope.
+ */
+export function trimWithMark(text: string, limit: number, mark: string): string {
+  if (text.length <= limit) return text;
+  const room = limit - mark.length;
+  const cortado = text.slice(0, room);
+  // por la ultima frontera de palabra, para no partir una a la mitad, pero sin
+  // tirar mas de la mitad de lo que cabia: un texto casi sin espacios —una
+  // cadena larga de datos, un base64— dejaria si no un resultado inservible, y
+  // ahi vale mas un corte feo que un resultado vacio
+  const espacio = cortado.lastIndexOf(' ');
+  const util = espacio >= room / 2 ? cortado.slice(0, espacio) : cortado;
+  return util.trimEnd() + mark;
+}
 
 /**
  * bloques de razonamiento en voz alta, con las etiquetas que se ven de verdad.
@@ -178,7 +227,10 @@ export function splitReasoning(text: string): { visible: string; reasoning: stri
   const reasoning = trozos.filter((t) => t.length > 0).join('\n\n');
   return {
     visible,
-    reasoning: reasoning.length === 0 ? null : reasoning.slice(0, MAX_REASONING_CHARS),
+    reasoning:
+      reasoning.length === 0
+        ? null
+        : trimWithMark(reasoning, MAX_REASONING_CHARS, REASONING_TRIM_MARK),
   };
 }
 
@@ -221,5 +273,13 @@ export function parseDescribeResponse(text: string, refused = false): DescribeRe
   // una respuesta que dice que no hay imagen NO es un pie de foto, por muy bien
   // escrita que este. Guardarla haria creer al personaje que la foto ES esa frase
   if (saysNoImage(limpio)) return { caption: null, failure: 'sin-imagen', reasoning };
-  return { caption: limpio.slice(0, MAX_CAPTION_CHARS), failure: null, reasoning };
+  // el pie de foto se recorta con puntos suspensivos y nada mas. Este texto SI
+  // se guarda y lo lee despues el personaje como «lo que se ve en la imagen»:
+  // una nota nuestra metida ahi la leeria como contenido. Los puntos avisan de
+  // que la descripcion no termino sin afirmar nada falso sobre el archivo
+  return {
+    caption: trimWithMark(limpio, MAX_CAPTION_CHARS, CAPTION_TRIM_MARK),
+    failure: null,
+    reasoning,
+  };
 }

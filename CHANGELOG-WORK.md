@@ -1,5 +1,52 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-09-08 11:05 — Claude — F16-DESCRIBIDOR-001
+
+Hilo entero del describidor de imagenes de la boveda, seis commits antes de
+este (`a0c390e`..`a79d528`) y este. Todo salio de probar de verdad con Daniel,
+no de auditar codigo: cada arreglo lo abrio un fallo que vio en pantalla.
+
+- **`a0c390e` — lo que el modelo piensa se separa del pie de foto.** Los modelos
+  de razonamiento devuelven `<think>` delante de la respuesta y eso se guardaba
+  como «lo que se ve en la imagen». Se aparta, y **no se tira**: Daniel pidio
+  expresamente conservarlo. Decision suya que despues resulto decisiva.
+- **`46da4fc` — Groq no salia en el selector de Privado.** `modelsForProvider`
+  filtraba solo por familia, y `groq` no esta en `MODEL_FAMILIES` —lista cerrada
+  a proposito—, asi que sus modelos caian en `qwen` y `other`. No era frescura
+  del catalogo, como parecia: era el criterio. Segunda via de coincidencia, por
+  conexion.
+- **`e5d4893` — el describidor pedia memoria.** Un turno tecnico sin marca caia
+  en la rama generica de conversacion, que pide un bloque `<LUXY_MEMORY>`: el
+  modelo gastaba media respuesta rellenando una memoria que nadie iba a guardar.
+  Marca propia `luxyTechnicalTurn`.
+- **`788080a` — se adapta a la imagen y llama a las cosas por su nombre.** El
+  prompt daba por hecho que habia una persona. Y eufemismos como «torso al
+  descubierto» hacen un pie de foto inservible para reconocer un archivo.
+- **`792f31c` — «no contesto nada» cuando se habia quedado pensando.** Motivo
+  `solo-razono` aparte de `vacio`: son dos averias distintas y una manda a
+  reintentar cuando lo que hace falta es cambiar de modelo.
+- **`a79d528` — las costuras del troceado no son viñetas** (`D-071`).
+- **Este commit — un recorte nuestro se marca** (`D-072`).
+
+Sobre el ultimo: Daniel avisa de que «se recorta lo que piensa». Medido: el
+razonamiento se cortaba a mitad de palabra por el tope de 4.000, y **un corte en
+seco es indistinguible de un modelo que se quedo sin salida** —la averia que el
+mismo habia visto dos mensajes antes—. Ahora `trimWithMark` corta por frontera
+de palabra y dice quien corto, con la marca DENTRO del tope.
+
+Los dos topes suben por medicion, no por si acaso: la primera descripcion buena
+ocupo **1.354 caracteres, el 90% del tope de 1.500**; con una imagen mas cargada
+se habria guardado una frase partida como si fuera el archivo.
+
+- Archivos: `packages/shared/src/vault-describe.ts` y su test, `DECISIONS.md`.
+- Pruebas: `npm run check` **exit 0** — 141 archivos, **2.523 pasadas**, 12
+  omitidas. Ocho nuevas, cuatro de ellas de `trimWithMark`.
+- Riesgo que queda: nada de esto arregla la causa de fondo del troceado, que
+  seria redimensionar antes de enviar. Bloqueado por `D-069`.
+- Siguiente paso exacto: Daniel vuelve a describir la misma foto y comprueba
+  que el razonamiento llega entero; y **prueba una foto sin personas**, que es
+  el caso que `788080a` arreglo y todavia no se ha probado ni una vez.
+
 ### 2026-09-04 21:35 — Claude — F15-BANCO-VISION-001
 
 - Origen, tres cosas en un mensaje de Daniel: el boton de adjuntar no le dejaba
