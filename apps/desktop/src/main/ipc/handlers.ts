@@ -155,6 +155,7 @@ import {
   IMAGE_EXTENSIONS,
   VIDEO_EXTENSIONS,
   isKnownImage,
+  sniffImageType,
   mimeTypeFor,
 } from '../../shared/media-types.js';
 import type { PrivateMemory } from '../vault/private-memory.js';
@@ -2388,7 +2389,12 @@ export function registerIpcHandlers(context: HandlerContext): void {
             character.avatarObjectKey,
           );
           await context.privateMedia.add(context.vault, conversationId, bytes, {
-            mimeType: 'image/webp',
+            // el tipo REAL, leido de los bytes. Estaba escrito 'image/webp' a
+            // pelo, fuera lo que fuera: eso derrota la guarda de AI Horde para
+            // img2img, que mira el tipo declarado, y convierte un rechazo claro
+            // en un fallo dentro del worker. Si no se reconoce la firma se dice
+            // que no se sabe, en vez de inventarlo
+            mimeType: sniffImageType(bytes) ?? 'application/octet-stream',
             displayName: 'foto de perfil',
             // el avatar no se genero aqui, asi que no tiene `prompt`. Y «su
             // foto de perfil» es un marcador, no una descripcion: no dice nada
