@@ -436,6 +436,56 @@ describe('sondeo', () => {
     );
   });
 
+  // PASO DE VERDAD: Daniel vio en la web del horde una generacion TERMINADA
+  // mientras Luxy le decia que no habia llegado a tiempo. El sondeo espacia sus
+  // vueltas hasta 8 s, asi que entre la ultima y el vencimiento hay una ventana
+  // en la que un worker puede terminar — y la cancelacion devuelve lo que
+  // hubiera, que es justo lo que se estaba tirando al suelo.
+  it('si la cancelacion trae la imagen, se rescata en vez de fallar', async () => {
+    const { impl, calls } = fakeFetch([
+      // la respuesta del DELETE
+      {
+        status: 200,
+        body: {
+          ...progress({ done: true, finished: 1 }),
+          generations: [
+            { img: 'https://r2.example/tarde.webp', seed: '9', id: 'g-9', model: 'Hassaku XL' },
+          ],
+        },
+      },
+    ]);
+
+    const result = await awaitImage('pet-1', { ...options(impl), maxWaitMs: 0 });
+
+    expect(result.generations[0]?.img).toBe('https://r2.example/tarde.webp');
+    // se cancela igual: la peticion no puede quedarse viva ocupando un worker
+    expect(calls.filter((call) => call.method === 'DELETE')).toHaveLength(1);
+  });
+
+  it('una imagen censurada NO se rescata: es un rectangulo negro', async () => {
+    // entregarla como si fuera la foto es peor que decir que no llego
+    const { impl } = fakeFetch([
+      {
+        status: 200,
+        body: {
+          ...progress({ done: true, finished: 1 }),
+          generations: [
+            { img: 'https://r2.example/negra.webp', seed: '1', id: 'g-1', censored: true },
+          ],
+        },
+      },
+    ]);
+
+    await expect(awaitImage('pet-1', { ...options(impl), maxWaitMs: 0 })).rejects.toThrow();
+  });
+
+  it('sin nada que rescatar sigue mandando el error original', async () => {
+    const { impl } = fakeFetch([{ status: 200, body: progress({ done: false }) }]);
+    await expect(awaitImage('pet-1', { ...options(impl), maxWaitMs: 0 })).rejects.toThrow(
+      'no estuvo lista a tiempo',
+    );
+  });
+
   it('respeta la cancelacion', async () => {
     const controller = new AbortController();
     controller.abort();

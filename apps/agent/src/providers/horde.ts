@@ -747,7 +747,26 @@ export async function awaitImage(
       const cancelSignal = new AbortController().signal;
       // es mejor esfuerzo: si la cancelacion tambien falla, manda el error
       // original, que es el que explica lo que paso
-      await cancelImage(id, { ...options, signal: cancelSignal }).catch(() => undefined);
+      const rescatado = await cancelImage(id, { ...options, signal: cancelSignal }).catch(
+        () => null,
+      );
+
+      // LA CANCELACION DEVUELVE LO QUE HUBIERA, y hasta ahora se tiraba.
+      //
+      // El sondeo espacia sus vueltas hasta 8 s, asi que entre la ultima y el
+      // vencimiento hay una ventana real en la que un worker puede terminar. Si
+      // eso pasa, la imagen viene DENTRO de la respuesta del DELETE: estaba
+      // hecha, pagada con kudos, y se descartaba para lanzar «no estuvo lista a
+      // tiempo». Daniel vio una de esas terminada en la web del horde mientras
+      // Luxy le decia que no habia llegado.
+      //
+      // Se comprueba la censura igual que en el camino normal: una imagen
+      // censurada es un rectangulo negro, y entregarla como si fuera la foto es
+      // peor que decir que no llego.
+      if (rescatado !== null && rescatado.generations.length > 0) {
+        assertNotCensored(rescatado);
+        return rescatado;
+      }
     }
     throw error;
   }

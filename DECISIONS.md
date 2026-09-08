@@ -2177,3 +2177,55 @@ casos deja fuera lo que no se le ocurrió a quien la escribió. Las tres reglas
 que había eran correctas y no sirvieron de nada, porque el modelo encontró una
 cuarta salida. Contra eso vale la regla positiva —«es una orden»— y no otra
 prohibición más.
+
+## D-078 — la cancelación devuelve lo que hubiera, y se tiraba
+
+Fecha: 2026-09-08
+
+Estado: aceptada, implementada
+
+Daniel pide una foto, Luxy dice «la imagen no estuvo lista a tiempo», y él abre
+la web de AI Horde: **una de sus dos generaciones estaba terminada**.
+
+`awaitImage` cancela al rendirse, y eso está bien: sin el DELETE la petición
+sigue viva ocupando a un worker. Lo que estaba mal es lo que hacía con la
+respuesta.
+
+```ts
+await cancelImage(id, { ...options, signal: cancelSignal }).catch(() => undefined);
+throw error;
+```
+
+El comentario de `cancelImage` lo dice con todas las letras — *«cancelar
+devuelve lo que hubiera»*— y devuelve un `HordeResult` completo, con sus
+`generations`. Se descartaba para lanzar el error del tiempo agotado.
+
+**La ventana no es teórica.** El sondeo espacia sus vueltas con backoff hasta
+8 s (`MIN_POLL_INTERVAL_MS` 1200 → `MAX_POLL_INTERVAL_MS` 8000), así que entre
+la última comprobación y el vencimiento hay segundos en los que un worker puede
+terminar. Si termina ahí, la imagen existe, está pagada con kudos —que en una
+cuenta nueva son 25— y se tiraba.
+
+Ahora, si la cancelación trae generaciones, se devuelven. Con dos cuidados:
+
+- **se sigue cancelando siempre**: rescatar no puede dejar la petición viva;
+- **se comprueba la censura**, igual que en el camino normal (`assertNotCensored`).
+  `cancelImage` no la aplica a propósito, porque quien cancela ya no espera nada;
+  pero aquí sí esperamos, y una imagen censurada es un rectángulo negro. Darla
+  por buena sería peor que decir que no llegó.
+
+**Lo que este arreglo NO es.** No explica los diez minutos de espera: eso son
+los workers del horde y la posición en la cola, que depende de los kudos. Es
+manejo de consecuencias, no la causa. Se dice porque la tentación al leerlo es
+darlo por resuelto.
+
+**Lo que quedó descartado por la verificación**, y conviene no volver a
+proponerlo:
+
+- *no cancelar para aprovechar los 30 minutos del enlace*. Confunde dos relojes:
+  los 30 minutos son de la URL prefirmada de R2 de un resultado **ya generado**;
+  la petición en cola caduca a los 10, que es justo nuestro plazo. No cancelar
+  no compra tiempo y rompe una invariante escrita.
+- *guardar el identificador de la petición para reintentar*. No sirve mientras
+  el propio Luxy borre el trabajo al rendirse, y con este rescate deja de hacer
+  falta en el caso que importaba.
