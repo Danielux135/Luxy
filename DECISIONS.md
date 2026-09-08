@@ -1901,3 +1901,51 @@ Dos consecuencias que conviene tener presentes:
   esquema que salta y un catálogo que desaparece entero. El precio es que un
   proveedor nuevo no se agrupa solo hasta añadirlo a `MODEL_FAMILIES`, y
   TypeScript obliga a ponerle etiqueta al hacerlo.
+
+## D-071 — las costuras del troceado no son contenido de la imagen
+
+Fecha: 2026-09-08
+
+Estado: aceptada, implementada
+
+Daniel prueba el describidor con una foto suya y el modelo escribe «un plano
+general y **cuatro primeros planos segmentados**». Él avisa: *«¿cómo que cuatro
+viñetas? Sólo es una foto»*.
+
+Tenía razón, y el detalle inventado estaba en una descripción que **habíamos
+dado por buena**.
+
+En el razonamiento del modelo estaba la explicación:
+
+> *«The seams are visible as white gaps between the sections»*
+> *«a vertical stack of crops from a single larger image»*
+
+No se lo inventó de la nada. **Los modelos de visión trocean la imagen en
+mosaicos de tamaño fijo y rellenan los huecos** para que encaje en su rejilla;
+una foto de 768×1280 no cuadra en ninguna, así que llega partida y con bandas
+de relleno. Estaba describiendo el procesado, no el contenido.
+
+Da igual el porqué: **como pie de foto es un hecho falso sobre el archivo**, y
+de ahí pasa a la memoria del personaje. Es `D-061` exacto, una capa antes.
+
+Lo descartado, y por qué:
+
+- **Redimensionar la imagen en Luxy** para que encaje en un mosaico. Es la
+  solución de fondo, pero no se puede hacer aquí: `nativeImage` de Electron no
+  decodifica webp (`D-069`), que es el formato de casi todo lo de la bóveda.
+  Y encoger antes de enviar tira detalle justo cuando lo que se pide es más.
+- **Callar toda división.** Sería el error contrario: una retícula de cómic o
+  un marco trazado son contenido de verdad, y omitirlos deja el archivo peor
+  descrito.
+
+Lo que se hace: se le dice al modelo que **recibe UNA imagen**, que las franjas
+de color plano que la parten son del procesado, y que sólo mencione una división
+si es claramente del dibujo. Es una regla del prompt y no un filtro sobre el
+texto porque el modelo es el único que puede distinguir un marco dibujado de una
+banda de relleno.
+
+**Lo que este caso demuestra del diseño, y conviene no perderlo:** el banco de
+pruebas no guarda nada, así que esa descripción falsa **nunca llegó a la
+bóveda**. Y el panel de «lo que pensó antes de responder» —que existe porque
+Daniel pidió que no se tirara— es lo único que permitió entender la causa en vez
+de apretar el prompt contra un síntoma.

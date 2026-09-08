@@ -300,3 +300,33 @@ describe('el modelo que se queda pensando y no contesta', () => {
     expect(buildDescribePrompt()).toContain('NO deliberes en voz alta');
   });
 });
+
+describe('las costuras del troceado no son contenido', () => {
+  // PASO DE VERDAD, y es el fallo mas peligroso visto hasta ahora porque salio
+  // en una descripcion que dimos por BUENA: ante una foto de 768x1280 —una sola
+  // imagen— el modelo escribio «un plano general y cuatro primeros planos
+  // segmentados», y en su razonamiento decia «the seams are visible as white
+  // gaps between the sections».
+  //
+  // No se lo invento de la nada: los modelos de vision trocean la imagen en
+  // mosaicos y rellenan los huecos para que cuadre en su rejilla. Estaba
+  // describiendo el relleno. Pero como pie de foto es un hecho FALSO sobre el
+  // archivo, y de ahi pasa a la memoria: es `D-061` exacto.
+  const prompt = buildDescribePrompt();
+
+  it('avisa de que es UNA imagen y de por que aparecen franjas', () => {
+    expect(prompt).toContain('Se te manda UNA imagen');
+    expect(prompt).toContain('trocean en mosaicos');
+  });
+
+  it('prohibe llamarlas viñetas o paneles', () => {
+    expect(prompt).toContain('no las describas como viñetas');
+  });
+
+  it('deja describir una division que SI es del dibujo', () => {
+    // una retícula de comic o un marco trazado son contenido de verdad, y
+    // callarlos seria el error contrario
+    expect(prompt).toContain('un marco');
+    expect(prompt).toContain('retícula de comic');
+  });
+});
