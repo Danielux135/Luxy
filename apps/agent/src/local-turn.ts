@@ -36,6 +36,16 @@ export interface LocalTurnInput {
    * existe para que su contenido no llegue a ningun servidor.
    */
   images?: readonly ProviderImage[];
+
+  /**
+   * cuanta salida pedir para este turno. Ausente = el tope de la conexion.
+   *
+   * Lo pone quien sabe cuanto va a conservar. El describidor guarda 1.900
+   * caracteres como mucho, y pedir los 8192 de la conexion no era derrochar:
+   * Groq rechaza la peticion entera cuando el `max_tokens` pedido supera el
+   * limite por minuto del modelo, en vez de recortar.
+   */
+  maxOutputTokens?: number;
 }
 
 export interface LocalTurnResult {
@@ -145,6 +155,7 @@ export async function runLocalTurn(
     // las imagenes acompañan al prompt y siguen su mismo camino: memoria entre
     // dos procesos de Luxy, nunca la cola
     ...(input.images === undefined ? {} : { images: input.images }),
+    ...(input.maxOutputTokens === undefined ? {} : { maxOutputTokens: input.maxOutputTokens }),
     // el progreso sale solo hacia quien llama. No hay EventQueue de por medio,
     // asi que no existe el camino por el que un evento acabaria en Supabase.
     emit: (type, message) => deps.onProgress(type, message),

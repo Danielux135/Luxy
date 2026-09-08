@@ -127,6 +127,16 @@ export const hostRequestSchema = z.discriminatedUnion('type', [
      * significan lo mismo.
      */
     images: z.array(localTurnImageSchema).max(MAX_LOCAL_TURN_IMAGES).default([]),
+
+    /**
+     * cuanta salida pedirle al proveedor en este turno.
+     *
+     * Opcional: ausente significa el tope de la conexion, que es lo de
+     * siempre. Lo manda quien sabe cuanto va a conservar de verdad. El tope
+     * de 32.000 es holgado a proposito —no somos nosotros quien decide el
+     * limite del modelo— pero cierra la puerta a un numero absurdo.
+     */
+    maxOutputTokens: z.number().int().min(64).max(32_000).optional(),
   }),
   z.object({
     type: z.literal('cancel_local_turn'),

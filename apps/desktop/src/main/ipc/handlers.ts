@@ -29,6 +29,7 @@ import {
   isPathInside,
   VAULT_IMAGE_NEGATIVE,
   buildHordeRequest,
+  DESCRIBE_MAX_OUTPUT_TOKENS,
   buildDescribePrompt,
   parseDescribeResponse,
   splitReasoning,
@@ -1502,6 +1503,10 @@ export function registerIpcHandlers(context: HandlerContext): void {
       model: args.model,
       projectAlias: args.projectAlias,
       prompt: buildDescribePrompt(),
+      // su propio presupuesto de salida, no el 8192 de la conexion: se
+      // guardan 1.900 caracteres como mucho, y pedir de mas hace que Groq
+      // rechace la peticion entera cuando supera el limite del modelo
+      maxOutputTokens: DESCRIBE_MAX_OUTPUT_TOKENS,
       kind: 'technical',
       // base64 PURO: el prefijo `data:` lo compone el proveedor, que lo quiere
       // a su manera segun con quien hable
@@ -1627,6 +1632,10 @@ export function registerIpcHandlers(context: HandlerContext): void {
       model: args.model,
       projectAlias: args.projectAlias,
       prompt: buildDescribePrompt(),
+      // su propio presupuesto de salida, no el 8192 de la conexion: se
+      // guardan 1.900 caracteres como mucho, y pedir de mas hace que Groq
+      // rechace la peticion entera cuando supera el limite del modelo
+      maxOutputTokens: DESCRIBE_MAX_OUTPUT_TOKENS,
       // modo TECNICO: es una descripcion de un archivo, no una escena, y
       // pedirsela a quien esta encarnando a alguien mezcla dos cosas (`D-055`)
       kind: 'technical',

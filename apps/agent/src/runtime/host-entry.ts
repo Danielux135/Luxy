@@ -142,6 +142,11 @@ export function startHostEntry(port: ParentPort): void {
             // deja de marcarlo cuando ve `technical` de verdad
             kind: request.kind,
             images: request.images,
+            // el presupuesto de salida del turno: sin reenviarlo, el
+            // describidor volveria a pedir el tope de la conexion
+            ...(request.maxOutputTokens === undefined
+              ? {}
+              : { maxOutputTokens: request.maxOutputTokens }),
           },
           (type, message) => {
             // SOLO fases y avisos. `provider_output` lleva texto del modelo, y

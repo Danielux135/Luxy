@@ -186,6 +186,18 @@ export function buildVaultImageInstruction(
         'b) GENERAR una nueva. Cuesta creditos y tarda, asi que solo cuando pidan algo que aun',
         '   no existe:',
         `   ${VAULT_IMAGE_OPEN}{"prompt":"<descripcion en INGLES>","kind":"image"}${VAULT_IMAGE_CLOSE}`,
+        '',
+        // PASO DE VERDAD: pidio «dame otra foto» y le reenvio la que acababa de
+        // mandarle. «Otra» es ambiguo —«una mas» o «una distinta de las que ya
+        // tienes»— y reenviar es el camino barato, asi que ante la duda ganaba
+        // siempre. Se desempata por escrito, porque adivinarlo no es su trabajo.
+        'CUAL DE LAS DOS, que es donde mas se falla:',
+        '- «otra», «otra mas», «una nueva», «hazme una», «enseñame algo distinto» piden GENERAR:',
+        '  quieren una foto que todavia no existe, y reenviar una vieja es no hacer caso.',
+        '- «la de antes», «esa otra vez», «vuelve a mandarmela», «tu foto de perfil» piden',
+        '  REENVIAR, y solo entonces.',
+        '- NUNCA reenvies dos veces seguidas la misma imagen. Si acabas de mandar una y te piden',
+        '  otra, es que quieren una nueva: generala.',
       ]
     : [
         // sin clave del proveedor no se puede generar, pero reenviar SI: la

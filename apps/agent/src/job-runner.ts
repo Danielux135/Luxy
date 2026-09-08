@@ -85,6 +85,16 @@ export interface JobRunnerDeps {
    * privado— existe justamente para que no lo hagan.
    */
   images?: readonly ProviderImage[];
+  /**
+   * cuanta salida pedir para ESTE turno, cuando se sabe.
+   *
+   * Ausente = el tope de la conexion, que es lo de siempre. Se pone cuando
+   * quien pide el turno sabe cuanto va a conservar: el describidor guarda 1.900
+   * caracteres como mucho, y pedir los 8192 de la conexion no era derrochar,
+   * era provocar un rechazo — Groq tira la peticion entera si el `max_tokens`
+   * pedido supera el limite por minuto del modelo.
+   */
+  maxOutputTokens?: number;
 }
 
 export type JobOutcome =
@@ -759,6 +769,15 @@ export async function runJob(
         // mismo, y omitirlo deja intacta la peticion de los proveedores que
         // solo hablan texto
         ...(deps.images !== undefined && deps.images.length > 0 ? { images: deps.images } : {}),
+        // presupuesto de salida propio del turno, cuando quien lo pide sabe
+        // cuanto va a conservar de verdad.
+        //
+        // Sin esto siempre viaja el tope de la conexion —8192 por defecto— y
+        // eso no es solo derrochar: Groq RECHAZA la peticion entera cuando el
+        // `max_tokens` pedido supera el limite por minuto del modelo, en vez de
+        // recortar. Pedir 8192 para una descripcion que se recorta a 1.900
+        // caracteres convertia un limite holgado en un 429.
+        ...(deps.maxOutputTokens === undefined ? {} : { maxOutputTokens: deps.maxOutputTokens }),
         workingDirectory,
         timeoutMs: deps.config.jobTimeoutMs,
         signal,

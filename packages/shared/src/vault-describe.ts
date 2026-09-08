@@ -283,3 +283,20 @@ export function parseDescribeResponse(text: string, refused = false): DescribeRe
     reasoning,
   };
 }
+
+/**
+ * cuanta salida se le pide al describidor.
+ *
+ * NO es el tope de la conexion, y esa era la averia. Un turno de descripcion
+ * pedia los 8192 por defecto de la conexion para guardar como mucho 1.900
+ * caracteres —unos 600 tokens—, y eso no es solo derrochar: Groq RECHAZA la
+ * peticion entera cuando el `max_tokens` pedido supera el limite por minuto del
+ * modelo, en vez de recortar. Un limite holgado se convertia en un 429 seco.
+ *
+ * 1.500 y no 600 porque los modelos que razonan en voz alta gastan el
+ * presupuesto ANTES de contestar: con lo justo para el pie de foto se quedaban
+ * sin espacio y devolvian `solo-razono`, que ya paso de verdad.
+ *
+ * Sigue siendo un maximo, no una reserva: se paga lo que se use.
+ */
+export const DESCRIBE_MAX_OUTPUT_TOKENS = 1500;

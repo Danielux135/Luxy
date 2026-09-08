@@ -368,6 +368,8 @@ export class AgentController {
      * en entrada de confianza.
      */
     images?: readonly { mimeType: string; base64: string }[];
+    /** cuanta salida pedir; ausente deja el tope de la conexion */
+    maxOutputTokens?: number;
   }): Promise<LocalTurnResponse> {
     const child = this.child;
     if (child === null) {

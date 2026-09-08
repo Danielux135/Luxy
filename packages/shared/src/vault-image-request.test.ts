@@ -469,3 +469,35 @@ describe('la escena no puede redefinir al personaje', () => {
     expect(instruccion).toContain('lo que CAMBIA de una foto a otra');
   });
 });
+
+// PASO DE VERDAD: Daniel escribio «Parece que te gusta... Dame otra foto» y Lia
+// le REENVIO la que acababa de mandarle. «Otra» es ambiguo —«una mas» o «una
+// distinta de las que ya tienes»— y reenviar es el camino barato, asi que ante
+// la duda ganaba siempre. Empeoro cuando se le dijo «si dudas, manda una».
+describe('«otra foto» significa una nueva', () => {
+  const instruccion = buildVaultImageInstruction();
+
+  it('lista las formas de pedir una nueva', () => {
+    expect(instruccion).toContain('piden GENERAR');
+    for (const forma of ['«otra»', '«una nueva»', '«hazme una»']) {
+      expect(instruccion).toContain(forma);
+    }
+  });
+
+  it('acota cuando SI vale reenviar', () => {
+    expect(instruccion).toContain('«la de antes»');
+    expect(instruccion).toContain('REENVIAR, y solo entonces');
+  });
+
+  it('prohibe mandar dos veces seguidas la misma', () => {
+    // era exactamente lo que hacia: la misma foto, dos turnos seguidos
+    expect(instruccion).toContain('NUNCA reenvies dos veces seguidas la misma imagen');
+  });
+
+  it('sin poder generar no promete lo que no puede hacer', () => {
+    // el desempate solo tiene sentido cuando las dos opciones existen
+    const sinGenerar = buildVaultImageInstruction([], 'prose', false);
+    expect(sinGenerar).not.toContain('piden GENERAR');
+    expect(sinGenerar).toContain('NO puedes generar');
+  });
+});
