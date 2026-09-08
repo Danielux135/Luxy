@@ -2132,7 +2132,19 @@ export function registerIpcHandlers(context: HandlerContext): void {
       const stored = await context.privateMedia.add(context.vault, input.conversationId, bytes, {
         mimeType,
         displayName: null,
-        prompt: input.prompt,
+        // LO QUE SE MANDO DE VERDAD, no solo la escena.
+        //
+        // El esquema define este campo como «lo que se PIDIO al generar, tal y
+        // como se le mando al proveedor», y se guardaba unicamente el trozo que
+        // escribe el modelo de la conversacion. El aspecto fijo del personaje y
+        // su ropa —que van DELANTE y son los que deciden si la cara es la
+        // suya— no quedaban en ningun sitio.
+        //
+        // Consecuencia: cuando una imagen no se parecia al personaje no habia
+        // forma de saber si la receta habia llegado o no. Se discutio a ciegas
+        // dos veces. Esto ya esta cifrado con la imagen, asi que guardarlo
+        // entero no expone nada nuevo.
+        prompt: request.prompt,
         width: recipe.width,
         height: recipe.height,
         durationMs: null,
