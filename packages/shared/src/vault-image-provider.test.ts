@@ -329,3 +329,44 @@ describe('la escena no puede contradecir el color de pelo ni de ojos', () => {
     expect(peticion.prompt).not.toContain('dark hair');
   });
 });
+
+// SEGUNDA VUELTA del mismo fallo. Quitado ya el color, el modelo seguia
+// escribiendo «petite japanese woman 18» y el generador devolvia una morena de
+// ojos ambar: en estos modelos «japanese» arrastra pelo, ojos y rasgos de golpe.
+describe('la escena tampoco puede reasignarle el origen', () => {
+  const ASPECTO = 'light brown hair, blue eyes, pale skin, slim body';
+
+  it('quita el origen cuando califica a una persona', () => {
+    expect(stripConflictingTraits('petite japanese woman 18, naked', ASPECTO)).toBe(
+      'petite woman 18, naked',
+    );
+  });
+
+  it('lo deja cuando es ESCENARIO, que es el riesgo del arreglo', () => {
+    const escena = 'japanese lantern on the wall, japanese garden outside';
+    expect(stripConflictingTraits(escena, ASPECTO)).toBe(escena);
+  });
+
+  it('si la receta ya lo dice, la escena no lo esta inventando', () => {
+    const conOrigen = 'japanese woman, light brown hair, blue eyes';
+    expect(stripConflictingTraits('japanese woman kneeling', conOrigen)).toBe(
+      'japanese woman kneeling',
+    );
+  });
+
+  it('alcanza aunque haya adjetivos por medio', () => {
+    expect(stripConflictingTraits('asian young slim girl on bed', ASPECTO)).toBe(
+      'young slim girl on bed',
+    );
+  });
+
+  it('la escena real de Daniel, ya sin color y sin origen', () => {
+    const escena =
+      'petite japanese woman 18, naked, legs wrapped around partner, arched back, ' +
+      'sweaty flushed skin, messy hair spread on pillow, glistening eyes locked on viewer';
+    const limpia = stripConflictingTraits(escena, ASPECTO);
+    expect(limpia).not.toContain('japanese');
+    expect(limpia).toContain('messy hair spread on pillow');
+    expect(limpia).toContain('legs wrapped around partner');
+  });
+});

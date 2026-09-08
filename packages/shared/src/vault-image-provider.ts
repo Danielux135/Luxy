@@ -437,6 +437,29 @@ const TRAIT_COLORS = [
 ];
 
 /**
+ * origenes que en estos modelos arrastran un aspecto entero.
+ *
+ * No es una lista de nacionalidades: es una lista de etiquetas que en un modelo
+ * de anime cambian pelo, ojos y rasgos de golpe. «japanese» es la que se vio
+ * ganandole a `light brown hair, blue eyes` con el color ya limpiado.
+ */
+const TRAIT_ORIGINS = [
+  'japanese',
+  'chinese',
+  'korean',
+  'asian',
+  'african',
+  'indian',
+  'latina',
+  'hispanic',
+  'nordic',
+  'scandinavian',
+  'russian',
+  'caucasian',
+  'european',
+];
+
+/**
  * quita de la ESCENA el color de pelo y de ojos cuando la receta ya lo dice.
  *
  * POR QUE EN CODIGO Y NO EN EL PROMPT, que es lo que se intento primero: se le
@@ -465,6 +488,24 @@ export function stripConflictingTraits(scene: string, appearance: string): strin
     // el color puede venir con varias palabras («light brown hair») y a veces
     // encadenado («long dark messy hair»): se repite el grupo hasta el rasgo
     const patron = new RegExp(`\\b(?:(?:${partes})\\s+)+(?=\\w*\\s*${rasgo}\\b)`, 'gi');
+    salida = salida.replace(patron, '');
+  }
+
+  // la NACIONALIDAD es el otro camino por el que la escena redefine la cara, y
+  // no lo cierra quitar colores: quitado «dark hair», el modelo seguia
+  // escribiendo «petite japanese woman 18» y el generador dibujaba una morena
+  // de ojos ambar igual, porque en estos modelos «japanese» arrastra un aspecto
+  // entero.
+  //
+  // Solo cuando califica a una PERSONA: «japanese lantern» y «japanese garden»
+  // son escenario y se quedan. Y solo si la receta no lo dice ya: si el aspecto
+  // fijo la declara, la escena no la esta inventando.
+  for (const origen of TRAIT_ORIGINS) {
+    if (fijo.includes(origen)) continue;
+    const patron = new RegExp(
+      `\\b${origen}\\s+(?=(?:\\w+\\s+){0,2}?(?:woman|women|girl|lady|man|men|boy|female|male)\\b)`,
+      'gi',
+    );
     salida = salida.replace(patron, '');
   }
   // la limpieza puede dejar comas huerfanas o dobles espacios
