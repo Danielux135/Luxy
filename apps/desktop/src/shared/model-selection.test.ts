@@ -11,15 +11,34 @@ import {
   type SelectableModel,
 } from './model-selection.js';
 
+/** azucar: casi todo el catalogo son modelos de texto normales */
+const texto = (
+  apiModel: string,
+  family: string,
+  connectionId: string,
+  enabled = true,
+): SelectableModel => ({ apiModel, family, connectionId, enabled, category: 'text' });
+
 const CATALOGO: SelectableModel[] = [
-  { apiModel: 'DeepSeek-V4-Pro', family: 'deepseek', connectionId: 'hcnsec', enabled: true },
-  { apiModel: 'DeepSeek-V4-Flash', family: 'deepseek', connectionId: 'hcnsec', enabled: true },
-  { apiModel: 'opus', family: 'claude', connectionId: 'claude', enabled: true },
-  { apiModel: 'retirado', family: 'deepseek', connectionId: 'hcnsec', enabled: false },
+  texto('DeepSeek-V4-Pro', 'deepseek', 'hcnsec'),
+  texto('DeepSeek-V4-Flash', 'deepseek', 'hcnsec'),
+  texto('opus', 'claude', 'claude'),
+  texto('retirado', 'deepseek', 'hcnsec', false),
   // un proveedor HTTP: sus modelos NO forman una familia nuestra, y por eso
   // se emparejan por conexion. Groq sirve qwen y otros bajo el nombre «groq»
-  { apiModel: 'qwen/qwen3.6-27b', family: 'qwen', connectionId: 'groq', enabled: true },
-  { apiModel: 'whisper-large-v3', family: 'other', connectionId: 'groq', enabled: true },
+  texto('qwen/qwen3.6-27b', 'qwen', 'groq'),
+  // los seis de Groq que NO son de chat, y que llegaban al desplegable como
+  // candidatos para describir una foto
+  { apiModel: 'whisper-large-v3', family: 'other', connectionId: 'groq', enabled: true, category: 'audio' },
+  {
+    apiModel: 'canopylabs/orpheus-v1-english',
+    family: 'other',
+    connectionId: 'groq',
+    enabled: true,
+    category: 'audio',
+  },
+  // un clasificador: su categoria SI es texto, y aun asi no se puede hablar con el
+  texto('meta-llama/llama-prompt-guard-2-86m', 'other', 'groq'),
 ];
 
 describe('el modelo que viaja con el proveedor', () => {
@@ -79,8 +98,10 @@ describe('un proveedor HTTP cuyos modelos no son una familia nuestra', () => {
   // solo por familia, el selector de Privado quedaba VACIO para siempre y
   // actualizar el catalogo no lo arreglaba: el problema no era la frescura.
   it('sus modelos salen al elegir ese proveedor', () => {
+    // whisper y el clasificador SI son suyos y ya no salen: son de esta
+    // conexion, pero no se puede hablar con ellos. Ver el bloque de abajo
     const suyos = modelsForProvider(CATALOGO, 'groq').map((m) => m.apiModel);
-    expect(suyos).toEqual(['qwen/qwen3.6-27b', 'whisper-large-v3']);
+    expect(suyos).toEqual(['qwen/qwen3.6-27b']);
   });
 
   it('no se cuelan en otro proveedor por su familia adivinada', () => {
@@ -101,5 +122,37 @@ describe('un proveedor HTTP cuyos modelos no son una familia nuestra', () => {
     expect(modelsForProvider(CATALOGO, 'hcnsec').map((m) => m.apiModel)).not.toContain(
       'retirado',
     );
+  });
+});
+
+// PASO DE VERDAD: de los 14 modelos que sirve la conexion de Groq, SEIS no son
+// de chat —whisper x2, orpheus x2 y tres clasificadores— y todos se ofrecian en
+// el desplegable del banco de vision. Elegir uno gasta una llamada que no puede
+// funcionar, y ninguno declara `image_input`, asi que la etiqueta «ve imagenes»
+// no aparecia en ninguno: no habia forma de saber cual probar.
+describe('el selector solo ofrece modelos con los que se puede hablar', () => {
+  const deGroq = modelsForProvider(CATALOGO, 'groq').map((model) => model.apiModel);
+
+  it('deja pasar el de chat', () => {
+    expect(deGroq).toContain('qwen/qwen3.6-27b');
+  });
+
+  it('quita los de voz, aunque esten habilitados', () => {
+    expect(deGroq).not.toContain('whisper-large-v3');
+    // el vendor delante era la trampa: `startsWith('orpheus')` no lo captura
+    expect(deGroq).not.toContain('canopylabs/orpheus-v1-english');
+  });
+
+  it('quita los clasificadores, que SI son de categoria texto', () => {
+    // entra texto y sale una etiqueta: decir que su categoria es otra cosa
+    // seria mentir, asi que la pregunta «se puede hablar con el» se responde
+    // aparte y no forzando el enum de categorias
+    expect(deGroq).not.toContain('meta-llama/llama-prompt-guard-2-86m');
+  });
+
+  it('un modelo de voz elegido antes deja de valer y se suelta', () => {
+    // `null` significa «usa el de la conexion», que es mejor que mandar un
+    // whisper y pagar el error
+    expect(modelForProvider(CATALOGO, 'groq', 'whisper-large-v3')).toBeNull();
   });
 });

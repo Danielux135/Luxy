@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { buildCatalogForConnection } from './catalog.js';
+import {
+  buildCatalogForConnection,
+  isAudioModel,
+  isClassifierModel,
+  isConversationalModel,
+} from './catalog.js';
 
 describe('catalogo de un origen que impone su familia', () => {
   // un proveedor HTTP se registra bajo SU identificador, y el identificador de
@@ -47,5 +52,40 @@ describe('catalogo de un origen que impone su familia', () => {
     const modelos = buildCatalogForConnection('mistral', ['kimi-k3'], 'mistral');
     expect(modelos[0]?.connectionId).toBe('mistral');
     expect(modelos[0]?.telegramAliases).toEqual([]);
+  });
+});
+
+// COMPROBADO CONTRA EL CATALOGO REAL de Groq el 2026-09-08: de sus 14 modelos,
+// seis no son de chat y los seis se ofrecian para describir una imagen.
+describe('modelos que no sirven para conversar', () => {
+  it('reconoce los de voz aunque lleven el vendor delante', () => {
+    expect(isAudioModel('whisper-large-v3')).toBe(true);
+    expect(isAudioModel('whisper-large-v3-turbo')).toBe(true);
+    // la trampa: un startsWith sobre la cadena entera no captura ninguno
+    expect(isAudioModel('canopylabs/orpheus-v1-english')).toBe(true);
+    expect(isAudioModel('canopylabs/orpheus-arabic-saudi')).toBe(true);
+  });
+
+  it('no confunde un modelo de chat con uno de voz', () => {
+    expect(isAudioModel('qwen/qwen3.6-27b')).toBe(false);
+    expect(isAudioModel('openai/gpt-oss-120b')).toBe(false);
+    expect(isAudioModel('DeepSeek-V4-Pro')).toBe(false);
+  });
+
+  it('reconoce los clasificadores', () => {
+    expect(isClassifierModel('meta-llama/llama-prompt-guard-2-22m')).toBe(true);
+    expect(isClassifierModel('meta-llama/llama-prompt-guard-2-86m')).toBe(true);
+    expect(isClassifierModel('openai/gpt-oss-safeguard-20b')).toBe(true);
+    expect(isClassifierModel('openai/gpt-oss-20b')).toBe(false);
+  });
+
+  it('un clasificador es de categoria TEXTO y aun asi no es conversacional', () => {
+    // entra texto y sale una etiqueta: decir que su categoria es otra cosa
+    // seria mentir. Son dos preguntas distintas y se responden por separado
+    expect(
+      isConversationalModel({ apiModel: 'openai/gpt-oss-safeguard-20b', category: 'text' }),
+    ).toBe(false);
+    expect(isConversationalModel({ apiModel: 'qwen/qwen3.6-27b', category: 'text' })).toBe(true);
+    expect(isConversationalModel({ apiModel: 'whisper-large-v3', category: 'audio' })).toBe(false);
   });
 });

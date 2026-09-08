@@ -10,6 +10,8 @@
 //
 // El id de proveedor ES la familia del modelo: asi los registra el agente.
 
+import { isConversationalModel } from '@luxy/shared';
+
 /** lo minimo que hace falta de un modelo del catalogo para elegirlo */
 export interface SelectableModel {
   apiModel: string;
@@ -17,6 +19,14 @@ export interface SelectableModel {
   /** de que origen salio: el identificador de la conexion o del proveedor HTTP */
   connectionId: string;
   enabled: boolean;
+  /**
+   * `text`, `audio`, `image` o `routing`.
+   *
+   * Hizo falta porque `enabled` no basta: de los 14 modelos que sirve Groq,
+   * seis no son de chat —dos whisper, dos orpheus y tres clasificadores— y
+   * todos llegaban al desplegable como candidatos para describir una foto.
+   */
+  category: string;
 }
 
 /**
@@ -67,6 +77,12 @@ export function modelsForProvider(
   return models.filter(
     (model) =>
       model.enabled &&
+      // y que se pueda HABLAR con el. `enabled` no lo dice: un whisper y un
+      // clasificador de seguridad estan perfectamente habilitados y no sirven
+      // para lo unico que preguntan los dos selectores que usan esta funcion
+      // —con quien hablo, y quien mira la imagen—. Elegir uno gastaba una
+      // llamada que no podia funcionar
+      isConversationalModel(model) &&
       // por FAMILIA: es como se registran los proveedores derivados de una
       // conexion agregadora, que sirve muchas familias por el mismo endpoint
       (model.family === provider ||

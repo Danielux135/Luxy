@@ -425,7 +425,7 @@ export function buildCatalogForConnection(
     const category =
       guessed === 'router'
         ? 'routing'
-        : guessed === 'stepaudio'
+        : guessed === 'stepaudio' || isAudioModel(apiModel)
           ? 'audio'
           : guessed === 'stepimage'
             ? 'image'
@@ -462,4 +462,62 @@ export function buildCatalogForConnection(
       },
     });
   });
+}
+
+/**
+ * el nombre del modelo, sin el vendor que lleve delante.
+ *
+ * Groq sirve `canopylabs/orpheus-v1-english` y `meta-llama/llama-prompt-guard-2-86m`:
+ * mirar el principio de la cadena no vale, porque lo que dice que es el modelo
+ * viene DESPUES de la ultima barra.
+ */
+function modelBaseName(apiModel: string): string {
+  const lower = apiModel.toLowerCase();
+  return lower.slice(lower.lastIndexOf('/') + 1);
+}
+
+/**
+ * hace audio, no conversacion.
+ *
+ * Comprobado contra el catalogo real de Groq: `whisper-large-v3`,
+ * `whisper-large-v3-turbo`, `canopylabs/orpheus-v1-english` y
+ * `canopylabs/orpheus-arabic-saudi`. Los cuatro caian en `text` y se ofrecian
+ * como candidatos para describir una imagen, y elegir uno gasta una llamada que
+ * no puede funcionar.
+ */
+export function isAudioModel(apiModel: string): boolean {
+  const nombre = modelBaseName(apiModel);
+  return (
+    nombre.startsWith('whisper') ||
+    nombre.startsWith('orpheus') ||
+    nombre.startsWith('tts-') ||
+    nombre.endsWith('-tts')
+  );
+}
+
+/**
+ * es un clasificador, no alguien con quien se pueda hablar.
+ *
+ * Groq sirve tres: `openai/gpt-oss-safeguard-20b` y los dos
+ * `meta-llama/llama-prompt-guard-2-*`. Entran texto y sale una etiqueta, asi
+ * que su categoria SI es `text` y decir otra cosa seria mentir. Lo que no son
+ * es conversacionales, y esa es una pregunta distinta de la categoria: por eso
+ * se responde aparte y no forzando el enum.
+ */
+export function isClassifierModel(apiModel: string): boolean {
+  const nombre = modelBaseName(apiModel);
+  return nombre.includes('prompt-guard') || nombre.includes('safeguard') || nombre.includes('guard-');
+}
+
+/**
+ * se puede elegir para hablar o para mirar una imagen.
+ *
+ * Es lo que de verdad pregunta un selector de modelo, y no coincide con la
+ * categoria: un clasificador es `text` y no sirve. Vive aqui, junto a las dos
+ * heuristicas que lo alimentan, para que no acaben tres listas separadas como
+ * paso con las extensiones de archivo (`D-074`).
+ */
+export function isConversationalModel(model: { apiModel: string; category: string }): boolean {
+  if (model.category !== 'text') return false;
+  return !isClassifierModel(model.apiModel);
 }
