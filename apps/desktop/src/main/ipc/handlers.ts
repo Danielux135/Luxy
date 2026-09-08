@@ -13,6 +13,7 @@ import {
   parseConversationMemoryResponse,
   PROFILE_PHOTO_LABEL,
   imageDescriptionFor,
+  imageTransportProblem,
   profilePhotoLine,
   parseVaultImageRequest,
   redact,
@@ -1471,6 +1472,13 @@ export function registerIpcHandlers(context: HandlerContext): void {
         'un video no se puede mirar de una sola vez; describelo a mano',
       );
     }
+    // y aunque sea una imagen, puede ser de un formato que ningun proveedor
+    // sepa leer. Se para aqui, sin gastar la llamada: el mismo caso en el banco
+    // costo una peticion para recibir «invalid image data»
+    const transporte = imageTransportProblem(mimeType);
+    if (transporte !== null) {
+      throw new VaultError('ese formato de imagen no se puede mandar', transporte);
+    }
 
     const run = await context.controller.runLocalTurn({
       localTurnId: randomUUID(),
@@ -1569,18 +1577,30 @@ export function registerIpcHandlers(context: HandlerContext): void {
     // «el agente no respondio a tiempo», que señala al agente cuando el
     // problema era la extension del archivo. La misma guarda ya existe en
     // `vaultMediaDescribe`; aqui faltaba.
-    if (!isKnownImage(filePath)) {
-      const extension = basename(filePath).split('.').pop() ?? '';
+    // dos muros distintos, y el segundo lo aprendimos pagando una llamada:
+    // que Luxy sepa NOMBRAR el formato no significa que el proveedor sepa
+    // LEERLO. Groq devolvio «invalid image data» con un avif perfectamente
+    // etiquetado. Los dos se comprueban aqui, antes de gastar nada
+    const problema = !isKnownImage(filePath)
+      ? `Luxy no sabe que tipo de imagen es un .${basename(filePath).split('.').pop() ?? ''}, asi que no puede mandarlo. Conviertelo a png, jpg o webp.`
+      : imageTransportProblem(mimeType);
+    if (problema !== null) {
       return {
         cancelled: false,
         fileName: basename(filePath),
         mimeType,
         byteSize: bytes.length,
-        dataUrl: null,
+        // la vista previa SI se enseña: Chromium sabe pintarla, y verla al lado
+        // del motivo es lo que hace evidente que el archivo esta bien y lo que
+        // falla es el formato
+        dataUrl:
+          bytes.length > VAULT_PREVIEW_MAX_BYTES
+            ? null
+            : `data:${mimeType};base64,${Buffer.from(bytes).toString('base64')}`,
         caption: null,
         reasoning: null,
         failure: 'fallo' as const,
-        error: `Luxy no sabe que tipo de imagen es un .${extension}, asi que no puede mandarlo. Conviertelo a png, jpg o webp.`,
+        error: problema,
         executedModel: null,
       };
     }

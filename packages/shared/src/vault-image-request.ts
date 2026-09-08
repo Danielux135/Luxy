@@ -64,39 +64,12 @@ export interface ParsedVaultImageRequest {
   status: VaultImageStatus;
 }
 
-/**
- * instrucciones que se añaden al prompt SOLO cuando generar es posible.
- *
- * Si no hay personaje o no hay clave, esto no se envia: ofrecerle al modelo una
- * herramienta que no existe garantiza que la use y que el usuario vea una
- * promesa incumplida en cada turno.
- *
- * El limite de una por respuesta no es estetico: cada generacion cuesta
- * creditos, y sin tope un modelo entusiasta los gasta en un turno.
- */
 /** lo que el modelo necesita saber de una imagen ya guardada para reenviarla */
 export interface VaultImageOnFile {
   mediaId: string;
   description: string;
 }
 
-/**
- * con que frase se le presenta al modelo una imagen ya guardada.
- *
- * EL ORDEN ES EL ARREGLO. Se leia `prompt` primero, y `prompt` es lo que se
- * PIDIO al generar —«historia, no descripcion», dice su propio esquema—. El
- * campo `caption`, creado expresamente para esto, no se leia en ninguna parte
- * del camino del prompt: describir una imagen con un modelo con vista, o
- * corregir su pie de foto a mano, no cambiaba una sola letra de lo que veia el
- * modelo de la conversacion. La funcion entera era decorativa.
- *
- * La cadena de reserva conserva lo que ya hay en disco: los adjuntos antiguos
- * guardaron el pie de foto en `prompt`, y una imagen generada tiene ahi su
- * prompt en ingles —peor descripcion que un caption, mejor que nada—.
- *
- * Vive aqui y no en el proceso principal porque alli no se puede probar, y no
- * probarlo fue como se quedo mal cableado sin que nadie lo notara.
- */
 /** como se llama a la foto de perfil de un personaje en la lista del modelo */
 export const PROFILE_PHOTO_LABEL = 'su foto de perfil';
 
@@ -118,6 +91,23 @@ export function profilePhotoLine(description: string): string {
   return `${PROFILE_PHOTO_LABEL} — ${limpio}`;
 }
 
+/**
+ * con que frase se le presenta al modelo una imagen ya guardada.
+ *
+ * EL ORDEN ES EL ARREGLO. Se leia `prompt` primero, y `prompt` es lo que se
+ * PIDIO al generar —«historia, no descripcion», dice su propio esquema—. El
+ * campo `caption`, creado expresamente para esto, no se leia en ninguna parte
+ * del camino del prompt: describir una imagen con un modelo con vista, o
+ * corregir su pie de foto a mano, no cambiaba una sola letra de lo que veia el
+ * modelo de la conversacion. La funcion entera era decorativa.
+ *
+ * La cadena de reserva conserva lo que ya hay en disco: los adjuntos antiguos
+ * guardaron el pie de foto en `prompt`, y una imagen generada tiene ahi su
+ * prompt en ingles —peor descripcion que un caption, mejor que nada—.
+ *
+ * Vive aqui y no en el proceso principal porque alli no se puede probar, y no
+ * probarlo fue como se quedo mal cableado sin que nadie lo notara.
+ */
 export function imageDescriptionFor(metadata: {
   caption?: string | null;
   prompt?: string | null;
@@ -162,6 +152,16 @@ export const VAULT_IMAGE_NEGATIVE = [
   'taking a photo',
 ].join(', ');
 
+/**
+ * instrucciones que se añaden al prompt cuando hay ALGO que ofrecer.
+ *
+ * Sin personaje conocido y sin ninguna imagen guardada esto no se envia:
+ * ofrecerle al modelo una herramienta que no existe garantiza que la use y que
+ * el usuario vea una promesa incumplida en cada turno.
+ *
+ * El limite de una por respuesta no es estetico: cada generacion cuesta
+ * creditos, y sin tope un modelo entusiasta los gasta en un turno.
+ */
 export function buildVaultImageInstruction(
   available: VaultImageOnFile[] = [],
   style: VaultImagePromptStyle = 'prose',
@@ -316,4 +316,43 @@ function stripFence(block: string): string {
     .replace(/^```[a-zA-Z]*\s*/, '')
     .replace(/```$/, '')
     .trim();
+}
+
+/**
+ * formatos de imagen que los transportes de Luxy pueden LLEVAR de verdad.
+ *
+ * No es una preferencia nuestra: es lo que aceptan los dos caminos por los que
+ * viaja una imagen.
+ *
+ * - `chat completions` la manda como data URL (`http-provider.ts`,
+ *   `buildUserContent`) y el proveedor decide. **Groq devolvio
+ *   `400 invalid_request_error: "invalid image data"` con un avif**, probado el
+ *   2026-09-08 con `qwen/qwen3.6-27b`: el fichero llego entero y con su tipo
+ *   correcto, y lo rechazo igual.
+ * - Claude Code lo manda en `media_type` (`claude.ts`), y la API de Anthropic
+ *   documenta un conjunto CERRADO que tampoco incluye avif.
+ *
+ * Que Chromium sepa pintarlo —la vista previa del banco se ve— no significa
+ * que el proveedor sepa leerlo. Son dos decodificadores distintos, y confundir
+ * uno con el otro es lo que hacia que la prueba costara una llamada para no
+ * enterarse de nada.
+ */
+export const TRANSPORTABLE_IMAGE_TYPES = [
+  'image/png',
+  'image/jpeg',
+  'image/gif',
+  'image/webp',
+] as const;
+
+/**
+ * `null` si ese tipo se puede mandar; si no, que decirle al usuario.
+ *
+ * Se comprueba ANTES de gastar la llamada. El sintoma sin esto es el peor de
+ * los dos mundos: se paga una peticion para recibir «invalid image data», que
+ * suena a que el archivo esta corrupto y no a que el formato no viaja.
+ */
+export function imageTransportProblem(mimeType: string): string | null {
+  if ((TRANSPORTABLE_IMAGE_TYPES as readonly string[]).includes(mimeType)) return null;
+  const formato = mimeType.startsWith('image/') ? mimeType.slice('image/'.length) : mimeType;
+  return `Ningun proveedor de Luxy acepta ${formato}: solo png, jpg, gif y webp. La imagen se ve aqui porque Chromium sabe pintarla, pero el que la mira no la sabe leer. Conviertela y vuelve a probar.`;
 }

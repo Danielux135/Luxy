@@ -11,6 +11,8 @@ import {
   VAULT_IMAGE_OPEN,
   buildVaultImageInstruction,
   PROFILE_PHOTO_LABEL,
+  TRANSPORTABLE_IMAGE_TYPES,
+  imageTransportProblem,
   imageDescriptionFor,
   profilePhotoLine,
   parseVaultImageRequest,
@@ -401,5 +403,37 @@ describe('la linea de la foto de perfil', () => {
     // con solo la descripcion se pierde que ese retrato es SUYO, que es lo que
     // lo distingue de cualquier otra foto de ella
     expect(profilePhotoLine('desnuda, pelo castaño, ojos azules')).toContain(PROFILE_PHOTO_LABEL);
+  });
+});
+
+// PROBADO CONTRA GROQ el 2026-09-08, gastando una llamada para averiguarlo:
+// `qwen/qwen3.6-27b` devolvio `400 invalid_request_error: "invalid image data"`
+// con un avif que habia llegado entero y con su tipo correcto. Que Chromium
+// sepa pintarlo —la vista previa del banco se veia perfectamente— no significa
+// que el proveedor sepa leerlo.
+describe('formatos que los transportes pueden llevar', () => {
+  it('los cuatro de siempre pasan', () => {
+    for (const tipo of TRANSPORTABLE_IMAGE_TYPES) {
+      expect(imageTransportProblem(tipo)).toBeNull();
+    }
+  });
+
+  it('avif se para, y el motivo dice que hacer', () => {
+    const problema = imageTransportProblem('image/avif');
+    expect(problema).not.toBeNull();
+    expect(problema).toContain('avif');
+    expect(problema).toContain('png');
+  });
+
+  it('el motivo no acusa al archivo de estar roto', () => {
+    // «invalid image data» suena a fichero corrupto, que es la pista falsa que
+    // devuelve el proveedor. El formato es lo que no viaja, no el archivo
+    const problema = imageTransportProblem('image/heic') ?? '';
+    expect(problema).not.toContain('corrupt');
+    expect(problema).toContain('Chromium');
+  });
+
+  it('lo que no es una imagen tambien se para', () => {
+    expect(imageTransportProblem('application/octet-stream')).not.toBeNull();
   });
 });
