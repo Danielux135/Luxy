@@ -437,3 +437,35 @@ describe('formatos que los transportes pueden llevar', () => {
     expect(imageTransportProblem('application/octet-stream')).not.toBeNull();
   });
 });
+
+// PASO DE VERDAD, y se leyo en el prompt guardado de la imagen que salio mal.
+// La receta de Lia decia «light brown hair, blue eyes» y el modelo escribio como
+// escena: «young japanese woman, 18, petite, small breasts, naked, lying on bed,
+// ... dark hair messy spread on pillow ...». Salio morena y con otro cuerpo.
+//
+// No lo hacia por capricho: estaba describiendo a su personaje, que es lo que
+// parece que se le pide. Por eso hay que PROHIBIRLO, no basta con no pedirlo.
+describe('la escena no puede redefinir al personaje', () => {
+  const instruccion = buildVaultImageInstruction();
+
+  it('prohibe describir sus rasgos fijos, uno por uno', () => {
+    expect(instruccion).toContain('NO describas COMO ES ella');
+    for (const rasgo of ['pelo', 'ojos', 'piel', 'pecho', 'edad']) {
+      expect(instruccion).toContain(rasgo);
+    }
+  });
+
+  it('explica POR QUE, que es lo que hace que se cumpla', () => {
+    // «no lo hagas» a secas invita a saltarselo cuando el modelo cree que ayuda
+    expect(instruccion).toContain('dos descripciones distintas de la misma');
+  });
+
+  it('cierra la excusa de que encaje con lo que sabe', () => {
+    expect(instruccion).toContain('Aunque lo sepas y aunque encaje');
+  });
+
+  it('dice lo que SI es suyo, para que no se quede sin nada que escribir', () => {
+    // prohibir sin sustituir deja un prompt vacio, que es peor
+    expect(instruccion).toContain('lo que CAMBIA de una foto a otra');
+  });
+});

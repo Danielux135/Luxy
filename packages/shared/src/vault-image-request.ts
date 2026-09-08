@@ -239,6 +239,22 @@ export function buildVaultImageInstruction(
     '  dicho «mandame una foto». Eso pone una camara en la imagen.',
     '- Solo lo que se ve: pose, ropa, expresion, luz, lugar. Sin dialogo, sin lo que siente, sin',
     '  contar lo que pasa antes o despues. No copies el mensaje del usuario.',
+    // ESTO FALTABA Y ARRUINABA CADA IMAGEN. El aspecto fijo del personaje va
+    // DELANTE de esto, puesto por su receta. Si la escena vuelve a decir de que
+    // color es el pelo, los dos textos compiten dentro del mismo prompt y gana
+    // cualquiera.
+    //
+    // Paso de verdad, y se leyo en el prompt guardado: la receta decia
+    // «light brown hair, blue eyes» y el modelo escribio «dark hair messy
+    // spread on pillow, young japanese woman, 18, petite». Salio morena. Lo
+    // hacia con buena intencion —esta describiendo a su personaje— y por eso
+    // hay que decirselo, no basta con no pedirselo.
+    '- NO describas COMO ES ella: ni el pelo, ni los ojos, ni la piel, ni el pecho, ni la edad,',
+    '  ni de donde es. Todo eso ya va escrito delante, y repetirlo lo estropea: si tu version no',
+    '  coincide palabra por palabra, el generador recibe dos descripciones distintas de la misma',
+    '  persona y dibuja a otra. Aunque lo sepas y aunque encaje, no lo pongas.',
+    '- Lo tuyo es lo que CAMBIA de una foto a otra: donde esta, en que postura, que ropa lleva o',
+    '  no lleva, que cara pone, como es la luz y que hay alrededor.',
     style === 'tags'
       ? '- Etiquetas cortas separadas por comas, sin frases: "sitting on a bed, blue dress, blushing,'
       : '- Frases cortas separadas por comas: "sitting on the edge of the bed, wearing a blue dress,',
