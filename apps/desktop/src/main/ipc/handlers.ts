@@ -146,6 +146,11 @@ import {
 } from '../../shared/vault-image-capability.js';
 import { classifyReply } from '../../shared/refusal.js';
 import {
+  worthReporting,
+  type HordeQueueProgress,
+} from '../../shared/horde-progress.js';
+import { IPC_EVENT } from '../../shared/channels.js';
+import {
   IMAGE_EXTENSIONS,
   VIDEO_EXTENSIONS,
   isKnownImage,
@@ -2069,9 +2074,43 @@ export function registerIpcHandlers(context: HandlerContext): void {
       sourceImage,
     });
 
+    // como va la cola, hacia la ventana y hacia el log.
+    //
+    // El sondeo da unas ochenta vueltas en diez minutos y hasta ahora se tiraban
+    // todas: la pantalla se quedaba en blanco y al final decia «no estuvo lista
+    // a tiempo», que no distingue «estabas el 300º de la cola» de «ningun worker
+    // sirve tus modelos». Solo viajan contadores; ni el prompt ni la imagen.
+    let ultimo: HordeQueueProgress | null = null;
+    const onProgress = (progress: {
+      queuePosition: number;
+      waitTimeSeconds: number;
+      waiting: number;
+      processing: number;
+      finished: number;
+    }): void => {
+      const actual: HordeQueueProgress = {
+        queuePosition: progress.queuePosition,
+        waitTimeSeconds: progress.waitTimeSeconds,
+        waiting: progress.waiting,
+        processing: progress.processing,
+        finished: progress.finished,
+      };
+      // la ventana recibe TODAS: es un contador en pantalla y tiene que bajar
+      const window = context.getMainWindow();
+      if (window !== null && !window.isDestroyed()) {
+        window.webContents.send(IPC_EVENT.hordeProgress, actual);
+      }
+      // el log solo las que dicen algo nuevo: ochenta lineas identicas esconden
+      // justo el momento en que la peticion avanza
+      if (worthReporting(ultimo, actual)) {
+        context.log('cola de AI Horde', actual);
+      }
+      ultimo = actual;
+    };
+
     try {
       const submission = await submitImage(request, options);
-      const result = await awaitImage(submission.id, options);
+      const result = await awaitImage(submission.id, { ...options, onProgress });
       const [generation] = result.generations;
       if (generation === undefined) {
         throw new VaultError('AI Horde termino sin devolver ninguna imagen');

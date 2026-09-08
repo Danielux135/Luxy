@@ -11,6 +11,7 @@
 // a ningun sitio.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ConversationMemoryStatus, HordeRecipe } from '@luxy/shared';
+import type { HordeQueueProgress } from '../shared/horde-progress.js';
 import type {
   vaultCompatibilityResultSchema,
   vaultMemoryListResultSchema,
@@ -402,6 +403,8 @@ export interface VaultController {
   attachMedia: (caption: string) => Promise<void>;
   openMedia: (mediaId: string) => Promise<string | null>;
   generating: boolean;
+  /** como va la cola de AI Horde mientras se genera; `null` si no se espera nada */
+  hordeProgress: HordeQueueProgress | null;
   /** créditos declarados por el proveedor en la última generación */
   lastCost: { amount: number; unit: 'creditos' | 'kudos' } | null;
   generateMedia: (input: {
@@ -515,6 +518,9 @@ export function useVault(): VaultController {
   const [media, setMedia] = useState<PrivateMediaItem[]>([]);
   const [attaching, setAttaching] = useState(false);
   const [generating, setGenerating] = useState(false);
+  // como va la cola del horde AHORA. Se pisa a si mismo en cada vuelta del
+  // sondeo y se borra al terminar: es un contador, no un historial
+  const [hordeProgress, setHordeProgress] = useState<HordeQueueProgress | null>(null);
   const [lastCost, setLastCost] = useState<{
     amount: number;
     unit: 'creditos' | 'kudos';
@@ -564,10 +570,17 @@ export function useVault(): VaultController {
       void refresh();
       setHint('La bóveda se cerró sola por inactividad.');
     });
+    // la cola de AI Horde. Llega muchas veces por imagen —el sondeo da unas
+    // ochenta vueltas en diez minutos—, asi que es un contador que se pisa a si
+    // mismo, no una lista de avisos
+    const unsubscribeHorde = window.luxy.onHordeProgress((progress) => {
+      if (mounted.current) setHordeProgress(progress);
+    });
     return () => {
       mounted.current = false;
       clearInterval(timer);
       unsubscribe();
+      unsubscribeHorde();
     };
   }, [refresh]);
 
@@ -1176,6 +1189,8 @@ export function useVault(): VaultController {
       }
       setGenerating(true);
       setError(null);
+      // la cola de la generacion anterior no dice nada de esta
+      setHordeProgress(null);
       try {
         const result = await window.luxy.generateVaultMedia({
           conversationId: openConversationId,
@@ -1194,7 +1209,12 @@ export function useVault(): VaultController {
         await reloadMedia();
         return true;
       } finally {
-        if (mounted.current) setGenerating(false);
+        if (mounted.current) {
+          setGenerating(false);
+          // terminada o fallida, la cola ya no existe: dejarla en pantalla
+          // haria creer que sigue esperando
+          setHordeProgress(null);
+        }
       }
     },
     [openConversationId, reloadMedia],
@@ -1376,6 +1396,7 @@ export function useVault(): VaultController {
     attachMedia,
     openMedia,
     generating,
+    hordeProgress,
     lastCost,
     generateMedia,
     createCharacter,

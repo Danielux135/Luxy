@@ -7,6 +7,7 @@
 // todo argumento que llega al main se valida con zod antes de tocar logica,
 // igual que la entrada de telegram en el gateway.
 import { z } from 'zod';
+import type { HordeQueueProgress } from './horde-progress.js';
 import {
   type agentEventSchema,
   agentHostStatusSchema,
@@ -1391,6 +1392,13 @@ export interface LuxyBridge {
   syncVault(): Promise<IpcResult<z.infer<typeof vaultSyncResultSchema>>>;
   /** avisa de que la boveda se cerro sola. devuelve la funcion de baja */
   onVaultLocked(listener: () => void): () => void;
+  /**
+   * como va la cola de AI Horde mientras se genera. Devuelve la funcion de baja.
+   *
+   * Llega muchas veces por imagen —el sondeo da unas ochenta vueltas en diez
+   * minutos—, asi que es un contador en pantalla, no un aviso.
+   */
+  onHordeProgress(listener: (progress: HordeQueueProgress) => void): () => void;
   /** devuelve la funcion de baja; sin ella se acumulan listeners al navegar */
   onAgentEvent(listener: (event: z.infer<typeof agentEventSchema>) => void): () => void;
 }

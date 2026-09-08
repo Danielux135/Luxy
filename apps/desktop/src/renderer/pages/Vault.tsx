@@ -18,6 +18,7 @@ import {
   type VaultController,
 } from '../useVault.js';
 import { imageBlockReason } from '../../shared/vault-image-capability.js';
+import { describeQueue, type HordeQueueProgress } from '../../shared/horde-progress.js';
 import {
   NATIVE_MODEL_SUGGESTIONS,
   modelForProvider,
@@ -2298,11 +2299,18 @@ function GeneratePanel({
         </button>
       </div>
 
-      {vault.generating && (
+      {vault.generating && vault.hordeProgress === null && (
         <p className="field__hint">
           Un vídeo puede tardar minutos. Luxy pregunta al proveedor cada pocos
           segundos hasta que termina.
         </p>
+      )}
+
+      {/* la cola de AI Horde, en cuanto se sabe. Antes eran diez minutos en
+          blanco seguidos de «no estuvo lista a tiempo», que no distingue estar
+          el 300º de la cola de que nadie sirva tus modelos */}
+      {vault.hordeProgress !== null && (
+        <HordeQueueNotice progress={vault.hordeProgress} />
       )}
 
       {vault.lastCost !== null && (
@@ -2591,6 +2599,36 @@ function ConversationList({ vault }: { vault: VaultController }): JSX.Element {
  * que entra aqui. Asi que cada baldosa descifra su imagen cuando entra en
  * pantalla y ni una antes.
  */
+/**
+ * como va la cola de AI Horde mientras se espera.
+ *
+ * Existe porque el fallo mas caro de este proveedor no es que falle: es que
+ * tarda diez minutos sin decir nada y luego dice «no estuvo lista a tiempo».
+ * Con el puesto delante, esa espera deja de ser un misterio y se convierte en
+ * una decision: esperar, o cambiar de modelo.
+ *
+ * El tono NO es de aviso mientras avanza: estar en cola es lo normal en una red
+ * de voluntarios. Solo se pone serio cuando el propio horde dice que hoy nadie
+ * puede hacerlo.
+ */
+function HordeQueueNotice({ progress }: { progress: HordeQueueProgress }): JSX.Element {
+  const dibujando = progress.processing > 0;
+  return (
+    <Notice tone={dibujando ? 'ok' : 'idle'}>
+      {describeQueue(progress)}
+      {!dibujando && (
+        <>
+          {' '}
+          En AI Horde el puesto lo deciden tus <strong>kudos</strong>: se
+          acumulan solos y suben si prestas tu GPU. Marcar varios modelos de la
+          misma familia suma sus workers y acorta la espera.
+        </>
+      )}
+    </Notice>
+  );
+}
+
+
 function MediaGallery({
   vault,
   provider,

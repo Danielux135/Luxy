@@ -2229,3 +2229,41 @@ proponerlo:
 - *guardar el identificador de la petición para reintentar*. No sirve mientras
   el propio Luxy borre el trabajo al rendirse, y con este rescate deja de hacer
   falta en el caso que importaba.
+
+## D-079 — una espera larga tiene que poder explicarse
+
+Fecha: 2026-09-08
+
+Estado: aceptada, implementada
+
+Generar una imagen en AI Horde puede tardar diez minutos, y durante esos diez
+minutos la ventana no decía nada. Al final: «la imagen no estuvo lista a
+tiempo».
+
+Esa frase no distingue **dos averías que se arreglan de forma distinta**:
+
+- estabas el 300º de la cola → esperar, o conseguir kudos;
+- ningún worker sirve tus modelos → cambiar de modelo.
+
+El dato existía todo el tiempo. `pollImage` calcula `queuePosition`,
+`waitTimeSeconds`, `waiting`, `processing` y `kudos` **en cada vuelta** —unas
+ochenta en diez minutos, porque el sondeo se espacia hasta 8 s— y `handlers.ts`
+no pasaba `onProgress`, así que se tiraba entero.
+
+Es el mismo patrón que `D-073` y que el `context.log` que no escribe en ningún
+sitio: **el diagnóstico existe y no llega a nadie.** Tres veces en una sesión.
+
+Lo que cruza al renderer es un esquema **cerrado de cinco contadores**. Esa es
+la garantía que permite mandarlo sin tocar la premisa de la bóveda, y hay una
+prueba que la fija: si algún día el progreso del proveedor creciera con algo que
+no sea un número, no pasaría por descuido.
+
+Dos consumidores, con reglas distintas a propósito:
+
+- **la ventana recibe todas las vueltas**: es un contador y tiene que bajar;
+- **el log solo las que dicen algo nuevo** —cambia el puesto, o alguien empieza
+  a dibujarla—. Ochenta líneas idénticas esconden justo el momento en que la
+  petición avanza.
+
+El canal es el patrón de `vaultLocked`, que ya existía; lo único nuevo es el
+canal y su carga.

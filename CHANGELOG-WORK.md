@@ -1,5 +1,54 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-09-08 15:20 — Claude — F17-COLA-HORDE-001
+
+Origen: Daniel pide una foto, espera diez minutos en blanco y recibe «la imagen
+no estuvo lista a tiempo». Investigado con un workflow de 16 agentes y
+verificacion adversarial —12 hallazgos, **5 sobreviven**, 7 refutados, uno de
+ellos mio— y despues implementado a peticion suya en esta misma sesion.
+
+Hecho (`D-079`): la cola de AI Horde llega a la pantalla.
+
+- `handlers.ts` compone `onProgress` en la llamada a `awaitImage`. No hace falta
+  tocar `hordeOptions`: un spread no dispara el chequeo de propiedades en exceso.
+- Canal nuevo `IPC_EVENT.hordeProgress`, copiando el patron de `vaultLocked`.
+  Todas las demas piezas ya existian.
+- `apps/desktop/src/shared/horde-progress.ts`, puro y probado: el esquema
+  CERRADO de cinco contadores, `worthReporting` y `describeQueue`.
+- La ventana recibe todas las vueltas; el log solo las que dicen algo nuevo.
+  Son unas 80 en diez minutos —el retardo llega al tope de 8 s a partir de la
+  cuarta—, no nueve o diez como creia yo.
+- Un solo arreglo cubre los dos llamadores de `generatePrivateMedia`, porque el
+  fallo vivia dentro de `generateHordeImage`.
+
+Antes, en el mismo hilo de trabajo:
+
+- **`D-078`**: la cancelacion devuelve lo que hubiera y se tiraba. Entre la
+  ultima vuelta del sondeo y el vencimiento hay hasta 8 s en los que un worker
+  puede terminar; esa imagen existia, estaba pagada, y se descartaba. Daniel vio
+  una asi terminada en la web del horde. Se rescata comprobando la censura.
+- **Mezcla de familias de modelos**: la receta tiene UN tamaño y UN clipSkip, y
+  la pantalla animaba a marcar varios sin decir que tenian que ser de la misma
+  familia. Daniel tenia dos SDXL y dos SD1, y por eso la imagen que salio no se
+  parecia a su personaje.
+- **El formulario del horde se abria fuera de pantalla**, encima de la lista
+  desde cuyo boton se abre.
+
+Lo que la verificacion REFUTO y conviene no volver a proponer: que el DELETE
+tragado perdiera kudos (cuando vence nuestro plazo la peticion ya caduco en el
+servidor); que Luxy pida a proposito los workers mas lentos; y no cancelar para
+aprovechar los 30 minutos del enlace, que confunde el reloj de la URL de R2 con
+el de la peticion en cola.
+
+- Archivos: `channels.ts`, `ipc.ts`, `preload/index.ts`, `handlers.ts`,
+  `useVault.ts`, `Vault.tsx`, `horde-progress.ts` (nuevo) y su test.
+- Pruebas: `npm run check` **exit 0** — **2.577 pasadas**, 12 omitidas. Doce
+  nuevas.
+- Riesgo que queda: nada de esto acorta la cola. Con 25 kudos en una cuenta de
+  cuatro dias se sigue esperando; la diferencia es que ahora se ve por que.
+- Siguiente paso exacto: Daniel pide una foto y comprueba que sale el puesto en
+  la cola y que cambia a «Dibujandola…» cuando un worker la coge.
+
 ### 2026-09-08 12:50 — Claude — UI-GALERIA-PLEGADA-001
 
 Origen, dos avisos de Daniel: «sigo sin ver la galeria de imagenes» —estaba, al

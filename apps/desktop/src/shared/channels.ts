@@ -100,6 +100,13 @@ export const IPC_EVENT = {
   agentEvent: 'luxy:agent:event',
   /** la boveda se cerro sola por inactividad. viaja el hecho, nada mas */
   vaultLocked: 'luxy:vault:locked',
+  /**
+   * como va la cola de AI Horde mientras se espera una imagen.
+   *
+   * Viajan SOLO contadores: puesto, segundos y cuantas peticiones tuyas hay en
+   * cada estado. Ni el prompt, ni el personaje, ni la imagen.
+   */
+  hordeProgress: 'luxy:vault:horde:progress',
 } as const;
 
 export type IpcInvokeChannel = (typeof IPC_INVOKE)[keyof typeof IPC_INVOKE];

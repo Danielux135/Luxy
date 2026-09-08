@@ -126,6 +126,15 @@ const bridge: LuxyBridge = {
     return () => ipcRenderer.removeListener(IPC_EVENT.vaultLocked, handler);
   },
 
+  onHordeProgress: (listener) => {
+    // el listener del renderer nunca ve el objeto IpcRendererEvent: solo el dato
+    const handler = (_event: unknown, payload: unknown): void => {
+      listener(payload as Parameters<typeof listener>[0]);
+    };
+    ipcRenderer.on(IPC_EVENT.hordeProgress, handler);
+    return () => ipcRenderer.removeListener(IPC_EVENT.hordeProgress, handler);
+  },
+
   onAgentEvent: (listener) => {
     // el listener del renderer nunca ve el objeto IpcRendererEvent: solo el dato
     const handler = (_event: unknown, payload: unknown): void => {
