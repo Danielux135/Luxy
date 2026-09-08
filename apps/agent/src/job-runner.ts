@@ -796,7 +796,20 @@ export async function runJob(
     } finally {
       latido.stop();
     }
-    executedModel = providerResult.usage?.model ?? executedModel;
+    // el proveedor manda sobre lo que se pidio, porque puede haber resuelto un
+    // alias del lado del servidor. Pero si difiere, se DICE: una sustitucion
+    // silenciosa de modelo es exactamente lo que CLAUDE.md prohibe, y ademas
+    // fue lo que tapo el bug de `usage.model` durante toda una sesion —la
+    // pantalla afirmaba un modelo distinto del que se habia mandado y no habia
+    // ni una linea en ningun sitio que permitiera notarlo—
+    const modeloInformado = providerResult.usage?.model;
+    if (modeloInformado !== undefined && modeloInformado !== executedModel) {
+      deps.logger.warn('el proveedor informa de un modelo distinto del pedido', {
+        pedido: executedModel,
+        informado: modeloInformado,
+      });
+    }
+    executedModel = modeloInformado ?? executedModel;
 
     // como termino la respuesta, antes de decidir nada con ella.
     //

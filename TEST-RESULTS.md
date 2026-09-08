@@ -1,5 +1,35 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-08 — BUG-MODELO-ETIQUETA-001 y BUG-AVIF-001
+
+`npm run check` exit 0.
+
+```
+Test Files  142 passed (142)
+     Tests   2535 passed | 12 skipped (2547)
+```
+
+Doce nuevas. Dos en `providers.test.ts` y diez en `media-types.test.ts`, que es
+un fichero nuevo.
+
+La que de verdad importa de las dos primeras afirma **las dos mitades sobre la
+misma llamada**: que `JSON.parse(body).model` y `result.usage.model` coinciden
+con el modelo de la peticion, y que ambos caen al de la conexion cuando no se
+pide ninguno. Separadas no sirven de nada, porque el bug era exactamente que
+divergieran. Antes no habia ninguna: `usage.model` no aparecia en ningun test
+del agente.
+
+De las diez de `media-types`, la de regresion es «toda extension de imagen
+ofrecida se traduce a un image/\*». Esa invariante estaba rota y su fallo no se
+veia como un error, sino como una ventana colgada media hora.
+
+Tambien se fija lo contrario de lo que uno esperaria: que las listas de imagen y
+de video **no** se solapen. Unificarlas «para no repetir» romperia el banco de
+vision, que manda una sola imagen y no puede aceptar un mp4.
+
+Lo que estas pruebas NO cubren: si Groq acepta `image/avif`. Depende del
+proveedor remoto y no se puede saber sin gastar una llamada.
+
 ### 2026-09-08 — F16-DESCRIBIDOR-001
 
 `npm run check` exit 0.

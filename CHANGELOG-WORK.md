@@ -1,5 +1,61 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-09-08 11:50 — Claude — BUG-MODELO-ETIQUETA-001 y BUG-AVIF-001
+
+Origen: dos avisos de Daniel en el mismo mensaje. «En todas las ejecuciones he
+puesto el modelo que me dices, si sigue respondiendo el otro es porque no
+funciona bien», y «la foto en escritorio que es .avif no la coge».
+
+Investigado con un workflow de 30 agentes: cinco trazas independientes por el
+codigo real y verificacion adversarial de cada hallazgo. 24 hallazgos, **21
+sobreviven a la refutacion**. Cinco trazas distintas convergieron en la misma
+linea. Todas las afirmaciones que se usan aqui estan re-verificadas a mano.
+
+**Lo primero: me equivoque, y lo dije como un hecho.** Afirme que el modelo
+elegido no llegaba a la peticion. Falso: el cuerpo del POST siempre lo llevo.
+Lo que mentia era `usage.model` en la rama no agentic —la unica que usa el
+banco— y de ahi el `executedModel` de la pantalla. Detalle y las dos evidencias
+independientes en `D-073`.
+
+- `http-provider.ts:368`: `this.config.model` -> `this.modelFor(request)`. Las
+  otras tres apariciones del campo en el fichero ya lo hacian bien.
+- `job-runner.ts:799`: ahora AVISA cuando el proveedor informa de un modelo
+  distinto del pedido en vez de tragarselo. Sin esa linea, este mismo bug
+  vuelve a ser invisible.
+- Prueba nueva que afirma las DOS mitades sobre la MISMA llamada —cuerpo e
+  informe—. No existia ninguna: `usage.model` no aparecia en ningun test.
+
+**Lo del avif eran tres sitios, no uno** (`D-074`): dos listas de extensiones a
+mano en dos dialogos y un mapa de tipos desincronizado, los tres dentro de
+`handlers.ts` y por tanto sin una sola prueba.
+
+- Nuevo `apps/desktop/src/shared/media-types.ts`, puro y probado. Los dos
+  dialogos derivan de las mismas constantes.
+- La prueba de regresion fija la invariante rota: toda extension ofrecida tiene
+  que tener un tipo de verdad detras.
+- Guarda en el banco antes de gastar la llamada, copiando la de
+  `vaultMediaDescribe`. Sin ella, un formato desconocido cruzaba el IPC como
+  `application/octet-stream`, `host-entry.ts:189` lo descartaba EN SILENCIO y la
+  ventana se quedaba «Mirando…» hasta el timeout para decir «el agente no
+  respondio a tiempo».
+
+- Archivos: `http-provider.ts`, `job-runner.ts`, `providers.test.ts`,
+  `handlers.ts`, `media-types.ts` (nuevo) y su test, `DECISIONS.md`.
+- Pruebas: `npm run check` **exit 0** — 142 archivos, **2.535 pasadas**, 12
+  omitidas. Doce nuevas.
+- Riesgo que queda: **no se sabe si Groq acepta `image/avif`**. No se puede
+  determinar leyendo el repositorio y no se ha gastado ninguna llamada. Se
+  responde probandolo en el banco.
+- Siguiente paso exacto: Daniel prueba el .avif en el banco. Si Groq lo rechaza,
+  el camino es convertir a png en el renderer (Chromium si decodifica avif, al
+  reves que `nativeImage`, `D-069`), no volver a esconder el formato.
+
+**Pendiente, confirmado y NO arreglado:** los cuatro modelos de voz de Groq
+(whisper x2, orpheus x2) y los dos clasificadores `llama-prompt-guard` se
+listan como candidatos en el selector de vision. Elegir uno gasta una llamada
+que no puede funcionar. No se toca ahora porque el arreglo pasa por
+`modelsForProvider`, que usan varias pantallas, y su alcance no esta auditado.
+
 ### 2026-09-08 11:05 — Claude — F16-DESCRIBIDOR-001
 
 Hilo entero del describidor de imagenes de la boveda, seis commits antes de

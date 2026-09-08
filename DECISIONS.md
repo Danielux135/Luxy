@@ -1991,3 +1991,95 @@ Los dos topes suben, y por medición:
   vez: el razonamiento sale **más largo** que la respuesta, no más corto. Esto
   no se archiva —vive en memoria, viaja por IPC una vez y se pinta en un
   desplegable—, así que el tope sólo existe para que no crezca sin límite.
+
+## D-073 — un dato de diagnóstico que miente es peor que no tenerlo
+
+Fecha: 2026-09-08
+
+Estado: aceptada, implementada
+
+Daniel: *«En todas las ejecuciones he puesto el modelo que me dices, si sigue
+respondiendo el otro es porque no funciona bien»*. La pantalla del banco decía
+`respondió llama-3.3-70b-versatile` en las cuatro pruebas, que es exactamente el
+`defaultModel` de su conexión de Groq.
+
+**Yo deduje de eso que el modelo elegido no llegaba a la petición, y se lo dije
+como un hecho. Era falso.** El cuerpo del POST siempre llevó el modelo elegido.
+Lo que mentía era la etiqueta.
+
+`apps/agent/src/providers/http-provider.ts:368`, rama de éxito sin herramientas
+—la única que usa el banco—:
+
+```ts
+const usage: ProviderUsage = { provider: this.config.id, model: this.config.model, ... }
+```
+
+Las otras tres apariciones del mismo campo en el fichero ya usaban
+`this.modelFor(request)`, incluida la que arma el cuerpo del POST (`:704`). Ésta
+se quedó atrás. Y `job-runner.ts:799` pisa con ella el `executedModel` correcto
+que él mismo había calculado en `:726`.
+
+Dos evidencias independientes de que el cuerpo iba bien:
+
+1. **La asimetría del log.** `failure()` no devuelve `usage`, así que un turno
+   que falla conserva el modelo correcto. En `luxy.log` los turnos fallidos de
+   Mistral registran `mistral-small-latest` y `mistral-medium-latest` —los que
+   Daniel eligió a mano, y ninguno es el `defaultModel` `mistral-large-latest`—
+   mientras que **todos** los turnos completados registran el valor por defecto.
+2. **`llama-3.3-70b-versatile` ya no está en el catálogo de Groq.** Si de verdad
+   se hubiera mandado, la llamada habría fallado. Completó cuatro veces.
+
+Lo que hace especialmente cara esta clase de fallo: **la única prueba que tenía
+el usuario de que algo iba mal era el campo estropeado**, y me llevó a mí a
+afirmar un diagnóstico equivocado con seguridad. Un contador que no existe deja
+a todo el mundo en la duda; uno que miente manda a arreglar lo que no está roto.
+
+Además de arreglar `:368`, `job-runner.ts:799` **avisa** cuando el proveedor
+informa de un modelo distinto del pedido, en vez de tragárselo. Es legítimo que
+un servidor resuelva un alias; lo que no es legítimo es que no se vea. Sin esa
+línea, este mismo bug volvería a ser invisible.
+
+La prueba de regresión afirma las **dos mitades sobre la misma llamada** —lo que
+va en el cuerpo y lo que se informa—, que es lo único que impide que vuelvan a
+separarse. No existía ninguna: `usage.model` no aparecía en ningún test del
+agente.
+
+## D-074 — una lista de formatos vive donde se pueda probar
+
+Fecha: 2026-09-08
+
+Estado: aceptada, implementada
+
+`.avif` no se podía adjuntar ni pasar por el banco. La causa eran **tres sitios
+mantenidos a mano por separado** dentro de `handlers.ts`: dos listas de
+extensiones en dos diálogos distintos y un mapa de tipos que no conocía los
+mismos formatos que ellas. Ninguno tenía una sola prueba, porque están dentro
+del proceso principal y allí no se pueden probar.
+
+El modo de fallo del mapa era el peor de los dos, y no parecía un fallo:
+
+- una extensión desconocida devuelve `application/octet-stream`;
+- eso no casa con el `^image/` de `localTurnImageSchema` (`host-protocol.ts:39`);
+- `host-entry.ts:189` **descarta el mensaje en silencio y no contesta**;
+- la ventana se queda en «Mirando…» hasta agotar el timeout y termina diciendo
+  «el agente no respondió a tiempo» — un fallo de extensión disfrazado de fallo
+  del agente.
+
+Ahora viven en `apps/desktop/src/shared/media-types.ts`, que es puro, y su
+prueba fija la invariante que estaba rota: **toda extensión que se ofrece en un
+diálogo tiene que tener un tipo de verdad detrás**. Los dos diálogos derivan de
+las mismas constantes.
+
+Las listas de imagen y de vídeo siguen **separadas**, y no por descuido: el
+banco de visión manda una imagen y no puede aceptar un mp4. Unificarlas lo
+rompería, y hay una prueba que lo dice.
+
+El banco rechaza ahora un formato que no sabe nombrar **antes** de gastar la
+llamada, copiando la guarda que ya existía en `vaultMediaDescribe`.
+
+**Lo que esto NO resuelve:** que Groq acepte `image/avif`. No se puede saber
+leyendo el repositorio y no se ha gastado ninguna llamada en averiguarlo. Se
+responde con una prueba en el banco, que existe precisamente para eso. Si lo
+rechaza, el siguiente paso sería convertir a png en el renderer —Chromium sí
+decodifica avif, al revés que `nativeImage` (`D-069`)—, no volver a esconder el
+formato.

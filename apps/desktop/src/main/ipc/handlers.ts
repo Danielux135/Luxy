@@ -141,6 +141,12 @@ import {
   type ImageBlockReason,
 } from '../../shared/vault-image-capability.js';
 import { classifyReply } from '../../shared/refusal.js';
+import {
+  IMAGE_EXTENSIONS,
+  VIDEO_EXTENSIONS,
+  isKnownImage,
+  mimeTypeFor,
+} from '../../shared/media-types.js';
 import type { PrivateMemory } from '../vault/private-memory.js';
 import type { MemoryPreferences } from '../vault/memory-preferences.js';
 import type { CatalogStore } from '../vault/catalog-store.js';
@@ -168,20 +174,8 @@ function imageBlockMessage(reason: ImageBlockReason, provider: 'xavira' | 'horde
   }
 }
 
-/** tipo declarado por la extension del archivo elegido en el dialogo */
-function mimeTypeFor(filePath: string): string {
-  const extension = filePath.toLowerCase().split('.').pop() ?? '';
-  const known: Record<string, string> = {
-    png: 'image/png',
-    jpg: 'image/jpeg',
-    jpeg: 'image/jpeg',
-    gif: 'image/gif',
-    webp: 'image/webp',
-    mp4: 'video/mp4',
-    webm: 'video/webm',
-  };
-  return known[extension] ?? 'application/octet-stream';
-}
+// las extensiones admitidas y el mapa de tipos viven en `shared/media-types`:
+// aqui no se pueden probar, y no probarlas fue justo el fallo
 
 export interface HandlerContext {
   controller: AgentController;
@@ -1063,7 +1057,7 @@ export function registerIpcHandlers(context: HandlerContext): void {
       title: 'Elige imagenes o videos',
       properties: ['openFile', 'multiSelections'],
       filters: [
-        { name: 'Imagenes y videos', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'mp4', 'webm'] },
+        { name: 'Imagenes y videos', extensions: [...IMAGE_EXTENSIONS, ...VIDEO_EXTENSIONS] },
       ],
     });
     if (picked.canceled) return { attached: 0 };
@@ -1535,7 +1529,7 @@ export function registerIpcHandlers(context: HandlerContext): void {
     const picked = await dialog.showOpenDialog(window, {
       title: 'Elige una imagen para la prueba',
       properties: ['openFile'],
-      filters: [{ name: 'Imagenes', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif'] }],
+      filters: [{ name: 'Imagenes', extensions: [...IMAGE_EXTENSIONS] }],
     });
     const filePath = picked.filePaths[0];
     if (picked.canceled || filePath === undefined) {
@@ -1555,6 +1549,32 @@ export function registerIpcHandlers(context: HandlerContext): void {
 
     const bytes = new Uint8Array(readFileSync(filePath));
     const mimeType = mimeTypeFor(filePath);
+
+    // un formato que no sabemos nombrar se para AQUI, y no en el limite entre
+    // procesos.
+    //
+    // Sin esta guarda el turno cruzaba el IPC con `application/octet-stream`,
+    // el esquema del host lo rechazaba por no casar con `^image/` y
+    // `host-entry` lo DESCARTABA EN SILENCIO, sin contestar nada: la ventana se
+    // quedaba en «Mirando…» hasta agotar el timeout del turno y entonces decia
+    // «el agente no respondio a tiempo», que señala al agente cuando el
+    // problema era la extension del archivo. La misma guarda ya existe en
+    // `vaultMediaDescribe`; aqui faltaba.
+    if (!isKnownImage(filePath)) {
+      const extension = basename(filePath).split('.').pop() ?? '';
+      return {
+        cancelled: false,
+        fileName: basename(filePath),
+        mimeType,
+        byteSize: bytes.length,
+        dataUrl: null,
+        caption: null,
+        reasoning: null,
+        failure: 'fallo' as const,
+        error: `Luxy no sabe que tipo de imagen es un .${extension}, asi que no puede mandarlo. Conviertelo a png, jpg o webp.`,
+        executedModel: null,
+      };
+    }
 
     const run = await context.controller.runLocalTurn({
       localTurnId: randomUUID(),

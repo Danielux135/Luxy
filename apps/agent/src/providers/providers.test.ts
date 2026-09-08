@@ -801,6 +801,71 @@ describe('HttpApiProvider: imagenes', () => {
   });
 });
 
+// POR QUE EXISTE, y es un fallo que estuvo suelto y costo una sesion entera de
+// diagnostico equivocado.
+//
+// El cuerpo del POST siempre llevo el modelo de la peticion. Lo que mentia era
+// el INFORME: `usage.model` devolvia el de la conexion, y como `job-runner`
+// pisa su `executedModel` con ese campo, el banco de vision enseñaba
+// «respondio llama-3.3-70b-versatile» en TODAS las pruebas aunque se hubiera
+// elegido otro modelo a mano. Daniel dedujo de ahi que su eleccion no se
+// aplicaba, y la unica prueba que tenia era el campo estropeado.
+//
+// Estas pruebas afirman las DOS mitades sobre la MISMA llamada, que es lo que
+// impide que vuelvan a separarse: lo que se manda y lo que se dice que se mando.
+describe('HttpApiProvider: que modelo dice que uso', () => {
+  const base = { ...EXAMPLE_HTTP_PROVIDERS[0]!, enabled: true, supportsStreaming: false };
+
+  function espiar(): { body: () => Record<string, unknown> | null } {
+    let sent: Record<string, unknown> | null = null;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (_url, init) => {
+      sent = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      return new Response(
+        JSON.stringify({
+          choices: [{ message: { content: 'lo veo' }, finish_reason: 'stop' }],
+          usage: { prompt_tokens: 4, completion_tokens: 2 },
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    });
+    return { body: () => sent };
+  }
+
+  const peticion = (overrides: Record<string, unknown> = {}) => ({
+    prompt: 'que ves aqui',
+    workingDirectory: 'C:/wt',
+    timeoutMs: 1000,
+    signal: new AbortController().signal,
+    onEvent: () => undefined,
+    ...overrides,
+  });
+
+  const OTRO = 'qwen/qwen3.6-27b';
+
+  it('informa del modelo de la PETICION, que es el que manda en el cuerpo', async () => {
+    // si el elegido y el de la conexion fueran iguales, la prueba pasaria sola
+    expect(base.model).not.toBe(OTRO);
+
+    const espia = espiar();
+    const provider = new HttpApiProvider(base, 'una-clave');
+
+    const result = await provider.run(peticion({ model: OTRO }));
+
+    expect(espia.body()?.['model']).toBe(OTRO);
+    expect(result.usage?.model).toBe(OTRO);
+  });
+
+  it('sin modelo en la peticion cae al de la conexion, y lo dice igual', async () => {
+    const espia = espiar();
+    const provider = new HttpApiProvider(base, 'una-clave');
+
+    const result = await provider.run(peticion());
+
+    expect(espia.body()?.['model']).toBe(base.model);
+    expect(result.usage?.model).toBe(base.model);
+  });
+});
+
 // POR QUE EXISTE: una web generada durante 23 minutos acabo a mitad de una
 // etiqueta y no se pudo demostrar el motivo. Sin estas señales, "se acabaron
 // los tokens", "Luxy corto la conexion" y "el proveedor cerro el socket" son

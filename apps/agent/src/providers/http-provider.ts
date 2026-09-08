@@ -365,7 +365,17 @@ export class HttpApiProvider implements ProviderExecution {
 
       const usage: ProviderUsage = {
         provider: this.config.id,
-        model: this.config.model,
+        // el modelo de la PETICION, que es el que se mando en el cuerpo, y no
+        // el de la conexion.
+        //
+        // Mentia, y la mentira era cara: `job-runner` pisa su `executedModel`
+        // con este campo, asi que el banco de vision enseñaba «respondio
+        // llama-3.3-70b-versatile» —el defaultModel de la conexion— en todas
+        // las pruebas, aunque la peticion hubiera salido con el modelo elegido
+        // a mano. Daniel dedujo de ahi que su eleccion no se aplicaba, y era la
+        // etiqueta la que estaba mal. Las otras tres apariciones de este campo
+        // en el fichero ya usaban `modelFor`: esta se quedo atras.
+        model: this.modelFor(request),
         jobId: null,
         inputTokens: result.inputTokens,
         outputTokens: result.outputTokens,
