@@ -27,6 +27,7 @@ import {
   buildHordeRequest,
   buildDescribePrompt,
   parseDescribeResponse,
+  splitReasoning,
   imagePromptStyleFor,
   type HordeRecipe,
 } from '@luxy/shared';
@@ -1490,10 +1491,13 @@ export function registerIpcHandlers(context: HandlerContext): void {
     }
 
     // una negativa llega como un turno normal y parece una descripcion rara
-    const refused = classifyReply(run.text).kind === 'refused';
+    // se clasifica lo VISIBLE, no el razonamiento: un modelo puede sopesar en
+    // voz alta si debe negarse y luego contestar con normalidad, y mirar el
+    // texto entero convertiria ese titubeo en un rechazo que nunca ocurrio
+    const refused = classifyReply(splitReasoning(run.text).visible).kind === 'refused';
     const described = parseDescribeResponse(run.text, refused);
     if (described.caption === null) {
-      return { caption: null, failure: described.failure };
+      return { caption: null, failure: described.failure, reasoning: described.reasoning };
     }
 
     await context.privateMedia.setCaption(
@@ -1504,7 +1508,7 @@ export function registerIpcHandlers(context: HandlerContext): void {
     );
     // ni la descripcion ni de que imagen es: solo que se pudo
     context.log('imagen descrita por un modelo');
-    return { caption: described.caption, failure: null };
+    return { caption: described.caption, failure: null, reasoning: described.reasoning };
   });
 
   /**
@@ -1543,6 +1547,7 @@ export function registerIpcHandlers(context: HandlerContext): void {
         dataUrl: null,
         caption: null,
         failure: null,
+        reasoning: null,
         error: null,
         executedModel: null,
       };
@@ -1583,6 +1588,7 @@ export function registerIpcHandlers(context: HandlerContext): void {
         byteSize: bytes.length,
         dataUrl: preview,
         caption: null,
+        reasoning: null,
         failure: 'fallo' as const,
         // el mensaje del proveedor ya pasa por `redact` aguas arriba
         error: run.error ?? `el turno termino como ${run.outcome}`,
@@ -1590,7 +1596,10 @@ export function registerIpcHandlers(context: HandlerContext): void {
       };
     }
 
-    const refused = classifyReply(run.text).kind === 'refused';
+    // se clasifica lo VISIBLE, no el razonamiento: un modelo puede sopesar en
+    // voz alta si debe negarse y luego contestar con normalidad, y mirar el
+    // texto entero convertiria ese titubeo en un rechazo que nunca ocurrio
+    const refused = classifyReply(splitReasoning(run.text).visible).kind === 'refused';
     const described = parseDescribeResponse(run.text, refused);
 
     // ni el nombre del archivo ni lo que se vio: solo que se pudo probar
@@ -1603,6 +1612,8 @@ export function registerIpcHandlers(context: HandlerContext): void {
       dataUrl: preview,
       caption: described.caption,
       failure: described.failure,
+      // se enseña, no se guarda: explica la descripcion sin ser la descripcion
+      reasoning: described.reasoning,
       error: null,
       executedModel: run.executedModel ?? args.model,
     };

@@ -671,6 +671,13 @@ export const vaultMediaDescribeResultSchema = z.object({
   caption: z.string().nullable(),
   /** por qué no se pudo, para poder arreglarlo: no contestó o se negó */
   failure: z.enum(['vacio', 'negativa', 'sin-imagen']).nullable(),
+  /**
+   * lo que el modelo razonó antes de contestar, si lo escribió.
+   *
+   * Se conserva y se enseña, pero **nunca** se guarda como pie de foto: es
+   * la explicación de por qué dijo lo que dijo, no lo que se ve en la imagen.
+   */
+  reasoning: z.string().nullable().default(null),
 });
 
 /**
@@ -705,6 +712,13 @@ export const vaultVisionProbeResultSchema = z.object({
    * algo que no va a funcionar, y el motivo real no aparecía por ningún lado.
    */
   failure: z.enum(['vacio', 'negativa', 'fallo', 'sin-imagen']).nullable(),
+  /**
+   * lo que el modelo razonó antes de contestar, si lo escribió.
+   *
+   * Se conserva y se enseña, pero **nunca** se guarda como pie de foto: es
+   * la explicación de por qué dijo lo que dijo, no lo que se ve en la imagen.
+   */
+  reasoning: z.string().nullable().default(null),
   /** el mensaje del fallo cuando lo hay; nunca una traza */
   error: z.string().nullable(),
   /** el modelo que respondió de verdad, que puede no ser el pedido */

@@ -2404,6 +2404,15 @@ function VisionBench({
               {probe.executedModel === null ? '' : ` · respondió ${probe.executedModel}`}
             </p>
             {probe.caption !== null && <p className="vault-media__caption">{probe.caption}</p>}
+            {probe.reasoning !== null && (
+              /* lo que penso antes de contestar. Va PLEGADO y aparte: explica
+                 una descripcion rara —que es cuando de verdad hace falta— pero
+                 no es la descripcion, y no se guarda en ningun sitio */
+              <details className="vision-probe__reasoning">
+                <summary>Lo que pensó antes de responder</summary>
+                <p>{probe.reasoning}</p>
+              </details>
+            )}
             {probe.failure === 'negativa' && (
               <Notice tone="warn">
                 Ese modelo se negó a describir la imagen. Repetirlo no lo arregla:
@@ -2673,6 +2682,8 @@ function MediaViewer({
   // por que no hay descripcion despues de pedirla: negarse y no contestar se
   // arreglan de forma distinta, asi que no se pueden contar igual
   const [failure, setFailure] = useState<string | null>(null);
+  // lo que penso el modelo en la ultima descripcion; efimero a proposito
+  const [reasoning, setReasoning] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -2813,7 +2824,12 @@ function MediaViewer({
                     })
                     // con descripcion ya esta guardada y la lista se recarga sola:
                     // aqui solo queda quedarse con el motivo cuando no la hubo
-                    .then((result) => setFailure(result.failure));
+                    .then((result) => {
+                      setFailure(result.failure);
+                      // el razonamiento NO se guarda con el medio: se enseña
+                      // aqui, esta vez, para poder juzgar la descripcion
+                      setReasoning(result.reasoning);
+                    });
                 }}
               >
                 {vault.describingMedia ? 'Mirando…' : 'Describir con IA'}
@@ -2833,6 +2849,13 @@ function MediaViewer({
             Lo que escriba se puede corregir a mano, porque es exactamente lo que
             lee después el personaje.
           </p>
+        )}
+
+        {reasoning !== null && (
+          <details className="vision-probe__reasoning">
+            <summary>Lo que pensó antes de responder</summary>
+            <p>{reasoning}</p>
+          </details>
         )}
 
         {failure === 'negativa' && (

@@ -245,7 +245,8 @@ export interface VaultController {
     provider: string;
     model: string | null;
     projectAlias: string;
-  }) => Promise<{ caption: string | null; failure: string | null }>;
+    /** `reasoning` se devuelve para verlo, y NUNCA se guarda con el archivo */
+  }) => Promise<{ caption: string | null; failure: string | null; reasoning: string | null }>;
   describingMedia: boolean;
   /**
    * banco de pruebas: una imagen del disco y a ver qué dice el modelo.
@@ -978,8 +979,8 @@ export function useVault(): VaultController {
       provider: string;
       model: string | null;
       projectAlias: string;
-    }): Promise<{ caption: string | null; failure: string | null }> => {
-      if (openConversationId === null) return { caption: null, failure: null };
+    }): Promise<{ caption: string | null; failure: string | null; reasoning: string | null }> => {
+      if (openConversationId === null) return { caption: null, failure: null, reasoning: null };
       setDescribingMedia(true);
       setError(null);
       setHint(null);
@@ -991,7 +992,7 @@ export function useVault(): VaultController {
         if (!result.ok) {
           setError(result.error);
           setHint(result.hint);
-          return { caption: null, failure: null };
+          return { caption: null, failure: null, reasoning: null };
         }
         // el pie de foto ya está guardado en el main: se recarga para verlo
         if (result.value.caption !== null) await reloadMedia();

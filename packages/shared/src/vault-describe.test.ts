@@ -8,8 +8,10 @@ import { describe, it, expect } from 'vitest';
 import {
   MAX_CAPTION_CHARS,
   buildDescribePrompt,
+  MAX_REASONING_CHARS,
   parseDescribeResponse,
   saysNoImage,
+  splitReasoning,
 } from './vault-describe.js';
 
 describe('lo que se le pide al describidor', () => {
@@ -45,7 +47,11 @@ describe('lo que vuelve del describidor', () => {
   });
 
   it('una respuesta vacia no se guarda', () => {
-    expect(parseDescribeResponse('   ')).toEqual({ caption: null, failure: 'vacio' });
+    expect(parseDescribeResponse('   ')).toEqual({
+      caption: null,
+      failure: 'vacio',
+      reasoning: null,
+    });
   });
 
   it('una negativa NO se guarda como pie de foto', () => {
@@ -81,7 +87,11 @@ describe('una respuesta que dice que no hay imagen', () => {
     const respuesta =
       'No hay ninguna imagen adjunta en esta conversación, así que no puedo describirla. ' +
       'Si la envías de nuevo, redacto el pie de foto siguiendo las reglas indicadas.';
-    expect(parseDescribeResponse(respuesta)).toEqual({ caption: null, failure: 'sin-imagen' });
+    expect(parseDescribeResponse(respuesta)).toEqual({
+      caption: null,
+      failure: 'sin-imagen',
+      reasoning: null,
+    });
   });
 
   it('reconoce las formas habituales, con y sin acentos, en dos idiomas', () => {
@@ -115,5 +125,82 @@ describe('una respuesta que dice que no hay imagen', () => {
     // se arreglan distinto: una negativa pide cambiar de modelo; «sin imagen»
     // pide cambiar de PROVEEDOR, porque el transporte no la lleva
     expect(parseDescribeResponse('No puedo ayudarte con eso.', true).failure).toBe('negativa');
+  });
+});
+
+describe('el modelo que piensa en voz alta', () => {
+  // POR QUE, y no es hipotetico: comprobado contra Groq el 2026-09-07 con
+  // qwen/qwen3.6-27b. Devolvio parrafos de deliberacion delante de la frase
+  // util, y eso guardado como pie de foto convierte el razonamiento en «lo que
+  // se ve en la imagen». Pero tirarlo tampoco vale: es lo unico que explica una
+  // descripcion rara.
+  const RESPUESTA_REAL =
+    '\n<think>\nThe user wants a short Spanish sentence describing the provided image. ' +
+    'The image displays vertical red and blue bars.\n</think>\n\n' +
+    'La imagen muestra barras verticales de colores rojo y azul.';
+
+  it('el pie de foto es SOLO lo visible', () => {
+    const { caption } = parseDescribeResponse(RESPUESTA_REAL);
+    expect(caption).toBe('La imagen muestra barras verticales de colores rojo y azul.');
+    expect(caption).not.toContain('The user wants');
+  });
+
+  it('lo pensado se conserva, no se tira', () => {
+    const { reasoning } = parseDescribeResponse(RESPUESTA_REAL);
+    expect(reasoning).toContain('The user wants a short Spanish sentence');
+  });
+
+  it('sin razonamiento el campo es null, no una cadena vacia', () => {
+    // «no lo escribio» y «escribio algo vacio» no son lo mismo en pantalla
+    expect(parseDescribeResponse('Un gato sobre una piedra.').reasoning).toBeNull();
+  });
+
+  it('reconoce las tres etiquetas que se ven de verdad', () => {
+    for (const etiqueta of ['think', 'thinking', 'reasoning']) {
+      const r = parseDescribeResponse(`<${etiqueta}>dudo</${etiqueta}>Un gato.`);
+      expect(r.caption).toBe('Un gato.');
+      expect(r.reasoning).toBe('dudo');
+    }
+  });
+
+  it('un bloque sin cerrar deja la respuesta VACIA, no un pie de foto pensado', () => {
+    // es un modelo cortado a mitad de pensar: no llego a contestar, y quedarse
+    // con su deliberacion como descripcion seria lo peor de los dos mundos
+    const r = parseDescribeResponse('<think>estoy pensando y me cortaron');
+    expect(r.caption).toBeNull();
+    expect(r.failure).toBe('vacio');
+    expect(r.reasoning).toContain('estoy pensando');
+  });
+
+  it('varios bloques se juntan y ninguno se cuela en el pie de foto', () => {
+    const r = parseDescribeResponse('<think>uno</think>Un gato<think>dos</think> en una piedra.');
+    expect(r.caption).toBe('Un gato en una piedra.');
+    expect(r.reasoning).toBe('uno\n\ndos');
+  });
+
+  it('el razonamiento se recorta: es para leerlo, no para archivarlo', () => {
+    const largo = `<think>${'x'.repeat(MAX_REASONING_CHARS + 500)}</think>Un gato.`;
+    expect(parseDescribeResponse(largo).reasoning).toHaveLength(MAX_REASONING_CHARS);
+  });
+
+  it('splitReasoning permite clasificar la negativa sobre lo VISIBLE', () => {
+    // un modelo puede sopesar en voz alta si debe negarse y luego contestar con
+    // normalidad: mirar el texto entero convertiria ese titubeo en un rechazo
+    const { visible, reasoning } = splitReasoning(
+      '<think>¿Debería negarme a esto? No, es una descripción técnica.</think>Dos personas en la playa.',
+    );
+    expect(visible.trim()).toBe('Dos personas en la playa.');
+    expect(visible).not.toContain('negarme');
+    expect(reasoning).toContain('negarme');
+  });
+
+  it('un razonamiento que dice «no hay imagen» no descarta una descripcion buena', () => {
+    // el detector de «sin imagen» mira lo visible; si mirara el razonamiento,
+    // un modelo que se lo plantea y luego describe quedaria descartado
+    const r = parseDescribeResponse(
+      '<think>Al principio pensé que no había ninguna imagen adjunta.</think>Un gato atigrado.',
+    );
+    expect(r.caption).toBe('Un gato atigrado.');
+    expect(r.failure).toBeNull();
   });
 });

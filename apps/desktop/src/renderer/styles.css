@@ -1717,6 +1717,27 @@ input[aria-invalid='true'] {
   border-radius: 8px;
 }
 
+/* lo que el modelo penso: presente pero plegado. No es la descripcion, asi que
+   no puede competir con ella a simple vista */
+.vision-probe__reasoning {
+  border-left: 2px solid var(--line);
+  padding-left: 10px;
+}
+
+.vision-probe__reasoning > summary {
+  cursor: pointer;
+  font-size: 11px;
+  color: var(--dim);
+}
+
+.vision-probe__reasoning > p {
+  margin: 6px 0 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--dim);
+  white-space: pre-wrap;
+}
+
 .vision-probe__text {
   flex: 1;
   min-width: 0;

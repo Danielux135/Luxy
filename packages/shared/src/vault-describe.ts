@@ -84,6 +84,51 @@ export function saysNoImage(text: string): boolean {
 export interface DescribeResult {
   caption: string | null;
   failure: DescribeFailure | null;
+  /**
+   * lo que el modelo razono ANTES de contestar, cuando lo escribe.
+   *
+   * Se separa y se conserva, no se tira: es lo unico que explica por que dijo
+   * lo que dijo, y con una descripcion rara es justo lo que hay que leer. Pero
+   * NO es la descripcion: guardarlo como pie de foto haria creer al personaje
+   * que la imagen ES el razonamiento.
+   *
+   * `null` cuando el modelo no razona en voz alta, que es lo normal.
+   */
+  reasoning: string | null;
+}
+
+/** tope de lo que se conserva del razonamiento: es para leerlo, no para archivarlo */
+export const MAX_REASONING_CHARS = 4000;
+
+/**
+ * bloques de razonamiento en voz alta, con las etiquetas que se ven de verdad.
+ *
+ * `<think>` es la de Qwen y DeepSeek —comprobada contra Groq el 2026-09-07, que
+ * devolvio el razonamiento entero delante de la frase util—. `<thinking>` la
+ * usan otros. La etiqueta de cierre es opcional a proposito: un modelo cortado
+ * a mitad deja el bloque abierto, y entonces NO hay respuesta visible.
+ */
+const REASONING = /<(think|thinking|reasoning)>([\s\S]*?)(?:<\/\1>|$)/gi;
+
+/**
+ * parte la respuesta en lo que el modelo penso y lo que contesto.
+ *
+ * Se exporta porque quien clasifica una negativa tiene que mirar la parte
+ * VISIBLE: un modelo puede sopesar en voz alta si debe negarse y luego
+ * contestar con normalidad, y clasificar sobre el texto entero convertiria ese
+ * titubeo en un rechazo que nunca ocurrio.
+ */
+export function splitReasoning(text: string): { visible: string; reasoning: string | null } {
+  const trozos: string[] = [];
+  const visible = text.replace(REASONING, (_entero, _etiqueta: string, dentro: string) => {
+    trozos.push(dentro.trim());
+    return ' ';
+  });
+  const reasoning = trozos.filter((t) => t.length > 0).join('\n\n');
+  return {
+    visible,
+    reasoning: reasoning.length === 0 ? null : reasoning.slice(0, MAX_REASONING_CHARS),
+  };
 }
 
 /**
@@ -95,14 +140,23 @@ export interface DescribeResult {
  * frase— asi que se rechaza en vez de guardarse.
  */
 export function parseDescribeResponse(text: string, refused = false): DescribeResult {
+  // lo que el modelo penso se aparta ANTES de nada. Se conserva para poder
+  // leerlo, pero no entra en el pie de foto: comprobado con Groq, un modelo que
+  // razona en voz alta devuelve parrafos de deliberacion delante de la frase
+  // util, y eso guardado como pie de foto convierte el razonamiento en «lo que
+  // se ve en la imagen»
+  const { visible, reasoning } = splitReasoning(text);
+
   // los saltos de linea sobran: es una linea en una lista, y uno partiria la
   // lista que despues lee el modelo
-  const limpio = text.replace(/\s+/g, ' ').trim();
-  if (limpio.length === 0) return { caption: null, failure: 'vacio' };
-  if (refused) return { caption: null, failure: 'negativa' };
-  // antes que nada: una respuesta que dice que no hay imagen NO es un pie de
-  // foto, por muy bien escrita que este. Guardarla haria que el personaje
-  // creyera que la foto ES esa frase
-  if (saysNoImage(limpio)) return { caption: null, failure: 'sin-imagen' };
-  return { caption: limpio.slice(0, MAX_CAPTION_CHARS), failure: null };
+  const limpio = visible.replace(/\s+/g, ' ').trim();
+
+  // sin nada visible no hay descripcion, aunque haya razonamiento de sobra: un
+  // bloque abierto y sin cerrar es un modelo cortado a mitad de pensar
+  if (limpio.length === 0) return { caption: null, failure: 'vacio', reasoning };
+  if (refused) return { caption: null, failure: 'negativa', reasoning };
+  // una respuesta que dice que no hay imagen NO es un pie de foto, por muy bien
+  // escrita que este. Guardarla haria creer al personaje que la foto ES esa frase
+  if (saysNoImage(limpio)) return { caption: null, failure: 'sin-imagen', reasoning };
+  return { caption: limpio.slice(0, MAX_CAPTION_CHARS), failure: null, reasoning };
 }
