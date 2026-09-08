@@ -36,9 +36,42 @@ describe('lo que se le pide al describidor', () => {
   it('enumera los puntos que hay que recorrer', () => {
     // sin la lista, «con detalle» es una peticion vacia y cada modelo decide
     // otra cosa. Con ella, dos descripciones distintas son comparables
-    for (const punto of ['encuadre', 'pelo', 'ropa', 'postura', 'expresion', 'luz']) {
+    for (const punto of ['encuadre', 'pelo', 'postura', 'expresion', 'luz']) {
       expect(prompt).toContain(punto);
     }
+  });
+
+  it('NO da por hecho que hay una persona', () => {
+    // no todo lo que se describe es un personaje: una foto de un paisaje se
+    // describe por sus arboles y su luz. Con la lista de rasgos como plantilla
+    // obligatoria, el modelo se ponia a buscar pelo y ropa donde no hay nadie
+    expect(prompt).toContain('un paisaje');
+    expect(prompt).toContain('si hay alguien');
+    expect(prompt).toContain('No hay una plantilla que rellenar');
+  });
+
+  it('prohibe el eufemismo, porque un pie de foto impreciso no sirve', () => {
+    // paso de verdad: ante una figura desnuda escribio «con el torso al
+    // descubierto». Eso no es pudor, es un dato falso, y el pie de foto es lo
+    // UNICO que se sabra despues de esa imagen
+    expect(prompt).toContain('LLAMA A LAS COSAS POR SU NOMBRE');
+    expect(prompt).toContain('eufemismos');
+  });
+
+  it('pide la misma precision para un cuerpo que para lo demas', () => {
+    // el pie de foto es lo unico que identifica ese archivo despues. Quedarse
+    // en «desnudo» deja sin identificar una imagen igual que quedarse en
+    // «lleva ropa» sin decir cual
+    expect(prompt).toContain('MISMA precision');
+    expect(prompt).toContain('no te quedes en «desnudo»');
+  });
+
+  it('sigue siendo descripcion, no narracion', () => {
+    // precision anatomica no es escribir erotica: el destino de este texto es
+    // una lista de archivos, y un pie de foto que narra deja de ser util para
+    // encontrar la imagen
+    expect(prompt).toContain('nada');
+    expect(prompt).toContain('de narrar, de insinuar ni de escribir para excitar');
   });
 
   it('prohibe el bloque de memoria', () => {
@@ -60,7 +93,8 @@ describe('lo que se le pide al describidor', () => {
   });
 
   it('encuadra la tarea como tecnica, para que no opine', () => {
-    expect(prompt).toContain('descripcion tecnica');
+    expect(prompt).toContain('una tarea');
+    expect(prompt).toContain('tecnica sobre un archivo');
   });
 });
 
