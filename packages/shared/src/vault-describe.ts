@@ -17,8 +17,20 @@
 // y ademas repetirlo cada vez. De ahi las tres reglas del prompt: SOLO lo que se
 // ve, CORTO, y lo dudoso se calla en vez de completarse.
 
-/** tope de lo que se acepta como pie de foto; el esquema del medio admite mas */
-export const MAX_CAPTION_CHARS = 600;
+/**
+ * tope de lo que se acepta como pie de foto.
+ *
+ * Eran 600, pensados para «una o dos frases». Daniel pidio que se explayara:
+ * con el detalle que ahora se le pide —encuadre, rasgos, ropa, postura,
+ * escenario, luz y estilo— una descripcion honesta de una imagen con varias
+ * viñetas no cabe en 600 caracteres, y recortarla la dejaba a mitad de frase.
+ *
+ * Sigue habiendo tope, y por debajo de los 2.000 que admite el esquema del
+ * medio: un pie de foto que se dispara no es mas informacion, es un modelo
+ * rellenando. El recorte es la ultima red, no el criterio: quien evita el
+ * relleno es el prompt, que manda OMITIR lo que no se distingue.
+ */
+export const MAX_CAPTION_CHARS = 1500;
 
 /**
  * que se le pide al describidor.
@@ -28,18 +40,34 @@ export const MAX_CAPTION_CHARS = 600;
  */
 export function buildDescribePrompt(): string {
   return [
-    'Describe lo que se ve en esta imagen.',
+    'Describe con detalle lo que se ve en esta imagen.',
+    '',
+    'Recorre estos puntos, y escribe SOLO los que se distingan de verdad:',
+    '- encuadre y composicion: plano general o primer plano, cuantas viñetas o',
+    '  recortes hay si es un montaje, y como estan dispuestos.',
+    '- la persona o personaje, si lo hay: pelo (color, largo, peinado), ojos,',
+    '  tono de piel, complexion, edad aparente solo si es evidente.',
+    '- ropa: cada prenda, su color y su estado. Si no lleva, dilo con',
+    '  naturalidad y sin rodeos: es una descripcion tecnica.',
+    '- postura, encuadre del cuerpo y hacia donde mira.',
+    '- expresion de la cara, solo lo que se ve en los rasgos.',
+    '- escenario y objetos reconocibles, con sus colores.',
+    '- luz, paleta dominante y estilo (anime, fotografico, ilustracion).',
     '',
     'Reglas, y son estrictas:',
     '- SOLO lo que se ve. Nada de suponer, deducir ni completar.',
-    '- Una o dos frases. Cortas. Un pie de foto, no un relato.',
-    '- En español.',
-    '- Si un detalle no se distingue con seguridad, NO lo escribas. Omitirlo es',
-    '  correcto; inventarlo no.',
+    '- Detallado NO significa largo: no rellenes. Un punto que no se distingue',
+    '  se OMITE, no se estira. Preferimos cinco datos ciertos a diez inventados.',
+    '- En español, en prosa seguida. Sin listas ni encabezados.',
     '- No pongas nombres a nadie ni digas quien es: no puedes saberlo.',
-    '- No cuentes que pasa antes ni despues, ni que siente nadie.',
-    '- No opines sobre la imagen ni sobre si deberia existir. Esto es una',
-    '  descripcion tecnica para poder encontrarla despues entre otras.',
+    '- No cuentes que pasa antes ni despues, ni que siente nadie por dentro.',
+    '- No opines sobre la imagen ni sobre si deberia existir.',
+    '- No escribas ningun bloque de memoria ni JSON: esto no es una',
+    '  conversacion, es una descripcion que se guarda tal cual.',
+    '',
+    'Para que sirve, y por eso importa el detalle: este texto es lo UNICO que se',
+    'sabra despues de esta imagen. Con el hay que poder reconocerla entre muchas',
+    'parecidas sin volver a mirarla.',
     '',
     'Empieza directamente por la descripcion, sin preambulo.',
   ].join('\n');

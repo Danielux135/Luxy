@@ -20,13 +20,38 @@ describe('lo que se le pide al describidor', () => {
   it('prohibe suponer y pide omitir lo dudoso', () => {
     // es la regla que separa un pie de foto util de una alucinacion con formato
     expect(prompt).toContain('SOLO lo que se ve');
-    expect(prompt).toContain('NO lo escribas');
+    expect(prompt).toContain('se OMITE, no se estira');
   });
 
-  it('pide una descripcion corta', () => {
-    // un describidor obligado a rellenar longitud inventa: cuanto mas largo el
-    // pie de foto, menos fiable, no mas
-    expect(prompt).toContain('Una o dos frases');
+  it('pide DETALLE sin pedir longitud', () => {
+    // Daniel pidio que se explayara. El riesgo de aflojar el «corto» es que
+    // el modelo rellene, asi que el detalle se dirige por COBERTURA —que
+    // puntos recorrer— y no por extension: pedir mas texto invita a inventar,
+    // pedir mas campos no.
+    expect(prompt).toContain('con detalle');
+    expect(prompt).not.toContain('Una o dos frases');
+    expect(prompt).toContain('Detallado NO significa largo');
+  });
+
+  it('enumera los puntos que hay que recorrer', () => {
+    // sin la lista, «con detalle» es una peticion vacia y cada modelo decide
+    // otra cosa. Con ella, dos descripciones distintas son comparables
+    for (const punto of ['encuadre', 'pelo', 'ropa', 'postura', 'expresion', 'luz']) {
+      expect(prompt).toContain(punto);
+    }
+  });
+
+  it('prohibe el bloque de memoria', () => {
+    // visto en una descripcion real: el turno tecnico caia en la rama generica
+    // de conversacion y el modelo dedicaba media respuesta a un JSON de memoria
+    // que nadie iba a guardar
+    expect(prompt).toContain('ningun bloque de memoria');
+  });
+
+  it('explica PARA QUE sirve, que es lo que justifica el detalle', () => {
+    // un modelo que sabe que su texto es lo unico que quedara de la imagen
+    // describe distinto que uno al que solo se le pide una frase
+    expect(prompt).toContain('lo UNICO que se');
   });
 
   it('prohibe ponerle nombre a nadie', () => {

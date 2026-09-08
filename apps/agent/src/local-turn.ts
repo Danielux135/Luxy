@@ -115,7 +115,15 @@ export function buildLocalJob(input: LocalTurnInput): ClaimedJob {
       // la marca que activa el envoltorio de personaje (`D-055`). Un turno
       // tecnico NO la lleva: catalogar es una tarea sobre un texto, y encarnar
       // a alguien mientras se rellena un JSON estropea las dos cosas
-      ...(input.kind === 'technical' ? {} : { luxyPrivateLocalTurn: true }),
+      ...(input.kind === 'technical'
+        ? // pero quitar una marca no basta: sin ninguna, el turno caia en la
+          // rama GENERICA de conversacion, que le pide al modelo un bloque
+          // `<LUXY_MEMORY>`. Visto en una descripcion real: el modelo dedicaba
+          // media respuesta a rellenar una memoria que nadie iba a guardar, y
+          // ese JSON solo se queda fuera del pie de foto porque lo recorta el
+          // job-runner despues. Un turno tecnico se declara como tal
+          { luxyTechnicalTurn: true }
+        : { luxyPrivateLocalTurn: true }),
     },
   };
 }

@@ -230,6 +230,25 @@ export function buildProviderPrompt(job: ClaimedJob, project?: ProjectConfig): s
     ].join('\n');
   }
 
+  // un turno TECNICO no conversa con nadie ni alimenta ninguna memoria.
+  //
+  // Describir una imagen o catalogar escenas son tareas sobre un contenido, y
+  // van y vuelven solas. Sin esta rama caian en la generica de abajo, que pide
+  // un bloque `<LUXY_MEMORY>`: se vio en una descripcion real, con el modelo
+  // gastando media respuesta en rellenar una memoria que nadie iba a guardar y
+  // que solo se queda fuera del resultado porque se recorta despues.
+  if (isStudioConversation(job) && job.metadata['luxyTechnicalTurn'] === true) {
+    return [
+      'Tarea tecnica solicitada desde Luxy Studio.',
+      'Haz EXACTAMENTE lo que pide el encargo de abajo y nada mas.',
+      'No encarnes a ningun personaje, no saludes y no te presentes.',
+      'No escribas ningun bloque de memoria: este turno no alimenta ninguna.',
+      'No modifiques archivos, no ejecutes comandos y no uses la red.',
+      '',
+      job.prompt,
+    ].join('\n');
+  }
+
   if (isStudioConversation(job)) {
     return [
       'Conversacion solicitada desde Luxy Studio.',
