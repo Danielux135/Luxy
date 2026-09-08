@@ -2083,3 +2083,97 @@ responde con una prueba en el banco, que existe precisamente para eso. Si lo
 rechaza, el siguiente paso sería convertir a png en el renderer —Chromium sí
 decodifica avif, al revés que `nativeImage` (`D-069`)—, no volver a esconder el
 formato.
+
+## D-075 — el pie de foto se escribía y nadie lo leía
+
+Fecha: 2026-09-08
+
+Estado: aceptada, implementada
+
+Daniel pide una foto en mitad de una escena. Lía no manda ninguna: menciona
+*«si es la del perfil... la que tienes guardada...»* y desvía.
+
+No estaba bloqueada. Su pantallazo cierra las tres condiciones de
+`imageBlockReason`: personaje fijado, personaje en la bóveda y **`clave
+guardada`** de AI Horde. `canGenerateImage` era `true`, así que el bloque de
+imagen **sí** iba en su prompt, con la lista de lo que había.
+
+Lo que veía era una línea:
+
+```
+- med-xxxx: su foto de perfil
+```
+
+`existingImages` se construía con `item.metadata.prompt`, y `prompt` es —según
+su propio esquema— *«lo que se PIDIÓ al generar. Es historia, no descripción»*.
+El campo `caption`, cuyo comentario en ese mismo esquema dice *«el pie de foto
+es lo único que el modelo sabe de una imagen ya guardada»*, **no se leía en
+ninguna parte del camino del prompt**.
+
+Consecuencia: describir una imagen con un modelo con vista, o corregir su pie de
+foto a mano, **no cambiaba una sola letra de lo que veía el modelo de la
+conversación**. Todo el describidor —el trabajo de esta misma sesión— era
+decorativo para su único consumidor.
+
+Y había un tercer significado del mismo campo: adjuntar un archivo metía el pie
+de foto tecleado por el usuario en `prompt`, que es exactamente la mezcla que el
+esquema dice haber corregido al separarlos. Ahora va a `caption`; la cadena de
+reserva `caption ?? prompt ?? displayName` conserva lo que ya hay en disco.
+
+El orden vive en `imageDescriptionFor`, en `packages/shared`, con sus pruebas.
+Estaba en el proceso principal, donde no se puede probar, y por eso llevaba mal
+cableado sin que nadie lo notara.
+
+## D-076 — reenviar y generar son dos permisos, no uno
+
+Fecha: 2026-09-08
+
+Estado: aceptada, implementada
+
+`canGenerateImage` gobernaba las dos cosas: sin él, `existingImages` se vaciaba
+y el bloque entero desaparecía del prompt.
+
+Pero **reenviar una imagen que ya está en la conversación no toca al proveedor
+ni necesita clave**: se lee del disco cifrado. Un personaje sin clave se quedaba
+sin poder enseñar ni su propia foto de perfil —que el mismo turno acababa de
+copiar a la conversación **precisamente para poder reenviarla**, catorce líneas
+antes de tirar la lista que la contenía—.
+
+Ahora el bloque se envía si se puede generar **o** si hay algo que reenviar, y
+`buildVaultImageInstruction` recibe cuál de las dos cosas se puede. Sin
+generación ofrece sólo (a) y dice que no puede generar, en vez de callarse las
+dos.
+
+## D-077 — una petición directa manda sobre el personaje
+
+Fecha: 2026-09-08
+
+Estado: aceptada, implementada
+
+La otra mitad de por qué Lía no mandó nada. El bloque prohibía **dos** formas de
+fallar al mandarla:
+
+- alegar que no puedes adjuntar archivos;
+- prometer enviarla sin incluir el bloque.
+
+Y se dejaba fuera la tercera, que es la que ocurrió: **desviar en personaje**.
+*«¿Para qué quieres una foto si me tienes aquí?»* no es ninguna de las dos
+prohibidas. Encima el permiso estaba condicionado a *«y haya una opción que
+encaje»*, un condicional que le daba la salida cuando la única imagen existente
+se describía como «su foto de perfil» (`D-075`).
+
+Y las instrucciones de personaje de Daniel empujaban en esa dirección: *«No
+llevas la iniciativa dos turnos seguidos»*. El modelo lo aplicó a una petición
+explícita.
+
+El bloque dice ahora que una petición directa **es una orden**, que enseñar algo
+que te han pedido no es iniciativa propia, que esquivar —cambiar de tema,
+bromear, preguntar para qué la quiere— es incumplirla por mucho que encaje con
+el personaje, y que ante la duda se manda una: elegir mal es mejor que no mandar
+nada.
+
+**Lo que este caso enseña del diseño:** una prohibición redactada como lista de
+casos deja fuera lo que no se le ocurrió a quien la escribió. Las tres reglas
+que había eran correctas y no sirvieron de nada, porque el modelo encontró una
+cuarta salida. Contra eso vale la regla positiva —«es una orden»— y no otra
+prohibición más.

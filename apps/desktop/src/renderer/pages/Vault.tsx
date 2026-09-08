@@ -738,9 +738,13 @@ function InstructionsPanel({
         </Notice>
       )}
 
+      {/* el hint decía «con uno puesto, puedes pedir imágenes», y eso era
+          falso: hace falta ADEMÁS la clave del proveedor que le haga las fotos.
+          Prometer algo que el prompt no ofrece deja al usuario pidiéndole al
+          personaje una foto que nunca va a llegar */}
       <Field
         label="Personaje de esta conversación"
-        hint="Con uno puesto, puedes pedir imágenes dentro de la conversación y se generan solas. Sin él, no se ofrece."
+        hint="Hace falta uno, y además la clave de quien le haga las fotos. Con las dos cosas puedes pedir imágenes dentro de la conversación."
       >
         <input
           value={characterValue}
@@ -764,6 +768,23 @@ function InstructionsPanel({
           esta conversación no podrá generar ni reenviar imágenes, y no se le
           ofrecerá hacerlo. Dalo de alta abajo, en «Generar imagen o vídeo», o
           elige uno de la lista.
+        </Notice>
+      )}
+      {/* faltaba, y su ausencia costó una tarde: el motivo se calculaba y se
+          tiraba. Un personaje del horde sin clave del horde no pinta nada en
+          ninguna de las dos pantallas donde uno miraría —el aviso que sí existe
+          vive dentro del desplegable «Crear un personaje gratis», que quien ya
+          creó a su personaje no tiene motivo para abrir—, así que el usuario
+          pide una foto, el modelo improvisa una excusa en personaje, y nadie
+          cuenta que la capacidad ni siquiera se ofreció */}
+      {imageBlock === 'sin-clave' && (
+        <Notice tone="warn">
+          {knownCharacter?.imageProvider === 'horde'
+            ? 'Falta la clave de AI Horde, que es quien le hace las fotos a este personaje. Es gratis y sin tarjeta: está más abajo, en «Gratis: AI Horde».'
+            : 'Falta la clave de Xavira, que es quien le hace las fotos a este personaje. Está más abajo, en «Generar imagen o vídeo».'}{' '}
+          Mientras siga así, esta conversación no podrá generar imágenes y no se
+          le ofrecerá hacerlo: si le pides una, se inventará una excusa en vez de
+          decirte que no puede.
         </Notice>
       )}
       {vault.characterDescription !== null && (

@@ -11,6 +11,7 @@ import {
   buildVaultPrompt,
   VAULT_RECENT_TURNS,
   parseConversationMemoryResponse,
+  imageDescriptionFor,
   parseVaultImageRequest,
   redact,
   type ConversationMemoryStatus,
@@ -1070,8 +1071,14 @@ export function registerIpcHandlers(context: HandlerContext): void {
         mimeType: mimeTypeFor(filePath),
         displayName: basename(filePath),
         // el pie de foto es lo unico que el modelo puede saber de un archivo
-        // que no ha generado el: no lo ve, no lo abre y no tiene ojos
-        prompt: caption.length === 0 ? null : caption,
+        // que no ha generado el: no lo ve, no lo abre y no tiene ojos.
+        //
+        // Va en `caption` y no en `prompt`: `prompt` es lo que se PIDIO al
+        // generar, y un adjunto no se genero. Meterlo ahi era el tercer
+        // significado del mismo campo, que es exactamente el error que el
+        // esquema dice haber corregido al separarlos.
+        prompt: null,
+        caption: caption.length === 0 ? null : caption,
         width: null,
         height: null,
         durationMs: null,
@@ -2300,7 +2307,13 @@ export function registerIpcHandlers(context: HandlerContext): void {
           await context.privateMedia.add(context.vault, conversationId, bytes, {
             mimeType: 'image/webp',
             displayName: 'foto de perfil',
-            prompt: 'su foto de perfil',
+            // el avatar no se genero aqui, asi que no tiene `prompt`. Y «su
+            // foto de perfil» es un marcador, no una descripcion: no dice nada
+            // de lo que se ve, asi que el modelo elige a ciegas si le piden
+            // «una foto». Va en `caption` para que describirla con un modelo
+            // con vista lo SUSTITUYA por algo util
+            prompt: null,
+            caption: 'su foto de perfil',
             width: null,
             height: null,
             durationMs: null,
@@ -2354,12 +2367,15 @@ export function registerIpcHandlers(context: HandlerContext): void {
 
     // sin esta lista el modelo no puede reenviar nada: no sabe que hay, asi que
     // genera otra —pagando— cada vez que le piden «la de antes»
-    const existingImages = canGenerateImage
-      ? (await context.privateMedia.list(context.vault, conversationId)).map((item) => ({
-          mediaId: item.mediaId,
-          description: item.metadata.prompt ?? item.metadata.displayName ?? '',
-        }))
-      : [];
+    const existingImages = (await context.privateMedia.list(context.vault, conversationId)).map(
+      (item) => ({
+        mediaId: item.mediaId,
+        // el orden lo decide `imageDescriptionFor`, que vive en shared con sus
+        // pruebas: aqui se leia `prompt` y nunca `caption`, asi que describir
+        // una imagen era decorativo
+        description: imageDescriptionFor(item.metadata),
+      }),
+    );
     // los turnos que ya viajan como historial reciente no se transcriben otra
     // vez: estarian dos veces en el mismo prompt
     const oldestRecent = history.slice(-1 - VAULT_RECENT_TURNS)[0]?.sequence;

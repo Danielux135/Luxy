@@ -10,6 +10,7 @@ import {
   VAULT_IMAGE_NEGATIVE,
   VAULT_IMAGE_OPEN,
   buildVaultImageInstruction,
+  imageDescriptionFor,
   parseVaultImageRequest,
 } from './vault-image-request.js';
 import { parseConversationMemoryResponse } from './schemas.js';
@@ -147,6 +148,27 @@ describe('la herramienta solo se ofrece cuando existe', () => {
     expect(prompt).toContain(VAULT_IMAGE_CLOSE);
   });
 
+  it('sin poder generar pero CON imagenes guardadas, si se ofrece reenviarlas', () => {
+    // reenviar no toca al proveedor ni necesita clave. El mismo turno copia el
+    // avatar del personaje a la conversacion para poder reenviarlo, y despues
+    // se tiraba la lista que lo contenia: quedaba sin poder enseñar ni su
+    // propia foto de perfil
+    const prompt = buildVaultPrompt({
+      ...base,
+      canGenerateImage: false,
+      existingImages: [{ mediaId: 'med-1', description: 'su foto de perfil' }],
+    });
+    expect(prompt).toContain(VAULT_IMAGE_OPEN);
+    expect(prompt).toContain('med-1: su foto de perfil');
+    expect(prompt).toContain('NO puedes generar');
+  });
+
+  it('sin poder generar y sin imagenes, sigue sin mencionarse el bloque', () => {
+    // no hay nada que ofrecer: el bloque solo seria ruido y una promesa
+    const prompt = buildVaultPrompt({ ...base, canGenerateImage: false, existingImages: [] });
+    expect(prompt).not.toContain(VAULT_IMAGE_OPEN);
+  });
+
   it('la instruccion pide describir la escena, no repetir al usuario', () => {
     // sin esto el modelo reenvia el mensaje del usuario como prompt, que casi
     // nunca describe una imagen
@@ -251,5 +273,106 @@ describe('la herramienta solo se ofrece cuando existe', () => {
     expect(texto).toContain('med-1: de pie junto a la ventana');
     expect(texto).toContain('med-2: sin descripcion');
     expect(texto).toContain('gratis');
+  });
+});
+
+// PASO DE VERDAD. Daniel escribio «Quiero ver una foto» en mitad de una escena
+// y Lia contesto «¿para que quieres una foto si me tienes aqui?». No estaba
+// bloqueada: tenia personaje en la boveda y clave del horde guardada, asi que
+// el bloque SI iba en su prompt.
+//
+// El bloque prohibia dos formas de fallar —alegar que no puedes adjuntar, y
+// prometerla sin incluirla— y se dejaba fuera la tercera, que es la que ocurrio:
+// DESVIAR EN PERSONAJE. Encima el permiso estaba condicionado a «y haya una
+// opcion que encaje», que le daba la salida cuando la unica imagen existente
+// era el avatar y su descripcion decia «su foto de perfil».
+describe('una peticion directa manda sobre el personaje', () => {
+  it('dice que es una orden, no una sugerencia', () => {
+    expect(buildVaultImageInstruction()).toContain('ES UNA ORDEN');
+  });
+
+  it('prohibe expresamente esquivarla, que era el hueco', () => {
+    const texto = buildVaultImageInstruction();
+    expect(texto).toContain('NO la esquives');
+    // las tres formas concretas que uso, escritas para que no valga ninguna
+    expect(texto).toContain('bromear');
+    expect(texto).toContain('preguntar para que la quiere');
+  });
+
+  it('desactiva la excusa de «no llevo la iniciativa»', () => {
+    // sus instrucciones de personaje decian «no llevas la iniciativa dos turnos
+    // seguidos», y el modelo lo aplico a una peticion explicita
+    const texto = buildVaultImageInstruction();
+    expect(texto).toContain('no llevar la iniciativa');
+    expect(texto).toContain('te la han pedido');
+  });
+
+  it('ante la duda manda una, en vez de no mandar nada', () => {
+    expect(buildVaultImageInstruction()).toContain('elegir mal es mejor que no mandar nada');
+  });
+});
+
+// reenviar una imagen que YA esta en la conversacion no toca al proveedor ni
+// necesita clave: se lee del disco cifrado. Son dos permisos, no uno.
+describe('sin poder generar todavia se puede reenviar', () => {
+  const guardadas = [{ mediaId: 'med-1', description: 'de pie junto a la ventana' }];
+
+  it('ofrece reenviar y NO ofrece generar', () => {
+    const texto = buildVaultImageInstruction(guardadas, 'prose', false);
+    expect(texto).toContain('REENVIANDO');
+    expect(texto).toContain('med-1: de pie junto a la ventana');
+    expect(texto).toContain('NO puedes generar');
+    // el formato del prompt del generador sobra si no se puede generar
+    expect(texto).not.toContain('EN INGLES');
+  });
+
+  it('sigue prohibiendo esquivar la peticion', () => {
+    // el hueco no se tapa solo para el camino con generacion
+    expect(buildVaultImageInstruction(guardadas, 'prose', false)).toContain('NO la esquives');
+  });
+
+  it('conserva el aviso de que no ve las imagenes', () => {
+    // es la regla que impide `D-061`, y duplicar la lista era la forma de que
+    // una de las dos copias se quedara sin ella
+    expect(buildVaultImageInstruction(guardadas, 'prose', false)).toContain('NO las ves');
+  });
+});
+
+// EL FALLO: el esquema documenta `caption` como «lo unico que el modelo sabe de
+// una imagen ya guardada», y el prompt leia `prompt`, que el mismo esquema
+// define como «historia, no descripcion». Describir una imagen con un modelo
+// con vista no cambiaba una letra de lo que veia el modelo de la conversacion.
+describe('con que frase se le presenta una imagen guardada', () => {
+  it('el pie de foto MANDA sobre el prompt de generacion', () => {
+    expect(
+      imageDescriptionFor({
+        caption: 'una mujer desnuda de perfil junto a una puerta blanca',
+        prompt: 'standing by a window, blue dress',
+        displayName: 'med-1.webp',
+      }),
+    ).toBe('una mujer desnuda de perfil junto a una puerta blanca');
+  });
+
+  it('sin pie de foto vale el prompt: peor descripcion, mejor que nada', () => {
+    // y conserva lo que ya hay en disco, donde los adjuntos antiguos guardaron
+    // su pie de foto en `prompt`
+    expect(imageDescriptionFor({ caption: null, prompt: 'standing by a window' })).toBe(
+      'standing by a window',
+    );
+  });
+
+  it('sin ninguno de los dos queda el nombre del archivo', () => {
+    expect(imageDescriptionFor({ displayName: 'foto de perfil' })).toBe('foto de perfil');
+  });
+
+  it('una cadena en blanco no cuenta como descripcion', () => {
+    // un caption vacio no puede tapar un prompt que si dice algo
+    expect(imageDescriptionFor({ caption: '   ', prompt: 'standing by a window' })).toBe(
+      'standing by a window',
+    );
+  });
+
+  it('sin nada devuelve cadena vacia, que la instruccion pinta como «sin descripcion»', () => {
+    expect(imageDescriptionFor({})).toBe('');
   });
 });

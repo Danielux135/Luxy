@@ -1,5 +1,55 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-09-08 12:25 — Claude — BUG-FOTO-NO-LLEGA-001
+
+Origen: Daniel pide una foto en una escena y Lia no manda ninguna; menciona la
+del perfil y desvia. Investigado con un workflow de 20 agentes, cinco trazas y
+verificacion adversarial: 15 hallazgos, **10 sobreviven**, 5 refutados.
+
+**Dos diagnosticos mios equivocados antes del bueno**, los dos dichos con mas
+seguridad de la que tenia: primero «no llega el modelo elegido» (era la
+etiqueta, `D-073`), despues «esta bloqueada» (no lo estaba). Lo que cerro el
+caso fue un pantallazo suyo, no el codigo: `clave guardada` en «Gratis: AI
+Horde» + personaje en la boveda cierran las tres condiciones de
+`imageBlockReason`. `canGenerateImage` era `true`.
+
+Causa real, en dos mitades:
+
+- **`D-075`**: `existingImages` se construia con `metadata.prompt` y NUNCA con
+  `metadata.caption`. El esquema documenta `caption` como «lo unico que el
+  modelo sabe de una imagen ya guardada» y nadie lo leia. **Todo el describidor
+  de esta misma sesion era decorativo para su unico consumidor.** La unica linea
+  que veia Lia era «- med-xxxx: su foto de perfil».
+- **`D-077`**: el bloque prohibia alegar que no puedes adjuntar y prometer sin
+  incluir, pero no DESVIAR EN PERSONAJE, que es lo que hizo. Y el permiso iba
+  condicionado a «y haya una opcion que encaje», que le daba la salida.
+
+Ademas, **`D-076`**: reenviar no necesita clave —la imagen esta en el disco
+cifrado— y estaba atado al mismo permiso que generar. El mismo turno copia el
+avatar a la conversacion para poder reenviarlo y catorce lineas despues tiraba
+la lista que lo contenia.
+
+Y el aviso que faltaba: `'sin-clave'` no pintaba NADA en Privado. El unico que
+lo dice vive dentro del desplegable «Crear un personaje gratis», que quien ya
+creo a su personaje no abre nunca. El hint del campo ademas afirmaba lo
+contrario de lo que pasa («Con uno puesto, puedes pedir imagenes»).
+
+- Archivos: `vault-image-request.ts` y su test, `vault-prompt.ts`,
+  `handlers.ts`, `Vault.tsx`, `DECISIONS.md`.
+- Pruebas: `npm run check` **exit 0** — **2.549 pasadas**, 12 omitidas. Catorce
+  nuevas.
+- Siguiente paso exacto: Daniel vuelve a pedirle una foto a Lia. Y describe su
+  avatar con el banco de vision: ahora ese pie de foto SI llega al modelo, que
+  era el punto de todo el trabajo de hoy.
+
+**Pendiente, confirmado y NO arreglado:** `context.log` del proceso principal no
+escribe en ningun sitio (`index.ts:176`, solo `console.log` si `isDev`, y el
+binario de Windows no tiene consola). La linea `turno privado` con
+`puedeGenerar`/`imagenesDisponibles` —la que habria resuelto esto en diez
+segundos— se pierde. Es la razon directa de mis dos diagnosticos equivocados. No
+se arregla ahora porque `AgentLogger` tiene el nombre del fichero y el prefijo
+de rotacion cableados, y reutilizarlo mal borraria los logs rotados del agente.
+
 ### 2026-09-08 11:50 — Claude — BUG-MODELO-ETIQUETA-001 y BUG-AVIF-001
 
 Origen: dos avisos de Daniel en el mismo mensaje. «En todas las ejecuciones he

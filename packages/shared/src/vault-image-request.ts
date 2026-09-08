@@ -81,6 +81,34 @@ export interface VaultImageOnFile {
 }
 
 /**
+ * con que frase se le presenta al modelo una imagen ya guardada.
+ *
+ * EL ORDEN ES EL ARREGLO. Se leia `prompt` primero, y `prompt` es lo que se
+ * PIDIO al generar —«historia, no descripcion», dice su propio esquema—. El
+ * campo `caption`, creado expresamente para esto, no se leia en ninguna parte
+ * del camino del prompt: describir una imagen con un modelo con vista, o
+ * corregir su pie de foto a mano, no cambiaba una sola letra de lo que veia el
+ * modelo de la conversacion. La funcion entera era decorativa.
+ *
+ * La cadena de reserva conserva lo que ya hay en disco: los adjuntos antiguos
+ * guardaron el pie de foto en `prompt`, y una imagen generada tiene ahi su
+ * prompt en ingles —peor descripcion que un caption, mejor que nada—.
+ *
+ * Vive aqui y no en el proceso principal porque alli no se puede probar, y no
+ * probarlo fue como se quedo mal cableado sin que nadie lo notara.
+ */
+export function imageDescriptionFor(metadata: {
+  caption?: string | null;
+  prompt?: string | null;
+  displayName?: string | null;
+}): string {
+  const primero = [metadata.caption, metadata.prompt, metadata.displayName].find(
+    (valor) => typeof valor === 'string' && valor.trim().length > 0,
+  );
+  return primero === undefined || primero === null ? '' : primero.trim();
+}
+
+/**
  * como quiere el generador que se le escriba el prompt.
  *
  * No es cosmetico: los modelos de anime rinden peor con prosa y los realistas
@@ -116,26 +144,70 @@ export const VAULT_IMAGE_NEGATIVE = [
 export function buildVaultImageInstruction(
   available: VaultImageOnFile[] = [],
   style: VaultImagePromptStyle = 'prose',
+  /**
+   * si se puede GENERAR una imagen nueva.
+   *
+   * Reenviar una que ya esta en la conversacion no toca al proveedor ni
+   * necesita clave: se lee del disco cifrado y ya esta. Por eso son dos
+   * permisos distintos y no uno: sin clave se pierde (b), no (a).
+   */
+  canGenerate = true,
 ): string {
-  const lines = [
-    'Puedes enseñar UNA imagen por respuesta, y tienes dos formas de hacerlo.',
-    '',
-    'a) REENVIAR una que ya existe en esta conversacion. Es gratis e inmediato, y es lo que',
-    '   hay que hacer cuando el usuario pide «otra vez esa», «la de antes» o «tu foto» y ya',
-    '   hay alguna que encaje:',
-    `   ${VAULT_IMAGE_OPEN}{"mediaId":"<id de la lista de abajo>"}${VAULT_IMAGE_CLOSE}`,
-    '',
-    'b) GENERAR una nueva. Cuesta creditos y tarda, asi que solo cuando pidan algo que aun',
-    '   no existe:',
-    `   ${VAULT_IMAGE_OPEN}{"prompt":"<descripcion en INGLES>","kind":"image"}${VAULT_IMAGE_CLOSE}`,
+  const lines = canGenerate
+    ? [
+        'Puedes enseñar UNA imagen por respuesta, y tienes dos formas de hacerlo.',
+        '',
+        'a) REENVIAR una que ya existe en esta conversacion. Es gratis e inmediato, y es lo que',
+        '   hay que hacer cuando el usuario pide «otra vez esa», «la de antes» o «tu foto» y ya',
+        '   hay alguna que encaje:',
+        `   ${VAULT_IMAGE_OPEN}{"mediaId":"<id de la lista de abajo>"}${VAULT_IMAGE_CLOSE}`,
+        '',
+        'b) GENERAR una nueva. Cuesta creditos y tarda, asi que solo cuando pidan algo que aun',
+        '   no existe:',
+        `   ${VAULT_IMAGE_OPEN}{"prompt":"<descripcion en INGLES>","kind":"image"}${VAULT_IMAGE_CLOSE}`,
+      ]
+    : [
+        // sin clave del proveedor no se puede generar, pero reenviar SI: la
+        // imagen ya esta guardada aqui. Ofrecer solo lo que de verdad se puede
+        // es mejor que callarse las dos cosas, que es lo que se hacia
+        'Puedes enseñar UNA imagen por respuesta, y solo de una forma: REENVIANDO una de las',
+        'que ya existen en esta conversacion. Es gratis e inmediato:',
+        `   ${VAULT_IMAGE_OPEN}{"mediaId":"<id de la lista de abajo>"}${VAULT_IMAGE_CLOSE}`,
+        '',
+        'NO puedes generar ninguna imagen nueva en este momento. Si te piden uno que no esta en',
+        'la lista, dilo con naturalidad: no prometas mandarla despues y no finjas que no te la',
+        'han pedido.',
+      ];
+
+  lines.push(
     '',
     'CUANDO escribir el bloque: SOLO si el usuario pide ver, recibir o volver a ver una imagen.',
     'Nunca por iniciativa propia. Un momento intenso, una promesa o un buen final de escena NO son',
     'una peticion: si no te la han pedido, no la mandes.',
-    'Cuando SI te la pidan y haya una opcion que encaje:',
-    '   responde primero en personaje y despues escribe el bloque;',
+    '',
+    // esto faltaba, y es la mitad que se le olvido al que escribio el bloque.
+    // Estaban prohibidas dos formas de fallar al mandarla —alegar que no puedes
+    // adjuntar, y prometerla sin incluir el bloque— pero no la tercera, que es
+    // la que ocurrio de verdad: DESVIAR EN PERSONAJE. Lia contesto «¿para que
+    // quieres una foto si me tienes aqui?», que no es ninguna de las dos
+    // prohibidas, y se quedo tan ancha. Y el condicional «y haya una opcion que
+    // encaje» le daba la salida
+    'PERO SI TE LA PIDEN, ES UNA ORDEN, no una sugerencia. Una peticion directa —«quiero ver una',
+    'foto», «mandame una», «enseñamela»— manda sobre tu forma de ser y sobre cualquier instruccion',
+    'de no llevar la iniciativa: enseñarla no es iniciativa tuya, te la han pedido. Entonces:',
+    '   responde primero en personaje y despues escribe el bloque, en el MISMO turno;',
     '   no alegues que no puedes adjuntar archivos;',
-    '   no prometas enviarla sin incluirlo.',
+    '   no prometas enviarla sin incluirlo;',
+    '   y NO la esquives. Cambiar de tema, bromear, preguntar para que la quiere o decir',
+    '   «mejor mirame ahora» es incumplir la orden, por mucho que encaje con tu personaje.',
+    'Si dudas de cual mandar, manda una: elegir mal es mejor que no mandar nada.',
+  );
+
+  if (!canGenerate) {
+    return lines.concat(availableLines(available)).join('\n');
+  }
+
+  lines.push(
     '',
     'COMO escribir `prompt`, que es lo que recibe el generador de imagenes:',
     '- EN INGLES, siempre. En cualquier otro idioma el generador ignora la escena y devuelve otra',
@@ -153,34 +225,41 @@ export function buildVaultImageInstruction(
     '',
     'El bloque va al final de tu respuesta, antes del bloque de memoria. No puedes adjuntar',
     'archivos de ninguna otra forma.',
+  );
+
+  return lines.concat(availableLines(available)).join('\n');
+}
+
+/**
+ * la lista de lo que ya hay, con su aviso de no inventar.
+ *
+ * Va aparte porque la necesitan los dos caminos —con y sin generacion—, y
+ * porque duplicarla era garantizar que una de las dos copias se quedara atras.
+ */
+function availableLines(available: VaultImageOnFile[]): string[] {
+  if (available.length === 0) return [];
+  return [
+    '',
+    'IMAGENES QUE YA EXISTEN AQUI (su id sirve para reenviarlas):',
+    ...available.map((image) => {
+      const description =
+        image.description.trim().length === 0 ? 'sin descripcion' : image.description.trim();
+      return `- ${image.mediaId}: ${description}`;
+    }),
+    '',
+    // paso de verdad: con un pie de foto que decia el color de una gata, el
+    // modelo describio ademas sus ojos y una oreja doblada. No las ve; las
+    // dio por vistas. Inventar detalle suena mas convincente que decir que no
+    // se puede ver, y por eso es peor
+    'Esa linea es TODO lo que sabes de cada imagen: NO las ves. Puedes comentarlas y darlas por',
+    'ciertas, pero no añadas ningun detalle visual que no este escrito ahi —colores, formas,',
+    'gestos, ropa, que hay al fondo—. Si te falta algo para responder, preguntalo; no lo supongas.',
+    // sin esto el arreglo dura un turno: el detalle inventado entra en la
+    // memoria acumulativa, vuelve marcado como hecho y desde ahi genera mas
+    'Esta lista MANDA sobre la memoria. Si recuerdas un detalle de una imagen que no aparece en su',
+    'linea, no lo des por visto: pudo inventarlo un turno anterior. La memoria recuerda lo que se',
+    'dijo, no lo que se vio.',
   ];
-
-  if (available.length > 0) {
-    lines.push(
-      '',
-      'IMAGENES QUE YA EXISTEN AQUI (su id sirve para reenviarlas):',
-      ...available.map((image) => {
-        const description =
-          image.description.trim().length === 0 ? 'sin descripcion' : image.description.trim();
-        return `- ${image.mediaId}: ${description}`;
-      }),
-      '',
-      // paso de verdad: con un pie de foto que decia el color de una gata, el
-      // modelo describio ademas sus ojos y una oreja doblada. No las ve; las
-      // dio por vistas. Inventar detalle suena mas convincente que decir que no
-      // se puede ver, y por eso es peor
-      'Esa linea es TODO lo que sabes de cada imagen: NO las ves. Puedes comentarlas y darlas por',
-      'ciertas, pero no añadas ningun detalle visual que no este escrito ahi —colores, formas,',
-      'gestos, ropa, que hay al fondo—. Si te falta algo para responder, preguntalo; no lo supongas.',
-      // sin esto el arreglo dura un turno: el detalle inventado entra en la
-      // memoria acumulativa, vuelve marcado como hecho y desde ahi genera mas
-      'Esta lista MANDA sobre la memoria. Si recuerdas un detalle de una imagen que no aparece en su',
-      'linea, no lo des por visto: pudo inventarlo un turno anterior. La memoria recuerda lo que se',
-      'dijo, no lo que se vio.',
-    );
-  }
-
-  return lines.join('\n');
 }
 
 /** separa el bloque del texto visible. Nunca lanza: una peticion mala no rompe el turno */

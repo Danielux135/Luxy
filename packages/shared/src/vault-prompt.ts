@@ -282,9 +282,21 @@ export function buildVaultPrompt(input: VaultPromptInput): string {
   // el orden importa: la imagen ANTES que la memoria, porque la instruccion de
   // memoria dice que no se escriba nada despues de su bloque. Al separarlos se
   // quita primero el de memoria y luego el de imagen, en el orden inverso
-  if (input.canGenerateImage === true) {
+  // el bloque se envia si se puede generar O si hay algo que reenviar.
+  //
+  // Antes solo lo primero, y eso tiraba una capacidad gratis: reenviar una
+  // imagen que YA esta en la conversacion no toca al proveedor ni necesita
+  // clave, se lee del disco cifrado. Un personaje sin clave se quedaba sin
+  // poder enseñar ni su propia foto de perfil —que el mismo turno acababa de
+  // copiar a la conversacion para poder reenviarla—.
+  const existing = input.existingImages ?? [];
+  if (input.canGenerateImage === true || existing.length > 0) {
     blocks.push(
-      buildVaultImageInstruction(input.existingImages ?? [], input.imagePromptStyle ?? 'prose'),
+      buildVaultImageInstruction(
+        existing,
+        input.imagePromptStyle ?? 'prose',
+        input.canGenerateImage === true,
+      ),
     );
   }
   blocks.push(CONVERSATION_MEMORY_INSTRUCTION);
