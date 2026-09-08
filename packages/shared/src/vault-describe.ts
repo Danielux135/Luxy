@@ -81,12 +81,17 @@ export function buildDescribePrompt(): string {
     'sabra despues de esta imagen. Con el hay que poder reconocerla entre muchas',
     'parecidas sin volver a mirarla.',
     '',
+    'NO deliberes en voz alta. Nada de analizar la imagen por partes, repasar',
+    'estas reglas ni corregirte sobre la marcha antes de contestar: la respuesta',
+    'ES la descripcion. Un modelo que se puso a razonar cada viñeta agoto su',
+    'limite de salida y se corto sin llegar a escribirla.',
+    '',
     'Empieza directamente por la descripcion, sin preambulo.',
   ].join('\n');
 }
 
 /** por que no se pudo escribir un pie de foto */
-export const DESCRIBE_FAILURES = ['vacio', 'negativa', 'sin-imagen'] as const;
+export const DESCRIBE_FAILURES = ['vacio', 'negativa', 'sin-imagen', 'solo-razono'] as const;
 export type DescribeFailure = (typeof DESCRIBE_FAILURES)[number];
 
 /**
@@ -191,9 +196,21 @@ export function parseDescribeResponse(text: string, refused = false): DescribeRe
   // lista que despues lee el modelo
   const limpio = visible.replace(/\s+/g, ' ').trim();
 
-  // sin nada visible no hay descripcion, aunque haya razonamiento de sobra: un
-  // bloque abierto y sin cerrar es un modelo cortado a mitad de pensar
-  if (limpio.length === 0) return { caption: null, failure: 'vacio', reasoning };
+  // sin nada visible no hay descripcion, pero HABER RAZONADO cambia el motivo.
+  //
+  // Paso de verdad con llama-3.3-70b: analizo la imagen viñeta a viñeta durante
+  // miles de tokens, agoto el limite de salida y se corto citando el propio
+  // prompt, sin escribir jamas la descripcion. Contarlo como «no contesto nada»
+  // mandaba a reintentar y a dudar de si el modelo sabe mirar, cuando se veia
+  // en su razonamiento que la habia mirado entera. Son dos averias distintas y
+  // se arreglan distinto: una pide otro modelo, la otra mas espacio de salida.
+  if (limpio.length === 0) {
+    return {
+      caption: null,
+      failure: reasoning === null ? 'vacio' : 'solo-razono',
+      reasoning,
+    };
+  }
   if (refused) return { caption: null, failure: 'negativa', reasoning };
   // una respuesta que dice que no hay imagen NO es un pie de foto, por muy bien
   // escrita que este. Guardarla haria creer al personaje que la foto ES esa frase

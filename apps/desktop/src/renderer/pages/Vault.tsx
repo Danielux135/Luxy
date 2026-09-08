@@ -2419,6 +2419,17 @@ function VisionBench({
                 prueba con otro.
               </Notice>
             )}
+            {probe.failure === 'solo-razono' && (
+              /* razono pero nunca contesto: agoto el limite de salida
+                 pensando. Distinto de «no contesto nada», y se arregla
+                 distinto: aqui el modelo SI vio la imagen */
+              <Notice tone="warn">
+                Se quedó pensando y se le acabó el espacio: analizó la imagen
+                pero nunca llegó a escribir la descripción. <strong>Sí la vio</strong>
+                {' '}— lo tienes abajo. Prueba con otro modelo que delibere menos, o
+                sube el límite de salida de esa conexión.
+              </Notice>
+            )}
             {probe.failure === 'vacio' && (
               <Notice tone="warn">
                 No contestó nada. Puede que no sepa mirar imágenes, o que se le
@@ -2863,6 +2874,13 @@ function MediaViewer({
             Ese modelo se negó a describir la imagen. Repetirlo no lo arregla:
             cambia el modelo de arriba y vuelve a pulsar, o escribe tú el pie de
             foto.
+          </Notice>
+        )}
+
+        {failure === 'solo-razono' && (
+          <Notice tone="warn">
+            Se quedó pensando y se le acabó el espacio antes de escribir la
+            descripción. Vio la imagen; lo que falta es sitio para responder.
           </Notice>
         )}
 

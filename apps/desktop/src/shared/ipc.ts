@@ -670,7 +670,7 @@ export const vaultMediaDescribeArgsSchema = z.object({
 export const vaultMediaDescribeResultSchema = z.object({
   caption: z.string().nullable(),
   /** por qué no se pudo, para poder arreglarlo: no contestó o se negó */
-  failure: z.enum(['vacio', 'negativa', 'sin-imagen']).nullable(),
+  failure: z.enum(['vacio', 'negativa', 'sin-imagen', 'solo-razono']).nullable(),
   /**
    * lo que el modelo razonó antes de contestar, si lo escribió.
    *
@@ -711,7 +711,7 @@ export const vaultVisionProbeResultSchema = z.object({
    * contarlo como «no contestó nada» se le decía al usuario que reintentara
    * algo que no va a funcionar, y el motivo real no aparecía por ningún lado.
    */
-  failure: z.enum(['vacio', 'negativa', 'fallo', 'sin-imagen']).nullable(),
+  failure: z.enum(['vacio', 'negativa', 'fallo', 'sin-imagen', 'solo-razono']).nullable(),
   /**
    * lo que el modelo razonó antes de contestar, si lo escribió.
    *

@@ -222,12 +222,13 @@ describe('el modelo que piensa en voz alta', () => {
     }
   });
 
-  it('un bloque sin cerrar deja la respuesta VACIA, no un pie de foto pensado', () => {
-    // es un modelo cortado a mitad de pensar: no llego a contestar, y quedarse
-    // con su deliberacion como descripcion seria lo peor de los dos mundos
+  it('un bloque sin cerrar no deja pie de foto, y dice por que', () => {
+    // es un modelo cortado a mitad de pensar: quedarse con su deliberacion
+    // como descripcion seria lo peor de los dos mundos. Y el motivo es
+    // «solo-razono», no «vacio»: contesto, pero nunca llego a la respuesta
     const r = parseDescribeResponse('<think>estoy pensando y me cortaron');
     expect(r.caption).toBeNull();
-    expect(r.failure).toBe('vacio');
+    expect(r.failure).toBe('solo-razono');
     expect(r.reasoning).toContain('estoy pensando');
   });
 
@@ -261,5 +262,41 @@ describe('el modelo que piensa en voz alta', () => {
     );
     expect(r.caption).toBe('Un gato atigrado.');
     expect(r.failure).toBeNull();
+  });
+});
+
+describe('el modelo que se queda pensando y no contesta', () => {
+  // PASO DE VERDAD con llama-3.3-70b: analizo la imagen viñeta a viñeta durante
+  // miles de tokens, agoto el limite de salida y se corto CITANDO EL PROPIO
+  // PROMPT, sin escribir jamas la descripcion.
+  //
+  // Contarlo como «no contesto nada» mandaba a reintentar y a dudar de si el
+  // modelo sabe mirar, cuando su razonamiento demostraba que la habia mirado
+  // entera. Son dos averias distintas: una pide otro modelo, la otra mas
+  // espacio de salida.
+  it('se distingue de no contestar nada', () => {
+    const cortado = '<think>Analicemos la imagen. Panel superior: una figura. Panel 2: la cara';
+    const r = parseDescribeResponse(cortado);
+    expect(r.caption).toBeNull();
+    expect(r.failure).toBe('solo-razono');
+    expect(r.reasoning).toContain('Panel superior');
+  });
+
+  it('sin razonamiento sigue siendo «vacio»', () => {
+    // un modelo que devuelve la nada no es lo mismo que uno que se explayo
+    expect(parseDescribeResponse('   ').failure).toBe('vacio');
+    expect(parseDescribeResponse('   ').reasoning).toBeNull();
+  });
+
+  it('con descripcion detras, el razonamiento no lo convierte en fallo', () => {
+    const r = parseDescribeResponse('<think>lo pienso</think>Un gato sobre una piedra.');
+    expect(r.failure).toBeNull();
+    expect(r.caption).toBe('Un gato sobre una piedra.');
+  });
+
+  it('el prompt le pide que NO delibere en voz alta', () => {
+    // es la causa raiz, no el sintoma: mientras siga narrando su analisis, el
+    // presupuesto de salida se lo come el razonamiento
+    expect(buildDescribePrompt()).toContain('NO deliberes en voz alta');
   });
 });
