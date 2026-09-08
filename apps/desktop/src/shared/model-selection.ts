@@ -14,6 +14,8 @@
 export interface SelectableModel {
   apiModel: string;
   family: string;
+  /** de que origen salio: el identificador de la conexion o del proveedor HTTP */
+  connectionId: string;
   enabled: boolean;
 }
 
@@ -62,5 +64,20 @@ export function modelsForProvider(
   models: readonly SelectableModel[],
   provider: string,
 ): SelectableModel[] {
-  return models.filter((model) => model.enabled && model.family === provider);
+  return models.filter(
+    (model) =>
+      model.enabled &&
+      // por FAMILIA: es como se registran los proveedores derivados de una
+      // conexion agregadora, que sirve muchas familias por el mismo endpoint
+      (model.family === provider ||
+        // o por CONEXION: un proveedor HTTP se registra bajo SU identificador y
+        // sirve lo que sirve, sin que sus modelos formen una familia nuestra.
+        //
+        // Sin esta segunda via, añadir Groq dejaba el selector vacio para
+        // siempre: `groq` no esta en `MODEL_FAMILIES` —es una lista cerrada a
+        // proposito— asi que sus modelos caian en `qwen` y `other`, y Privado
+        // pedia «familia groq» y no encontraba nada. Actualizar el catalogo no
+        // lo arreglaba, porque el problema no era la frescura sino el criterio.
+        model.connectionId === provider),
+  );
 }

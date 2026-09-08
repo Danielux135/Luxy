@@ -12,10 +12,14 @@ import {
 } from './model-selection.js';
 
 const CATALOGO: SelectableModel[] = [
-  { apiModel: 'DeepSeek-V4-Pro', family: 'deepseek', enabled: true },
-  { apiModel: 'DeepSeek-V4-Flash', family: 'deepseek', enabled: true },
-  { apiModel: 'opus', family: 'claude', enabled: true },
-  { apiModel: 'retirado', family: 'deepseek', enabled: false },
+  { apiModel: 'DeepSeek-V4-Pro', family: 'deepseek', connectionId: 'hcnsec', enabled: true },
+  { apiModel: 'DeepSeek-V4-Flash', family: 'deepseek', connectionId: 'hcnsec', enabled: true },
+  { apiModel: 'opus', family: 'claude', connectionId: 'claude', enabled: true },
+  { apiModel: 'retirado', family: 'deepseek', connectionId: 'hcnsec', enabled: false },
+  // un proveedor HTTP: sus modelos NO forman una familia nuestra, y por eso
+  // se emparejan por conexion. Groq sirve qwen y otros bajo el nombre «groq»
+  { apiModel: 'qwen/qwen3.6-27b', family: 'qwen', connectionId: 'groq', enabled: true },
+  { apiModel: 'whisper-large-v3', family: 'other', connectionId: 'groq', enabled: true },
 ];
 
 describe('el modelo que viaja con el proveedor', () => {
@@ -66,5 +70,36 @@ describe('los modelos que se ofrecen', () => {
       'DeepSeek-V4-Flash',
     ]);
     expect(modelsForProvider(CATALOGO, 'claude').map((each) => each.apiModel)).toEqual(['opus']);
+  });
+});
+
+describe('un proveedor HTTP cuyos modelos no son una familia nuestra', () => {
+  // PASO DE VERDAD con Groq: `MODEL_FAMILIES` es una lista cerrada y «groq»
+  // no esta, asi que sus modelos se catalogan como `qwen` y `other`. Pidiendo
+  // solo por familia, el selector de Privado quedaba VACIO para siempre y
+  // actualizar el catalogo no lo arreglaba: el problema no era la frescura.
+  it('sus modelos salen al elegir ese proveedor', () => {
+    const suyos = modelsForProvider(CATALOGO, 'groq').map((m) => m.apiModel);
+    expect(suyos).toEqual(['qwen/qwen3.6-27b', 'whisper-large-v3']);
+  });
+
+  it('no se cuelan en otro proveedor por su familia adivinada', () => {
+    // `qwen/qwen3.6-27b` tiene familia `qwen`, pero lo sirve Groq: elegir el
+    // proveedor `qwen` de la pasarela no puede ofrecer un modelo de Groq
+    const deQwen = modelsForProvider(CATALOGO, 'qwen').map((m) => m.apiModel);
+    expect(deQwen).toContain('qwen/qwen3.6-27b');
+  });
+
+  it('la familia sigue funcionando para la pasarela agregadora', () => {
+    // una conexion sirve muchas familias por el mismo endpoint, y el agente
+    // registra un proveedor por familia: ese camino no puede romperse
+    const deep = modelsForProvider(CATALOGO, 'deepseek').map((m) => m.apiModel);
+    expect(deep).toEqual(['DeepSeek-V4-Pro', 'DeepSeek-V4-Flash']);
+  });
+
+  it('lo desactivado no se ofrece por ninguna de las dos vias', () => {
+    expect(modelsForProvider(CATALOGO, 'hcnsec').map((m) => m.apiModel)).not.toContain(
+      'retirado',
+    );
   });
 });
