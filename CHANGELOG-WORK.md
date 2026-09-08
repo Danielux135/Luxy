@@ -1,5 +1,55 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-09-08 12:50 — Claude — UI-GALERIA-PLEGADA-001
+
+Origen, dos avisos de Daniel: «sigo sin ver la galeria de imagenes» —estaba, al
+final del hilo, y no la habia visto— y «la foto del perfil siempre sale
+desplegada cuando hablo con Lia: no queremos eso».
+
+Lo segundo era real y es consecuencia de un diseño anterior: el avatar del
+personaje se copia a CADA conversacion suya para que pueda reenviarlo
+(`handlers.ts`, la copia del avatar), asi que la galeria nunca esta vacia y su
+foto de perfil quedaba a la vista en todos los hilos como si fuera contenido de
+esa conversacion.
+
+Preguntado a Daniel entre tres diseños. Eligio uno distinto de los tres, mas
+estricto, y tenia razon:
+
+- galeria **plegada siempre por defecto**, con el recuento en el resumen;
+- al abrirla **no se ven las fotos**: una entrada por archivo, con su tipo, su
+  nombre y su pie de foto;
+- la imagen solo se descifra y se pinta **al pulsar**, en el visor;
+- al cambiar de conversacion se cierra lo que hubiera abierto.
+
+Ademas de lo que pedia, arregla un coste que estaba escondido: no hay
+miniaturas guardadas y no puede haberlas (`D-069`), asi que cada baldosa
+descifraba el archivo ENTERO para pintarlo a 128 px. Abrir una conversacion con
+treinta archivos los descifraba todos segun entraban en pantalla. Ahora no se
+lee un byte hasta que se pulsa.
+
+Y una aclaracion suya que cambia el lado del MODELO, no el de la pantalla: «la
+foto de perfil sigue existiendo, Lia debe de saber que existe y es su foto de
+perfil, y deberia saber lo que describe la foto, aunque no se vea siempre».
+
+Eran dos cosas y solo se daba una. La linea que ve el modelo dice ahora las dos:
+`su foto de perfil — <lo que se ve>`, con `profilePhotoLine` en shared. Sin la
+etiqueta se pierde que ese retrato es SUYO; sin la descripcion no puede decidir
+si encaja con lo que le piden, que es lo que paso (`D-075`). Cuando aun no la ha
+descrito nadie no se repite: queda solo la etiqueta.
+
+- Archivos: `Vault.tsx` (`MediaGallery`, `GalleryTile` -> `GalleryEntry`),
+  `styles.css`.
+- `GalleryTile` desaparece con su `IntersectionObserver` y su estado de imagen
+  descifrada; 85 lineas por 42. Las clases `__tile`, `__frame`, `__image`,
+  `__placeholder` y `__badge` se van con el: cero referencias huerfanas,
+  comprobado.
+- El remontado al cambiar de conversacion se consigue con `key`, que ademas
+  cierra el visor: antes el de una conversacion seguia encima al abrir otra.
+- Pruebas: `npm run check` **exit 0** — 2.549 pasadas, 12 omitidas. Sin pruebas
+  nuevas: es presentacion, y no hay logica que fijar.
+- Siguiente paso exacto: Daniel comprueba que la galeria sale plegada y que al
+  abrirla no se carga ninguna imagen.
+
 ### 2026-09-08 12:25 — Claude — BUG-FOTO-NO-LLEGA-001
 
 Origen: Daniel pide una foto en una escena y Lia no manda ninguna; menciona la

@@ -11,7 +11,9 @@ import {
   buildVaultPrompt,
   VAULT_RECENT_TURNS,
   parseConversationMemoryResponse,
+  PROFILE_PHOTO_LABEL,
   imageDescriptionFor,
+  profilePhotoLine,
   parseVaultImageRequest,
   redact,
   type ConversationMemoryStatus,
@@ -2313,7 +2315,7 @@ export function registerIpcHandlers(context: HandlerContext): void {
             // «una foto». Va en `caption` para que describirla con un modelo
             // con vista lo SUSTITUYA por algo util
             prompt: null,
-            caption: 'su foto de perfil',
+            caption: PROFILE_PHOTO_LABEL,
             width: null,
             height: null,
             durationMs: null,
@@ -2368,13 +2370,21 @@ export function registerIpcHandlers(context: HandlerContext): void {
     // sin esta lista el modelo no puede reenviar nada: no sabe que hay, asi que
     // genera otra —pagando— cada vez que le piden «la de antes»
     const existingImages = (await context.privateMedia.list(context.vault, conversationId)).map(
-      (item) => ({
-        mediaId: item.mediaId,
+      (item) => {
         // el orden lo decide `imageDescriptionFor`, que vive en shared con sus
         // pruebas: aqui se leia `prompt` y nunca `caption`, asi que describir
         // una imagen era decorativo
-        description: imageDescriptionFor(item.metadata),
-      }),
+        const description = imageDescriptionFor(item.metadata);
+        // la foto de perfil se anuncia COMO TAL, y ademas con lo que se ve en
+        // ella. El personaje tiene que saber que ese retrato suyo existe aunque
+        // ya no se enseñe siempre en pantalla
+        const esAvatar =
+          character !== undefined && item.metadata.characterId === character.characterId;
+        return {
+          mediaId: item.mediaId,
+          description: esAvatar ? profilePhotoLine(description) : description,
+        };
+      },
     );
     // los turnos que ya viajan como historial reciente no se transcriben otra
     // vez: estarian dos veces en el mismo prompt

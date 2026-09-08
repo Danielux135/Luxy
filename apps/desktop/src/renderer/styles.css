@@ -1746,76 +1746,56 @@ input[aria-invalid='true'] {
   gap: 8px;
 }
 
-/* la rejilla de archivos. `auto-fill` con un minimo en vez de un numero fijo
-   de columnas: el panel cambia de ancho y una cuadricula rigida deja franjas
-   vacias o corta las baldosas */
+/* una LISTA, no una rejilla de miniaturas. No hay miniaturas guardadas y no
+   puede haberlas —`nativeImage` no decodifica webp, `D-069`—, asi que pintar
+   una baldosa obligaba a descifrar el archivo entero para enseñarlo a 128 px.
+   Aqui no se lee un solo byte hasta que se pulsa una entrada. */
 .vault-gallery {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(128px, 1fr));
-  gap: 10px;
-  margin-bottom: 14px;
-}
-
-.vault-gallery__tile {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding: 0;
+  margin: 10px 0 14px;
+}
+
+.vault-gallery__entry {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  padding: 8px 10px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: transparent;
   color: inherit;
   cursor: pointer;
   text-align: left;
-  overflow: hidden;
 }
 
-.vault-gallery__tile:hover {
+.vault-gallery__entry:hover {
   border-color: var(--accent);
 }
 
-/* cuadrada pase lo que pase: con imagenes de proporciones distintas —y las
-   hay, porque el alto y el ancho se eligen por personaje— una rejilla de
-   alturas libres queda en escalera */
-.vault-gallery__frame {
-  position: relative;
+.vault-gallery__entry-head {
   display: flex;
   align-items: center;
-  justify-content: center;
-  aspect-ratio: 1;
-  background: var(--raised);
+  gap: 8px;
 }
 
-.vault-gallery__image {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.vault-gallery__placeholder {
-  font-size: 11px;
-  color: var(--dim);
-}
-
-.vault-gallery__badge {
-  position: absolute;
-  right: 6px;
-  bottom: 6px;
-  padding: 1px 6px;
-  border-radius: 4px;
-  background: rgba(0, 0, 0, 0.6);
-  color: #fff;
-  font-size: 10px;
+.vault-gallery__entry-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
 }
 
 /* dos lineas y corta: el pie entero se lee en el visor, y aqui solo sirve
-   para distinguir una baldosa de otra */
+   para distinguir una entrada de otra */
 .vault-gallery__foot {
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
-  padding: 0 8px 8px;
   font-size: 11px;
   line-height: 1.35;
   color: var(--dim);

@@ -4,7 +4,7 @@
 // pantalla no muestra NADA de su contenido. Ni titulos, ni recuentos, ni "tu
 // ultima conversacion fue el martes". No es que se oculte: es que el renderer
 // no lo tiene, porque el proceso principal no puede descifrarlo sin la llave.
-import { useEffect, useMemo, useRef, useState, type JSX } from 'react';
+import { useEffect, useMemo, useState, type JSX } from 'react';
 import { Empty, Explica, Field, Notice, Panel, Readout, Skeleton, Tag } from '../ui/primitives.js';
 import {
   describeWhen,
@@ -190,7 +190,17 @@ function ConversationPanel({
       )}
 
       {vault.media.length > 0 && (
-        <MediaGallery vault={vault} provider={provider} model={model} project={project} />
+        /* la clave es la conversacion a proposito: al cambiar de hilo se
+           remonta, asi que se cierra la imagen que hubiera abierta y la lista
+           vuelve a estar plegada. Sin esto, el visor de una conversacion
+           seguia encima al abrir otra */
+        <MediaGallery
+          key={vault.openConversationId ?? ''}
+          vault={vault}
+          provider={provider}
+          model={model}
+          project={project}
+        />
       )}
 
       {vault.lastImage !== null && <ImageOutcome image={vault.lastImage} />}
@@ -2570,18 +2580,33 @@ function MediaGallery({
   const [openId, setOpenId] = useState<string | null>(null);
   const open = vault.media.find((item) => item.mediaId === openId) ?? null;
 
+  const imagenes = vault.media.filter((item) => !item.mimeType.startsWith('video/')).length;
+  const videos = vault.media.length - imagenes;
+
   return (
     <>
-      <div className="vault-gallery">
-        {vault.media.map((item) => (
-          <GalleryTile
-            key={item.mediaId}
-            item={item}
-            vault={vault}
-            onOpen={() => setOpenId(item.mediaId)}
-          />
-        ))}
-      </div>
+      {/* PLEGADA, y sin `open`. El avatar del personaje se copia a cada
+          conversacion suya para que pueda reenviarlo, asi que la galeria nunca
+          esta vacia: su foto de perfil quedaba a la vista en todos los hilos
+          como si fuera contenido de esa conversacion. */}
+      <details className="vault-generate">
+        <summary>
+          Archivos de esta conversación ·{' '}
+          {[
+            imagenes > 0 ? `${imagenes} imagen${imagenes === 1 ? '' : 'es'}` : null,
+            videos > 0 ? `${videos} vídeo${videos === 1 ? '' : 's'}` : null,
+          ]
+            .filter((parte) => parte !== null)
+            .join(' · ')}
+        </summary>
+
+        <div className="vault-gallery">
+          {vault.media.map((item) => (
+            <GalleryEntry key={item.mediaId} item={item} onOpen={() => setOpenId(item.mediaId)} />
+          ))}
+        </div>
+      </details>
+
       {open !== null && (
         <MediaViewer
           item={open}
@@ -2597,84 +2622,43 @@ function MediaGallery({
 }
 
 /**
- * una baldosa de la rejilla.
+ * una entrada de la lista de archivos.
  *
- * Descifra su imagen cuando entra en pantalla y no antes: abrir una
- * conversacion con treinta archivos no puede descifrarlos todos de golpe.
- * La copia descifrada vive en el estado de este componente, que se desmonta
- * al cerrar la boveda, asi que no sobrevive al cierre.
+ * NO descifra ni pinta la imagen: solo dice lo que hay. La imagen se ve al
+ * pulsarla, en el visor.
+ *
+ * Antes era una baldosa con miniatura, y eso obligaba a descifrar el archivo
+ * ENTERO para pintar un cuadro de 128 px —no hay miniaturas guardadas, y no
+ * puede haberlas: `nativeImage` no decodifica webp (`D-069`)—. Abrir la galeria
+ * descifraba de golpe todo lo que entrara en pantalla. Aqui no se lee ni un
+ * byte hasta que se pulsa.
  */
-function GalleryTile({
+function GalleryEntry({
   item,
-  vault,
   onOpen,
 }: {
   item: VaultController['media'][number];
-  vault: VaultController;
   onOpen: () => void;
 }): JSX.Element {
-  const [dataUrl, setDataUrl] = useState<string | null>(null);
-  const [tooBig, setTooBig] = useState(false);
-  const [visible, setVisible] = useState(false);
-  const box = useRef<HTMLButtonElement | null>(null);
-
-  useEffect(() => {
-    const node = box.current;
-    if (node === null || visible) return;
-    const observer = new IntersectionObserver((entries) => {
-      if (entries.some((entry) => entry.isIntersecting)) setVisible(true);
-    });
-    observer.observe(node);
-    return () => observer.disconnect();
-  }, [visible]);
-
-  useEffect(() => {
-    if (!visible) return;
-    let cancelled = false;
-    void vault.openMedia(item.mediaId).then((url) => {
-      if (cancelled) return;
-      if (url === null) setTooBig(true);
-      else setDataUrl(url);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [visible, item.mediaId, vault]);
-
   const isVideo = item.mimeType.startsWith('video/');
   const caption = item.caption ?? '';
   const name = item.displayName ?? item.mediaId.slice(0, 8);
 
   return (
-    <button
-      ref={box}
-      className="vault-gallery__tile"
-      onClick={onOpen}
-      title={caption.length > 0 ? caption : name}
-    >
-      <span className="vault-gallery__frame">
-        {dataUrl !== null && !isVideo && (
-          <img className="vault-gallery__image" src={dataUrl} alt="" />
-        )}
-        {dataUrl !== null && isVideo && (
-          /* sin `controls`: la baldosa es para mirar, y el visor es donde se
-             reproduce. Con controles, pulsar la baldosa daba al play en vez
-             de abrirla */
-          <video className="vault-gallery__image" src={dataUrl} muted />
-        )}
-        {dataUrl === null && (
-          <span className="vault-gallery__placeholder">
-            {tooBig ? 'demasiado grande' : '…'}
-          </span>
-        )}
-        {isVideo && <span className="vault-gallery__badge">vídeo</span>}
+    <button className="vault-gallery__entry" onClick={onOpen}>
+      <span className="vault-gallery__entry-head">
+        <Tag tone="idle">{isVideo ? 'vídeo' : 'imagen'}</Tag>
+        <span className="vault-gallery__entry-name">{name}</span>
+        {/* decirlo AQUI y no al abrirla: pulsar para encontrarse un hueco es
+            peor que saber antes que ese archivo no se va a poder mirar */}
+        {!item.previewable && <span className="field__hint">demasiado grande</span>}
       </span>
       <span className="vault-gallery__foot">
         {caption.length > 0 ? (
           caption
         ) : (
           /* sin pie de foto el modelo no sabe que hay aqui y acaba pagando otra
-             generacion: se marca en la propia baldosa, no en un aviso aparte */
+             generacion: se marca en la propia entrada, no en un aviso aparte */
           <em className="vault-gallery__missing">sin pie de foto</em>
         )}
       </span>

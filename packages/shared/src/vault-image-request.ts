@@ -97,6 +97,27 @@ export interface VaultImageOnFile {
  * Vive aqui y no en el proceso principal porque alli no se puede probar, y no
  * probarlo fue como se quedo mal cableado sin que nadie lo notara.
  */
+/** como se llama a la foto de perfil de un personaje en la lista del modelo */
+export const PROFILE_PHOTO_LABEL = 'su foto de perfil';
+
+/**
+ * la linea de la foto de perfil: dice QUE ES y ademas lo que se ve en ella.
+ *
+ * Las dos cosas, y no una. Con solo «su foto de perfil» el modelo sabe que
+ * existe y no sabe que hay dentro, asi que no puede decidir si encaja con lo
+ * que le piden —fue exactamente lo que paso (`D-075`)—. Con solo la
+ * descripcion sabe lo que se ve y pierde que esa imagen es SU retrato, que es
+ * lo que la distingue de cualquier otra foto de ella.
+ *
+ * Cuando aun no la ha descrito nadie, el pie de foto ES la etiqueta: entonces
+ * no se repite.
+ */
+export function profilePhotoLine(description: string): string {
+  const limpio = description.trim();
+  if (limpio.length === 0 || limpio === PROFILE_PHOTO_LABEL) return PROFILE_PHOTO_LABEL;
+  return `${PROFILE_PHOTO_LABEL} — ${limpio}`;
+}
+
 export function imageDescriptionFor(metadata: {
   caption?: string | null;
   prompt?: string | null;

@@ -10,7 +10,9 @@ import {
   VAULT_IMAGE_NEGATIVE,
   VAULT_IMAGE_OPEN,
   buildVaultImageInstruction,
+  PROFILE_PHOTO_LABEL,
   imageDescriptionFor,
+  profilePhotoLine,
   parseVaultImageRequest,
 } from './vault-image-request.js';
 import { parseConversationMemoryResponse } from './schemas.js';
@@ -374,5 +376,30 @@ describe('con que frase se le presenta una imagen guardada', () => {
 
   it('sin nada devuelve cadena vacia, que la instruccion pinta como «sin descripcion»', () => {
     expect(imageDescriptionFor({})).toBe('');
+  });
+});
+
+// Daniel, sobre la foto de perfil: «Lía debe de saber que existe y es su foto de
+// perfil, y debería saber lo que describe la foto, aunque no se vea siempre».
+// Son las DOS cosas, y antes solo se daba una.
+describe('la linea de la foto de perfil', () => {
+  it('dice que es su retrato Y lo que se ve en el', () => {
+    expect(profilePhotoLine('una mujer de pelo castaño junto a una puerta')).toBe(
+      'su foto de perfil — una mujer de pelo castaño junto a una puerta',
+    );
+  });
+
+  it('sin describir todavia, no se repite a si misma', () => {
+    // el pie de foto de partida ES la etiqueta: «su foto de perfil — su foto de
+    // perfil» no informa de nada
+    expect(profilePhotoLine(PROFILE_PHOTO_LABEL)).toBe(PROFILE_PHOTO_LABEL);
+    expect(profilePhotoLine('')).toBe(PROFILE_PHOTO_LABEL);
+    expect(profilePhotoLine('   ')).toBe(PROFILE_PHOTO_LABEL);
+  });
+
+  it('sigue diciendo que es su foto aunque la descripcion sea larga', () => {
+    // con solo la descripcion se pierde que ese retrato es SUYO, que es lo que
+    // lo distingue de cualquier otra foto de ella
+    expect(profilePhotoLine('desnuda, pelo castaño, ojos azules')).toContain(PROFILE_PHOTO_LABEL);
   });
 });
