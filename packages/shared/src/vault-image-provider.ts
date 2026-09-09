@@ -529,3 +529,39 @@ export function stripConflictingTraits(scene: string, appearance: string): strin
     .replace(/^\s*,\s*/, '')
     .trim();
 }
+
+/**
+ * los modelos de la familia Pony, que piden su propio prefijo de calidad.
+ *
+ * Se reconocen por el nombre —todos lo llevan— y no por una lista aparte que
+ * habria que mantener en dos sitios. `baseline` no sirve: Pony e Illustrious
+ * son los dos SDXL, comparten tamaño y clipSkip, y aun asi no se les escribe
+ * igual.
+ */
+export function isPonyModel(model: string): boolean {
+  return model.toLowerCase().includes('pony');
+}
+
+/** lo que Pony espera al principio del prompt; sin esto rinde de forma erratica */
+export const PONY_QUALITY_PREFIX = 'score_9, score_8_up, score_7_up';
+
+/**
+ * aviso cuando el aspecto fijo no trae el prefijo que pide el modelo elegido.
+ *
+ * PASO DE VERDAD: con `WAI-ANI-NSFW-PONYXL` y un aspecto que empezaba por
+ * `masterpiece, best quality` —el prefijo de Illustrious—, una escena de baño
+ * y desnudo devolvio un retrato de busto, vestida y sobre fondo blanco. Pony
+ * sin sus `score_` no falla con un error: falla devolviendo algo generico que
+ * ignora media peticion, y eso se confunde con «el prompt no se entendio».
+ *
+ * Solo avisa cuando hay algo que corregir, y solo si TODOS los modelos elegidos
+ * son de la misma familia: con una receta mezclada el aviso que toca es el otro
+ * (`mixedBaselineWarning`), porque ningun prefijo puede estar bien para los dos.
+ */
+export function qualityPrefixWarning(models: readonly string[], appearance: string): string | null {
+  if (models.length === 0) return null;
+  const pony = models.filter((model) => isPonyModel(model));
+  if (pony.length === 0 || pony.length !== models.length) return null;
+  if (appearance.toLowerCase().includes('score_')) return null;
+  return `${pony[0]} es de la familia Pony y espera empezar por «${PONY_QUALITY_PREFIX}». Sin eso no da error: devuelve imagenes genericas que ignoran media escena. Ponlo al principio del aspecto fijo, o elige un modelo Illustrious, que es el que usa «masterpiece, best quality».`;
+}

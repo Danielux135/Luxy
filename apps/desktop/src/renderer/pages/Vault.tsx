@@ -31,6 +31,7 @@ import {
   describeHordeCharacter,
   hordeRecipeSchema,
   mixedBaselineWarning,
+  qualityPrefixWarning,
   recipeDefaultsFor,
   type HordeBaseline,
   type HordeLora,
@@ -1556,6 +1557,14 @@ function HordeCharacterForm({
           fallo: sale una imagen, pero de otra persona */}
       {mixedBaselineWarning(models) !== null && (
         <Notice tone="warn">{mixedBaselineWarning(models)}</Notice>
+      )}
+
+      {/* Pony sin sus `score_` no da error: devuelve imágenes genéricas que
+          ignoran media escena, y eso se confunde con «el prompt no se
+          entendió». Pasó con un desnudo en un baño que volvió como retrato de
+          busto, vestida y sobre fondo blanco */}
+      {qualityPrefixWarning(models, appearance) !== null && (
+        <Notice tone="warn">{qualityPrefixWarning(models, appearance)}</Notice>
       )}
 
       <div className="row">

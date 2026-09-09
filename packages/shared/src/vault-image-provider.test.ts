@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 
 import {
   baselineOf,
+  isPonyModel,
   mixedBaselineWarning,
+  qualityPrefixWarning,
   stripConflictingTraits,
   buildHordeRequest,
   describeHordeCharacter,
@@ -412,5 +414,49 @@ describe('donar las imagenes a cambio de kudos', () => {
       appearance: 'brown hair, blue eyes',
     });
     expect(vieja.shared).toBe(false);
+  });
+});
+
+// PASO DE VERDAD: con WAI-ANI-NSFW-PONYXL y un aspecto que empezaba por
+// «masterpiece, best quality» —el prefijo de Illustrious—, una escena de baño y
+// desnudo devolvio un retrato de busto, vestida y sobre fondo blanco. Pony sin
+// sus `score_` no falla con un error: devuelve algo generico que ignora media
+// peticion, y eso se confunde con «no se entendio el prompt».
+describe('el prefijo de calidad que pide cada familia', () => {
+  const ILUSTRIOUS = 'masterpiece, best quality, brown hair, blue eyes';
+
+  it('reconoce los Pony por el nombre', () => {
+    expect(isPonyModel('WAI-ANI-NSFW-PONYXL')).toBe(true);
+    expect(isPonyModel('Prefect Pony')).toBe(true);
+    expect(isPonyModel('CyberRealistic Pony')).toBe(true);
+    expect(isPonyModel('WAI-NSFW-illustrious-SDXL')).toBe(false);
+  });
+
+  it('avisa con un Pony y el prefijo de Illustrious', () => {
+    const aviso = qualityPrefixWarning(['WAI-ANI-NSFW-PONYXL'], ILUSTRIOUS);
+    expect(aviso).not.toBeNull();
+    expect(aviso).toContain('score_9');
+  });
+
+  it('no avisa si el aspecto ya trae los score_', () => {
+    expect(
+      qualityPrefixWarning(['WAI-ANI-NSFW-PONYXL'], 'score_9, score_8_up, brown hair'),
+    ).toBeNull();
+  });
+
+  it('no avisa con un Illustrious, que es el que usa masterpiece', () => {
+    expect(qualityPrefixWarning(['WAI-NSFW-illustrious-SDXL'], ILUSTRIOUS)).toBeNull();
+  });
+
+  it('con la receta MEZCLADA se calla: ahi el aviso que toca es el otro', () => {
+    // ningun prefijo puede estar bien para las dos familias, asi que decir
+    // «pon score_» seria un consejo equivocado
+    expect(
+      qualityPrefixWarning(['WAI-ANI-NSFW-PONYXL', 'WAI-NSFW-illustrious-SDXL'], ILUSTRIOUS),
+    ).toBeNull();
+  });
+
+  it('sin modelos no avisa de nada', () => {
+    expect(qualityPrefixWarning([], ILUSTRIOUS)).toBeNull();
   });
 });
