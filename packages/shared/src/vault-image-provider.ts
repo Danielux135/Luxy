@@ -548,11 +548,14 @@ export const PONY_QUALITY_PREFIX = 'score_9, score_8_up, score_7_up';
 /**
  * aviso cuando el aspecto fijo no trae el prefijo que pide el modelo elegido.
  *
- * PASO DE VERDAD: con `WAI-ANI-NSFW-PONYXL` y un aspecto que empezaba por
- * `masterpiece, best quality` —el prefijo de Illustrious—, una escena de baño
- * y desnudo devolvio un retrato de busto, vestida y sobre fondo blanco. Pony
- * sin sus `score_` no falla con un error: falla devolviendo algo generico que
- * ignora media peticion, y eso se confunde con «el prompt no se entendio».
+ * Es una RECOMENDACION, y el texto lo dice asi a proposito. La documentacion de
+ * Pony pide sus `score_`, pero no son obligatorios: hay dos generaciones reales
+ * con `WAI-ANI-NSFW-PONYXL` sin ellos, una que ignoro media escena y otra que la
+ * cumplio entera. O sea que ayudan y no explican por si solos un mal resultado.
+ *
+ * La primera version de este aviso decia que sin ellos «devuelve imagenes
+ * genericas». Eso era afirmar de mas con dos muestras, y un aviso que exagera
+ * se acaba ignorando tambien cuando acierta.
  *
  * Solo avisa cuando hay algo que corregir, y solo si TODOS los modelos elegidos
  * son de la misma familia: con una receta mezclada el aviso que toca es el otro

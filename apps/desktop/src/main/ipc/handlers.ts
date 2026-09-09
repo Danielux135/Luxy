@@ -2197,6 +2197,10 @@ export function registerIpcHandlers(context: HandlerContext): void {
         // el modelo que la cogio de verdad. Sin esto, «la misma semilla da
         // caras distintas» no se puede ni empezar a diagnosticar
         modelo: generation.model,
+        // y QUIEN lo ejecuto. Dos workers con el mismo modelo pueden dar
+        // resultados distintos: version del fichero, backend y retoques son
+        // suyos, no del horde. Ya venia en la respuesta y se tiraba
+        worker: generation.workerName,
       });
 
       return {
