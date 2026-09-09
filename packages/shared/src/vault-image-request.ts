@@ -271,6 +271,19 @@ export function buildVaultImageInstruction(
       ? '- Etiquetas cortas separadas por comas, sin frases: "sitting on a bed, blue dress, blushing,'
       : '- Frases cortas separadas por comas: "sitting on the edge of the bed, wearing a blue dress,',
     style === 'tags' ? '  looking at viewer, warm light".' : '  warm evening light, candid".',
+    // EL NUMERO IMPORTA, y no estaba dicho. Un generador reparte su atencion
+    // entre todo lo que se le pone: con trece elementos cada uno recibe una
+    // fraccion, y los del final —que es donde caen los detalles concretos— son
+    // los que menos. Paso de verdad: una escena de trece pedia «de espaldas,
+    // mirando sobre el hombro, camisa caida hasta la cintura, vaqueros
+    // bajados», y volvio una foto de frente, vestida y sentada.
+    '- OCHO elementos como mucho, y mejor seis. No es una lista de todo lo que pasa: es lo que',
+    '  hay que ver. Cada cosa que añades le quita fuerza a las demas.',
+    '- El PRIMERO es el que mas pesa, asi que empieza por lo que no puede faltar. Si lo que',
+    '  importa es que esta de espaldas, «from behind» va primero, no al final.',
+    '- Los estados de ropa se dicen con la etiqueta corta que existe —«open shirt», «off',
+    '  shoulder», «undressing»— y no describiendolos: «la camisa se le cae del todo por los',
+    '  hombros y se queda en la cintura» no lo entiende, «off shoulder» si.',
     '',
     'El bloque va al final de tu respuesta, antes del bloque de memoria. No puedes adjuntar',
     'archivos de ninguna otra forma.',

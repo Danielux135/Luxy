@@ -501,3 +501,30 @@ describe('«otra foto» significa una nueva', () => {
     expect(sinGenerar).toContain('NO puedes generar');
   });
 });
+
+// PASO DE VERDAD: Lia escribio una escena de TRECE elementos pidiendo «de
+// espaldas, mirando sobre el hombro, camisa caida hasta la cintura, vaqueros
+// bajados», y volvio una foto de frente, vestida y sentada. Un generador
+// reparte su atencion entre todo lo que se le pone: con trece cosas, las del
+// final —que es donde caen los detalles concretos— no llegan.
+describe('la escena tiene que ser corta para que se cumpla', () => {
+  const instruccion = buildVaultImageInstruction();
+
+  it('pone un tope de elementos, que era lo que faltaba', () => {
+    expect(instruccion).toContain('OCHO elementos como mucho');
+  });
+
+  it('explica el mecanismo, no solo la regla', () => {
+    // «se breve» sin motivo se salta; sabiendo que cada añadido resta, no
+    expect(instruccion).toContain('le quita fuerza a las demas');
+  });
+
+  it('dice que el primero manda', () => {
+    expect(instruccion).toContain('El PRIMERO es el que mas pesa');
+  });
+
+  it('manda usar la etiqueta corta de ropa en vez de describirla', () => {
+    expect(instruccion).toContain('off');
+    expect(instruccion).toContain('open shirt');
+  });
+});
