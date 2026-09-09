@@ -1891,6 +1891,20 @@ function GeneratePanel({
   onCharacterReady: (characterId: string, description: string) => void;
 }): JSX.Element {
   const [characterId, setCharacterId] = useState('');
+  // el campo empieza con el personaje de la conversacion.
+  //
+  // Antes empezaba vacio y la UNICA forma de rellenarlo era el boton «Usar» de
+  // la lista, que no aparece justamente en quien YA esta en uso: para generarle
+  // una imagen al personaje con el que estabas hablando habia que copiar su
+  // identificador a mano del campo de arriba. Es lo primero que se quiere hacer
+  // y era lo unico que no se podia.
+  //
+  // No pisa lo escrito: solo rellena si esta vacio, porque generar para OTRO
+  // personaje sigue siendo legitimo.
+  useEffect(() => {
+    if (activeCharacterId === null || activeCharacterId.length === 0) return;
+    setCharacterId((previo) => (previo.length === 0 ? activeCharacterId : previo));
+  }, [activeCharacterId]);
   const [traits, setTraits] = useState<Record<string, string>>({});
   const [scene, setScene] = useState('');
   const [sfw, setSfw] = useState(false);
