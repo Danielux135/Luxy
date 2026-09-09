@@ -2540,14 +2540,10 @@ function VisionBench({
                 Se quedó pensando y se le acabó el espacio: analizó la imagen
                 pero nunca llegó a escribir la descripción. <strong>Sí la vio</strong>
                 {' '}— lo tienes abajo. Prueba con otro modelo que delibere menos.{' '}
-                {/* decia «o sube el limite de salida de esa conexion», y eso ya
-                    es un consejo FALSO: el describidor pide su propio
-                    presupuesto, no el de la conexion, y pedir mas de lo que el
-                    modelo permite por minuto hace que el proveedor rechace la
-                    peticion entera con un 429. Paso dos veces seguidas */}
+                {/* decia «o sube el limite de salida de esa conexion», y el
+                    describidor ya no usa el de la conexion: pide el suyo */}
                 Subir el límite de la conexión no ayuda: el describidor pide lo
-                suyo, y pasarse del tope por minuto del modelo hace que el
-                proveedor rechace la petición entera.
+                suyo.
               </Notice>
             )}
             {probe.failure === 'vacio' && (

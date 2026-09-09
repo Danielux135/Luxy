@@ -293,16 +293,19 @@ export function parseDescribeResponse(text: string, refused = false): DescribeRe
  * cuando el `max_tokens` pedido supera el limite por minuto del modelo, en vez
  * de recortar. Un limite holgado se convertia en un 429 seco.
  *
- * DE 1.500 A 900, y el 1.500 tambien era mio: el tope de `qwen/qwen3.6-27b` en
- * el nivel gratuito de Groq son 1.000 tokens de salida por minuto, asi que
- * 1.500 seguia por encima y seguia rechazando. Medido contra el error real, no
- * estimado.
+ * QUE NO ES: un margen para esquivar el 429 de Groq. Se bajo a 1.500 y luego a
+ * 900 creyendo que su «OTPM: Limit 1000» era un tope por peticion, y es FALSO:
+ * el registro tiene una peticion de `qwen/qwen3.6-27b` servida con 1.500 tokens
+ * de salida. Es un presupuesto POR MINUTO que se agota describiendo varias
+ * seguidas, y encogerlo no lo evita —solo trunca la descripcion—. El propio
+ * mensaje de error de Luxy ya lo decia: si el limite es mayor que cero, es
+ * frecuencia; se espera y se repite.
  *
- * 900 sale de lo que de verdad hace falta: 1.900 caracteres de español son unos
- * 540 tokens, y quedan ~360 de margen para un razonamiento breve. Un modelo que
- * delibere mucho se quedara corto y devolvera `solo-razono`, que se distingue y
- * se explica; es mejor que un 429 que no devuelve nada.
+ * 2.000 sale de lo que hace falta para responder: 1.900 caracteres de español
+ * son unos 540 tokens, y el resto es sitio para que un modelo que razona en voz
+ * alta llegue a escribir la descripcion. Con 900 no llegaba: agotaba el
+ * presupuesto pensando y devolvia `solo-razono`.
  *
  * Sigue siendo un maximo, no una reserva: se paga lo que se use.
  */
-export const DESCRIBE_MAX_OUTPUT_TOKENS = 900;
+export const DESCRIBE_MAX_OUTPUT_TOKENS = 2000;

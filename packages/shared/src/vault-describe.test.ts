@@ -396,9 +396,14 @@ describe('las costuras del troceado no son contenido', () => {
 // vez de recortar. Primero con los 8192 de la conexion, y despues con los 1.500
 // que puse yo, porque el tope de qwen/qwen3.6-27b son 1.000.
 describe('el presupuesto de salida del describidor', () => {
-  it('cabe bajo el limite por minuto mas bajo que hemos visto', () => {
-    // 1.000 en el nivel gratuito de Groq para qwen/qwen3.6-27b
-    expect(DESCRIBE_MAX_OUTPUT_TOKENS).toBeLessThan(1000);
+  it('deja sitio para RAZONAR y ademas escribir', () => {
+    // habia aqui una prueba que exigia `< 1000`, y fijaba una creencia FALSA:
+    // que el «OTPM: Limit 1000» de Groq era un tope por peticion. El registro
+    // tiene una peticion servida con 1.500 tokens de salida, asi que no lo es.
+    // Con 900 el modelo agotaba el presupuesto pensando y no llegaba a la
+    // descripcion; una prueba que ata un numero a una teoria equivocada es peor
+    // que no tenerla, porque impide arreglarlo
+    expect(DESCRIBE_MAX_OUTPUT_TOKENS).toBeGreaterThanOrEqual(1500);
   });
 
   it('y da para el pie de foto entero, que es su unico trabajo', () => {
