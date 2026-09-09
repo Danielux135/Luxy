@@ -7,6 +7,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   CAPTION_TRIM_MARK,
+  DESCRIBE_MAX_OUTPUT_TOKENS,
   MAX_CAPTION_CHARS,
   buildDescribePrompt,
   MAX_REASONING_CHARS,
@@ -387,5 +388,23 @@ describe('las costuras del troceado no son contenido', () => {
     // callarlos seria el error contrario
     expect(prompt).toContain('un marco');
     expect(prompt).toContain('retícula de comic');
+  });
+});
+
+// PASO DE VERDAD, dos veces seguidas: Groq rechaza la peticion ENTERA con un
+// 429 cuando el max_tokens pedido supera el limite por minuto del modelo, en
+// vez de recortar. Primero con los 8192 de la conexion, y despues con los 1.500
+// que puse yo, porque el tope de qwen/qwen3.6-27b son 1.000.
+describe('el presupuesto de salida del describidor', () => {
+  it('cabe bajo el limite por minuto mas bajo que hemos visto', () => {
+    // 1.000 en el nivel gratuito de Groq para qwen/qwen3.6-27b
+    expect(DESCRIBE_MAX_OUTPUT_TOKENS).toBeLessThan(1000);
+  });
+
+  it('y da para el pie de foto entero, que es su unico trabajo', () => {
+    // ~3,5 caracteres por token en español: el tope del pie de foto tiene que
+    // caber con margen, o el recorte lo haria el proveedor y a mitad de frase
+    const tokensDelPie = Math.ceil(MAX_CAPTION_CHARS / 3.5);
+    expect(DESCRIBE_MAX_OUTPUT_TOKENS).toBeGreaterThan(tokensDelPie);
   });
 });
