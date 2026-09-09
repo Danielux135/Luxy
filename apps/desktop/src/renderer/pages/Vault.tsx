@@ -2539,8 +2539,15 @@ function VisionBench({
               <Notice tone="warn">
                 Se quedó pensando y se le acabó el espacio: analizó la imagen
                 pero nunca llegó a escribir la descripción. <strong>Sí la vio</strong>
-                {' '}— lo tienes abajo. Prueba con otro modelo que delibere menos, o
-                sube el límite de salida de esa conexión.
+                {' '}— lo tienes abajo. Prueba con otro modelo que delibere menos.{' '}
+                {/* decia «o sube el limite de salida de esa conexion», y eso ya
+                    es un consejo FALSO: el describidor pide su propio
+                    presupuesto, no el de la conexion, y pedir mas de lo que el
+                    modelo permite por minuto hace que el proveedor rechace la
+                    peticion entera con un 429. Paso dos veces seguidas */}
+                Subir el límite de la conexión no ayuda: el describidor pide lo
+                suyo, y pasarse del tope por minuto del modelo hace que el
+                proveedor rechace la petición entera.
               </Notice>
             )}
             {probe.failure === 'vacio' && (
@@ -3008,7 +3015,13 @@ function MediaViewer({
         {failure === 'solo-razono' && (
           <Notice tone="warn">
             Se quedó pensando y se le acabó el espacio antes de escribir la
-            descripción. Vio la imagen; lo que falta es sitio para responder.
+            descripción. Vio la imagen; lo que falta es sitio para responder.{' '}
+            {/* sin remedio, este aviso solo servia para frustrar: repetirlo con
+                el mismo modelo da el mismo resultado, porque el limite es suyo
+                y no del intento */}
+            Repetirlo con el mismo modelo dará lo mismo:{' '}
+            <strong>elige otro que delibere menos</strong> en «Probar la vista de
+            un modelo», aquí abajo.
           </Notice>
         )}
 
