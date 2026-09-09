@@ -121,6 +121,22 @@ Lo que hay que saber antes:
 
 Entrenar uno es trabajo de contenido, no de Luxy: se hace fuera y se publica.
 
+**Y publicarlo tiene un límite que no es técnico.** Los términos de CivitAI
+—apartado 9.6, leídos el 2026-09-09— **prohíben el contenido adulto**:
+pornografía, desnudos, «contenido destinado a causar excitación sexual». No es
+una zona gris con avisos, es una prohibición, y sus moderadores pueden retirar
+lo que quieran sin avisar.
+
+Consecuencia práctica para un personaje de la bóveda: **un LoRA entrenado con
+desnudos no se puede publicar allí**, y sin publicarlo el worker no puede
+descargarlo. Los dos requisitos son incompatibles.
+
+Lo que sí encaja: un LoRA de **identidad**, entrenado con imágenes vestidas y
+publicado con vistas previas vestidas. Da la cara, el pelo y la complexión en
+todas las escenas, que es para lo que sirve; lo explícito lo pone el modelo base
+y el prompt en cada generación, no el LoRA. Sigue siendo **público**, que es el
+otro peaje y el que más pesa con un personaje privado.
+
 ### Partir de una imagen anterior (img2img)
 
 En el panel de generar, con un personaje del horde, se puede elegir una imagen
