@@ -13,6 +13,7 @@ import {
   PROFILE_PHOTO_LABEL,
   TRANSPORTABLE_IMAGE_TYPES,
   imageTransportProblem,
+  MAX_IMAGE_LINE_CHARS,
   imageDescriptionFor,
   profilePhotoLine,
   parseVaultImageRequest,
@@ -580,5 +581,43 @@ describe('cuando la imagen anterior no llego a generarse', () => {
       canGenerateImage: true,
     });
     expect(prompt).not.toContain('NO llego a generarse');
+  });
+});
+
+// PASO DE VERDAD, y lo destapo Daniel mirando un log: `tokensIn=9321` en un
+// turno con once imagenes guardadas. Al guardar el prompt compuesto entero,
+// cada imagen aportaba ~308 tokens a la lista: 3.388 en total, el 36% de todo
+// lo que se le enviaba al modelo.
+describe('lo que ocupa cada imagen en el prompt', () => {
+  const NEGATIVO = 'worst quality, low quality, blurry, bad anatomy, watermark, censored';
+
+  it('el negativo NO viaja: no describe la imagen, dice lo que se evito', () => {
+    const linea = imageDescriptionFor({ prompt: `sitting on a bed, blue dress ### ${NEGATIVO}` });
+    expect(linea).toBe('sitting on a bed, blue dress');
+    expect(linea).not.toContain('worst quality');
+  });
+
+  it('se recorta por el tope, marcado', () => {
+    const largo = 'palabra '.repeat(200);
+    const linea = imageDescriptionFor({ caption: largo });
+    expect(linea.length).toBeLessThanOrEqual(MAX_IMAGE_LINE_CHARS);
+    expect(linea.endsWith('…')).toBe(true);
+  });
+
+  it('un pie de foto corto se deja intacto', () => {
+    // describir las imagenes mejora la eleccion Y acorta el prompt: es el caso
+    // bueno y no debe tocarse
+    expect(imageDescriptionFor({ caption: 'una mujer de pelo castaño en la cama' })).toBe(
+      'una mujer de pelo castaño en la cama',
+    );
+  });
+
+  it('once imagenes ya no se comen un tercio del prompt', () => {
+    const compuesto = `${'tag, '.repeat(120)} ### ${NEGATIVO}`;
+    const total = Array.from({ length: 11 }, () => imageDescriptionFor({ prompt: compuesto })).join(
+      '',
+    ).length;
+    // antes eran ~13.500 caracteres; el tope los deja en 2.200 como mucho
+    expect(total).toBeLessThanOrEqual(11 * MAX_IMAGE_LINE_CHARS);
   });
 });

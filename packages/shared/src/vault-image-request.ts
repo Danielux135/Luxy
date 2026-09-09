@@ -15,6 +15,7 @@
 // que hay escrito. Asi cada caso limite se prueba sin montar una boveda ni
 // gastar una generacion.
 import { z } from 'zod';
+import { trimWithMark } from './vault-describe.js';
 
 export const VAULT_IMAGE_OPEN = '<LUXY_IMAGEN>';
 export const VAULT_IMAGE_CLOSE = '</LUXY_IMAGEN>';
@@ -70,6 +71,20 @@ export interface VaultImageOnFile {
   description: string;
 }
 
+/**
+ * cuanto ocupa como mucho la linea de UNA imagen en el prompt.
+ *
+ * MEDIDO, no elegido a ojo. Al guardar el prompt compuesto entero, cada imagen
+ * generada aportaba ~308 tokens a esta lista: con once imagenes eran 3.388
+ * tokens, el 36% de todo lo que se le enviaba al modelo en un turno real.
+ *
+ * Doscientos caracteres bastan para distinguir una foto de otra, que es para lo
+ * que existe la lista. Y hay un incentivo bueno: un pie de foto de verdad
+ * —escrito por el describidor o a mano— es mas corto Y mas util que el prompt
+ * de generacion, asi que describir las imagenes mejora las dos cosas a la vez.
+ */
+export const MAX_IMAGE_LINE_CHARS = 200;
+
 /** como se llama a la foto de perfil de un personaje en la lista del modelo */
 export const PROFILE_PHOTO_LABEL = 'su foto de perfil';
 
@@ -116,7 +131,12 @@ export function imageDescriptionFor(metadata: {
   const primero = [metadata.caption, metadata.prompt, metadata.displayName].find(
     (valor) => typeof valor === 'string' && valor.trim().length > 0,
   );
-  return primero === undefined || primero === null ? '' : primero.trim();
+  if (primero === undefined || primero === null) return '';
+  // el negativo NO describe la imagen: dice lo que se pidio evitar. Va detras
+  // de ' ### ' porque el horde no tiene campo aparte, y arrastrarlo aqui suma
+  // cien tokens por imagen que no ayudan a elegir ninguna
+  const sinNegativo = primero.split(' ### ')[0] ?? primero;
+  return trimWithMark(sinNegativo.trim(), MAX_IMAGE_LINE_CHARS, '…');
 }
 
 /**
