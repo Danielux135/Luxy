@@ -1421,6 +1421,22 @@ export function registerIpcHandlers(context: HandlerContext): void {
     };
   };
 
+  /**
+   * la ultima imagen de esta conversacion que NO llego a generarse.
+   *
+   * El personaje no se enteraba de que su imagen habia fallado: el turno
+   * guarda el texto y nada mas, asi que en el turno siguiente daba por hecho
+   * que la mando. Cuando el usuario decia «no me ha llegado, mandame otra
+   * igual», ella copiaba el prompt de la ultima imagen GUARDADA —que era una
+   * vieja, porque la fallida nunca se guardo— y devolvia aquella escena.
+   *
+   * Vive en memoria y no en la boveda: es informacion de un turno para el
+   * siguiente, y perderla al reiniciar no rompe nada. Guardar el motivo en el
+   * historial cifrado seria escribir un fallo tecnico dentro de una
+   * conversacion, que es justo lo que `D-020` separa.
+   */
+  const ultimaImagenFallida = new Map<string, string>();
+
   /** la lista tal y como la ve el renderer; la usan el listado y las correcciones */
   const listMediaForRenderer = async (conversationId: string) => {
     const items = await context.privateMedia.list(context.vault, conversationId);
@@ -2518,6 +2534,9 @@ export function registerIpcHandlers(context: HandlerContext): void {
           ? null
           : characterDescription,
       canGenerateImage,
+      // y si la imagen del turno anterior no llego a salir. Se consume aqui:
+      // es informacion para ESTE turno, no un estado que se arrastre
+      lastImageError: ultimaImagenFallida.get(conversationId) ?? null,
       existingImages,
       // los modelos de anime rinden peor con prosa y los realistas peor con
       // etiquetas sueltas: lo dice la documentacion del proveedor
@@ -2526,6 +2545,10 @@ export function registerIpcHandlers(context: HandlerContext): void {
         recipe: character?.horde?.recipe ?? null,
       }),
     });
+
+    // dicho ya, se olvida: si no, el personaje seguiria disculpandose por una
+    // imagen fallida tres turnos despues
+    ultimaImagenFallida.delete(conversationId);
 
     // ni el texto ni los rasgos: solo si el turno pudo ofrecer imagenes y
     // cuantas habia para reenviar. Sin esto habia que adivinar por que el
@@ -2622,7 +2645,14 @@ export function registerIpcHandlers(context: HandlerContext): void {
           };
         } catch (error) {
           // una generacion fallida NO tira la respuesta de texto: lo escrito
-          // sigue valiendo y se guarda igual, con el fallo al lado
+          // sigue valiendo y se guarda igual, con el fallo al lado.
+          //
+          // Y se apunta para el turno siguiente: sin esto el personaje cree
+          // que la mando
+          ultimaImagenFallida.set(
+            conversationId,
+            redact(error instanceof Error ? error.message : String(error)),
+          );
           image = {
             mediaId: null,
             costCredits: null,

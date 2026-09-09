@@ -173,6 +173,12 @@ export function buildVaultImageInstruction(
    * permisos distintos y no uno: sin clave se pierde (b), no (a).
    */
   canGenerate = true,
+  /**
+   * la imagen del turno anterior no llego a generarse, y por que.
+   *
+   * `null` cuando la anterior salio bien o no hubo ninguna, que es lo normal.
+   */
+  lastError: string | null = null,
 ): string {
   const lines = canGenerate
     ? [
@@ -211,6 +217,21 @@ export function buildVaultImageInstruction(
         'la lista, dilo con naturalidad: no prometas mandarla despues y no finjas que no te la',
         'han pedido.',
       ];
+
+  if (lastError !== null) {
+    // PASO DE VERDAD: fallo una generacion, ella no se entero, y cuando el
+    // usuario dijo «no me ha llegado, mandame otra igual» copio el prompt de
+    // la ultima imagen GUARDADA —una vieja, porque la fallida nunca se
+    // guardo— y devolvio aquella escena, que ya no tenia nada que ver.
+    lines.push(
+      '',
+      'AVISO: la imagen que pediste en tu turno anterior NO llego a generarse. El usuario no la',
+      `ha visto nunca. Motivo tecnico: ${lastError}`,
+      'Si te pide «otra igual» o dice que no le llego, se refiere a ESA, la que intentaste y no',
+      'salio: vuelve a describir aquella escena. NO copies el prompt de una imagen mas antigua de',
+      'la lista solo porque sea la ultima que quedo guardada.',
+    );
+  }
 
   lines.push(
     '',

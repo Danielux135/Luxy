@@ -528,3 +528,57 @@ describe('la escena tiene que ser corta para que se cumpla', () => {
     expect(instruccion).toContain('open shirt');
   });
 });
+
+// PASO DE VERDAD, y lo diagnostico Daniel: fallo una generacion, Lia no se
+// entero —el turno guarda su texto y nada mas—, y cuando el le dijo «se me ha
+// borrado, mandame una nueva pero igual», ella copio el prompt de la ultima
+// imagen GUARDADA. Como la fallida nunca llego a guardarse, la ultima guardada
+// era una vieja, de otra escena: devolvio aquella foto.
+describe('cuando la imagen anterior no llego a generarse', () => {
+  it('se le dice, y con el motivo', () => {
+    const texto = buildVaultImageInstruction([], 'tags', true, 'AI Horde: no estuvo lista a tiempo');
+    expect(texto).toContain('NO llego a generarse');
+    expect(texto).toContain('no estuvo lista a tiempo');
+  });
+
+  it('le dice que el usuario NO la ha visto', () => {
+    // es lo que distingue «no llego» de «no le gusto»: sin esto podria
+    // disculparse por la foto en vez de volver a mandarla
+    const texto = buildVaultImageInstruction([], 'tags', true, 'fallo');
+    // sin saltos de linea, que es como lo lee el modelo y no como se escribio
+    expect(texto.replace(/\s+/g, ' ')).toContain('El usuario no la ha visto nunca');
+  });
+
+  it('le prohibe copiar el prompt de una imagen mas antigua', () => {
+    // el fallo exacto: «otra igual» resolvia a la ultima guardada
+    const texto = buildVaultImageInstruction([], 'tags', true, 'fallo');
+    expect(texto).toContain('NO copies el prompt de una imagen mas antigua');
+  });
+
+  it('sin fallo anterior no se le dice nada', () => {
+    // el aviso es informacion de un turno; repetirlo siempre seria ruido
+    expect(buildVaultImageInstruction([], 'tags', true, null)).not.toContain('NO llego a generarse');
+    expect(buildVaultImageInstruction()).not.toContain('NO llego a generarse');
+  });
+
+  it('el prompt de la conversacion lo transmite', () => {
+    const prompt = buildVaultPrompt({
+      memory: null,
+      turns: [],
+      message: 'mandame otra igual',
+      canGenerateImage: true,
+      lastImageError: 'AI Horde: no estuvo lista a tiempo',
+    });
+    expect(prompt).toContain('NO llego a generarse');
+  });
+
+  it('y sin fallo el prompt no lo menciona', () => {
+    const prompt = buildVaultPrompt({
+      memory: null,
+      turns: [],
+      message: 'mandame una foto',
+      canGenerateImage: true,
+    });
+    expect(prompt).not.toContain('NO llego a generarse');
+  });
+});

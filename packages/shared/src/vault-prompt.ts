@@ -91,6 +91,15 @@ export interface VaultPromptInput {
    */
   canGenerateImage?: boolean;
   /**
+   * la imagen del turno ANTERIOR no llego a generarse, y por que.
+   *
+   * Sin esto el personaje da por hecho que la mando: el turno guarda su texto
+   * y nada mas. Cuando el usuario decia «no me ha llegado, mandame otra
+   * igual», copiaba el prompt de la ultima imagen GUARDADA —una vieja, porque
+   * la fallida nunca se guardo— y devolvia aquella escena.
+   */
+  lastImageError?: string | null;
+  /**
    * imagenes que ya existen en esta conversacion.
    *
    * Sin esta lista el modelo no puede reenviar nada: no sabe que hay, asi que
@@ -290,12 +299,19 @@ export function buildVaultPrompt(input: VaultPromptInput): string {
   // poder enseñar ni su propia foto de perfil —que el mismo turno acababa de
   // copiar a la conversacion para poder reenviarla—.
   const existing = input.existingImages ?? [];
+  // el fallo anterior va DENTRO del bloque de imagen: es informacion sobre
+  // esa herramienta y no tiene sentido si la herramienta no se ofrece
+  const fallo =
+    typeof input.lastImageError === 'string' && input.lastImageError.length > 0
+      ? input.lastImageError
+      : null;
   if (input.canGenerateImage === true || existing.length > 0) {
     blocks.push(
       buildVaultImageInstruction(
         existing,
         input.imagePromptStyle ?? 'prose',
         input.canGenerateImage === true,
+        fallo,
       ),
     );
   }
