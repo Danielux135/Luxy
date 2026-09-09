@@ -138,6 +138,20 @@ export const hordeRecipeSchema = z
     negative: z.string().max(1000).default(''),
     /** con la misma seed y el mismo prompt, la cara se repite mucho mejor */
     seed: z.string().max(64).nullable().default(null),
+    /**
+     * dona lo generado al conjunto de datos publico de AI Horde, a cambio de
+     * kudos.
+     *
+     * Es de LA RECETA y no de la maquina a proposito: se comparte a un
+     * personaje concreto, no todo lo que uno genere. Un personaje puede ser
+     * inventado y anodino y otro no.
+     *
+     * `false` por defecto y siempre: donar contenido de la boveda no puede ser
+     * la opcion que viene puesta. Con la clave anonima el servidor lo fuerza a
+     * `true` y este campo no lo evita (`D-065`); con una clave propia, que es
+     * gratis, manda esto.
+     */
+    shared: z.boolean().default(false),
     width: z.number().int().min(MIN_SIDE).max(MAX_SIDE).default(1024),
     height: z.number().int().min(MIN_SIDE).max(MAX_SIDE).default(1024),
     steps: z.number().int().min(1).max(60).default(30),

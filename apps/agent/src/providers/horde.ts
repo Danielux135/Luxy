@@ -82,6 +82,22 @@ const MAX_POLL_INTERVAL_MS = 8000;
 
 /** el propio horde descarta una peticion async a los 10 minutos */
 const DEFAULT_MAX_WAIT_MS = 10 * 60_000;
+/**
+ * cuanto mas se puede esperar por encima del plazo base, si la cola avanza.
+ *
+ * Diez minutos mas, o sea veinte en total como techo absoluto. Sale de la
+ * espera real de una cuenta con pocos kudos: se han visto colas de 25 minutos
+ * estimados que acababan sirviendose.
+ */
+const DEFAULT_GRACE_MS = 10 * 60_000;
+/**
+ * plazo que se renueva con cada señal de que la peticion avanza.
+ *
+ * Dos minutos: mas que de sobra entre dos vueltas del sondeo, que como mucho
+ * son 8 segundos, y poco suficiente para que una peticion que se queda parada
+ * se rinda enseguida en vez de arrastrar la espera.
+ */
+const PROGRESS_GRACE_MS = 2 * 60_000;
 
 /** tope del horde: mas de cinco LoRAs se rechaza, y cada uno cuesta +3 kudos */
 export const MAX_LORAS = 5;
@@ -714,8 +730,15 @@ export async function cancelImage(id: string, options: HordeOptions): Promise<Ho
 }
 
 export interface AwaitImageOptions {
-  /** tope total. Por defecto 10 min, que es cuando el horde descarta la peticion */
+  /** plazo BASE. Se estira mientras la cola avance, hasta `graceMs` mas */
   maxWaitMs?: number;
+  /**
+   * cuanto se puede estirar el plazo por encima del base, como maximo.
+   *
+   * Existe para que una cola que avanza muy despacio no deje la espera abierta
+   * para siempre: por muchas señales de vida que haya, el techo no se pasa.
+   */
+  graceMs?: number;
   onProgress?: (progress: HordeProgress) => void;
 }
 
@@ -777,7 +800,20 @@ async function pollImage(
   options: HordeOptions & AwaitImageOptions,
 ): Promise<HordeResult> {
   const sleep = options.sleep ?? defaultSleep;
-  const deadline = Date.now() + (options.maxWaitMs ?? DEFAULT_MAX_WAIT_MS);
+  // EL PLAZO SE ESTIRA MIENTRAS LA COLA AVANCE, y esto no es generosidad.
+  //
+  // Paso de verdad: al vencer los diez minutos la peticion estaba en el PUESTO
+  // 18 con 56 segundos estimados, y se tiro. El horde no la habia descartado
+  // —seguia viva y subiendo puestos—; el que perdia la imagen era este plazo.
+  //
+  // Se estira solo con evidencia de que llega: un worker ya la esta dibujando,
+  // o la cola se ha movido hacia delante desde la vuelta anterior. Una peticion
+  // parada no estira nada y se rinde a su hora, que es lo que evita esperar
+  // diez minutos a algo que no va a salir.
+  const hardDeadline =
+    Date.now() + (options.maxWaitMs ?? DEFAULT_MAX_WAIT_MS) + (options.graceMs ?? DEFAULT_GRACE_MS);
+  let deadline = Date.now() + (options.maxWaitMs ?? DEFAULT_MAX_WAIT_MS);
+  let lastPosition: number | null = null;
   let attempt = 0;
 
   while (Date.now() < deadline) {
@@ -795,6 +831,17 @@ async function pollImage(
 
     const progress = await checkImage(id, options);
     options.onProgress?.(progress);
+
+    // ¿hay señales de que esto llega? Un worker dibujandola cuenta, y subir
+    // puestos tambien. Con cualquiera de las dos se renueva el plazo, siempre
+    // por debajo del techo absoluto
+    const avanza =
+      progress.processing > 0 ||
+      (lastPosition !== null && progress.queuePosition > 0 && progress.queuePosition < lastPosition);
+    lastPosition = progress.queuePosition;
+    if (avanza) {
+      deadline = Math.min(hardDeadline, Date.now() + PROGRESS_GRACE_MS);
+    }
 
     if (progress.faulted) {
       throw new HordeError(

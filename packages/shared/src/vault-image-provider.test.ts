@@ -370,3 +370,47 @@ describe('la escena tampoco puede reasignarle el origen', () => {
     expect(limpia).toContain('legs wrapped around partner');
   });
 });
+
+// Daniel: «la idea es ganar kudos, me da igual que se comparta la foto de Lia».
+// Con una cuenta nueva los kudos SON el puesto en la cola —el suyo era el 151 de
+// 400 segundos— y compartir es la unica palanca que no pide dinero ni una GPU.
+// Estaba fijado a `false` en el codigo y no habia forma de tocarlo.
+describe('donar las imagenes a cambio de kudos', () => {
+  it('por defecto NO se comparte', () => {
+    // donar contenido de la boveda no puede ser lo que viene puesto
+    expect(recipe().shared).toBe(false);
+  });
+
+  it('se puede activar, y es de la receta: por personaje', () => {
+    // uno puede ser anodino y otro no; no es una decision de la maquina
+    expect(recipe({ shared: true }).shared).toBe(true);
+  });
+
+  it('lo que diga la receta llega a la peticion', () => {
+    const compartida = buildHordeRequest({
+      recipe: recipe({ shared: true }),
+      prompt: 'sitting on a bed',
+      extraNegative: '',
+      shared: recipe({ shared: true }).shared,
+    });
+    expect(compartida.shared).toBe(true);
+
+    const privada = buildHordeRequest({
+      recipe: recipe(),
+      prompt: 'sitting on a bed',
+      extraNegative: '',
+      shared: recipe().shared,
+    });
+    expect(privada.shared).toBe(false);
+  });
+
+  it('una receta guardada antes de este campo se abre sin compartir', () => {
+    // `default(false)` y no `optional()`: lo que ya esta en disco no puede
+    // volverse compartido por un cambio de esquema
+    const vieja = hordeRecipeSchema.parse({
+      models: ['WAI-NSFW-illustrious-SDXL'],
+      appearance: 'brown hair, blue eyes',
+    });
+    expect(vieja.shared).toBe(false);
+  });
+});

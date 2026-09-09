@@ -1333,6 +1333,7 @@ function HordeCharacterForm({
   const [outfit, setOutfit] = useState(base?.outfit ?? '');
   const [negative, setNegative] = useState(base?.negative ?? '');
   const [seed, setSeed] = useState(base?.seed ?? '');
+  const [shared, setShared] = useState(base?.shared ?? false);
   const [width, setWidth] = useState(base?.width ?? initial.width);
   const [height, setHeight] = useState(base?.height ?? initial.height);
   const [steps, setSteps] = useState(base?.steps ?? initial.steps);
@@ -1376,6 +1377,7 @@ function HordeCharacterForm({
     outfit: outfit.trim(),
     negative: negative.trim(),
     seed: seed.trim().length === 0 ? null : seed.trim(),
+    shared,
     width,
     height,
     steps,
@@ -1638,6 +1640,28 @@ function HordeCharacterForm({
           en cada imagen.
         </span>
       </div>
+
+      {/* estaba fijado a «no compartir» en el código y no se podía tocar.
+          Compartir da kudos, y con una cuenta nueva los kudos SON el puesto en
+          la cola: es la única forma de acortar la espera sin poner dinero ni una
+          GPU. Va por personaje y no por máquina porque uno puede ser anodino y
+          otro no */}
+      <label className="check">
+        <input
+          type="checkbox"
+          checked={shared}
+          disabled={saving}
+          onChange={(event) => setShared(event.target.checked)}
+        />
+        Donar sus imágenes a AI Horde a cambio de kudos
+      </label>
+      <p className="field__hint">
+        Lo que genere este personaje pasa al conjunto de datos público de AI
+        Horde: cualquiera puede verlo y se usa para entrenar. A cambio ganas
+        kudos, que son tu puesto en la cola. <strong>No se puede deshacer</strong>{' '}
+        para lo ya compartido, así que piénsalo por personaje. Los demás siguen
+        sin compartir nada.
+      </p>
 
       <details className="vault-generate">
         <summary>

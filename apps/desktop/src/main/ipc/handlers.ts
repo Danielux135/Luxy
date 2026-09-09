@@ -2096,7 +2096,10 @@ export function registerIpcHandlers(context: HandlerContext): void {
       recipe,
       prompt: input.prompt,
       extraNegative: VAULT_IMAGE_NEGATIVE,
-      shared: false,
+      // lo decide la receta del personaje, no una constante. Compartir da
+      // kudos, y con una cuenta nueva los kudos SON el puesto en la cola: es la
+      // unica forma de acortar la espera sin poner dinero ni una GPU
+      shared: recipe.shared,
       sourceImage,
     });
 

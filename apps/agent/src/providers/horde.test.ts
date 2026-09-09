@@ -436,52 +436,75 @@ describe('sondeo', () => {
     );
   });
 
-  // PASO DE VERDAD: Daniel vio en la web del horde una generacion TERMINADA
-  // mientras Luxy le decia que no habia llegado a tiempo. El sondeo espacia sus
-  // vueltas hasta 8 s, asi que entre la ultima y el vencimiento hay una ventana
-  // en la que un worker puede terminar — y la cancelacion devuelve lo que
-  // hubiera, que es justo lo que se estaba tirando al suelo.
-  it('si la cancelacion trae la imagen, se rescata en vez de fallar', async () => {
-    const { impl, calls } = fakeFetch([
-      // la respuesta del DELETE
-      {
-        status: 200,
-        body: {
-          ...progress({ done: true, finished: 1 }),
-          generations: [
-            { img: 'https://r2.example/tarde.webp', seed: '9', id: 'g-9', model: 'Hassaku XL' },
-          ],
-        },
-      },
-    ]);
-
-    const result = await awaitImage('pet-1', { ...options(impl), maxWaitMs: 0 });
-
-    expect(result.generations[0]?.img).toBe('https://r2.example/tarde.webp');
-    // se cancela igual: la peticion no puede quedarse viva ocupando un worker
-    expect(calls.filter((call) => call.method === 'DELETE')).toHaveLength(1);
+  // PASO DE VERDAD, y esta en su registro: al vencer los diez minutos la
+  // peticion estaba en el PUESTO 18 con 56 segundos estimados, y se tiro. El
+  // horde NO la habia descartado —seguia viva y subiendo puestos—; el que
+  // perdia la imagen era nuestro plazo.
+  //
+  // Estas cuatro pruebas necesitan que el reloj CORRA: con `sleep` instantaneo
+  // el plazo base nunca vence dentro del bucle y no habria nada que estirar.
+  // Por eso duermen de verdad unos milisegundos.
+  const lento = (impl: typeof fetch) => ({
+    ...options(impl),
+    sleep: async () => {
+      await new Promise((listo) => setTimeout(listo, 40));
+    },
+    maxWaitMs: 60,
   });
 
-  it('una imagen censurada NO se rescata: es un rectangulo negro', async () => {
-    // entregarla como si fuera la foto es peor que decir que no llego
+  it('estira el plazo mientras la cola avanza', async () => {
     const { impl } = fakeFetch([
+      { status: 200, body: progress({ done: false, queue_position: 40, waiting: 1 }) },
+      { status: 200, body: progress({ done: false, queue_position: 18, waiting: 1 }) },
+      { status: 200, body: progress({ done: true, finished: 1 }) },
       {
         status: 200,
         body: {
           ...progress({ done: true, finished: 1 }),
-          generations: [
-            { img: 'https://r2.example/negra.webp', seed: '1', id: 'g-1', censored: true },
-          ],
+          generations: [{ img: 'https://r2.example/a.webp', seed: '1', id: 'g-1' }],
         },
       },
     ]);
 
-    await expect(awaitImage('pet-1', { ...options(impl), maxWaitMs: 0 })).rejects.toThrow();
+    const result = await awaitImage('pet-1', lento(impl));
+    expect(result.generations[0]?.img).toBe('https://r2.example/a.webp');
   });
 
-  it('sin nada que rescatar sigue mandando el error original', async () => {
-    const { impl } = fakeFetch([{ status: 200, body: progress({ done: false }) }]);
-    await expect(awaitImage('pet-1', { ...options(impl), maxWaitMs: 0 })).rejects.toThrow(
+  it('un worker dibujandola tambien renueva el plazo', async () => {
+    const { impl } = fakeFetch([
+      { status: 200, body: progress({ done: false, processing: 1 }) },
+      { status: 200, body: progress({ done: false, processing: 1 }) },
+      { status: 200, body: progress({ done: true, finished: 1 }) },
+      {
+        status: 200,
+        body: {
+          ...progress({ done: true, finished: 1 }),
+          generations: [{ img: 'https://r2.example/b.webp', seed: '2', id: 'g-2' }],
+        },
+      },
+    ]);
+
+    const result = await awaitImage('pet-1', lento(impl));
+    expect(result.generations[0]?.img).toBe('https://r2.example/b.webp');
+  });
+
+  it('una cola PARADA no estira nada y se rinde a su hora', async () => {
+    // es lo que evita esperar veinte minutos a algo que no va a salir: sin
+    // señales de avance manda el plazo base
+    const { impl } = fakeFetch([
+      { status: 200, body: progress({ done: false, queue_position: 40, waiting: 1 }) },
+    ]);
+    await expect(awaitImage('pet-1', lento(impl))).rejects.toThrow('no estuvo lista a tiempo');
+  });
+
+  it('el techo absoluto no se pasa por muchas señales que haya', async () => {
+    // graceMs 0: aunque la cola avance, no queda margen que estirar
+    const { impl } = fakeFetch([
+      { status: 200, body: progress({ done: false, queue_position: 40, waiting: 1 }) },
+      { status: 200, body: progress({ done: false, queue_position: 18, waiting: 1 }) },
+      { status: 200, body: progress({ done: false, queue_position: 5, waiting: 1 }) },
+    ]);
+    await expect(awaitImage('pet-1', { ...lento(impl), graceMs: 0 })).rejects.toThrow(
       'no estuvo lista a tiempo',
     );
   });
