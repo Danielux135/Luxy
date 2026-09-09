@@ -2865,7 +2865,18 @@ function MediaViewer({
           /* lo que se PIDIO no es lo que se VE: verlos juntos es justo lo que
              explica una imagen que no salio como se esperaba. Es historia, y por
              eso se enseña en pequeño y no se puede corregir */
-          <p className="vault-media__prompt">Se pidió al generarla: «{item.prompt}»</p>
+          <p className="vault-media__prompt">
+            Se pidió al generarla: «{item.prompt}»
+            {/* y QUIEN la dibujo. Con varios modelos en la receta la coge el
+                que esté libre, y cada uno da otra cara: sin esto, dos imágenes
+                de la misma semilla salen distintas y no hay por dónde empezar */}
+            {item.model !== null && item.model.length > 0 && (
+              <>
+                {' · la dibujó '}
+                <strong>{item.model}</strong>
+              </>
+            )}
+          </p>
         )}
 
         {editing ? (

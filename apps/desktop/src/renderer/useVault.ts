@@ -140,6 +140,13 @@ export interface PrivateMediaItem {
   caption: string | null;
   /** lo que se PIDIÓ al generarlo. Es historia y no se corrige */
   prompt: string | null;
+  /**
+   * el modelo que la dibujó de verdad.
+   *
+   * No es el primero de la receta: se mandan varios para que la coja el que
+   * esté libre, y cada uno da una cara distinta.
+   */
+  model: string | null;
 }
 
 export interface VaultComposer {

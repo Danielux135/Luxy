@@ -627,6 +627,15 @@ export const vaultMediaItemSchema = z.object({
    * salió como salió. Separado de `caption` a propósito.
    */
   prompt: z.string().nullable().default(null),
+  /**
+   * el modelo que la dibujó de verdad.
+   *
+   * NO es el primero de la receta: al horde se le mandan varios para que la
+   * coja el que esté libre, y cada uno da una cara distinta. Estaba guardado
+   * con el medio y no se veía en ningún sitio, así que «la misma semilla me da
+   * caras distintas» no se podía ni empezar a diagnosticar.
+   */
+  model: z.string().nullable().default(null),
 });
 
 export const vaultMediaListResultSchema = z.object({

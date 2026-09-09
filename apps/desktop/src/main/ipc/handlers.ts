@@ -1433,6 +1433,12 @@ export function registerIpcHandlers(context: HandlerContext): void {
       previewable: true,
       caption: item.metadata.caption ?? null,
       prompt: item.metadata.prompt,
+      // QUIEN la dibujo, que no es el primero de la lista de la receta: se
+      // mandan varios modelos para que la coja el que este libre, y cada uno
+      // da una cara distinta. Estaba guardado y no se veia en ningun sitio,
+      // asi que dos imagenes de la misma semilla salian distintas sin que
+      // hubiera forma de saber por que
+      model: item.metadata.model,
     }));
   };
 
@@ -2169,6 +2175,9 @@ export function registerIpcHandlers(context: HandlerContext): void {
         proveedor: 'horde',
         kind: input.kind,
         byteSize: stored.byteSize,
+        // el modelo que la cogio de verdad. Sin esto, «la misma semilla da
+        // caras distintas» no se puede ni empezar a diagnosticar
+        modelo: generation.model,
       });
 
       return {
