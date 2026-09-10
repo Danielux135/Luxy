@@ -9,6 +9,9 @@ import { basename, join, resolve } from 'node:path';
 import type { z } from 'zod';
 import {
   buildVaultPrompt,
+  composeVaultPrompt,
+  estimateTokens,
+  measureVaultPrompt,
   VAULT_RECENT_TURNS,
   parseConversationMemoryResponse,
   PROFILE_PHOTO_LABEL,
@@ -2609,7 +2612,7 @@ export function registerIpcHandlers(context: HandlerContext): void {
         : { alreadyInPrompt: { conversationId, fromSequence: oldestRecent } }),
     });
 
-    const prompt = buildVaultPrompt({
+    const bloques = composeVaultPrompt({
       memory,
       recall,
       // el ultimo es el que se acaba de guardar: va aparte como mensaje nuevo
@@ -2631,6 +2634,18 @@ export function registerIpcHandlers(context: HandlerContext): void {
         xaviraModelId: character?.xavira?.modelId ?? null,
         recipe: character?.horde?.recipe ?? null,
       }),
+    });
+
+    // el TAMAÑO de cada bloque, nunca su contenido. Sin esto, «el bloque de
+    // imagen se lleva 2.050 tokens» era una estimacion de sobremesa; con esto es
+    // un dato de cada turno real, y sin sacar una palabra de la boveda al log
+    const prompt = bloques.map((bloque) => bloque.text).join('\n\n');
+    const medidas = measureVaultPrompt(bloques);
+    context.log('prompt privado compuesto', {
+      caracteres: prompt.length,
+      tokensEstimados: estimateTokens(prompt),
+      // de mayor a menor: lo primero de la lista es lo que hay que mirar
+      bloques: medidas.map((m) => m.label + ' ' + String(m.chars) + 'c ' + String(m.share) + '%'),
     });
 
     // dicho ya, se olvida: si no, el personaje seguiria disculpandose por una

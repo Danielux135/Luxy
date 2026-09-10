@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { VAULT_RECENT_TURNS, buildVaultPrompt, omittedTurnCount } from './vault-prompt.js';
+import {
+  VAULT_RECENT_TURNS,
+  buildVaultPrompt,
+  composeVaultPrompt,
+  estimateTokens,
+  measureVaultPrompt,
+  omittedTurnCount,
+} from './vault-prompt.js';
 import { CONVERSATION_MEMORY_OPEN, type ConversationMemory } from './schemas.js';
 
 const memoria: ConversationMemory = {
@@ -299,5 +306,86 @@ describe('prompt de conversacion privada', () => {
   it('omittedTurnCount cuadra con lo que hace el prompt', () => {
     expect(omittedTurnCount(3)).toBe(0);
     expect(omittedTurnCount(30)).toBe(30 - VAULT_RECENT_TURNS);
+  });
+});
+
+// -----------------------------------------------------------------------------
+// medir el prompt
+// -----------------------------------------------------------------------------
+
+/**
+ * Sin numeros por bloque, cualquier reparto del presupuesto es una opinion.
+ *
+ * Estas pruebas fijan dos cosas: que medir NO cambia lo que ve el modelo, y que
+ * la medida sirve para lo unico que se le va a pedir — saber que bloque hay que
+ * mirar primero cuando el prompt se dispara.
+ */
+describe('medir el prompt por bloques', () => {
+  const base = {
+    character: 'Te llamas Lia.',
+    instructions: null,
+    memory: null,
+    turns: [],
+    message: 'hola',
+  };
+
+  it('lo que ve el modelo es exactamente el texto de los bloques unidos', () => {
+    // la prueba que impide que medir cambie nada por el camino
+    const bloques = composeVaultPrompt(base);
+    expect(buildVaultPrompt(base)).toBe(bloques.map((b) => b.text).join('\n\n'));
+  });
+
+  it('las etiquetas NO viajan al modelo', () => {
+    // son para el registro; si se colaran, el modelo leeria nombres internos
+    const prompt = buildVaultPrompt(base);
+    for (const bloque of composeVaultPrompt(base)) {
+      expect(prompt).not.toContain(`label:${bloque.label}`);
+    }
+    expect(prompt).not.toContain('instruccion-memoria');
+  });
+
+  it('cada bloque tiene etiqueta y ninguna se repite', () => {
+    // dos bloques con el mismo nombre harian ilegible la medida
+    const etiquetas = composeVaultPrompt(base).map((b) => b.label);
+    expect(etiquetas.every((e) => e.length > 0)).toBe(true);
+    expect(new Set(etiquetas).size).toBe(etiquetas.length);
+  });
+
+  it('ordena de mayor a menor: lo primero es lo que hay que mirar', () => {
+    const medidas = measureVaultPrompt([
+      { label: 'pequeno', text: 'ab' },
+      { label: 'grande', text: 'abcdefghij' },
+      { label: 'medio', text: 'abcde' },
+    ]);
+    expect(medidas.map((m) => m.label)).toEqual(['grande', 'medio', 'pequeno']);
+  });
+
+  it('el porcentaje dice de un vistazo quien se lleva el prompt', () => {
+    const medidas = measureVaultPrompt([
+      { label: 'a', text: 'x'.repeat(75) },
+      { label: 'b', text: 'x'.repeat(25) },
+    ]);
+    expect(medidas[0]?.share).toBe(75);
+    expect(medidas[1]?.share).toBe(25);
+  });
+
+  it('sin bloques no divide entre cero', () => {
+    expect(measureVaultPrompt([])).toEqual([]);
+    expect(measureVaultPrompt([{ label: 'vacio', text: '' }])[0]?.share).toBe(0);
+  });
+
+  it('la estimacion de tokens redondea hacia arriba y nunca da cero con texto', () => {
+    // quedarse corto en un presupuesto es peor que pasarse
+    expect(estimateTokens('')).toBe(0);
+    expect(estimateTokens('a')).toBe(1);
+    expect(estimateTokens('x'.repeat(35))).toBe(10);
+  });
+
+  it('el bloque de imagen aparece medido cuando se ofrece', () => {
+    // es el que la investigacion señala como el mas caro, asi que tiene que
+    // poder verse por separado en el registro
+    const conImagen = composeVaultPrompt({ ...base, canGenerateImage: true });
+    expect(conImagen.map((b) => b.label)).toContain('imagen');
+    expect(composeVaultPrompt(base).map((b) => b.label)).not.toContain('imagen');
   });
 });

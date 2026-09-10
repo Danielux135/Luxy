@@ -85,13 +85,20 @@ Dos consecuencias de diseño que vienen con ese patrón:
 
 ## El plan, por fases
 
-### 1. Medir
+### 1. Medir — **HECHA** (2026-09-10)
 
-`buildVaultPrompt` devuelve una cadena: hoy nadie sabe qué ocupa cada bloque.
-Que devuelva los bloques con su tamaño, y una línea de log por turno.
+`composeVaultPrompt` devuelve los bloques etiquetados y `measureVaultPrompt`
+los ordena de mayor a menor con su porcentaje. `buildVaultPrompt` se conserva
+como envoltorio, así que **el texto que ve el modelo es idéntico byte a byte**:
+lo fijan las 25 pruebas que ya existían, que pasaron sin tocar ninguna.
 
-**Pequeño.** Es lo único de lo que dependen todas las demás fases: sin números
-por bloque, cualquier presupuesto es una opinión.
+Cada turno privado registra ahora el tamaño de cada bloque —nunca su contenido—
+en `prompt privado compuesto`. Ocho pruebas nuevas, incluida la que impide que
+las etiquetas se cuelen en el prompt.
+
+Era lo único de lo que dependen las demás fases: sin números por bloque,
+cualquier presupuesto es una opinión. A partir de la próxima conversación real
+hay medidas en vez de estimaciones.
 
 ### 2. El estado de escena
 
@@ -112,8 +119,35 @@ Cuatro decisiones, cada una con su motivo:
 - **editable a mano.** Un estado equivocado es muy visible («estás en la cocina»
   cuando la escena se mudó) y hoy no hay forma de tocarlo.
 
+Y una quinta que salió de una pregunta de Daniel, y que habría entrado rota si
+no la hace:
+
+- **fuera de personaje, el estado no se toca.** Él quiere poder tratarla como a
+  una persona *y* poder romper la cuarta pared: decirle que es un personaje de
+  roleplay y hablarlo con ella. Si eso ocurre y el estado sigue escribiéndose, una
+  charla meta contamina la escena — la ropa, el sitio y la hora se llenan de
+  cosas que no pasaron en la ficción, y como el estado se re-inyecta en cada
+  turno, esa basura se queda.
+
+  Así que el bloque necesita marcar el turno como fuera de personaje y, en ese
+  caso, **congelar la escena**: no actualizarla y retomarla donde estaba. Barato
+  si se diseña desde el principio, un lío si se añade después.
+
 **Grande.** Es el corazón del plan y lo único que no se puede hacer a medias:
 media capa de estado, escrita a veces, es peor que ninguna.
+
+#### Salir del personaje, por conversación
+
+La directiva de encarnación ya dice hoy que no se presente como asistente
+«salvo que el usuario pregunte por ellas de forma directa». La puerta existe,
+pero depende de que el modelo juzgue si la pregunta fue «directa»: eso es una
+interpretación, no un interruptor.
+
+El sitio natural para convertirlo en decisión suya son las **instrucciones de la
+conversación**, que ya existen, ya son por hilo y las escribe él. Tres formas, y
+cada conversación con la suya: que no salga nunca del personaje, que salga si se
+lo pide, o que sepa lo que es y pueda hablarlo. Al ser instrucciones y no código,
+se puede cambiar a mitad de conversación sin tocar nada.
 
 ### 3. Recuperar los tokens del bloque de imagen
 

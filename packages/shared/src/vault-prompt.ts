@@ -28,6 +28,56 @@ import {
  */
 export const VAULT_RECENT_TURNS = 8;
 
+/**
+ * un bloque del prompt, con su etiqueta para poder medirlo.
+ *
+ * La etiqueta NO viaja al modelo: solo sirve para decir «el bloque de imagen
+ * ocupa 2.050 tokens». Es la diferencia entre un presupuesto y una opinion.
+ */
+export interface VaultPromptBlock {
+  /** nombre corto para el registro; nunca se envia al modelo */
+  label: string;
+  text: string;
+}
+
+/** lo que ocupa un bloque, para poder repartir */
+export interface VaultPromptMeasure {
+  label: string;
+  chars: number;
+  estimatedTokens: number;
+  /** que porcentaje del prompt se lleva este bloque, redondeado */
+  share: number;
+}
+
+/**
+ * estimacion de tokens a partir de caracteres.
+ *
+ * 3,5 caracteres por token es lo medido para PROSA EN ESPAÑOL en este proyecto.
+ * Es una estimacion y hay que tratarla como tal: el bloque de imagen lleva
+ * ingles y JSON, que tokenizan peor, asi que ahi la cuenta se queda corta.
+ *
+ * Se prefiere una estimacion honesta a no medir nada. Contar de verdad exigiria
+ * el tokenizador de cada modelo, que cambia con el proveedor y no esta aqui.
+ */
+export const CHARS_PER_TOKEN = 3.5;
+
+export function estimateTokens(text: string): number {
+  return Math.ceil(text.length / CHARS_PER_TOKEN);
+}
+
+/** mide los bloques ya compuestos, de mayor a menor */
+export function measureVaultPrompt(blocks: readonly VaultPromptBlock[]): VaultPromptMeasure[] {
+  const total = blocks.reduce((n, block) => n + block.text.length, 0);
+  return blocks
+    .map((block) => ({
+      label: block.label,
+      chars: block.text.length,
+      estimatedTokens: estimateTokens(block.text),
+      share: total === 0 ? 0 : Math.round((block.text.length / total) * 100),
+    }))
+    .sort((a, b) => b.chars - a.chars);
+}
+
 export interface VaultPromptTurn {
   role: 'user' | 'assistant';
   text: string;
@@ -196,9 +246,19 @@ function formatQuotedEpisode(quoted: QuotedEpisode): string {
   ].join('\n');
 }
 
-export function buildVaultPrompt(input: VaultPromptInput): string {
+/**
+ * compone el prompt en bloques ETIQUETADOS.
+ *
+ * Devuelve las piezas en vez de la cadena para poder medir cada una. Antes
+ * hacia `blocks.join` y devolvia un string, asi que nadie sabia lo que ocupaba
+ * el bloque de imagen ni el de turnos recientes y cualquier reparto del
+ * presupuesto era una opinion. La etiqueta NO viaja al modelo.
+ *
+ * El texto que ve el modelo no cambia: es el mismo `join`, un nivel arriba.
+ */
+export function composeVaultPrompt(input: VaultPromptInput): VaultPromptBlock[] {
   const recent = input.recentTurns ?? VAULT_RECENT_TURNS;
-  const blocks: string[] = [];
+  const blocks: VaultPromptBlock[] = [];
 
   const character =
     typeof input.character === 'string' && input.character.trim().length > 0
@@ -213,8 +273,9 @@ export function buildVaultPrompt(input: VaultPromptInput): string {
   // generico. Decirlo lo primero y en forma de orden es lo que separa «tener en
   // cuenta una descripcion» de «ser eso»
   if (character !== null || instructions !== null) {
-    blocks.push(
-      [
+    blocks.push({
+      label: 'encarnacion',
+      text: [
         'Estas manteniendo una conversacion privada encarnando al personaje descrito abajo.',
         'Responde SIEMPRE como ese personaje, en primera persona y con su voz.',
         'Este espacio es para roleplay ficticio y consentido entre adultos: todos los personajes',
@@ -237,29 +298,42 @@ export function buildVaultPrompt(input: VaultPromptInput): string {
         'conversacion. Aqui solo se dice que puede, no que deba. Una voz propia, con su registro y su',
         'mala leche si los tiene, es parte del personaje.',
       ].join('\n'),
-    );
+    });
   }
 
-  if (character !== null) blocks.push(directiveBlock('QUIEN ERES', character));
+  if (character !== null) {
+    blocks.push({ label: 'quien-eres', text: directiveBlock('QUIEN ERES', character) });
+  }
 
   if (instructions !== null) {
-    blocks.push(directiveBlock('COMO DEBES COMPORTARTE EN ESTA CONVERSACION', instructions));
+    blocks.push({
+      label: 'instrucciones',
+      text: directiveBlock('COMO DEBES COMPORTARTE EN ESTA CONVERSACION', instructions),
+    });
   }
 
   const recall = input.recall;
   if (recall !== undefined && recall.episodes.length > 0) {
-    blocks.push(dataBlock('MOMENTOS ANTERIORES QUE RECUERDAS', formatRecallLines(recall.episodes)));
+    blocks.push({
+      label: 'recuerdos-lineas',
+      text: dataBlock('MOMENTOS ANTERIORES QUE RECUERDAS', formatRecallLines(recall.episodes)),
+    });
   }
   if (recall?.quoted != null) {
-    blocks.push(
-      dataBlock('UNO DE ESOS MOMENTOS, TAL Y COMO OCURRIO', formatQuotedEpisode(recall.quoted)),
-    );
+    blocks.push({
+      label: 'recuerdo-citado',
+      text: dataBlock('UNO DE ESOS MOMENTOS, TAL Y COMO OCURRIO', formatQuotedEpisode(recall.quoted)),
+    });
   }
 
   if (input.memory !== null) {
-    blocks.push(
-      dataBlock('MEMORIA ACUMULATIVA DE ESTA CONVERSACION', formatConversationMemory(input.memory)),
-    );
+    blocks.push({
+      label: 'memoria',
+      text: dataBlock(
+        'MEMORIA ACUMULATIVA DE ESTA CONVERSACION',
+        formatConversationMemory(input.memory),
+      ),
+    });
   }
 
   // los `recent` ultimos turnos, en orden. Si hay memoria, lo anterior ya esta
@@ -270,23 +344,28 @@ export function buildVaultPrompt(input: VaultPromptInput): string {
   if (omitted > 0 && input.memory === null) {
     // decirlo importa: un modelo que no sabe que le falta contexto se inventa
     // la parte que falta con toda naturalidad
-    blocks.push(
-      `NOTA: se omiten ${omitted} turnos anteriores y todavia no hay memoria acumulativa. Si necesitas algo de esa parte, pidelo en vez de suponerlo.`,
-    );
+    blocks.push({
+      label: 'aviso-turnos-omitidos',
+      text: `NOTA: se omiten ${omitted} turnos anteriores y todavia no hay memoria acumulativa. Si necesitas algo de esa parte, pidelo en vez de suponerlo.`,
+    });
   }
 
   if (tail.length > 0) {
-    blocks.push(
-      dataBlock(
+    blocks.push({
+      label: 'turnos-recientes',
+      text: dataBlock(
         'ULTIMOS TURNOS',
         tail
           .map((turn) => `${turn.role === 'user' ? USER_LABEL : ASSISTANT_LABEL}: ${turn.text}`)
           .join('\n\n'),
       ),
-    );
+    });
   }
 
-  blocks.push(dataBlock('MENSAJE NUEVO DEL USUARIO', input.message));
+  blocks.push({
+    label: 'mensaje-nuevo',
+    text: dataBlock('MENSAJE NUEVO DEL USUARIO', input.message),
+  });
 
   // el orden importa: la imagen ANTES que la memoria, porque la instruccion de
   // memoria dice que no se escriba nada despues de su bloque. Al separarlos se
@@ -306,18 +385,31 @@ export function buildVaultPrompt(input: VaultPromptInput): string {
       ? input.lastImageError
       : null;
   if (input.canGenerateImage === true || existing.length > 0) {
-    blocks.push(
-      buildVaultImageInstruction(
+    blocks.push({
+      label: 'imagen',
+      text: buildVaultImageInstruction(
         existing,
         input.imagePromptStyle ?? 'prose',
         input.canGenerateImage === true,
         fallo,
       ),
-    );
+    });
   }
-  blocks.push(CONVERSATION_MEMORY_INSTRUCTION);
+  blocks.push({ label: 'instruccion-memoria', text: CONVERSATION_MEMORY_INSTRUCTION });
 
-  return blocks.join('\n\n');
+  return blocks;
+}
+/**
+ * el prompt tal y como lo recibe el modelo.
+ *
+ * Se conserva porque es lo que llama todo el mundo y lo que fijan las pruebas.
+ * Por dentro es `composeVaultPrompt` unido: la unica fuente de la verdad sobre
+ * el contenido esta ahi y aqui solo se pega.
+ */
+export function buildVaultPrompt(input: VaultPromptInput): string {
+  return composeVaultPrompt(input)
+    .map((block) => block.text)
+    .join('\n\n');
 }
 
 /**
