@@ -1,5 +1,29 @@
 # Luxy — tarea activa
 
+## F18-ESFUERZO-001 — elegir cuanto piensa el modelo
+
+Estado: **`done` en codigo, `pendiente de prueba real` — Claude, 2026-09-10.**
+
+Origen: Codex salia a `xhigh` en cada turno, heredado del `config.toml` del
+usuario, y no habia forma de verlo ni de cambiarlo desde Luxy. Detalle en
+`CHANGELOG-WORK.md` (2026-09-10 08:55) y `D-082`.
+
+Selector de esfuerzo junto al de modelo, gateado por deteccion en los dos CLI, y
+con la lista de niveles filtrada POR MODELO —`ultra` no existe en `gpt-5.5` y
+mandarlo falla la llamada, que se paga igual—. `npm run check` exit 0, 2.676
+pasadas.
+
+### Lo que falta, y es de Daniel
+
+1. **Probarlo de verdad.** Nada de esto ha hecho una llamada real: las pruebas
+   fijan como se CONSTRUYEN los argumentos, no que el CLI los acepte. Lo que hay
+   que mirar la primera vez es que un turno con `low` conteste mas rapido y mas
+   corto que uno con `xhigh`.
+2. **Decidir si su `~/.codex/config.toml` se queda como esta.** Ese
+   `model_reasoning_effort = "xhigh"` sigue gobernando Codex fuera de Luxy.
+   No se ha tocado: es configuracion personal.
+
+
 ## F16-DESCRIBIDOR-002 — el pie de foto se corrige y se reescribe
 
 Estado: **`done` en codigo, `pendiente de prueba real` — Claude, 2026-09-10.**

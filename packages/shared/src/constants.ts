@@ -77,6 +77,36 @@ export function isProviderId(value: string): value is (typeof PROVIDER_IDS)[numb
 // proveedores que se ejecutan mediante un cli local con sesion autenticada
 export const LOCAL_CLI_PROVIDERS = ['claude', 'codex'] as const;
 
+/**
+ * cuanto se le deja pensar al modelo antes de contestar.
+ *
+ * Union de lo que aceptan los dos CLI, COMPROBADO contra ellos el 2026-09-10 y
+ * no copiado de ningun sitio:
+ *
+ * - `claude --help` declara `--effort <level>` con «low, medium, high, xhigh,
+ *   max»;
+ * - Codex no tiene flag propio: va por `-c model_reasoning_effort=<valor>`, y
+ *   su catalogo real da `low, medium, high, xhigh, max, ultra`, con `ultra`
+ *   solo en algunos modelos.
+ *
+ * QUE NO ES: una lista que valga para cualquier modelo. El propio esquema de
+ * Codex lo dice —«must be supported by the selected model»— y ahi esta el
+ * detalle que cuesta dinero: mandarle `ultra` a un modelo que no lo acepta no
+ * lo recorta, falla, y la llamada se paga igual. Quien ofrece la lista al
+ * usuario tiene que filtrarla POR MODELO; esto es solo el conjunto de valores
+ * que existen.
+ *
+ * Estan en orden de gasto creciente a proposito: es el orden en que se pintan.
+ */
+export const REASONING_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'] as const;
+
+export type ReasoningEffort = (typeof REASONING_EFFORTS)[number];
+
+/** distingue un esfuerzo valido de una cadena cualquiera */
+export function isReasoningEffort(value: string): value is ReasoningEffort {
+  return (REASONING_EFFORTS as readonly string[]).includes(value);
+}
+
 // proveedores que se consumen por http con clave propia
 export const HTTP_API_PROVIDERS = [
   'deepseek',

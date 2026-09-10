@@ -9,6 +9,7 @@
 // trata igual que la entrada de telegram.
 import { z } from 'zod';
 import { agentEventSchema, agentHostStatusSchema } from './agent-events.js';
+import { REASONING_EFFORTS } from './constants.js';
 
 /**
  * tope de imagenes en un turno privado.
@@ -137,6 +138,19 @@ export const hostRequestSchema = z.discriminatedUnion('type', [
      * limite del modelo— pero cierra la puerta a un numero absurdo.
      */
     maxOutputTokens: z.number().int().min(64).max(32_000).optional(),
+
+    /**
+     * cuanto dejarle pensar en este turno.
+     *
+     * Opcional: ausente es lo que traiga el proveedor. Se valida contra la
+     * lista cerrada porque esto cruza un limite de proceso —lo manda el
+     * proceso principal de Electron y lo recibe el hijo— y ahi la regla es que
+     * nada entra sin validar, por muy nuestro que sea quien lo manda.
+     *
+     * Cerrarlo aqui NO comprueba que el modelo elegido acepte ese esfuerzo:
+     * eso depende del modelo y lo filtra quien pinta la lista.
+     */
+    effort: z.enum(REASONING_EFFORTS).optional(),
   }),
   z.object({
     type: z.literal('cancel_local_turn'),

@@ -62,6 +62,10 @@ Options:
  * retocarla para que pase una prueba seria fingir que una version antigua
  * admite un flag que no tiene. La deteccion de capacidades existe justo para
  * distinguirlas.
+ *
+ * La linea de `--effort` se añadio el 2026-09-10 releyendo el MISMO binario,
+ * que sigue siendo el 2.1.250: estaba recortada, no ausente. No es un retoque
+ * para que pase nada — se comprobo antes de escribir la prueba.
  */
 const CLAUDE_HELP_2_1_250 = `
 Usage: claude [options] [command] [prompt]
@@ -74,6 +78,7 @@ Options:
   --permission-mode <mode>     Permission mode to use for the session
   -p, --print                  Print response and exit
   --verbose                    Override verbose mode setting
+  --effort <level>             Effort level for the current session (low, medium, high, xhigh, max)
 `;
 
 // ayuda real recortada de codex-cli 0.141.0
@@ -87,6 +92,16 @@ Options:
       --skip-git-repo-check
       --json                     Print events to stdout as JSONL
   -o, --output-last-message <FILE>
+  -c, --config <key=value>       Override a configuration value
+`;
+
+// ayuda de una version de codex SIN `-c`: el esfuerzo no se puede pedir ahi
+const CODEX_HELP_SIN_CONFIG = `
+Run Codex non-interactively
+Usage: codex exec [OPTIONS] [PROMPT]
+Options:
+  -m, --model <MODEL>
+      --json                     Print events to stdout as JSONL
 `;
 
 // -----------------------------------------------------------------------------
@@ -130,6 +145,14 @@ describe('extractVersion', () => {
 // Claude Code
 // -----------------------------------------------------------------------------
 describe('parseClaudeCapabilities', () => {
+  // pasarle un flag que no conoce no lo ignora: aborta la invocacion entera.
+  // Sin deteccion, actualizar Luxy romperia Claude en la maquina de quien no
+  // hubiera actualizado el CLI
+  it('detecta --effort, y no lo asume en la version que no lo traia', () => {
+    expect(parseClaudeCapabilities(CLAUDE_HELP_2_1_250).effort).toBe(true);
+    expect(parseClaudeCapabilities(CLAUDE_HELP).effort).toBe(false);
+  });
+
   it('detecta las capacidades de la version instalada', () => {
     const caps = parseClaudeCapabilities(CLAUDE_HELP);
     expect(caps).toMatchObject({
@@ -157,6 +180,23 @@ describe('parseClaudeCapabilities', () => {
 
 describe('buildClaudeArgs', () => {
   const caps = parseClaudeCapabilities(CLAUDE_HELP);
+
+  it('manda el esfuerzo cuando la version lo admite', () => {
+    const nueva = parseClaudeCapabilities(CLAUDE_HELP_2_1_250);
+    const args = buildClaudeArgs({ prompt: 'algo', effort: 'low', capabilities: nueva });
+    expect(args[args.indexOf('--effort') + 1]).toBe('low');
+  });
+
+  // pasarle un flag que no conoce no lo ignora: aborta la invocacion entera
+  it('y lo CALLA en la version que no lo admite, en vez de romper la llamada', () => {
+    const args = buildClaudeArgs({ prompt: 'algo', effort: 'low', capabilities: caps });
+    expect(args).not.toContain('--effort');
+  });
+
+  it('sin elegir esfuerzo no se manda nada: manda el suyo', () => {
+    const nueva = parseClaudeCapabilities(CLAUDE_HELP_2_1_250);
+    expect(buildClaudeArgs({ prompt: 'algo', capabilities: nueva })).not.toContain('--effort');
+  });
 
   it('construye la invocacion no interactiva con modelo y stream-json', () => {
     const args = buildClaudeArgs({ prompt: 'haz algo', model: 'opus', capabilities: caps });
@@ -290,7 +330,13 @@ describe('parseCodexCapabilities', () => {
       model: true,
       outputLastMessage: true,
       skipGitRepoCheck: true,
+      config: true,
     });
+  });
+
+  // `-c` es la UNICA via para el esfuerzo: codex no tiene flag propio
+  it('sin -c no hay por donde pedir el esfuerzo', () => {
+    expect(parseCodexCapabilities(CODEX_HELP_SIN_CONFIG).config).toBe(false);
   });
 
   it('sin ayuda no asume nada', () => {
@@ -301,6 +347,24 @@ describe('parseCodexCapabilities', () => {
 
 describe('buildCodexArgs', () => {
   const caps = parseCodexCapabilities(CODEX_HELP);
+
+  // codex no tiene flag de esfuerzo: se pisa la clave de su config.toml, y el
+  // valor va entrecomillado porque la parte derecha se parsea como TOML
+  it('pide el esfuerzo pisando la clave de su config', () => {
+    const args = buildCodexArgs({ workingDirectory: 'C:/wt', effort: 'low', capabilities: caps });
+    expect(args[args.indexOf('-c') + 1]).toBe('model_reasoning_effort="low"');
+  });
+
+  it('y lo calla en una version sin -c, en vez de romper la llamada', () => {
+    const vieja = parseCodexCapabilities(CODEX_HELP_SIN_CONFIG);
+    const args = buildCodexArgs({ workingDirectory: 'C:/wt', effort: 'low', capabilities: vieja });
+    expect(args).not.toContain('-c');
+  });
+
+  it('sin elegir esfuerzo no se toca su configuracion', () => {
+    const args = buildCodexArgs({ workingDirectory: 'C:/wt', capabilities: caps });
+    expect(args.join(' ')).not.toContain('model_reasoning_effort');
+  });
 
   it('usa el subcomando exec con json y directorio de trabajo', () => {
     const args = buildCodexArgs({ workingDirectory: 'C:/wt/lux-1', capabilities: caps });

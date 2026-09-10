@@ -1,5 +1,70 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-09-10 08:55 — Claude — F18-ESFUERZO-001
+
+Origen: Daniel ve que Codex sale por defecto a xHigh y dice «no quiero
+reventarme los tokens»; pide poder elegir el esfuerzo, y lo mismo en Claude.
+Y antes, que los modelos de los dos se puedan elegir de una lista.
+
+**De donde salen los valores, que es la mitad del trabajo.** Comprobado a mano
+contra los binarios instalados, no copiado:
+
+- `claude --help` (2.1.250, el que hay instalado): `--effort <level>` con
+  «low, medium, high, xhigh, max»;
+- `codex exec --help`: NO tiene flag de esfuerzo. Va por `-c`, la opcion
+  generica de configuracion, pisando `model_reasoning_effort`;
+- el catalogo de Codex: `gpt-6-astra`, `gpt-5.6-sol`, `gpt-5.6-terra` llegan
+  a `ultra`; `gpt-5.6-luna` a `max`; `gpt-5.5` y `gpt-5.3-codex-spark` a
+  `xhigh`.
+
+**Y una fuente que hay que descartar por escrito: `codex debug models`.** Yo
+mismo la use primero y le dije a Daniel que su `gpt-6-astra` no existia. Se
+equivocaba la fuente, no el. Ese comando devuelve un catalogo empaquetado en el
+binario, sin el modelo nuevo, y dos llamadas seguidas dan lo mismo, asi que
+tampoco es una cache que se refresque. El catalogo vivo esta en
+`~/.codex/.codex-global-state.json`, que es estado privado de otro programa y
+por eso NO se lee desde Luxy: los modelos van como sugerencias verificadas con
+salida a texto libre. Queda una prueba que lo fija —`gpt-6-astra` tiene que
+estar en la lista— para que nadie lo «arregle» cambiandola por ese comando.
+
+**El camino.** Mapeado antes de tocar nada con un workflow de lectores en
+paralelo, y por un motivo concreto que estaba escrito en el propio codigo:
+`job-runner.ts` documenta que esto YA fallo con el modelo —«antes solo se le
+pasaba a claude, asi que codex y las APIs http usaban siempre su modelo por
+defecto y el catalogo no servia de nada»—. El esfuerzo viaja exactamente por
+donde viaja `maxOutputTokens`, que es el precedente correcto: un ajuste de ESTA
+llamada, no parte del contrato del gateway. Nueve puntos:
+
+`constants.ts` (`REASONING_EFFORTS`) → `types.ts` (`ProviderRunRequest`) →
+`host-protocol.ts` → `agent-controller.ts` → `host-entry.ts` →
+`local-turn.ts` (x2) → `job-runner.ts` (x2) → los dos adaptadores.
+
+**Gateado por deteccion en los dos.** `--effort` en Claude y `-c` en Codex se
+detectan del `--help`: pasarle a un CLI un flag que no conoce no lo ignora,
+aborta la invocacion. Sin esto, actualizar Luxy romperia el CLI de quien no
+hubiera actualizado.
+
+**La lista de esfuerzos depende del MODELO.** El esquema de Codex lo dice —«must
+be supported by the selected model»— y ahi esta el detalle que cuesta dinero:
+`ultra` en `gpt-5.5` no se recorta, falla, y la llamada se paga. Con un modelo
+desconocido se ofrece hasta `xhigh`, el techo del mas modesto: equivocarse hacia
+arriba cuesta una llamada; hacia abajo, una opcion sin ofrecer. Y al cambiar de
+modelo, un esfuerzo que deje de estar soportado se suelta solo.
+
+Una conexion HTTP no ve el selector: el contrato `chat completions` no tiene
+donde poner esto, y un mando que no mueve nada es peor que no tenerlo.
+
+**El esfuerzo no se persiste**, a diferencia de lo que uno esperaria. Es
+deliberado y va comentado: se paga por turno, y una eleccion cara que
+sobreviviera a cerrar la ventana volveria a cobrarse sin que nadie la hubiera
+elegido otra vez.
+
+Dos correcciones mias por el camino: puse `--effort` en el fixture de ayuda
+equivocado y escribi la prueba al reves. Y el fixture de 2.1.250 se completo
+releyendo el MISMO binario —la linea estaba recortada, no ausente—, que es
+distinto de retocar la ayuda de otra version para que pase una prueba; queda
+dicho ahi mismo.
+
 ### 2026-09-10 08:30 — Claude — F16-DESCRIBIDOR-003
 
 Origen: dos peticiones de Daniel antes de ponerse a probar. Que los recuadros

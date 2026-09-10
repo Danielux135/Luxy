@@ -1,5 +1,30 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-10 — F18-ESFUERZO-001
+
+`npm run check` exit 0.
+
+```
+Test Files  145 passed (145)
+     Tests   2676 passed | 12 skipped (2688)
+```
+
+Trece pruebas nuevas. Lo que fijan, por orden de importancia:
+
+- que el esfuerzo **se calla** cuando el CLI instalado no lo admite, en vez de
+  romper la llamada. Es la que de verdad importa: un flag desconocido no se
+  ignora, aborta la invocacion;
+- que Codex lo pide pisando `model_reasoning_effort` con el valor
+  **entrecomillado**, porque `-c` parsea la derecha como TOML;
+- que `ultra` solo se ofrece donde existe, y que un modelo desconocido se queda
+  en `xhigh` — equivocarse hacia arriba cuesta una llamada, hacia abajo solo una
+  opcion sin ofrecer;
+- que `gpt-6-astra` esta en la lista de Codex, para que nadie la sustituya por
+  la salida de `codex debug models`, que se deja fuera el modelo nuevo.
+
+**Nada de esto prueba el camino real.** Ni una llamada a un CLI. Que `low`
+gaste menos que `xhigh` solo se sabe usandolo.
+
 ### 2026-09-10 — F16-DESCRIBIDOR-002
 
 `npm run check` exit 0.

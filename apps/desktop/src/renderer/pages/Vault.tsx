@@ -21,6 +21,7 @@ import { imageBlockReason } from '../../shared/vault-image-capability.js';
 import { describeQueue, type HordeQueueProgress } from '../../shared/horde-progress.js';
 import {
   NATIVE_MODEL_SUGGESTIONS,
+  effortsFor,
   modelForProvider,
   modelsForProvider,
 } from '../../shared/model-selection.js';
@@ -38,6 +39,7 @@ import {
   type HordeLora,
   type HordeRecipe,
   type ModelDefinition,
+  type ReasoningEffort,
 } from '@luxy/shared';
 
 /** debe coincidir con AUTO_LOCK_MINUTES del proceso principal */
@@ -212,6 +214,16 @@ function ConversationPanel({
   // `unrecognized_model`
   const model = modelForProvider(models, provider, composer.model) ?? '';
 
+  // que esfuerzos tiene sentido ofrecer AQUI. Vacio = este proveedor no
+  // entiende de esfuerzos, y entonces no se pinta nada: un selector que no
+  // hace nada es peor que no tenerlo
+  const efforts = effortsFor(provider, model.length === 0 ? null : model);
+  // y el elegido tiene que seguir estando: cambiar de modelo puede dejar fuera
+  // el esfuerzo que habia —`ultra` no existe en `gpt-5.5`— y mandarlo asi
+  // haria fallar la llamada, que se paga igual
+  const effort =
+    composer.effort !== null && efforts.includes(composer.effort) ? composer.effort : null;
+
   const canSend =
     message.trim().length > 0 && project.length > 0 && provider.length > 0 && !vault.sending;
 
@@ -221,6 +233,7 @@ function ConversationPanel({
         message: message.trim(),
         provider,
         model: model.length === 0 ? null : model,
+        effort,
         projectAlias: project,
         instructions: draftInstructions,
         characterId: draftCharacter,
@@ -395,6 +408,31 @@ function ConversationPanel({
                 value={model}
                 onChange={(elegido) => vault.setComposer({ model: elegido })}
               />
+            )}
+            {/* solo donde significa algo. Una conexion HTTP no tiene donde
+                poner esto —el contrato `chat completions` no lo contempla— y
+                pintarlo alli seria un mando que no mueve nada */}
+            {efforts.length > 0 && (
+              <Field
+                label="Esfuerzo"
+                hint="Cuánto le dejas pensar antes de contestar. Sin elegir usa el suyo, que puede ser caro."
+              >
+                <select
+                  value={effort ?? ''}
+                  onChange={(event) =>
+                    vault.setComposer({
+                      effort: event.target.value === '' ? null : (event.target.value as ReasoningEffort),
+                    })
+                  }
+                >
+                  <option value="">el suyo por defecto</option>
+                  {efforts.map((nivel) => (
+                    <option key={nivel} value={nivel}>
+                      {nivel}
+                    </option>
+                  ))}
+                </select>
+              </Field>
             )}
             <Field label="Proyecto">
               <select

@@ -15,7 +15,13 @@
 // Lo que se pierde a cambio, y hay que asumir: no hay lease, no hay reintento
 // tras un corte y no hay historial en el servidor. Si Luxy se cierra a media
 // respuesta, esa respuesta se pierde.
-import type { AgentConfig, ClaimedJob, ProviderId, ProviderImage } from '@luxy/shared';
+import type {
+  AgentConfig,
+  ClaimedJob,
+  ProviderId,
+  ProviderImage,
+  ReasoningEffort,
+} from '@luxy/shared';
 import { runJob, type JobOutcome } from './job-runner.js';
 import type { AgentLogger } from './logger.js';
 import type { ProviderExecution } from '@luxy/shared';
@@ -46,6 +52,14 @@ export interface LocalTurnInput {
    * limite por minuto del modelo, en vez de recortar.
    */
   maxOutputTokens?: number;
+
+  /**
+   * cuanto dejarle pensar en este turno. Ausente = lo que traiga el proveedor.
+   *
+   * Viaja por el mismo sitio que `maxOutputTokens` y no dentro del trabajo: no
+   * es parte del contrato del gateway, es un ajuste de ESTA llamada.
+   */
+  effort?: ReasoningEffort;
 }
 
 export interface LocalTurnResult {
@@ -156,6 +170,7 @@ export async function runLocalTurn(
     // dos procesos de Luxy, nunca la cola
     ...(input.images === undefined ? {} : { images: input.images }),
     ...(input.maxOutputTokens === undefined ? {} : { maxOutputTokens: input.maxOutputTokens }),
+    ...(input.effort === undefined ? {} : { effort: input.effort }),
     // el progreso sale solo hacia quien llama. No hay EventQueue de por medio,
     // asi que no existe el camino por el que un evento acabaria en Supabase.
     emit: (type, message) => deps.onProgress(type, message),

@@ -2352,3 +2352,57 @@ Tampoco puede quitar lo explicito: un pie de foto es una descripcion tecnica y
 la precision es lo que lo hace servir para elegir una imagen. Y lo escribe el
 modelo de la **conversacion**, no el de vision: aqui no hay nada que mirar, y
 quien mira bien no es quien escribe bien.
+
+## D-082 — el esfuerzo de razonamiento se elige, y la lista depende del modelo
+
+Fecha: 2026-09-10
+
+Estado: aceptada, implementada
+
+Codex salia a `xhigh` en cada turno de Luxy. No era un defecto de Codex: era el
+`model_reasoning_effort = "xhigh"` que el usuario tenia puesto en su
+`~/.codex/config.toml` desde hacia meses. **Un ajuste heredado de otro programa
+gobernaba en silencio lo que gasta este**, y no habia forma de verlo ni de
+cambiarlo sin salir de Luxy. Los modelos traen `medium` o `low` de fabrica.
+
+Ahora se elige por turno. Tres decisiones dentro de esta:
+
+**1. Viaja por donde viaja `maxOutputTokens`, no dentro del trabajo.** Es un
+ajuste de ESTA llamada, no parte del contrato del gateway, asi que no toca la
+base de datos ni pide migracion. El camino se mapeo antes de escribir nada
+porque el propio `job-runner.ts` documenta que esto ya fallo con el modelo:
+«antes solo se le pasaba a claude, asi que codex y las APIs http usaban siempre
+su modelo por defecto y el catalogo no servia de nada».
+
+**2. Gateado por deteccion en los dos CLI.** `--effort` en Claude y `-c` en
+Codex se comprueban contra el `--help` de la version instalada. Pasarle a un CLI
+un flag que no conoce **no lo ignora: aborta la invocacion**, asi que sin esto
+actualizar Luxy romperia el CLI de quien no hubiera actualizado el suyo.
+
+**3. La lista de esfuerzos depende del MODELO, no del proveedor.** El esquema de
+Codex lo dice: «must be supported by the selected model». Mandar `ultra` a
+`gpt-5.5` no lo recorta, falla, y la llamada se paga igual. Con un modelo
+desconocido se ofrece hasta `xhigh`, el techo del mas modesto: equivocarse hacia
+arriba cuesta una llamada; hacia abajo, solo una opcion sin ofrecer.
+
+Una conexion HTTP no ve el selector. El contrato `chat completions` no tiene
+donde poner esto, y un mando que no mueve nada es peor que no tenerlo.
+
+**Y no se persiste**, al contrario que casi todo lo demas. El esfuerzo se paga
+por turno: una eleccion cara que sobreviviera a cerrar la ventana volveria a
+cobrarse sin que nadie la hubiera vuelto a elegir.
+
+### La fuente del catalogo de Codex, y una que no vale
+
+Los modelos de Codex son sugerencias verificadas, no una consulta al CLI, y eso
+es a proposito. `codex debug models` **no sirve**: devuelve un catalogo
+empaquetado dentro del binario que se dejaba fuera `gpt-6-astra` —el modelo
+nuevo, el que el usuario tenia puesto— y dos llamadas seguidas dan lo mismo, asi
+que tampoco es una cache que se refresque. Con esa fuente se le llego a decir al
+usuario que su modelo no existia; se equivocaba la fuente.
+
+El catalogo vivo esta en `~/.codex/.codex-global-state.json`, que es estado
+privado de otro programa y sin formato documentado: vale para comprobar a mano,
+no para que Luxy lo lea. Hay una prueba que fija `gpt-6-astra` en la lista, para
+que cambiarla por la salida de `codex debug models` falle en vez de borrar el
+modelo nuevo en silencio.

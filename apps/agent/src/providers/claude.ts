@@ -44,6 +44,18 @@ export interface ClaudeCapabilities {
    * binario: con `--restricted` la respuesta es solo la descripcion.
    */
   restricted: boolean;
+  /**
+   * `--effort <level>`: cuanto se le deja pensar antes de contestar.
+   *
+   * Comprobado contra el CLI real el 2026-09-10: «Effort level for the current
+   * session (low, medium, high, xhigh, max)».
+   *
+   * Se detecta en vez de darse por hecho por la misma razon que todo lo demas
+   * de esta lista: una version anterior no lo tiene, y pasarle un flag que no
+   * conoce no lo ignora —aborta la invocacion entera—. Sin deteccion, actualizar
+   * Luxy romperia Claude en la maquina de quien no hubiera actualizado el CLI.
+   */
+  effort: boolean;
 }
 
 /** analiza `claude --help` para saber que se puede usar en esta maquina */
@@ -62,12 +74,15 @@ export function parseClaudeCapabilities(help: string | null): ClaudeCapabilities
     maxTurns: helpHasFlag(help, '--max-turns'),
     inputFormat: helpHasFlag(help, '--input-format'),
     restricted: helpHasFlag(help, '--restricted'),
+    effort: helpHasFlag(help, '--effort'),
   };
 }
 
 export interface ClaudeArgsOptions {
   prompt: string;
   model?: string;
+  /** cuanto dejarle pensar; ausente deja el de su sesion */
+  effort?: string;
   capabilities: ClaudeCapabilities;
   /** modo de permisos; nunca se acepta bypassPermissions */
   permissionMode?: string;
@@ -108,6 +123,12 @@ export function buildClaudeArgs(options: ClaudeArgsOptions): string[] {
 
   if (capabilities.model && options.model) {
     args.push('--model', options.model);
+  }
+
+  // el esfuerzo va detras del modelo porque se lee junto con el, no porque el
+  // orden importe: son dos opciones con nombre
+  if (capabilities.effort && options.effort) {
+    args.push('--effort', options.effort);
   }
 
   // salida estructurada solo si esta version la ofrece
@@ -337,6 +358,11 @@ export class ClaudeCodeProvider implements ProviderExecution {
     const args = buildClaudeArgs({
       prompt: request.prompt,
       model: request.model ?? this.defaultModel,
+      // sin esto el selector de la pantalla no haria nada, que es exactamente
+      // lo que ya paso una vez con el modelo (ver `job-runner.ts`: «solo se le
+      // pasaba a claude, asi que codex y las APIs http usaban siempre su modelo
+      // por defecto»)
+      ...(request.effort === undefined ? {} : { effort: request.effort }),
       capabilities: this.capabilities,
       readOnly: request.readOnly === true,
       withImages: imagenes.length > 0,

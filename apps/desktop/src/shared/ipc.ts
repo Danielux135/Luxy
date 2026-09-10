@@ -9,6 +9,7 @@
 import { z } from 'zod';
 import type { HordeQueueProgress } from './horde-progress.js';
 import {
+  REASONING_EFFORTS,
   type agentEventSchema,
   agentHostStatusSchema,
   conversationMemoryStatusSchema,
@@ -295,6 +296,14 @@ export const vaultConversationSendArgsSchema = z.object({
   message: z.string().min(1).max(200_000),
   provider: z.string().min(1).max(64),
   model: z.string().max(128).nullable(),
+  /**
+   * cuanto dejarle pensar antes de contestar.
+   *
+   * `null` deja lo que traiga el proveedor, que es lo de siempre. Solo lo
+   * entienden los CLI nativos; una conexión HTTP lo ignora porque el contrato
+   * `chat completions` no tiene dónde ponerlo.
+   */
+  effort: z.enum(REASONING_EFFORTS).nullable().default(null),
   projectAlias: z.string().min(1).max(64),
   /**
    * instrucciones fijas de la conversacion, tal y como estan en la ventana.

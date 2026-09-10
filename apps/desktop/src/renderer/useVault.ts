@@ -10,7 +10,7 @@
 // Nada de eso se persiste en localStorage, ni en un estado global, ni se envia
 // a ningun sitio.
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { ConversationMemoryStatus, HordeRecipe } from '@luxy/shared';
+import type { ConversationMemoryStatus, HordeRecipe, ReasoningEffort } from '@luxy/shared';
 import type { HordeQueueProgress } from '../shared/horde-progress.js';
 import type {
   vaultCompatibilityResultSchema,
@@ -171,6 +171,14 @@ export interface VaultComposer {
    * acabara SIEMPRE en el modelo por defecto de la conexion, sin poder elegir.
    */
   model: string | null;
+  /**
+   * cuanto se le deja pensar; `null` deja lo que traiga el proveedor.
+   *
+   * No se persiste, como el resto del composer, y eso aqui es deliberado: el
+   * esfuerzo se paga por turno, y una eleccion cara que sobreviviera a cerrar
+   * la ventana volveria a cobrarse sin que nadie la hubiera vuelto a elegir.
+   */
+  effort: ReasoningEffort | null;
   /** proyecto elegido; `null` mientras no se haya elegido ninguno */
   project: string | null;
   message: string;
@@ -208,7 +216,7 @@ const EMPTY_DRAFT = {
   caption: '',
 } satisfies Omit<
   VaultComposer,
-  'provider' | 'model' | 'project' | 'visionProvider' | 'visionModel'
+  'provider' | 'model' | 'effort' | 'project' | 'visionProvider' | 'visionModel'
 >;
 
 export interface VaultController {
@@ -434,6 +442,8 @@ export interface VaultController {
     provider: string;
     /** `null` deja que decida la conexion; con valor, manda este */
     model: string | null;
+    /** `null` deja el esfuerzo que traiga el proveedor */
+    effort: ReasoningEffort | null;
     projectAlias: string;
     /** null conserva las que hubiera; cadena vacía las borra */
     instructions: string | null;
@@ -553,6 +563,9 @@ export function useVault(): VaultController {
   const [composer, setComposerState] = useState<VaultComposer>({
     provider: null,
     model: null,
+    // arranca sin elegir a proposito: lo que traiga el proveedor. Poner aqui un
+    // valor seria decidir por el usuario cuanto gasta cada turno
+    effort: null,
     project: null,
     // quien mira las imagenes es una preferencia de la herramienta, no
     // de la conversacion: no se borra al cambiar de hilo
@@ -1191,6 +1204,7 @@ export function useVault(): VaultController {
       message: string;
       provider: string;
       model: string | null;
+      effort: ReasoningEffort | null;
       projectAlias: string;
       instructions: string | null;
       characterId: string | null;

@@ -14,6 +14,7 @@ import type {
   AgentHostStatus,
   HostRequest,
   HostResponse,
+  ReasoningEffort,
 } from '@luxy/shared';
 import { buildAgentProcessEnv } from './agent-environment.js';
 
@@ -370,6 +371,8 @@ export class AgentController {
     images?: readonly { mimeType: string; base64: string }[];
     /** cuanta salida pedir; ausente deja el tope de la conexion */
     maxOutputTokens?: number;
+    /** cuanto dejarle pensar; ausente deja lo que traiga el proveedor */
+    effort?: ReasoningEffort;
   }): Promise<LocalTurnResponse> {
     const child = this.child;
     if (child === null) {

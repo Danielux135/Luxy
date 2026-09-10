@@ -23,6 +23,14 @@ export interface CodexCapabilities {
   model: boolean;
   outputLastMessage: boolean;
   skipGitRepoCheck: boolean;
+  /**
+   * `-c key=value`, la opcion generica de configuracion.
+   *
+   * Es la UNICA via para el esfuerzo de razonamiento: Codex no tiene un flag
+   * propio. Comprobado contra `codex exec --help` el 2026-09-10 — declara
+   * `-c, --config <key=value>` y ningun `--effort` ni `--reasoning`.
+   */
+  config: boolean;
 }
 
 export function parseCodexCapabilities(help: string | null): CodexCapabilities {
@@ -33,12 +41,22 @@ export function parseCodexCapabilities(help: string | null): CodexCapabilities {
     model: helpHasFlag(help, '--model') || helpHasFlag(help, '-m'),
     outputLastMessage: helpHasFlag(help, '--output-last-message') || helpHasFlag(help, '-o'),
     skipGitRepoCheck: helpHasFlag(help, '--skip-git-repo-check'),
+    config: helpHasFlag(help, '--config') || helpHasFlag(help, '-c'),
   };
 }
 
 export interface CodexArgsOptions {
   workingDirectory: string;
   model?: string;
+  /**
+   * cuanto dejarle pensar. Ausente deja lo que diga su `config.toml`.
+   *
+   * Y ese «lo que diga» es justo el motivo de que esto exista: en el equipo
+   * donde se escribio, el `~/.codex/config.toml` del usuario llevaba meses con
+   * `model_reasoning_effort = "xhigh"` y cada turno de Luxy salia ahi sin que
+   * nada lo dijera. Los modelos traen `medium` o `low` de fabrica.
+   */
+  effort?: string;
   capabilities: CodexCapabilities;
   /** archivo donde codex escribe su mensaje final */
   lastMessageFile?: string;
@@ -70,6 +88,19 @@ export function buildCodexArgs(options: CodexArgsOptions): string[] {
 
   if (capabilities.model && options.model) {
     args.push('--model', options.model);
+  }
+
+  // Codex no tiene flag de esfuerzo: se pisa la clave de su config.toml.
+  //
+  // El valor va ENTRECOMILLADO porque `-c` parsea la parte derecha como TOML,
+  // y asi es como lo documenta su propia ayuda (`-c model="o3"`). Sin comillas
+  // tambien cuela —cae al literal cuando el TOML no parsea— pero apoyarse en el
+  // camino de respaldo de otro programa es pedir que un dia cambie.
+  //
+  // No hay shell de por medio: `spawn` recibe los argumentos separados, asi que
+  // estas comillas llegan a Codex tal cual, que es lo que se quiere.
+  if (capabilities.config && options.effort) {
+    args.push('-c', `model_reasoning_effort="${options.effort}"`);
   }
 
   if (capabilities.outputLastMessage && options.lastMessageFile) {
@@ -198,6 +229,7 @@ export class CodexCliProvider implements ProviderExecution {
     const args = buildCodexArgs({
       workingDirectory: request.workingDirectory,
       model: request.model ?? this.defaultModel,
+      ...(request.effort === undefined ? {} : { effort: request.effort }),
       capabilities: this.capabilities,
       lastMessageFile,
       sandboxMode: request.readOnly === true ? 'read-only' : 'workspace-write',

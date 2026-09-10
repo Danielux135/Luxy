@@ -77,7 +77,68 @@ export function modelForProvider(
  */
 export const NATIVE_MODEL_SUGGESTIONS: Readonly<Record<string, readonly string[]>> = {
   claude: ['opus', 'sonnet', 'haiku', 'fable'],
+  // COMPROBADO el 2026-09-10 contra el catalogo vivo de la propia instalacion.
+  //
+  // Y ojo con la fuente, porque hay una trampa: `codex debug models` NO sirve.
+  // Devuelve un catalogo empaquetado dentro del binario que va desfasado —se
+  // dejaba fuera `gpt-6-astra`, que es el modelo nuevo y el que el usuario
+  // tenia puesto— y dos llamadas seguidas daban lo mismo, asi que tampoco es
+  // una cache que se refresque. Si alguien propone «mejor preguntarselo al
+  // CLI», la respuesta es que ya se probo y miente.
+  codex: ['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5'],
 };
+
+/**
+ * que esfuerzos acepta cada modelo, y por que no vale una lista sola.
+ *
+ * El esquema de Codex lo dice con todas las letras: «must be supported by the
+ * selected model». Ahi esta el detalle que cuesta dinero — mandarle `ultra` a
+ * un modelo que no lo acepta no lo recorta, FALLA, y la llamada se paga igual.
+ *
+ * Comprobado el 2026-09-10, modelo por modelo:
+ *
+ * - `gpt-6-astra`, `gpt-5.6-sol` y `gpt-5.6-terra` llegan hasta `ultra`;
+ * - `gpt-5.6-luna` se queda en `max`;
+ * - `gpt-5.5` y `gpt-5.3-codex-spark` se quedan en `xhigh`;
+ * - Claude, de su `--help`: «low, medium, high, xhigh, max».
+ */
+const CODEX_EFFORTS_ULTRA = ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'] as const;
+const HASTA_MAX = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
+const HASTA_XHIGH = ['low', 'medium', 'high', 'xhigh'] as const;
+
+const MODEL_EFFORTS: Readonly<Record<string, readonly string[]>> = {
+  'gpt-6-astra': CODEX_EFFORTS_ULTRA,
+  'gpt-5.6-sol': CODEX_EFFORTS_ULTRA,
+  'gpt-5.6-terra': CODEX_EFFORTS_ULTRA,
+  'gpt-5.6-luna': HASTA_MAX,
+  'gpt-5.5': HASTA_XHIGH,
+  'gpt-5.3-codex-spark': HASTA_XHIGH,
+};
+
+/**
+ * el mas alto que se puede ofrecer sin saber que modelo es.
+ *
+ * Se queda en `xhigh` a proposito, que es el techo del modelo mas modesto de
+ * la lista. Un desconocido puede ser cualquier cosa —uno nuevo, uno escrito a
+ * mano— y equivocarse hacia arriba cuesta una llamada fallida; equivocarse
+ * hacia abajo solo deja una opcion sin ofrecer.
+ */
+const EFFORTS_DESCONOCIDO = HASTA_XHIGH;
+
+/**
+ * los esfuerzos que se le pueden ofrecer al usuario para este proveedor y modelo.
+ *
+ * Vacio significa «este proveedor no entiende de esfuerzos»: es el caso de las
+ * conexiones HTTP, donde el contrato `chat completions` no tiene donde ponerlo
+ * y ofrecerlo seria un boton que no hace nada.
+ */
+export function effortsFor(provider: string, model: string | null): readonly string[] {
+  // Claude no varia por modelo: el nivel es de la sesion, no del modelo
+  if (provider === 'claude') return HASTA_MAX;
+  if (provider !== 'codex') return [];
+  if (model === null || model.length === 0) return EFFORTS_DESCONOCIDO;
+  return MODEL_EFFORTS[model] ?? EFFORTS_DESCONOCIDO;
+}
 
 /** los modelos que ese proveedor sirve de verdad */
 export function modelsForProvider(

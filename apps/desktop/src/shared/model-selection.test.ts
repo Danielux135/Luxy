@@ -6,6 +6,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   NATIVE_MODEL_SUGGESTIONS,
+  effortsFor,
   modelForProvider,
   modelsForProvider,
   type SelectableModel,
@@ -80,9 +81,16 @@ describe('el modelo que viaja con el proveedor', () => {
     expect(NATIVE_MODEL_SUGGESTIONS['claude']).toContain('sonnet');
     // sale del propio `claude --help`, que nombra 'fable', 'opus' y 'sonnet'
     expect(NATIVE_MODEL_SUGGESTIONS['claude']).toContain('fable');
-    // NO es un olvido: `codex exec --help` declara `--model <MODEL>` y no
-    // enumera ningun valor, asi que ponerle una lista seria inventarsela
-    expect(NATIVE_MODEL_SUGGESTIONS['codex']).toBeUndefined();
+    // Codex estuvo sin lista un rato, y no por descuido: `codex exec --help`
+    // declara `--model <MODEL>` sin enumerar un solo valor. La lista aparecio
+    // cuando se encontro una fuente de verdad —el catalogo vivo de la propia
+    // instalacion— y no antes.
+    //
+    // Lo que NO vale como fuente es `codex debug models`: devuelve un catalogo
+    // empaquetado en el binario que se dejaba fuera `gpt-6-astra`, el modelo
+    // nuevo. Esta prueba lo fija justo por eso: si alguien cambia la lista por
+    // la de ese comando, el modelo nuevo desaparece y esto lo caza.
+    expect(NATIVE_MODEL_SUGGESTIONS['codex']).toContain('gpt-6-astra');
   });
 });
 
@@ -158,5 +166,43 @@ describe('el selector solo ofrece modelos con los que se puede hablar', () => {
     // `null` significa «usa el de la conexion», que es mejor que mandar un
     // whisper y pagar el error
     expect(modelForProvider(CATALOGO, 'groq', 'whisper-large-v3')).toBeNull();
+  });
+});
+
+describe('esfuerzos que se pueden ofrecer', () => {
+  // el detalle que cuesta dinero: mandarle un esfuerzo que el modelo no acepta
+  // no lo recorta, falla, y la llamada se paga igual
+  it('ofrece ultra solo en los modelos que lo aceptan', () => {
+    expect(effortsFor('codex', 'gpt-6-astra')).toContain('ultra');
+    expect(effortsFor('codex', 'gpt-5.6-sol')).toContain('ultra');
+    expect(effortsFor('codex', 'gpt-5.6-luna')).not.toContain('ultra');
+    expect(effortsFor('codex', 'gpt-5.5')).not.toContain('ultra');
+  });
+
+  it('y max solo hasta donde llega', () => {
+    expect(effortsFor('codex', 'gpt-5.6-luna')).toContain('max');
+    expect(effortsFor('codex', 'gpt-5.5')).not.toContain('max');
+    expect(effortsFor('codex', 'gpt-5.3-codex-spark')).not.toContain('max');
+  });
+
+  it('con un modelo desconocido se queda corto, que es el error barato', () => {
+    // equivocarse hacia arriba cuesta una llamada fallida; hacia abajo solo
+    // deja una opcion sin ofrecer
+    const desconocido = effortsFor('codex', 'gpt-7-lo-que-sea');
+    expect(desconocido).toEqual(['low', 'medium', 'high', 'xhigh']);
+    expect(effortsFor('codex', null)).toEqual(desconocido);
+  });
+
+  it('Claude no varia por modelo: el nivel es de la sesion', () => {
+    expect(effortsFor('claude', 'opus')).toEqual(effortsFor('claude', 'haiku'));
+    // los cinco de su --help, ni uno mas: ultra no existe en Claude
+    expect(effortsFor('claude', 'opus')).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
+  });
+
+  it('una conexion HTTP no entiende de esfuerzos, y no se le ofrece ninguno', () => {
+    // el contrato chat completions no tiene donde ponerlo: un selector ahi
+    // seria un mando que no mueve nada
+    expect(effortsFor('groq', 'llama-3.3-70b')).toEqual([]);
+    expect(effortsFor('deepseek', null)).toEqual([]);
   });
 });

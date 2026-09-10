@@ -11,6 +11,7 @@ import type {
   RESPONSE_ABORT_SOURCES,
   RESPONSE_OUTCOMES,
 } from './constants.js';
+import type { ReasoningEffort } from './constants.js';
 
 export type JobStatus = (typeof JOB_STATUSES)[number];
 export type StreamTransportEnd = (typeof STREAM_TRANSPORT_ENDS)[number];
@@ -305,6 +306,21 @@ export interface ProviderRunRequest {
    * 25 registros salia cortado unas veces y entero otras.
    */
   maxOutputTokens?: number;
+  /**
+   * cuanto se le deja pensar antes de contestar, en ESTA peticion.
+   *
+   * Ausente = lo que traiga el proveedor, que es lo de siempre. Existe porque
+   * ese «lo de siempre» puede ser carisimo sin que se note: en el equipo donde
+   * se escribio esto, el `~/.codex/config.toml` del usuario tenia
+   * `model_reasoning_effort = "xhigh"` puesto hacia meses, y cada turno de
+   * Luxy salia a xhigh sin que nada lo dijera. Un ajuste heredado de otro
+   * programa no puede gobernar en silencio lo que gasta este.
+   *
+   * Solo lo entienden los CLI nativos —`--effort` en Claude,
+   * `-c model_reasoning_effort=` en Codex—. Un proveedor HTTP lo ignora, y eso
+   * es correcto: el contrato `chat completions` no tiene donde ponerlo.
+   */
+  effort?: ReasoningEffort;
   /**
    * tope de tiempo de ESTA peticion, por encima del tope general.
    *

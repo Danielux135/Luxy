@@ -2641,6 +2641,9 @@ export function registerIpcHandlers(context: HandlerContext): void {
       model: args.model,
       projectAlias: args.projectAlias,
       prompt,
+      // lo que elija el usuario en la ventana. Sin esta linea el selector
+      // existiria y no haria nada, que es como se perdio el modelo una vez
+      ...(args.effort === null ? {} : { effort: args.effort }),
     });
 
     // lo que el modelo pidio generar, y como acabo. Se devuelve a la interfaz

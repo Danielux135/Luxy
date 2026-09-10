@@ -147,6 +147,9 @@ export function startHostEntry(port: ParentPort): void {
             ...(request.maxOutputTokens === undefined
               ? {}
               : { maxOutputTokens: request.maxOutputTokens }),
+            // el esfuerzo del turno: sin reenviarlo, el selector de la pantalla
+            // se quedaria en la pantalla
+            ...(request.effort === undefined ? {} : { effort: request.effort }),
           },
           (type, message) => {
             // SOLO fases y avisos. `provider_output` lleva texto del modelo, y

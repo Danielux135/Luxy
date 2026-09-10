@@ -10,6 +10,7 @@ import type {
   ResponseTermination,
   JobArtifact,
   ProviderImage,
+  ReasoningEffort,
 } from '@luxy/shared';
 import {
   redact,
@@ -95,6 +96,14 @@ export interface JobRunnerDeps {
    * pedido supera el limite por minuto del modelo.
    */
   maxOutputTokens?: number;
+
+  /**
+   * cuanto dejarle pensar en este turno. Ausente = lo que traiga el proveedor.
+   *
+   * Viaja por el mismo sitio que `maxOutputTokens` y no dentro del trabajo: no
+   * es parte del contrato del gateway, es un ajuste de ESTA llamada.
+   */
+  effort?: ReasoningEffort;
 }
 
 export type JobOutcome =
@@ -788,6 +797,9 @@ export async function runJob(
         // http usaban siempre su modelo por defecto y el catalogo no servia
         // de nada.
         model: resolveJobModel(job, deps.config),
+        // y el esfuerzo con el, por el mismo motivo que se explica arriba: un
+        // ajuste que no llega al proveedor es un selector que no hace nada
+        ...(deps.effort === undefined ? {} : { effort: deps.effort }),
         // si el modelo es agentic y hay worktree, se le dan herramientas locales
         agentic: readOnlyStudioRun
           ? undefined
