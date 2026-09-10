@@ -1,5 +1,29 @@
 # Luxy — tarea activa
 
+## LA-CLIS-001 — los dos CLI actualizados
+
+Estado: **`done` y verificado — Claude, 2026-09-10.** `npm run check` exit 0.
+
+Codex a **0.154.0** y Claude Code a **2.1.267**. Detalle en `CHANGELOG-WORK.md`
+(2026-09-10 12:00).
+
+Habia DOS Codex: el de la app de escritorio (0.153.4, con Astra) y el de npm
+(0.150.1, sin Astra), y Luxy usa el de npm. `codex update` desde la app no toca
+esa instalacion. Ahora `gpt-6-astra` funciona en Luxy.
+
+Se comprobaron los veinte flags que Luxy detecta del `--help`: diecinueve
+siguen. `--max-turns` desaparecio, y resulto ser una capacidad **fantasma** —se
+detectaba y nadie la leia—, asi que se quito.
+
+### Lo que falta, y es de Daniel
+
+1. **Probar Astra en Luxy**, ahora que el CLI lo soporta. En el banco de vision
+   o en la conversacion, con el esfuerzo que quiera.
+2. Si quiere, comparar Astra contra Opus describiendo la MISMA imagen: es el
+   dato que faltaba para decidir si merece la pena el transporte
+   `codex app-server` (probado y documentado, sin implementar).
+
+
 ## F20-CODEX-IMAGENES-001 — Codex si ve imagenes
 
 Estado: **`done` en codigo, `pendiente de prueba real` — Claude, 2026-09-10.**

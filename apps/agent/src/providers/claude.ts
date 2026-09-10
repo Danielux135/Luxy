@@ -23,7 +23,12 @@ export interface ClaudeCapabilities {
   addDir: boolean;
   verbose: boolean;
   disallowedTools: boolean;
-  maxTurns: boolean;
+  // aqui vivia `maxTurns`, y se fue el 2026-09-10 al actualizar a 2.1.267.
+  //
+  // Dos motivos, y el segundo es el bueno: `--max-turns` ya no sale en el
+  // `--help` de esa version, y `buildClaudeArgs` NO lo usaba — se detectaba y
+  // no lo leia nadie. Una capacidad que se calcula y no se consulta es peor que
+  // no tenerla: parece que Luxy soporta algo que nunca ha hecho.
   /**
    * `--input-format`, que es lo unico que permite mandarle una IMAGEN.
    *
@@ -72,7 +77,6 @@ export function parseClaudeCapabilities(help: string | null): ClaudeCapabilities
     verbose: helpHasFlag(help, '--verbose'),
     disallowedTools:
       helpHasFlag(help, '--disallowedTools') || helpHasFlag(help, '--disallowed-tools'),
-    maxTurns: helpHasFlag(help, '--max-turns'),
     inputFormat: helpHasFlag(help, '--input-format'),
     restricted: helpHasFlag(help, '--restricted'),
     effort: helpHasFlag(help, '--effort'),

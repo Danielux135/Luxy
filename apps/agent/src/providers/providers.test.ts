@@ -264,7 +264,6 @@ describe('buildClaudeArgs', () => {
       addDir: false,
       verbose: false,
       disallowedTools: false,
-      maxTurns: false,
       // una version vieja tampoco trae los flags posteriores: si alguno se
       // colara aqui como true, el CLI abortaria en vez de ignorarlo.
       inputFormat: false,

@@ -1,5 +1,48 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-09-10 12:00 — Claude — LA-CLIS-001 — actualizar los dos CLI
+
+Origen: Daniel dice que ya actualizo Codex y que Astra le funciona; Luxy seguia
+diciendo que no. Los dos teniamos razon, y faltaba un dato: **hay DOS Codex
+instalados**.
+
+- la app de escritorio trae su propio `codex.exe` bajo `%LOCALAPPDATA%`, en
+  `OpenAI/Codex/bin/<hash>/`, y estaba en 0.153.4 **con Astra**;
+- el CLI de npm —el que usa Luxy— seguia en 0.150.1, del 28 de agosto, **sin
+  Astra**. `codex update` desde la app no toca esa instalacion.
+
+Actualizados los dos donde toca: Codex a **0.154.0** (`npm install -g`), mas
+nuevo incluso que la app, y Claude Code a **2.1.267** (`claude update`).
+`codex debug models` ya lista `gpt-6-astra` con esfuerzos hasta `ultra`.
+
+**Y la verificacion que importa, porque Luxy decide lo que puede hacer leyendo
+el `--help`:** se comprobaron los veinte flags que detecta, uno a uno. Diecinueve
+siguen; `--max-turns` ya no sale en 2.1.267.
+
+De ahi salio algo mejor que el hallazgo: **esa capacidad se detectaba y no la
+usaba nadie**. `buildClaudeArgs` nunca la leyo. Llevaba tiempo calculandose para
+nada y ahora ademas apuntaba a un flag inexistente — una capacidad fantasma que
+hacia parecer que Luxy soporta algo que jamas hizo. Fuera, con el porque al lado.
+
+**Corregido tambien lo que se dijo por la mañana:** `codex debug models` NO
+mentia. Lista lo que soporta ESA version del binario, y la instalada de verdad
+no soportaba Astra —el servidor lo decia con todas las letras: «The 'gpt-6-astra'
+model requires a newer version of Codex»—. El catalogo de la CUENTA, en
+`.codex-global-state.json`, si lo incluia: son dos cosas distintas y confundirlas
+llevo a acusar al comando de mentir.
+
+**Investigacion aparte, con resultado positivo y sin implementar:** Codex SI
+puede recibir una imagen en linea, sin copia en disco, por `codex app-server`
+—su `UserInput` distingue `LocalImageUserInput` con ruta de `ImageUserInput`
+con `url`, y ese `url` acepta un data URI—. **Probado**: una sonda mando un PNG
+4x4 rojo/azul y Codex contesto describiendolo. El protocolo lleva ademas
+`effort` nativo y un `model/list` de verdad.
+
+No se implemento, y el motivo es del usuario, no tecnico: sus propias pruebas
+dicen que Opus describe mejor y ya funciona hoy, asi que construir un segundo
+transporte sobre un protocolo que el CLI marca `[experimental]` daria un
+resultado peor. Queda documentado para el dia que haya un motivo.
+
 ### 2026-09-10 11:00 — Claude — F20-CODEX-IMAGENES-001
 
 Origen: Daniel prueba el banco de vision con un modelo de ChatGPT y recibe

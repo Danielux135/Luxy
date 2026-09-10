@@ -1,5 +1,28 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-10 — LA-CLIS-001
+
+`npm run check` exit 0.
+
+```
+Test Files  146 passed (146)
+     Tests   2687 passed | 12 skipped (2699)
+```
+
+Sin pruebas nuevas: el cambio es quitar una capacidad muerta. Lo que se verifico
+NO fue con pruebas sino contra los binarios reales, que es lo unico que vale
+aqui: los veinte flags que Luxy detecta del `--help`, uno a uno, en Claude
+2.1.267 y Codex 0.154.0. Diecinueve siguen; `--max-turns` ya no existe y nadie
+lo usaba.
+
+Y **fuera de las pruebas**, contra los CLI de verdad:
+
+- `codex debug models` lista `gpt-6-astra` tras actualizar, con esfuerzos hasta
+  `ultra`;
+- una sonda contra `codex app-server` confirmo que acepta una imagen en linea
+  por data URI y la describe. No esta implementado en Luxy; queda como hecho
+  comprobado para cuando haga falta.
+
 ### 2026-09-10 — F20-CODEX-IMAGENES-001
 
 `npm run check` exit 0.
