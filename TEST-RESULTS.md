@@ -1,5 +1,28 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-10 — F18-ESFUERZO-002
+
+`npm run check` exit 0.
+
+```
+Test Files  146 passed (146)
+     Tests   2684 passed | 12 skipped (2696)
+```
+
+Ocho pruebas nuevas. La que mas vale es una **regla ejecutable**: barre el
+modulo IPC entero y exige que todo esquema de argumentos con `provider` y
+`model` lleve tambien `effort`. Comprobada de verdad, no supuesta: quitando el
+campo del banco de vision, falla y **nombra el esquema culpable**. Lleva ademas
+una segunda prueba que la protege de volverse vacia si el barrido dejara de
+encontrar esquemas — una invariante que deja de comprobarse en silencio es peor
+que no tenerla.
+
+Y cinco del aviso de que el esfuerzo NO se aplica, incluida la de que **calla**
+cuando no se eligio ninguno.
+
+**Sigue sin probarse el camino real.** Ninguna prueba lanza un CLI. Que `low`
+gaste menos que `xhigh` solo se sabe usandolo.
+
 ### 2026-09-10 — F19-TIPAR-PRUEBAS-001
 
 `npm run check` exit 0, ya con el typecheck de pruebas dentro.

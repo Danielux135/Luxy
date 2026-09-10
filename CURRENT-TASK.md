@@ -1,5 +1,24 @@
 # Luxy — tarea activa
 
+## F18-ESFUERZO-002 — el esfuerzo, en los seis caminos de la boveda
+
+Estado: **`done` en codigo, `pendiente de prueba real` — Claude, 2026-09-10.**
+`npm run check` exit 0, 2.684 pasadas.
+
+Lo pidio Daniel: «no has puesto el esfuerzo del razonamiento en comprobar
+imagenes». Faltaba en cinco de seis caminos. Detalle en `CHANGELOG-WORK.md`
+(2026-09-10 09:50) y `D-082`.
+
+### Lo que falta, y es de Daniel
+
+1. **Reiniciar Studio**: esta vez si cambia codigo. `npm run build` y abrir.
+2. **Probar el selector nuevo del banco de vision**: la misma foto con `low` y
+   con `xhigh`, a ver si la descripcion mejora lo bastante para pagarlo.
+3. **Decidir si quiere el esfuerzo en la cola de trabajos.** Es otra tarea:
+   pide columna nueva y migracion contra su Supabase, y esas no se tocan sin
+   que lo pida.
+
+
 ## F19-TIPAR-PRUEBAS-001 — las pruebas entran en el typecheck
 
 Estado: **`done` y verificado — Claude, 2026-09-10.** `npm run check` exit 0.

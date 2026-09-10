@@ -12,6 +12,7 @@ import type {
   ProviderRunResult,
   ToolPresence,
 } from '@luxy/shared';
+import { effortIgnoredWarning } from '@luxy/shared';
 import { runProcess, BASE_ENV_ALLOWLIST } from '../process.js';
 import { detectTool, readHelp, helpHasFlag } from '../detect.js';
 
@@ -234,6 +235,11 @@ export class CodexCliProvider implements ProviderExecution {
       lastMessageFile,
       sandboxMode: request.readOnly === true ? 'read-only' : 'workspace-write',
     });
+
+    // un ajuste que se cae en silencio es peor que no tenerlo: el usuario cree
+    // que esta gastando menos y no lo esta
+    const avisoEsfuerzo = effortIgnoredWarning(request.effort, this.capabilities.config, this.displayName);
+    if (avisoEsfuerzo !== null) request.onEvent({ type: 'warning', message: avisoEsfuerzo });
 
     request.onEvent({ type: 'phase', message: 'lanzando Codex CLI' });
 

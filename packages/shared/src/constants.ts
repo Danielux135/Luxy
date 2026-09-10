@@ -107,6 +107,33 @@ export function isReasoningEffort(value: string): value is ReasoningEffort {
   return (REASONING_EFFORTS as readonly string[]).includes(value);
 }
 
+/**
+ * el aviso de que el esfuerzo elegido NO se va a aplicar, o `null` si si.
+ *
+ * UN AJUSTE QUE SE CAE EN SILENCIO ES PEOR QUE NO TENERLO. El flag se descarta
+ * a proposito cuando el CLI instalado no lo declara —pasarselo no lo ignora,
+ * aborta la invocacion— pero callarselo deja al usuario creyendo que eligio y
+ * que se aplico: puso `low` para gastar menos y esta pagando lo de siempre.
+ *
+ * Es la misma enfermedad que `D-073`, `D-079` y `D-080`: el dato existe y no
+ * llega a nadie. Lo encontro un barrido del repositorio, no una prueba, porque
+ * no habia ninguna que lo mirara.
+ *
+ * Vive aqui, puro, para poder probarlo sin lanzar un proceso: la decision es de
+ * texto, y el adaptador solo tiene que emitir lo que devuelva.
+ */
+export function effortIgnoredWarning(
+  effort: string | undefined,
+  supported: boolean,
+  displayName: string,
+): string | null {
+  if (effort === undefined || supported) return null;
+  return (
+    `esta version de ${displayName} no admite elegir el esfuerzo de razonamiento, ` +
+    `asi que el turno corre con el suyo; actualiza el CLI si quieres poder bajarlo`
+  );
+}
+
 // proveedores que se consumen por http con clave propia
 export const HTTP_API_PROVIDERS = [
   'deepseek',

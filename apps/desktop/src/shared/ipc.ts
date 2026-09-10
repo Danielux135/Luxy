@@ -474,6 +474,8 @@ export const vaultCompatibilityArgsSchema = z.object({
         provider: z.string().min(1).max(64),
         /** `null` deja decidir a la conexion, como en un turno normal */
         model: z.string().max(128).nullable().default(null),
+        /** y su esfuerzo, que es parte de lo que se esta comparando */
+        effort: z.enum(REASONING_EFFORTS).nullable().default(null),
       }),
     )
     .min(1)
@@ -559,6 +561,13 @@ export const vaultMemoryExcludeArgsSchema = z.object({
 export const vaultCatalogSyncArgsSchema = z.object({
   provider: z.string().min(1).max(64),
   model: z.string().max(128).nullable().default(null),
+  /**
+   * cuanto dejarle pensar en CADA conversacion del lote.
+   *
+   * Aqui es donde mas se nota: catalogar no es una llamada, son `limit`
+   * llamadas seguidas, asi que el esfuerzo se multiplica por la tanda.
+   */
+  effort: z.enum(REASONING_EFFORTS).nullable().default(null),
   projectAlias: projectAliasSchema,
   /** solo esta; sin ella, todas las que lo necesiten */
   conversationId: conversationIdSchema.optional(),
@@ -682,6 +691,14 @@ export const vaultMediaDescribeArgsSchema = z.object({
   mediaId: z.string().min(1).max(128),
   provider: z.string().min(1).max(64),
   model: z.string().min(1).max(128).nullable().default(null),
+  /**
+   * cuanto dejarle pensar. `null` deja lo que traiga el proveedor.
+   *
+   * Va donde va el modelo, siempre. Dejarlo fuera de un camino lo convierte en
+   * el unico que no lo respeta, y eso no se ve: la llamada sale, contesta y
+   * cuesta lo que cueste sin que nada lo diga.
+   */
+  effort: z.enum(REASONING_EFFORTS).nullable().default(null),
   projectAlias: projectAliasSchema,
 });
 
@@ -718,6 +735,14 @@ export const vaultMediaRewriteCaptionArgsSchema = z.object({
   caption: z.string().min(1).max(3200),
   provider: z.string().min(1).max(64),
   model: z.string().min(1).max(128).nullable().default(null),
+  /**
+   * cuanto dejarle pensar. `null` deja lo que traiga el proveedor.
+   *
+   * Va donde va el modelo, siempre. Dejarlo fuera de un camino lo convierte en
+   * el unico que no lo respeta, y eso no se ve: la llamada sale, contesta y
+   * cuesta lo que cueste sin que nada lo diga.
+   */
+  effort: z.enum(REASONING_EFFORTS).nullable().default(null),
   projectAlias: projectAliasSchema,
 });
 
@@ -740,6 +765,14 @@ export const vaultMediaRewriteCaptionResultSchema = z.object({
 export const vaultVisionProbeArgsSchema = z.object({
   provider: z.string().min(1).max(64),
   model: z.string().min(1).max(128).nullable().default(null),
+  /**
+   * cuanto dejarle pensar. `null` deja lo que traiga el proveedor.
+   *
+   * Va donde va el modelo, siempre. Dejarlo fuera de un camino lo convierte en
+   * el unico que no lo respeta, y eso no se ve: la llamada sale, contesta y
+   * cuesta lo que cueste sin que nada lo diga.
+   */
+  effort: z.enum(REASONING_EFFORTS).nullable().default(null),
   projectAlias: projectAliasSchema,
 });
 

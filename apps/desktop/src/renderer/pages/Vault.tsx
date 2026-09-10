@@ -296,6 +296,7 @@ function ConversationPanel({
           vault={vault}
           provider={provider}
           model={model}
+          effort={effort}
           project={project}
         />
       )}
@@ -339,9 +340,15 @@ function ConversationPanel({
         }}
       />
 
-      <MemoryPanel vault={vault} provider={provider} model={model} project={project} />
+      <MemoryPanel
+        vault={vault}
+        provider={provider}
+        model={model}
+        effort={effort}
+        project={project}
+      />
 
-      <CompatibilityPanel vault={vault} models={models} project={project} />
+      <CompatibilityPanel vault={vault} models={models} effort={effort} project={project} />
 
       {vault.error !== null && <Notice tone="fault">{vault.error}</Notice>}
 
@@ -2536,6 +2543,12 @@ function VisionBench({
   // llamada y devuelve `unrecognized_model`
   const modelo = modelForProvider(models, elegido, model.length === 0 ? null : model) ?? '';
 
+  // misma regla que en la conversacion: la lista depende del modelo, y un
+  // esfuerzo que deje de estar soportado se suelta en vez de viajar y fallar
+  const efforts = effortsFor(elegido, modelo.length === 0 ? null : modelo);
+  const elegidoEffort = vault.composer.visionEffort;
+  const effort = elegidoEffort !== null && efforts.includes(elegidoEffort) ? elegidoEffort : null;
+
   return (
     <Panel
       title="Probar la vista de un modelo"
@@ -2589,6 +2602,29 @@ function VisionBench({
           // nombre que hay que saberse de memoria
           <NativeModelField provider={elegido} value={model} onChange={setModel} />
         )}
+        {/* el banco existe para COMPARAR: sin fijar el esfuerzo, dos pruebas
+            pueden diferir por el modelo o por lo que se le dejo pensar, y no
+            hay forma de saber cual de las dos cosas fue */}
+        {efforts.length > 0 && (
+          <Field label="Esfuerzo" hint="Cuánto le dejas pensar. Sin elegir usa el suyo.">
+            <select
+              value={effort ?? ''}
+              onChange={(event) =>
+                vault.setComposer({
+                  visionEffort:
+                    event.target.value === '' ? null : (event.target.value as ReasoningEffort),
+                })
+              }
+            >
+              <option value="">el suyo por defecto</option>
+              {efforts.map((nivel) => (
+                <option key={nivel} value={nivel}>
+                  {nivel}
+                </option>
+              ))}
+            </select>
+          </Field>
+        )}
         <button
           className="btn btn--primary"
           disabled={vault.probingVision || project.length === 0}
@@ -2596,6 +2632,7 @@ function VisionBench({
             void vault.probeVision({
               provider: elegido,
               model: modelo.length === 0 ? null : modelo,
+              effort,
               projectAlias: project,
             });
           }}
@@ -2800,6 +2837,7 @@ function MediaGallery({
   vault,
   provider,
   model,
+  effort,
   project,
 }: {
   vault: VaultController;
@@ -2807,6 +2845,8 @@ function MediaGallery({
      una descripcion es otra llamada a lo mismo, no una conexion aparte */
   provider: string;
   model: string;
+  /** el de la conversacion; describir una foto usa el de vision, que es otro */
+  effort: ReasoningEffort | null;
   project: string;
 }): JSX.Element {
   const [openId, setOpenId] = useState<string | null>(null);
@@ -2845,6 +2885,7 @@ function MediaGallery({
           vault={vault}
           provider={provider}
           model={model}
+          effort={effort}
           project={project}
           onClose={() => setOpenId(null)}
         />
@@ -2910,6 +2951,7 @@ function MediaViewer({
   vault,
   provider,
   model,
+  effort,
   project,
   onClose,
 }: {
@@ -2917,6 +2959,8 @@ function MediaViewer({
   vault: VaultController;
   provider: string;
   model: string;
+  /** el de la CONVERSACION; el de mirar es otro y sale de `vision` */
+  effort: ReasoningEffort | null;
   project: string;
   onClose: () => void;
 }): JSX.Element {
@@ -2965,12 +3009,21 @@ function MediaViewer({
   // un video gasta la llamada y no devuelve nada
   const isImage = item.mimeType.startsWith('image/');
   const caption = item.caption ?? '';
+  const visionProvider = vault.composer.visionProvider ?? provider;
+  const visionModel = vault.composer.visionModel ?? (model.length === 0 ? null : model);
+  const visionEfforts = effortsFor(visionProvider, visionModel);
+  const visionElegido = vault.composer.visionEffort;
+  const visionEffort =
+    visionElegido !== null && visionEfforts.includes(visionElegido) ? visionElegido : null;
   const editing = draft !== null;
   // quién mira, que no tiene por qué ser quién conversa. Sin elegir en el banco
   // de pruebas se usa el de la conversación, como toda la vida
   const vision = {
     provider: vault.composer.visionProvider ?? provider,
     model: vault.composer.visionModel ?? (model.length === 0 ? null : model),
+    // el de mirar, no el de conversar. Si el elegido no lo acepta este modelo,
+    // se suelta: mandarlo no lo recortaria, fallaria cobrando igual
+    effort: visionEffort,
   };
   const chosen = vision.model ?? vision.provider;
 
@@ -3089,6 +3142,7 @@ function MediaViewer({
                       // que este botón viene a arreglar
                       provider,
                       model: model.length === 0 ? null : model,
+                      effort,
                       projectAlias: project,
                     })
                     // vuelve al BORRADOR, no al pie de foto guardado: se lee al
@@ -3162,6 +3216,7 @@ function MediaViewer({
                       // encarna al personaje. Sin elegir ninguno, el de siempre
                       provider: vision.provider,
                       model: vision.model,
+                      effort: vision.effort,
                       projectAlias: project,
                     })
                     // con descripcion ya esta guardada y la lista se recarga sola:
@@ -4009,12 +4064,15 @@ function ChangePasswordForm({
  * Es de solo lectura: no añade turnos ni toca la memoria.
  */
 function CompatibilityPanel({
+  effort,
   vault,
   models,
   project,
 }: {
   vault: VaultController;
   models: ModelDefinition[];
+  /** el mismo para todos los candidatos: es la comparacion, no una variable */
+  effort: ReasoningEffort | null;
   project: string;
 }): JSX.Element | null {
   const [selected, setSelected] = useState<string[]>([]);
@@ -4032,7 +4090,10 @@ function CompatibilityPanel({
   const run = (): void => {
     const targets = usable
       .filter((model) => selected.includes(model.id))
-      .map((model) => ({ provider: model.family, model: model.apiModel }));
+      // el mismo esfuerzo para todos, y a proposito: se estan comparando
+      // modelos, asi que dejar que cada uno corra al suyo por defecto mezclaria
+      // dos variables y el resultado no diria nada de ninguna de las dos
+      .map((model) => ({ provider: model.family, model: model.apiModel, effort }));
     void vault.checkCompatibility({ projectAlias: project, targets, repetitions });
   };
 
@@ -4116,11 +4177,17 @@ function MemoryPanel({
   vault,
   provider,
   model,
+  effort,
   project,
 }: {
   vault: VaultController;
   provider: string;
   model: string;
+  /**
+   * y cuanto se le deja pensar. Aqui es donde mas cuesta equivocarse: catalogar
+   * no es una llamada, es una por conversacion pendiente y en tandas.
+   */
+  effort: ReasoningEffort | null;
   project: string;
 }): JSX.Element {
   const [open, setOpen] = useState<string | null>(null);
@@ -4146,6 +4213,7 @@ function MemoryPanel({
           const target = {
             provider,
             model: model.length === 0 ? null : model,
+            effort,
             projectAlias: project,
           };
           // tope de vueltas: una cola que no baja es un fallo, no un motivo
@@ -4202,6 +4270,7 @@ function MemoryPanel({
               const target = {
                 provider,
                 model: model.length === 0 ? null : model,
+                effort,
                 projectAlias: project,
               };
               void (async () => {
@@ -4237,6 +4306,7 @@ function MemoryPanel({
               const target = {
                 provider,
                 model: model.length === 0 ? null : model,
+                effort,
                 projectAlias: project,
               };
               void (async () => {
@@ -4314,6 +4384,7 @@ function MemoryPanel({
                     .syncCatalog({
                       provider,
                       model: model.length === 0 ? null : model,
+                      effort,
                       projectAlias: project,
                       conversationId: episode.conversationId,
                     })

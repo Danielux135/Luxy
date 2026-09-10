@@ -2409,9 +2409,28 @@ modelo nuevo en silencio.
 
 ### Donde NO llega el esfuerzo, a sabiendas
 
-El mapa previo encontro dos caminos que se quedan fuera. No es olvido y por eso
-se escriben: quien los necesite sabra que estan sin hacer, en vez de descubrir
-que el esfuerzo «a veces no se aplica».
+Dos caminos se quedan fuera. No es olvido y por eso se escriben con sus lineas:
+quien los necesite sabra que estan sin hacer, en vez de descubrir que el
+esfuerzo «a veces no se aplica».
+
+Se listan con precision porque **la primera version de esta nota era vaga y eso
+ya costo un fallo**: el mismo dia, el esfuerzo se cableo en un solo camino de
+seis de la boveda y los otros cinco se quedaron fuera en silencio, incluido el
+banco de pruebas de vision, que lo encontro Daniel usandolo. Un limite que no se
+puede comprobar no es un limite, es un olvido con buena prensa.
+
+Los tres puntos exactos, verificados con un barrido del repositorio:
+
+- `apps/agent/src/agent.ts:638` — `executeJob` construye las dependencias de
+  `runJob` sin `effort`. Es el UNICO camino de la cola, asi que se queda fuera
+  todo lo que entra por ahi: Studio **Trabajos**, **Conversaciones** y
+  **Laboratorio**, y en Telegram `/claude`, `/codex` y `/auto`;
+- `apps/agent/src/job-runner.ts:500` — `runBatchOutcome` llama a
+  `providerBatchModel` pasandole el modelo y no el esfuerzo, aunque tiene
+  `deps` delante. Se sale del flujo normal antes de la linea que lo propaga;
+- `apps/agent/src/batch/model.ts:120` — y esto es lo estructural:
+  `ProviderBatchOptions` **no tiene campo** donde ponerlo. Aunque manana alguien
+  arregle el punto anterior, no habria donde, y el tipo no se quejaria.
 
 **El contrato del gateway.** `studioJobCreateRequestSchema` y `studioJobSchema`
 (`packages/shared/src/schemas.ts`) no llevan esfuerzo, ni de ida ni de vuelta.

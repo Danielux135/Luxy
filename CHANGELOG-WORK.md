@@ -1,5 +1,70 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-09-10 09:50 — Claude — F18-ESFUERZO-002
+
+Origen, y es de Daniel: «no has puesto el esfuerzo del razonamiento en
+comprobar imagenes». Tenia razon, y el agujero era mas grande que lo que dijo:
+el esfuerzo solo estaba en UN camino de seis.
+
+Es exactamente el fallo que `D-082` decia evitar, cometido en el mismo dia. Se
+cableo el camino que se tenia delante —el envio de mensaje— y los otros cinco se
+quedaron fuera **sin que nada lo dijera**, que es la parte mala: la llamada sale,
+contesta, y cuesta lo que cueste.
+
+Los cinco que faltaban:
+
+1. **el banco de pruebas de vision**, el que dijo Daniel, y el peor de todos: ese
+   panel existe para COMPARAR modelos, asi que sin fijar el esfuerzo dos pruebas
+   podian diferir por el modelo o por lo que se le dejo pensar, sin forma de
+   saber cual;
+2. **describir una imagen** del visor;
+3. **reformular un pie de foto**, el boton de esta misma manana;
+4. **catalogar escenas**, donde mas cuesta: no es una llamada, es una por
+   conversacion pendiente y en tandas, asi que el esfuerzo se multiplica;
+5. **la comparativa de compatibilidad**, que corre un turno por candidato.
+
+**Como queda repartido**, siguiendo la separacion que ya existia entre quien
+conversa y quien mira:
+
+- `composer.effort` —el de conversar— lo usan enviar, reformular, catalogar y la
+  comparativa;
+- `composer.visionEffort` —nuevo, junto a `visionProvider`/`visionModel`— lo
+  usan el banco y describir. Van aparte por lo mismo que el modelo va aparte:
+  describir una foto y encarnar a alguien son dos trabajos.
+
+En la comparativa el esfuerzo va **dentro de cada candidato** y se aplica el
+mismo a todos: dejar que cada uno corriera al suyo por defecto mezclaria dos
+variables y el resultado no diria nada de ninguna.
+
+**Y una regla ejecutable para que no haya una cuarta vez.** `ipc.test.ts` barre
+el modulo entero —no una lista escrita a mano, que habria que acordarse de
+actualizar— y exige que **todo esquema de argumentos con `provider` y `model`
+lleve tambien `effort`**. Comprobado que no es decorativa: quitando el campo del
+banco de vision, la prueba falla y **nombra el esquema culpable**. Lleva ademas
+una segunda prueba que la protege de volverse vacia si el barrido dejara de
+encontrar esquemas.
+
+**Y un defecto propio que encontro el barrido, no una prueba.** El esfuerzo se
+caia EN SILENCIO cuando el CLI instalado no declaraba el flag: se descartaba a
+proposito —pasarselo aborta la invocacion— pero no se decia. El usuario elegia
+`low` para gastar menos, se ignoraba, y el creyendo que se aplicaba. Otra vez
+lo mismo: el dato existe y no llega a nadie. Ahora se avisa, y el aviso dice QUE
+HACER —«actualiza el CLI»—, no solo que pasa.
+
+La decision vive en `effortIgnoredWarning` (`packages/shared/src/constants.ts`),
+pura, para poder probarla sin lanzar un proceso. Incluye la prueba de que CALLA
+cuando no se eligio ninguno: avisar ahi seria ruido en cada turno.
+
+**Lo que sigue fuera, confirmado por tres barridos independientes**, es la cola
+de trabajos: `agent.ts:638`, `job-runner.ts:500` y `batch/model.ts:120`, con
+sus entradas —Studio Trabajos, Conversaciones y Laboratorio, y en Telegram
+`/claude`, `/codex`, `/auto` y `/batch_*`—. Ahi **no hay ningun boton que
+mienta**: esas pantallas no enseñan selector, asi que es una funcion que falta,
+no algo roto. Cerrarlo pide columna nueva y migracion, y eso es otra tarea.
+Queda con sus lineas exactas en `D-082`.
+
+`npm run check` exit 0, 2.684 pasadas.
+
 ### 2026-09-10 09:30 — Claude — F19-TIPAR-PRUEBAS-001
 
 Origen: al añadir el campo `effort` a `ClaudeCapabilities` se vio que un literal

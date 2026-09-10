@@ -9,6 +9,7 @@ import type {
   ProviderRunResult,
   ToolPresence,
 } from '@luxy/shared';
+import { effortIgnoredWarning } from '@luxy/shared';
 import { runProcess, BASE_ENV_ALLOWLIST } from '../process.js';
 import { detectTool, readHelp, helpHasFlag } from '../detect.js';
 
@@ -367,6 +368,11 @@ export class ClaudeCodeProvider implements ProviderExecution {
       readOnly: request.readOnly === true,
       withImages: imagenes.length > 0,
     });
+
+    // un ajuste que se cae en silencio es peor que no tenerlo: el usuario cree
+    // que esta gastando menos y no lo esta
+    const avisoEsfuerzo = effortIgnoredWarning(request.effort, this.capabilities.effort, this.displayName);
+    if (avisoEsfuerzo !== null) request.onEvent({ type: 'warning', message: avisoEsfuerzo });
 
     request.onEvent({ type: 'phase', message: 'lanzando Claude Code' });
 

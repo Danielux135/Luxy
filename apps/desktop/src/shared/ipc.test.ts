@@ -3,7 +3,10 @@
 // no arrancan Electron: comprueban las invariantes que se pueden romper sin
 // darse cuenta al editar el contrato, que son justo las de seguridad.
 import { describe, it, expect } from 'vitest';
+import { z } from 'zod';
 import { agentEventSchema, hostRequestSchema, hostResponseSchema } from '@luxy/shared';
+// el modulo entero, para poder barrer sus esquemas en vez de listarlos a mano
+import * as ipc from './ipc.js';
 import {
   IPC_EVENT,
   IPC_INVOKE,
@@ -636,5 +639,67 @@ describe('banco de pruebas de vision', () => {
         executedModel: null,
       }).success,
     ).toBe(false);
+  });
+});
+
+// -----------------------------------------------------------------------------
+// donde se elige un modelo, se elige el esfuerzo
+// -----------------------------------------------------------------------------
+
+/**
+ * la regla, ejecutable en vez de escrita en un documento.
+ *
+ * Este fallo ha ocurrido TRES veces en este proyecto, siempre igual: se anade
+ * un ajuste, se cablea en el camino que se tenia delante, y los demas se quedan
+ * sin el sin que nada lo diga. Con el modelo lo documenta `job-runner.ts`
+ * —«antes solo se le pasaba a claude»—. Con el esfuerzo lo encontro Daniel: el
+ * banco de pruebas de vision se habia quedado fuera, y con el otros cuatro
+ * caminos.
+ *
+ * Lo que no se puede es confiar en acordarse. Asi que la regla se comprueba:
+ * **todo esquema de ARGUMENTOS que deje elegir proveedor y modelo tiene que
+ * dejar elegir tambien el esfuerzo.** Si alguien anade un camino nuevo y se
+ * olvida, esto falla y le dice por que.
+ *
+ * Se mira sobre `ipc` entero y no sobre una lista escrita a mano, justamente
+ * para que un esquema NUEVO entre solo. Una lista habria que acordarse de
+ * actualizarla, que es el problema que esto viene a resolver.
+ */
+describe('donde se elige un modelo, se elige el esfuerzo', () => {
+  /** los esquemas de argumentos que dejan elegir proveedor Y modelo */
+  function esquemasConModelo(): [string, z.ZodRawShape][] {
+    const encontrados: [string, z.ZodRawShape][] = [];
+    for (const [nombre, valor] of Object.entries(ipc)) {
+      if (!nombre.endsWith('ArgsSchema')) continue;
+      if (!(valor instanceof z.ZodObject)) continue;
+      const shape = valor.shape as z.ZodRawShape;
+      if (shape['provider'] === undefined || shape['model'] === undefined) continue;
+      encontrados.push([nombre, shape]);
+    }
+    return encontrados;
+  }
+
+  it('encuentra los esquemas de verdad, no una lista vacia', () => {
+    // sin esto la prueba pasaria sola si el barrido dejara de encontrar nada,
+    // que es la forma mas silenciosa de que una invariante deje de comprobarse
+    const nombres = esquemasConModelo().map(([nombre]) => nombre);
+    expect(nombres.length).toBeGreaterThanOrEqual(4);
+    expect(nombres).toContain('vaultVisionProbeArgsSchema');
+    expect(nombres).toContain('vaultCatalogSyncArgsSchema');
+  });
+
+  it('todos dejan elegir tambien el esfuerzo', () => {
+    const sinEsfuerzo = esquemasConModelo()
+      .filter(([, shape]) => shape['effort'] === undefined)
+      .map(([nombre]) => nombre);
+    expect(sinEsfuerzo).toEqual([]);
+  });
+
+  // la comparativa es la excepcion de FORMA, no de fondo: su modelo va dentro
+  // de cada candidato, asi que su esfuerzo tambien
+  it('y en la comparativa va dentro del candidato, con el modelo', () => {
+    const targets = ipc.vaultCompatibilityArgsSchema.shape.targets;
+    const candidato = targets.element as z.ZodObject<z.ZodRawShape>;
+    expect(Object.keys(candidato.shape)).toContain('effort');
   });
 });

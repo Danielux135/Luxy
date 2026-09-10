@@ -200,6 +200,15 @@ export interface VaultComposer {
    */
   visionProvider: string | null;
   visionModel: string | null;
+  /**
+   * y cuanto se le deja pensar a QUIEN MIRA.
+   *
+   * Aparte del de la conversacion por lo mismo que el modelo esta aparte:
+   * describir una foto y encarnar a alguien son dos trabajos, y el ajuste de
+   * uno no puede gobernar el otro. Sin esto, el banco de pruebas comparaba
+   * modelos mezclando dos variables sin decirlo.
+   */
+  visionEffort: ReasoningEffort | null;
 }
 
 /**
@@ -216,7 +225,13 @@ const EMPTY_DRAFT = {
   caption: '',
 } satisfies Omit<
   VaultComposer,
-  'provider' | 'model' | 'effort' | 'project' | 'visionProvider' | 'visionModel'
+  | 'provider'
+  | 'model'
+  | 'effort'
+  | 'project'
+  | 'visionProvider'
+  | 'visionModel'
+  | 'visionEffort'
 >;
 
 export interface VaultController {
@@ -272,6 +287,8 @@ export interface VaultController {
     mediaId: string;
     provider: string;
     model: string | null;
+    /** `null` deja el esfuerzo que traiga el proveedor */
+    effort: ReasoningEffort | null;
     projectAlias: string;
     /** `reasoning` se devuelve para verlo, y NUNCA se guarda con el archivo */
   }) => Promise<{ caption: string | null; failure: string | null; reasoning: string | null }>;
@@ -288,6 +305,8 @@ export interface VaultController {
     caption: string;
     provider: string;
     model: string | null;
+    /** `null` deja el esfuerzo que traiga el proveedor */
+    effort: ReasoningEffort | null;
     projectAlias: string;
   }) => Promise<{ caption: string | null; failure: string | null; reasoning: string | null }>;
   rewritingCaption: boolean;
@@ -301,6 +320,8 @@ export interface VaultController {
   probeVision: (input: {
     provider: string;
     model: string | null;
+    /** `null` deja el esfuerzo que traiga el proveedor */
+    effort: ReasoningEffort | null;
     projectAlias: string;
   }) => Promise<VisionProbe | null>;
   probingVision: boolean;
@@ -386,6 +407,8 @@ export interface VaultController {
   syncCatalog: (input: {
     provider: string;
     model: string | null;
+    /** `null` deja el esfuerzo que traiga el proveedor */
+    effort: ReasoningEffort | null;
     projectAlias: string;
     /** solo esta, y reintentandola aunque hubiera fallado antes */
     conversationId?: string;
@@ -420,7 +443,8 @@ export interface VaultController {
    */
   checkCompatibility: (input: {
     projectAlias: string;
-    targets: { provider: string; model: string | null }[];
+    /** el esfuerzo va dentro del candidato: es parte de lo que se compara */
+    targets: { provider: string; model: string | null; effort: ReasoningEffort | null }[];
     repetitions: number;
   }) => Promise<void>;
   /**
@@ -571,6 +595,7 @@ export function useVault(): VaultController {
     // de la conversacion: no se borra al cambiar de hilo
     visionProvider: null,
     visionModel: null,
+    visionEffort: null,
     ...EMPTY_DRAFT,
   });
   const [media, setMedia] = useState<PrivateMediaItem[]>([]);
@@ -871,6 +896,8 @@ export function useVault(): VaultController {
     async (input: {
       provider: string;
       model: string | null;
+      /** `null` deja el esfuerzo que traiga el proveedor */
+      effort: ReasoningEffort | null;
       projectAlias: string;
       conversationId?: string;
     }): Promise<{ pending: number; cataloged: number; failed: number } | null> => {
@@ -940,7 +967,8 @@ export function useVault(): VaultController {
   const checkCompatibility = useCallback(
     async (input: {
       projectAlias: string;
-      targets: { provider: string; model: string | null }[];
+      /** el esfuerzo va dentro del candidato: es parte de lo que se compara */
+      targets: { provider: string; model: string | null; effort: ReasoningEffort | null }[];
       repetitions: number;
     }): Promise<void> => {
       if (openConversationId === null) {
@@ -1049,6 +1077,8 @@ export function useVault(): VaultController {
       mediaId: string;
       provider: string;
       model: string | null;
+      /** `null` deja el esfuerzo que traiga el proveedor */
+      effort: ReasoningEffort | null;
       projectAlias: string;
     }): Promise<{ caption: string | null; failure: string | null; reasoning: string | null }> => {
       if (openConversationId === null) return { caption: null, failure: null, reasoning: null };
@@ -1087,6 +1117,8 @@ export function useVault(): VaultController {
       caption: string;
       provider: string;
       model: string | null;
+      /** `null` deja el esfuerzo que traiga el proveedor */
+      effort: ReasoningEffort | null;
       projectAlias: string;
     }): Promise<{ caption: string | null; failure: string | null; reasoning: string | null }> => {
       setRewritingCaption(true);
@@ -1118,6 +1150,8 @@ export function useVault(): VaultController {
     async (input: {
       provider: string;
       model: string | null;
+      /** `null` deja el esfuerzo que traiga el proveedor */
+      effort: ReasoningEffort | null;
       projectAlias: string;
     }): Promise<VisionProbe | null> => {
       setProbingVision(true);

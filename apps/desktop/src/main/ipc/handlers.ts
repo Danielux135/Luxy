@@ -1157,6 +1157,9 @@ export function registerIpcHandlers(context: HandlerContext): void {
             localTurnId: randomUUID(),
             provider: target.provider,
             model: target.model,
+            // del candidato, no del panel: aqui se estan COMPARANDO
+            // configuraciones, y el esfuerzo es parte de lo que se compara
+            ...(target.effort === null ? {} : { effort: target.effort }),
             projectAlias: args.projectAlias,
             prompt,
           });
@@ -1348,6 +1351,8 @@ export function registerIpcHandlers(context: HandlerContext): void {
           localTurnId: randomUUID(),
           provider: args.provider,
           model: args.model,
+          // se multiplica por la tanda: esto no es una llamada, son `limit`
+          ...(args.effort === null ? {} : { effort: args.effort }),
           projectAlias: args.projectAlias,
           prompt: buildCatalogPrompt(
             shown.map((turn) => ({
@@ -1532,6 +1537,10 @@ export function registerIpcHandlers(context: HandlerContext): void {
       // guardan 1.900 caracteres como mucho, y pedir de mas hace que Groq
       // rechace la peticion entera cuando supera el limite del modelo
       maxOutputTokens: DESCRIBE_MAX_OUTPUT_TOKENS,
+      // el de VISION, que va con el modelo que mira. Describir bien una foto es
+      // justo donde pensar mas puede valer la pena, y donde mas caro sale
+      // hacerlo sin querer
+      ...(args.effort === null ? {} : { effort: args.effort }),
       kind: 'technical',
       // base64 PURO: el prefijo `data:` lo compone el proveedor, que lo quiere
       // a su manera segun con quien hable
@@ -1603,6 +1612,7 @@ export function registerIpcHandlers(context: HandlerContext): void {
       model: args.model,
       projectAlias: args.projectAlias,
       prompt: buildRewriteCaptionPrompt(args.caption),
+      ...(args.effort === null ? {} : { effort: args.effort }),
       // el mismo presupuesto que el describidor y por el mismo motivo: la
       // salida es del mismo tamaño —un pie de foto— y pedir de mas hace que
       // Groq rechace la peticion entera en vez de recortarla
@@ -1720,6 +1730,10 @@ export function registerIpcHandlers(context: HandlerContext): void {
       // guardan 1.900 caracteres como mucho, y pedir de mas hace que Groq
       // rechace la peticion entera cuando supera el limite del modelo
       maxOutputTokens: DESCRIBE_MAX_OUTPUT_TOKENS,
+      // el banco existe para COMPARAR modelos, y el esfuerzo cambia lo que dice
+      // uno tanto como cambiarlo de modelo: sin poder fijarlo, la comparacion
+      // mezcla dos variables y no dice nada de ninguna
+      ...(args.effort === null ? {} : { effort: args.effort }),
       // modo TECNICO: es una descripcion de un archivo, no una escena, y
       // pedirsela a quien esta encarnando a alguien mezcla dos cosas (`D-055`)
       kind: 'technical',
