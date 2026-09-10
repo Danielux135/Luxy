@@ -78,6 +78,10 @@ describe('el modelo que viaja con el proveedor', () => {
   it('las sugerencias nativas no se inventan donde no se han comprobado', () => {
     // `CLAUDE.md` prohibe inventarse los valores de un CLI sin mirar su --help
     expect(NATIVE_MODEL_SUGGESTIONS['claude']).toContain('sonnet');
+    // sale del propio `claude --help`, que nombra 'fable', 'opus' y 'sonnet'
+    expect(NATIVE_MODEL_SUGGESTIONS['claude']).toContain('fable');
+    // NO es un olvido: `codex exec --help` declara `--model <MODEL>` y no
+    // enumera ningun valor, asi que ponerle una lista seria inventarsela
     expect(NATIVE_MODEL_SUGGESTIONS['codex']).toBeUndefined();
   });
 });

@@ -61,12 +61,22 @@ export function modelForProvider(
  * `opus`.
  *
  * Son SUGERENCIAS y no una lista cerrada: el valor se manda exacto y el CLI
- * decide. Para Codex no se pone ninguna porque no se han comprobado sus valores
- * contra su `--help`, y `CLAUDE.md` prohibe expresamente inventarse los flags o
- * los valores de un CLI.
+ * decide. Por eso el desplegable que las usa lleva siempre un «otro…» que
+ * devuelve la caja de texto; cerrar la lista dejaria fuera modelos que existen.
+ *
+ * COMPROBADO contra `claude --help` el 2026-09-10, que dice literalmente:
+ * «Provide an alias for the latest model (e.g. 'fable', 'opus', or 'sonnet') or
+ * a model's full name». El «e.g.» es la razon de que esto no sea una lista
+ * cerrada, y de ahi sale `fable`, que faltaba.
+ *
+ * Para Codex sigue sin haber ninguna, y no por descuido: `codex exec --help`
+ * declara `-m, --model <MODEL>` y **no enumera un solo valor**. `CLAUDE.md`
+ * prohibe inventarse los valores de un CLI sin comprobarlos, asi que su lista
+ * lleva solo «por defecto» —que es el `model` de su `config.toml`, o sea lo
+ * que el usuario ya tenia puesto—, lo que se haya elegido y «otro…».
  */
 export const NATIVE_MODEL_SUGGESTIONS: Readonly<Record<string, readonly string[]>> = {
-  claude: ['opus', 'sonnet', 'haiku'],
+  claude: ['opus', 'sonnet', 'haiku', 'fable'],
 };
 
 /** los modelos que ese proveedor sirve de verdad */

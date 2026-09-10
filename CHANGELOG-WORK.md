@@ -1,5 +1,51 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-09-10 08:30 — Claude — F16-DESCRIBIDOR-003
+
+Origen: dos peticiones de Daniel antes de ponerse a probar. Que los recuadros
+del banco de pruebas de vision se puedan cerrar uno a uno —«se van acumulando y
+las fotos se quedan visibles»— y que los modelos de Claude y de Codex se puedan
+elegir de una lista.
+
+**La X de cada prueba.** `dismissProbe(id)` en `useVault`, boton en la esquina
+del recuadro. Lo que se acumulaba eran imagenes descifradas en pantalla: el tope
+de cuatro acaba echandolas, pero «acaba» puede ser dentro de un rato. Es la
+misma regla que la galeria plegada.
+
+Iba con una trampa: la lista se dibujaba con la POSICION como clave. Eso
+funciona mientras solo se apila por delante, y deja de funcionar en cuanto se
+puede cerrar una del medio —React reutiliza el recuadro y enseña la imagen de
+una prueba con el texto de otra, que en un banco cuya unica razon de ser es
+comparar modelos es el peor fallo posible—. Cada prueba lleva ahora su `id`.
+
+**Los modelos nativos, en lista.** Claude y Codex no salen en `/v1/models`
+porque no son conexiones HTTP. En la conversacion habia una caja de texto con un
+`datalist` detras —una lista que casi nadie ve: hay que ponerse a escribir para
+que aparezca— y en el banco de vision **ni siquiera eso**: caja de texto a
+secas para un nombre que hay que saberse de memoria.
+
+Ahora las dos usan `NativeModelField`, un `select` con:
+
+1. **por defecto**, que se lo deja al CLI. En Codex eso es el `model` de su
+   `config.toml`, o sea lo que el usuario ya tenia puesto;
+2. las **sugerencias comprobadas**;
+3. **el valor en uso**, aunque no sea una sugerencia. Sin esto, un modelo
+   escrito a mano desaparecia de la lista al volver a mirarla;
+4. **«otro…»**, que devuelve la caja de texto.
+
+El «otro…» no es adorno. Comprobado a mano, como manda `CLAUDE.md`:
+`claude --help` dice «Provide an alias for the latest model (e.g. 'fable',
+'opus', or 'sonnet')» —de ahi sale `fable`, que faltaba— y ese «e.g.» es la
+razon de que la lista no pueda cerrarse. `codex exec --help` declara
+`-m, --model <MODEL>` y **no enumera un solo valor**, asi que Codex sigue sin
+sugerencias: inventarselas esta prohibido y seria justo el fallo que la regla
+evita.
+
+Tropiezo: el centinela del «otro…» se escribio como `\u0000otro` y el heredoc
+colapso la barra, metiendo un **byte NUL literal** en el `.tsx` —git lo marco
+como binario—. Es la regla 2 bis otra vez, cuarta esta sesion. Ahora es
+`'::otro::'`, que ademas se puede leer.
+
 ### 2026-09-10 08:20 — Claude — F16-DESCRIBIDOR-002
 
 Origen: Daniel corrige a mano un pie de foto y se encuentra «un solo recuadrito

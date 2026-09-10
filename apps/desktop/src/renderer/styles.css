@@ -1719,6 +1719,28 @@ input[aria-invalid='true'] {
   gap: 14px;
   align-items: flex-start;
   margin-top: 12px;
+  /* para la X, que va anclada a la esquina del recuadro y no en el flujo: si
+     entrara en el flex se llevaria su hueco del ancho del texto */
+  position: relative;
+}
+
+.vision-probe__close {
+  position: absolute;
+  top: 0;
+  right: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  opacity: 0.5;
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+  padding: 4px 6px;
+}
+
+.vision-probe__close:hover {
+  opacity: 1;
+  color: var(--danger, #e06c75);
 }
 
 .vision-probe__image {
@@ -1756,6 +1778,9 @@ input[aria-invalid='true'] {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  /* hueco para la X, que va flotando encima: sin el, la linea del nombre del
+     archivo pasa por debajo y se lee «foto.pn ×» */
+  padding-right: 26px;
 }
 
 /* una LISTA, no una rejilla de miniaturas. No hay miniaturas guardadas y no

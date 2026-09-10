@@ -48,6 +48,86 @@ const MIN_PASSWORD_LENGTH = 10;
 /** ocho grupos de cuatro, sin los separadores. Debe coincidir con vault-crypto */
 const RECOVERY_KEY_LENGTH = 32;
 
+/** lo que se elige en el desplegable para escribir un modelo que no esta listado */
+const OTRO_MODELO = '::otro::';
+
+/**
+ * el modelo de un proveedor NATIVO —los CLI locales— como lista de verdad.
+ *
+ * Claude y Codex no salen en `/v1/models`: no son conexiones HTTP, son
+ * programas que ya estan instalados aqui. Antes esto era una caja de texto con
+ * un `datalist` detras, y un `datalist` es una lista que casi nadie ve: hay
+ * que ponerse a escribir para que aparezca. En la practica era escribir el
+ * nombre del modelo de memoria, y en el banco de pruebas de vision ni siquiera
+ * habia sugerencias.
+ *
+ * Ahora es un `select`, y la lista lleva tres cosas:
+ *
+ * 1. **por defecto**, que es dejarselo al CLI. Para Codex eso significa el
+ *    `model` de su `config.toml`, o sea lo que el usuario ya tenia puesto;
+ * 2. **las sugerencias comprobadas** de ese proveedor, si las hay;
+ * 3. **el valor en uso**, aunque no sea una sugerencia. Sin esto, un modelo
+ *    escrito a mano desaparecia de la lista en cuanto se volvia a mirar, y
+ *    parecia que se habia perdido.
+ *
+ * Y **«otro…»**, que devuelve la caja de texto. No es un adorno: la lista de
+ * sugerencias es corta a proposito —`CLAUDE.md` prohibe inventarse los valores
+ * de un CLI sin comprobarlos contra su `--help`, y el de Codex declara
+ * `--model <MODEL>` sin enumerar ninguno— asi que cerrar la lista dejaria
+ * fuera modelos que existen de verdad.
+ */
+function NativeModelField({
+  provider,
+  value,
+  onChange,
+}: {
+  provider: string;
+  value: string;
+  onChange: (model: string) => void;
+}): JSX.Element {
+  const [escribiendo, setEscribiendo] = useState(false);
+  const sugerencias = NATIVE_MODEL_SUGGESTIONS[provider] ?? [];
+  const opciones =
+    value.length > 0 && !sugerencias.includes(value) ? [...sugerencias, value] : sugerencias;
+
+  if (escribiendo) {
+    return (
+      <Field label="Modelo" hint={`Se manda tal cual. Sin nada usa el de ${provider}.`}>
+        <input
+          value={value}
+          placeholder="por defecto"
+          onChange={(event) => onChange(event.target.value)}
+        />
+        <button className="btn btn--quiet" onClick={() => setEscribiendo(false)}>
+          Volver a la lista
+        </button>
+      </Field>
+    );
+  }
+
+  return (
+    <Field label="Modelo" hint={`Sin elegir usa el que trae ${provider} por defecto.`}>
+      <select
+        value={value}
+        onChange={(event) => {
+          // «otro…» no es un modelo: abre la caja de texto y deja lo que
+          // hubiera elegido, para poder corregirlo en vez de empezar de cero
+          if (event.target.value === OTRO_MODELO) setEscribiendo(true);
+          else onChange(event.target.value);
+        }}
+      >
+        <option value="">por defecto</option>
+        {opciones.map((opcion) => (
+          <option key={opcion} value={opcion}>
+            {opcion}
+          </option>
+        ))}
+        <option value={OTRO_MODELO}>otro…</option>
+      </select>
+    </Field>
+  );
+}
+
 export function VaultPage({
   vault,
   summary,
@@ -309,24 +389,12 @@ function ConversationPanel({
               </Field>
             ) : (
               // los CLI locales no salen en /v1/models, asi que no hay catalogo
-              // que ofrecer: se escribe, con sugerencias donde las hay. El valor
-              // se manda exacto y decide el CLI
-              <Field
-                label="Modelo"
-                hint={`Sin escribir nada usa el que trae ${provider} por defecto.`}
-              >
-                <input
-                  value={model}
-                  list={`modelos-${provider}`}
-                  placeholder="por defecto"
-                  onChange={(event) => vault.setComposer({ model: event.target.value })}
-                />
-                <datalist id={`modelos-${provider}`}>
-                  {(NATIVE_MODEL_SUGGESTIONS[provider] ?? []).map((suggestion) => (
-                    <option key={suggestion} value={suggestion} />
-                  ))}
-                </datalist>
-              </Field>
+              // que pedir: la lista la ponemos nosotros, con salida a texto libre
+              <NativeModelField
+                provider={provider}
+                value={model}
+                onChange={(elegido) => vault.setComposer({ model: elegido })}
+              />
             )}
             <Field label="Proyecto">
               <select
@@ -2479,13 +2547,9 @@ function VisionBench({
             </select>
           </Field>
         ) : (
-          <Field label="Modelo" hint={`Sin escribir nada usa el que trae ${elegido} por defecto.`}>
-            <input
-              value={model}
-              placeholder="por defecto"
-              onChange={(event) => setModel(event.target.value)}
-            />
-          </Field>
+          // aqui no habia ni sugerencias: era una caja de texto a secas para un
+          // nombre que hay que saberse de memoria
+          <NativeModelField provider={elegido} value={model} onChange={setModel} />
         )}
         <button
           className="btn btn--primary"
@@ -2507,8 +2571,22 @@ function VisionBench({
           que existe: Claude describió una imagen y el 429 de Mistral, treinta y
           dos segundos después, se llevó esa descripción de la pantalla sin que
           se llegara a leer. */}
-      {vault.probes.map((probe, indice) => (
-        <div className="vision-probe" key={`${probe.fileName ?? 'sin-nombre'}-${indice}`}>
+      {vault.probes.map((probe) => (
+        /* la clave es el identificador de la prueba, no su posicion: al poder
+           cerrar una del medio, con la posicion React reutilizaba el recuadro y
+           enseñaba la imagen de una prueba con el texto de otra */
+        <div className="vision-probe" key={probe.id}>
+          {/* se van acumulando, y lo que se acumula son imagenes descifradas en
+              la pantalla. El tope de cuatro acaba echandolas, pero «acaba»
+              puede ser dentro de un rato: la que ya has mirado se cierra */}
+          <button
+            className="vision-probe__close"
+            title="Cerrar esta prueba"
+            aria-label="Cerrar esta prueba"
+            onClick={() => vault.dismissProbe(probe.id)}
+          >
+            ×
+          </button>
           {probe.dataUrl !== null && (
             <img className="vision-probe__image" src={probe.dataUrl} alt="" />
           )}

@@ -31,6 +31,18 @@ type MemoryEpisode = z.infer<typeof vaultMemoryListResultSchema>['episodes'][num
 export type VisionProbe = z.infer<typeof vaultVisionProbeResultSchema>;
 
 /**
+ * una prueba guardada a la vista, con identidad propia.
+ *
+ * El identificador no es adorno: sin el, la lista se dibujaba con la POSICION
+ * como clave, y eso funciona mientras solo se apila por delante. En cuanto se
+ * puede cerrar una del medio deja de funcionar: React reutiliza el recuadro de
+ * la que se fue y enseña la imagen de una prueba con el texto de otra, que en
+ * un banco cuya unica razon de ser es comparar modelos es el peor fallo
+ * posible.
+ */
+export type StoredProbe = VisionProbe & { id: string };
+
+/**
  * la cuenta, tal y como la ve la interfaz.
  *
  * `email` puede existir sin `signedIn`: la bóveda de este equipo pertenece a
@@ -295,9 +307,19 @@ export interface VaultController {
    *
    * No se persiste en ningún sitio y muere al cerrar la bóveda.
    */
-  probes: VisionProbe[];
+  probes: StoredProbe[];
   /** olvida lo probado hasta ahora; nada de esto estaba guardado */
   clearProbes: () => void;
+  /**
+   * cierra UNA prueba.
+   *
+   * Existe porque las que se quedan son imagenes descifradas en la pantalla.
+   * El tope de cuatro las acaba echando, pero «acabar» puede ser dentro de un
+   * rato y mientras tanto siguen ahi a la vista. Poder quitar la que ya has
+   * mirado es lo mismo que la galeria plegada: nada del contenido privado se
+   * queda expuesto porque si.
+   */
+  dismissProbe: (id: string) => void;
   /**
    * cambia quién le hace las fotos a un personaje.
    *
@@ -505,7 +527,7 @@ export function useVault(): VaultController {
   const [rewritingCaption, setRewritingCaption] = useState(false);
   const [probingVision, setProbingVision] = useState(false);
   // lo ultimo que devolvio el banco de pruebas; no se guarda en ningun sitio
-  const [probes, setProbes] = useState<VisionProbe[]>([]);
+  const [probes, setProbes] = useState<StoredProbe[]>([]);
   const [hordeAccount, setHordeAccount] = useState<{
     username: string;
     kudos: number;
@@ -1101,7 +1123,9 @@ export function useVault(): VaultController {
         // es el caso real, y guardarlas todas llena la pantalla de imágenes
         // descifradas sin que nadie las mire
         if (mounted.current) {
-          setProbes((previas) => [result.value, ...previas].slice(0, MAX_PROBES));
+          setProbes((previas) =>
+            [{ ...result.value, id: crypto.randomUUID() }, ...previas].slice(0, MAX_PROBES),
+          );
         }
         return result.value;
       } finally {
@@ -1113,6 +1137,10 @@ export function useVault(): VaultController {
 
   const clearProbes = useCallback((): void => {
     setProbes([]);
+  }, []);
+
+  const dismissProbe = useCallback((id: string): void => {
+    setProbes((previas) => previas.filter((probe) => probe.id !== id));
   }, []);
 
   const attachMedia = useCallback(async (caption: string): Promise<void> => {
@@ -1412,6 +1440,7 @@ export function useVault(): VaultController {
     probingVision,
     probes,
     clearProbes,
+    dismissProbe,
     create,
     unlock,
     lock,
