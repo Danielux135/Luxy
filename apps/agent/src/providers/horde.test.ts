@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
+import type { HordeImageRequest } from '@luxy/shared';
 import type { HordeError } from './horde.js';
 import {
   awaitImage,
@@ -22,9 +23,12 @@ const KEY = 'clave_de_prueba_del_horde';
  * peticion de ejemplo con la forma de `HordeImageRequest`.
  *
  * Se escribe como literal a proposito: el tipo vive en `@luxy/shared` y aqui
- * solo hace falta algo que la cumpla, no otra copia del tipo.
+ * solo hace falta algo que la cumpla, no otra copia del tipo. Los `overrides`
+ * van tipados contra el, porque con `Record<string, unknown>` el spread
+ * ensanchaba el resultado y un campo mal escrito llegaba hasta la llamada sin
+ * que nadie lo parase.
  */
-function request(overrides: Record<string, unknown> = {}) {
+function request(overrides: Partial<HordeImageRequest> = {}): HordeImageRequest {
   return {
     prompt: 'una foto ### borroso, marca de agua',
     models: ['Deliberate'],
@@ -64,7 +68,7 @@ function fakeFetch(responses: { status: number; body?: unknown }[]) {
   let index = 0;
 
   const impl = (async (url: string | URL, init?: RequestInit) => {
-    const headers = new Headers(init?.headers as HeadersInit | undefined);
+    const headers = new Headers(init?.headers);
     calls.push({
       url: url.toString(),
       method: init?.method ?? 'GET',
@@ -91,6 +95,18 @@ const options = (impl: typeof fetch, apiKey = KEY) => ({
   // sin espera real: las pruebas no duermen
   sleep: async () => undefined,
 });
+
+/**
+ * espera el rechazo de una promesa y lo devuelve como `HordeError`.
+ *
+ * Existe porque `await f().catch((e) => e as HordeError)` deja la union
+ * `Resultado | HordeError`, y ahi leer `.hint` o `.rc` no compila aunque la
+ * prueba solo llegue a esa linea cuando ha fallado de verdad. Aislar la
+ * asercion aqui evita repetirla en cada caso.
+ */
+async function rejection(promise: Promise<unknown>): Promise<HordeError> {
+  return (await promise.catch((e: unknown) => e)) as HordeError;
+}
 
 const accepted = { status: 202, body: { id: 'pet-1', kudos: 12 } };
 
@@ -120,7 +136,7 @@ describe('autenticacion', () => {
 
   it('la clave nunca aparece en el mensaje de error', async () => {
     const { impl } = fakeFetch([{ status: 400, body: { message: `la clave ${KEY} no vale` } }]);
-    const error = await submitImage(request(), options(impl)).catch((e: unknown) => e as HordeError);
+    const error = await rejection(submitImage(request(), options(impl)));
     expect(error.message).not.toContain(KEY);
   });
 });
@@ -265,9 +281,7 @@ describe('validacion antes de la red', () => {
 
   it('explica el tamaño valido en la pista', async () => {
     const { impl } = fakeFetch([accepted]);
-    const error = await submitImage(request({ width: 500 }), options(impl)).catch(
-      (e: unknown) => e as HordeError,
-    );
+    const error = await rejection(submitImage(request({ width: 500 }), options(impl)));
     expect(error.hint).toContain('64');
     expect(error.hint).toContain('3072');
   });
@@ -342,10 +356,9 @@ describe('imagen de partida', () => {
   it('una imagen demasiado grande se rechaza sin llamar a la red', async () => {
     // 7 millones de caracteres de base64 son unos 5,25 MB decodificados
     const { impl, calls } = fakeFetch([accepted]);
-    const error = await submitImage(
-      request({ sourceImage: 'A'.repeat(7_000_000) }),
-      options(impl),
-    ).catch((e: unknown) => e as HordeError);
+    const error = await rejection(
+      submitImage(request({ sourceImage: 'A'.repeat(7_000_000) }), options(impl)),
+    );
 
     expect(error.message).toContain('demasiado grande');
     expect(error.hint).toContain('mas pequeña');
@@ -411,7 +424,7 @@ describe('sondeo', () => {
       { status: 200, body: progress({ done: false, is_possible: false }) },
     ]);
 
-    const error = await awaitImage('pet-1', options(impl)).catch((e: unknown) => e as HordeError);
+    const error = await rejection(awaitImage('pet-1', options(impl)));
     expect(error.message).toContain('ningun worker conectado');
     expect(error.hint).toContain('modelo');
     // ni una lectura de status: esperar diez minutos no lo arregla
@@ -425,7 +438,7 @@ describe('sondeo', () => {
 
   it('faulted true falla', async () => {
     const { impl } = fakeFetch([{ status: 200, body: progress({ done: false, faulted: true }) }]);
-    const error = await awaitImage('pet-1', options(impl)).catch((e: unknown) => e as HordeError);
+    const error = await rejection(awaitImage('pet-1', options(impl)));
     expect(error.message).toContain('no pudo generar');
   });
 
@@ -573,9 +586,7 @@ describe('censura de la red', () => {
       },
     ]);
 
-    const error = await readImageStatus('pet-1', options(impl)).catch(
-      (e: unknown) => e as HordeError,
-    );
+    const error = await rejection(readImageStatus('pet-1', options(impl)));
     // no es un fallo tecnico y no se reintenta: hay que decirlo tal cual
     expect(error.message).toContain('CSAM');
     expect(error.rc).toBe('csam');
@@ -633,9 +644,7 @@ describe('censura de la red', () => {
       },
     ]);
 
-    const error = await readImageStatus('pet-1', options(impl)).catch(
-      (e: unknown) => e as HordeError,
-    );
+    const error = await rejection(readImageStatus('pet-1', options(impl)));
     expect(error.message).toContain('censuro');
     expect(error.rc).toBe('censored');
     // se puede reintentar, al contrario que el filtro de la red
@@ -676,9 +685,7 @@ describe('errores', () => {
     const pistas = new Set<string>();
     for (const caso of casos) {
       const { impl } = fakeFetch([{ status: caso.status, body: { message: 'no', rc: caso.rc } }]);
-      const error = await submitImage(request(), options(impl)).catch(
-        (e: unknown) => e as HordeError,
-      );
+      const error = await rejection(submitImage(request(), options(impl)));
 
       expect(error.rc).toBe(caso.rc);
       expect(error.status).toBe(caso.status);
@@ -696,24 +703,18 @@ describe('errores', () => {
     const { impl } = fakeFetch([
       { status: 400, body: { message: 'You do not have enough kudos', rc: 'KudosUpfront' } },
     ]);
-    const error = await submitImage(request(), options(impl)).catch(
-      (e: unknown) => e as HordeError,
-    );
+    const error = await rejection(submitImage(request(), options(impl)));
     expect(error.hint).toContain('resolucion');
 
     // y tambien cuando el codigo no lo conocemos
     const otro = fakeFetch([{ status: 400, body: { message: 'not enough kudos', rc: 'Futuro' } }]);
-    const segundo = await submitImage(request(), options(otro.impl)).catch(
-      (e: unknown) => e as HordeError,
-    );
+    const segundo = await rejection(submitImage(request(), options(otro.impl)));
     expect(segundo.hint).toContain('resolucion');
   });
 
   it('un codigo desconocido conserva el texto original', async () => {
     const { impl } = fakeFetch([{ status: 418, body: { message: 'algo nuevo', rc: 'Futuro' } }]);
-    const error = await submitImage(request(), options(impl)).catch(
-      (e: unknown) => e as HordeError,
-    );
+    const error = await rejection(submitImage(request(), options(impl)));
     expect(error.message).toContain('418');
     expect(error.message).toContain('algo nuevo');
     expect(error.rc).toBe('Futuro');
@@ -722,9 +723,7 @@ describe('errores', () => {
   it('un cuerpo que no es JSON no rompe el manejo del error', async () => {
     const impl = (async () =>
       new Response('<html>502 Bad Gateway</html>', { status: 502 })) as unknown as typeof fetch;
-    const error = await submitImage(request(), options(impl)).catch(
-      (e: unknown) => e as HordeError,
-    );
+    const error = await rejection(submitImage(request(), options(impl)));
     expect(error.status).toBe(502);
     expect(error.rc).toBeNull();
     expect(error.message).toContain('502');
@@ -787,9 +786,7 @@ describe('descarga', () => {
 
   it('explica un enlace caducado', async () => {
     const impl = (async () => new Response('', { status: 403 })) as unknown as typeof fetch;
-    const error = await downloadImage('https://r2.example/a.webp', options(impl)).catch(
-      (e: unknown) => e as HordeError,
-    );
+    const error = await rejection(downloadImage('https://r2.example/a.webp', options(impl)));
     // la URL prefirmada de R2 caduca a los 1800 s
     expect(error.message).toContain('403');
     expect(error.hint).toContain('media hora');

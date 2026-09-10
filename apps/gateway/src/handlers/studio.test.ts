@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import type { Job } from '@luxy/shared';
 import { hashToken } from '../auth.js';
 import {
   handleStudioConversationUpdate,
@@ -72,7 +73,9 @@ function machine(id = TARGET_ID, httpProviders: string[] = ['deepseek']) {
   };
 }
 
-function completedJob(overrides: Record<string, unknown> = {}) {
+// se tipa como `Job` real para que un campo mal escrito o un valor fuera del
+// enum salte aqui y no en la lectura del handler
+function completedJob(overrides: Partial<Job> = {}): Job {
   return {
     id: '33333333-3333-4333-8333-333333333333',
     shortId: 'LUX-STUDIO',
@@ -643,7 +646,9 @@ describe('Luxy Studio API', () => {
     expect(context.repo.createJob).not.toHaveBeenCalled();
   });
 
-  it.each([
+  // la tupla se anota porque cada caso cambia un campo distinto: sin ella el
+  // parametro seria la union de los cuatro y no se podria consultar ninguno
+  it.each<[string, Record<string, unknown>, Record<string, unknown>]>([
     ['grupo', { comparisonGroupId: '99999999-9999-4999-8999-999999999999' }, {}],
     ['prompt', {}, { prompt: `${EVALUATION_PROMPT}\nalterado` }],
     ['maquina', {}, { targetMachineId: CREATOR_ID }],

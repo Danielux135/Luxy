@@ -126,12 +126,23 @@ Studio/Telegram → Cloudflare Worker → Supabase → (polling) → agente loca
 npm install
 npm run build        # tsc -b en todos los paquetes
 npm run lint         # eslint
-npm run typecheck    # tsc -b tsconfig.build.json
+npm run typecheck    # los paquetes Y las pruebas
 npm test             # vitest
 npm run check        # lint + typecheck + test + build
 npm run demo         # trabajo completo con mocks, sin consumir APIs
 npm run setup:machine
 ```
+
+`typecheck` son dos pasos: `tsc -b tsconfig.build.json` para el codigo que se
+publica, y `npm run typecheck:tests` para las **pruebas**, que van por un
+`tsconfig.tests.json` propio en cada paquete. Existe porque el tsconfig normal
+las excluye —emite a `dist` y una prueba no tiene por que acabar ahi— y vitest
+transpila sin comprobar tipos: entre las dos cosas, un archivo de prueba no veia
+nunca un comprobador. Se destapo con un literal anotado
+`const caps: ClaudeCapabilities = { ... }` al que le faltaban tres campos
+obligatorios desde hacia meses, y con una prueba que afirmaba un valor de enum
+que no existe. `apps/desktop` no tiene ese archivo: sus tres tsconfig ya
+incluian las pruebas.
 
 Para probar el Worker sin desplegar: `cd apps/gateway && npm run dry-run`.
 

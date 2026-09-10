@@ -1,5 +1,26 @@
 # Luxy — tarea activa
 
+## F19-TIPAR-PRUEBAS-001 — las pruebas entran en el typecheck
+
+Estado: **`done` y verificado — Claude, 2026-09-10.** `npm run check` exit 0.
+
+Un literal anotado de los tests llevaba meses sin listar tres campos
+obligatorios y nadie se enteraba: los tsconfig excluian las pruebas y vitest no
+comprueba tipos. Ahora hay un `tsconfig.tests.json` por paquete y
+`npm run typecheck` los ejecuta. Detalle en `CHANGELOG-WORK.md` (2026-09-10
+09:30).
+
+124 errores arreglados, ninguno en produccion, y **una sola afirmacion
+cambiada**: `response-matrix.test.ts` verificaba `final=aborted`, un valor que
+`STREAM_TRANSPORT_ENDS` no tiene y que produccion no escribe jamas.
+
+### Lo que falta, y es de Daniel
+
+Nada de esta tarea. Queda pendiente lo de antes: probar de verdad el selector de
+esfuerzo (`F18-ESFUERZO-001`) y volver a describir la imagen cuyo pie de foto
+se guardo cortado (`F16-DESCRIBIDOR-002`).
+
+
 ## F18-ESFUERZO-001 — elegir cuanto piensa el modelo
 
 Estado: **`done` en codigo, `pendiente de prueba real` — Claude, 2026-09-10.**

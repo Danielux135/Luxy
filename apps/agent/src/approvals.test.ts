@@ -7,7 +7,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, existsSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { agentConfigSchema } from '@luxy/shared';
+import { agentConfigSchema, type ProjectConfig } from '@luxy/shared';
 import {
   checkApprovalGates,
   executeApproval,
@@ -23,18 +23,23 @@ let worktreesDir: string;
 let worktree: string;
 let auditFile: string;
 
-const project = (overrides: Record<string, unknown> = {}) => ({
+// se tipa como ProjectConfig entero para que al ensancharse por el spread no
+// se pierda de vista un campo obligatorio nuevo del esquema.
+const project = (overrides: Partial<ProjectConfig> = {}): ProjectConfig => ({
   path: 'C:/proyecto',
   type: 'other' as const,
   testCommands: [],
   testTimeoutMs: 600_000,
+  // las comprobaciones en el host son una capacidad peligrosa: aqui se prueban
+  // las puertas de aprobacion, no eso, asi que va apagada como por defecto.
+  allowHostChecks: false,
   allowEdits: true,
   allowCommit: true,
   allowPush: false,
   ...overrides,
 });
 
-function config(projectOverrides: Record<string, unknown> = {}) {
+function config(projectOverrides: Partial<ProjectConfig> = {}) {
   return agentConfigSchema.parse({
     machineName: 'maquina',
     gatewayUrl: 'https://gateway.example',

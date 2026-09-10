@@ -8,6 +8,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { agentEventSchema, agentHostStatusSchema, agentConfigSchema } from '@luxy/shared';
+import type { z } from 'zod';
 import type { AgentConfig, AgentEvent } from '@luxy/shared';
 import { AgentHost, AgentNotConfiguredError } from './host.js';
 import { AgentLogger } from '../logger.js';
@@ -26,7 +27,12 @@ afterEach(() => {
   rmSync(temporal, { recursive: true, force: true });
 });
 
-function buildConfig(projects: AgentConfig['projects'] = {}): AgentConfig {
+// lo que se recibe es lo que ENTRA al esquema, no lo que sale: una prueba que
+// solo declara `path` y `allowEdits` deja que los demas campos los ponga el
+// propio esquema, que es justo lo que se quiere comprobar
+function buildConfig(
+  projects: z.input<typeof agentConfigSchema>['projects'] = {},
+): AgentConfig {
   return agentConfigSchema.parse({
     machineName: 'maquina-de-pruebas',
     // puerto 1 esta cerrado: el gateway nunca respondera

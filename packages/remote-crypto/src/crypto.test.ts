@@ -83,7 +83,7 @@ describe('firma', () => {
 
   it('una firma manipulada no verifica', () => {
     const firma = sign(yo.privateKey, 'luxy.auth.challenge.v1', ['reto']);
-    firma[0] ^= 0xff;
+    firma[0] = firma[0]! ^ 0xff;
     expect(verify(yo.publicKey, 'luxy.auth.challenge.v1', ['reto'], firma)).toBe(false);
   });
 

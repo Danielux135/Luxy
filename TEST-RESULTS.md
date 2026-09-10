@@ -1,5 +1,26 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-10 — F19-TIPAR-PRUEBAS-001
+
+`npm run check` exit 0, ya con el typecheck de pruebas dentro.
+
+```
+Test Files  145 passed (145)
+     Tests   2676 passed | 12 skipped (2688)
+```
+
+No hay pruebas nuevas: el trabajo era que las 2.676 que ya habia se comprueben
+tambien contra sus tipos. `npm run typecheck:tests` pasa de **124 errores a 0**.
+
+Lo que encontro, que es la justificacion de la tarea entera:
+
+- un literal `const antigua: ClaudeCapabilities = { ... }` sin tres campos
+  obligatorios, con la anotacion dando una seguridad falsa;
+- **una prueba que verificaba un valor inexistente**: `transportEnd: 'aborted'`
+  y `expect(...).toContain('final=aborted')`. Produccion no escribe eso nunca
+  —un aborto sale como `read_error`— asi que ese `expect` habria seguido en
+  verde con el diagnostico roto.
+
 ### 2026-09-10 — F18-ESFUERZO-001
 
 `npm run check` exit 0.

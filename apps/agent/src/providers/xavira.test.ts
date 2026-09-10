@@ -29,7 +29,7 @@ function fakeFetch(responses: { status: number; body?: unknown; headers?: Record
   let index = 0;
 
   const impl = (async (url: string | URL, init?: RequestInit) => {
-    const headers = new Headers(init?.headers as HeadersInit | undefined);
+    const headers = new Headers(init?.headers);
     calls.push({
       url: url.toString(),
       method: init?.method ?? 'GET',
@@ -56,11 +56,25 @@ const options = (impl: typeof fetch) => ({
   sleep: async () => undefined,
 });
 
+/**
+ * el fallo que espera la prueba, ya estrechado a `XaviraError`.
+ *
+ * Encadenar el `.catch` a la propia llamada unia el camino de exito en la
+ * union, y entonces `code`, `hint` o `requestId` —lo unico que se comprueba
+ * aqui— dejaban de existir para el compilador aunque nunca se llegue a ese
+ * camino.
+ */
+async function rejection(promise: Promise<unknown>): Promise<XaviraError> {
+  return (await promise.catch((e: unknown) => e)) as XaviraError;
+}
+
 describe('personajes', () => {
   it('crea uno y devuelve su identificador', async () => {
     const { impl, calls } = fakeFetch([{ status: 201, body: { character_id: 'per-1' } }]);
     const created = await createCharacter(
-      { modelId: 'realistic-sharp-v1', traits: { pelo: 'largo' } },
+      // el rasgo va con la clave del enum cerrado del proveedor: escribirlo en
+      // castellano lo rechazaria la API, aunque aqui el transporte sea falso
+      { modelId: 'realistic-sharp-v1', traits: { hairLength: 'long' } },
       options(impl),
     );
 
@@ -393,9 +407,7 @@ describe('errores', () => {
       },
     ]);
 
-    const error = await generateImage({ characterId: 'c', prompt: 'p' }, options(impl)).catch(
-      (e: unknown) => e as XaviraError,
-    );
+    const error = await rejection(generateImage({ characterId: 'c', prompt: 'p' }, options(impl)));
 
     expect(error.code).toBe('character_not_found');
     expect(error.status).toBe(404);
@@ -420,9 +432,7 @@ describe('errores', () => {
       },
     ]);
 
-    const error = await generateImage({ characterId: 'c', prompt: 'p' }, options(impl)).catch(
-      (e: unknown) => e as XaviraError,
-    );
+    const error = await rejection(generateImage({ characterId: 'c', prompt: 'p' }, options(impl)));
 
     expect(error.requestId).toBe('01M1H6ZJWYMBF771AWEBERJMK5');
     expect(error.message).toContain('01M1H6ZJWYMBF771AWEBERJMK5');
@@ -442,9 +452,7 @@ describe('errores', () => {
       },
     ]);
 
-    const error = await generateImage({ characterId: 'c', prompt: 'p' }, options(impl)).catch(
-      (e: unknown) => e as XaviraError,
-    );
+    const error = await rejection(generateImage({ characterId: 'c', prompt: 'p' }, options(impl)));
 
     expect(error.message).toContain('category=minors');
     expect(error.hint).toContain('credito');
@@ -456,9 +464,7 @@ describe('errores', () => {
       { status: 418, body: { error: { code: 'codigo_futuro', message: 'algo nuevo' } } },
     ]);
 
-    const error = await generateImage({ characterId: 'c', prompt: 'p' }, options(impl)).catch(
-      (e: unknown) => e as XaviraError,
-    );
+    const error = await rejection(generateImage({ characterId: 'c', prompt: 'p' }, options(impl)));
 
     expect(error.message).toContain('418');
     expect(error.message).toContain('algo nuevo');
@@ -469,9 +475,7 @@ describe('errores', () => {
     const impl = (async () =>
       new Response('<html>502 Bad Gateway</html>', { status: 502 })) as unknown as typeof fetch;
 
-    const error = await generateImage({ characterId: 'c', prompt: 'p' }, options(impl)).catch(
-      (e: unknown) => e as XaviraError,
-    );
+    const error = await rejection(generateImage({ characterId: 'c', prompt: 'p' }, options(impl)));
 
     expect(error.status).toBe(502);
     expect(error.code).toBeNull();
@@ -517,9 +521,7 @@ describe('errores', () => {
     const { impl } = fakeFetch([
       { status: 400, body: { error: { message: `clave ${KEY} invalida` } } },
     ]);
-    const error = await generateImage({ characterId: 'c', prompt: 'p' }, options(impl)).catch(
-      (e: unknown) => e as XaviraError,
-    );
+    const error = await rejection(generateImage({ characterId: 'c', prompt: 'p' }, options(impl)));
     expect(error.message).not.toContain(KEY);
   });
 });

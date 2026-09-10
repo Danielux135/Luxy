@@ -23,6 +23,8 @@ function evaluationJob(): ClaimedJob {
     origin: 'studio',
     provider: 'codex',
     model: 'gpt-evaluado',
+    // una evaluacion de Studio no lleva adjunto
+    attachment: null,
     projectAlias: 'demo',
     prompt: '[LUXY_EVALUATION]\nid=speed-exact-v1\nversion=1\n\n[INSTRUCCIONES]\nLISTO',
     telegramChatId: null,
@@ -56,6 +58,9 @@ describe('trabajo de evaluacion', () => {
           usage: {
             provider: 'codex',
             model: 'gpt-evaluado',
+            // el proveedor simulado no sabe a que trabajo pertenece: quien
+            // rellena el jobId es el ejecutor, no el proveedor
+            jobId: null,
             inputTokens: 20,
             outputTokens: 1,
             estimatedCost: 0,

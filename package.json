@@ -16,7 +16,7 @@
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "typecheck": "tsc -b tsconfig.build.json",
+    "typecheck": "tsc -b tsconfig.build.json && npm run typecheck:tests",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:live": "vitest run apps/agent/src/providers/live.test.ts",
@@ -28,7 +28,8 @@
     "desktop:package": "npm run package --workspace @luxy/desktop",
     "desktop:test": "vitest run apps/desktop",
     "demo": "npm run demo --workspace @luxy/agent",
-    "check": "npm run lint && npm run typecheck && npm run test && npm run build"
+    "check": "npm run lint && npm run typecheck && npm run test && npm run build",
+    "typecheck:tests": "tsc -p packages/shared/tsconfig.tests.json && tsc -p packages/remote-protocol/tsconfig.tests.json && tsc -p packages/remote-crypto/tsconfig.tests.json && tsc -p packages/vault-crypto/tsconfig.tests.json && tsc -p apps/gateway/tsconfig.tests.json && tsc -p apps/agent/tsconfig.tests.json"
   },
   "devDependencies": {
     "@eslint/js": "^9.17.0",

@@ -106,7 +106,7 @@ describe('sobre cifrado', () => {
     const k = key();
     const envelope = await sealText(k, 'vault.test', 'contenido integro');
     const bytes = fromBase64Url(envelope.ciphertext);
-    bytes[0] ^= 0x01;
+    bytes[0] = bytes[0]! ^ 0x01;
 
     await expect(
       openText(k, 'vault.test', { ...envelope, ciphertext: toBase64Url(bytes) }),
@@ -117,7 +117,7 @@ describe('sobre cifrado', () => {
     const k = key();
     const envelope = await sealText(k, 'vault.test', 'contenido integro');
     const nonce = fromBase64Url(envelope.nonce);
-    nonce[0] ^= 0x01;
+    nonce[0] = nonce[0]! ^ 0x01;
 
     await expect(
       openText(k, 'vault.test', { ...envelope, nonce: toBase64Url(nonce) }),

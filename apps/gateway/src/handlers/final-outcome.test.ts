@@ -55,14 +55,18 @@ async function run(
   extras: Record<string, unknown> = {},
   metadata: Record<string, unknown> = {},
 ) {
+  // los parametros se declaran aunque no se usen: sin ellos `mock.calls` seria
+  // una lista de tuplas vacias y no se podria inspeccionar lo que se guardo
   const repo = {
     getJobById: vi.fn(async () => ({ ...job(status), metadata })),
-    updateJob: vi.fn(async () => job('completed')),
+    updateJob: vi.fn(async (_jobId: string, _values: Record<string, unknown>) => job('completed')),
     recordProviderUsage: vi.fn(async () => undefined),
   };
   const telegram = {
-    editMessageText: vi.fn(async () => undefined),
-    sendMessage: vi.fn(async () => undefined),
+    editMessageText: vi.fn(
+      async (_chatId: number, _messageId: number, _text: string) => undefined,
+    ),
+    sendMessage: vi.fn(async (_chatId: number, _text: string) => undefined),
     sendMedia: vi.fn(async () => undefined),
   };
   const deps = {
@@ -382,12 +386,17 @@ describe('resultado final idempotente', () => {
     const respuesta = 'x'.repeat(20_000);
     const repo = {
       getJobById: vi.fn(async () => ({ ...job('running'), telegramChatId: 12345 })),
-      updateJob: vi.fn(async () => job('completed')),
+      // ver la nota de `run`: los parametros existen para poder leer `mock.calls`
+      updateJob: vi.fn(async (_jobId: string, _values: Record<string, unknown>) =>
+        job('completed'),
+      ),
       recordProviderUsage: vi.fn(async () => undefined),
     };
     const telegram = {
-      editMessageText: vi.fn(async () => undefined),
-      sendMessage: vi.fn(async () => undefined),
+      editMessageText: vi.fn(
+        async (_chatId: number, _messageId: number, _text: string) => undefined,
+      ),
+      sendMessage: vi.fn(async (_chatId: number, _text: string) => undefined),
       sendMedia: vi.fn(async () => undefined),
     };
     const deps = {

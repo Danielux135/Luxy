@@ -303,7 +303,9 @@ describe('runBatchJob', () => {
   /** modelo que devuelve un registro por cada uno de entrada */
   function modeloBueno(): BatchModel {
     return {
-      process: vi.fn(async (rows) =>
+      // `vi.fn` no hereda el tipo de `BatchModel['process']`, asi que los
+      // registros se anotan aqui o llegan como `any`
+      process: vi.fn(async (rows: Record<string, unknown>[]) =>
         JSON.stringify({
           results: rows.map((fila) => ({ id: fila.id, nombre: String(fila.nombre).toUpperCase() })),
         }),
@@ -499,7 +501,7 @@ describe('runBatchJob', () => {
   it('respeta la cancelacion', async () => {
     const abort = new AbortController();
     const model: BatchModel = {
-      process: vi.fn(async (rows) => {
+      process: vi.fn(async (rows: Record<string, unknown>[]) => {
         abort.abort();
         return JSON.stringify({ results: rows.map((f) => ({ id: f.id })) });
       }),

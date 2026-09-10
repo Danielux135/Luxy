@@ -255,7 +255,11 @@ const CASOS_TRANSPORTE: CasoTransporte[] = [
     numero: 8,
     nombre: 'AbortError por timeout con texto parcial',
     cuerpo: () => flujo(delta('lo que dio tiempo a escribir')),
-    extra: { transportEnd: 'aborted', abortedBy: 'request_timeout' },
+    // un aborto sale del transporte como `read_error`: la lectura del cuerpo
+    // lanza (`sseData`). Poner aqui la señal real es lo que da valor a la fila,
+    // porque obliga a que `abortedBy` mande sobre ella; con una señal inventada
+    // la prueba no distinguia `timed_out` de `interrupted`.
+    extra: { transportEnd: 'read_error', abortedBy: 'request_timeout' },
     fallo: true,
     esperado: 'timed_out',
     conservaTexto: true,
@@ -318,6 +322,8 @@ function trabajoDeConversacion(): ClaimedJob {
     telegramChatId: null,
     telegramUserId: null,
     leaseExpiresAt: new Date(Date.now() + 120_000).toISOString(),
+    // la fila es un turno de conversacion de texto: no viene ninguna imagen
+    attachment: null,
     metadata: { studioMode: 'conversation' },
   };
 }
@@ -355,7 +361,19 @@ describe('matriz de finales de respuesta — caso 10: cancelacion manual', () =>
               chunks: 3,
               bytes: 512,
               durationMs: 1200,
-              transportEnd: 'aborted' as const,
+              // 'aborted' NO EXISTE, y esta prueba lo afirmo durante meses.
+              //
+              // Lo destapo meter las pruebas en el typecheck: `STREAM_TRANSPORT_ENDS`
+              // no tiene ese valor y ningun sitio de produccion lo produce. El
+              // comentario del propio enum lo dice: un aborto sale como
+              // `read_error` —«la lectura del cuerpo lanzo: socket caido, aborto o
+              // error de red»— y es lo que pone `http-provider.ts` en su catch.
+              //
+              // Asi que el punto 3 de mas abajo comprobaba una cadena que el
+              // sistema real nunca escribe: habria seguido en verde con el
+              // diagnostico roto. Se cambia al valor de verdad, que es lo unico
+              // que hace que esa afirmacion signifique algo.
+              transportEnd: 'read_error' as const,
               finishReason: null,
               finalUsageReceived: false,
               abortedBy: 'user' as const,
@@ -410,7 +428,7 @@ describe('matriz de finales de respuesta — caso 10: cancelacion manual', () =>
         (evento) => evento.type === 'log' && evento.message.includes('cancelled'),
       );
       expect(diagnostico).toBeDefined();
-      expect(diagnostico?.message).toContain('final=aborted');
+      expect(diagnostico?.message).toContain('final=read_error');
 
       // 4. una conversacion cancelada no ejecuta pruebas ni toca el proyecto
       expect(emitido).not.toContain('npm test');
@@ -436,7 +454,10 @@ describe('matriz de finales de respuesta — caso 10: cancelacion manual', () =>
           texto: 'parcial',
           finishReason: 'length',
           finalUsageReceived: false,
-          reporte: { transportEnd: 'aborted', chunks: 1, bytes: 10, durationMs: 5 },
+          // `read_error` es como llega un aborto desde `sseData`; el caso sigue
+          // siendo el mismo, porque lo que se fija es que la cancelacion gane
+          // pase lo que pase en el transporte.
+          reporte: { transportEnd: 'read_error', chunks: 1, bytes: 10, durationMs: 5 },
         },
         { abortedBy: 'user' },
       ),

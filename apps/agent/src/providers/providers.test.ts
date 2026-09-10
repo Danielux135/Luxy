@@ -32,6 +32,7 @@ import {
   RetryError,
   SOFT_TERMINAL_GRACE_MS,
   TERMINAL_GRACE_MS,
+  type ProviderRunRequest,
 } from '@luxy/shared';
 import { helpHasFlag, extractVersion } from '../detect.js';
 
@@ -263,6 +264,11 @@ describe('buildClaudeArgs', () => {
       verbose: false,
       disallowedTools: false,
       maxTurns: false,
+      // una version vieja tampoco trae los flags posteriores: si alguno se
+      // colara aqui como true, el CLI abortaria en vez de ignorarlo.
+      inputFormat: false,
+      restricted: false,
+      effort: false,
     };
     const args = buildClaudeArgs({ prompt: 'algo', model: 'opus', capabilities: antigua });
     expect(args).not.toContain('--output-format');
@@ -409,6 +415,9 @@ describe('buildCodexArgs', () => {
       model: false,
       outputLastMessage: false,
       skipGitRepoCheck: false,
+      // sin `-c` no hay forma de fijar el esfuerzo de razonamiento, que es
+      // justo lo que se espera de una version anterior a esa opcion.
+      config: false,
     };
     const args = buildCodexArgs({ workingDirectory: 'C:/wt', capabilities: antigua });
     expect(args).toEqual(['exec', '--cd', 'C:/wt', '-']);
@@ -937,7 +946,9 @@ describe('HttpApiProvider: que modelo dice que uso', () => {
 describe('HttpApiProvider: diagnostico del final de la respuesta', () => {
   const config = { ...EXAMPLE_HTTP_PROVIDERS[0]!, enabled: true, supportsStreaming: true };
 
-  function peticion(overrides: Record<string, unknown> = {}) {
+  // tipado con la peticion real: sin ello un `onEvent` sobrescrito aqui pierde
+  // el tipo de su evento y se cuela cualquier cosa en los asertos.
+  function peticion(overrides: Partial<ProviderRunRequest> = {}): ProviderRunRequest {
     return {
       prompt: 'genera una web completa',
       workingDirectory: 'C:/wt',

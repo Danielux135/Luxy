@@ -2406,3 +2406,24 @@ privado de otro programa y sin formato documentado: vale para comprobar a mano,
 no para que Luxy lo lea. Hay una prueba que fija `gpt-6-astra` en la lista, para
 que cambiarla por la salida de `codex debug models` falle en vez de borrar el
 modelo nuevo en silencio.
+
+### Donde NO llega el esfuerzo, a sabiendas
+
+El mapa previo encontro dos caminos que se quedan fuera. No es olvido y por eso
+se escriben: quien los necesite sabra que estan sin hacer, en vez de descubrir
+que el esfuerzo «a veces no se aplica».
+
+**El contrato del gateway.** `studioJobCreateRequestSchema` y `studioJobSchema`
+(`packages/shared/src/schemas.ts`) no llevan esfuerzo, ni de ida ni de vuelta.
+Un trabajo lanzado desde Telegram o desde la pantalla de Trabajos usa el que
+traiga el proveedor. Meterlo ahi es otra funcion —columna nueva, migracion, y el
+camino de vuelta para poder ver con que esfuerzo se ejecuto un trabajo ya
+terminado—, no un remate de esta.
+
+**Los lotes.** `providerBatchModel` (`apps/agent/src/batch/model.ts`) es el
+segundo y ultimo sitio del agente que construye un `ProviderRunRequest`, y no
+recibe esfuerzo. Es el que mas lo notaria: un lote hace N llamadas y el coste se
+multiplica. No se cableo porque hoy nadie lo elegiria y seria plomeria muerta,
+pero deja al lote como el unico camino sin esfuerzo — que es exactamente la
+forma de la asimetria que ya costo detectar con el modelo. Si algun dia el
+catalogador se elige a mano, empezar por ahi.

@@ -91,8 +91,9 @@ describe('GET /api/jobs/:jobId/attachment', () => {
     const { response, deps: d } = await call(TOKEN_B);
     expect(response.status).toBe(403);
     // y sobre todo: nunca se llego a pedir el archivo a Telegram
-    expect((d.telegram as { downloadFile: ReturnType<typeof vi.fn> }).downloadFile)
-      .not.toHaveBeenCalled();
+    // `d` esta tipado como las dependencias reales, asi que el metodo se ve
+    // como el de TelegramClient: vi.mocked lo devuelve como el doble que es
+    expect(vi.mocked(d.telegram.downloadFile)).not.toHaveBeenCalled();
   });
 
   it('sin token no se sirve nada', async () => {

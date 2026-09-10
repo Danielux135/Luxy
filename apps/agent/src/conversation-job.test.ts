@@ -24,6 +24,8 @@ function conversationJob(): ClaimedJob {
     origin: 'studio',
     provider: 'codex',
     model: null,
+    // una conversacion de Studio no lleva adjunto
+    attachment: null,
     projectAlias: 'demo',
     prompt: 'Usuario:\nExplica este proyecto\n\nAsistente:',
     telegramChatId: null,
@@ -75,6 +77,9 @@ describe('trabajo de conversacion', () => {
           usage: {
             provider: 'codex',
             model: 'codex-modelo-efectivo',
+            // el proveedor simulado no sabe a que trabajo pertenece: quien
+            // rellena el jobId es el ejecutor, no el proveedor
+            jobId: null,
             inputTokens: 10,
             outputTokens: 20,
             estimatedCost: 0,

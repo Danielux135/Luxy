@@ -1,5 +1,66 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-09-10 09:30 — Claude — F19-TIPAR-PRUEBAS-001
+
+Origen: al añadir el campo `effort` a `ClaudeCapabilities` se vio que un literal
+anotado de los tests —`const antigua: ClaudeCapabilities = { ... }`— llevaba
+meses sin listar tres campos obligatorios, y nadie se enteraba.
+
+**El diagnostico.** Cada `tsconfig.json` de paquete excluye `src/**/*.test.ts`
+y vitest transpila sin typechequear. Entre las dos cosas, un archivo de prueba
+no veia NUNCA un comprobador de tipos: la anotacion `: ClaudeCapabilities` daba
+una seguridad que no existia.
+
+**Se eligio la opcion A —meterlos en el typecheck— y no por gusto: `apps/desktop`
+YA lo hacia.** Sus tres tsconfig incluyen `src/**/*.ts` sin excluir pruebas y
+estan en `tsconfig.build.json`. Los demas paquetes eran la excepcion, no al
+reves.
+
+**El coste, medido antes de decidir**, no estimado: 124 errores, **ninguno en
+codigo de produccion**. `apps/agent` 108, `apps/gateway` 11,
+`packages/vault-crypto` 4, `packages/remote-crypto` 1, y `packages/shared` y
+`remote-protocol` **0** — el paquete con mas pruebas ya estaba limpio. Y los 108
+no eran 108 problemas: 63 salian de un archivo con dos causas raiz.
+
+Correccion de metodo por el camino: la primera medicion daba errores en archivos
+de PRODUCCION de `vault-crypto`. Era artefacto propio —el tsconfig de medida
+extendia la base en vez del del paquete, cambiando `lib` y `types`—. Los
+`tsconfig.tests.json` definitivos extienden el del paquete, para comprobar con
+su misma configuracion.
+
+**Patrones arreglados**, todos mecanicos:
+
+- helper que se ensancha al hacer spread: `request(overrides: Record<string, unknown>)`
+  → `request(overrides: Partial<HordeImageRequest>): HordeImageRequest`;
+- `.catch((e: unknown) => e as X)` que deja una union: helper `rejection()`
+  tipado, mismo comportamiento en ejecucion;
+- literales a los que les faltaban campos obligatorios;
+- `HeadersInit` inexistente en esta config: el cast sobraba, `init?.headers` ya
+  es lo que espera `new Headers`.
+
+**Y un hallazgo que valia mas que el resto junto.** `response-matrix.test.ts`
+montaba `transportEnd: 'aborted'` y afirmaba `final=aborted`. **Ese valor no
+existe**: `STREAM_TRANSPORT_ENDS` no lo tiene y ningun sitio de produccion lo
+produce —el comentario del propio enum dice que un aborto sale como
+`read_error`—. Esa prueba llevaba meses verificando una cadena que el sistema
+real no escribe jamas: habria seguido en verde con el diagnostico roto. Es
+exactamente lo que un typecheck de pruebas sirve para encontrar.
+
+El agente que lo encontro **paro y lo reporto como bloqueo en vez de tocarlo**,
+que era la instruccion. Cambiar una afirmacion es decision de quien puede
+juzgarla; se cambio a `read_error` con el porque escrito al lado.
+
+**Cableado:** `npm run typecheck` pasa a ser
+`tsc -b tsconfig.build.json && npm run typecheck:tests`. El orden importa: el
+primero deja frescos los `.d.ts` de shared, que es lo que resuelven esas
+configuraciones por `node_modules`. No se quita el `exclude` del tsconfig normal
+porque ese EMITE a `dist`.
+
+Auditoria propia del diff completo, no solo la de los agentes: **una sola
+afirmacion cambiada en todo el repositorio**, la del valor ficticio. Cero `any`,
+cero `@ts-ignore`, cero pruebas saltadas, cero archivos de produccion tocados.
+`npm run check` exit 0, 2.676 pasadas.
+
 ### 2026-09-10 08:55 — Claude — F18-ESFUERZO-001
 
 Origen: Daniel ve que Codex sale por defecto a xHigh y dice «no quiero

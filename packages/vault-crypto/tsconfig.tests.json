@@ -1,0 +1,33 @@
+// las PRUEBAS de este paquete, comprobadas contra sus tipos.
+//
+// Por que existe: el `tsconfig.json` de al lado excluye `src/**/*.test.ts`, y
+// vitest transpila sin typechequear. Entre las dos cosas, un archivo de prueba
+// nunca veia un comprobador de tipos. Eso no es solo cosmetico: habia literales
+// anotados —`const caps: ClaudeCapabilities = { ... }`— a los que les faltaban
+// campos obligatorios desde hacia meses. La anotacion daba una seguridad que no
+// existia, y anadir un campo obligatorio a una interfaz no rompia nada.
+//
+// No se arregla quitando el `exclude` del tsconfig normal: ese EMITE a `dist`,
+// y las pruebas no tienen por que acabar en el paquete publicado. Por eso este
+// archivo aparte, con `noEmit`.
+//
+// Hereda del tsconfig del paquete para comprobar con SU misma configuracion:
+// extender la base directamente cambiaba `lib` y `types`, y hacia aparecer
+// errores en archivos de produccion que no existen de verdad.
+//
+// `apps/desktop` no tiene uno: sus tres tsconfig ya incluyen las pruebas.
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    // sin `composite` no puede ser referenciado desde `tsconfig.build.json`, y
+    // es lo que se quiere: se ejecuta aparte, con su propio `tsc -p`
+    "composite": false,
+    "declaration": false,
+    "declarationMap": false,
+    "sourceMap": false
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": [],
+  "references": []
+}

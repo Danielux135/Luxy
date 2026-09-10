@@ -6,7 +6,7 @@
 //
 // La invariante que se protege aqui es que una instruccion llegue igual venga
 // en el texto o en el pie de un archivo.
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, type MockInstance } from 'vitest';
 import { handleWebhook, type WebhookDeps } from './webhook.js';
 import * as commands from './commands.js';
 
@@ -57,7 +57,9 @@ function peticion(message: Record<string, unknown>): Request {
   });
 }
 
-let handle: ReturnType<typeof vi.spyOn>;
+// se ata a la firma real del comando espiado: `ReturnType<typeof vi.spyOn>`
+// devuelve el doble generico y perderia los argumentos que aqui se comprueban
+let handle: MockInstance<typeof commands.handleTextMessage>;
 
 beforeEach(() => {
   handle = vi

@@ -71,7 +71,7 @@ Dónde tocar según el cambio:
 ```powershell
 npm install
 npm run lint
-npm run typecheck
+npm run typecheck # los paquetes y las pruebas (ver abajo)
 npm test
 npm run build
 npm run check     # los cuatro anteriores
@@ -160,6 +160,14 @@ npm run build
 ```
 
 Los cuatro deben pasar.
+
+`typecheck` comprueba **tambien las pruebas**, por un `tsconfig.tests.json` en
+cada paquete. El tsconfig normal las excluye porque emite a `dist`, y vitest
+transpila sin comprobar tipos: entre las dos cosas, un archivo de prueba no veia
+nunca un comprobador de tipos, y eso dejo pasar durante meses un literal anotado
+al que le faltaban campos obligatorios y una prueba que afirmaba un valor de
+enum inexistente. `apps/desktop` no lleva ese archivo: sus tres tsconfig ya
+incluian las pruebas.
 
 ## Política de worktrees
 

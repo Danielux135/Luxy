@@ -751,6 +751,11 @@ describe('buildProviderPrompt', () => {
     id: 'id',
     shortId: 'LUX-1',
     provider: 'claude',
+    // el caso base es una tarea de Telegram sin modelo forzado ni adjunto: son
+    // los valores que el esquema pone por defecto al reclamar un trabajo
+    model: null,
+    origin: 'telegram',
+    attachment: null,
     projectAlias: 'demo',
     prompt: 'Corrige el menu',
     telegramChatId: 1,

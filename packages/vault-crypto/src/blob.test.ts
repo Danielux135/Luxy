@@ -50,14 +50,14 @@ describe('sobre binario', () => {
   it('falla si se altera un solo byte', async () => {
     const k = key();
     const blob = await sealBlob(k, 'vault.media', randomBytes(1024));
-    blob[BLOB_HEADER_BYTES + 10] ^= 0x01;
+    blob[BLOB_HEADER_BYTES + 10] = blob[BLOB_HEADER_BYTES + 10]! ^ 0x01;
     await expect(openBlob(k, 'vault.media', blob)).rejects.toThrow('no se pudo descifrar');
   });
 
   it('falla si se altera el nonce', async () => {
     const k = key();
     const blob = await sealBlob(k, 'vault.media', randomBytes(1024));
-    blob[3] ^= 0x01;
+    blob[3] = blob[3]! ^ 0x01;
     await expect(openBlob(k, 'vault.media', blob)).rejects.toThrow(VaultCryptoError);
   });
 

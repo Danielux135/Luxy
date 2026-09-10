@@ -79,7 +79,9 @@ describe('buildBatchPrompt', () => {
 
 describe('providerBatchModel', () => {
   function proveedor(result: Partial<Awaited<ReturnType<ProviderExecution['run']>>>) {
-    const run = vi.fn(async () => ({
+    // el parametro se declara aunque no se use: sin el, `run.mock.calls` queda
+    // tipado como una tupla vacia y no se puede inspeccionar la peticion
+    const run = vi.fn(async (_request: ProviderRunRequest) => ({
       ok: true,
       finalText: '{"results":[]}',
       sessionId: null,
