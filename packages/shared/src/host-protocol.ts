@@ -43,6 +43,18 @@ const localTurnImageSchema = z.object({
     .min(1)
     .max(MAX_LOCAL_TURN_IMAGE_BASE64)
     .regex(/^[A-Za-z0-9+/]+={0,2}$/, 'el base64 debe ir sin el prefijo data:'),
+  /**
+   * la ruta del archivo, cuando existe sin cifrar en el disco.
+   *
+   * Solo la pone el banco de pruebas de vision, donde el usuario elige un
+   * archivo suyo en un dialogo: ese archivo ya estaba ahi en claro. Para el
+   * contenido de la boveda NO se manda, porque no hay ninguna copia en claro
+   * que apuntar y crearla romperia la boveda.
+   *
+   * Sirve para Codex, que ve imagenes pero solo por ruta
+   * (`codex exec -i, --image <FILE>...`).
+   */
+  path: z.string().min(1).max(4096).optional(),
 });
 
 /** mensajes del proceso principal hacia el agente */

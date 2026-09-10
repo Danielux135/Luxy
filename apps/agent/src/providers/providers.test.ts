@@ -94,6 +94,7 @@ Options:
       --json                     Print events to stdout as JSONL
   -o, --output-last-message <FILE>
   -c, --config <key=value>       Override a configuration value
+  -i, --image <FILE>...          Optional image(s) to attach to the initial prompt
 `;
 
 // ayuda de una version de codex SIN `-c`: el esfuerzo no se puede pedir ahi
@@ -337,7 +338,14 @@ describe('parseCodexCapabilities', () => {
       outputLastMessage: true,
       skipGitRepoCheck: true,
       config: true,
+      image: true,
     });
+  });
+
+  // Codex VE imagenes. Luxy dijo lo contrario durante un tiempo y era falso
+  it('detecta -i/--image: Codex si ve imagenes', () => {
+    expect(parseCodexCapabilities(CODEX_HELP).image).toBe(true);
+    expect(parseCodexCapabilities(CODEX_HELP_SIN_CONFIG).image).toBe(false);
   });
 
   // `-c` es la UNICA via para el esfuerzo: codex no tiene flag propio
@@ -370,6 +378,23 @@ describe('buildCodexArgs', () => {
   it('sin elegir esfuerzo no se toca su configuracion', () => {
     const args = buildCodexArgs({ workingDirectory: 'C:/wt', capabilities: caps });
     expect(args.join(' ')).not.toContain('model_reasoning_effort');
+  });
+
+  it('adjunta cada imagen por su ruta, con una -i cada una', () => {
+    const args = buildCodexArgs({
+      workingDirectory: 'C:/wt',
+      imagePaths: ['C:/fotos/una.webp', 'C:/fotos/otra.png'],
+      capabilities: caps,
+    });
+    expect(args.filter((a) => a === '-i')).toHaveLength(2);
+    expect(args[args.indexOf('-i') + 1]).toBe('C:/fotos/una.webp');
+    // el prompt sigue yendo por stdin: la imagen no lo mueve de sitio
+    expect(args[args.length - 1]).toBe('-');
+  });
+
+  it('sin rutas no adjunta nada', () => {
+    const args = buildCodexArgs({ workingDirectory: 'C:/wt', imagePaths: [], capabilities: caps });
+    expect(args).not.toContain('-i');
   });
 
   it('usa el subcomando exec con json y directorio de trabajo', () => {
@@ -418,6 +443,8 @@ describe('buildCodexArgs', () => {
       // sin `-c` no hay forma de fijar el esfuerzo de razonamiento, que es
       // justo lo que se espera de una version anterior a esa opcion.
       config: false,
+      // ni `-i`, asi que esa version no puede ver imagenes. Las de ahora si
+      image: false,
     };
     const args = buildCodexArgs({ workingDirectory: 'C:/wt', capabilities: antigua });
     expect(args).toEqual(['exec', '--cd', 'C:/wt', '-']);

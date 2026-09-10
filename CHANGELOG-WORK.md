@@ -1,5 +1,46 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-09-10 11:00 — Claude — F20-CODEX-IMAGENES-001
+
+Origen: Daniel prueba el banco de vision con un modelo de ChatGPT y recibe
+«Codex no puede recibir imagenes: su transporte es un CLI local y solo acepta
+texto». Su respuesta: «Codex es mas que capaz de ver imagenes, pago suscripcion
+5x de ChatGPT». Tenia razon y el mensaje era FALSO.
+
+`codex exec --help` declara `-i, --image <FILE>...`. Y el repositorio ya lo
+sabia: `claude.ts` tiene un comentario que menciona ese mismo flag para
+justificar por que la imagen va por stdin. El dato estaba a diez lineas del
+codigo que decia lo contrario.
+
+Hecho (`D-083`): separar las dos preguntas que `acceptsImages` mezclaba.
+
+- `acceptsImages` — «me das los bytes y los mando»: Claude Code y HTTP;
+- `acceptsImagePaths` — «dame una ruta y la leo yo»: Codex.
+
+De ahi sale que valga en un sitio y no en otro, y esa es la parte que importa:
+
+- **el banco de vision SI**. El archivo lo elige el usuario en un dialogo y ya
+  estaba en su disco sin cifrar, asi que se le pasa la ruta junto a los bytes;
+- **la boveda NO**. Una imagen privada solo existe descifrada en memoria, y
+  escribir una copia en claro para que Codex la abriera romperia la boveda. El
+  mensaje dice ahora CUAL de los dos casos es, porque se arreglan distinto.
+
+La capacidad se detecta del `--help`, como todo. El fixture de capacidades de
+las pruebas se habia quedado incompleto y **lo caza el typecheck de pruebas que
+se monto esta misma manana** — la primera vez que sirve, y sirvio.
+
+**De la misma tanda, dos cosas que NO son fallos de Luxy:**
+
+- Sonnet se nego a describir una imagen desnuda. Luxy lo clasifico bien: no la
+  guardo como pie de foto —que seria lo grave— y dijo que repetir no lo arregla.
+  Es el modelo decidiendo, y para eso existe el banco: saber quien hara el
+  trabajo antes de gastar llamadas sobre contenido propio;
+- Opus la describio entera **con esfuerzo `low`**, y esa es la primera
+  verificacion REAL del selector: ~1.700 caracteres con encuadre, madera,
+  tirador, luz, paleta, complexion, pelo, ojos, expresion y cuerpo. Dos
+  conclusiones: `low` basta para describir, y con el tope viejo de 1.900 esa
+  descripcion habria entrado por los pelos.
+
 ### 2026-09-10 09:50 — Claude — F18-ESFUERZO-002
 
 Origen, y es de Daniel: «no has puesto el esfuerzo del razonamiento en

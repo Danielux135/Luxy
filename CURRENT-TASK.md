@@ -1,5 +1,34 @@
 # Luxy — tarea activa
 
+## F20-CODEX-IMAGENES-001 — Codex si ve imagenes
+
+Estado: **`done` en codigo, `pendiente de prueba real` — Claude, 2026-09-10.**
+`npm run check` exit 0, 2.687 pasadas.
+
+Luxy decia que Codex «solo acepta texto» y era falso: `codex exec --help`
+declara `-i, --image <FILE>...`. Detalle en `CHANGELOG-WORK.md` (2026-09-10
+11:00) y `D-083`.
+
+Lo que Codex no acepta son BYTES, solo rutas. De ahi que valga en el banco de
+vision —el archivo lo elige el usuario y ya esta en claro en su disco— y no en
+la boveda, donde la imagen solo existe descifrada en memoria.
+
+### Lo que falta, y es de Daniel
+
+1. **Probar Codex en el banco de vision.** Es lo unico que confirma que el
+   `-i` funciona de verdad contra su CLI: ninguna prueba lanza un proceso.
+2. Si falla, mirar `%LOCALAPPDATA%Luxylogsluxy.log`: los argumentos
+   construidos salen ahi.
+
+### De la tanda anterior, ya verificado por el
+
+`F18-ESFUERZO` esta **probado de verdad**: Opus describio una imagen entera con
+esfuerzo `low` —unos 1.700 caracteres, con encuadre, luz, paleta, complexion,
+pelo, ojos y cuerpo—. `low` basta para describir. Y Sonnet se nego a la misma
+imagen, que no es un fallo de Luxy: lo clasifico bien y no lo guardo como pie de
+foto.
+
+
 ## F18-ESFUERZO-002 — el esfuerzo, en los seis caminos de la boveda
 
 Estado: **`done` en codigo, `pendiente de prueba real` — Claude, 2026-09-10.**

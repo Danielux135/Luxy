@@ -752,11 +752,29 @@ export async function runJob(
     // el modelo contestaba «no hay ninguna imagen adjunta». Esa frase es una
     // respuesta valida, asi que se guardaba como pie de foto de una imagen de
     // la boveda, y ahi el personaje creia que la foto ES esa frase.
-    if (deps.images !== undefined && deps.images.length > 0 && provider.acceptsImages !== true) {
-      throw new Error(
-        `${provider.displayName} no puede recibir imagenes: su transporte es un CLI local y ` +
-          'solo acepta texto. Elige un proveedor HTTP con un modelo que sepa mirar.',
-      );
+    if (deps.images !== undefined && deps.images.length > 0) {
+      // dos formas de aceptar una imagen, y confundirlas costo un mensaje que
+      // decia una MENTIRA: que Codex «solo acepta texto». Codex ve imagenes
+      // perfectamente —`codex exec -i, --image <FILE>...`—, lo que no acepta
+      // son bytes en memoria: quiere una ruta.
+      const porBytes = provider.acceptsImages === true;
+      const porRuta =
+        provider.acceptsImagePaths === true &&
+        deps.images.every((image) => image.path !== undefined && image.path.length > 0);
+      if (!porBytes && !porRuta) {
+        // y el motivo se dice ENTERO, porque cada uno se arregla distinto: uno
+        // se arregla cambiando de proveedor y el otro no se arregla, es el
+        // precio de que la boveda sea una boveda
+        throw new Error(
+          provider.acceptsImagePaths === true
+            ? `${provider.displayName} ve imagenes, pero solo como archivo en disco, y esta ` +
+              'esta cifrada en la boveda: solo existe descifrada en memoria. Escribir una copia ' +
+              'en claro para que pudiera leerla romperia la boveda. Para describirla, elige un ' +
+              'proveedor que acepte la imagen directamente.'
+            : `${provider.displayName} no puede recibir imagenes: su transporte no las lleva. ` +
+              'Elige un proveedor con un modelo que sepa mirar.',
+        );
+      }
     }
     deps.emit(
       'phase',

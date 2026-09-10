@@ -25,6 +25,20 @@ export interface CodexCapabilities {
   outputLastMessage: boolean;
   skipGitRepoCheck: boolean;
   /**
+   * `-i, --image <FILE>...`: adjuntar imagenes al prompt inicial.
+   *
+   * Codex VE imagenes. Durante un tiempo Luxy dijo lo contrario —«su transporte
+   * es un CLI local y solo acepta texto»— y era falso; lo desmintio Daniel, que
+   * paga la suscripcion y sabia que su modelo mira. Comprobado contra el CLI el
+   * 2026-09-10: `codex exec --help` declara `-i, --image <FILE>...`.
+   *
+   * Lo que no acepta son BYTES: quiere una ruta en el disco. Por eso vale para
+   * el banco de pruebas, donde el archivo lo elige el usuario y ya estaba ahi
+   * en claro, y no para la boveda, donde la imagen solo existe descifrada en
+   * memoria.
+   */
+  image: boolean;
+  /**
    * `-c key=value`, la opcion generica de configuracion.
    *
    * Es la UNICA via para el esfuerzo de razonamiento: Codex no tiene un flag
@@ -43,12 +57,20 @@ export function parseCodexCapabilities(help: string | null): CodexCapabilities {
     outputLastMessage: helpHasFlag(help, '--output-last-message') || helpHasFlag(help, '-o'),
     skipGitRepoCheck: helpHasFlag(help, '--skip-git-repo-check'),
     config: helpHasFlag(help, '--config') || helpHasFlag(help, '-c'),
+    image: helpHasFlag(help, '--image') || helpHasFlag(help, '-i'),
   };
 }
 
 export interface CodexArgsOptions {
   workingDirectory: string;
   model?: string;
+  /**
+   * rutas de las imagenes a adjuntar, ya en claro en el disco.
+   *
+   * Nunca son una copia que Luxy haya escrito: son archivos que el usuario ya
+   * tenia. Ver `ProviderImage.path`.
+   */
+  imagePaths?: readonly string[];
   /**
    * cuanto dejarle pensar. Ausente deja lo que diga su `config.toml`.
    *
@@ -102,6 +124,13 @@ export function buildCodexArgs(options: CodexArgsOptions): string[] {
   // estas comillas llegan a Codex tal cual, que es lo que se quiere.
   if (capabilities.config && options.effort) {
     args.push('-c', `model_reasoning_effort="${options.effort}"`);
+  }
+
+  // una `-i` por imagen aunque el flag sea variadico: repetir la opcion es
+  // inequivoco, y una lista variadica pegada a un argumento posicional es la
+  // clase de cosa que se rompe cuando alguien añade un flag detras
+  if (capabilities.image && options.imagePaths !== undefined) {
+    for (const ruta of options.imagePaths) args.push('-i', ruta);
   }
 
   if (capabilities.outputLastMessage && options.lastMessageFile) {
@@ -163,6 +192,16 @@ export function parseCodexStreamLine(
 export class CodexCliProvider implements ProviderExecution {
   readonly id = 'codex' as const;
   readonly displayName = 'Codex';
+  /**
+   * NO acepta los bytes de una imagen, solo su ruta.
+   *
+   * Los dos campos juntos son la verdad entera: durante un tiempo solo estaba
+   * el primero, en `false` por omision, y de ahi salio un error que le decia
+   * al usuario que Codex «solo acepta texto». Codex mira igual de bien que
+   * cualquiera; lo que no hace es leer de la memoria de otro proceso.
+   */
+  readonly acceptsImages = false;
+  readonly acceptsImagePaths = true;
 
   private capabilities: CodexCapabilities | null = null;
   private presence: ToolPresence | null = null;
@@ -231,6 +270,11 @@ export class CodexCliProvider implements ProviderExecution {
       workingDirectory: request.workingDirectory,
       model: request.model ?? this.defaultModel,
       ...(request.effort === undefined ? {} : { effort: request.effort }),
+      // solo las que tienen ruta. Una imagen de la boveda no la tiene, y el
+      // guardia de `job-runner` ya lo ha rechazado antes de llegar aqui
+      imagePaths: (request.images ?? [])
+        .map((image) => image.path)
+        .filter((ruta): ruta is string => ruta !== undefined && ruta.length > 0),
       capabilities: this.capabilities,
       lastMessageFile,
       sandboxMode: request.readOnly === true ? 'read-only' : 'workspace-write',

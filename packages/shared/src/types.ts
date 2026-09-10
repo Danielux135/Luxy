@@ -194,6 +194,24 @@ export interface HttpProviderConfig {
 export interface ProviderImage {
   mimeType: string;
   base64: string;
+  /**
+   * donde vive el archivo, cuando existe SIN CIFRAR en el disco.
+   *
+   * Solo lo hay en un caso: el banco de pruebas de vision, donde el usuario
+   * elige un archivo suyo en un dialogo. Ese archivo ya estaba ahi, en claro,
+   * antes de que Luxy lo tocara.
+   *
+   * Existe porque Codex SI ve imagenes —`codex exec -i, --image <FILE>...`,
+   * comprobado el 2026-09-10— pero solo por RUTA, no por bytes en memoria. Sin
+   * este campo, Luxy le decia que no a Codex en todos los casos, incluido este,
+   * donde no hay nada que proteger.
+   *
+   * Ausente para el contenido de la boveda, y ahi no es un detalle pendiente:
+   * una imagen privada solo existe descifrada en memoria, y escribir una copia
+   * en claro para que Codex pueda leerla romperia lo unico que hace privada a
+   * la boveda. Ese caso se queda en los transportes que aceptan bytes.
+   */
+  path?: string;
 }
 
 // uso de tokens registrado tras una llamada http
@@ -232,6 +250,15 @@ export interface ProviderExecution {
    * proveedor: el dia que un CLI acepte imagenes, lo dice el.
    */
   readonly acceptsImages?: boolean;
+  /**
+   * acepta imagenes, pero solo como ARCHIVO en disco.
+   *
+   * Es el caso de Codex: `codex exec -i, --image <FILE>...` ve imagenes
+   * perfectamente, pero quiere una ruta. No es lo mismo que `acceptsImages`
+   * —que significa «acepta los bytes que le des»— y confundirlos costo un
+   * mensaje de error que decia que Codex «solo acepta texto», lo cual es falso.
+   */
+  readonly acceptsImagePaths?: boolean;
   /** comprueba si el proveedor puede usarse en esta maquina */
   detect(): Promise<ToolPresence>;
   /** ejecuta la tarea dentro de un directorio de trabajo aislado */

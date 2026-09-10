@@ -368,7 +368,7 @@ export class AgentController {
      * `hostRequestSchema`: que las mande el proceso principal no las convierte
      * en entrada de confianza.
      */
-    images?: readonly { mimeType: string; base64: string }[];
+    images?: readonly { mimeType: string; base64: string; path?: string }[];
     /** cuanta salida pedir; ausente deja el tope de la conexion */
     maxOutputTokens?: number;
     /** cuanto dejarle pensar; ausente deja lo que traiga el proveedor */

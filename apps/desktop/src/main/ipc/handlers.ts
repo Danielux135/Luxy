@@ -1737,7 +1737,14 @@ export function registerIpcHandlers(context: HandlerContext): void {
       // modo TECNICO: es una descripcion de un archivo, no una escena, y
       // pedirsela a quien esta encarnando a alguien mezcla dos cosas (`D-055`)
       kind: 'technical',
-      images: [{ mimeType, base64: Buffer.from(bytes).toString('base64') }],
+      // la RUTA va con los bytes, y solo aqui: este archivo lo eligio el
+      // usuario en un dialogo y ya estaba en su disco, sin cifrar. Es lo que
+      // permite que Codex mire —ve imagenes, pero por ruta, no por bytes—.
+      //
+      // La misma linea de la boveda NO la lleva, y no es un olvido: alli la
+      // imagen solo existe descifrada en memoria, y escribir una copia en
+      // claro para que Codex pudiera leerla romperia la boveda entera.
+      images: [{ mimeType, base64: Buffer.from(bytes).toString('base64'), path: filePath }],
     });
 
     const preview =

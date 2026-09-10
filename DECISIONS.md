@@ -2446,3 +2446,46 @@ multiplica. No se cableo porque hoy nadie lo elegiria y seria plomeria muerta,
 pero deja al lote como el unico camino sin esfuerzo — que es exactamente la
 forma de la asimetria que ya costo detectar con el modelo. Si algun dia el
 catalogador se elige a mano, empezar por ahi.
+
+## D-083 — Codex si ve imagenes; lo que no lee son bytes
+
+Fecha: 2026-09-10
+
+Estado: aceptada, implementada
+
+Luxy le decia al usuario que **Codex «solo acepta texto»**. Es falso.
+`codex exec --help` declara `-i, --image <FILE>...`, y lo desmintio Daniel, que
+paga la suscripcion y sabe que su modelo mira.
+
+Lo peor no es el fallo, es que **el repositorio ya lo sabia**: hay un comentario
+en `claude.ts` que menciona ese mismo flag para explicar por que se eligio
+mandar la imagen por stdin. El dato estaba escrito a diez lineas del codigo que
+decia lo contrario. Otra vez lo mismo: el dato existe y no llega a nadie.
+
+**La distincion que faltaba.** `acceptsImages` era un booleano y respondia a la
+pregunta equivocada. Hay dos:
+
+- `acceptsImages` — «me das los bytes y los mando». Claude Code y las conexiones
+  HTTP, si;
+- `acceptsImagePaths` — «dame una RUTA y la leo yo». Codex, si.
+
+Codex declara ahora `acceptsImages = false` y `acceptsImagePaths = true`. Los
+dos juntos son la verdad entera; con solo el primero, en `false` por omision,
+salia un error que llamaba tonto a un CLI que no lo es.
+
+**Y de ahi sale que valga en un sitio y no en otro, que es lo importante:**
+
+- **el banco de pruebas de vision SI**: el archivo lo elige el usuario en un
+  dialogo y ya estaba en su disco, sin cifrar. No hay nada que proteger, asi que
+  se le pasa la ruta junto a los bytes y Codex mira;
+- **la boveda NO**, y no es un pendiente: una imagen privada solo existe
+  descifrada en memoria. Escribir una copia en claro en el disco para que Codex
+  pudiera abrirla romperia lo unico que hace privada a la boveda. Ese caso se
+  queda en los transportes que aceptan bytes.
+
+El mensaje de error dice ahora **cual de los dos casos es**, porque se arreglan
+distinto: uno cambiando de proveedor, y el otro no se arregla — es el precio de
+que la boveda sea una boveda.
+
+La capacidad se detecta del `--help`, como todo lo demas: una version de Codex
+sin `-i` no recibe el flag.

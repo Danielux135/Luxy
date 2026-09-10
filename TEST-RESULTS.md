@@ -1,5 +1,30 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-10 — F20-CODEX-IMAGENES-001
+
+`npm run check` exit 0.
+
+```
+Test Files  146 passed (146)
+     Tests   2687 passed | 12 skipped (2699)
+```
+
+Tres pruebas nuevas: que se detecta `-i/--image` del `--help` y no se asume en
+una version que no lo trae; que cada imagen se adjunta con su propia `-i` sin
+mover el prompt de stdin; y que sin rutas no se adjunta nada.
+
+**Lo que caza esto y no cazaba nada antes:** el fixture de `CodexCapabilities`
+se quedo incompleto al anadir el campo, y lo dijo el **typecheck de pruebas**
+montado esta misma manana. Primera vez que sirve.
+
+**Sin probar el camino real:** ninguna prueba lanza `codex`. Que el `-i`
+funcione contra el CLI instalado solo se sabe usandolo.
+
+**Verificado a mano por Daniel, fuera de las pruebas:** Opus describe una imagen
+entera con esfuerzo `low`; Sonnet se niega a la misma. Lo primero valida el
+selector de esfuerzo; lo segundo valida que la negativa se clasifica y no se
+guarda como pie de foto.
+
 ### 2026-09-10 — F18-ESFUERZO-002
 
 `npm run check` exit 0.
