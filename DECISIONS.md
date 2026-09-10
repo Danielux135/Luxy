@@ -2489,3 +2489,67 @@ que la boveda sea una boveda.
 
 La capacidad se detecta del `--help`, como todo lo demas: una version de Codex
 sin `-i` no recibe el flag.
+
+## D-084 — un segundo transporte para Codex, solo para las imagenes de la boveda
+
+Fecha: 2026-09-10
+
+Estado: aceptada, implementada y **probada contra el binario real**
+
+`D-083` dejo una cosa a medias: Codex ve imagenes, pero `codex exec` solo las
+acepta por `-i <FICHERO>`. Para una foto de la boveda no hay fichero —existe
+descifrada en memoria y nada mas— y escribir una copia en claro romperia lo
+unico que la hace privada. Daniel pidio explicitamente que se buscara otra via.
+
+**La hay, y esta probada.** `codex app-server` habla un JSON-RPC por tuberia
+cuyo `UserInput` distingue `LocalImageUserInput` (con ruta) de
+`ImageUserInput` (con `url`), y ese `url` acepta un `data:` URI. La foto viaja
+en linea dentro del mensaje, igual que en Claude Code, y **el disco no se toca**.
+
+Comprobado de punta a punta con el transporte ya escrito: un PNG en memoria,
+`gpt-6-astra`, esfuerzo `low`, respuesta correcta en once segundos.
+
+### Convive con `codex exec`, no lo sustituye
+
+Es la decision central. El propio CLI marca `app-server` como
+`[experimental]`: su protocolo puede cambiar en cualquier actualizacion. Si
+fuera el unico camino de Codex, una actualizacion dejaria a Codex entero sin
+funcionar.
+
+Se desvia **solo** cuando el turno lleva una imagen sin ruta. Todo lo demas
+sigue por `codex exec`. Traducido: si el protocolo se rompe, se pierde describir
+fotos de la boveda con Codex, no Codex.
+
+### Tres cosas del protocolo que no son evidentes
+
+1. **No existe `turn/failed`.** El fracaso viaja DENTRO de `turn/completed`, en
+   `turn.status`, y solo entonces viene `turn.error`. Esperar una notificacion
+   que no existe deja el transporte colgado hasta el timeout.
+2. **El servidor PREGUNTA.** Manda mensajes con `id` que esperan respuesta
+   —aprobaciones, herramientas, refresco de credenciales—. Si nadie contesta, el
+   turno se cuelga y parece que el modelo no responde. Se rechazan todas por
+   defecto; la de credenciales de ChatGPT ademas nunca podria atenderse, porque
+   Luxy no maneja esas credenciales.
+3. **`interrupted` no es un fallo.** Es lo que devuelve al pulsar Detener, y
+   contarlo como error haria que la pantalla pidiera reintentar algo que el
+   usuario acababa de parar.
+
+Barreras del turno, las tres comprobadas: hilo **efimero** —no deja sesion
+guardada con contenido de la boveda dentro—, sandbox **`read-only`** y
+`approvalPolicy: 'never'`.
+
+De regalo, este transporte SI rellena el diagnostico de final de respuesta y el
+recuento de tokens. `codex exec` no lo hacia nunca, asi que hasta hoy un turno
+de Codex no podia salir como truncado ni como agotado en Studio.
+
+### El fallo que casi se cuela, y merece quedar escrito
+
+La deteccion de `app-server` se escribio con una expresion regular con ``. La
+consola convirtio esas dos letras en **caracteres de retroceso reales** (0x08).
+El resultado compilaba, el typecheck pasaba y **no casaba nunca**: la capacidad
+habria sido siempre falsa y el transporte no se habria activado jamas, diciendo
+«actualiza Codex» con Codex ya actualizado.
+
+Se encontro mirando los BYTES del archivo, no el texto. Es exactamente el caso
+que describe la regla 2 bis del `CLAUDE.md`. Ahora es un `includes` sin
+expresion regular, inmune al problema.

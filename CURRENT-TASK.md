@@ -1,5 +1,35 @@
 # Luxy — tarea activa
 
+## F21-CODEX-TUBERIA-001 — Codex describe fotos de la boveda sin tocar el disco
+
+Estado: **`done` y PROBADO contra el binario real — Claude, 2026-09-10.**
+`npm run check` exit 0, 2.704 pasadas.
+
+Transporte nuevo por `codex app-server`: la foto viaja descifrada en memoria,
+en linea dentro del mensaje, y el disco no se toca. Convive con `codex exec`,
+que sigue llevando todo lo demas. Detalle en `CHANGELOG-WORK.md` (2026-09-10
+12:30) y `D-084`.
+
+Prueba real hecha: PNG en memoria, `gpt-6-astra`, esfuerzo `low`, respuesta
+correcta en 11 segundos, con tokens y diagnostico de final de respuesta — que
+`codex exec` no rellenaba nunca.
+
+### Lo que falta, y es de Daniel
+
+1. **Probarlo desde la pantalla**, no desde un script: abrir una foto de la
+   boveda, elegir Codex como modelo de vision y pulsar Describir con IA. Es el
+   unico camino que no se ha ejercitado entero.
+2. Comparar esa descripcion con la de Opus, que sigue siendo la mejor de las
+   probadas.
+
+### Aviso para quien siga
+
+El protocolo del app-server es `[experimental]` segun el propio CLI. Si una
+actualizacion de Codex lo cambia, lo que se pierde es describir fotos de la
+boveda con Codex; el resto de Codex sigue por `codex exec`. La deteccion
+(`capabilities.appServer`) apaga el camino sola si el subcomando desaparece.
+
+
 ## LA-CLIS-001 — los dos CLI actualizados
 
 Estado: **`done` y verificado — Claude, 2026-09-10.** `npm run check` exit 0.

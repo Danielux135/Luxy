@@ -1,5 +1,33 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-10 — F21-CODEX-TUBERIA-001
+
+`npm run check` exit 0.
+
+```
+Test Files  147 passed (147)
+     Tests   2704 passed | 12 skipped (2716)
+```
+
+Diecisiete pruebas nuevas, todas puras: la imagen se compone como data URI, el
+texto va detras, se distingue una PREGUNTA del servidor de un aviso —la que
+evita que el turno se cuelgue—, `interrupted` no cuenta como fallo, un turno sin
+estado reconocible se cuenta como fallo y no como exito, y un codigo de error
+desconocido no se inventa una traduccion.
+
+**Y una prueba de verdad, fuera de la suite, porque ninguna lanza el proceso:**
+el transporte compilado contra el Codex instalado, con un PNG solo en memoria y
+`gpt-6-astra` a esfuerzo `low`. Respondio describiendo la imagen en 11
+segundos, con `finishReason: completed`, 17 trozos de texto y el recuento de
+tokens real (23.717 de entrada, 58 de salida).
+
+Ese recuento es nuevo en si mismo: `codex exec` no rellenaba nunca el
+diagnostico de final de respuesta, asi que hasta hoy un turno de Codex no podia
+salir como truncado ni como agotado en Studio.
+
+**Lo que sigue sin probarse:** el camino desde la PANTALLA, con una foto real de
+la boveda. La prueba se hizo llamando al transporte directamente.
+
 ### 2026-09-10 — LA-CLIS-001
 
 `npm run check` exit 0.

@@ -13,6 +13,7 @@ import type {
   ToolPresence,
 } from '@luxy/shared';
 import { effortIgnoredWarning } from '@luxy/shared';
+import { runCodexAppServerTurn } from './codex-app-server.js';
 import { runProcess, BASE_ENV_ALLOWLIST } from '../process.js';
 import { detectTool, readHelp, helpHasFlag } from '../detect.js';
 
@@ -24,6 +25,14 @@ export interface CodexCapabilities {
   model: boolean;
   outputLastMessage: boolean;
   skipGitRepoCheck: boolean;
+  /**
+   * el subcomando `app-server`, que habla el protocolo por tuberia.
+   *
+   * Es lo unico que permite mandarle una imagen SIN escribir una copia en el
+   * disco, asi que sin el no se pueden describir fotos de la boveda. Se detecta
+   * de la ayuda GENERAL, no la de `exec`: es un subcomando hermano suyo.
+   */
+  appServer: boolean;
   /**
    * `-i, --image <FILE>...`: adjuntar imagenes al prompt inicial.
    *
@@ -48,7 +57,10 @@ export interface CodexCapabilities {
   config: boolean;
 }
 
-export function parseCodexCapabilities(help: string | null): CodexCapabilities {
+export function parseCodexCapabilities(
+  help: string | null,
+  generalHelp: string | null = null,
+): CodexCapabilities {
   return {
     json: helpHasFlag(help, '--json'),
     cd: helpHasFlag(help, '--cd') || helpHasFlag(help, '-C'),
@@ -58,6 +70,8 @@ export function parseCodexCapabilities(help: string | null): CodexCapabilities {
     skipGitRepoCheck: helpHasFlag(help, '--skip-git-repo-check'),
     config: helpHasFlag(help, '--config') || helpHasFlag(help, '-c'),
     image: helpHasFlag(help, '--image') || helpHasFlag(help, '-i'),
+    // `app-server` es un subcomando, no un flag: se busca en la ayuda general
+    appServer: generalHelp !== null && generalHelp.includes('app-server'),
   };
 }
 
@@ -193,14 +207,19 @@ export class CodexCliProvider implements ProviderExecution {
   readonly id = 'codex' as const;
   readonly displayName = 'Codex';
   /**
-   * NO acepta los bytes de una imagen, solo su ruta.
+   * acepta imagenes de las dos formas, cada una por su transporte.
    *
-   * Los dos campos juntos son la verdad entera: durante un tiempo solo estaba
-   * el primero, en `false` por omision, y de ahi salio un error que le decia
-   * al usuario que Codex «solo acepta texto». Codex mira igual de bien que
-   * cualquiera; lo que no hace es leer de la memoria de otro proceso.
+   * Por RUTA con `codex exec -i`, y por BYTES con `app-server`, que las lleva
+   * en linea dentro del mensaje. Estuvo en `false` un tiempo y de ahi salio un
+   * error que le decia al usuario que Codex «solo acepta texto», lo cual era
+   * falso: Codex mira igual de bien que cualquiera.
+   *
+   * Se declara `true` aunque el app-server pueda faltar en una version vieja.
+   * El guardia de `job-runner` solo evita GASTAR una llamada imposible, y aqui
+   * no se gasta ninguna: si falta, `run()` devuelve el motivo exacto sin salir
+   * a la red. Declararlo `false` daria un mensaje generico y peor.
    */
-  readonly acceptsImages = false;
+  readonly acceptsImages = true;
   readonly acceptsImagePaths = true;
 
   private capabilities: CodexCapabilities | null = null;
@@ -215,9 +234,12 @@ export class CodexCliProvider implements ProviderExecution {
     this.presence = presence;
     if (!presence.available) return presence;
 
-    // la ayuda relevante es la del subcomando exec, no la general
+    // la ayuda relevante es la del subcomando exec, no la general...
     const help = await readHelp('codex', ['exec', '--help'], 60_000);
-    this.capabilities = parseCodexCapabilities(help);
+    // ...salvo para saber si existe `app-server`, que es hermano de `exec` y
+    // solo aparece en la lista de subcomandos de la ayuda general
+    const generalHelp = await readHelp('codex', ['--help'], 60_000);
+    this.capabilities = parseCodexCapabilities(help, generalHelp);
 
     if (help === null) {
       // sin ayuda no se puede construir la invocacion con garantias
@@ -255,6 +277,55 @@ export class CodexCliProvider implements ProviderExecution {
         cancelled: false,
         errorMessage:
           'esta version de Codex no ofrece un sandbox de solo lectura; actualizala antes de usar Conversaciones',
+      };
+    }
+
+    // EL DESVIO: una imagen sin ruta solo puede ir por el app-server.
+    //
+    // `codex exec` quiere un fichero, y para el contenido de la boveda no hay
+    // ninguno —existe descifrado en memoria y nada mas—. Escribir una copia en
+    // claro para que pudiera abrirla romperia lo unico que hace privada a la
+    // boveda, asi que se cambia de transporte en vez de cambiar de principio.
+    //
+    // Se desvia SOLO en este caso, a proposito: el app-server es
+    // `[experimental]` segun su propio CLI y su protocolo puede cambiar. Si se
+    // rompe, se pierde describir fotos de la boveda con Codex, no Codex.
+    const enMemoria = (request.images ?? []).filter(
+      (image) => image.path === undefined || image.path.length === 0,
+    );
+    if (enMemoria.length > 0) {
+      if (!this.capabilities.appServer) {
+        return {
+          ok: false,
+          finalText: '',
+          sessionId: null,
+          exitCode: null,
+          timedOut: false,
+          cancelled: false,
+          errorMessage:
+            'esta version de Codex no trae "app-server", que es lo unico que permite mandarle una imagen sin escribir una copia sin cifrar en el disco. Actualiza Codex, o elige otro proveedor para describir esta foto.',
+        };
+      }
+      const porTuberia = await runCodexAppServerTurn({
+        prompt: request.prompt,
+        images: request.images ?? [],
+        cwd: request.workingDirectory,
+        model: request.model ?? this.defaultModel,
+        effort: request.effort,
+        timeoutMs: request.timeoutMs,
+        signal: request.signal,
+        onPhase: (message) => request.onEvent({ type: 'phase', message }),
+        onText: (message) => request.onEvent({ type: 'text', message }),
+      });
+      return {
+        ok: porTuberia.ok,
+        finalText: porTuberia.finalText,
+        sessionId: porTuberia.sessionId,
+        exitCode: null,
+        timedOut: porTuberia.timedOut,
+        cancelled: porTuberia.cancelled,
+        errorMessage: porTuberia.errorMessage,
+        termination: porTuberia.termination,
       };
     }
 

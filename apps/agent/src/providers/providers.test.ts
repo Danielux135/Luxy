@@ -444,6 +444,8 @@ describe('buildCodexArgs', () => {
       config: false,
       // ni `-i`, asi que esa version no puede ver imagenes. Las de ahora si
       image: false,
+      // ni `app-server`: sin el no hay forma de mandarle una imagen en memoria
+      appServer: false,
     };
     const args = buildCodexArgs({ workingDirectory: 'C:/wt', capabilities: antigua });
     expect(args).toEqual(['exec', '--cd', 'C:/wt', '-']);

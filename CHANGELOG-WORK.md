@@ -1,5 +1,47 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-09-10 12:30 — Claude — F21-CODEX-TUBERIA-001
+
+Origen: «construye igualmente la herramienta que nos permita que Codex lea y
+describa fotos de manera cifrada». Matiz que se le dijo antes de empezar: Codex
+no lee nada cifrado —nadie le da la llave—; lo que hace es recibir la foto
+descifrada **en memoria y por la tuberia**, y el disco no se toca.
+
+Hecho (`D-084`): `apps/agent/src/providers/codex-app-server.ts`, un cliente del
+JSON-RPC de `codex app-server`. **Probado de punta a punta contra el binario
+real**: PNG en memoria, `gpt-6-astra`, esfuerzo `low`, respuesta correcta en 11
+segundos, con recuento de tokens y diagnostico de final de respuesta.
+
+Convive con `codex exec` en vez de sustituirlo, y es la decision central: el CLI
+marca `app-server` como `[experimental]`. Se desvia SOLO cuando el turno lleva
+una imagen sin ruta. Si el protocolo se rompe, se pierde describir fotos de la
+boveda con Codex, no Codex.
+
+Tres cosas del protocolo que no eran evidentes y las saco la especificacion
+previa, no la intuicion:
+
+1. **no existe `turn/failed`**: el fracaso viaja dentro de `turn/completed`.
+   Esperar esa notificacion habria colgado el transporte hasta el timeout;
+2. **el servidor pregunta**, con mensajes que llevan `id`. Sin contestar, el
+   turno se cuelga. Se rechazan todas por defecto — la de credenciales de
+   ChatGPT ademas nunca podria atenderse;
+3. **`interrupted` no es un fallo**: es Detener.
+
+De regalo, este transporte rellena el `responseTermination` y los tokens, que
+`codex exec` no rellenaba nunca: hasta hoy un turno de Codex no podia salir como
+truncado ni agotado en Studio.
+
+**El fallo que casi se cuela.** La deteccion de `app-server` se escribio con una
+expresion regular con una barra invertida y la consola la convirtio en
+**caracteres de retroceso reales**. Compilaba, el typecheck pasaba y no casaba
+nunca: la capacidad habria sido siempre falsa y el transporte no se habria
+activado jamas, diciendo «actualiza Codex» con Codex ya actualizado. Se
+encontro mirando los BYTES del archivo, no el texto. Es la regla 2 bis del
+`CLAUDE.md`, la cuarta vez esta sesion. Ahora es un `includes`, sin regex.
+
+Despues se barrieron todos los archivos tocados buscando caracteres de control:
+cero.
+
 ### 2026-09-10 12:00 — Claude — LA-CLIS-001 — actualizar los dos CLI
 
 Origen: Daniel dice que ya actualizo Codex y que Astra le funciona; Luxy seguia
