@@ -1,5 +1,63 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-09-10 08:20 — Claude — F16-DESCRIBIDOR-002
+
+Origen: Daniel corrige a mano un pie de foto y se encuentra «un solo recuadrito
+que te lleva al principio sin poder hacer scroll ni nada», y pregunta por que no
+hay un boton que se lo reformule con otra IA. A mitad de la sesion aparece el
+tercer sintoma: una descripcion de Opus cortada a mitad de frase.
+
+Hecho (`D-081`): tres cosas del mismo texto.
+
+- **El recuadro.** `input` de una linea → `textarea` de diez filas,
+  agrandable, con la cuenta de caracteres debajo. `.vault-caption-edit` y
+  `.vault-caption` en `styles.css`.
+- **El tope.** `MAX_CAPTION_CHARS` 1.900 → 3.000, y los dos esquemas de al lado
+  —`vault-payloads.ts` y `ipc.ts`— 2.000 → 3.200. El `…` del final de la
+  descripcion de Daniel era NUESTRO recorte, no el modelo quedandose sin salida:
+  se corto con el escenario, la luz, el pelo y la piel ya descritos y la postura
+  a medias. `DESCRIBE_MAX_OUTPUT_TOKENS` se queda en 2.000: 3.000 caracteres de
+  español son ~860 tokens y sobra sitio; subirlo reabriria el 429 de Groq.
+- **El boton «Mejorar el español».** Canal, esquemas, handler, `useVault` y
+  boton, dentro del editor. `buildRewriteCaptionPrompt` y
+  `parseRewriteResponse` en `vault-describe.ts`, puros y probados.
+
+Lo que NO hace el boton, que es donde estaba el riesgo:
+
+- no manda la imagen, solo el texto: cualquier detalle nuevo seria inventado por
+  definicion, y el prompt se lo dice con esas palabras;
+- no guarda: lo que devuelve cae en el borrador, al lado de la foto;
+- no resuelve contradicciones, las quita enteras;
+- no busca `saysNoImage`, que es lo unico que lo separa de
+  `parseDescribeResponse`: aqui no se manda ninguna imagen, asi que esa frase
+  solo podria ser el propio pie de foto hablando de una foto.
+
+Lo escribe el modelo de la **conversacion**, no el de vision: aqui no hay nada
+que mirar, y quien mira bien no es quien escribe bien —los modelos con vista
+disponibles escriben «figura femenina de proporcionadas masculinas adultas»—.
+
+Avisos de fallo propios (`rewriteFailure`, aparte de `failure`): los de la
+descripcion dicen «se nego a describir la imagen» y «la vio, le falto sitio», y
+reaprovecharlos habria contado una historia falsa. Los tres nuevos dicen ademas
+lo que hace falta saber: **tu texto sigue intacto**.
+
+Tropiezo, el mismo de siempre: el heredoc se comio una barra invertida al pasar
+por una plantilla de JavaScript —`'una gata' + BARRA + 'n'` llego como salto de
+linea de verdad— y dejo una cadena sin cerrar en las pruebas. Lo caza `vitest`
+al instante. Regla 2 bis del `CLAUDE.md`, tercera vez.
+
+De propina, un fallo que salio en el `check` y **no era de este cambio**: la
+prueba «estira el plazo mientras la cola avanza», escrita esta misma manana,
+dormia DE VERDAD 40 ms contra un plazo de 60. Con la suite entera en paralelo
+una siesta se paso de 60 ms y la prueba fallo sola, sin nada roto. `pollImage`
+acepta ahora `now` por parametro y el `sleep` de la prueba adelanta un reloj
+falso en vez de dormir: las 53 pruebas de `horde.test.ts` pasan de ~1,5 s a
+54 ms y ya no dependen de como ande la maquina. Una prueba que falla por la
+carga es peor que no tenerla: enseña a ignorar los fallos.
+
+Pendiente de Daniel: la descripcion que ya tiene guardada sigue cortada. Para
+verla entera hay que volver a pulsar **Describir con IA** sobre esa imagen.
+
 ### 2026-09-08 15:20 — Claude — F17-COLA-HORDE-001
 
 Origen: Daniel pide una foto, espera diez minutos en blanco y recibe «la imagen

@@ -25,17 +25,23 @@
  * escenario, luz y estilo— una descripcion honesta no cabe en 600 caracteres,
  * y recortarla la dejaba a mitad de frase.
  *
- * De 1.500 a 1.900 por MEDICION, no por si acaso: la primera descripcion buena
- * de verdad —una ilustracion de una figura y su habitacion— ocupo 1.354, el 90%
- * del tope. Una imagen con mas cosas dentro lo pasaba, y pasarlo significa
- * guardar una frase cortada a la mitad como si fuera lo que se ve en el
- * archivo. El limite del esquema del medio son 2.000: quedan 100 de margen.
+ * Sube por MEDICION, no por si acaso, y ya dos veces. De 1.500 a 1.900 cuando
+ * la primera descripcion buena de verdad —una ilustracion de una figura y su
+ * habitacion— ocupo 1.354, el 90% del tope. Y de 1.900 a 3.000 cuando un modelo
+ * que mira de verdad se comio los 1.900 enteros y se corto a mitad de la
+ * postura, con el escenario, la luz, el pelo y la piel ya descritos: no le
+ * sobraba nada, es que no cabia. Lo que se guardaba era una frase partida por
+ * la mitad presentada como lo que se ve en el archivo.
+ *
+ * Los esquemas de al lado —el del medio sellado y el del IPC— van 200 por
+ * encima. El tope de verdad es este; los otros solo evitan que un pie de foto
+ * desbocado entre por otra puerta.
  *
  * Sigue habiendo tope: un pie de foto que se dispara no es mas informacion, es
  * un modelo rellenando. El recorte es la ultima red, no el criterio: quien
  * evita el relleno es el prompt, que manda OMITIR lo que no se distingue.
  */
-export const MAX_CAPTION_CHARS = 1900;
+export const MAX_CAPTION_CHARS = 3000;
 
 /** lo que se añade a un pie de foto recortado: avisa sin afirmar nada */
 export const CAPTION_TRIM_MARK = '…';
@@ -286,3 +292,70 @@ export function parseDescribeResponse(text: string, refused = false): DescribeRe
  * Sigue siendo un maximo, no una reserva: se paga lo que se use.
  */
 export const DESCRIBE_MAX_OUTPUT_TOKENS = 2000;
+
+/**
+ * arregla el español de un pie de foto, SIN tocar lo que dice.
+ *
+ * Existe porque los modelos con vista que hay disponibles escriben mal:
+ * «figura femenina de proporcionadas masculinas adultas», «estandares de
+ * esteticidad». Ven bien y redactan fatal, y ese texto es lo que despues lee el
+ * personaje como hecho.
+ *
+ * EL RIESGO ES EL MISMO DE SIEMPRE, y por eso el prompt es tan restrictivo: un
+ * reformulador que «mejora» añadiendo detalle produce exactamente `D-061`, un
+ * dato falso sobre una imagen que nadie ha vuelto a mirar. Aqui el modelo NO ve
+ * la foto: solo tiene el texto, asi que cualquier detalle nuevo seria inventado
+ * por definicion.
+ *
+ * Una contradiccion no se resuelve eligiendo: se quita. Si el original dice dos
+ * cosas incompatibles, ninguna de las dos es de fiar.
+ */
+export function buildRewriteCaptionPrompt(caption: string): string {
+  return [
+    'Reescribe este texto en español correcto. Es el pie de foto de una imagen.',
+    '',
+    'NO ves la imagen: solo tienes el texto. Todo lo que añadas seria inventado.',
+    '',
+    'Reglas:',
+    '- No añadas NADA. Ni un detalle, ni un adjetivo, ni una precision.',
+    '- No quites nada que se entienda, por explicito que sea. Es una descripcion',
+    '  tecnica de un archivo y la precision es lo que la hace util.',
+    '- Arregla la gramatica, la concordancia y las palabras que no existen.',
+    '- Si algo se contradice —«femenina de proporciones masculinas»— QUITA las dos',
+    '  partes en vez de elegir una: no puedes saber cual era la buena.',
+    '- En prosa seguida, sin listas ni encabezados.',
+    '',
+    'Responde SOLO con el texto reescrito, sin comillas ni preambulo.',
+    '',
+    'TEXTO:',
+    caption,
+  ].join('\n');
+}
+
+/**
+ * limpia lo que devuelve el reformulador.
+ *
+ * No comprueba `saysNoImage` a proposito, y esa es la unica diferencia con
+ * `parseDescribeResponse`: aqui no hay imagen que mandar, asi que «no veo
+ * ninguna imagen» no puede ser un fallo de transporte. Si el modelo lo dijera
+ * seria hablando del texto, y buscarlo solo serviria para tirar una
+ * reformulacion buena de un pie de foto que mencione una foto.
+ */
+export function parseRewriteResponse(text: string, refused = false): DescribeResult {
+  const { visible, reasoning } = splitReasoning(text);
+  // una linea, como el pie de foto que va a sustituir
+  let limpio = visible.replace(/\s+/g, ' ').trim();
+  // se le pide sin comillas y aun asi las pone: entrecomillar lo que te mandan
+  // reescribir es casi un reflejo. Quitarlas aqui evita que acaben guardadas
+  // como parte de lo que se ve en la imagen
+  limpio = limpio.replace(/^["«“'](.*)["»”']$/s, '$1').trim();
+  if (limpio.length === 0) {
+    return { caption: null, failure: reasoning === null ? 'vacio' : 'solo-razono', reasoning };
+  }
+  if (refused) return { caption: null, failure: 'negativa', reasoning };
+  return {
+    caption: trimWithMark(limpio, MAX_CAPTION_CHARS, CAPTION_TRIM_MARK),
+    failure: null,
+    reasoning,
+  };
+}

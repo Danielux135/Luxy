@@ -2310,3 +2310,45 @@ encajar en el formato sería perder lo único que quedaba de una salida rara.
 
 La línea del turno lleva ahora el **motivo** del bloqueo y el **proveedor**, no
 sólo el booleano: los tres motivos se arreglan en sitios distintos.
+
+## D-081 — el pie de foto se corrige en una caja, y quien lo reescribe no ve la imagen
+
+Fecha: 2026-09-10
+
+Estado: aceptada, implementada
+
+Dos problemas del mismo texto, el pie de foto de una imagen de la boveda, que es
+lo unico que el personaje sabra de ella.
+
+**Uno: el recuadro.** Era un `input` de una linea para un texto de hasta 1.900
+caracteres. Corregir ahi dentro es imposible —el cursor salta al principio y no
+se ve lo que se esta tocando— asi que en la practica nadie corregia nada, y un
+pie de foto mal redactado se quedaba mal redactado. Ahora es un `textarea` de
+diez filas, agrandable, con la cuenta de caracteres debajo.
+
+**Dos: el tope.** 1.900 se quedaron cortos con un modelo que mira de verdad: se
+corto a mitad de la postura con el escenario, la luz, el pelo y la piel ya
+descritos. No sobraba nada, es que no cabia, y lo que se guardaba era una frase
+partida por la mitad presentada como lo que se ve en el archivo. Sube a 3.000
+—los esquemas de al lado, a 3.200— por la misma regla de siempre: se sube cuando
+se mide, no por si acaso.
+
+**Y tres: el boton que lo reescribe.** Los modelos con vista disponibles ven
+bien y redactan mal: «figura femenina de proporcionadas masculinas adultas».
+Otro modelo arregla eso en una llamada. Lo delicado es que ese boton es un
+generador de `D-061` esperando a ocurrir —un dato falso sobre una imagen que
+nadie va a volver a mirar— asi que se le ponen tres cerrojos:
+
+1. **no se le manda la imagen.** Solo el texto. Cualquier detalle nuevo seria
+   inventado por definicion, y el prompt se lo dice con esas palabras;
+2. **no guarda.** Lo que devuelve cae en el borrador del recuadro, al lado de la
+   foto, y se guarda a mano o no se guarda. Un boton que escribiera directamente
+   cambiaria un texto verdadero por otro que nadie ha leido;
+3. **una contradiccion se quita entera, no se resuelve.** Si el original dice
+   «femenina de proporciones masculinas», elegir una mitad seria inventarse cual
+   era la buena.
+
+Tampoco puede quitar lo explicito: un pie de foto es una descripcion tecnica y
+la precision es lo que lo hace servir para elegir una imagen. Y lo escribe el
+modelo de la **conversacion**, no el de vision: aqui no hay nada que mirar, y
+quien mira bien no es quien escribe bien.

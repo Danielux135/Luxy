@@ -122,7 +122,7 @@ export const vaultMediaPayloadSchema = z.object({
    * `default(null)` conserva lo ya escrito en disco: un medio sellado antes de
    * este campo se abre con `caption: null` en vez de fallar al validarse.
    */
-  caption: z.string().max(2000).nullable().default(null),
+  caption: z.string().max(3200).nullable().default(null),
   width: z.number().int().min(1).max(16384).nullable().default(null),
   height: z.number().int().min(1).max(16384).nullable().default(null),
   durationMs: z.number().int().min(0).nullable().default(null),

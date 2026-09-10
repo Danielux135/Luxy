@@ -1,5 +1,28 @@
 # Luxy — tarea activa
 
+## F16-DESCRIBIDOR-002 — el pie de foto se corrige y se reescribe
+
+Estado: **`done` en codigo, `pendiente de prueba real` — Claude, 2026-09-10.**
+
+Origen: Daniel intenta corregir a mano un pie de foto y se topa con «un solo
+recuadrito que te lleva al principio sin poder hacer scroll», y pregunta por un
+boton que se lo reformule con otra IA. Detalle en `CHANGELOG-WORK.md`, entrada
+del 2026-09-10 08:20, y `D-081`.
+
+Tres cosas: recuadro de diez filas en vez de `input`, tope del pie de foto de
+1.900 a 3.000 (esquemas a 3.200) y boton **Mejorar el español**, que no ve la
+imagen, no guarda nada y devuelve el texto al borrador.
+
+### Lo que falta, y es de Daniel
+
+1. **Reconstruir y abrir Studio** para verlo: `npm run desktop:build` no basta,
+   ha cambiado `packages/shared`. Toca `npm run build`.
+2. **Volver a describir la imagen cortada.** El pie de foto guardado se recorto
+   con el tope viejo y sigue cortado en disco: hay que pulsar **Describir con
+   IA** otra vez sobre esa imagen para que se escriba entero.
+3. Probar el boton nuevo sobre una descripcion mal redactada y comprobar lo
+   unico que importa: que **no añade** nada que no estuviera.
+
 ## F16-DESCRIBIDOR-001 — el describidor de imagenes de la boveda
 
 Estado: **`done` en codigo, `pendiente de prueba real` — Claude, 2026-09-08.**

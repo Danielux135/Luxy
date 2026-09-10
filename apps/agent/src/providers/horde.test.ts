@@ -443,14 +443,23 @@ describe('sondeo', () => {
   //
   // Estas cuatro pruebas necesitan que el reloj CORRA: con `sleep` instantaneo
   // el plazo base nunca vence dentro del bucle y no habria nada que estirar.
-  // Por eso duermen de verdad unos milisegundos.
-  const lento = (impl: typeof fetch) => ({
-    ...options(impl),
-    sleep: async () => {
-      await new Promise((listo) => setTimeout(listo, 40));
-    },
-    maxWaitMs: 60,
-  });
+  //
+  // La primera version dormia DE VERDAD 40 ms contra un plazo de 60, y fallo
+  // sola con la suite entera en paralelo: una siesta se paso de 60 ms y el
+  // plazo vencio antes de la primera vuelta. Nada estaba roto. Ahora el
+  // `sleep` no duerme, adelanta un reloj falso: la prueba es instantanea, mide
+  // exactamente lo que dice medir y no depende de como ande la maquina.
+  const lento = (impl: typeof fetch) => {
+    let reloj = 0;
+    return {
+      ...options(impl),
+      sleep: async () => {
+        reloj += 40;
+      },
+      now: () => reloj,
+      maxWaitMs: 60,
+    };
+  };
 
   it('estira el plazo mientras la cola avanza', async () => {
     const { impl } = fakeFetch([

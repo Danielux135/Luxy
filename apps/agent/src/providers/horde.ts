@@ -740,6 +740,20 @@ export interface AwaitImageOptions {
    */
   graceMs?: number;
   onProgress?: (progress: HordeProgress) => void;
+  /**
+   * el reloj, por parametro.
+   *
+   * No es un lujo de diseño: las pruebas del plazo que se estira necesitan que
+   * el tiempo CORRA —con un `sleep` instantaneo el plazo base nunca vence
+   * dentro del bucle y no hay nada que estirar— y la primera version dormia de
+   * verdad 40 ms contra un plazo de 60. Paso lo que tenia que pasar: con la
+   * suite entera en paralelo una siesta se fue de 60 ms y la prueba fallo sola,
+   * sin que nada estuviera roto. Una prueba que falla por la carga de la
+   * maquina es peor que no tenerla, porque enseña a ignorar los fallos.
+   *
+   * Con el reloj falso la prueba es instantanea y da igual como ande el equipo.
+   */
+  now?: () => number;
 }
 
 /**
@@ -800,6 +814,7 @@ async function pollImage(
   options: HordeOptions & AwaitImageOptions,
 ): Promise<HordeResult> {
   const sleep = options.sleep ?? defaultSleep;
+  const now = options.now ?? Date.now;
   // EL PLAZO SE ESTIRA MIENTRAS LA COLA AVANCE, y esto no es generosidad.
   //
   // Paso de verdad: al vencer los diez minutos la peticion estaba en el PUESTO
@@ -811,12 +826,12 @@ async function pollImage(
   // parada no estira nada y se rinde a su hora, que es lo que evita esperar
   // diez minutos a algo que no va a salir.
   const hardDeadline =
-    Date.now() + (options.maxWaitMs ?? DEFAULT_MAX_WAIT_MS) + (options.graceMs ?? DEFAULT_GRACE_MS);
-  let deadline = Date.now() + (options.maxWaitMs ?? DEFAULT_MAX_WAIT_MS);
+    now() + (options.maxWaitMs ?? DEFAULT_MAX_WAIT_MS) + (options.graceMs ?? DEFAULT_GRACE_MS);
+  let deadline = now() + (options.maxWaitMs ?? DEFAULT_MAX_WAIT_MS);
   let lastPosition: number | null = null;
   let attempt = 0;
 
-  while (Date.now() < deadline) {
+  while (now() < deadline) {
     if (options.signal.aborted) throw new HordeError('generacion cancelada');
 
     const delay = Math.max(
@@ -840,7 +855,7 @@ async function pollImage(
       (lastPosition !== null && progress.queuePosition > 0 && progress.queuePosition < lastPosition);
     lastPosition = progress.queuePosition;
     if (avanza) {
-      deadline = Math.min(hardDeadline, Date.now() + PROGRESS_GRACE_MS);
+      deadline = Math.min(hardDeadline, now() + PROGRESS_GRACE_MS);
     }
 
     if (progress.faulted) {

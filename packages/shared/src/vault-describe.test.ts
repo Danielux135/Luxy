@@ -10,6 +10,8 @@ import {
   DESCRIBE_MAX_OUTPUT_TOKENS,
   MAX_CAPTION_CHARS,
   buildDescribePrompt,
+  buildRewriteCaptionPrompt,
+  parseRewriteResponse,
   MAX_REASONING_CHARS,
   REASONING_TRIM_MARK,
   parseDescribeResponse,
@@ -411,5 +413,80 @@ describe('el presupuesto de salida del describidor', () => {
     // caber con margen, o el recorte lo haria el proveedor y a mitad de frase
     const tokensDelPie = Math.ceil(MAX_CAPTION_CHARS / 3.5);
     expect(DESCRIBE_MAX_OUTPUT_TOKENS).toBeGreaterThan(tokensDelPie);
+  });
+});
+
+describe('reformular un pie de foto', () => {
+  // el riesgo entero de este boton cabe en una frase: si el reformulador añade,
+  // mete un dato falso sobre una imagen que ya nadie va a volver a mirar. Es
+  // `D-061` otra vez, y por eso lo que se fija aqui es lo que NO puede hacer
+  it('le dice al modelo que no ve la imagen y que no puede añadir nada', () => {
+    const prompt = buildRewriteCaptionPrompt('una gata');
+    expect(prompt).toContain('NO ves la imagen');
+    expect(prompt).toContain('No añadas NADA');
+    // y que lo explicito no se suaviza: un pie de foto es una descripcion
+    // tecnica, y quitarle precision lo deja sin servir para elegir una imagen
+    expect(prompt).toContain('No quites nada');
+  });
+
+  it('manda quitar las dos partes de una contradiccion, no elegir una', () => {
+    // el caso real: «figura femenina de proporciones masculinas». Elegir una
+    // seria inventarse cual era la buena
+    expect(buildRewriteCaptionPrompt('x')).toContain('QUITA las dos');
+  });
+
+  it('lleva el texto a reescribir al final, detras de las reglas', () => {
+    const prompt = buildRewriteCaptionPrompt('una gata parda');
+    expect(prompt.endsWith('una gata parda')).toBe(true);
+  });
+
+  it('deja el texto reescrito en una sola linea', () => {
+    const { caption } = parseRewriteResponse(`una gata
+parda   y   tuerta`);
+    expect(caption).toBe('una gata parda y tuerta');
+  });
+
+  it('le quita las comillas que pone aunque se le digan que no', () => {
+    expect(parseRewriteResponse('"una gata parda"').caption).toBe('una gata parda');
+    expect(parseRewriteResponse('«una gata parda»').caption).toBe('una gata parda');
+  });
+
+  it('no confunde unas comillas de dentro con unas que envuelvan el texto', () => {
+    const { caption } = parseRewriteResponse('un cartel que pone "abierto" en la puerta');
+    expect(caption).toBe('un cartel que pone "abierto" en la puerta');
+  });
+
+  it('aparta el razonamiento en vez de guardarlo como pie de foto', () => {
+    const { caption, reasoning } = parseRewriteResponse(
+      '<think>concuerda el genero</think>una gata parda',
+    );
+    expect(caption).toBe('una gata parda');
+    expect(reasoning).toBe('concuerda el genero');
+  });
+
+  it('distingue no contestar de gastarse el turno razonando', () => {
+    expect(parseRewriteResponse('   ').failure).toBe('vacio');
+    expect(parseRewriteResponse('<think>y si me niego</think>').failure).toBe('solo-razono');
+  });
+
+  it('no guarda una negativa como si fuera el texto corregido', () => {
+    const { caption, failure } = parseRewriteResponse('No puedo ayudarte con eso.', true);
+    expect(caption).toBeNull();
+    expect(failure).toBe('negativa');
+  });
+
+  it('NO busca «no veo ninguna imagen»: aqui no se manda ninguna', () => {
+    // esa comprobacion es del describidor, donde delata un transporte que tira
+    // las imagenes en silencio. Aqui solo serviria para tirar la reformulacion
+    // buena de un pie de foto que hable de una foto
+    const original = 'una postal en la que no se ve ninguna imagen, solo texto';
+    expect(parseRewriteResponse(original).caption).toBe(original);
+  });
+
+  it('respeta el mismo tope que el pie de foto, y marca el corte', () => {
+    const { caption } = parseRewriteResponse('palabra '.repeat(MAX_CAPTION_CHARS));
+    expect(caption).not.toBeNull();
+    expect(caption?.length).toBeLessThanOrEqual(MAX_CAPTION_CHARS);
+    expect(caption?.endsWith(CAPTION_TRIM_MARK)).toBe(true);
   });
 });

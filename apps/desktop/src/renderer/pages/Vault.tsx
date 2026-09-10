@@ -27,6 +27,7 @@ import {
 import {
   HORDE_ANIME_MODELS,
   HORDE_REALISTIC_MODELS,
+  MAX_CAPTION_CHARS,
   describeConversationMemoryStatus,
   describeHordeCharacter,
   hordeRecipeSchema,
@@ -2815,6 +2816,11 @@ function MediaViewer({
   const [failure, setFailure] = useState<string | null>(null);
   // lo que penso el modelo en la ultima descripcion; efimero a proposito
   const [reasoning, setReasoning] = useState<string | null>(null);
+  // el fallo del reformulador va APARTE del de la descripcion: los avisos de
+  // aquella hablan de mirar la imagen —«se nego a describirla», «la vio, le
+  // falto sitio»— y al reformulador no se le manda ninguna. Reaprovechar el
+  // aviso habria contado una historia falsa sobre lo que acababa de pasar
+  const [rewriteFailure, setRewriteFailure] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -2916,32 +2922,110 @@ function MediaViewer({
         )}
 
         {editing ? (
-          <div className="row">
-            <input
+          <div className="vault-caption-edit">
+            {/* era un `input` de una sola linea para un texto que llega a 3.000
+                caracteres: el cursor saltaba al principio y no habia forma de
+                ver lo que se estaba corrigiendo. Corregir un pie de foto es
+                leerlo entero contra la imagen, asi que necesita caja */}
+            <textarea
               className="vault-caption"
+              rows={10}
               value={draft}
               placeholder="Qué se ve en este archivo…"
-              disabled={saving}
+              // tambien mientras reescribe: lo que devuelva pisa el borrador, y
+              // dejar escribir encima seria perder lo tecleado a mitad
+              disabled={saving || vault.rewritingCaption}
               onChange={(event) => setDraft(event.target.value)}
             />
-            <button
-              className="btn btn--primary"
-              disabled={saving}
-              onClick={() => {
-                setSaving(true);
-                // vacio a proposito lo deja sin pie de foto: borrar una
-                // descripcion equivocada es tan legitimo como corregirla
-                void vault.setMediaCaption(item.mediaId, draft.trim()).then((ok) => {
-                  setSaving(false);
-                  if (ok) setDraft(null);
-                });
-              }}
-            >
-              {saving ? 'Guardando…' : 'Guardar'}
-            </button>
-            <button className="btn btn--quiet" disabled={saving} onClick={() => setDraft(null)}>
-              Cancelar
-            </button>
+            <p className="field__hint">
+              {draft.length} de {MAX_CAPTION_CHARS} caracteres. Es lo único que el
+              modelo sabrá de este archivo, así que lo que escribas aquí lo dará
+              por cierto.
+            </p>
+            <div className="row">
+              <button
+                className="btn btn--primary"
+                disabled={saving || vault.rewritingCaption}
+                onClick={() => {
+                  setSaving(true);
+                  // vacio a proposito lo deja sin pie de foto: borrar una
+                  // descripcion equivocada es tan legitimo como corregirla
+                  void vault.setMediaCaption(item.mediaId, draft.trim()).then((ok) => {
+                    setSaving(false);
+                    if (ok) setDraft(null);
+                  });
+                }}
+              >
+                {saving ? 'Guardando…' : 'Guardar'}
+              </button>
+              <button
+                className="btn btn--quiet"
+                disabled={saving || vault.rewritingCaption || draft.trim().length === 0}
+                onClick={() => {
+                  setRewriteFailure(null);
+                  void vault
+                    .rewriteCaption({
+                      caption: draft.trim(),
+                      // el de la CONVERSACIÓN, no el de visión: aquí no hay nada
+                      // que mirar, es texto. Y quien mira bien no es quien
+                      // escribe bien: los modelos con vista disponibles ven
+                      // estupendamente y redactan fatal, que es justo el problema
+                      // que este botón viene a arreglar
+                      provider,
+                      model: model.length === 0 ? null : model,
+                      projectAlias: project,
+                    })
+                    // vuelve al BORRADOR, no al pie de foto guardado: se lee al
+                    // lado de la imagen y se guarda —o no— a mano
+                    .then((result) => {
+                      setRewriteFailure(result.failure);
+                      setReasoning(result.reasoning);
+                      if (result.caption !== null) setDraft(result.caption);
+                    });
+                }}
+              >
+                {vault.rewritingCaption ? 'Reescribiendo…' : 'Mejorar el español'}
+              </button>
+              <button
+                className="btn btn--quiet"
+                disabled={saving || vault.rewritingCaption}
+                onClick={() => setDraft(null)}
+              >
+                Cancelar
+              </button>
+            </div>
+            <p className="field__hint">
+              <strong>Mejorar el español</strong> gasta una llamada a{' '}
+              <Tag tone="idle">{model.length === 0 ? provider : model}</Tag> y solo
+              le manda <strong>este texto</strong>, no la imagen: arregla la
+              redacción y no puede añadir nada, porque no ve nada. Lo que
+              devuelva cae aquí para que lo leas contra la foto antes de
+              guardarlo.
+            </p>
+
+            {rewriteFailure === 'negativa' && (
+              <Notice tone="warn">
+                Ese modelo se negó a reescribirlo. Pasa con los pies de foto
+                explícitos, y repetirlo no lo arregla: tu texto sigue intacto
+                aquí arriba. Cambia el modelo de la conversación o corrígelo a
+                mano.
+              </Notice>
+            )}
+
+            {rewriteFailure === 'solo-razono' && (
+              <Notice tone="warn">
+                Se quedó pensando y se le acabó el espacio antes de escribir
+                nada. Tu texto sigue intacto. Repetirlo con el mismo modelo dará
+                lo mismo: el límite es suyo, no del intento.
+              </Notice>
+            )}
+
+            {rewriteFailure === 'vacio' && (
+              <Notice tone="warn">
+                No contestó nada. Tu texto sigue intacto y aquí sí tiene sentido
+                volver a intentarlo.
+              </Notice>
+            )}
           </div>
         ) : (
           <div className="row">

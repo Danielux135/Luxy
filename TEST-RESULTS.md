@@ -1,5 +1,32 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-10 — F16-DESCRIBIDOR-002
+
+`npm run check` exit 0.
+
+```
+Test Files  145 passed (145)
+     Tests   2663 passed | 12 skipped (2675)
+```
+
+77 pruebas nuevas del reformulador de pies de foto en
+`packages/shared/src/vault-describe.test.ts`: que el prompt le dice que NO ve la
+imagen, que no puede añadir, que no puede quitar lo explicito y que una
+contradiccion se quita entera; y del parseo, que deja una linea, quita las
+comillas que envuelven sin tocar las de dentro, aparta el razonamiento, separa
+«no contesto» de «se gasto el turno pensando», no guarda una negativa y NO busca
+`saysNoImage`, porque aqui no se manda ninguna imagen.
+
+**Una prueba que fallo antes de estar bien:** «estira el plazo mientras la cola
+avanza» dormia de verdad 40 ms contra un plazo de 60 y se paso con la suite
+entera en paralelo. No estaba roto nada; estaba mal medido. `pollImage` acepta
+ahora `now` por parametro y la prueba adelanta un reloj falso: `horde.test.ts`
+pasa de ~1,5 s a 54 ms y ya no depende de la carga de la maquina.
+
+Lo de siempre: **nada de esto prueba el camino real**. Ni una llamada a un
+proveedor, ni una imagen descrita de verdad. Que el boton escriba mejor español
+sin inventarse nada solo se sabe usandolo.
+
 ### 2026-09-08 — BUG-MODELO-ETIQUETA-001 y BUG-AVIF-001
 
 `npm run check` exit 0.

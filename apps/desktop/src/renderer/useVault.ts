@@ -257,6 +257,21 @@ export interface VaultController {
   }) => Promise<{ caption: string | null; failure: string | null; reasoning: string | null }>;
   describingMedia: boolean;
   /**
+   * reescribe un pie de foto en español correcto sin cambiar lo que dice.
+   *
+   * **No guarda nada.** Devuelve el texto para que vuelva al recuadro y se
+   * acepte o se tire a mano: los modelos con vista redactan mal, pero ven bien,
+   * y sustituir a ciegas lo que vieron por lo que otro modelo supone que
+   * quisieron decir es cambiar un texto verdadero por uno que nadie ha leído.
+   */
+  rewriteCaption: (input: {
+    caption: string;
+    provider: string;
+    model: string | null;
+    projectAlias: string;
+  }) => Promise<{ caption: string | null; failure: string | null; reasoning: string | null }>;
+  rewritingCaption: boolean;
+  /**
    * banco de pruebas: una imagen del disco y a ver qué dice el modelo.
    *
    * **No escribe nada** y no necesita conversación abierta. Sirve para saber si
@@ -487,6 +502,7 @@ export function useVault(): VaultController {
   const [characterDescription, setCharacterDescription] = useState<string | null>(null);
   const [characters, setCharacters] = useState<VaultCharacterView[]>([]);
   const [describingMedia, setDescribingMedia] = useState(false);
+  const [rewritingCaption, setRewritingCaption] = useState(false);
   const [probingVision, setProbingVision] = useState(false);
   // lo ultimo que devolvio el banco de pruebas; no se guarda en ningun sitio
   const [probes, setProbes] = useState<VisionProbe[]>([]);
@@ -1025,6 +1041,38 @@ export function useVault(): VaultController {
   );
 
   /**
+   * reescribe un pie de foto en buen español. Ni lee ni escribe la bóveda.
+   *
+   * No necesita `mediaId` ni conversación abierta a propósito: entra texto y
+   * sale texto, así que vale igual sobre lo que se está escribiendo sin
+   * guardar, y la decisión de quedárselo sigue siendo del usuario.
+   */
+  const rewriteCaption = useCallback(
+    async (input: {
+      caption: string;
+      provider: string;
+      model: string | null;
+      projectAlias: string;
+    }): Promise<{ caption: string | null; failure: string | null; reasoning: string | null }> => {
+      setRewritingCaption(true);
+      setError(null);
+      setHint(null);
+      try {
+        const result = await window.luxy.rewriteVaultMediaCaption(input);
+        if (!result.ok) {
+          setError(result.error);
+          setHint(result.hint);
+          return { caption: null, failure: null, reasoning: null };
+        }
+        return result.value;
+      } finally {
+        if (mounted.current) setRewritingCaption(false);
+      }
+    },
+    [],
+  );
+
+  /**
    * prueba de visión: una imagen del disco y a ver qué dice el modelo.
    *
    * No escribe nada y **no necesita conversación abierta**, que es justo el
@@ -1358,6 +1406,8 @@ export function useVault(): VaultController {
     setMediaCaption,
     describeMedia,
     describingMedia,
+    rewriteCaption,
+    rewritingCaption,
     probeVision,
     probingVision,
     probes,

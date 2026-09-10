@@ -658,7 +658,7 @@ export const vaultMediaReadResultSchema = z.object({
 export const vaultMediaCaptionArgsSchema = z.object({
   conversationId: conversationIdSchema,
   mediaId: z.string().min(1).max(128),
-  caption: z.string().max(2000).default(''),
+  caption: z.string().max(3200).default(''),
 });
 
 /**
@@ -687,6 +687,36 @@ export const vaultMediaDescribeResultSchema = z.object({
    * Se conserva y se enseña, pero **nunca** se guarda como pie de foto: es
    * la explicación de por qué dijo lo que dijo, no lo que se ve en la imagen.
    */
+  reasoning: z.string().nullable().default(null),
+});
+
+/**
+ * reescribe un pie de foto en español correcto, sin cambiar lo que dice.
+ *
+ * Existe porque los modelos con vista disponibles ven bien y redactan mal, y
+ * ese texto es justo el que después lee el personaje como un hecho sobre la
+ * imagen. Corregirlo a mano es tedioso; corregirlo con otro modelo cuesta una
+ * llamada y sale mejor.
+ *
+ * **No toca la bóveda.** No recibe `mediaId` ni escribe el pie de foto: entra
+ * texto y sale texto. Así funciona igual sobre lo que el usuario está
+ * escribiendo sin haberlo guardado, y sobre todo deja la decisión donde tiene
+ * que estar: la reformulación vuelve al recuadro y se guarda —o no— a mano. Un
+ * botón que reescribiera directamente sobre lo guardado sustituiría un texto
+ * verdadero por uno que nadie ha leído.
+ */
+export const vaultMediaRewriteCaptionArgsSchema = z.object({
+  caption: z.string().min(1).max(3200),
+  provider: z.string().min(1).max(64),
+  model: z.string().min(1).max(128).nullable().default(null),
+  projectAlias: projectAliasSchema,
+});
+
+/** el texto reescrito; `caption` es null cuando no se pudo */
+export const vaultMediaRewriteCaptionResultSchema = z.object({
+  caption: z.string().nullable(),
+  failure: z.enum(['vacio', 'negativa', 'sin-imagen', 'solo-razono']).nullable(),
+  /** lo que razonó antes de contestar; se enseña, no se guarda */
   reasoning: z.string().nullable().default(null),
 });
 
@@ -1377,6 +1407,10 @@ export interface LuxyBridge {
   describeVaultMedia(
     args: z.infer<typeof vaultMediaDescribeArgsSchema>,
   ): Promise<IpcResult<z.infer<typeof vaultMediaDescribeResultSchema>>>;
+  /** reescribe un pie de foto en buen español. Gasta una llamada, no guarda nada */
+  rewriteVaultMediaCaption(
+    args: z.infer<typeof vaultMediaRewriteCaptionArgsSchema>,
+  ): Promise<IpcResult<z.infer<typeof vaultMediaRewriteCaptionResultSchema>>>;
   probeVision(
     args: z.input<typeof vaultVisionProbeArgsSchema>,
   ): Promise<IpcResult<z.infer<typeof vaultVisionProbeResultSchema>>>;

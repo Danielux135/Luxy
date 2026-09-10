@@ -31,7 +31,9 @@ import {
   buildHordeRequest,
   DESCRIBE_MAX_OUTPUT_TOKENS,
   buildDescribePrompt,
+  buildRewriteCaptionPrompt,
   parseDescribeResponse,
+  parseRewriteResponse,
   splitReasoning,
   imagePromptStyleFor,
   type HordeRecipe,
@@ -81,6 +83,7 @@ import {
   vaultMediaGenerateArgsSchema,
   vaultMediaCaptionArgsSchema,
   vaultMediaDescribeArgsSchema,
+  vaultMediaRewriteCaptionArgsSchema,
   vaultVisionProbeArgsSchema,
   vaultCharacterCreateArgsSchema,
   vaultCharacterForgetArgsSchema,
@@ -1563,6 +1566,65 @@ export function registerIpcHandlers(context: HandlerContext): void {
     // ni la descripcion ni de que imagen es: solo que se pudo
     context.log('imagen descrita por un modelo');
     return { caption: described.caption, failure: null, reasoning: described.reasoning };
+  });
+
+  /**
+   * reescribe un pie de foto en español correcto sin cambiar lo que dice.
+   *
+   * Existe porque los modelos con vista que hay ven bien y redactan mal:
+   * «figura femenina de proporcionadas masculinas adultas». Ese texto es el que
+   * despues lee el personaje como un hecho sobre la imagen, y corregirlo a mano
+   * carácter a carácter es justo lo que nadie hace.
+   *
+   * TRES COSAS QUE NO HACE, y las tres a proposito:
+   *
+   * 1. **no toca la boveda.** Ni lee el medio ni escribe el pie de foto. Entra
+   *    texto y sale texto, asi que vale igual para lo que se esta escribiendo
+   *    sin guardar, y la reformulacion vuelve al recuadro para aceptarla o
+   *    tirarla. Un boton que escribiera directamente cambiaria un texto
+   *    verdadero por otro que nadie ha leido;
+   * 2. **no manda la imagen.** El modelo solo ve el texto, asi que cualquier
+   *    detalle nuevo seria inventado por definicion. De ahi que el prompt
+   *    prohiba añadir: un reformulador que «mejora» produce `D-061`, un dato
+   *    falso sobre una imagen que nadie va a volver a mirar;
+   * 3. **no exige un modelo con vista.** Es texto plano: sirve cualquiera, y
+   *    conviene que sea uno que escriba bien en español, no uno que mire bien.
+   *
+   * En modo TECNICO, como el describidor: es una correccion de estilo sobre un
+   * archivo, no una escena (`D-055`).
+   */
+  handle(IPC_INVOKE.vaultMediaRewriteCaption, vaultMediaRewriteCaptionArgsSchema, async (args) => {
+    // el texto es contenido de la boveda aunque llegue por parametro
+    if (!context.vault.isUnlocked()) throw new VaultError('la boveda esta bloqueada');
+
+    const run = await context.controller.runLocalTurn({
+      localTurnId: randomUUID(),
+      provider: args.provider,
+      model: args.model,
+      projectAlias: args.projectAlias,
+      prompt: buildRewriteCaptionPrompt(args.caption),
+      // el mismo presupuesto que el describidor y por el mismo motivo: la
+      // salida es del mismo tamaño —un pie de foto— y pedir de mas hace que
+      // Groq rechace la peticion entera en vez de recortarla
+      maxOutputTokens: DESCRIBE_MAX_OUTPUT_TOKENS,
+      kind: 'technical',
+    });
+
+    if (run.outcome !== 'completed') {
+      throw new VaultError(
+        run.error ?? `la llamada termino como ${run.outcome}`,
+        'no es que el modelo no supiera reescribirlo: la llamada no llego a completarse',
+      );
+    }
+
+    // un pie de foto explicito puede hacer que un modelo se niegue a tocarlo, y
+    // esa negativa parece una reformulacion cortisima. Se clasifica lo VISIBLE,
+    // no el razonamiento
+    const refused = classifyReply(splitReasoning(run.text).visible).kind === 'refused';
+    const rewritten = parseRewriteResponse(run.text, refused);
+    // ni el texto de antes ni el de despues: solo que se pudo
+    context.log('pie de foto reescrito por un modelo');
+    return rewritten;
   });
 
   /**

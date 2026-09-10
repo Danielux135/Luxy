@@ -1695,9 +1695,21 @@ input[aria-invalid='true'] {
 }
 
 /* pie de foto del proximo adjunto: comparte fila con el boton que lo usa */
+/* el editor del pie de foto: caja de verdad, no una linea.
+   Un pie de foto llega a 1.900 caracteres y se corrige leyendolo contra la
+   imagen; en un `input` el cursor saltaba al principio y no se veia nada */
+.vault-caption-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 8px 0;
+}
+
 .vault-caption {
-  flex: 1 1 220px;
+  width: 100%;
   min-width: 0;
+  resize: vertical;
+  line-height: 1.45;
 }
 
 /* banco de pruebas de vision: la imagen a la izquierda y lo que dice el modelo
