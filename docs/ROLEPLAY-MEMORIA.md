@@ -172,10 +172,26 @@ detecto la suite del subagente, que ademas corrigio el alcance del fallo UTC que
 yo habia descrito mal: en España el corte en UTC acierta por la noche y se
 equivoca de medianoche a las cinco.
 
-Pendiente, y es lo que de verdad lo hara listo: **que elija Lia** entre los
-candidatos de un dia en vez de citar el mas largo, y **enriquecer el catalogo**
-—hoy una escena guarda solo `from`, `to` y un titulo de una linea, asi que
-cualquier seleccion elige con casi nada—.
+Corregido: una escena catalogada NO guarda solo un titulo. Guarda titulo,
+resumen y etiquetas, y resumen y etiquetas ya alimentan la busqueda por
+palabras. Lo que ve el modelo en cada linea si es solo el titulo.
+
+### Alcance, principio y momentos de un dia — **HECHO** (2026-09-11)
+
+Lo destapo la primera ejecucion real del diagnostico: 40 momentos con un tope
+de 40 lineas, y los caminos que transcriben solo miraban dentro de esas 40.
+
+- el tope limita las LINEAS, no el alcance; el primer momento va siempre, con
+  su resumen, y un aviso dice cuantos faltan entre medias;
+- «¿como nos conocimos?» tiene su camino, y trae el primer momento;
+- de un dia con varios momentos se elige el que nombran las palabras con
+  contenido del mensaje —contando turnos, y solo con un ganador claro— o el
+  mas largo; los demas se le nombran con su hora y su longitud, y puede
+  preguntar a cual se refiere;
+- los patrones siguen `D-085`: precision antes que alcance.
+
+Pendiente: que ella lo elija con un modelo, y la memoria de promesas y
+animo (`F23-PENDIENTES-001`, diseño en `docs/PENDIENTES-DISENO.md`).
 
 ### 3. Recuperar los tokens del bloque de imagen
 

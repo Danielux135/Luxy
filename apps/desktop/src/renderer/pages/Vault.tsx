@@ -4440,8 +4440,12 @@ function MemoryDiagnosticsSummary({
   diagnostics: NonNullable<VaultController['lastDiagnostics']>;
 }): JSX.Element {
   const c = diagnostics.conversations;
+  const e = diagnostics.episodes;
+  const i = diagnostics.index;
   const d = diagnostics.dateRecall;
+  const o = diagnostics.origin;
   const s = diagnostics.style;
+  const t = diagnostics.triggers;
   return (
     <div className="field__hint">
       <p>
@@ -4449,8 +4453,19 @@ function MemoryDiagnosticsSummary({
         etiquetas; {c.gapOnly} solo troceadas por pausas, que no se encuentran por paráfrasis.
       </p>
       <p>
+        <strong>Índice:</strong> {i.lines} de {e.total} momentos a la vista en cada mensaje
+        {i.omitted > 0
+          ? `; los otros ${i.omitted} se recuerdan igual por fecha o por palabras`
+          : ''}
+        . El primero de todos va siempre, con su resumen.
+      </p>
+      <p>
         <strong>Búsqueda por fecha:</strong> {d.hits} de {d.tested} días encontrados
         {d.missedDays.length > 0 ? ' · fallan: ' + d.missedDays.join(', ') : ''}
+      </p>
+      <p>
+        <strong>Cómo os conocisteis:</strong> {o.found} de {o.probes} formas de preguntarlo
+        traen el primer momento{o.day === null ? '' : `, que es del ${o.day}`}.
       </p>
       <p>
         <strong>Tu forma de escribir:</strong> {s.userMessages} mensajes, mediana de{' '}
@@ -4458,6 +4473,25 @@ function MemoryDiagnosticsSummary({
         {s.withMemoryRequest} pidiendo recuerdos y {s.withConversationRecall} hablando de lo
         dicho.
       </p>
+      <p>
+        <strong>Tus mensajes, pasados por la memoria:</strong> {t.byDate} habrían traído un
+        momento por su fecha, {t.byOrigin} por cómo os conocisteis y {t.byWords} lo habrían
+        buscado por palabras. {t.dateWithoutQuestion} nombraban un día sin preguntar nada y no
+        dispararon, que es lo correcto.
+        {t.dateWithoutMoment > 0
+          ? ` ${t.dateWithoutMoment} preguntaban por un día en que no hablasteis.`
+          : ''}
+        {t.dateInHistory > 0
+          ? ` ${t.dateInHistory} preguntaban por algo que ya estaba en la conversación.`
+          : ''}
+      </p>
+      {diagnostics.scope.otherConversations > 0 && (
+        <p>
+          Medido sobre {diagnostics.scope.characterName ?? 'las conversaciones sin personaje'},
+          como en un turno real; {diagnostics.scope.otherConversations} de otros personajes o
+          sin personaje quedan fuera.
+        </p>
+      )}
     </div>
   );
 }

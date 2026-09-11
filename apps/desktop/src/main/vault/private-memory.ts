@@ -205,15 +205,30 @@ export class PrivateMemory {
   async search(
     vault: VaultService,
     query: string,
-    options: { limit?: number; characterId?: string | null } = {},
+    options: {
+      limit?: number;
+      characterId?: string | null;
+      /**
+       * ademas, SOLO en estas conversaciones.
+       *
+       * Para elegir entre los momentos de un dia: buscando en toda la memoria,
+       * una palabra que sale mucho en otros dias se llevaba los resultados.
+       */
+      conversationIds?: ReadonlySet<string>;
+    } = {},
   ): Promise<RecalledTurn[]> {
     await this.ensureBuilt(vault);
     if (this.index === null) return [];
 
     const limit = options.limit ?? 5;
     // sin personaje indicado se busca en todo; con el, solo en lo suyo
-    const only =
+    const delPersonaje =
       options.characterId === undefined ? undefined : this.conversationsOf(options.characterId);
+    const pedidas = options.conversationIds;
+    const only =
+      pedidas === undefined
+        ? delPersonaje
+        : new Set([...pedidas].filter((id) => delPersonaje === undefined || delPersonaje.has(id)));
     // las dos busquedas se mezclan: una acierta por lo que se dijo y la otra
     // por como se llama. Una escena encontrada por su etiqueta apunta a su
     // primer turno real, que es lo que despues se cita
@@ -275,5 +290,6 @@ function fromCatalog(scene: CatalogedEpisode, turns: readonly IndexedTurn[]): Ep
     turns: inside.length,
     title: scene.title,
     catalogedBy: scene.model,
+    ...(scene.summary.length > 0 ? { summary: scene.summary } : {}),
   };
 }

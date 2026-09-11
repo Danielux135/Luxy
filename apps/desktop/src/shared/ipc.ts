@@ -765,6 +765,10 @@ export const vaultMediaRewriteCaptionResultSchema = z.object({
 export const vaultMemoryDiagnosticsArgsSchema = z.object({});
 
 export const vaultMemoryDiagnosticsResultSchema = z.object({
+  scope: z.object({
+    otherConversations: z.number().int().min(0),
+    characterName: z.string().nullable(),
+  }),
   conversations: z.object({
     total: z.number().int().min(0),
     cataloged: z.number().int().min(0),
@@ -778,6 +782,12 @@ export const vaultMemoryDiagnosticsResultSchema = z.object({
     lastDay: z.string().nullable(),
     distinctDays: z.number().int().min(0),
   }),
+  index: z.object({
+    cap: z.number().int().min(0),
+    lines: z.number().int().min(0),
+    omitted: z.number().int().min(0),
+    firstInIndex: z.boolean(),
+  }),
   dateRecall: z.object({
     tested: z.number().int().min(0),
     hits: z.number().int().min(0),
@@ -785,12 +795,26 @@ export const vaultMemoryDiagnosticsResultSchema = z.object({
     /** dias con formato AAAA-MM-DD: cuando se hablo, nunca que se dijo */
     missedDays: z.array(z.string()),
   }),
+  origin: z.object({
+    /** formas corrientes de preguntarlo que se prueban, y cuantas lo reconocen */
+    probes: z.number().int().min(0),
+    found: z.number().int().min(0),
+    day: z.string().nullable(),
+  }),
   style: z.object({
     userMessages: z.number().int().min(0),
     medianChars: z.number().int().min(0),
     withTemporalReference: z.number().int().min(0),
     withMemoryRequest: z.number().int().min(0),
     withConversationRecall: z.number().int().min(0),
+  }),
+  triggers: z.object({
+    byOrigin: z.number().int().min(0),
+    byDate: z.number().int().min(0),
+    byWords: z.number().int().min(0),
+    dateWithoutQuestion: z.number().int().min(0),
+    dateWithoutMoment: z.number().int().min(0),
+    dateInHistory: z.number().int().min(0),
   }),
 });
 

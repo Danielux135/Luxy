@@ -43,6 +43,13 @@ export interface Episode {
   title: string;
   /** modelo que la catalogo; `null` si se dedujo por silencios */
   catalogedBy?: string | null;
+  /**
+   * de que fue, en una frase, si lo catalogo un modelo.
+   *
+   * Lo lleva al prompt SOLO el primer momento: es el respaldo de «¿como nos
+   * conocimos?» cuando ningun patron reconoce la forma de preguntarlo.
+   */
+  summary?: string;
 }
 
 export interface SegmentOptions {

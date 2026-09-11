@@ -47,10 +47,12 @@ describe('reconocer que se pide rememorar', () => {
     for (const frase of [
       '¿te acuerdas de cuando nos conocimos?',
       'recuerdas lo de la vainilla',
-      '¿qué te dije aquella noche?',
+      '¿te acuerdas de aquella noche?',
       'acuérdate de lo que hablamos',
-      'cómo empezó todo esto',
-      'la primera vez que hablamos',
+      // lo que decide es la construccion (`D-085`): un verbo de recordar que
+      // pregunta, o un imperativo de recordar con un objeto que es un recuerdo
+      'recuérdame cómo empezó todo',
+      '¿recuerdas qué te dije?',
     ]) {
       expect(looksLikeMemoryRequest(frase)).toBe(true);
     }

@@ -1,5 +1,102 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-09-11 — Claude — F22-ALCANCE-MEMORIA-001, caza de falsos positivos
+
+Tercera ronda, solo falsos positivos, que son el error dañino: tres agentes
+probaron 287 frases de chat (coqueteo, en plena escena y con referencias de
+tiempo) contra `recallRoute`, y un escéptico por hallazgo intento tumbarlos.
+Resultado: **141 reales de 143**. La mayoria venian de reglas anteriores a hoy:
+
+- fecha: cualquier «hablamos», «dije», «mensaje» o «charla» con un dia —«ayer
+  hable con mi madre», «el sabado hablamos con calma», «¿ayer hablaste con tu
+  madre?»— transcribia la conversacion de ese dia;
+- palabras: «te acuerdas» y «recuerdame» sueltos —«acuerdate de comprar pan»,
+  «me recuerdas a un osito», «recuerdame que mañana tengo dentista»—;
+- principio: «pq no te conoci antes?», «desde q te conoci» (la «q» se saltaba
+  la exclusion), «nuestro primer dia juntos en Paris».
+
+Arreglo: la gramatica de `D-085` (ampliada). La deteccion se reescribio en
+`recall.ts` como construcciones, no palabras. Las 141 frases quedan como tabla
+generada en `recall-falsos-positivos.fixture.ts` y probadas una a una.
+
+Resultado: `npm run check` exit 0, 151 archivos, 2964 pruebas, 12 saltadas.
+
+### 2026-09-11 — Claude — F22-ALCANCE-MEMORIA-001, revision adversarial y reescritura
+
+Primera revision (33 agentes): 27 hallazgos confirmados sobre la primera
+version. Los tres gordos: «¿te acuerdas del dia que nos conocimos?» no se
+reconocia (en «del» no hay limite de palabra antes de «el»); «el primer dia del
+viaje», «¿cuando empezamos la peli?» o «desde que nos conocimos, ¿sabes?»
+transcribian la primera conversacion; y «ese mismo dia» mezclaba dias con «la
+semana pasada».
+
+Segunda revision (23 agentes) sobre los arreglos: 15 bien, 12 a medias y 18
+problemas nuevos, casi todos del mismo tipo. Cada regla por frase rompia otra.
+Cambio de enfoque, registrado como `D-085`: la frase tiene que estar DENTRO de
+la pregunta, por clausula, con exclusiones («desde que», «al mes de») y verbo de
+recordar donde la frase tambien es corriente. Y el respaldo: el primer momento
+con su resumen en el indice.
+
+Tambien: la preferencia dentro de un dia cuenta turnos coincidentes y busca
+solo en los candidatos (una conversacion larga ya no tapa el momento de ayer);
+el nombre del personaje, las acciones entre asteriscos, apelativos y risas no
+eligen momento; «¿que paso ayer?» cuenta solo si pregunta; el diagnostico mide
+al personaje con conversaciones, con la misma ventana de historial que un turno,
+y separa «preguntaba por algo que ya iba en el historial» de «dia sin
+conversacion».
+
+Las ~80 frases de las dos revisiones son ahora la tabla de
+`recall-reach.test.ts`. Resultado local: 21 archivos, 435 pruebas en verde.
+
+Aparte, lo que destapo el diseño de `F23-PENDIENTES-001` (verificado en el
+codigo, no en ejecucion real):
+
+1. **La memoria acumulativa de Privado no se guardaba nunca.** Todo turno local
+   es `studioMode: 'conversation'`; el job-runner separa `<LUXY_MEMORY>` y lo
+   deja en `conversationMemory`, que `toLocalResult` no devolvia. El handler lo
+   buscaba en un texto que ya no lo llevaba: `absent` siempre. Arreglo en curso
+   como `F22-MEMORIA-ACUMULATIVA-001`: la parte del agente y el protocolo esta
+   hecha y probada; falta el handler.
+2. **Catalogar usa el proveedor de la ventana.** Con DeepSeek elegido, abrir
+   «Lo que recuerda» cataloga con llamadas de pago. Es el paso 1 del diseño.
+
+### 2026-09-11 — Claude — F22-ALCANCE-MEMORIA-001 (en curso)
+
+Origen: la primera ejecucion real del diagnostico. La pantalla decia 17/17 y
+6/6; el registro decia ademas `episodios.total: 40` con `MAX_EPISODE_LINES = 40`.
+La busqueda por fecha filtraba `visible` y la lexica descartaba todo lo que no
+tuviera posicion en `visible`, asi que el momento 41 habria sacado de su
+alcance el 1 de septiembre. Y `resolveTemporalReference` devolvia
+`kind: 'principio'` para «cuando nos conocimos», que `recall.ts` descartaba.
+
+Tambien destapo que el diagnostico no ejercia exactamente el camino real: el
+suyo buscaba en todos los episodios y el real solo en los 40. Con 40 no se
+notaba; con 41, el diagnostico habria dado verde en falso.
+
+Archivos:
+
+- `apps/desktop/src/main/vault/recall.ts`: `selectIndexEpisodes` (recientes
+  mas el primero fijo), `selectOriginEpisode` con `ORIGIN_PATTERNS` y
+  `REMEMBER_VERB`, `contentQuery` y `lexicalPreference` para elegir entre los
+  momentos de un dia, y `buildRecall` citando fuera del indice con `via` y
+  `sameDay`;
+- `packages/shared/src/vault-prompt.ts`: `RecallVia`, `QuotedEpisode.via` y
+  `sameDay`, `VaultRecall.omitted`; el aviso del hueco va justo antes del
+  primero de todos;
+- `memory-diagnostics.ts`: indice, principio y disparos por mensaje real;
+- `handlers.ts`: el diagnostico recoge hora y conversacion de cada mensaje, y
+  el registro de cada turno anota el camino del recuerdo (nunca el texto);
+- pruebas: `recall-reach.test.ts` (nuevo), `memory-diagnostics.test.ts` y
+  `vault-prompt.test.ts`.
+
+Un fallo cazado antes de probar: la guarda del principio aceptaba
+`looksLikeMemoryRequest`, que ya incluye «el primer dia», asi que «desde el
+primer dia supe que me gustabas» se daba permiso a si misma para recitarlo.
+Ahora exige un verbo de recordar, hablar de lo dicho o una pregunta.
+
+Resultado local: 5 archivos de prueba, 127 pruebas en verde; lint y typecheck
+limpios. Pendiente: revision adversarial y `npm run check`.
+
 ### 2026-09-11 — Claude — F22-DIAGNOSTICO-MEMORIA-001
 
 Origen, de Daniel: que cada mejora incluya las conversaciones ya tenidas, poder

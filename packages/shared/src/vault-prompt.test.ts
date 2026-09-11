@@ -389,3 +389,205 @@ describe('medir el prompt por bloques', () => {
     expect(composeVaultPrompt(base).map((b) => b.label)).not.toContain('imagen');
   });
 });
+
+describe('recuerdos: el principio, los otros momentos del dia y el hueco del indice', () => {
+  const linea = (id: string, date: string, title: string) => ({ id, date, title, turns: 2 });
+  const citado = {
+    ...linea('r2', '2026-09-01', 'hola, ¿eres nueva?'),
+    conversation: [{ role: 'user' as const, text: 'hola' }],
+  };
+
+  it('traido por el principio, se le dice que es el primero', () => {
+    const prompt = buildVaultPrompt({
+      memory: null,
+      turns: [],
+      message: '¿cómo nos conocimos?',
+      recall: { episodes: [citado], quoted: { ...citado, via: 'principio' } },
+    });
+    expect(prompt).toContain('Es el momento mas antiguo que tienes guardado con esta persona');
+  });
+
+  it('traido por palabras no lleva ese encabezado', () => {
+    const prompt = buildVaultPrompt({
+      memory: null,
+      turns: [],
+      message: '¿te acuerdas?',
+      recall: { episodes: [citado], quoted: { ...citado, via: 'palabras' } },
+    });
+    expect(prompt).not.toContain('momento mas antiguo');
+  });
+
+  it('traido por fecha con otros momentos ese dia, los nombra y le deja preguntar', () => {
+    const prompt = buildVaultPrompt({
+      memory: null,
+      turns: [],
+      message: '¿de qué hablamos ayer?',
+      recall: {
+        episodes: [citado],
+        quoted: {
+          ...citado,
+          via: 'fecha',
+          sameDay: [
+            { title: 'la caja de música', turns: 3 },
+            { title: 'el mercado', turns: 2 },
+          ],
+        },
+      },
+    });
+    expect(prompt).toContain('Ese mismo dia hubo 2 momentos mas: «la caja de música» (3 turnos), «el mercado» (2 turnos).');
+    expect(prompt).toContain('preguntaselo');
+  });
+
+  it('un solo momento mas se dice en singular', () => {
+    const prompt = buildVaultPrompt({
+      memory: null,
+      turns: [],
+      message: '¿de qué hablamos ayer?',
+      recall: {
+        episodes: [citado],
+        quoted: { ...citado, via: 'fecha', sameDay: [{ title: 'la caja de música', turns: 3 }] },
+      },
+    });
+    expect(prompt).toContain('Ese mismo dia hubo otro momento: «la caja de música» (3 turnos).');
+  });
+
+  it('con momentos fuera del indice, lo dice justo antes del primero de todos', () => {
+    const prompt = buildVaultPrompt({
+      memory: null,
+      turns: [],
+      message: 'hola',
+      recall: {
+        episodes: [linea('r1', '2026-09-10', 'lo de hoy'), linea('r2', '2026-09-01', 'el principio')],
+        quoted: null,
+        omitted: 38,
+      },
+    });
+    const lineas = prompt.split('\n');
+    const hueco = lineas.findIndex((texto) => texto.includes('38 momentos mas entre medias'));
+    const primero = lineas.findIndex((texto) => texto.includes('[r2]'));
+    expect(hueco).toBeGreaterThan(-1);
+    expect(primero).toBe(hueco + 1);
+    expect(prompt).toContain('El ultimo de esta lista es el primero de todos');
+  });
+
+  it('sin hueco no hay aviso', () => {
+    const prompt = buildVaultPrompt({
+      memory: null,
+      turns: [],
+      message: 'hola',
+      recall: { episodes: [linea('r1', '2026-09-10', 'lo de hoy')], quoted: null },
+    });
+    expect(prompt).not.toContain('entre medias');
+  });
+});
+
+describe('recuerdos: como se eligio, cuantos hubo y si esta en la lista', () => {
+  const citado = {
+    id: 'r2',
+    date: '2026-09-10',
+    title: 'el faro',
+    turns: 2,
+    conversation: [{ role: 'user' as const, text: 'hola' }],
+  };
+  const conPrompt = (quoted: typeof citado & Record<string, unknown>) =>
+    buildVaultPrompt({
+      memory: null,
+      turns: [],
+      message: '¿de qué hablamos ayer?',
+      recall: { episodes: [citado], quoted },
+    });
+
+  it('elegido por lo que nombra el mensaje, lo dice sin darlo por seguro', () => {
+    const prompt = conPrompt({
+      ...citado,
+      via: 'fecha',
+      pickedBy: 'palabras',
+      sameDay: [{ title: 'la caja de música', turns: 3 }],
+      sameDayTotal: 1,
+    });
+    // la eleccion por palabras puede equivocarse: no se le presenta como certeza
+    expect(prompt).toContain('El de arriba es el que parece encajar con lo que te pregunta');
+  });
+
+  it('elegido por largo, le deja preguntar si no casa', () => {
+    const prompt = conPrompt({
+      ...citado,
+      via: 'fecha',
+      pickedBy: 'mas-largo',
+      sameDay: [{ title: 'la caja de música', turns: 3 }],
+      sameDayTotal: 1,
+    });
+    expect(prompt).toContain('preguntaselo');
+  });
+
+  it('con la lista recortada dice el total de verdad', () => {
+    const prompt = conPrompt({
+      ...citado,
+      via: 'fecha',
+      sameDay: [
+        { title: 'a', turns: 2 },
+        { title: 'b', turns: 2 },
+      ],
+      sameDayTotal: 5,
+    });
+    expect(prompt).toContain('Ese mismo dia hubo 5 momentos mas: «a» (2 turnos), «b» (2 turnos) y 3 mas.');
+  });
+
+  it('un momento que no esta en la lista no se presenta como «uno de esos»', () => {
+    const prompt = conPrompt({ ...citado, via: 'palabras', listed: false });
+    expect(prompt).toContain('UN MOMENTO QUE NO ESTA EN ESA LISTA, TAL Y COMO OCURRIO');
+    expect(prompt).not.toContain('UNO DE ESOS MOMENTOS');
+  });
+});
+
+describe('recuerdos: la hora del dia y el resumen del primero', () => {
+  it('el primer momento lleva su resumen en la linea', () => {
+    const prompt = buildVaultPrompt({
+      memory: null,
+      turns: [],
+      message: 'hola',
+      recall: {
+        episodes: [
+          { id: 'r1', date: '2026-09-10', title: 'lo de hoy', turns: 4 },
+          {
+            id: 'r2',
+            date: '2026-09-01',
+            title: 'el principio',
+            turns: 6,
+            summary: 'se conocen en la estacion y ella se ha perdido',
+          },
+        ],
+        quoted: null,
+      },
+    });
+    expect(prompt).toContain(
+      '- [r2] 2026-09-01 · el principio · 6 turnos · de que fue: se conocen en la estacion y ella se ha perdido',
+    );
+    expect(prompt).toContain('- [r1] 2026-09-10 · lo de hoy · 4 turnos');
+    expect(prompt).not.toContain('lo de hoy · 4 turnos · de que fue');
+  });
+
+  it('el momento transcrito y los de su dia dicen en que parte del dia fueron', () => {
+    const prompt = buildVaultPrompt({
+      memory: null,
+      turns: [],
+      message: '¿de qué hablamos ayer?',
+      recall: {
+        episodes: [{ id: 'r1', date: '2026-09-10', title: 'hola', turns: 4 }],
+        quoted: {
+          id: 'r1',
+          date: '2026-09-10',
+          title: 'hola',
+          turns: 4,
+          when: 'tarde',
+          conversation: [{ role: 'user', text: 'hola' }],
+          via: 'fecha',
+          sameDay: [{ title: 'hola', turns: 2, when: 'madrugada' }],
+          sameDayTotal: 1,
+        },
+      },
+    });
+    expect(prompt).toContain('2026-09-10 por la tarde · hola');
+    expect(prompt).toContain('Ese mismo dia hubo otro momento: «hola» (de madrugada, 2 turnos).');
+  });
+});

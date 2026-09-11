@@ -1,8 +1,70 @@
 # Luxy — tarea activa
 
+## F22-MEMORIA-ACUMULATIVA-001 — la memoria de cada conversacion privada no se guardaba
+
+Estado: **`en curso`: agente y protocolo hechos y probados; falta el handler —
+Claude, 2026-09-11.**
+
+Todo turno local va como `studioMode: 'conversation'`, asi que el job-runner
+separa el bloque `<LUXY_MEMORY>` de la respuesta y lo pone en
+`conversationMemory`. `toLocalResult` solo devolvia el texto, y el handler lo
+buscaba en un texto que ya no lo llevaba: `absent` en todos los turnos, y nunca
+se guardaba nada. El modelo seguia escribiendo el bloque: tokens pagados para
+nada. La sonda de compatibilidad tiene el mismo fallo (`memoryOk` siempre 0).
+
+Hecho: `LocalTurnResult` y la respuesta `local_turn` llevan `memory` y
+`memoryStatus` (opcionales, para agentes viejos); `host-entry` los reenvia;
+`turn-memory.ts` decide cual cuenta. Pruebas con el `runLocalTurn` real y un
+proveedor falso.
+
+Falta: usar `memoryOfTurn` en el turno privado y en la sonda de compatibilidad,
+y verlo en un turno real (el registro «prompt privado compuesto» dira si aparece
+el bloque `memoria`). Las 17 conversaciones existentes no tienen memoria
+acumulativa: una pasada por suscripcion que la genere queda por decidir.
+
+
+## F23-PENDIENTES-001 — que Lia saque sola las promesas y lo pendiente
+
+Estado: **`diseño hecho`, sin implementar — Claude, 2026-09-11.** Diseño en
+`docs/PENDIENTES-DISENO.md`: tres propuestas independientes, dos jueces y una
+sintesis. Se implementa despues de cerrar `F22-ALCANCE-MEMORIA-001` y
+`F22-MEMORIA-ACUMULATIVA-001`. Su paso 1 es la guarda del catalogo.
+
+Origen, de Daniel: «que ella misma pueda sacar recuerdos sola: por ejemplo, le
+prometi dos cafes y una tarta de chocolate en la cama. Ella podria
+recordarmelo, echarmelo en cara, etc sin que yo se lo recuerde».
+
+Se diseña con tres propuestas independientes y dos jueces antes de tocar
+codigo. Condiciones: sin llamadas de pago extra por turno, con pasada sobre
+las 17 conversaciones que ya existen, y comprobable con el diagnostico en
+cifras.
+
+## F22-ALCANCE-MEMORIA-001 — el tope del indice deja de limitar lo que recuerda
+
+Estado: **`done` en codigo — Claude, 2026-09-11.** Tres rondas adversariales
+(dos revisiones y una caza de 287 frases con 141 falsos positivos), deteccion
+reescrita como gramatica (`D-085`), `npm run check` exit 0 con 2964 pruebas.
+Falta verlo en turnos reales: el diagnostico «Comprobar la memoria» dira que
+camino dispara con los mensajes de Daniel.
+
+Salio del diagnostico real: 40 momentos con un tope de 40 lineas, y los
+caminos que transcriben solo miraban dentro de esas 40. Ademas «¿como nos
+conocimos?» no lo recogia ningun camino. Cuatro cambios:
+
+1. el tope limita las LINEAS, no el alcance: principio, fecha y palabras
+   buscan en todos los episodios, y el primero de todos va fijo en el indice,
+   con un aviso de cuantos faltan entre medias;
+2. un camino para el principio, que exige preguntar: «desde el primer dia
+   supe que...» no se lo hace recitar;
+3. de un dia con varios momentos (casi siete de media) se elige el que
+   nombran las palabras con contenido del mensaje, o el mas largo; los demas
+   se le nombran y puede preguntar cual;
+4. el diagnostico pasa cada mensaje real por la memoria tal y como estaba al
+   escribirlo y cuenta que camino habria disparado.
+
 ## F22-DIAGNOSTICO-MEMORIA-001 — comprobar la memoria sobre lo ya hablado
 
-Estado: **`done` en codigo, `pendiente de ejecucion real` — Claude, 2026-09-11.**
+Estado: **`done` y ejecutado sobre la boveda real — Claude, 2026-09-11.**
 
 Origen, de Daniel: «quiero que cada mejora que hagamos incluya las
 conversaciones ya tenidas. ¿No puedes cogerlas e indexarlas con las nuevas
@@ -19,11 +81,20 @@ catalogo, la busqueda por fecha probada contra cada dia real en que se hablo
 («¿de que hablamos ayer?» desde el dia siguiente) y el estilo de Daniel en
 recuentos de patrones. Sin llamadas a modelos.
 
-### Lo que falta, y es de Daniel
+### Primera ejecucion real (2026-09-11, 08:58)
 
-1. Reiniciar Studio, abrir Privado y pulsar «Comprobar la memoria».
-2. Las cifras quedan tambien en `studio.log` («diagnostico de memoria»): con
-   eso la siguiente IA puede leerlas sin ver ni una frase.
+Lo pulso Daniel; las cifras salen de `studio.log`, sin una sola frase:
+
+- 17 de 17 conversaciones catalogadas; 0 solo por pausas;
+- 40 momentos, todos catalogados, en 6 dias (2026-09-01 a 2026-09-10);
+- busqueda por fecha: 6 de 6 dias;
+- 137 mensajes suyos, mediana de 85 caracteres; 7 con fecha, 3 pidiendo
+  recuerdos y 0 hablando de lo dicho.
+
+Lo que destapo, y no se veia en pantalla: **40 momentos con un tope de 40
+lineas**, y los tres caminos que transcriben solo miraban dentro de esas 40.
+La conversacion siguiente habria dejado fuera el primer dia. Se arregla en
+`F22-ALCANCE-MEMORIA-001`.
 
 
 ## F22-RECUERDO-POR-FECHA-001 — Lia reconoce conversaciones por su fecha
@@ -45,7 +116,9 @@ dia. Antes no podia: la busqueda era solo por palabras. Detalle en
 ### Lo siguiente del plan
 
 - que Lia elija entre los candidatos de un dia, y pueda preguntar cual;
-- enriquecer el catalogo de escenas, que hoy solo guarda un titulo;
+- las lineas del indice solo muestran el titulo. El catalogo ya guarda titulo,
+  resumen y etiquetas, y resumen y etiquetas ya alimentan la busqueda; lo que
+  falta es decidir si el resumen entra en la linea, que cuesta tokens;
 - fase 3: recuperar los tokens del bloque de imagen, en cuanto haya medidas
   reales de una conversacion (fase 1 ya las registra).
 

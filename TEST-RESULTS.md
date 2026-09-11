@@ -1,5 +1,62 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-11 — F22-ALCANCE-MEMORIA-001, tras la caza de falsos positivos
+
+`npm run check` exit 0.
+
+```
+Test Files  151 passed (151)
+     Tests   2964 passed | 12 skipped
+```
+
+Nuevo: las 141 frases de la caza, una prueba cada una contra `recallRoute`
+sobre diez dias con dos momentos, esperando `ninguno`. Siguen en verde las ~45
+formas de preguntar por el principio y las del resto de la tabla.
+
+
+### 2026-09-11 — F22-ALCANCE-MEMORIA-001 y F22-MEMORIA-ACUMULATIVA-001 (parte del agente)
+
+`npm run check` exit 0.
+
+```
+Test Files  151 passed (151)
+     Tests   2822 passed | 12 skipped (2834)
+```
+
+Lo nuevo:
+
+- `recall-reach.test.ts`: la tabla de ~80 frases de las dos revisiones
+  adversariales (43 que tienen que traer el principio y 34 que no), frases de
+  pedir un recuerdo y de preguntar por lo vivido, y los casos de `buildRecall`
+  contra una boveda de verdad: mas alla del tope, el principio, la fecha, la
+  preferencia dentro de un dia en una conversacion de varios dias, el nombre del
+  personaje y las muletillas, la hora del dia y el resumen del primer momento;
+- `memory-diagnostics.test.ts`: la ventana de historial igual que un turno real
+  y la diferencia entre «ya iba en el historial» y «dia sin conversacion»;
+- `vault-prompt.test.ts`: aviso del hueco, hora del dia, resumen del primero y
+  la eleccion por palabras dicha sin darla por segura;
+- `local-turn.test.ts`, `host-entry.test.ts` y `turn-memory.test.ts`: la memoria
+  del turno vuelve aparte, ya separada de la respuesta, con el `runLocalTurn`
+  real y un proveedor falso.
+
+**Sin ejecutar en un turno real.** La memoria acumulativa todavia no se usa en
+el handler.
+
+### 2026-09-11 — F22-DIAGNOSTICO-MEMORIA-001, ejecucion real
+
+Sobre la boveda real, pulsado por Daniel. Cifras de `studio.log`:
+
+```
+conversaciones  17 total, 17 catalogadas, 0 solo por pausas, 0 sin episodios
+episodios       40 total, 40 catalogados, 2026-09-01 a 2026-09-10, 6 dias
+fecha           6 probados, 6 aciertos, 0 fallos
+estilo          137 mensajes, mediana 85 caracteres, 7 con fecha,
+                3 pidiendo recuerdos, 0 hablando de lo dicho
+```
+
+Verde, pero con un aviso: 40 momentos con un tope de 40 lineas. Ver
+`F22-ALCANCE-MEMORIA-001`.
+
 ### 2026-09-11 — F22-DIAGNOSTICO-MEMORIA-001
 
 `npm run check` exit 0.

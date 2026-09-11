@@ -96,12 +96,59 @@ export interface RecalledEpisodeLine {
   date: string;
   title: string;
   turns: number;
+  /**
+   * de que fue, en una frase. Solo lo lleva el PRIMER momento de todos.
+   *
+   * Es el respaldo de «¿como nos conocimos?»: los patrones no reconocen todas
+   * las formas de preguntarlo, y sin esto un fallo dejaba solo un titulo.
+   */
+  summary?: string;
 }
+
+/** en que parte del dia local empezo un momento */
+export type PartOfDay = 'madrugada' | 'mañana' | 'tarde' | 'noche';
+
+/** por que camino se trajo un momento transcrito */
+export type RecallVia = 'principio' | 'fecha' | 'palabras';
 
 /** un momento traido entero, con las palabras que se dijeron */
 export interface QuotedEpisode extends RecalledEpisodeLine {
   turns: number;
   conversation: VaultPromptTurn[];
+  /**
+   * por que camino se trajo.
+   *
+   * Lo lee sobre todo el registro de cada turno, para saber que camino dispara
+   * en la practica. Al modelo solo le cambia el encabezado cuando es el
+   * principio.
+   */
+  via?: RecallVia;
+  /**
+   * si su linea esta en el indice de arriba.
+   *
+   * Desde que el tope limita las lineas y no el alcance, se puede citar un
+   * momento que no aparece en la lista, y el encabezado no puede decir «uno de
+   * esos». Ausente cuenta como `true`, que es lo que era siempre.
+   */
+  listed?: boolean;
+  /** en que parte del dia empezo; ausente sin ancla temporal */
+  when?: PartOfDay;
+  /**
+   * los OTROS momentos del MISMO dia civil, cuando se trajo por fecha.
+   *
+   * Un dia tiene de media casi siete (40 momentos en 6 dias, cifras de la
+   * boveda real). Sin esto, «¿de que hablamos ayer?» traia uno y ella hablaba
+   * de el como si fuera lo unico que paso. Va recortada: `sameDayTotal` dice
+   * cuantos hubo de verdad.
+   */
+  sameDay?: { title: string; turns: number; when?: PartOfDay }[];
+  sameDayTotal?: number;
+  /**
+   * como se eligio entre los de ese dia: por lo que nombra el mensaje, o por
+   * ser el mas largo a falta de pistas. Solo en el segundo caso tiene sentido
+   * que ella pregunte a cual se refiere.
+   */
+  pickedBy?: 'palabras' | 'mas-largo';
 }
 
 /**
@@ -114,6 +161,13 @@ export interface QuotedEpisode extends RecalledEpisodeLine {
 export interface VaultRecall {
   episodes: RecalledEpisodeLine[];
   quoted: QuotedEpisode | null;
+  /**
+   * cuantos momentos NO van en las lineas por el tope.
+   *
+   * Sin decirlo, ella veria una lista que salta de hace un mes a hoy y podria
+   * afirmar que entre medias no paso nada.
+   */
+  omitted?: number;
 }
 
 export interface VaultPromptInput {
@@ -206,7 +260,21 @@ function directiveBlock(title: string, body: string): string {
  * detalle inventado sobre algo que «recuerda» se blanquea despues en la memoria
  * acumulativa y vuelve convertido en hecho.
  */
-function formatRecallLines(episodes: readonly RecalledEpisodeLine[]): string {
+function formatRecallLines(episodes: readonly RecalledEpisodeLine[], omitted = 0): string {
+  const listed = episodes.map(
+    (episode) =>
+      `- [${episode.id}] ${episode.date} · ${episode.title} · ${episode.turns} turnos` +
+      (episode.summary === undefined ? '' : ` · de que fue: ${episode.summary}`),
+  );
+  if (omitted > 0) {
+    // con dos o mas lineas, la ultima es el primer momento de todos, que va
+    // fijo: el aviso va justo antes, que es donde esta el hueco
+    const aviso =
+      `- (${omitted} ${omitted === 1 ? 'momento mas' : 'momentos mas'} entre medias, que no caben aqui.` +
+      (listed.length >= 2 ? ' El ultimo de esta lista es el primero de todos.' : '') +
+      ' Que uno no aparezca no significa que no pasara.)';
+    listed.splice(listed.length >= 2 ? listed.length - 1 : listed.length, 0, aviso);
+  }
   return [
     'Momentos anteriores con esta persona, del mas reciente al mas antiguo. Puedes aludirlos con',
     'naturalidad y darlos por ciertos.',
@@ -223,9 +291,7 @@ function formatRecallLines(episodes: readonly RecalledEpisodeLine[]): string {
     'tres con uno inventado. Un recuerdo falso suena igual de bien que uno cierto, y ahi esta el',
     'problema: quien te escucha no puede distinguirlos.',
     '',
-    ...episodes.map(
-      (episode) => `- [${episode.id}] ${episode.date} · ${episode.title} · ${episode.turns} turnos`,
-    ),
+    ...listed,
   ].join('\n');
 }
 
@@ -235,10 +301,49 @@ function formatRecallLines(episodes: readonly RecalledEpisodeLine[]): string {
  * Es texto real, no un resumen: por eso rememorar suena a recordar y no a
  * parafrasear. Va como DATOS igual que el resto del historial.
  */
+/** «por la tarde», «de madrugada» */
+function whenLabel(when: PartOfDay): string {
+  return when === 'madrugada' ? 'de madrugada' : `por la ${when}`;
+}
+
 function formatQuotedEpisode(quoted: QuotedEpisode): string {
+  const sameDay = quoted.sameDay ?? [];
+  // el total real, no el recortado: con nueve y seis nombrados, decir «seis»
+  // seria afirmar que no hubo mas
+  const total = Math.max(quoted.sameDayTotal ?? sameDay.length, sameDay.length);
+  const resto = total - sameDay.length;
   return [
-    `${quoted.date} · ${quoted.title}`,
+    `${quoted.date}${quoted.when === undefined ? '' : ` ${whenLabel(quoted.when)}`} · ${quoted.title}`,
+    // el mas antiguo GUARDADO, no «como empezo lo vuestro»: la ficcion puede
+    // situar el principio antes de la primera conversacion
+    ...(quoted.via === 'principio'
+      ? ['Es el momento mas antiguo que tienes guardado con esta persona.']
+      : []),
     'Esto se dijo de verdad, palabra por palabra. Puedes citarlo o referirte a ello.',
+    ...(sameDay.length > 0
+      ? [
+          `Ese mismo dia hubo ${total === 1 ? 'otro momento' : `${total} momentos mas`}: ` +
+            // con la hora y la longitud: dos titulos iguales —«hola», «hola»—
+            // no dejaban saber de cual se hablaba
+            sameDay
+              .map(
+                (other) =>
+                  `«${other.title}» (${other.when === undefined ? '' : `${whenLabel(other.when)}, `}${other.turns} turnos)`,
+              )
+              .join(', ') +
+            (resto > 0 ? ` y ${resto} mas` : '') +
+            '.',
+          'De esos solo sabes el titulo.' +
+            // «parece»: la eleccion por palabras puede equivocarse, y decirlo
+            // como certeza le quitaba la salida de preguntar
+            (quoted.pickedBy === 'palabras'
+              ? ' El de arriba es el que parece encajar con lo que te pregunta; si no casa, puede' +
+                ' que se refiera a otro de esos, y entonces preguntaselo en vez de inventar.'
+              : ' El de arriba se eligio por ser el mas largo: si lo que te pregunta no casa con' +
+                ' lo transcrito, puede que se refiera a otro de esos, y entonces preguntaselo en' +
+                ' vez de inventar.'),
+        ]
+      : []),
     '',
     ...quoted.conversation.map(
       (turn) => `${turn.role === 'user' ? USER_LABEL : ASSISTANT_LABEL}: ${turn.text}`,
@@ -316,13 +421,21 @@ export function composeVaultPrompt(input: VaultPromptInput): VaultPromptBlock[] 
   if (recall !== undefined && recall.episodes.length > 0) {
     blocks.push({
       label: 'recuerdos-lineas',
-      text: dataBlock('MOMENTOS ANTERIORES QUE RECUERDAS', formatRecallLines(recall.episodes)),
+      text: dataBlock(
+        'MOMENTOS ANTERIORES QUE RECUERDAS',
+        formatRecallLines(recall.episodes, recall.omitted ?? 0),
+      ),
     });
   }
   if (recall?.quoted != null) {
     blocks.push({
       label: 'recuerdo-citado',
-      text: dataBlock('UNO DE ESOS MOMENTOS, TAL Y COMO OCURRIO', formatQuotedEpisode(recall.quoted)),
+      text: dataBlock(
+        recall.quoted.listed === false
+          ? 'UN MOMENTO QUE NO ESTA EN ESA LISTA, TAL Y COMO OCURRIO'
+          : 'UNO DE ESOS MOMENTOS, TAL Y COMO OCURRIO',
+        formatQuotedEpisode(recall.quoted),
+      ),
     });
   }
 

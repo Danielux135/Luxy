@@ -2544,7 +2544,7 @@ de Codex no podia salir como truncado ni como agotado en Studio.
 
 ### El fallo que casi se cuela, y merece quedar escrito
 
-La deteccion de `app-server` se escribio con una expresion regular con ``. La
+La deteccion de `app-server` se escribio con una expresion regular con `\b`. La
 consola convirtio esas dos letras en **caracteres de retroceso reales** (0x08).
 El resultado compilaba, el typecheck pasaba y **no casaba nunca**: la capacidad
 habria sido siempre falsa y el transporte no se habria activado jamas, diciendo
@@ -2553,3 +2553,63 @@ habria sido siempre falsa y el transporte no se habria activado jamas, diciendo
 Se encontro mirando los BYTES del archivo, no el texto. Es exactamente el caso
 que describe la regla 2 bis del `CLAUDE.md`. Ahora es un `includes` sin
 expresion regular, inmune al problema.
+
+## D-085 — en la memoria, precision antes que alcance
+
+Fecha: 2026-09-11. Autor: Claude. Origen: dos revisiones adversariales de
+`F22-ALCANCE-MEMORIA-001` (33 y 23 agentes) sobre los patrones que deciden si
+un mensaje pide recordar.
+
+Decision. Los caminos que TRANSCRIBEN un momento (principio, fecha y palabras)
+solo disparan cuando lo nombrado esta DENTRO de una pregunta o de una peticion
+de recordar, en la misma clausula. Nombrarlo no basta.
+
+Por que. Los dos errores no cuestan lo mismo:
+
+- un falso NEGATIVO degrada bien: ella sigue teniendo las lineas del indice, y
+  la del primer momento lleva su resumen, asi que contesta con lo que sabe;
+- un falso POSITIVO transcribe un momento que nadie pidio: cuesta tokens y le
+  hace recitarlo, muchas veces el que no era.
+
+La primera version miraba el mensaje entero y cualquier «?» daba permiso: «desde
+que nos conocimos pienso en ti, ¿quieres ser mi novia?» transcribia la primera
+conversacion. Cada parche por frase rompia otra; lo que convergio fue la regla
+por clausula mas una tabla de ~80 frases reales en `recall-reach.test.ts`, que
+es la que dice si un cambio rompe algo.
+
+Consecuencias:
+
+- «la primera vez», «el primer dia» y «cuando nos conocimos» dejan de ser por
+  si solas una peticion de recuerdo: la mayoria de las veces son afirmaciones;
+- «el primer dia» a secas y «¿cuando empezamos?» exigen un verbo de recordar,
+  porque tambien son el trabajo nuevo y la peli;
+- el primer momento va SIEMPRE en el indice y con su resumen: es el respaldo
+  que hace aceptables los falsos negativos.
+
+Ampliacion, el mismo dia: una caza de falsos positivos probo 287 frases de
+chat realistas y encontro **141** que transcribian sin que nadie lo pidiera, y
+muchas por reglas anteriores a este paso: «ayer hable con mi madre», «el
+sabado hablamos con calma», «acuerdate de comprar pan», «me recuerdas a un
+osito». La regla por clausula no bastaba. Lo que decide ahora es la
+CONSTRUCCION:
+
+1. un verbo de recordar que pregunta, con un objeto que es un recuerdo y no un
+   recado («de comprar»), un mimo («que te quiero») ni un parecido («me
+   recuerdas a»); ni «siempre te acuerdas» ni «si te acuerdas»;
+2. un imperativo de recordar con objeto de recuerdo: «acuerdate de cuando...»,
+   no «recuerdame que mañana...»;
+3. una pregunta que EMPIEZA por un interrogativo pegado a un verbo de nosotros
+   o de ti a mi: «¿de que hablamos?», «¿que me dijiste?», no «¿que dijiste en
+   la entrevista?»;
+4. «lo que»/«aquello que» con esos verbos, y «lo de» + un tiempo.
+
+Para el principio: la frase tiene que estar gobernada por un verbo de
+recordar, pedida con «cuentame», o ser una pregunta que empieza por «como»,
+«cuando» o «donde» pegado a ella, o por ella misma. Se escriben enteras las
+abreviaturas «q», «pq» y «xq».
+
+Las 141 frases son `recall-falsos-positivos.fixture.ts`, GENERADO del resultado
+de la caza: no se retoca una frase para que pase.
+
+Reabrir solo con evidencia de mensajes reales que fallen: el diagnostico
+«Comprobar la memoria» cuenta que camino habria disparado cada mensaje de Daniel.

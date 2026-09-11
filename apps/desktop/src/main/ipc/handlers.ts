@@ -170,7 +170,7 @@ import type { PrivateMemory } from '../vault/private-memory.js';
 import type { MemoryPreferences } from '../vault/memory-preferences.js';
 import type { CatalogStore } from '../vault/catalog-store.js';
 import { buildRecall } from '../vault/recall.js';
-import { diagnoseMemory } from '../vault/memory-diagnostics.js';
+import { diagnoseMemory, type DiagnosticMessage } from '../vault/memory-diagnostics.js';
 
 /**
  * que decirle al usuario cuando la imagen que pidio el modelo no se puede
@@ -1658,19 +1658,53 @@ export function registerIpcHandlers(context: HandlerContext): void {
     if (!context.vault.isUnlocked()) throw new VaultError('la boveda esta bloqueada');
 
     const store = context.privateConversations;
-    const conversaciones = await store.list(context.vault);
-    const userMessages: string[] = [];
+    const todas = await store.list(context.vault);
+    // un turno real solo ve los recuerdos de SU personaje (`D-058`): mezclar los
+    // de todos daria cifras de una memoria que no existe. Se mide el personaje
+    // con mas conversaciones, que es con quien se habla
+    const cuantas = new Map<string | null, number>();
+    for (const conversacion of todas) {
+      cuantas.set(conversacion.characterId, (cuantas.get(conversacion.characterId) ?? 0) + 1);
+    }
+    // `null` —sin personaje— solo cuenta si no hay ninguna con personaje: unas
+    // pruebas sin personaje podian ser mayoria y dejar fuera a quien importa
+    const conPersonaje = [...cuantas.entries()].filter(([id]) => id !== null);
+    const principal =
+      (conPersonaje.length > 0 ? conPersonaje : [...cuantas.entries()]).sort(
+        (a, b) => b[1] - a[1],
+      )[0]?.[0] ?? null;
+    // para que la pantalla diga a quien ha medido; al registro no va
+    const nombre =
+      principal === null
+        ? null
+        : ((await context.characters.list(context.vault)).find(
+            (entry) => entry.characterId === principal,
+          )?.label ?? null);
+    const conversaciones = todas.filter((conversacion) => conversacion.characterId === principal);
+
+    // con su hora, su conversacion y su numero de turno: el diagnostico pasa cada
+    // mensaje por la memoria tal y como estaba cuando se escribio, con la misma
+    // ventana de historial reciente que un turno real
+    const userMessages: DiagnosticMessage[] = [];
     for (const conversacion of conversaciones) {
       const turnos = await store.read(context.vault, conversacion.conversationId);
       for (const turno of turnos) {
-        if (turno.role === 'user') userMessages.push(turno.text);
+        if (turno.role !== 'user') continue;
+        userMessages.push({
+          text: turno.text,
+          createdAt: turno.createdAt,
+          conversationId: conversacion.conversationId,
+          sequence: turno.sequence,
+        });
       }
     }
 
     const diagnostico = diagnoseMemory({
-      episodes: await context.privateMemory.listEpisodes(context.vault),
+      episodes: await context.privateMemory.listEpisodes(context.vault, principal),
       userMessages,
       conversationIds: conversaciones.map((conversacion) => conversacion.conversationId),
+      otherConversations: todas.length - conversaciones.length,
+      characterName: nombre,
       // el mismo ancla que un turno real, o la prueba mediria otra cosa
       anchor: {
         instant: new Date().toISOString(),
@@ -1683,9 +1717,14 @@ export function registerIpcHandlers(context: HandlerContext): void {
     // dijo, y el registro ya lleva la hora de cada turno
     context.log('diagnostico de memoria', {
       conversaciones: diagnostico.conversations,
+      // el nombre del personaje NO: el registro lleva cifras
+      alcance: { otrasConversaciones: diagnostico.scope.otherConversations },
       episodios: diagnostico.episodes,
+      indice: diagnostico.index,
       busquedaPorFecha: diagnostico.dateRecall,
+      principio: diagnostico.origin,
       estilo: diagnostico.style,
+      disparos: diagnostico.triggers,
     });
     return diagnostico;
   });
@@ -2671,6 +2710,8 @@ export function registerIpcHandlers(context: HandlerContext): void {
       // los recuerdos son del personaje: un hilo sin personaje no hereda los de
       // nadie, y uno con otro personaje tampoco ve los de este
       characterId,
+      // su nombre sale en muchos momentos: no sirve para elegir entre ellos
+      ignoreWords: character === undefined ? [] : [character.label],
       ...(oldestRecent === undefined
         ? {}
         : { alreadyInPrompt: { conversationId, fromSequence: oldestRecent } }),
@@ -2710,6 +2751,11 @@ export function registerIpcHandlers(context: HandlerContext): void {
       tokensEstimados: estimateTokens(prompt),
       // de mayor a menor: lo primero de la lista es lo que hay que mirar
       bloques: medidas.map((m) => m.label + ' ' + String(m.chars) + 'c ' + String(m.share) + '%'),
+      // que camino trajo un recuerdo, si alguno: es lo que dice en la practica
+      // cual dispara y cual no. El camino, nunca lo que se cito
+      recuerdo: recall.quoted?.via ?? 'ninguno',
+      lineasIndice: recall.episodes.length,
+      fueraDelIndice: recall.omitted ?? 0,
     });
 
     // dicho ya, se olvida: si no, el personaje seguiria disculpandose por una
