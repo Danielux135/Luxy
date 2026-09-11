@@ -31,6 +31,16 @@ vi.mock('./host.js', () => ({
         outputTokens: null,
         modelCalls: 1,
         responseOutcome: 'completed',
+        memory: {
+          version: 1,
+          summary: 'lo que va pasando',
+          facts: [],
+          decisions: [],
+          plan: [],
+          openQuestions: [],
+          lessons: [],
+        },
+        memoryStatus: 'structured',
       };
     }
   },
@@ -141,6 +151,21 @@ describe('host-entry: el turno privado llega entero', () => {
     const respuesta = port.sent.find((m) => m['type'] === 'local_turn');
     expect(respuesta?.['text']).toBe('respuesta');
     expect(port.sent.some((m) => m['type'] === 'event')).toBe(false);
+  });
+
+  it('la memoria vuelve aparte, junto al texto', async () => {
+    // sin esto, el proceso principal la buscaba en un texto del que el
+    // job-runner ya la habia quitado, y no se guardaba nunca
+    const port = await arrancar();
+
+    port.deliver(peticion({}));
+    await vi.waitFor(() => expect(port.sent.some((m) => m['type'] === 'local_turn')).toBe(true));
+
+    const respuesta = port.sent.find((m) => m['type'] === 'local_turn');
+    expect(respuesta?.['memoryStatus']).toBe('structured');
+    expect((respuesta?.['memory'] as { summary?: string } | undefined)?.summary).toBe(
+      'lo que va pasando',
+    );
   });
 
   it('descarta un mensaje que no cumple el protocolo', async () => {

@@ -171,6 +171,7 @@ import type { MemoryPreferences } from '../vault/memory-preferences.js';
 import type { CatalogStore } from '../vault/catalog-store.js';
 import { buildRecall } from '../vault/recall.js';
 import { diagnoseMemory, type DiagnosticMessage } from '../vault/memory-diagnostics.js';
+import { memoryOfTurn } from '../vault/turn-memory.js';
 
 /**
  * que decirle al usuario cuando la imagen que pidio el modelo no se puede
@@ -1173,7 +1174,8 @@ export function registerIpcHandlers(context: HandlerContext): void {
           const verdict = classifyReply(parsed.visibleText);
           tally[verdict.kind] += 1;
           for (const signal of verdict.signals) signals.add(signal);
-          if (parsed.status === 'structured') tally.memoryOk += 1;
+          // mismo fallo que el turno: sin el estado del agente, siempre 0
+          if (memoryOfTurn(run, parsed).status === 'structured') tally.memoryOk += 1;
         } catch (failure) {
           // un modelo caido no debe tumbar la comprobacion de los demas, y «no
           // estaba disponible» no es «se nego»: la pasarela avisa de que los
@@ -2820,7 +2822,11 @@ export function registerIpcHandlers(context: HandlerContext): void {
       // la memoria viaja DENTRO de la respuesta y se separa aqui: lo que se
       // guarda como turno es solo el texto visible, sin el bloque tecnico
       const parsed = parseConversationMemoryResponse(result.text);
-      memoryStatus = parsed.status;
+      // la memoria la separa el agente y la manda aparte: el texto ya no lleva el
+      // bloque, y buscarlo solo ahi daba `absent` en TODOS los turnos, asi que
+      // la memoria acumulativa de Privado no se guardaba nunca
+      const memoria = memoryOfTurn(result, parsed);
+      memoryStatus = memoria.status;
       // y despues la peticion de imagen, sobre lo que quedo. El orden es el
       // inverso al del prompt: la memoria va la ultima, asi que sale la primera
       const imageRequest = parseVaultImageRequest(parsed.visibleText);
@@ -2900,7 +2906,7 @@ export function registerIpcHandlers(context: HandlerContext): void {
         },
         // sin memoria valida no se guarda ninguna: se conserva la anterior, que
         // sigue siendo buena. Un turno malo no borra la conversacion (D-019)
-        parsed.memory === null ? undefined : { memory: parsed.memory },
+        memoria.memory === null ? undefined : { memory: memoria.memory },
       );
     }
 

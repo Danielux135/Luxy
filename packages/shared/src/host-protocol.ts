@@ -10,6 +10,7 @@
 import { z } from 'zod';
 import { agentEventSchema, agentHostStatusSchema } from './agent-events.js';
 import { REASONING_EFFORTS } from './constants.js';
+import { conversationMemorySchema, conversationMemoryStatusSchema } from './schemas.js';
 
 /**
  * tope de imagenes en un turno privado.
@@ -221,6 +222,16 @@ export const hostResponseSchema = z.discriminatedUnion('type', [
     durationMs: z.number().int().min(0),
     inputTokens: z.number().int().min(0).nullable(),
     outputTokens: z.number().int().min(0).nullable(),
+    /**
+     * la memoria del turno, YA separada de la respuesta.
+     *
+     * El job-runner quita el bloque `<LUXY_MEMORY>` del texto antes de
+     * devolverlo, asi que buscarlo en `text` no encuentra nada: sin estos dos
+     * campos la memoria acumulativa del camino privado no se guardaba nunca.
+     * Opcionales para que un agente viejo siga hablando con un Studio nuevo.
+     */
+    memory: conversationMemorySchema.nullable().optional(),
+    memoryStatus: conversationMemoryStatusSchema.nullable().optional(),
   }),
 ]);
 

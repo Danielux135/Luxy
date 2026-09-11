@@ -179,6 +179,10 @@ export function startHostEntry(port: ParentPort): void {
           durationMs: result.durationMs,
           inputTokens: result.inputTokens,
           outputTokens: result.outputTokens,
+          // la memoria ya separada de la respuesta: sin reenviarla, el proceso
+          // principal la buscaba en un texto que ya no la llevaba
+          memory: result.memory ?? null,
+          memoryStatus: result.memoryStatus ?? null,
         });
         break;
       }

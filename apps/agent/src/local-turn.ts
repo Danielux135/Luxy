@@ -18,6 +18,8 @@
 import type {
   AgentConfig,
   ClaimedJob,
+  ConversationMemory,
+  ConversationMemoryStatus,
   ProviderId,
   ProviderImage,
   ReasoningEffort,
@@ -82,6 +84,15 @@ export interface LocalTurnResult {
   modelCalls: number | null;
   /** como termino de verdad; `completed` no garantiza respuesta entera */
   responseOutcome: string | null;
+  /**
+   * la memoria del turno, ya separada de la respuesta por el job-runner.
+   *
+   * Antes no se devolvia: el texto viajaba SIN el bloque y la memoria no
+   * llegaba a ningun sitio. El job-runner solo la incluye si la respuesta
+   * termino bien, asi que una cortada trae el estado pero no la memoria.
+   */
+  memory?: ConversationMemory | null;
+  memoryStatus?: ConversationMemoryStatus | null;
 }
 
 export interface LocalTurnDeps {
@@ -218,6 +229,8 @@ function toLocalResult(outcome: JobOutcome): LocalTurnResult {
       durationMs: result.durationMs,
       inputTokens: result.usage?.inputTokens ?? null,
       outputTokens: result.usage?.outputTokens ?? null,
+      memory: result.conversationMemory ?? null,
+      memoryStatus: result.conversationMemoryStatus ?? null,
     };
   }
 

@@ -1,5 +1,11 @@
 import { describe, it, expect, vi } from 'vitest';
-import { agentConfigSchema, hostRequestSchema, hostResponseSchema } from '@luxy/shared';
+import {
+  CONVERSATION_MEMORY_CLOSE,
+  CONVERSATION_MEMORY_OPEN,
+  agentConfigSchema,
+  hostRequestSchema,
+  hostResponseSchema,
+} from '@luxy/shared';
 import type { AgentConfig, ProviderExecution, ProviderRunRequest } from '@luxy/shared';
 import { buildLocalJob, runLocalTurn, LocalTurnIsolationError } from './local-turn.js';
 import type { AgentLogger } from './logger.js';
@@ -522,5 +528,77 @@ describe('aislamiento del gateway', () => {
     );
     expect(result.outcome).toBe('failed');
     expect(result.error).toContain('no tiene configurado el proyecto');
+  });
+});
+
+describe('la memoria del turno privado', () => {
+  const MEMORIA = {
+    version: 1,
+    summary: 'lo que va pasando entre los dos',
+    facts: ['a ella le gusta el faro'],
+    decisions: [],
+    plan: [],
+    openQuestions: [],
+    lessons: [],
+  };
+
+  const turnoCon = (texto: string) =>
+    runLocalTurn(
+      {
+        localTurnId: TURN_ID,
+        provider: 'claude',
+        model: null,
+        projectAlias: 'privado',
+        prompt: 'hola',
+      },
+      new AbortController().signal,
+      {
+        config: config(),
+        logger,
+        getProvider: () => fakeProvider(texto),
+        worktreesDirectory: 'C:/no/se/usa',
+        apiKeyFor: () => undefined,
+        onProgress: () => undefined,
+      },
+    );
+
+  it('vuelve aparte y ya separada de la respuesta', async () => {
+    // el fallo de verdad: el job-runner quitaba el bloque del texto y el
+    // resultado local solo devolvia el texto, asi que la memoria se perdia
+    const result = await turnoCon(
+      'la respuesta visible\n\n' +
+        CONVERSATION_MEMORY_OPEN +
+        JSON.stringify(MEMORIA) +
+        CONVERSATION_MEMORY_CLOSE,
+    );
+    expect(result.text).not.toContain(CONVERSATION_MEMORY_OPEN);
+    expect(result.text).toContain('la respuesta visible');
+    expect(result.memoryStatus).toBe('structured');
+    expect(result.memory?.summary).toBe('lo que va pasando entre los dos');
+  });
+
+  it('sin bloque, llega como ausente y sin memoria', async () => {
+    const result = await turnoCon('solo la respuesta');
+    expect(result.memoryStatus).toBe('absent');
+    expect(result.memory ?? null).toBeNull();
+  });
+
+  it('el protocolo acepta la memoria aparte y rechaza un estado inventado', () => {
+    const base = {
+      type: 'local_turn',
+      requestId: 'r1',
+      localTurnId: TURN_ID,
+      outcome: 'completed',
+      text: 'la respuesta',
+      error: null,
+      executedModel: 'un-modelo',
+      durationMs: 120,
+      inputTokens: 10,
+      outputTokens: 20,
+    };
+    expect(
+      hostResponseSchema.safeParse({ ...base, memory: MEMORIA, memoryStatus: 'structured' }).success,
+    ).toBe(true);
+    expect(hostResponseSchema.safeParse({ ...base, memoryStatus: 'inventado' }).success).toBe(false);
   });
 });

@@ -1,5 +1,23 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-09-11 — Claude — F22-MEMORIA-ACUMULATIVA-001
+
+Todo turno local va como `studioMode: 'conversation'`, asi que el job-runner
+separaba `<LUXY_MEMORY>` de la respuesta y lo dejaba en `conversationMemory`,
+que `toLocalResult` no devolvia. El handler lo buscaba en `result.text`, que ya
+no lo llevaba: `absent` siempre, y la memoria acumulativa de Privado no se
+guardaba nunca. La sonda de compatibilidad contaba siempre 0 memorias validas.
+
+Archivos: `packages/shared/src/host-protocol.ts` (campos `memory` y
+`memoryStatus`, opcionales), `apps/agent/src/local-turn.ts`,
+`apps/agent/src/runtime/host-entry.ts`, `apps/desktop/src/main/vault/turn-memory.ts`
+(nuevo) y `handlers.ts` (turno privado y sonda). Pruebas: `local-turn.test.ts`
+con el `runLocalTurn` real y un proveedor falso, `host-entry.test.ts` y
+`turn-memory.test.ts`.
+
+`npm run check` exit 0: 151 archivos, 2964 pruebas, 12 saltadas.
+Sin ver todavia en un turno real.
+
 ### 2026-09-11 — Claude — F22-ALCANCE-MEMORIA-001, caza de falsos positivos
 
 Tercera ronda, solo falsos positivos, que son el error dañino: tres agentes

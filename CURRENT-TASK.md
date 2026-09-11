@@ -2,8 +2,9 @@
 
 ## F22-MEMORIA-ACUMULATIVA-001 — la memoria de cada conversacion privada no se guardaba
 
-Estado: **`en curso`: agente y protocolo hechos y probados; falta el handler —
-Claude, 2026-09-11.**
+Estado: **`done` en codigo, `pendiente de un turno real` — Claude, 2026-09-11.**
+Agente, protocolo y handler hechos; el turno privado y la sonda de
+compatibilidad usan `memoryOfTurn`.
 
 Todo turno local va como `studioMode: 'conversation'`, asi que el job-runner
 separa el bloque `<LUXY_MEMORY>` de la respuesta y lo pone en
@@ -17,10 +18,11 @@ Hecho: `LocalTurnResult` y la respuesta `local_turn` llevan `memory` y
 `turn-memory.ts` decide cual cuenta. Pruebas con el `runLocalTurn` real y un
 proveedor falso.
 
-Falta: usar `memoryOfTurn` en el turno privado y en la sonda de compatibilidad,
-y verlo en un turno real (el registro «prompt privado compuesto» dira si aparece
-el bloque `memoria`). Las 17 conversaciones existentes no tienen memoria
-acumulativa: una pasada por suscripcion que la genere queda por decidir.
+Falta, y es de Daniel: reiniciar Studio y hablar con Lia. Desde el segundo
+turno de una conversacion, el registro «prompt privado compuesto» tiene que
+enseñar el bloque `memoria`. Las 17 conversaciones existentes empiezan sin
+memoria acumulativa y la van ganando al retomarlas; generarla de golpe por
+suscripcion queda por decidir.
 
 
 ## F23-PENDIENTES-001 — que Lia saque sola las promesas y lo pendiente
