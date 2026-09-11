@@ -591,3 +591,37 @@ describe('recuerdos: la hora del dia y el resumen del primero', () => {
     expect(prompt).toContain('Ese mismo dia hubo otro momento: «hola» (de madrugada, 2 turnos).');
   });
 });
+
+describe('un trozo del momento se dice que es un trozo', () => {
+  const citado = {
+    id: 'r1',
+    date: '2026-09-08',
+    title: 'la facultad',
+    turns: 20,
+    conversation: [{ role: 'user' as const, text: 'hola' }],
+  };
+
+  it('con el trozo, le dice cuales son y que no supla lo que falta', () => {
+    const prompt = buildVaultPrompt({
+      memory: null,
+      turns: [],
+      message: '¿te acuerdas?',
+      recall: {
+        episodes: [citado],
+        quoted: { ...citado, via: 'palabras', excerpt: { first: 15, last: 20, total: 20 } },
+      },
+    });
+    expect(prompt).toContain('Es solo un trozo: los turnos 15 a 20 de 20.');
+    expect(prompt).toContain('pero no lo supongas');
+  });
+
+  it('entero, no dice nada de trozos', () => {
+    const prompt = buildVaultPrompt({
+      memory: null,
+      turns: [],
+      message: '¿te acuerdas?',
+      recall: { episodes: [citado], quoted: { ...citado, via: 'palabras' } },
+    });
+    expect(prompt).not.toContain('Es solo un trozo');
+  });
+});

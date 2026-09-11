@@ -1,5 +1,19 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-11 — F22-TROZO-CITADO-001
+
+`npm run check` exit 0.
+
+```
+Test Files  151 passed (151)
+     Tests   2973 passed | 12 skipped
+```
+
+Nuevo: un momento de 20 turnos con lo buscado en el 18 se transcribe del 15 al
+20 y se marca como trozo; sin turno buscado, por el principio. **Sin ejecutar
+en un turno real.**
+
+
 ### 2026-09-11 — F22-MEMORIA-ACUMULATIVA-001, turnos reales
 
 Tres turnos de Daniel con la compilacion de las 16:42. Cifras de «prompt privado

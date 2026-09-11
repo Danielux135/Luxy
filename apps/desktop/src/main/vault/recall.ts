@@ -851,21 +851,25 @@ export async function buildRecall(
     episode: Episode,
     via: RecallVia,
     extra: Pick<QuotedEpisode, 'sameDay' | 'sameDayTotal' | 'pickedBy'> = {},
+    /** el turno que se buscaba, si se sabe: la transcripcion va alrededor de el */
+    anchorSequence?: number,
   ): Promise<VaultRecall> => {
     const position = visible.findIndex((candidate) => episodeKey(candidate) === episodeKey(episode));
     const listed = position >= 0;
     const line = listed ? lines[position]! : lineFor(episode, `r${lines.length + 1}`);
     const turns = await memory.readEpisode(vault, episode);
     const when = whenOf(episode);
+    const trozo = quoteWindow(turns, anchorSequence, options.maxQuotedTurns ?? MAX_QUOTED_TURNS);
+    const entero = trozo.first === 1 && trozo.last >= turns.length;
     const quoted: QuotedEpisode = {
       ...line,
       via,
       listed,
       ...(when === undefined ? {} : { when }),
-      conversation: capConversation(
-        turns.map((turn) => ({ role: turn.role, text: turn.text })),
-        options.maxQuotedTurns ?? MAX_QUOTED_TURNS,
-      ),
+      conversation: trozo.kept,
+      // si no va entero se le dice: sin saberlo, tomaba el trozo por el momento
+      // y rellenaba lo que faltaba
+      ...(entero ? {} : { excerpt: { first: trozo.first, last: trozo.last, total: turns.length } }),
       ...extra,
     };
     return { ...base, quoted };
@@ -924,30 +928,54 @@ export async function buildRecall(
       const episode = match.episode;
       // lo que ya va como historial reciente no se transcribe otra vez
       if (episode === undefined || isAlreadyInPrompt(episode, window)) continue;
-      return quote(episode, 'palabras');
+      // alrededor del turno que caso, no desde el principio del momento
+      return quote(episode, 'palabras', {}, match.sequence);
     }
   }
 
   return base;
 }
 
-/**
- * recorta el episodio transcrito.
- *
- * Se conserva el PRINCIPIO y no el final: cuando alguien pregunta por un
- * momento, quiere como fue, no como acabo.
- */
-function capConversation(
-  turns: { role: 'user' | 'assistant'; text: string }[],
-  maxTurns: number,
-): { role: 'user' | 'assistant'; text: string }[] {
-  const kept: { role: 'user' | 'assistant'; text: string }[] = [];
-  let characters = 0;
+/** turnos de contexto que se transcriben antes del que se buscaba */
+const CONTEXT_BEFORE = 3;
 
-  for (const turn of turns.slice(0, maxTurns)) {
-    if (characters + turn.text.length > MAX_QUOTED_CHARS) break;
-    characters += turn.text.length;
-    kept.push(turn);
+/**
+ * el trozo del episodio que se transcribe, y donde cae dentro de el.
+ *
+ * Por el PRINCIPIO —quien pregunta por un momento quiere como fue, no como
+ * acabo—, salvo que se sepa que turno se buscaba: entonces alrededor de ESE
+ * turno, con unos pocos de antes. Paso de verdad: «¿de verdad no te acuerdas de
+ * lo del baño de la facultad?» encontro el momento, pero se transcribian sus
+ * doce primeros turnos y lo que se buscaba estaba mas adelante. Ella no lo vio y
+ * relleno el hueco inventando.
+ *
+ * Siempre entra al menos un turno, aunque pase del tope de caracteres: si no, un
+ * turno muy largo dejaba la transcripcion vacia justo cuando era el buscado.
+ */
+function quoteWindow(
+  turns: readonly { sequence: number; role: 'user' | 'assistant'; text: string }[],
+  anchorSequence: number | undefined,
+  maxTurns: number,
+): { kept: { role: 'user' | 'assistant'; text: string }[]; first: number; last: number } {
+  const collect = (start: number): { role: 'user' | 'assistant'; text: string }[] => {
+    const kept: { role: 'user' | 'assistant'; text: string }[] = [];
+    let characters = 0;
+    for (const turn of turns.slice(start, start + maxTurns)) {
+      if (kept.length > 0 && characters + turn.text.length > MAX_QUOTED_CHARS) break;
+      characters += turn.text.length;
+      kept.push({ role: turn.role, text: turn.text });
+    }
+    return kept;
+  };
+
+  const buscado =
+    anchorSequence === undefined ? -1 : turns.findIndex((turn) => turn.sequence === anchorSequence);
+  let start = buscado < 0 ? 0 : Math.max(0, buscado - CONTEXT_BEFORE);
+  let kept = collect(start);
+  if (buscado >= 0 && start + kept.length <= buscado) {
+    // con los de antes no cabia: se empieza en el mismo turno buscado
+    start = buscado;
+    kept = collect(start);
   }
-  return kept;
+  return { kept, first: start + 1, last: start + kept.length };
 }

@@ -2756,6 +2756,13 @@ export function registerIpcHandlers(context: HandlerContext): void {
       // que camino trajo un recuerdo, si alguno: es lo que dice en la practica
       // cual dispara y cual no. El camino, nunca lo que se cito
       recuerdo: recall.quoted?.via ?? 'ninguno',
+      // posiciones de turno, nunca texto: dice si lo buscado pudo entrar
+      recuerdoTrozo:
+        recall.quoted == null
+          ? null
+          : recall.quoted.excerpt === undefined
+            ? 'entero'
+            : `${recall.quoted.excerpt.first}-${recall.quoted.excerpt.last}/${recall.quoted.excerpt.total}`,
       lineasIndice: recall.episodes.length,
       fueraDelIndice: recall.omitted ?? 0,
     });

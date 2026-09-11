@@ -158,14 +158,30 @@ describe('lo que recuerda en un turno', () => {
     expect(recall.episodes).toEqual([]);
   });
 
-  it('recorta el momento transcrito por el principio, no por el final', async () => {
+  it('sin un turno buscado, recorta el momento por el principio, no por el final', async () => {
     // quien pregunta por un momento quiere como fue, no como acabo
+    const recall = await buildRecall(memory, vault, '¿cómo nos conocimos?', {
+      characterId: LIA,
+      maxQuotedTurns: 1,
+    });
+    expect(recall.quoted?.via).toBe('principio');
+    expect(recall.quoted?.conversation).toHaveLength(1);
+    expect(recall.quoted?.conversation[0]?.text).toBe('¿cómo te llamas? ¿de dónde eres?');
+    // y se le dice que es un trozo: el momento tiene dos turnos
+    expect(recall.quoted?.excerpt).toEqual({ first: 1, last: 1, total: 2 });
+  });
+
+  it('por palabras, con sitio para un solo turno, entra el que casa', async () => {
+    // el turno buscado no puede quedarse fuera por empezar desde el principio
     const recall = await buildRecall(memory, vault, '¿te acuerdas de la vainilla?', {
       characterId: LIA,
       maxQuotedTurns: 1,
     });
-    expect(recall.quoted?.conversation).toHaveLength(1);
-    expect(recall.quoted?.conversation[0]?.text).toBe('¿cómo te llamas? ¿de dónde eres?');
+    expect(recall.quoted?.via).toBe('palabras');
+    expect(recall.quoted?.conversation[0]?.text).toBe(
+      'Me llamo Luxy. Vengo de un lugar donde huele a vainilla.',
+    );
+    expect(recall.quoted?.excerpt).toEqual({ first: 2, last: 2, total: 2 });
   });
 
   it('un hilo SIN personaje no hereda los recuerdos de nadie', async () => {

@@ -438,6 +438,26 @@ describe('mas alla del indice, el principio y los momentos de un mismo dia', () 
     expect(textos(recall)).toContain('Compramos higos y una bufanda roja.');
   });
 
+  it('por palabras transcribe ALREDEDOR del turno que casa, no el principio del momento', async () => {
+    // paso de verdad: el momento se encontro, pero se transcribian sus doce
+    // primeros turnos y lo que se buscaba iba mas adelante. Ella no lo vio
+    const LARGA = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb1';
+    for (let i = 0; i < 20; i += 1) {
+      const texto = i === 17 ? 'Te lo debo desde lo del baño de la facultad.' : `turno de relleno ${i}`;
+      const minuto = String(i).padStart(2, '0');
+      await decir(LARGA, texto, i % 2 === 0 ? 'user' : 'assistant', `2026-09-08T10:${minuto}:00Z`);
+    }
+
+    const recall = await buildRecall(memory, vault, '¿te acuerdas de lo del baño de la facultad?', {
+      characterId: LIA,
+      anchor: ANCLA,
+    });
+    expect(recall.quoted?.via).toBe('palabras');
+    expect(textos(recall)).toContain('Te lo debo desde lo del baño de la facultad.');
+    // con tres de contexto delante: el trozo empieza en el 15 de 20
+    expect(recall.quoted?.excerpt).toEqual({ first: 15, last: 20, total: 20 });
+  });
+
   it('por palabras alcanza un momento que no esta en las lineas', async () => {
     const recall = await buildRecall(memory, vault, '¿te acuerdas de los higos?', {
       characterId: LIA,

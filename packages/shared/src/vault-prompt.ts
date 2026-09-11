@@ -134,6 +134,15 @@ export interface QuotedEpisode extends RecalledEpisodeLine {
   /** en que parte del dia empezo; ausente sin ancla temporal */
   when?: PartOfDay;
   /**
+   * que trozo del momento va transcrito, si no va entero: posiciones de turno
+   * dentro del momento, empezando en 1.
+   *
+   * Sin decirselo, tomaba el trozo por el momento entero y rellenaba lo que
+   * faltaba inventando: con una pregunta por una promesa que quedo fuera del
+   * trozo, se invento otras.
+   */
+  excerpt?: { first: number; last: number; total: number };
+  /**
    * los OTROS momentos del MISMO dia civil, cuando se trajo por fecha.
    *
    * Un dia tiene de media casi siete (40 momentos en 6 dias, cifras de la
@@ -320,6 +329,13 @@ function formatQuotedEpisode(quoted: QuotedEpisode): string {
       ? ['Es el momento mas antiguo que tienes guardado con esta persona.']
       : []),
     'Esto se dijo de verdad, palabra por palabra. Puedes citarlo o referirte a ello.',
+    ...(quoted.excerpt === undefined
+      ? []
+      : [
+          `Es solo un trozo: los turnos ${quoted.excerpt.first} a ${quoted.excerpt.last} de ${quoted.excerpt.total}.` +
+            ' De lo de antes y lo de despues no sabes nada: si te preguntan por algo que no esta',
+          'aqui, dilo o preguntalo, pero no lo supongas.',
+        ]),
     ...(sameDay.length > 0
       ? [
           `Ese mismo dia hubo ${total === 1 ? 'otro momento' : `${total} momentos mas`}: ` +

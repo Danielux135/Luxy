@@ -1,5 +1,30 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-09-11 — Claude — F22-TROZO-CITADO-001
+
+Origen, de Daniel en turnos reales: le pregunto a Lia por «la deuda» que tiene
+con ella y por lo del «baño de la facultad», y no lo recordo. El registro dice
+que los dos turnos SI trajeron un momento por palabras (6.099 y 5.297
+caracteres); el contenido no se ha mirado.
+
+Causa en el codigo: el camino por palabras encontraba el TURNO que casaba, pero
+transcribia el momento desde su principio y lo cortaba a los doce turnos. Si lo
+buscado iba mas adelante, se quedaba fuera. Y nada le decia que era un trozo, asi
+que ella lo tomaba por el momento entero y rellenaba el hueco inventando: se
+invento deudas de fotos que nunca existieron.
+
+Arreglo: `quoteWindow` en `recall.ts` transcribe alrededor del turno que caso,
+con tres de contexto delante; sin turno buscado sigue por el principio.
+`QuotedEpisode.excerpt` dice que trozo va, y el prompt le avisa de que lo de
+antes y lo de despues no lo sabe. El registro anota `recuerdoTrozo` en
+posiciones, sin texto.
+
+Lo que NO arregla: si la palabra de la pregunta no es la que se uso entonces
+(«deuda» frente a «te debo»), la busqueda no los une. Eso lo resuelve
+`F23-PENDIENTES-001`.
+
+`npm run check` exit 0: 151 archivos, 2973 pruebas, 12 saltadas.
+
 ### 2026-09-11 — Claude — F22-FOTO-DEL-USUARIO-001 (D-086)
 
 Origen, de Daniel en un turno real: le hizo una foto a Lia dentro de la escena y
