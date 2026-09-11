@@ -2613,3 +2613,41 @@ de la caza: no se retoca una frase para que pase.
 
 Reabrir solo con evidencia de mensajes reales que fallen: el diagnostico
 «Comprobar la memoria» cuenta que camino habria disparado cada mensaje de Daniel.
+
+## D-086 — una foto que hace el usuario dentro de la escena se genera
+
+Fecha: 2026-09-11. Autor: Claude. Origen: un turno real de Daniel.
+
+Paso: el usuario escribio en la escena que le hacia una foto al personaje. El
+modelo lo entendio y reacciono al clic en personaje, pero no genero nada: la
+instruccion de imagen solo contaba «el usuario pide ver, recibir o volver a ver
+una imagen», y hacer una foto no es pedirla. La imagen solo salio cuando el
+dijo que la habia borrado y pidio otra.
+
+Decision. `buildVaultImageInstruction` cuenta DOS casos para escribir el bloque:
+
+1. el usuario pide ver, recibir o volver a ver una imagen;
+2. el usuario HACE una foto en ese turno, dentro de la escena, y el personaje
+   sale en ella: se genera lo que capta SU camara, aunque no pida verla.
+
+No cuenta si se fotografia solo a si mismo, ni si solo lo dice o lo recuerda.
+Sin poder generar, el segundo caso no aparece.
+
+Lo que añadio la revision (dos agentes y un esceptico por hallazgo, cinco
+problemas reales):
+
+- «Nunca por iniciativa propia... si no te la han pedido, no la mandes» iba
+  justo detras del caso 2 y lo anulaba. Ahora dice «fuera de esos dos casos» y
+  que la foto que hace el no es iniciativa suya; la opcion «generar» tambien
+  nombra el caso 2;
+- si salen los dos, o se la hace otra persona, se genera solo ella, en plano
+  cercano y sin el: el generador no puede dibujarle a el;
+- si mira una foto que le acaba de hacer y no esta en la lista de imagenes
+  existentes, no llego a generarse: se genera entonces;
+- el prompt de esa foto no nombra ninguna camara, ni siquiera en negativo:
+  «not looking at camera» tambien la dibuja. Se usan «eyes closed», «asleep» o
+  «looking away», y el encuadre desde donde esta el.
+
+Coste: la instruccion de imagen crece unos 1.200 caracteres. La fase 3 del plan
+(mandar la guia de como escribir el prompt solo cuando el mensaje hable de
+fotos) lo compensaria de sobra.

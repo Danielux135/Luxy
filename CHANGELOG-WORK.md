@@ -1,5 +1,20 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-09-11 — Claude — F22-FOTO-DEL-USUARIO-001 (D-086)
+
+Origen, de Daniel en un turno real: le hizo una foto a Lia dentro de la escena y
+ella reacciono al clic sin generarla. Salio solo al pedirle «una nueva». El
+registro lo confirma: el primer turno no genero nada y el segundo si, con siete
+minutos de cola de AI Horde.
+
+Causa: la instruccion de imagen solo contaba «pedir ver una imagen». Arreglo en
+`packages/shared/src/vault-image-request.ts`: un segundo caso para la foto que
+hace el usuario, solo con generacion disponible, y el prompt de esa foto desde
+su camara. Pruebas en `vault-image-request.test.ts`.
+
+`npm run check` exit 0: 151 archivos, 2969 pruebas, 12 saltadas.
+Sin ver todavia en un turno real.
+
 ### 2026-09-11 — Claude — F22-MEMORIA-ACUMULATIVA-001
 
 Todo turno local va como `studioMode: 'conversation'`, asi que el job-runner

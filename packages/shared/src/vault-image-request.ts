@@ -210,7 +210,7 @@ export function buildVaultImageInstruction(
         `   ${VAULT_IMAGE_OPEN}{"mediaId":"<id de la lista de abajo>"}${VAULT_IMAGE_CLOSE}`,
         '',
         'b) GENERAR una nueva. Cuesta creditos y tarda, asi que solo cuando pidan algo que aun',
-        '   no existe:',
+        '   no existe, o cuando el haga una foto (ver CUANDO, caso 2):',
         `   ${VAULT_IMAGE_OPEN}{"prompt":"<descripcion en INGLES>","kind":"image"}${VAULT_IMAGE_CLOSE}`,
         '',
         // PASO DE VERDAD: pidio «dame otra foto» y le reenvio la que acababa de
@@ -253,11 +253,32 @@ export function buildVaultImageInstruction(
     );
   }
 
+  // PASO DE VERDAD: «me incorporo y le saco una foto mientras duerme». Ella lo
+  // entendio, reacciono en personaje y NO la genero, porque la regla solo
+  // contaba «el usuario pide ver una imagen», y hacer una foto no es pedirla.
+  // Solo salio cuando el dijo «la he borrado, dame una nueva». Una foto hecha
+  // DENTRO de la escena es una imagen que tiene que existir: la de su camara
   lines.push(
     '',
-    'CUANDO escribir el bloque: SOLO si el usuario pide ver, recibir o volver a ver una imagen.',
-    'Nunca por iniciativa propia. Un momento intenso, una promesa o un buen final de escena NO son',
-    'una peticion: si no te la han pedido, no la mandes.',
+    ...(canGenerate
+      ? [
+          'CUANDO escribir el bloque, en DOS casos y solo en esos:',
+          '1. el usuario pide ver, recibir o volver a ver una imagen;',
+          '2. el usuario HACE UNA FOTO en este turno, dentro de la escena, y sales tu en ella («te',
+          '   saco una foto», «te hago una mientras duermes»). No la pide, pero tiene que existir:',
+          '   GENERALA. Si salis los dos, o os la hace otra persona, generala solo contigo, en plano',
+          '   cercano y sin el. Si solo se fotografia a si mismo, o solo lo dice o lo recuerda («ayer',
+          '   te hice una», «voy a hacerte una»), no. Y si mira una foto que te acaba de hacer y no',
+          '   esta en la lista de imagenes que ya existen, es que no llego a generarse: generala.',
+          'Fuera de esos dos casos, nunca por iniciativa propia: un momento intenso, una promesa o un',
+          'buen final de escena NO cuentan. Que el haga la foto no es iniciativa tuya, es el caso 2:',
+          'reaccionas en personaje y escribes el bloque en el MISMO turno.',
+        ]
+      : [
+          'CUANDO escribir el bloque: SOLO si el usuario pide ver, recibir o volver a ver una imagen.',
+          'Nunca por iniciativa propia. Un momento intenso, una promesa o un buen final de escena NO',
+          'son una peticion: si no te la han pedido, no la mandes.',
+        ]),
     '',
     // esto faltaba, y es la mitad que se le olvido al que escribio el bloque.
     // Estaban prohibidas dos formas de fallar al mandarla —alegar que no puedes
@@ -289,7 +310,11 @@ export function buildVaultImageInstruction(
     '- Solo aparece EL PERSONAJE, a solas. Nunca describas al usuario, sus manos, su cuerpo ni a',
     '  ninguna otra persona: si mencionas a alguien mas, sale en la imagen.',
     '- Nada de camaras, moviles, espejos, selfies ni el acto de fotografiar, aunque el usuario haya',
-    '  dicho «mandame una foto». Eso pone una camara en la imagen.',
+    '  dicho «mandame una foto» o aunque la foto la este haciendo el. Eso pone una camara en la',
+    '  imagen. Ni siquiera en negativo: «not looking at camera» tambien la dibuja.',
+    '- Si la foto la hace el, describe la escena tal como se ve desde donde esta el («from',
+    '  above», «from the side»). Si estas dormida o no te das cuenta, dilo con «eyes closed»,',
+    '  «asleep» o «looking away».',
     '- Solo lo que se ve: pose, ropa, expresion, luz, lugar. Sin dialogo, sin lo que siente, sin',
     '  contar lo que pasa antes o despues. No copies el mensaje del usuario.',
     // ESTO FALTABA Y ARRUINABA CADA IMAGEN. El aspecto fijo del personaje va

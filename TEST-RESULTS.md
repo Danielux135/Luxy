@@ -1,5 +1,17 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-11 — F22-FOTO-DEL-USUARIO-001
+
+`npm run check` exit 0.
+
+```
+Test Files  151 passed (151)
+     Tests   2969 passed | 12 skipped
+```
+
+**Sin ejecutar en un turno real.**
+
+
 ### 2026-09-11 — F22-MEMORIA-ACUMULATIVA-001
 
 `npm run check` exit 0.

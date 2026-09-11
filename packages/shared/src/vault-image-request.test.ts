@@ -185,9 +185,15 @@ describe('la herramienta solo se ofrece cuando existe', () => {
     // un momento dramatico de la escena. La instruccion empujaba a usar el
     // bloque y no decia en ningun sitio que no lo usara por su cuenta
     const instruction = buildVaultImageInstruction();
-    expect(instruction).toContain('SOLO si el usuario pide ver, recibir o volver a ver una imagen');
-    expect(instruction).toContain('Nunca por iniciativa propia');
-    expect(instruction).toContain('si no te la han pedido, no la mandes');
+    expect(instruction).toContain('en DOS casos y solo en esos');
+    expect(instruction).toContain('1. el usuario pide ver, recibir o volver a ver una imagen');
+    expect(instruction).toContain('Fuera de esos dos casos, nunca por iniciativa propia');
+    expect(instruction).toContain('NO cuentan');
+    // sin poder generar solo queda el primer caso, dicho como antes
+    const sinGenerar = buildVaultImageInstruction([], 'prose', false);
+    expect(sinGenerar).toContain('SOLO si el usuario pide ver, recibir o volver a ver una imagen');
+    expect(sinGenerar).toContain('Nunca por iniciativa propia');
+    expect(sinGenerar).toContain('si no te la han pedido, no la mandes');
   });
 
   it('el prompt del generador se pide en ingles', () => {
@@ -619,5 +625,52 @@ describe('lo que ocupa cada imagen en el prompt', () => {
     ).length;
     // antes eran ~13.500 caracteres; el tope los deja en 2.200 como mucho
     expect(total).toBeLessThanOrEqual(11 * MAX_IMAGE_LINE_CHARS);
+  });
+});
+
+describe('una foto que hace EL dentro de la escena', () => {
+  // paso de verdad: «me incorporo y le saco una foto mientras duerme». Ella lo
+  // entendio y reacciono al clic, pero no la genero: la regla solo contaba
+  // «pide ver una imagen». Salio cuando el dijo «la he borrado, dame otra»
+
+  it('se genera aunque no pida verla, en el mismo turno en que reacciona', () => {
+    const instruction = buildVaultImageInstruction();
+    expect(instruction).toContain('2. el usuario HACE UNA FOTO en este turno, dentro de la escena');
+    expect(instruction).toContain('No la pide, pero tiene que existir:');
+    expect(instruction).toContain('reaccionas en personaje y escribes el bloque en el MISMO turno');
+  });
+
+  it('«nunca por iniciativa propia» ya no anula la foto que hace el', () => {
+    // la revision lo encontro: la frase siguiente al caso 2 decia «si no te la
+    // han pedido, no la mandes», que es justo el hueco del fallo original
+    const instruction = buildVaultImageInstruction();
+    expect(instruction).not.toContain('si no te la han pedido, no la mandes');
+    expect(instruction).toContain('Que el haga la foto no es iniciativa tuya, es el caso 2');
+    expect(instruction).toContain('o cuando el haga una foto (ver CUANDO, caso 2)');
+  });
+
+  it('decide por escrito la foto de los dos juntos y la que no llego a salir', () => {
+    const instruction = buildVaultImageInstruction();
+    expect(instruction).toContain('Si salis los dos, o os la hace otra persona, generala solo contigo');
+    expect(instruction).toContain('es que no llego a generarse: generala');
+    expect(instruction).toContain('Si solo se fotografia a si mismo, o solo lo dice o lo recuerda');
+  });
+
+  it('sin poder generar no se le pide generarla', () => {
+    // prometer lo que no se puede hacer es peor que no ofrecerlo
+    const instruction = buildVaultImageInstruction([], 'prose', false);
+    expect(instruction).not.toContain('HACE UNA FOTO');
+    expect(instruction).not.toContain('caso 2');
+  });
+
+  it('el prompt de esa foto no nombra ninguna camara, ni en negativo', () => {
+    // «not looking at camera» mete la palabra en el prompt, y el generador no
+    // entiende el «not»: dibuja lo que se nombra
+    const instruction = buildVaultImageInstruction();
+    expect(instruction).toContain('o aunque la foto la este haciendo el');
+    expect(instruction).toContain('Ni siquiera en negativo');
+    expect(instruction).toContain('tal como se ve desde donde esta el');
+    expect(instruction).not.toContain('lo que ve su camara');
+    expect(instruction).not.toContain('sin mirar a la camara');
   });
 });
