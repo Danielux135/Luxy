@@ -1,5 +1,29 @@
 # Luxy — tarea activa
 
+## F22-RECUERDO-POR-FECHA-001 — Lia reconoce conversaciones por su fecha
+
+Estado: **`done` en codigo, `pendiente de prueba real` — Claude, 2026-09-11.**
+
+«¿te acuerdas de lo que hablamos el jueves?» ya encuentra la conversacion de ese
+dia. Antes no podia: la busqueda era solo por palabras. Detalle en
+`CHANGELOG-WORK.md` y en `docs/ROLEPLAY-MEMORIA.md`.
+
+### Lo que falta, y es de Daniel
+
+1. **Probarlo en Privado**, reiniciando antes Studio: preguntarle por lo que
+   hablasteis «hoy», «ayer», «el lunes». Es lo unico que confirma que las fechas
+   del disco casan con las del mensaje en su maquina.
+2. Y comprobar lo contrario: que una frase con fecha que no pregunta nada —«hoy
+   estoy cansado»— NO le haga recitar la conversacion.
+
+### Lo siguiente del plan
+
+- que Lia elija entre los candidatos de un dia, y pueda preguntar cual;
+- enriquecer el catalogo de escenas, que hoy solo guarda un titulo;
+- fase 3: recuperar los tokens del bloque de imagen, en cuanto haya medidas
+  reales de una conversacion (fase 1 ya las registra).
+
+
 ## F21-CODEX-TUBERIA-001 — Codex describe fotos de la boveda sin tocar el disco
 
 Estado: **`done` y PROBADO contra el binario real — Claude, 2026-09-10.**

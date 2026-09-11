@@ -10,7 +10,13 @@
 //
 // Todo se decide ANTES de la llamada: una sola llamada por turno. Con cobro por
 // llamada, una segunda duplicaria la factura de cada mensaje que recuerde algo.
-import type { VaultRecall, RecalledEpisodeLine, QuotedEpisode } from '@luxy/shared';
+import type {
+  VaultRecall,
+  RecalledEpisodeLine,
+  QuotedEpisode,
+  TemporalAnchor,
+} from '@luxy/shared';
+import { civilDayLabel, resolveTemporalReference } from '@luxy/shared';
 import type { PrivateMemory } from './private-memory.js';
 import type { VaultService } from './vault-service.js';
 import { normalizeTerm } from './turn-index.js';
@@ -54,6 +60,22 @@ export interface RecallOptions {
   maxEpisodeLines?: number;
   maxQuotedTurns?: number;
   /**
+   * desde cuando y en que zona se interpreta el mensaje.
+   *
+   * Hace falta para dos cosas distintas, y las dos estaban rotas:
+   *
+   * 1. FECHAR BIEN el indice. La linea se construia con
+   *    `startedAt.slice(0, 10)`, que es la fecha UTC. Con España en UTC+2, toda
+   *    conversacion entre las 22:00 y las 00:00 quedaba fechada el dia ANTERIOR,
+   *    y el personaje contradecia una fecha que el usuario recuerda con certeza;
+   * 2. ENTENDER «el jueves». Sin ancla no se puede resolver ninguna referencia
+   *    relativa, y el reloj no se lee aqui dentro para poder probarlo.
+   *
+   * Ausente, se conserva el comportamiento de antes: fecha UTC y sin busqueda
+   * por fecha. Asi ninguna prueba vieja cambia de significado sin querer.
+   */
+  anchor?: TemporalAnchor;
+  /**
    * de quien son los recuerdos que puede traer.
    *
    * Obligatorio en un turno real: los recuerdos pertenecen al personaje
@@ -68,6 +90,48 @@ export interface RecallOptions {
    * otra vez turnos que estan tres bloques mas abajo.
    */
   alreadyInPrompt?: { conversationId: string; fromSequence: number };
+}
+
+/**
+ * señales de que se pregunta por una CONVERSACION, no por un dia cualquiera.
+ *
+ * Existe por un fallo que se colo al añadir la busqueda por fecha: el modulo
+ * temporal lee la referencia, no la intencion, asi que «hoy me duele la cabeza»
+ * devuelve el dia de hoy perfectamente. Si una fecha bastara para disparar,
+ * decirle eso le haria sacar la transcripcion de una conversacion entera.
+ *
+ * Con esto, «lo que hablamos el jueves» busca y «hoy me duele la cabeza» no.
+ */
+const CONVERSATION_RECALL_PATTERNS: readonly RegExp[] = [
+  /\bhablamos\b/,
+  /\bhablaste\b/,
+  /\bhable\b/,
+  /\bhablabamos\b/,
+  /\bdijiste\b/,
+  /\bdije\b/,
+  /\bdijimos\b/,
+  /\bcontaste\b/,
+  /\bconte\b/,
+  /\bcomentamos\b/,
+  /\bcomentaste\b/,
+  /\bpreguntaste\b/,
+  /\bmensaje\b/,
+  /\bconversacion\b/,
+  /\bcharla\b/,
+  /\blo de\b/,
+  /\beso de\b/,
+];
+
+/**
+ * true si el mensaje pregunta por lo que se dijo, ademas de nombrar un dia.
+ *
+ * Una fecha sola NO basta. Se comprueba aparte de `looksLikeMemoryRequest`
+ * porque son dos cosas distintas: aquella busca «te acuerdas», y esta busca que
+ * se hable de hablar.
+ */
+export function looksLikeConversationRecall(message: string): boolean {
+  const normalized = normalizeTerm(message);
+  return CONVERSATION_RECALL_PATTERNS.some((pattern) => pattern.test(normalized));
 }
 
 /** true si el mensaje interpela a la memoria del personaje */
@@ -95,10 +159,69 @@ export async function buildRecall(
   const visible = all.slice(0, options.maxEpisodeLines ?? MAX_EPISODE_LINES);
   const lines: RecalledEpisodeLine[] = visible.map((episode, position) => ({
     id: `r${position + 1}`,
-    date: episode.startedAt.slice(0, 10),
+    // el dia CIVIL local, no el UTC. Ver `anchor` en RecallOptions: cortar el
+    // ISO fechaba mal todo lo hablado despues de las diez de la noche
+    date:
+      options.anchor === undefined
+        ? episode.startedAt.slice(0, 10)
+        : civilDayLabel(episode.startedAt, options.anchor),
     title: episode.title,
     turns: episode.turns,
   }));
+
+  // POR FECHA ANTES QUE POR PALABRAS, y el orden importa.
+  //
+  // «¿te acuerdas de lo que hablamos el jueves?» no tiene ninguna palabra en
+  // comun con lo que se dijo ese jueves, asi que la busqueda lexica no
+  // encuentra nada: no es que acierte poco, es que no puede acertar. En cambio
+  // los episodios SI saben cuando ocurrieron, y ese dato estaba sin usar.
+  //
+  // Una referencia de fecha ademas es una peticion de recuerdo por si sola: no
+  // hace falta que el mensaje diga tambien «te acuerdas».
+  const already = options.alreadyInPrompt;
+  const cuando =
+    options.anchor === undefined ? null : resolveTemporalReference(message, options.anchor);
+
+  // la fecha SOLA no basta: tiene que preguntarse por algo dicho, o por su
+  // memoria. Si no, «hoy me duele la cabeza» sacaria la transcripcion de hoy
+  const preguntaPorLoDicho =
+    looksLikeMemoryRequest(message) || looksLikeConversationRecall(message);
+
+  if (cuando !== null && cuando.kind !== 'principio' && preguntaPorLoDicho) {
+    const dentro = visible.filter((episode) => {
+      const inicio = episode.startedAt;
+      return inicio >= cuando.from && inicio < cuando.to;
+    });
+    // si el dia tiene varios episodios se cita el mas largo: es el que de
+    // verdad se recuerda como «lo que hablamos», no el saludo de dos turnos
+    const elegido = [...dentro].sort((a, b) => b.turns - a.turns)[0];
+    if (elegido !== undefined) {
+      const yaVa =
+        already !== undefined &&
+        elegido.conversationId === already.conversationId &&
+        elegido.from >= already.fromSequence;
+      if (!yaVa) {
+        const position = visible.findIndex(
+          (candidate) =>
+            candidate.conversationId === elegido.conversationId &&
+            candidate.from === elegido.from,
+        );
+        if (position >= 0) {
+          const turns = await memory.readEpisode(vault, elegido);
+          return {
+            episodes: lines,
+            quoted: {
+              ...lines[position]!,
+              conversation: capConversation(
+                turns.map((turn) => ({ role: turn.role, text: turn.text })),
+                options.maxQuotedTurns ?? MAX_QUOTED_TURNS,
+              ),
+            },
+          };
+        }
+      }
+    }
+  }
 
   if (!looksLikeMemoryRequest(message)) return { episodes: lines, quoted: null };
 
@@ -106,7 +229,6 @@ export async function buildRecall(
     limit: 5,
     characterId: options.characterId ?? null,
   });
-  const already = options.alreadyInPrompt;
 
   for (const match of matches) {
     const episode = match.episode;

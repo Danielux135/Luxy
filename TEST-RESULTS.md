@@ -1,5 +1,35 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-11 — F22-RECUERDO-POR-FECHA-001
+
+`npm run check` exit 0.
+
+```
+Test Files  148 passed (148)
+     Tests   2763 passed | 12 skipped (2775)
+```
+
+59 pruebas nuevas en dos archivos:
+
+- `temporal-reference.test.ts` (43), puras, con el ancla fijada en jueves
+  2026-09-10 a las 17:00 en Madrid y comprobada como jueves antes de nada, para
+  que el resto no mienta si el calculo del dia estuviera mal;
+- `recall.test.ts` (16 mas), **contra una boveda de verdad** con fechas
+  fijadas en el disco: «¿de que hablamos el jueves?» trae la del jueves, «lo que
+  me dijiste el lunes» trae la del lunes y no la de hoy, un dia sin
+  conversaciones no se inventa una, y **«hoy me duele la cabeza» no transcribe
+  nada**.
+
+**La suite encontro tres fallos, y dos eran mios.** La escribio un subagente con
+la orden de no tocar el modulo y reportar lo que no cuadrara: una fecha sola
+disparaba la transcripcion, «el proximo jueves» resolvia al jueves de hoy, y el
+alcance del fallo UTC estaba mal descrito — en España acierta por la noche y se
+equivoca de medianoche a las cinco.
+
+**Sin probar el camino real:** ninguna prueba pasa por la pantalla ni por un
+modelo. Que Lia cite la conversacion correcta al preguntarle solo se sabe
+preguntandoselo.
+
 ### 2026-09-10 — F21-CODEX-TUBERIA-001
 
 `npm run check` exit 0.

@@ -11,7 +11,7 @@ import { VaultService, type DeviceKeyStore } from './vault-service.js';
 import { vaultFilePathFor } from './key-file.js';
 import { PrivateConversationStore, conversationsDirectory } from './conversation-store.js';
 import { PrivateMemory } from './private-memory.js';
-import { buildRecall, looksLikeMemoryRequest } from './recall.js';
+import { buildRecall, looksLikeConversationRecall, looksLikeMemoryRequest } from './recall.js';
 
 const PASSWORD = 'una frase larga de prueba';
 const FAST = { t: 1, m: 8 * 1024, p: 1 } as const;
@@ -194,5 +194,153 @@ describe('lo que recuerda en un turno', () => {
     const empty = new PrivateMemory(store, { excluded: () => new Set([A]) });
     const recall = await buildRecall(empty, vault, '¿te acuerdas?', { characterId: LIA });
     expect(recall).toEqual({ episodes: [], quoted: null });
+  });
+});
+
+// -----------------------------------------------------------------------------
+// recordar por fecha
+// -----------------------------------------------------------------------------
+
+/**
+ * Lo que pidio Daniel, con sus palabras: «si le digo ¿te acuerdas de lo que
+ * hablamos el jueves? (o sea, hoy), que sea capaz de reconocer la conversacion
+ * de hoy y rememorarla».
+ *
+ * La busqueda lexica no podia: «jueves» no aparece en lo que se dijo ese
+ * jueves. Estas pruebas van contra una boveda de verdad y con fechas FIJADAS,
+ * porque lo que se comprueba es que la fecha del disco y la del mensaje se
+ * encuentran.
+ */
+describe('reconocer que se pregunta por algo dicho', () => {
+  it('hablar de hablar es preguntar por una conversacion', () => {
+    for (const frase of [
+      '¿de qué hablamos el jueves?',
+      'lo que me dijiste ayer',
+      'aquello que te conté anoche',
+      'lo de esta mañana',
+    ]) {
+      expect(looksLikeConversationRecall(frase)).toBe(true);
+    }
+  });
+
+  it('nombrar un dia NO es preguntar por lo que se dijo', () => {
+    // el fallo que motivo esto: una fecha sola disparaba la transcripcion, y
+    // «hoy me duele la cabeza» sacaba la conversacion entera de hoy
+    for (const frase of ['hoy me duele la cabeza', 'el jueves fui al médico', 'ayer llovió']) {
+      expect(looksLikeConversationRecall(frase)).toBe(false);
+    }
+  });
+});
+
+describe('recordar por fecha, contra una boveda de verdad', () => {
+  const JUEVES = '22222222-2222-4222-8222-222222222222';
+  const LUNES = '33333333-3333-4333-8333-333333333333';
+  // jueves 2026-09-10 a las 17:00 en Madrid: el caso exacto que se pidio
+  const ANCLA = {
+    instant: '2026-09-10T15:00:00Z',
+    timeZone: 'Europe/Madrid',
+    dayStartsAtHour: 5,
+  };
+
+  let directory: string;
+  let vault: VaultService;
+  let store: PrivateConversationStore;
+  let memory: PrivateMemory;
+
+  beforeEach(async () => {
+    directory = mkdtempSync(join(tmpdir(), 'luxy-recall-fecha-'));
+    vault = new VaultService(vaultFilePathFor(directory), memoryDeviceKeys(), {
+      argon2Params: FAST,
+    });
+    await vault.create(PASSWORD);
+    store = new PrivateConversationStore(conversationsDirectory(directory));
+    memory = new PrivateMemory(store);
+    memory.attachTo(vault);
+
+    // la conversacion del jueves por la mañana (10:00 en Madrid)
+    await store.appendTurn(vault, JUEVES, {
+      ...turn('buenos días, ¿qué tal has dormido?'),
+      characterId: LIA,
+      createdAt: '2026-09-10T08:00:00Z',
+    });
+    await store.appendTurn(vault, JUEVES, {
+      ...turn('Soñé con el faro de la costa, el de las luces verdes.', 'assistant'),
+      characterId: LIA,
+      createdAt: '2026-09-10T08:05:00Z',
+    });
+
+    // y otra del lunes por la noche (20:00 en Madrid)
+    await store.appendTurn(vault, LUNES, {
+      ...turn('¿me cuentas algo antes de dormir?'),
+      characterId: LIA,
+      createdAt: '2026-09-07T18:00:00Z',
+    });
+    await store.appendTurn(vault, LUNES, {
+      ...turn('Te cuento lo del gato que se colaba en la biblioteca.', 'assistant'),
+      characterId: LIA,
+      createdAt: '2026-09-07T18:05:00Z',
+    });
+  });
+
+  afterEach(() => {
+    rmSync(directory, { recursive: true, force: true });
+  });
+
+  const textos = (recall: Awaited<ReturnType<typeof buildRecall>>): string[] =>
+    recall.quoted?.conversation.map((each) => each.text) ?? [];
+
+  it('«el jueves» dicho en jueves trae la conversacion de HOY', async () => {
+    // ninguna palabra en comun con lo que se dijo: sin la fecha no habia forma
+    const recall = await buildRecall(memory, vault, '¿de qué hablamos el jueves?', {
+      characterId: LIA,
+      anchor: ANCLA,
+    });
+    expect(textos(recall)).toContain('Soñé con el faro de la costa, el de las luces verdes.');
+  });
+
+  it('un dia de la semana pasado trae SU conversacion, no la de hoy', async () => {
+    const recall = await buildRecall(memory, vault, 'lo que me dijiste el lunes', {
+      characterId: LIA,
+      anchor: ANCLA,
+    });
+    const dicho = textos(recall);
+    expect(dicho).toContain('Te cuento lo del gato que se colaba en la biblioteca.');
+    expect(dicho).not.toContain('Soñé con el faro de la costa, el de las luces verdes.');
+  });
+
+  it('una fecha sin preguntar por lo dicho NO transcribe nada', async () => {
+    // el fallo que se colo al añadir esto: una fecha sola bastaba para disparar
+    const recall = await buildRecall(memory, vault, 'hoy me duele la cabeza', {
+      characterId: LIA,
+      anchor: ANCLA,
+    });
+    expect(recall.quoted).toBeNull();
+    // las lineas SI siguen ahi: saber que ocurrio no depende de preguntar
+    expect(recall.episodes.length).toBeGreaterThan(0);
+  });
+
+  it('un dia sin conversaciones no se inventa una', async () => {
+    // el martes no hubo nada; traer otro dia seria mentir con una fecha
+    const recall = await buildRecall(memory, vault, '¿de qué hablamos el martes?', {
+      characterId: LIA,
+      anchor: ANCLA,
+    });
+    expect(textos(recall)).not.toContain('Soñé con el faro de la costa, el de las luces verdes.');
+    expect(textos(recall)).not.toContain('Te cuento lo del gato que se colaba en la biblioteca.');
+  });
+
+  it('con ancla, la linea del indice lleva el dia LOCAL', async () => {
+    const recall = await buildRecall(memory, vault, 'hola', { characterId: LIA, anchor: ANCLA });
+    const fechas = recall.episodes.map((episode) => episode.date);
+    expect(fechas).toContain('2026-09-10');
+    expect(fechas).toContain('2026-09-07');
+  });
+
+  it('sin ancla se conserva el comportamiento de antes', async () => {
+    // ninguna prueba vieja cambia de significado sin querer
+    const recall = await buildRecall(memory, vault, '¿de qué hablamos el jueves?', {
+      characterId: LIA,
+    });
+    expect(textos(recall)).not.toContain('Soñé con el faro de la costa, el de las luces verdes.');
   });
 });

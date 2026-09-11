@@ -9,6 +9,7 @@ export * from './vault-prompt.js';
 export * from './vault-image-request.js';
 export * from './vault-image-provider.js';
 export * from './vault-describe.js';
+export * from './temporal-reference.js';
 export * from './vault-catalog.js';
 export * from './response-outcome.js';
 export * from './continuation.js';

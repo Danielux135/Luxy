@@ -2604,6 +2604,20 @@ export function registerIpcHandlers(context: HandlerContext): void {
     // vez: estarian dos veces en el mismo prompt
     const oldestRecent = history.slice(-1 - VAULT_RECENT_TURNS)[0]?.sequence;
     const recall = await buildRecall(context.privateMemory, context.vault, args.message, {
+      // el reloj y la zona se leen AQUI y se pasan como dato: `recall` es puro
+      // en esa parte y asi se puede probar «el jueves dicho en jueves» sin
+      // esperar a que sea jueves.
+      //
+      // La zona sale del sistema porque es donde vive quien escribe: una
+      // conversacion de las once de la noche tiene que fecharse en SU dia, no
+      // en el UTC, que iba un dia por detras a partir de las diez
+      anchor: {
+        instant: new Date().toISOString(),
+        timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        // el dia civil empieza a las cinco: de madrugada se sigue hablando de
+        // «esta noche», no de la noche de ayer
+        dayStartsAtHour: 5,
+      },
       // los recuerdos son del personaje: un hilo sin personaje no hereda los de
       // nadie, y uno con otro personaje tampoco ve los de este
       characterId,

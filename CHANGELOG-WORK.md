@@ -1,5 +1,54 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-09-11 — Claude — F22-RECUERDO-POR-FECHA-001
+
+Origen, de Daniel: «si le digo ¿te acuerdas de lo que hablamos el jueves? (o sea,
+hoy), que sea capaz de reconocer la conversacion de hoy y rememorarla». Y antes:
+«no necesito que siempre recuerde las cosas, simplemente que si nombro algo sea
+capaz de sacarlo exacto».
+
+Esto no estaba en el plan y deberia haberlo estado. La investigacion lo encontro
+—*time-aware query expansion*, +11,3% de recuperacion por sesion— y se descarto
+por venir costeado con una llamada a modelo, sin ver que la version por patrones,
+en la misma ficha, costaba cero. El motivo de fondo: el plan se escribio
+alrededor del diagnostico propio y no de lo que Daniel le pregunta a Lia.
+
+Hecho:
+
+- `packages/shared/src/temporal-reference.ts`, puro y con el reloj INYECTADO.
+  Entiende hoy, ayer, anteayer, partes del dia, anoche, dias de la semana con
+  «este» y «pasado», la semana pasada, «hace N dias/semanas» y el principio. El
+  dia civil empieza a las 05:00; «el jueves» dicho en jueves es HOY;
+- `recall.ts`: la fecha va ANTES que la busqueda lexica, porque «jueves» no
+  comparte ni una palabra con lo que se dijo ese jueves. Y una fecha SOLA no
+  basta: tiene que preguntarse por algo dicho (`looksLikeConversationRecall`);
+- la linea del indice lleva el dia CIVIL local en vez de cortar el ISO en UTC;
+- `handlers.ts` pasa el ancla: el reloj y la zona se leen ahi, no dentro.
+
+**Tres fallos, y dos eran mios.** La suite la escribio un subagente con la orden
+de NO tocar el modulo y reportar lo que no cuadrara. Encontro:
+
+1. **«hoy me duele la cabeza» sacaba la transcripcion de hoy.** El modulo lee la
+   referencia, no la intencion, y yo habia cableado que una fecha disparara por
+   si sola. Arreglado con `looksLikeConversationRecall`;
+2. **«el proximo jueves» resolvia al jueves de hoy**: el prefijo «el proximo» se
+   colaba en el patron. El futuro ahora devuelve `null`;
+3. **el fallo UTC lo habia descrito mal, y dos veces a Daniel.** Dije que lo
+   hablado despues de las diez de la noche salia fechado el dia anterior. En
+   España (UTC+2) es falso: las 23:00 locales son las 21:00Z del mismo dia. La
+   ventana real es de medianoche a las cinco, donde el corte da el dia del
+   calendario y no la noche a la que pertenece. El arreglo sigue siendo correcto;
+   la justificacion no lo era.
+
+Tropiezos de consola, los de toda la sesion: el heredoc se comio barras
+invertidas en tres sitios, y el modulo temporal llevaba un caracter de control
+LITERAL dentro de una cadena. Funcionaba; ahora es `String.fromCharCode(1)`,
+legible.
+
+Pendiente, y es lo que lo hara listo de verdad: que elija Lia entre los
+candidatos de un dia en vez de citar el mas largo, y enriquecer el catalogo —una
+escena guarda hoy solo `from`, `to` y un titulo—.
+
 ### 2026-09-10 12:30 — Claude — F21-CODEX-TUBERIA-001
 
 Origen: «construye igualmente la herramienta que nos permita que Codex lea y

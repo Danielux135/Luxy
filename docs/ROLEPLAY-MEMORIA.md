@@ -149,6 +149,34 @@ cada conversación con la suya: que no salga nunca del personaje, que salga si s
 lo pide, o que sepa lo que es y pueda hablarlo. Al ser instrucciones y no código,
 se puede cambiar a mitad de conversación sin tocar nada.
 
+### Recordar por fecha — **HECHO** (2026-09-11), fuera del orden previsto
+
+No estaba en el plan y deberia haberlo estado: la investigacion lo encontro con
+nombre propio —*time-aware query expansion*, +11,3% de recuperacion por sesion— y
+se descarto por costeado con una llamada a modelo, sin ver que la version por
+patrones, al lado en la misma ficha, costaba cero. El motivo de fondo fue peor:
+el plan se escribio alrededor del diagnostico propio y no de lo que Daniel le
+pregunta a Lia. Lo destapo el, pidiendo «¿te acuerdas de lo que hablamos el
+jueves?».
+
+`packages/shared/src/temporal-reference.ts`, puro, con el reloj INYECTADO.
+Entiende hoy, ayer, anteayer, las partes del dia, anoche, los dias de la semana
+con «este» y «pasado», la semana pasada, «hace N dias/semanas» y el principio. El
+dia civil empieza a las 05:00, y «el jueves» dicho en jueves es HOY.
+
+En `recall.ts` la fecha va ANTES que la busqueda por palabras —«jueves» no
+comparte ni una palabra con lo que se dijo ese jueves— pero **una fecha sola no
+basta**: tiene que preguntarse por algo dicho. Sin eso, «hoy me duele la cabeza»
+sacaba la transcripcion de la conversacion de hoy. Ese fallo lo introduje yo y lo
+detecto la suite del subagente, que ademas corrigio el alcance del fallo UTC que
+yo habia descrito mal: en España el corte en UTC acierta por la noche y se
+equivoca de medianoche a las cinco.
+
+Pendiente, y es lo que de verdad lo hara listo: **que elija Lia** entre los
+candidatos de un dia en vez de citar el mas largo, y **enriquecer el catalogo**
+—hoy una escena guarda solo `from`, `to` y un titulo de una linea, asi que
+cualquier seleccion elige con casi nada—.
+
 ### 3. Recuperar los tokens del bloque de imagen
 
 Las instrucciones de imagen ocupan **~2.050 tokens en cada turno**, se pida foto
