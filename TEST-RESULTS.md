@@ -1,5 +1,20 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-11 — F22-MEMORIA-ACUMULATIVA-001, turnos reales
+
+Tres turnos de Daniel con la compilacion de las 16:42. Cifras de «prompt privado
+compuesto» en `studio.log`, sin contenido:
+
+```
+16:51  sin bloque memoria (la conversacion no tenia ninguna guardada)
+16:57  memoria 342c   <- guardada en el turno anterior
+17:04  memoria 382c   <- actualizada; ademas recuerdo-citado por palabras
+```
+
+Antes del arreglo, los turnos de las 13:05 y las 13:19 tenian historial y ningun
+bloque `memoria`. Ahora aparece desde el segundo turno y crece.
+
+
 ### 2026-09-11 — F22-FOTO-DEL-USUARIO-001
 
 `npm run check` exit 0.

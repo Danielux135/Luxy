@@ -2,7 +2,7 @@
 
 ## F22-MEMORIA-ACUMULATIVA-001 — la memoria de cada conversacion privada no se guardaba
 
-Estado: **`done` en codigo, `pendiente de un turno real` — Claude, 2026-09-11.**
+Estado: **`done` y verificado en turnos reales — Claude, 2026-09-11.**
 Agente, protocolo y handler hechos; el turno privado y la sonda de
 compatibilidad usan `memoryOfTurn`.
 
