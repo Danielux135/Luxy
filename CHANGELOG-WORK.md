@@ -1,5 +1,33 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-09-11 — Claude — F22-DIAGNOSTICO-MEMORIA-001
+
+Origen, de Daniel: que cada mejora incluya las conversaciones ya tenidas, poder
+probar sobre ellas y ver su estilo de hablarle a Lia.
+
+Por que no se leen desde aqui: las conversaciones estan cifradas y esta
+conversacion con el asistente se guarda en claro en el disco. Leerlas para
+analizarlas las sacaria de la boveda. El diagnostico corre DENTRO de Luxy y
+solo devuelve cifras.
+
+Archivos:
+
+- `apps/desktop/src/main/vault/memory-diagnostics.ts` (nuevo): `diagnoseMemory`,
+  pura. Cobertura (catalogadas, solo por pausas, sin episodios), episodios por
+  dia civil, prueba de la busqueda por fecha y estilo en recuentos;
+- `apps/desktop/src/main/vault/recall.ts`: la seleccion por fecha sale a
+  `selectEpisodeForDate`, y `buildRecall` la llama. Asi el diagnostico ejerce
+  el MISMO camino que un turno real, no una copia que pueda dar verde en falso;
+- canal `vaultMemoryDiagnostics`, esquemas en `ipc.ts`, handler (registra solo
+  cifras), preload, `useVault` y el boton con su resumen en `MemoryPanel`;
+- `memory-diagnostics.test.ts` (nuevo, 6 pruebas): vacio, cobertura, madrugada
+  en el dia civil anterior, busqueda por fecha con dos episodios el mismo dia,
+  estilo sin frases en el resultado y mediana par e impar.
+
+Siguiente paso: que Daniel lo pulse y leer las cifras de `studio.log`. Si hay
+dias fallidos, casi seguro son madrugadas: mirar ahi primero.
+
+
 ### 2026-09-11 — Claude — F22-RECUERDO-POR-FECHA-001
 
 Origen, de Daniel: «si le digo ¿te acuerdas de lo que hablamos el jueves? (o sea,

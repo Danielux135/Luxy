@@ -1,5 +1,31 @@
 # Luxy — tarea activa
 
+## F22-DIAGNOSTICO-MEMORIA-001 — comprobar la memoria sobre lo ya hablado
+
+Estado: **`done` en codigo, `pendiente de ejecucion real` — Claude, 2026-09-11.**
+
+Origen, de Daniel: «quiero que cada mejora que hagamos incluya las
+conversaciones ya tenidas. ¿No puedes cogerlas e indexarlas con las nuevas
+mejoras, y de paso hacer pruebas, o que veas mi estilo de hablarle?».
+
+Principio adoptado: **cada mejora de memoria trae su pasada sobre las
+conversaciones ya tenidas.** Ya se cumplia en la indexacion —`PrivateMemory`
+recorre todas en cada apertura—; faltaba poder COMPROBARLO sin sacar nada de
+la boveda.
+
+Boton «Comprobar la memoria» en el panel de memoria de Privado. Corre en el
+proceso principal con la llave abierta y devuelve solo cifras: cobertura del
+catalogo, la busqueda por fecha probada contra cada dia real en que se hablo
+(«¿de que hablamos ayer?» desde el dia siguiente) y el estilo de Daniel en
+recuentos de patrones. Sin llamadas a modelos.
+
+### Lo que falta, y es de Daniel
+
+1. Reiniciar Studio, abrir Privado y pulsar «Comprobar la memoria».
+2. Las cifras quedan tambien en `studio.log` («diagnostico de memoria»): con
+   eso la siguiente IA puede leerlas sin ver ni una frase.
+
+
 ## F22-RECUERDO-POR-FECHA-001 — Lia reconoce conversaciones por su fecha
 
 Estado: **`done` en codigo, `pendiente de prueba real` — Claude, 2026-09-11.**

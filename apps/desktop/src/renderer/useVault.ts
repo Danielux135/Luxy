@@ -16,6 +16,7 @@ import type {
   vaultCompatibilityResultSchema,
   vaultMemoryListResultSchema,
   vaultVisionProbeResultSchema,
+  vaultMemoryDiagnosticsResultSchema,
 } from '../shared/ipc.js';
 import type { z } from 'zod';
 
@@ -29,6 +30,9 @@ type MemoryEpisode = z.infer<typeof vaultMemoryListResultSchema>['episodes'][num
  * cerrar la bóveda. Es una prueba, no contenido.
  */
 export type VisionProbe = z.infer<typeof vaultVisionProbeResultSchema>;
+
+/** el diagnostico de la memoria: solo cifras, nunca contenido */
+export type MemoryDiagnosticsView = z.infer<typeof vaultMemoryDiagnosticsResultSchema>;
 
 /**
  * una prueba guardada a la vista, con identidad propia.
@@ -311,6 +315,15 @@ export interface VaultController {
   }) => Promise<{ caption: string | null; failure: string | null; reasoning: string | null }>;
   rewritingCaption: boolean;
   /**
+   * comprueba la memoria sobre TODAS las conversaciones ya tenidas.
+   *
+   * Cobertura del catalogo, una prueba de la busqueda por fecha contra las
+   * fechas reales, y el estilo en cifras. Nada de contenido sale de la boveda.
+   */
+  diagnoseMemory: () => Promise<MemoryDiagnosticsView | null>;
+  diagnosingMemory: boolean;
+  lastDiagnostics: MemoryDiagnosticsView | null;
+  /**
    * banco de pruebas: una imagen del disco y a ver qué dice el modelo.
    *
    * **No escribe nada** y no necesita conversación abierta. Sirve para saber si
@@ -559,6 +572,8 @@ export function useVault(): VaultController {
   const [characters, setCharacters] = useState<VaultCharacterView[]>([]);
   const [describingMedia, setDescribingMedia] = useState(false);
   const [rewritingCaption, setRewritingCaption] = useState(false);
+  const [diagnosingMemory, setDiagnosingMemory] = useState(false);
+  const [lastDiagnostics, setLastDiagnostics] = useState<MemoryDiagnosticsView | null>(null);
   const [probingVision, setProbingVision] = useState(false);
   // lo ultimo que devolvio el banco de pruebas; no se guarda en ningun sitio
   const [probes, setProbes] = useState<StoredProbe[]>([]);
@@ -1139,6 +1154,24 @@ export function useVault(): VaultController {
     [],
   );
 
+  const diagnoseMemory = useCallback(async (): Promise<MemoryDiagnosticsView | null> => {
+    setDiagnosingMemory(true);
+    setError(null);
+    setHint(null);
+    try {
+      const result = await window.luxy.diagnoseVaultMemory();
+      if (!result.ok) {
+        setError(result.error);
+        setHint(result.hint);
+        return null;
+      }
+      if (mounted.current) setLastDiagnostics(result.value);
+      return result.value;
+    } finally {
+      if (mounted.current) setDiagnosingMemory(false);
+    }
+  }, []);
+
   /**
    * prueba de visión: una imagen del disco y a ver qué dice el modelo.
    *
@@ -1484,6 +1517,9 @@ export function useVault(): VaultController {
     describingMedia,
     rewriteCaption,
     rewritingCaption,
+    diagnoseMemory,
+    diagnosingMemory,
+    lastDiagnostics,
     probeVision,
     probingVision,
     probes,

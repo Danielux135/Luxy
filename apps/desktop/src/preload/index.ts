@@ -111,6 +111,7 @@ const bridge: LuxyBridge = {
   describeVaultMedia: (args: unknown) => ipcRenderer.invoke(IPC_INVOKE.vaultMediaDescribe, args),
   rewriteVaultMediaCaption: (args: unknown) =>
     ipcRenderer.invoke(IPC_INVOKE.vaultMediaRewriteCaption, args),
+  diagnoseVaultMemory: () => ipcRenderer.invoke(IPC_INVOKE.vaultMemoryDiagnostics, {}),
   probeVision: (args: unknown) => ipcRenderer.invoke(IPC_INVOKE.vaultVisionProbe, args),
   createVaultCharacter: (args: unknown) =>
     ipcRenderer.invoke(IPC_INVOKE.vaultCharacterCreate, args),

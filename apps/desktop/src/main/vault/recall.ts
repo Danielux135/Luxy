@@ -20,6 +20,7 @@ import { civilDayLabel, resolveTemporalReference } from '@luxy/shared';
 import type { PrivateMemory } from './private-memory.js';
 import type { VaultService } from './vault-service.js';
 import { normalizeTerm } from './turn-index.js';
+import type { Episode } from './episodes.js';
 
 /**
  * señales de que se esta pidiendo rememorar.
@@ -141,6 +142,33 @@ export function looksLikeMemoryRequest(message: string): boolean {
 }
 
 /**
+ * el episodio del dia al que se refiere el mensaje, o null.
+ *
+ * Aparte de buildRecall para que el diagnostico de memoria ejerza EXACTAMENTE
+ * este camino: una copia de la logica podria dar verde mientras la de verdad
+ * falla. De un dia con varios episodios devuelve el mas largo, que es el que
+ * se recuerda como «lo que hablamos», no el saludo de dos turnos.
+ *
+ * Una fecha SOLA no basta: tiene que preguntarse por algo dicho, o por su
+ * memoria. Si no, «hoy me duele la cabeza» sacaria la transcripcion de hoy.
+ */
+export function selectEpisodeForDate(
+  episodes: readonly Episode[],
+  message: string,
+  anchor: TemporalAnchor,
+): Episode | null {
+  const preguntaPorLoDicho =
+    looksLikeMemoryRequest(message) || looksLikeConversationRecall(message);
+  if (!preguntaPorLoDicho) return null;
+  const cuando = resolveTemporalReference(message, anchor);
+  if (cuando === null || cuando.kind === 'principio') return null;
+  const dentro = episodes.filter(
+    (episode) => episode.startedAt >= cuando.from && episode.startedAt < cuando.to,
+  );
+  return [...dentro].sort((a, b) => b.turns - a.turns)[0] ?? null;
+}
+
+/**
  * arma lo que el personaje recuerda en este turno.
  *
  * El identificador que ve el modelo es corto y posicional (`r1`, `r2`): no hace
@@ -179,46 +207,32 @@ export async function buildRecall(
   // Una referencia de fecha ademas es una peticion de recuerdo por si sola: no
   // hace falta que el mensaje diga tambien «te acuerdas».
   const already = options.alreadyInPrompt;
-  const cuando =
-    options.anchor === undefined ? null : resolveTemporalReference(message, options.anchor);
-
-  // la fecha SOLA no basta: tiene que preguntarse por algo dicho, o por su
-  // memoria. Si no, «hoy me duele la cabeza» sacaria la transcripcion de hoy
-  const preguntaPorLoDicho =
-    looksLikeMemoryRequest(message) || looksLikeConversationRecall(message);
-
-  if (cuando !== null && cuando.kind !== 'principio' && preguntaPorLoDicho) {
-    const dentro = visible.filter((episode) => {
-      const inicio = episode.startedAt;
-      return inicio >= cuando.from && inicio < cuando.to;
-    });
-    // si el dia tiene varios episodios se cita el mas largo: es el que de
-    // verdad se recuerda como «lo que hablamos», no el saludo de dos turnos
-    const elegido = [...dentro].sort((a, b) => b.turns - a.turns)[0];
-    if (elegido !== undefined) {
-      const yaVa =
-        already !== undefined &&
-        elegido.conversationId === already.conversationId &&
-        elegido.from >= already.fromSequence;
-      if (!yaVa) {
-        const position = visible.findIndex(
-          (candidate) =>
-            candidate.conversationId === elegido.conversationId &&
-            candidate.from === elegido.from,
-        );
-        if (position >= 0) {
-          const turns = await memory.readEpisode(vault, elegido);
-          return {
-            episodes: lines,
-            quoted: {
-              ...lines[position]!,
-              conversation: capConversation(
-                turns.map((turn) => ({ role: turn.role, text: turn.text })),
-                options.maxQuotedTurns ?? MAX_QUOTED_TURNS,
-              ),
-            },
-          };
-        }
+  // la seleccion por fecha vive en selectEpisodeForDate para que el
+  // diagnostico de memoria ejerza EXACTAMENTE este camino y no una copia
+  const elegido =
+    options.anchor === undefined ? null : selectEpisodeForDate(visible, message, options.anchor);
+  if (elegido !== null) {
+    const yaVa =
+      already !== undefined &&
+      elegido.conversationId === already.conversationId &&
+      elegido.from >= already.fromSequence;
+    if (!yaVa) {
+      const position = visible.findIndex(
+        (candidate) =>
+          candidate.conversationId === elegido.conversationId && candidate.from === elegido.from,
+      );
+      if (position >= 0) {
+        const turns = await memory.readEpisode(vault, elegido);
+        return {
+          episodes: lines,
+          quoted: {
+            ...lines[position]!,
+            conversation: capConversation(
+              turns.map((turn) => ({ role: turn.role, text: turn.text })),
+              options.maxQuotedTurns ?? MAX_QUOTED_TURNS,
+            ),
+          },
+        };
       }
     }
   }

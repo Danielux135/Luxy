@@ -1,5 +1,23 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-11 — F22-DIAGNOSTICO-MEMORIA-001
+
+`npm run check` exit 0.
+
+```
+Test Files  149 passed (149)
+     Tests   2769 passed | 12 skipped (2781)
+```
+
+6 pruebas nuevas en `memory-diagnostics.test.ts`, puras: vacio, cobertura
+(catalogadas, solo por pausas, sin episodios), una charla de madrugada contada
+en el dia civil anterior, la busqueda por fecha acertando tres dias con dos
+episodios en uno de ellos, el estilo sin ninguna frase en el resultado y la
+mediana par e impar. Las 23 de `recall.test.ts` siguen en verde tras sacar
+`selectEpisodeForDate`.
+
+**Sin ejecutar contra la boveda real**: hace falta que Daniel pulse el boton.
+
 ### 2026-09-11 — F22-RECUERDO-POR-FECHA-001
 
 `npm run check` exit 0.

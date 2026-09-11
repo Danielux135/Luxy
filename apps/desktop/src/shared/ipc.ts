@@ -755,6 +755,46 @@ export const vaultMediaRewriteCaptionResultSchema = z.object({
 });
 
 /**
+ * diagnostico de la memoria: sin argumentos, todas las conversaciones.
+ *
+ * Existe porque Daniel pidio que cada mejora incluya lo ya hablado y poder
+ * comprobarlo sobre ello. Sus conversaciones estan cifradas y siguen estandolo:
+ * el diagnostico corre DENTRO del proceso principal con la llave abierta y solo
+ * devuelve cifras. Ni una palabra de lo dicho cruza este canal.
+ */
+export const vaultMemoryDiagnosticsArgsSchema = z.object({});
+
+export const vaultMemoryDiagnosticsResultSchema = z.object({
+  conversations: z.object({
+    total: z.number().int().min(0),
+    cataloged: z.number().int().min(0),
+    gapOnly: z.number().int().min(0),
+    withoutEpisodes: z.number().int().min(0),
+  }),
+  episodes: z.object({
+    total: z.number().int().min(0),
+    cataloged: z.number().int().min(0),
+    firstDay: z.string().nullable(),
+    lastDay: z.string().nullable(),
+    distinctDays: z.number().int().min(0),
+  }),
+  dateRecall: z.object({
+    tested: z.number().int().min(0),
+    hits: z.number().int().min(0),
+    misses: z.number().int().min(0),
+    /** dias con formato AAAA-MM-DD: cuando se hablo, nunca que se dijo */
+    missedDays: z.array(z.string()),
+  }),
+  style: z.object({
+    userMessages: z.number().int().min(0),
+    medianChars: z.number().int().min(0),
+    withTemporalReference: z.number().int().min(0),
+    withMemoryRequest: z.number().int().min(0),
+    withConversationRecall: z.number().int().min(0),
+  }),
+});
+
+/**
  * prueba de visión: una imagen del disco, un modelo, y la descripción de vuelta.
  *
  * **No escribe nada.** Ni en la bóveda, ni en la conversación, ni en el pie de
@@ -1453,6 +1493,8 @@ export interface LuxyBridge {
   rewriteVaultMediaCaption(
     args: z.infer<typeof vaultMediaRewriteCaptionArgsSchema>,
   ): Promise<IpcResult<z.infer<typeof vaultMediaRewriteCaptionResultSchema>>>;
+  /** cifras sobre todas las conversaciones; nunca devuelve su contenido */
+  diagnoseVaultMemory(): Promise<IpcResult<z.infer<typeof vaultMemoryDiagnosticsResultSchema>>>;
   probeVision(
     args: z.input<typeof vaultVisionProbeArgsSchema>,
   ): Promise<IpcResult<z.infer<typeof vaultVisionProbeResultSchema>>>;

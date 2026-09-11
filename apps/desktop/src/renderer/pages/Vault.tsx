@@ -4248,6 +4248,21 @@ function MemoryPanel({
         otro para esta tarea, cámbialo antes de abrir esto. Lo excluido no se envía.
       </Notice>
 
+      {/* comprobar la memoria sobre lo YA hablado: cobertura, la busqueda por
+          fecha contra las fechas reales y el estilo, todo en cifras */}
+      <div className="row">
+        <button
+          className="btn btn--quiet"
+          disabled={vault.diagnosingMemory}
+          onClick={() => void vault.diagnoseMemory()}
+        >
+          {vault.diagnosingMemory ? 'Comprobando…' : 'Comprobar la memoria'}
+        </button>
+      </div>
+      {vault.lastDiagnostics !== null && (
+        <MemoryDiagnosticsSummary diagnostics={vault.lastDiagnostics} />
+      )}
+
       {vault.lastCatalog !== null && (
         <p className="field__hint">
           {vault.lastCatalog.cataloged > 0
@@ -4410,5 +4425,39 @@ function MemoryPanel({
         );
       })}
     </details>
+  );
+}
+
+/**
+ * el diagnostico de la memoria, en frases.
+ *
+ * Solo cifras sobre todas las conversaciones, nunca su contenido: es lo que
+ * permite comprobar las mejoras sobre lo ya hablado sin sacar nada de la boveda.
+ */
+function MemoryDiagnosticsSummary({
+  diagnostics,
+}: {
+  diagnostics: NonNullable<VaultController['lastDiagnostics']>;
+}): JSX.Element {
+  const c = diagnostics.conversations;
+  const d = diagnostics.dateRecall;
+  const s = diagnostics.style;
+  return (
+    <div className="field__hint">
+      <p>
+        <strong>Cobertura:</strong> {c.cataloged} de {c.total} conversaciones con resumen y
+        etiquetas; {c.gapOnly} solo troceadas por pausas, que no se encuentran por paráfrasis.
+      </p>
+      <p>
+        <strong>Búsqueda por fecha:</strong> {d.hits} de {d.tested} días encontrados
+        {d.missedDays.length > 0 ? ' · fallan: ' + d.missedDays.join(', ') : ''}
+      </p>
+      <p>
+        <strong>Tu forma de escribir:</strong> {s.userMessages} mensajes, mediana de{' '}
+        {s.medianChars} caracteres; {s.withTemporalReference} con fecha,{' '}
+        {s.withMemoryRequest} pidiendo recuerdos y {s.withConversationRecall} hablando de lo
+        dicho.
+      </p>
+    </div>
   );
 }

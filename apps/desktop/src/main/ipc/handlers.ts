@@ -87,6 +87,7 @@ import {
   vaultMediaCaptionArgsSchema,
   vaultMediaDescribeArgsSchema,
   vaultMediaRewriteCaptionArgsSchema,
+  vaultMemoryDiagnosticsArgsSchema,
   vaultVisionProbeArgsSchema,
   vaultCharacterCreateArgsSchema,
   vaultCharacterForgetArgsSchema,
@@ -169,6 +170,7 @@ import type { PrivateMemory } from '../vault/private-memory.js';
 import type { MemoryPreferences } from '../vault/memory-preferences.js';
 import type { CatalogStore } from '../vault/catalog-store.js';
 import { buildRecall } from '../vault/recall.js';
+import { diagnoseMemory } from '../vault/memory-diagnostics.js';
 
 /**
  * que decirle al usuario cuando la imagen que pidio el modelo no se puede
@@ -1638,6 +1640,54 @@ export function registerIpcHandlers(context: HandlerContext): void {
     // ni el texto de antes ni el de despues: solo que se pudo
     context.log('pie de foto reescrito por un modelo');
     return rewritten;
+  });
+
+  /**
+   * diagnostico de la memoria sobre TODAS las conversaciones, en cifras.
+   *
+   * Lo pidio Daniel: que cada mejora incluya lo ya hablado y poder comprobarlo
+   * sobre ello, y ver su forma de hablarle. Leerlas desde fuera las sacaria de
+   * la boveda —copiarlas a una conversacion con un asistente las dejaria en
+   * claro en el disco—, asi que corre AQUI, con la llave abierta, y solo
+   * devuelve numeros.
+   *
+   * Sin llamadas a ningun modelo: todo es local y cuesta lo que leer los
+   * turnos, que ya se leen para construir el indice.
+   */
+  handle(IPC_INVOKE.vaultMemoryDiagnostics, vaultMemoryDiagnosticsArgsSchema, async () => {
+    if (!context.vault.isUnlocked()) throw new VaultError('la boveda esta bloqueada');
+
+    const store = context.privateConversations;
+    const conversaciones = await store.list(context.vault);
+    const userMessages: string[] = [];
+    for (const conversacion of conversaciones) {
+      const turnos = await store.read(context.vault, conversacion.conversationId);
+      for (const turno of turnos) {
+        if (turno.role === 'user') userMessages.push(turno.text);
+      }
+    }
+
+    const diagnostico = diagnoseMemory({
+      episodes: await context.privateMemory.listEpisodes(context.vault),
+      userMessages,
+      conversationIds: conversaciones.map((conversacion) => conversacion.conversationId),
+      // el mismo ancla que un turno real, o la prueba mediria otra cosa
+      anchor: {
+        instant: new Date().toISOString(),
+        timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        dayStartsAtHour: 5,
+      },
+    });
+
+    // CIFRAS, nunca texto. Los dias fallidos son cuando se hablo, no que se
+    // dijo, y el registro ya lleva la hora de cada turno
+    context.log('diagnostico de memoria', {
+      conversaciones: diagnostico.conversations,
+      episodios: diagnostico.episodes,
+      busquedaPorFecha: diagnostico.dateRecall,
+      estilo: diagnostico.style,
+    });
+    return diagnostico;
   });
 
   /**

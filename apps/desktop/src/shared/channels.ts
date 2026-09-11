@@ -75,6 +75,8 @@ export const IPC_INVOKE = {
   vaultMediaDescribe: 'luxy:vault:media:describe',
   /** reescribe en buen español un pie de foto ya escrito. No guarda nada */
   vaultMediaRewriteCaption: 'luxy:vault:media:rewrite-caption',
+  /** cifras sobre todas las conversaciones de la boveda, nunca su contenido */
+  vaultMemoryDiagnostics: 'luxy:vault:memory:diagnostics',
   vaultVisionProbe: 'luxy:vault:vision:probe',
   vaultCharacterCreate: 'luxy:vault:character:create',
   vaultCharacterList: 'luxy:vault:character:list',
