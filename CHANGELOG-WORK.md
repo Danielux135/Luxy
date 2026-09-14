@@ -1,5 +1,22 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-09-11 — Claude — F23-PENDIENTES-001, paso 1: el trabajo de fondo (D-087)
+
+Pedido por Daniel: «haz lo de Claude/Codex». Catalogar con DeepSeek elegido
+costaba llamadas de pago.
+
+Archivos: `packages/shared/src/auxiliary-target.ts` (nuevo, con prueba),
+`memory-preferences.ts` (campo `auxiliary`, con prueba nueva y la antigua
+ajustada), `handlers.ts` (`catalogOnce` resuelve el destino y lo registra;
+canales `vaultAuxiliaryGet` y `vaultAuxiliarySet`), `ipc.ts`, `channels.ts`,
+el preload, `useVault.ts` y `Vault.tsx` (selector, aviso que nombra a quien
+cataloga de verdad, botones de reintento y bucle que no se para por una sola
+fallida).
+
+`npm run check` exit 0: 156 archivos, 3060 pruebas, 12 saltadas.
+Sin ver todavia con la boveda abierta: el registro «escenas catalogadas» dira
+proveedor y si hubo sustitucion.
+
 ### 2026-09-11 — Claude — F22-TROZO-CITADO-001
 
 Origen, de Daniel en turnos reales: le pregunto a Lia por «la deuda» que tiene

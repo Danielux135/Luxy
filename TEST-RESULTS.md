@@ -1,5 +1,20 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-11 — F23-PENDIENTES-001, paso 1 (D-087)
+
+`npm run check` exit 0.
+
+```
+Test Files  156 passed (156)
+     Tests   3060 passed | 12 skipped
+```
+
+Nuevo: `auxiliary-target.test.ts` (seis casos, entre ellos que DeepSeek nunca
+pasa) y `memory-preferences-auxiliary.test.ts` (archivos viejos, reapertura,
+que excluir no borra la eleccion y que un proveedor de pago metido a mano se
+descarta sin perder las exclusiones).
+
+
 ### 2026-09-11 — F22-TROZO-CITADO-001
 
 `npm run check` exit 0.

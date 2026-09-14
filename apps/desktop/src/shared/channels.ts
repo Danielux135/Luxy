@@ -65,6 +65,9 @@ export const IPC_INVOKE = {
   vaultMemoryRead: 'luxy:vault:memory:read',
   vaultMemoryExclude: 'luxy:vault:memory:exclude',
   vaultCatalogSync: 'luxy:vault:catalog:sync',
+  /** quien hace el trabajo de fondo de la boveda: solo Claude o Codex */
+  vaultAuxiliaryGet: 'luxy:vault:auxiliary:get',
+  vaultAuxiliarySet: 'luxy:vault:auxiliary:set',
   vaultCharacterInstructions: 'luxy:vault:character:instructions',
   vaultMediaList: 'luxy:vault:media:list',
   vaultMediaRead: 'luxy:vault:media:read',

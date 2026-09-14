@@ -40,6 +40,7 @@ import {
   type HordeRecipe,
   type ModelDefinition,
   type ReasoningEffort,
+  resolveAuxiliaryTarget,
 } from '@luxy/shared';
 
 /** debe coincidir con AUTO_LOCK_MINUTES del proceso principal */
@@ -4195,6 +4196,20 @@ function MemoryPanel({
 
   const episodes = vault.memoryEpisodes;
 
+  // quien catalogara de verdad: lo elegido abajo, o el de la ventana si es Claude
+  // o Codex, o Codex. Nunca una API de pago
+  const pedido = { provider, model: model.length === 0 ? null : model, effort };
+  const destino = resolveAuxiliaryTarget(pedido, vault.auxiliary);
+  const automatico = resolveAuxiliaryTarget(pedido, null);
+  const nombreDe = (target: { provider: string; model: string | null }): string =>
+    target.model ?? (target.provider === 'codex' ? 'Codex' : 'Claude');
+  const destinoNombre = nombreDe(destino);
+
+  const { loadAuxiliary } = vault;
+  useEffect(() => {
+    void loadAuxiliary();
+  }, [loadAuxiliary]);
+
   return (
     <details
       className="vault-generate"
@@ -4222,9 +4237,10 @@ function MemoryPanel({
             const result = await vault.syncCatalog(target);
             if (result === null || result.pending === 0) break;
             // si una tanda no cataloga NADA, algo va mal de forma sistematica
-            // —un modelo que no existe para ese proveedor, por ejemplo— y seguir
-            // solo gasta una llamada por conversacion pendiente
-            if (result.cataloged === 0 || result.failed > 0) break;
+            // —un modelo que no existe, por ejemplo— y seguir no sirve. Pero una
+            // sola negativa no para las demas: con contenido explicito, un CLI
+            // puede negarse a una conversacion y aceptar el resto
+            if (result.cataloged === 0) break;
           }
           await vault.loadMemory();
         })();
@@ -4243,10 +4259,28 @@ function MemoryPanel({
 
       <Notice tone="idle">
         Para partirlos y titularlos se manda el texto completo de cada conversación
-        sin catalogar al proveedor elegido arriba: ahora mismo{' '}
-        <Tag tone="idle">{model.length === 0 ? provider : model}</Tag>. Si prefieres
-        otro para esta tarea, cámbialo antes de abrir esto. Lo excluido no se envía.
+        sin catalogar a <Tag tone="idle">{destinoNombre}</Tag>, con tu sesión de Claude
+        o Codex: nunca a una API de pago, aunque la ventana use una. Lo excluido no se
+        envía.
       </Notice>
+
+      <label className="field">
+        <span>Quién hace el trabajo de fondo (sin coste por llamada)</span>
+        <select
+          value={vault.auxiliary?.provider ?? ''}
+          disabled={vault.catalogingMemory}
+          onChange={(event) => {
+            const valor = event.currentTarget.value;
+            void vault.setAuxiliary(
+              valor === 'codex' || valor === 'claude' ? { provider: valor, model: null } : null,
+            );
+          }}
+        >
+          <option value="">Automático ({nombreDe(automatico)})</option>
+          <option value="codex">Codex</option>
+          <option value="claude">Claude</option>
+        </select>
+      </label>
 
       {/* comprobar la memoria sobre lo YA hablado: cobertura, la busqueda por
           fecha contra las fechas reales y el estilo, todo en cifras */}
@@ -4298,7 +4332,7 @@ function MemoryPanel({
           >
             {vault.catalogingMemory
               ? 'Probando…'
-              : `Reintentar con ${model.length === 0 ? provider : model}`}
+              : `Reintentar con ${destinoNombre}`}
           </button>{' '}
           {vault.lastCatalog.failed.length === 1
             ? 'Una conversación no se pudo ordenar y se queda partida por silencios'
@@ -4334,7 +4368,7 @@ function MemoryPanel({
           >
             {vault.catalogingMemory
               ? 'Probando…'
-              : `Repetir con ${model.length === 0 ? provider : model}`}
+              : `Repetir con ${destinoNombre}`}
           </button>{' '}
           {vault.lastCatalog.uneven.length === 1
             ? 'Una conversación salió partida en trozos del mismo tamaño'

@@ -9,6 +9,7 @@
 import { z } from 'zod';
 import type { HordeQueueProgress } from './horde-progress.js';
 import {
+  LOCAL_CLI_PROVIDERS,
   REASONING_EFFORTS,
   type agentEventSchema,
   agentHostStatusSchema,
@@ -573,6 +574,24 @@ export const vaultCatalogSyncArgsSchema = z.object({
   conversationId: conversationIdSchema.optional(),
   /** tope de conversaciones por tanda: cada una es una llamada de verdad */
   limit: z.number().int().min(1).max(10).default(3),
+});
+
+/**
+ * quien hace el trabajo de fondo de la boveda.
+ *
+ * Solo Claude o Codex, que van con la sesion local: con la API de pago de la
+ * ventana, catalogar costaba una llamada por conversacion pendiente.
+ */
+export const vaultAuxiliaryChoiceSchema = z.object({
+  provider: z.enum(LOCAL_CLI_PROVIDERS),
+  model: z.string().max(128).nullable(),
+});
+
+export const vaultAuxiliaryGetArgsSchema = z.object({});
+
+/** `null` vuelve a lo automatico */
+export const vaultAuxiliarySetArgsSchema = z.object({
+  choice: vaultAuxiliaryChoiceSchema.nullable(),
 });
 
 export const vaultCatalogSyncResultSchema = z.object({
@@ -1490,6 +1509,10 @@ export interface LuxyBridge {
   syncVaultCatalog(
     args: z.infer<typeof vaultCatalogSyncArgsSchema>,
   ): Promise<IpcResult<z.infer<typeof vaultCatalogSyncResultSchema>>>;
+  getVaultAuxiliary(): Promise<IpcResult<z.infer<typeof vaultAuxiliaryChoiceSchema> | null>>;
+  setVaultAuxiliary(
+    args: z.infer<typeof vaultAuxiliarySetArgsSchema>,
+  ): Promise<IpcResult<z.infer<typeof vaultAuxiliaryChoiceSchema> | null>>;
   readVaultMemory(
     args: z.infer<typeof vaultMemoryReadArgsSchema>,
   ): Promise<IpcResult<z.infer<typeof vaultMemoryReadResultSchema>>>;

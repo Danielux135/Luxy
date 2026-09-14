@@ -10,7 +10,12 @@
 // Nada de eso se persiste en localStorage, ni en un estado global, ni se envia
 // a ningun sitio.
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { ConversationMemoryStatus, HordeRecipe, ReasoningEffort } from '@luxy/shared';
+import type {
+  AuxiliaryChoice,
+  ConversationMemoryStatus,
+  HordeRecipe,
+  ReasoningEffort,
+} from '@luxy/shared';
 import type { HordeQueueProgress } from '../shared/horde-progress.js';
 import type {
   vaultCompatibilityResultSchema,
@@ -412,6 +417,10 @@ export interface VaultController {
   memoryEpisodes: MemoryEpisode[] | null;
   /** conversaciones que hoy quedan fuera del banco */
   memoryExcluded: string[];
+  /** quien hace el trabajo de fondo de la boveda; `null` es automatico */
+  auxiliary: AuxiliaryChoice | null;
+  loadAuxiliary: () => Promise<void>;
+  setAuxiliary: (choice: AuxiliaryChoice | null) => Promise<void>;
   loadMemory: () => Promise<void>;
   /**
    * cataloga en escenas lo que aun no lo este. Gasta una llamada por
@@ -591,6 +600,7 @@ export function useVault(): VaultController {
   const [lastMemoryStatus, setLastMemoryStatus] = useState<ConversationMemoryStatus | null>(null);
   const [memoryEpisodes, setMemoryEpisodes] = useState<MemoryEpisode[] | null>(null);
   const [memoryExcluded, setMemoryExcluded] = useState<string[]>([]);
+  const [auxiliary, setAuxiliaryState] = useState<AuxiliaryChoice | null>(null);
   const [catalogingMemory, setCatalogingMemory] = useState(false);
   // un `useState` no sirve de guarda: dentro del callback llega con el valor de
   // la ultima renderizacion, y dos disparos seguidos lo leen los dos en `false`
@@ -905,6 +915,21 @@ export function useVault(): VaultController {
     }
     setMemoryEpisodes(result.value.episodes);
     setMemoryExcluded(result.value.excluded);
+  }, []);
+
+  const loadAuxiliary = useCallback(async (): Promise<void> => {
+    const result = await window.luxy.getVaultAuxiliary();
+    if (mounted.current && result.ok) setAuxiliaryState(result.value);
+  }, []);
+
+  const setAuxiliary = useCallback(async (choice: AuxiliaryChoice | null): Promise<void> => {
+    const result = await window.luxy.setVaultAuxiliary({ choice });
+    if (!mounted.current) return;
+    if (!result.ok) {
+      setError(result.error);
+      return;
+    }
+    setAuxiliaryState(result.value);
   }, []);
 
   const syncCatalog = useCallback(
@@ -1554,6 +1579,9 @@ export function useVault(): VaultController {
     lastMemoryStatus,
     memoryEpisodes,
     memoryExcluded,
+    auxiliary,
+    loadAuxiliary,
+    setAuxiliary,
     loadMemory,
     syncCatalog,
     catalogingMemory,

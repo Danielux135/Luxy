@@ -40,6 +40,7 @@ import {
   splitReasoning,
   imagePromptStyleFor,
   type HordeRecipe,
+  resolveAuxiliaryTarget,
 } from '@luxy/shared';
 import { detectEnvironment } from '@luxy/agent/dist/detect.js';
 import { GatewayClient } from '@luxy/agent/dist/gateway-client.js';
@@ -88,6 +89,8 @@ import {
   vaultMediaDescribeArgsSchema,
   vaultMediaRewriteCaptionArgsSchema,
   vaultMemoryDiagnosticsArgsSchema,
+  vaultAuxiliaryGetArgsSchema,
+  vaultAuxiliarySetArgsSchema,
   vaultVisionProbeArgsSchema,
   vaultCharacterCreateArgsSchema,
   vaultCharacterForgetArgsSchema,
@@ -1314,8 +1317,31 @@ export function registerIpcHandlers(context: HandlerContext): void {
     }
   });
 
+  /**
+   * quien hace el trabajo de fondo: lo elegido, o `null` si es automatico.
+   *
+   * No exige la boveda abierta: es el nombre de un CLI, nada de la boveda.
+   */
+  handle(IPC_INVOKE.vaultAuxiliaryGet, vaultAuxiliaryGetArgsSchema, async () =>
+    context.memoryPreferences.auxiliary(),
+  );
+
+  handle(IPC_INVOKE.vaultAuxiliarySet, vaultAuxiliarySetArgsSchema, async (args) => {
+    const elegido = context.memoryPreferences.setAuxiliary(args.choice);
+    context.log('trabajo de fondo elegido', { proveedor: elegido?.provider ?? 'automatico' });
+    return elegido;
+  });
+
   /** una tanda de catalogado. La serializacion la pone quien la llama */
   const catalogOnce = async (args: z.infer<typeof vaultCatalogSyncArgsSchema>) => {
+
+    // el trabajo de fondo NUNCA va a la API de pago de la ventana: con DeepSeek
+    // elegido, abrir «Lo que recuerda» costaba una llamada por conversacion
+    // pendiente. Va a Claude o Codex, con la sesion local
+    const destino = resolveAuxiliaryTarget(
+      { provider: args.provider, model: args.model, effort: args.effort },
+      context.memoryPreferences.auxiliary(),
+    );
 
     const existing = await context.catalogs.list(context.vault);
     const conversations = await context.privateConversations.list(context.vault);
@@ -1356,10 +1382,10 @@ export function registerIpcHandlers(context: HandlerContext): void {
       try {
         const run = await context.controller.runLocalTurn({
           localTurnId: randomUUID(),
-          provider: args.provider,
-          model: args.model,
+          provider: destino.provider,
+          model: destino.model,
           // se multiplica por la tanda: esto no es una llamada, son `limit`
-          ...(args.effort === null ? {} : { effort: args.effort }),
+          ...(destino.effort === null ? {} : { effort: destino.effort }),
           projectAlias: args.projectAlias,
           prompt: buildCatalogPrompt(
             shown.map((turn) => ({
@@ -1390,7 +1416,7 @@ export function registerIpcHandlers(context: HandlerContext): void {
           parsed.scenes.map((scene) => ({
             ...scene,
             conversationId: conversation.conversationId,
-            model: run.executedModel ?? args.model,
+            model: run.executedModel ?? destino.model,
             catalogedAt: new Date().toISOString(),
             turnsAtCatalog: turns.length,
           })),
@@ -1425,6 +1451,9 @@ export function registerIpcHandlers(context: HandlerContext): void {
       conversaciones: cataloged,
       escenas: scenes,
       fallidas: failed.length,
+      // quien lo hizo, y si se sustituyo un proveedor de pago
+      proveedor: destino.provider,
+      sustituido: destino.replaced,
     });
     return {
       cataloged,

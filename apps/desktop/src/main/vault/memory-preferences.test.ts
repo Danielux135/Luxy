@@ -45,13 +45,15 @@ describe('conversaciones excluidas del banco de recuerdos', () => {
     expect(preferences.set(A, true)).toEqual([A]);
   });
 
-  it('el archivo guarda identificadores y NADA mas', () => {
+  it('el archivo guarda identificadores y NADA mas de la boveda', () => {
     // es lo que permite no cifrarlo: los uuid ya estan a la vista como nombres
-    // de archivo en vault/conversations
+    // de archivo en vault/conversations. Lo unico que se añadio despues es quien
+    // hace el trabajo de fondo, que es el nombre de un CLI y no dice nada de lo
+    // hablado
     preferences.set(A, true);
     const raw = readFileSync(file, 'utf8');
     expect(raw).toContain(A);
-    expect(JSON.parse(raw)).toEqual({ version: 1, excluded: [A] });
+    expect(JSON.parse(raw)).toEqual({ version: 1, excluded: [A], auxiliary: null });
   });
 
   it('un archivo ilegible no impide usar la aplicacion', () => {

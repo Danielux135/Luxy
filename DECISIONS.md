@@ -2651,3 +2651,30 @@ problemas reales):
 Coste: la instruccion de imagen crece unos 1.200 caracteres. La fase 3 del plan
 (mandar la guia de como escribir el prompt solo cuando el mensaje hable de
 fotos) lo compensaria de sobra.
+
+## D-087 — el trabajo de fondo de la boveda solo va por Claude o Codex
+
+Fecha: 2026-09-11. Autor: Claude. Origen: el diseño de `F23-PENDIENTES-001`
+lo destapo al leer el codigo, y Daniel pidio arreglarlo.
+
+Paso: catalogar escenas usaba el proveedor de la ventana de conversacion. Con
+DeepSeek elegido —el de pago, cobrado por llamada—, abrir «Lo que recuerda»
+mandaba una llamada de pago por cada conversacion pendiente, en tandas de tres
+y hasta doce vueltas.
+
+Decision. Todo trabajo de fondo de la boveda —catalogar ahora, apuntar promesas
+despues— pasa por `resolveAuxiliaryTarget`
+(`packages/shared/src/auxiliary-target.ts`), que solo devuelve Claude o Codex:
+
+1. lo elegido en el panel («Quien hace el trabajo de fondo»), si hay eleccion;
+2. si no, el proveedor de la ventana cuando ya es Claude o Codex;
+3. si no, Codex.
+
+Un proveedor de pago se sustituye siempre, y su modelo y su esfuerzo se
+descartan. La eleccion vive en `memory-excluded.json`, sin cifrar como las
+exclusiones: es el nombre de un CLI, nada de la boveda. El esquema solo admite
+Claude o Codex, asi que un archivo tocado a mano no puede colar otro.
+
+Tambien: el bucle del panel ya no se para por una sola conversacion fallida
+—un CLI puede negarse a una con contenido explicito y aceptar las demas—; solo
+se para si una tanda no cataloga ninguna.
