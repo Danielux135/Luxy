@@ -2026,6 +2026,29 @@ input[aria-invalid='true'] {
 }
 
 /*
+ * la ficha de continuidad de una conversacion, tal y como la va a leer ella.
+ *
+ * Se pinta como un documento y no como una frase de la interfaz a proposito:
+ * hasta ahora no habia en todo Luxy ni una pantalla donde se pudiera leer la
+ * memoria de una conversacion, y lo que aqui ponga se arrastra en TODOS los
+ * turnos futuros de ese hilo. Hay que poder leerlo entero y sin esfuerzo, asi
+ * que va con el salto de linea respetado —el texto lleva sus propias listas— y
+ * con el ancho completo de la seccion.
+ */
+.vault-recap__block {
+  align-self: stretch;
+  margin: 2px 0 0;
+  padding: 10px 12px;
+  border: 1px solid var(--rule);
+  border-left: 2px solid var(--signal);
+  border-radius: 4px;
+  background: var(--raised);
+  white-space: pre-wrap;
+  line-height: 1.55;
+  color: var(--text);
+}
+
+/*
  * los modelos de AI Horde son una docena y cada uno lleva debajo su familia y
  * su disponibilidad. En una fila que envuelve quedaban de anchos distintos y no
  * se podian comparar; en una columna ocupaban la pantalla entera.

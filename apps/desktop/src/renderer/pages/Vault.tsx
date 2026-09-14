@@ -19,7 +19,17 @@ import {
   groupPendingByCharacter,
   pendingDecisionsFor,
 } from '../vault-pending.js';
-import { keepSweepingCatalog, keepSweepingRelations } from '../vault-sweep.js';
+import {
+  keepSweepingCatalog,
+  keepSweepingRecaps,
+  keepSweepingRelations,
+} from '../vault-sweep.js';
+import {
+  CLI_LABELS,
+  RECAP_REFUSAL_LABELS,
+  describeRecapRow,
+} from '../vault-recap-row.js';
+import { auxiliaryName, backgroundAuxiliary } from '../vault-auxiliary.js';
 import type { ConfigSummary } from '../useConfig.js';
 import {
   formatAutoLockOption,
@@ -48,6 +58,7 @@ import {
   type HordeBaseline,
   type HordeLora,
   type HordeRecipe,
+  type LocalCliProvider,
   type ModelDefinition,
   type ReasoningEffort,
   resolveAuxiliaryTarget,
@@ -4211,9 +4222,21 @@ function MemoryPanel({
   const pedido = { provider, model: model.length === 0 ? null : model, effort };
   const destino = resolveAuxiliaryTarget(pedido, vault.auxiliary);
   const automatico = resolveAuxiliaryTarget(pedido, null);
-  const nombreDe = (target: { provider: string; model: string | null }): string =>
-    target.model ?? (target.provider === 'codex' ? 'Codex' : 'Claude');
+  const nombreDe = auxiliaryName;
   const destinoNombre = nombreDe(destino);
+  /**
+   * y quien hara de verdad los pendientes y el relleno.
+   *
+   * Hacen falta DOS nombres porque los tres trabajos no se resuelven igual: el
+   * catalogo si manda el proveedor de la ventana (`handlers.ts`, `catalogOnce`),
+   * y la pasada de pendientes y la del relleno llaman con `null` y se quedan
+   * con lo elegido aqui abajo, o con Codex. Con «Automatico» y la ventana
+   * hablando por Claude —el estado inicial de la aplicacion— el panel decia
+   * Claude y el trabajo salia por Codex, asi que «Rehacerlo con Claude» se
+   * negaba otra vez con el mismo CLI sin cambiar nada.
+   */
+  const fondo = backgroundAuxiliary(vault.auxiliary);
+  const fondoNombre = nombreDe(fondo);
 
   const { loadAuxiliary } = vault;
   useEffect(() => {
@@ -4279,6 +4302,9 @@ function MemoryPanel({
           // asi ella puede sacarlo sola sin que el se lo recuerde
           await buscarPendientes();
           await vault.loadMemory();
+          // las fichas ya escritas, para poder repasarlas. Esto NO llama a
+          // ningun CLI: solo lee lo que hay. Rellenar es un boton aparte
+          await vault.loadRecaps();
         })();
       }}
     >
@@ -4333,7 +4359,7 @@ function MemoryPanel({
         <button
           className="btn btn--quiet"
           disabled={vault.syncingRelations || vault.catalogingMemory}
-          title={`Lee lo que ya habéis hablado con ${destinoNombre} y apunta lo que quedó pendiente entre los dos. Reintenta también lo que se negó o falló antes`}
+          title={`Lee lo que ya habéis hablado con ${fondoNombre} y apunta lo que quedó pendiente entre los dos. Reintenta también lo que se negó o falló antes`}
           onClick={() => void buscarPendientes(true)}
         >
           {vault.syncingRelations ? 'Buscando…' : 'Buscar lo pendiente en lo ya hablado'}
@@ -4350,10 +4376,21 @@ function MemoryPanel({
           {vault.lastRelationSync.pending > 0 &&
             ` Quedan ${vault.lastRelationSync.pending} conversación(es) por leer.`}
           {vault.lastRelationSync.refused > 0 &&
-            ` ${vault.lastRelationSync.refused} no se pudo leer con ${destinoNombre}: cambia arriba de CLI y vuelve a pulsar, o púlsalo otra vez para reintentar con el mismo.`}
+            ` ${vault.lastRelationSync.refused} no se pudo leer con ${fondoNombre}: cambia arriba de CLI y vuelve a pulsar, o púlsalo otra vez para reintentar con el mismo.`}
         </p>
       )}
       <PendingAffairsSection vault={vault} />
+
+      {/* el relleno hacia atras de las conversaciones viejas. Su boton va DENTRO
+          de la seccion y fuera del `onToggle` de arriba: los tres trabajos de
+          fondo comparten un solo carril y un solo CLI, y abrir este panel no
+          puede arrancar media hora de proceso que nadie pidio */}
+      <RecapSection
+        vault={vault}
+        project={project}
+        destino={fondo.provider}
+        destinoNombre={fondoNombre}
+      />
 
       {vault.lastDiagnostics !== null && (
         <MemoryDiagnosticsSummary diagnostics={vault.lastDiagnostics} />
@@ -4676,6 +4713,474 @@ function PendingAffairsSection({ vault }: { vault: VaultController }): JSX.Eleme
 }
 
 /**
+ * la memoria de lo ya hablado: las conversaciones antiguas, rellenadas hacia
+ * atrás.
+ *
+ * Diecisiete de las dieciocho conversaciones no tienen memoria acumulativa
+ * porque estuvo rota meses. Esto la escribe con Claude o Codex, por ventanas y
+ * sin tocar un byte de lo sellado.
+ *
+ * Por qué esta pantalla existe, y por qué «Ver» no es un adorno: el único fallo
+ * que el código NO puede cazar es un resumen competente pero saneado —«tuvieron
+ * un encuentro íntimo y quedaron el sábado»—, que valida contra el esquema, pasa
+ * el detector de vaguedad, avanza el cursor y se queda de semilla para siempre
+ * en ese hilo, porque cada turno futuro conserva lo válido de la memoria
+ * anterior. El único juez posible es Daniel leyéndolo ANTES que ella. Por eso una
+ * ficha escrita por un CLI no entra en ningún prompt hasta que se aprueba.
+ */
+function RecapSection({
+  vault,
+  project,
+  destino,
+  destinoNombre,
+}: {
+  vault: VaultController;
+  project: string;
+  /** a qué CLI va el trabajo de fondo ahora mismo */
+  destino: LocalCliProvider;
+  destinoNombre: string;
+}): JSX.Element {
+  /** qué ficha tiene el bloque abierto, por su conversación */
+  const [open, setOpen] = useState<string | null>(null);
+  /**
+   * la última tanda fue una prueba y no se guardó nada.
+   *
+   * Vive aquí y no en el resultado porque el resultado no lo dice: los
+   * contadores de una prueba son idénticos a los de una pasada de verdad. Sin
+   * esta marca, «se han escrito 2 fichas» aparecía después de una prueba que no
+   * escribió ninguna, que es exactamente la clase de frase que hace desconfiar
+   * de todas las demás.
+   */
+  const [fuePrueba, setFuePrueba] = useState(false);
+  /**
+   * qué se está ejecutando ahora mismo, y sobre qué conversación.
+   *
+   * Los tres botones leían la misma bandera `syncingRecaps`, así que durante
+   * una pasada la pantalla decía a la vez «Rellenando…», «Probando…» y
+   * «Rehaciendo…» en cada fila. Volver al panel diez minutos después no
+   * permitía saber si lo que corría era la prueba que no guarda nada o la
+   * pasada que sí escribe, que es justo la distinción que esta sección se toma
+   * el trabajo de marcar en todos los demás sitios.
+   *
+   * No sustituye a `fuePrueba`: esto vuelve a `null` al terminar y aquello
+   * tiene que sobrevivir para etiquetar el resultado.
+   */
+  const [corriendo, setCorriendo] = useState<{
+    accion: 'rellenar' | 'prueba' | 'rehacer';
+    conversationId: string | null;
+  } | null>(null);
+
+  const rows = vault.recaps;
+  const cobertura = vault.recapCoverage;
+  const ultima = vault.lastRecapSync;
+  const ocupado = vault.syncingRecaps || vault.decidingRecap;
+
+  /**
+   * rellena hacia atrás, en tandas y hasta acabar.
+   *
+   * Fuera del `onToggle` del panel a propósito: catálogo, pendientes y esto
+   * comparten un solo carril y un solo CLI, y abrir «Lo que recuerda» no puede
+   * convertirse en media hora de proceso arrancando sin haberlo pedido.
+   *
+   * Cuándo parar lo decide `keepSweepingRecaps`, que se prueba aparte: las dos
+   * conversaciones de una tanda son siempre las dos más antiguas, así que cortar
+   * cuando no se escribe ninguna ficha dejaría las quince restantes sin mirar.
+   */
+  const rellenar = async (force = false): Promise<void> => {
+    setFuePrueba(false);
+    setCorriendo({ accion: 'rellenar', conversationId: null });
+    try {
+      for (let vuelta = 0; vuelta < 12; vuelta += 1) {
+        const result = await vault.syncRecaps({
+          projectAlias: project,
+          // `force` solo en la primera vuelta: repetirlo en las doce volvería a
+          // empezar desde cero las mismas conversaciones ya rellenadas
+          force: force && vuelta === 0,
+        });
+        if (!keepSweepingRecaps(result)) break;
+      }
+      await vault.loadRecaps();
+    } finally {
+      setCorriendo(null);
+    }
+  };
+
+  /**
+   * una sola tanda, sin guardar nada.
+   *
+   * NO se repite en bucle, y es deliberado: con `dryRun` no se escribe ninguna
+   * entrada, así que la cola no baja y la vuelta siguiente cogería LAS MISMAS
+   * dos conversaciones para volver a pagarlas. Esto es una muestra para leer, no
+   * una pasada.
+   */
+  const probar = async (): Promise<void> => {
+    setFuePrueba(true);
+    setCorriendo({ accion: 'prueba', conversationId: null });
+    try {
+      await vault.syncRecaps({ projectAlias: project, dryRun: true });
+    } finally {
+      setCorriendo(null);
+    }
+  };
+
+  /**
+   * vuelve a hacer una conversación desde cero.
+   *
+   * Con un CLI distinto cuando el otro se negó: quien se niega es un modelo
+   * concreto, así que la salida natural es probar con el otro. Cambia además la
+   * preferencia del trabajo de fondo, porque el botón dice «con Claude» y tiene
+   * que ir de verdad a Claude, no al que siga elegido arriba.
+   */
+  const rehacer = async (conversationId: string, con: LocalCliProvider): Promise<void> => {
+    setFuePrueba(false);
+    setCorriendo({ accion: 'rehacer', conversationId });
+    try {
+      // SIEMPRE, sin comparar con lo que el panel cree que está elegido: es
+      // barato, es idempotente, y comparar era justo lo que hacía que el botón
+      // dijera un CLI y el trabajo saliera por el otro
+      await vault.setAuxiliary({ provider: con, model: null });
+      await vault.syncRecaps({ projectAlias: project, conversationId, force: true });
+      await vault.loadRecaps();
+    } finally {
+      setCorriendo(null);
+    }
+  };
+
+  // los cinco que suman. Se pinta la SUMA y no `total - excluded - sealed`: si
+  // el panel pudiera decir un total distinto del que enseña, la linea de
+  // cobertura dejaria de servir para lo unico que sirve
+  const rellenables =
+    cobertura === null
+      ? 0
+      : cobertura.summarized +
+        cobertura.withGaps +
+        cobertura.indexOnly +
+        cobertura.awaitingApproval +
+        cobertura.missing;
+  const cuadra =
+    cobertura === null || rellenables + cobertura.sealed === cobertura.total - cobertura.excluded;
+
+  /**
+   * fichas escritas que sólo esperan que las lea y las apruebe.
+   *
+   * Las de una conversación que ya tiene memoria propia no cuentan: la sellada
+   * gana siempre, así que aprobarlas dejaría en disco un `approved` que no
+   * significa nada y un botón que no hace nada.
+   */
+  const esperando =
+    rows?.filter(
+      (row) => !row.approved && row.block.length > 0 && !row.sealed && !row.superseded,
+    ) ?? [];
+
+  return (
+    <div className="vault-generate__section">
+      <p className="field__hint">
+        <strong>Memoria de lo ya hablado.</strong> Al reabrir una conversación
+        antigua, ella no recuerda en qué punto quedó: sólo ve los últimos turnos.
+        Esto lo escribe hacia atrás, conversación a conversación, leyéndolas con{' '}
+        {destinoNombre}. Es por conversación: no hace que se acuerde de un hilo
+        estando en otro, que es lo que hacen los momentos y lo pendiente.
+      </p>
+
+      <Notice tone="idle">
+        Para resumirlas se manda el texto de cada conversación sin ficha a{' '}
+        <Tag tone="idle">{destinoNombre}</Tag>, con tu sesión de Claude o Codex:
+        nunca a una API de pago. Lo excluido no se envía. Lo que se niegue a
+        resumir no se manda a ningún otro sitio: se queda sin resumir y aquí lo
+        verás.
+      </Notice>
+
+      {cobertura !== null && (
+        <p className="field__hint">
+          {/* «escritas y esperando» va aparte de «sin memoria» porque no son el
+              mismo estado ni se arreglan igual: una espera un minuto de lectura
+              y la otra una llamada a un CLI. Juntas, la línea decía «17 sin
+              leer» justo después de la pasada que escribió las diecisiete */}
+          <strong>Cobertura:</strong> {cobertura.summarized} resumida(s) ·{' '}
+          {cobertura.withGaps} con huecos · {cobertura.indexOnly} sólo por índice ·{' '}
+          {cobertura.awaitingApproval} escrita(s) esperando que las apruebes ·{' '}
+          {cobertura.missing} sin memoria en el prompt ({rellenables} en total).{' '}
+          {cobertura.sealed === 1
+            ? '1 ya tiene memoria propia.'
+            : `${cobertura.sealed} ya tienen memoria propia.`}
+          {cobertura.excluded > 0 && ` ${cobertura.excluded} excluida(s) quedan fuera.`}
+        </p>
+      )}
+
+      {!cuadra && (
+        <Notice tone="fault">
+          Esta cuenta no cuadra con el total de conversaciones, y eso no es un
+          redondeo: es un fallo. No te fíes de la línea de arriba hasta que se
+          arregle.
+        </Notice>
+      )}
+
+      {/* la ventana en la que el trabajo se pierde sin que nada lo diga: una
+          ficha sin aprobar no entra en el prompt, así que el primer turno que se
+          conteste en ese hilo se compone sin ella y sella su propia memoria. Y
+          la sellada gana siempre, de modo que esa ficha ya no vuelve a entrar
+          por mucho que se apruebe después */}
+      {esperando.length > 0 && (
+        <Notice tone="warn">
+          {esperando.length === 1
+            ? 'Hay 1 ficha escrita y sin aprobar.'
+            : `Hay ${esperando.length} fichas escritas y sin aprobar.`}{' '}
+          Léelas y apruébalas <strong>antes</strong> de volver a escribir en esas
+          conversaciones: el primer mensaje que contestes en una de ellas sella su
+          propia memoria, y a partir de ahí la ficha ya no puede entrar aunque la
+          apruebes.
+        </Notice>
+      )}
+
+      <div className="row">
+        <button
+          className="btn btn--quiet"
+          disabled={ocupado}
+          title={`Lee con ${destinoNombre} las conversaciones que no tienen ficha y escribe la memoria de cada una. No toca lo ya escrito`}
+          onClick={() => void rellenar()}
+        >
+          {corriendo?.accion === 'rellenar'
+            ? 'Rellenando…'
+            : 'Generar la memoria de lo ya hablado'}
+        </button>
+        {/* lo unico que contesta a la vez «¿se niegan?» y «¿sale bueno?» sin
+            dejar nada escrito. Una sola tanda: no guarda, asi que repetirla
+            cogeria las mismas conversaciones */}
+        <button
+          className="btn btn--quiet"
+          disabled={ocupado}
+          title="Corre la pasada entera con dos conversaciones y NO guarda nada: sólo te enseña lo que habría escrito"
+          onClick={() => void probar()}
+        >
+          {corriendo?.accion === 'prueba' ? 'Probando…' : 'Probar sin guardar'}
+        </button>
+        <button
+          className="btn btn--quiet"
+          disabled={ocupado}
+          title="Vuelve a leer lo que ya hay escrito, sin llamar a ningún CLI"
+          onClick={() => void vault.loadRecaps()}
+        >
+          Repasar lo que hay
+        </button>
+      </div>
+
+      {ultima !== null && (
+        <p className="field__hint">
+          {fuePrueba
+            ? ultima.windows === 0
+              ? 'Prueba: no había ninguna conversación sin ficha que leer.'
+              : `Prueba, y no se ha guardado nada: ${ultima.windows} llamada(s) a ${CLI_LABELS[ultima.provider]} habrían dado ${ultima.reviewed} ficha(s).`
+            : ultima.reviewed > 0
+              ? `Se han escrito o ampliado ${ultima.reviewed} ficha(s) en ${ultima.windows} llamada(s).`
+              : 'No se ha escrito ninguna ficha nueva.'}
+          {ultima.partial > 0 &&
+            ` ${ultima.partial} salieron con tramos declarados, que es la respuesta honesta: esos huecos viajan al prompt y ella preguntará en vez de suponer.`}
+          {ultima.refused > 0 &&
+            ` ${ultima.refused} tramo(s) no los quiso resumir ${CLI_LABELS[ultima.provider]}: cambia de CLI abajo en cada ficha y reinténtalo.`}
+          {ultima.vague > 0 &&
+            ` ${ultima.vague} salieron sin decir nada y no se guardaron: eso depende del modelo más que del CLI.`}
+          {ultima.invalid > 0 && ` ${ultima.invalid} no se pudieron leer.`}
+          {ultima.deduced > 0 &&
+            ` ${ultima.deduced} se quedaron en el índice de sus escenas, que no es memoria: dice qué escenas hubo, no qué se dijo.`}
+          {ultima.superseded > 0 &&
+            ` ${ultima.superseded} ya tenían memoria propia y no se tocan.`}
+          {ultima.dropped > 0 &&
+            ` Atención: al encadenar ventanas se perdieron ${ultima.dropped} entradas de las anteriores (${ultima.added} nuevas).`}
+          {ultima.pending > 0 && ` Quedan ${ultima.pending} conversación(es) por rellenar.`}
+        </p>
+      )}
+
+      {ultima !== null && ultima.replaced && (
+        <Notice tone="warn">
+          La preferencia guardada pedía un proveedor de pago y se ha sustituido por{' '}
+          {CLI_LABELS[ultima.provider]}. Este trabajo no llama nunca a una API que
+          cobre.
+        </Notice>
+      )}
+
+      {ultima !== null && ultima.failed.length > 0 && (
+        <Notice tone="warn">
+          {ultima.failed.length === 1
+            ? 'Una conversación no se pudo ni leer ni guardar'
+            : `${ultima.failed.length} conversaciones no se pudieron ni leer ni guardar`}
+          : {[...new Set(ultima.failed.map((each) => each.reason))].join('; ')}. No se
+          reintentan solas: búscalas abajo —salen sin ficha— y pídelo desde su
+          fila, o cambia de CLI arriba y vuelve a pulsar.
+        </Notice>
+      )}
+
+      {vault.recapPreview !== null && (
+        <div className="vault-generate__section">
+          <p className="field__hint">
+            <strong>Prueba sin guardar.</strong> Esto es lo que se habría escrito.
+            No se ha guardado nada, no ha entrado en ningún prompt y desaparece al
+            cerrar. Léelo antes de decidir con qué CLI haces la pasada de verdad:
+            lo que busques es si dice qué pasó, con nombres, o si lo ha dejado en
+            «tuvieron un momento íntimo», que no sirve para nada.
+          </p>
+          {vault.recapPreview.length === 0 && (
+            <Empty title="No salió ninguna ficha">
+              {ultima !== null && ultima.windows === 0
+                ? 'No había ninguna conversación sin ficha que leer, así que no se ha llamado a nadie.'
+                : 'Ninguna de las conversaciones probadas dio un resumen utilizable. Prueba con el otro CLI antes de hacer la pasada entera.'}
+            </Empty>
+          )}
+          {vault.recapPreview.map((preview) => (
+            <div key={preview.conversationId} className="vault-media__item">
+              <p className="field__hint">
+                <Tag tone={preview.refusedKind === null ? 'ok' : 'warn'}>
+                  {preview.refusedKind === null
+                    ? preview.source === 'index'
+                      ? 'sólo índice'
+                      : 'ficha'
+                    : RECAP_REFUSAL_LABELS[preview.refusedKind]}
+                </Tag>{' '}
+                <span className="vault-list__meta">
+                  cubre del turno {preview.covered.from} al {preview.covered.to} ·{' '}
+                  {preview.chars} caracteres en cada turno futuro
+                  {preview.gaps > 0 && ` · ${preview.gaps} tramo(s) sin resumir`}
+                </span>
+              </p>
+              {preview.block.length > 0 && (
+                <p className="vault-recap__block">{preview.block}</p>
+              )}
+            </div>
+          ))}
+          <div className="row">
+            <button className="btn btn--quiet" onClick={() => vault.clearRecapPreview()}>
+              Cerrar la prueba
+            </button>
+          </div>
+        </div>
+      )}
+
+      {rows !== null && rows.length === 0 && (
+        <Empty title="No hay ninguna conversación que rellenar">
+          Las que hay o están excluidas, o ya tienen memoria propia, o no tienen
+          ningún mensaje todavía.
+        </Empty>
+      )}
+
+      {esperando.length > 0 && (
+        <div className="row">
+          {/* son diecisiete textos cortos: un minuto. Pero leerlos primero es el
+              punto entero de esta pantalla */}
+          <button
+            className="btn btn--quiet"
+            disabled={ocupado}
+            title="Deja entrar en los prompts todas las fichas que están esperando. Léelas antes: lo que pongan se propaga a todos los turnos futuros de ese hilo"
+            onClick={() => void vault.decideRecap({ action: 'approve-all' })}
+          >
+            Aprobar todas
+          </button>
+        </div>
+      )}
+
+      {rows?.map((row) => {
+        // como se pinta y, sobre todo, que NO se enseña. Vive en un modulo puro
+        // con pruebas porque una de las dos cosas que decide es la regla de que
+        // una negativa no anuncia de que iba la conversacion
+        const look = describeRecapRow(row, destino);
+
+        return (
+          <div key={row.conversationId} className="vault-media__item">
+            <p className="field__hint">
+              <Tag tone={look.tone}>{look.state}</Tag>{' '}
+              {look.title ?? `Del ${row.day}`}{' '}
+              <span className="vault-list__meta">
+                {look.title === null ? '· ' : `· del ${row.day} · `}
+                {row.turns} mensajes
+                {look.canRead && ` · cubre ${row.covered} de ${row.turns} turnos`}
+                {look.canRead && ` · ${row.chars} caracteres en cada turno`}
+                {row.source === 'index' && ' · sólo el índice de sus escenas'}
+                {row.gaps > 0 && ` · ${row.gaps} tramo(s) que nadie resumió`}
+                {row.provider !== null && ` · escrita con ${CLI_LABELS[row.provider]}`}
+                {row.model !== null && ` (${row.model})`}
+              </span>
+            </p>
+
+            {row.source === 'index' && (
+              <Notice tone="idle">
+                Esto no es un resumen de lo que se dijo: son los títulos de sus
+                escenas y una frase de cada una. Ella lo lee como índice y sigue
+                sabiendo que le faltan turnos, así que preguntará en vez de
+                suponer.
+              </Notice>
+            )}
+
+            <div className="row">
+              {look.canRead && (
+                <button
+                  className="btn btn--quiet"
+                  title="Léela antes de aprobarla: esto es lo que ella va a leer en cada mensaje de ese hilo"
+                  onClick={() =>
+                    setOpen(open === row.conversationId ? null : row.conversationId)
+                  }
+                >
+                  {open === row.conversationId ? 'Cerrar' : 'Ver'}
+                </button>
+              )}
+              {look.canApprove && (
+                <button
+                  className="btn btn--quiet"
+                  disabled={ocupado}
+                  title="Hasta que no la apruebes no entra en ningún prompt"
+                  onClick={() =>
+                    void vault.decideRecap({
+                      action: 'approve',
+                      conversationId: row.conversationId,
+                    })
+                  }
+                >
+                  Aprobar
+                </button>
+              )}
+              {/* borrarla devuelve esa conversacion a su aviso de turnos
+                  omitidos, que es el estado seguro: eso hace el trabajo entero
+                  reversible. Sin entrada no hay nada que borrar */}
+              {row.hasEntry && (
+                <button
+                  className="btn btn--quiet"
+                  disabled={ocupado}
+                  title="Quita esta ficha. Esa conversación vuelve a avisarle de que le faltan turnos, que es el estado seguro"
+                  onClick={() =>
+                    void vault.decideRecap({
+                      action: 'forget',
+                      conversationId: row.conversationId,
+                    })
+                  }
+                >
+                  Borrarlo
+                </button>
+              )}
+              {look.canRedo && (
+                <button
+                  className="btn btn--quiet"
+                  disabled={ocupado}
+                  title={
+                    row.inPrompt
+                      ? `Vuelve a leerla desde cero con ${CLI_LABELS[look.retryWith]}. Ojo: si esta vez no sale nada utilizable, esta ficha se queda como está y no se sustituye por una vacía`
+                      : `Empieza esta conversación desde cero con ${CLI_LABELS[look.retryWith]}, y deja elegido ese CLI para el trabajo de fondo`
+                  }
+                  onClick={() => void rehacer(row.conversationId, look.retryWith)}
+                >
+                  {corriendo?.accion === 'rehacer' &&
+                  corriendo.conversationId === row.conversationId
+                    ? 'Rehaciendo…'
+                    : look.redoLabel}
+                </button>
+              )}
+            </div>
+
+            {open === row.conversationId && <p className="vault-recap__block">{row.block}</p>}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
  * el diagnostico de la memoria, en frases.
  *
  * Solo cifras sobre todas las conversaciones, nunca su contenido: es lo que
@@ -4737,6 +5242,26 @@ function MemoryDiagnosticsSummary({
           Medido sobre {diagnostics.scope.characterName ?? 'las conversaciones sin personaje'},
           como en un turno real; {diagnostics.scope.otherConversations} de otros personajes o
           sin personaje quedan fuera.
+        </p>
+      )}
+      {/* la cobertura de la memoria acumulativa, que es lo que el diagnostico no
+          medía: medía catálogo, fechas, estilo y disparos, y no cuántas
+          conversaciones saben en qué punto quedaron */}
+      {diagnostics.recaps !== undefined && (
+        <p>
+          <strong>Memoria de lo ya hablado:</strong> {diagnostics.recaps.summarized} de{' '}
+          {diagnostics.recaps.summarized +
+            diagnostics.recaps.withGaps +
+            diagnostics.recaps.indexOnly +
+            diagnostics.recaps.awaitingApproval +
+            diagnostics.recaps.missing}{' '}
+          conversaciones con ficha completa en el prompt; {diagnostics.recaps.withGaps} con tramos
+          que nadie resumió, {diagnostics.recaps.indexOnly} sólo con el índice de sus escenas,{' '}
+          {/* escrita y esperando NO es lo mismo que sin nada: decirlo junto hacía
+              que esta frase dijera «0 de 17» justo después de escribir las 17 */}
+          {diagnostics.recaps.awaitingApproval} escritas esperando que las apruebes y{' '}
+          {diagnostics.recaps.missing} sin nada, que siguen avisándole de que les faltan turnos.{' '}
+          {diagnostics.recaps.sealed} ya tienen memoria propia.
         </p>
       )}
       {diagnostics.relations !== undefined && (

@@ -18,9 +18,13 @@ import type {
   RelationStatus,
 } from '@luxy/shared';
 import type { HordeQueueProgress } from '../shared/horde-progress.js';
+import type { RecapSweepRound } from './vault-sweep.js';
 import type {
   vaultCompatibilityResultSchema,
   vaultMemoryListResultSchema,
+  vaultRecapListResultSchema,
+  vaultRecapSyncResultSchema,
+  vaultRecapUpdateArgsSchema,
   vaultRelationListResultSchema,
   vaultVisionProbeResultSchema,
   vaultMemoryDiagnosticsResultSchema,
@@ -38,6 +42,33 @@ type MemoryEpisode = z.infer<typeof vaultMemoryListResultSchema>['episodes'][num
  * cerrar la boveda, como el resto del contenido privado.
  */
 export type PendingAffair = z.infer<typeof vaultRelationListResultSchema>['notes'][number];
+
+/**
+ * una conversacion antigua con su ficha de continuidad, tal y como se repasa.
+ *
+ * Lleva el bloque ENTERO, que es contenido descifrado de la boveda: es lo unico
+ * con lo que Daniel puede juzgar si lo escrito vale antes de dejarlo entrar en
+ * ningun prompt, y desde el primer turno nuevo el modelo de pago lo arrastra
+ * para siempre. Vive en el estado de la ventana y se va al cerrar la boveda.
+ */
+export type RecapRow = z.infer<typeof vaultRecapListResultSchema>['rows'][number];
+
+/** la linea de cobertura; sus numeros SUMAN o es un fallo */
+export type RecapCoverage = z.infer<typeof vaultRecapListResultSchema>['coverage'];
+
+/** lo que se HABRIA escrito, para leerlo sin guardar nada */
+export type RecapPreview = z.infer<typeof vaultRecapSyncResultSchema>['preview'][number];
+
+/**
+ * lo que hizo la ultima tanda, sin el vistazo.
+ *
+ * El vistazo va aparte porque es contenido de la boveda y solo llega con
+ * `dryRun`; esto son cifras y se puede enseñar siempre.
+ */
+export type RecapSyncSummary = Omit<z.infer<typeof vaultRecapSyncResultSchema>, 'preview'>;
+
+/** aprobar una, aprobarlas todas, u olvidar una */
+export type RecapDecision = z.infer<typeof vaultRecapUpdateArgsSchema>;
 
 /**
  * lo que devuelve el banco de pruebas de visión.
@@ -515,6 +546,55 @@ export interface VaultController {
   decidePendingAffair: (id: string, status: RelationStatus) => Promise<void>;
   /** hay una decisión escribiéndose: los botones se apagan mientras tanto */
   decidingPendingAffair: boolean;
+  /**
+   * rellena hacia atrás la memoria acumulativa de las conversaciones viejas.
+   *
+   * Va al mismo sitio que catalogar y que buscar lo pendiente —Claude o Codex
+   * con la sesión local— y por el mismo carril, así que nunca corren dos a la
+   * vez. Devuelve `null` si ya había una en marcha o si falló, que es lo que
+   * `keepSweepingRecaps` entiende como «no insistas».
+   */
+  syncRecaps: (input: {
+    projectAlias: string;
+    /** sólo ésta */
+    conversationId?: string;
+    /** «Rehacerlo»: la empieza desde cero y se salta lo que se negó antes */
+    force?: boolean;
+    /**
+     * corre la pasada entera y NO guarda nada.
+     *
+     * Es lo único que contesta a la vez «¿se niegan los CLI?» y «¿sale bueno el
+     * resumen?». Lo que devuelve se lee y se tira.
+     */
+    dryRun?: boolean;
+  }) => Promise<RecapSweepRound | null>;
+  syncingRecaps: boolean;
+  /** qué pasó en la última tanda; null si no se ha hecho ninguna */
+  lastRecapSync: RecapSyncSummary | null;
+  /**
+   * lo que se habría escrito sin guardarlo; `null` mientras no se pruebe.
+   *
+   * Es contenido descifrado de la bóveda: se enseña, se tira y no va a ningún
+   * registro.
+   */
+  recapPreview: RecapPreview[] | null;
+  clearRecapPreview: () => void;
+  /**
+   * las fichas escritas, con su bloque entero; `null` hasta que se piden.
+   *
+   * Es una lista para LEER ANTES: una ficha de un CLI no entra en ningún prompt
+   * hasta que Daniel la aprueba, porque lo único que el código no puede cazar es
+   * un resumen competente pero saneado, que valida, avanza y se queda de semilla
+   * para siempre en ese hilo.
+   */
+  recaps: RecapRow[] | null;
+  /** la línea de cobertura que acompaña a la lista */
+  recapCoverage: RecapCoverage | null;
+  loadRecaps: () => Promise<void>;
+  /** aprobar una, aprobarlas todas, u olvidar una; devuelve la lista ya rehecha */
+  decideRecap: (args: RecapDecision) => Promise<void>;
+  /** hay una decisión escribiéndose: los botones se apagan mientras tanto */
+  decidingRecap: boolean;
   readMemoryEpisode: (
     episode: MemoryEpisode,
   ) => Promise<{ role: 'user' | 'assistant'; text: string }[]>;
@@ -690,6 +770,16 @@ export function useVault(): VaultController {
     useState<VaultController['lastRelationSync']>(null);
   const [pendingAffairs, setPendingAffairs] = useState<PendingAffair[] | null>(null);
   const [decidingPendingAffair, setDecidingPendingAffair] = useState(false);
+  const [syncingRecaps, setSyncingRecaps] = useState(false);
+  // y por el mismo motivo que los otros dos: dentro del callback, un `useState`
+  // llega con el valor de la ultima renderizacion y dos disparos seguidos lo
+  // leen los dos en `false`
+  const recapsRef = useRef(false);
+  const [lastRecapSync, setLastRecapSync] = useState<RecapSyncSummary | null>(null);
+  const [recapPreview, setRecapPreview] = useState<RecapPreview[] | null>(null);
+  const [recaps, setRecaps] = useState<RecapRow[] | null>(null);
+  const [recapCoverage, setRecapCoverage] = useState<RecapCoverage | null>(null);
+  const [decidingRecap, setDecidingRecap] = useState(false);
   const [compatibility, setCompatibility] = useState<CompatibilityResult[] | null>(null);
   const [checkingCompatibility, setCheckingCompatibility] = useState(false);
   const [sending, setSending] = useState(false);
@@ -740,6 +830,11 @@ export function useVault(): VaultController {
         // los pendientes llevan la cita LITERAL de un turno: es contenido
         // descifrado y se va con lo demas
         setPendingAffairs(null);
+        // y las fichas de continuidad llevan el bloque entero y el titulo de la
+        // conversacion, que es exactamente lo mismo: contenido de la boveda
+        setRecaps(null);
+        setRecapCoverage(null);
+        setRecapPreview(null);
       }
     }
     setLoading(false);
@@ -1137,6 +1232,98 @@ export function useVault(): VaultController {
     [],
   );
 
+  const syncRecaps = useCallback(
+    async (input: {
+      projectAlias: string;
+      conversationId?: string;
+      force?: boolean;
+      dryRun?: boolean;
+    }): Promise<RecapSweepRound | null> => {
+      if (recapsRef.current) return null;
+      recapsRef.current = true;
+      setSyncingRecaps(true);
+      // el vistazo de la prueba caduca EN CUANTO empieza una pasada de verdad:
+      // la de verdad coge las mismas conversaciones que la prueba acaba de
+      // enseñar, asi que dejarlo en pantalla bajo su «no se ha guardado nada»
+      // significa decidir —y aprobar— leyendo un texto que ya no es el que hay
+      // en disco
+      if (input.dryRun !== true) setRecapPreview(null);
+      try {
+        const result = await window.luxy.syncVaultRecaps({
+          projectAlias: input.projectAlias,
+          ...(input.conversationId === undefined
+            ? {}
+            : { conversationId: input.conversationId }),
+          // el mismo numero que `RECAP_DEFAULT_LIMIT` en la pasada: dos y no
+          // tres como los pendientes, porque aqui una sola conversacion puede
+          // gastar una llamada por cada cuarenta turnos
+          limit: 2,
+          force: input.force ?? false,
+          dryRun: input.dryRun ?? false,
+        });
+        if (!result.ok) {
+          setError(result.error);
+          return null;
+        }
+        if (!mounted.current) return null;
+        const { preview, ...counters } = result.value;
+        setLastRecapSync(counters);
+        // el vistazo solo se pisa cuando se ha pedido uno: una pasada de verdad
+        // devuelve la lista vacia, y dejarla entrar borraria lo que Daniel esta
+        // leyendo en ese momento
+        if (input.dryRun === true) setRecapPreview(preview);
+        // van tambien las negativas, las vagas, las ilegibles, los indices y las
+        // selladas: quien decide si dar otra vuelta las necesita, porque una
+        // tanda entera negada no escribe ninguna ficha y aun asi la siguiente
+        // coge OTRAS dos conversaciones
+        return {
+          pending: counters.pending,
+          reviewed: counters.reviewed,
+          refused: counters.refused,
+          vague: counters.vague,
+          invalid: counters.invalid,
+          failed: counters.failed.length,
+          deduced: counters.deduced,
+          superseded: counters.superseded,
+        };
+      } finally {
+        recapsRef.current = false;
+        if (mounted.current) setSyncingRecaps(false);
+      }
+    },
+    [],
+  );
+
+  const loadRecaps = useCallback(async (): Promise<void> => {
+    const result = await window.luxy.listVaultRecaps();
+    if (!mounted.current) return;
+    if (!result.ok) {
+      setError(result.error);
+      return;
+    }
+    setRecaps(result.value.rows);
+    setRecapCoverage(result.value.coverage);
+  }, []);
+
+  const decideRecap = useCallback(async (args: RecapDecision): Promise<void> => {
+    setDecidingRecap(true);
+    try {
+      const result = await window.luxy.updateVaultRecap(args);
+      if (!mounted.current) return;
+      if (!result.ok) {
+        setError(result.error);
+        return;
+      }
+      // el proceso principal devuelve la lista y la cobertura ya rehechas:
+      // volver a pedirlas abriria una ventana en la que los botones enseñan el
+      // estado anterior
+      setRecaps(result.value.rows);
+      setRecapCoverage(result.value.coverage);
+    } finally {
+      if (mounted.current) setDecidingRecap(false);
+    }
+  }, []);
+
   const readMemoryTurns = useCallback(
     async (input: {
       conversationId: string;
@@ -1521,7 +1708,12 @@ export function useVault(): VaultController {
 
   const removeConversation = useCallback(
     async (conversationId: string): Promise<void> => {
-      await window.luxy.deleteVaultConversation(conversationId);
+      const result = await window.luxy.deleteVaultConversation(conversationId);
+      // un borrado que falla a medias deja en disco algo que Daniel mando
+      // borrar —el resumen de lo que se dijo, lo apuntado, las escenas—, y
+      // callarlo era lo peor de los dos: la conversacion desaparecia de la
+      // lista y nadie decia que algo habia sobrevivido
+      if (!result.ok) setError(result.error);
       if (openConversationId === conversationId) {
         setOpenConversationId(null);
         setTurns([]);
@@ -1766,6 +1958,16 @@ export function useVault(): VaultController {
     loadPendingAffairs,
     decidePendingAffair,
     decidingPendingAffair,
+    syncRecaps,
+    syncingRecaps,
+    lastRecapSync,
+    recapPreview,
+    clearRecapPreview: () => setRecapPreview(null),
+    recaps,
+    recapCoverage,
+    loadRecaps,
+    decideRecap,
+    decidingRecap,
     readMemoryEpisode,
     readMemoryTurns,
     excludeFromMemory,
