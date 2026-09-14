@@ -27,7 +27,8 @@ suscripcion queda por decidir.
 
 ## F23-PENDIENTES-001 — que Lia saque sola las promesas y lo pendiente
 
-Estado: **pasos 1, 2 y 3 hechos; del 4 al 12 pendientes — Claude, 2026-09-14.**
+Estado: **pasos 1 a 10 hechos y comprobados; falta la prueba real de Daniel
+(12) — Claude, 2026-09-14.**
 Diseño en `docs/PENDIENTES-DISENO.md`.
 
 - **Paso 1, el trabajo de fondo (`D-087`)**: catalogar ya no usa la API de pago.
@@ -47,9 +48,35 @@ Diseño en `docs/PENDIENTES-DISENO.md`.
   `formatPendingAffairs` arma «ASUNTOS PENDIENTES ENTRE VOSOTROS» con los
   hechos calculados por linea. Sin pendientes, el prompt es identico al de
   antes. Falta engancharlo en el turno;
-- **Falta**: el diagnostico (5), la pasada sobre las 17 conversaciones (6), la
-  lista para corregirlas (7), la captura en los turnos nuevos (8) y enganchar
-  el bloque en `vaultConversationSend` (9).
+- **Paso 6 y 8, la extraccion y la pasada**: hechos. `relation-sync.ts`
+  recorre las conversaciones en ventanas de 40 turnos con 4 de contexto, con
+  cursor por conversacion que solo avanza sobre turnos REVISADOS de verdad. La
+  parte nueva de una ventana termina siempre en un turno del personaje, asi que
+  un mensaje sin respuesta nunca se da por leido. Corre entre turnos: a los 3
+  minutos de silencio, con 4 turnos de desfase, y al terminar el primer turno de
+  una conversacion nueva. Catalogo y extraccion comparten un solo carril
+  (`createAuxiliaryLane`), asi que nunca hay dos CLI a la vez;
+- **Paso 7, la lista**: hecha. «Lo que teneis pendiente» en el panel de memoria,
+  agrupada por personaje, con la cita literal, el dia, el estado y los cuatro
+  botones (Cumplida, Ya no vale, No era una promesa, Reabrir). Lo que decide
+  Daniel queda con `decidedBy: daniel` y el extractor no lo pisa;
+- **Paso 5, el diagnostico**: hecho. `relation-diagnostics.ts` es puro y
+  devuelve solo enteros y booleanos: cobertura, desfase, notas por estado,
+  integridad de las citas, la dosificacion simulada sobre los mensajes reales de
+  Daniel, cuantas saca ella antes de que el las nombre y cuantas reclamaciones
+  van sin respaldo;
+- **Paso 9, el enganche**: hecho. `selectPendingForTurn` corre dentro de un
+  `try` en `vaultConversationSend`: si falla, el turno sale sin bloque en vez de
+  perderse. Los contadores van al registro «prompt privado compuesto» y despues
+  de la respuesta se apunta «pendientes en la respuesta» con cuantas se le
+  enseñaron y cuantas aludio;
+- **Paso 10, comprobado**: `npm run check` exit 0, 166 archivos de prueba,
+  3187 pruebas, 12 saltadas.
+
+**Falta, y es de Daniel (paso 12):** reiniciar Studio, pulsar «Comprobar la
+memoria» ANTES de extraer nada para tener la linea base, lanzar «Buscar lo
+pendiente en lo ya hablado», repasar la lista y descartar lo que no sea una
+promesa, y solo entonces hablar con Lia sin nombrar la deuda. Ver `LA-045`.
 
 Origen, de Daniel: «que ella misma pueda sacar recuerdos sola: por ejemplo, le
 prometi dos cafes y una tarta de chocolate en la cama. Ella podria

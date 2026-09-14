@@ -2678,3 +2678,48 @@ Claude o Codex, asi que un archivo tocado a mano no puede colar otro.
 Tambien: el bucle del panel ya no se para por una sola conversacion fallida
 —un CLI puede negarse a una con contenido explicito y aceptar las demas—; solo
 se para si una tanda no cataloga ninguna.
+
+## D-088 — el trabajo de fondo no puede perder material en silencio
+
+Fecha: 2026-09-14. Autor: Claude. Origen: nueve hallazgos confirmados al
+revisar los pasos 5 a 9 de `F23-PENDIENTES-001`; cinco eran el mismo defecto
+con cinco caras.
+
+El patron. El trabajo de fondo de la boveda —catalogar, apuntar promesas— corre
+solo, sin que nadie lo mire, y marca lo que va haciendo con un cursor. Cada vez
+que una de esas dos cosas se desincroniza —se procesa MENOS de lo que se marca
+como hecho— el material se pierde y ademas no se puede recuperar, porque el
+sistema cree que ya paso por ahi. Las cinco caras que aparecieron:
+
+1. el extractor heredaba el reparto del catalogo, que recorta cada turno a unos
+   1.400 caracteres para poder resumir muchos. Veia el principio de cada turno,
+   marcaba el turno entero como revisado y seguia;
+2. un fallo al descifrar una conversacion tiraba la tanda entera, y la siguiente
+   volvia a empezar por la misma;
+3. una negativa se guardaba sin decir de que CLI venia, asi que cambiar de CLI
+   no la reintentaba;
+4. el bucle de la pantalla se paraba si las primeras conversaciones se negaban;
+5. la cuenta de «cuantas quedan» se hacia antes de trabajar, asi que el panel
+   decia que no quedaba nada.
+
+Decision. Todo camino de fondo cumple estas cuatro, y se prueba una por una:
+
+- **el cursor solo avanza sobre lo que se ha leido ENTERO.** Si algo se recorta,
+   se cuenta (`clipped`) y se enseña. Un presupuesto pensado para resumir no se
+   reutiliza para extraer;
+- **un fallo es de una conversacion, no de la tanda.** Se marca y las demas
+   siguen;
+- **una negativa pertenece al CLI que la dio.** Cambiar de CLI la reintenta, y
+   hay un boton que fuerza el reintento. Nunca se cae sola al otro CLI: eso
+   seria mandar a otro sitio el contenido que el primero rechazo;
+- **lo que se enseña en pantalla se calcula DESPUES de trabajar**, con los
+   mismos filtros que eligieron el trabajo.
+
+Y la que las une: un fallo del trabajo de fondo **nunca** puede hacer perder un
+turno de Daniel. `selectPendingForTurn` corre dentro de un `try`; si revienta,
+el turno sale sin bloque de pendientes.
+
+Corolario sobre los registros. El diagnostico escribia el motivo del fallo al
+registro mientras el turno se guardaba de escribirlo. Ahora los dos caminos
+apuntan lo mismo: `{leido, causa}`, sin texto de la boveda. Lo fija
+`memory-diagnostics-log.test.ts` con un centinela.

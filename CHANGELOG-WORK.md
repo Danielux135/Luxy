@@ -1,5 +1,48 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-09-14 — Claude — F23-PENDIENTES-001, pasos 5 a 10
+
+Cuatro agentes escribieron la extraccion, la lista, el diagnostico y el
+enganche; despues dos revisores con lentes distintas y un esceptico por
+hallazgo. **Nueve hallazgos confirmados, todos arreglados con prueba.** Cinco
+de los nueve eran la misma familia: **algo se perdia o se callaba sin que
+nadie se enterara.** De ahi sale `D-088`.
+
+Los que habrian arruinado la funcion:
+
+- **el extractor solo veia los primeros 1.400 caracteres de cada turno, y el
+  cursor avanzaba igual**: heredaba el reparto del catalogo, que trocea para
+  resumir. Una promesa dicha a la mitad de una respuesta larga se perdia para
+  siempre, porque ese turno quedaba marcado como revisado. El extractor tiene
+  ahora su propio presupuesto sin techo por turno, y lo que se recorte se
+  cuenta (`clipped`) y se avisa en pantalla;
+- **un fallo en una conversacion tumbaba la tanda entera** y se repetia en cada
+  disparo. Ahora se marca esa conversacion y las demas siguen;
+- **una negativa no se podia reintentar** ni cambiando de CLI, aunque el aviso
+  dijera «prueba con el otro»: la negativa no guardaba de quien era. Ahora
+  pertenece al CLI que la dio, y el boton fuerza un reintento;
+- **el bloque ofrecia como «de otras conversaciones» promesas hechas en el hilo
+  vivo**, y podia repetirlas dos turnos seguidos;
+- **un fallo del CLI silenciaba todas las promesas del personaje**, porque la
+  guarda de desfase conocia las negativas pero no los fallos.
+
+Y tres de higiene: el diagnostico escribia al registro el motivo del fallo que
+el turno se guarda de escribir (ahora `{leido, causa}` y nada mas); el bucle de
+la pasada se paraba si las tres primeras conversaciones se negaban; y `pending`
+se calculaba antes de la tanda, asi que el panel decia «no queda nada» con
+trabajo sin hacer.
+
+Archivos nuevos: `relation-sync.ts` (924 lineas), `relation-diagnostics.ts`
+(722), `relation-review.ts` (181), `vault-pending.ts` (138) y `vault-sweep.ts`
+(64), con sus pruebas. Tocados: `handlers.ts`, `relation-selection.ts`,
+`vault-relation.ts`, `vault-catalog.ts`, `vault-prompt.ts`, `ipc.ts`,
+`channels.ts`, `preload/index.ts`, `useVault.ts`, `Vault.tsx` y `styles.css`.
+
+`npm run check` exit 0: 166 archivos, 3187 pruebas, 12 saltadas.
+
+**Sin ejecutar con la boveda abierta.** La funcion no hace nada hasta que
+Daniel reinicie Studio y lance la pasada; ver `LA-045`.
+
 ### 2026-09-14 — Claude — F23-PENDIENTES-001, paso 4 y el bloque del prompt
 
 El almacen lo escribieron agentes con dos revisores y un esceptico por hallazgo;
@@ -5282,7 +5325,7 @@ luxy/work-update-001-studio`, `git apply --whitespace=nowarn`, `npm run build`,
   `npx prettier --write`, `npm run lint`, `npm run typecheck`, `npm test`.
 - Resultado real: cuando una respuesta de conversación es **larga y además un
   documento**, el agente la escribe en
-  `%LOCALAPPDATA%\Luxyrtifacts\<jobId>\<LUX-XXXX>.<ext>`, el gateway guarda
+  `%LOCALAPPDATA%\Luxy\artifacts\<jobId>\<LUX-XXXX>.<ext>`, el gateway guarda
   sólo la referencia (nombre, tipo, bytes, sha-256, fecha) en la metadata, y la
   tarjeta de Studio la muestra con un botón **Abrir carpeta**.
 - Pruebas: 17 nuevas, **1.470 pasadas, 9 omitidas, 0 fallos** en 74 archivos.

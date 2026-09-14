@@ -1,5 +1,32 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-14 — F23-PENDIENTES-001, pasos 5 a 10
+
+`npm run check` exit 0.
+
+```
+Test Files  166 passed (166)
+     Tests   3187 passed | 12 skipped
+```
+
+Las 12 saltadas son las de `apps/agent/src/providers/live.test.ts`, que ya lo
+estaban antes de tocar nada: piden red.
+
+Nuevos: `relation-sync.test.ts` (20), `relation-diagnostics.test.ts`,
+`relation-review.test.ts`, `relation-list.test.ts`, `conversation-pending.test.ts`,
+`vault-pending.test.ts`, `vault-sweep.test.ts` (11) y
+`memory-diagnostics-log.test.ts`, que es la primera que invoca
+`vaultMemoryDiagnostics` y comprueba con un centinela que ni la cita ni el
+identificador de la conversacion llegan al registro.
+
+Medido sobre el codigo real, no estimado: `diagnoseRelations` tarda 11 ms sin
+notas y 604 ms con 30 notas y el volumen de hoy (17 conversaciones, 272
+turnos). Sube a 1,9 s al doble de volumen y 3,5 s al cuadruple. Corre en el
+proceso principal, asi que si algun dia sube de ahi hay que trocearlo.
+
+**Sin ejecutar con la boveda abierta.**
+
+
 ### 2026-09-14 — F23-PENDIENTES-001, paso 4 y bloque del prompt
 
 `npm run check` exit 0.

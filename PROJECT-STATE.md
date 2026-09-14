@@ -1,6 +1,18 @@
 # Luxy — estado canónico del proyecto
 
-Última actualización: **2026-09-04 — hay dónde probar si un modelo ve una foto**
+Última actualización: **2026-09-14 — Lía puede sacar sola lo que quedó
+pendiente entre los dos**
+
+La bóveda apunta las promesas y los planes que quedaron sin cumplir, con la
+cita literal verificada contra el turno donde se dijo, y se los recuerda a ella
+en el prompt para que pueda sacarlos **sin que Daniel los nombre**. Lo extraen
+Claude Code o Codex entre turnos, nunca una API de pago; se guardan cifrados en
+`vault/relation.json`; Daniel los repasa en «Lo que tenéis pendiente» y tiene la
+última palabra. Como mucho salen dos por turno, con 72 h de reposo entre
+repeticiones. Implementado y comprobado con `npm run check`; **sin ejecutar aún
+con la bóveda abierta** (ver `LA-045`).
+
+Lo anterior:
 
 La pestaña Privado tiene un **banco de pruebas de visión**: eliges una imagen de
 tu disco, eliges proveedor y modelo, y te devuelve lo que el modelo dice de ella.

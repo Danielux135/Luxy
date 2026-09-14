@@ -1,5 +1,38 @@
 # Luxy — acciones locales de Daniel
 
+## LA-045 — encender lo pendiente: la pasada sobre las 17 conversaciones
+
+Estado: **`abierta` — 2026-09-14.** Nada de `F23-PENDIENTES-001` hace efecto
+hasta que se hagan estos pasos, y **el orden importa**: los tres primeros son
+para que Daniel vea y corrija lo que se apuntó antes de que Lía lo lea.
+
+1. **Cerrar Studio del todo** («Salir completamente» en la bandeja) y volver a
+   abrirlo, para que cargue el código nuevo.
+2. En Privado → «Lo que recuerda», pulsar **«Comprobar la memoria»** ANTES de
+   extraer nada. Es la línea base: se esperan 0 notas, `raising` a 0 y
+   `inventionGuard.unbacked` con su valor de partida. Las cifras salen en
+   `studio.log` y se apuntan en `TEST-RESULTS.md`, sólo cifras.
+3. Pulsar **«Buscar lo pendiente en lo ya hablado»** y dejar que termine.
+   Recorre las 17 conversaciones en orden cronológico. Se espera `behind 0` y
+   que aparezca al menos una nota abierta con `by: user`: **la de los dos cafés
+   y el trozo de tarta de chocolate en la cama.** Si no aparece, esto ha
+   fallado y hay que mirar `refused` y `clipped` en el registro.
+4. Repasar **«Lo que tenéis pendiente»** y descartar lo que no sea una promesa
+   («No era una promesa»). Lo que decida Daniel no lo pisa el extractor.
+5. Sólo entonces, abrir una conversación con Lía **sin nombrar la deuda** y ver
+   si la saca ella en los primeros mensajes, o si se la calla porque la escena
+   va por otro lado. Las dos cosas son correctas; lo que no vale es que la
+   repita dos turnos seguidos.
+6. Volver a «Comprobar la memoria» y comparar con la línea base:
+   `notesRaisedByHerBeforeHim`, `sameNoteWithin24h` y `unbacked`.
+
+**Lo que puede salir mal, y no sería un fallo del código:** Claude y Codex se
+niegan ante contenido sexual explícito. Si una conversación se niega, el cursor
+no avanza, se cuenta en `refused` y se puede reintentar con el otro CLI desde el
+selector «Quien hace el trabajo de fondo». Si se niegan los dos, esa conversación
+no aporta pendientes y no silencia a las demás. Nunca se recurre a DeepSeek ni a
+ninguna API de pago para esto (`D-087`).
+
 ## LA-044 — Mistral: descartado. La API nunca estuvo activada
 
 Estado: **`cerrada` — 2026-09-07. Decision de Daniel: no se usa Mistral.**

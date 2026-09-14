@@ -60,8 +60,16 @@ trabajo auxiliar**, y dejar la API de pago sólo para el turno de roleplay.
 **Medido: un turno trivial del CLI de Claude tarda 16 s**, casi todo arranque
 (Codex por su tubería, 11 s). Eso descarta poner trabajo auxiliar *dentro* del
 turno —serían 15 s de espera en cada mensaje— y lo habilita **después** de
-entregar la respuesta, mientras el usuario la lee. Luxy ya hace exactamente eso
-con el catalogador de escenas: esto lo generaliza.
+entregar la respuesta, mientras el usuario la lee.
+
+**Al día de hoy (2026-09-14) esto ya corre así, pero sólo para las promesas.**
+El catalogador de escenas sigue arrancando únicamente al abrir el panel «Lo que
+recuerda»; quien corre de verdad entre turnos es `relation-sync.ts`, que apunta
+lo que quedó pendiente entre los dos: a los 3 minutos de silencio, con 4 turnos
+de desfase, y al terminar el primer turno de una conversación nueva. Los dos
+comparten un solo carril, así que nunca hay dos CLI a la vez. La fase siguiente
+del mismo registro es el ánimo (`joy` y `hurt`), y después los gustos y las
+personas (`taste` y `person`).
 
 ### El estado no necesita ninguno de los dos
 

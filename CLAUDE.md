@@ -360,6 +360,14 @@ inyección de shell, pero no convierte en seguro el código que la prueba import
   `config.json`; las URLs remotas exigen HTTPS y HTTP sólo se admite en loopback.
 - El catálogo real de una conexión consulta sólo `/v1/models`; no sondea rutas
   tentativas de precios (`D-022`).
+- El trabajo de fondo de la bóveda —catalogar escenas, apuntar lo que queda
+  pendiente entre los dos— va **sólo** por Claude Code o Codex con la sesión
+  local, nunca por una API de pago (`D-087`). Lo resuelve
+  `resolveAuxiliaryTarget`, y catálogo y extracción comparten un único carril.
+  Su cursor sólo avanza sobre lo que se ha leído entero, una negativa pertenece
+  al CLI que la dio y un fallo suyo jamás hace perder un turno del usuario
+  (`D-088`). Lo apuntado vive cifrado en `vault/relation.json`, sellado con la
+  subclave de identidad como el catálogo.
 - Las imágenes de la bóveda tienen **dos** proveedores y el proveedor es del
   **personaje**, no de la máquina: el de pago guarda la identidad en su servidor
   y AI Horde no tiene personajes, así que allí la identidad es una receta local

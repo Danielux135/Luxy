@@ -145,7 +145,9 @@ Funciones puras del mismo módulo:
 
 Las expresiones regulares de `normalizeQuote` se escriben con la herramienta de edición, nunca con heredoc (CLAUDE.md, regla 2 bis).
 
-`packages/shared/src/vault-catalog.ts` exporta, sin cambiar su comportamiento, las piezas de recorte que hoy son privadas: `flatten`, `turnAllowance`, `clip` y `CUT_MARK`, con los nombres `flattenTurnText`, `turnAllowance`, `clipMiddle` y `CATALOG_CUT_MARK`. El extractor usa el mismo recorte por el medio y el mismo tope de 60.000 caracteres.
+`packages/shared/src/vault-catalog.ts` exporta, sin cambiar su comportamiento, las piezas de recorte que hoy son privadas: `flatten`, `turnAllowance`, `clip` y `CUT_MARK`, con los nombres `flattenTurnText`, `turnAllowance`, `clipMiddle` y `CATALOG_CUT_MARK`. El extractor usa el mismo recorte por el medio y el mismo tope global de 60.000 caracteres.
+
+**Corregido tras la revisión (`D-088`): el extractor NO hereda el tope por turno del catálogo.** El catálogo reparte su presupuesto entre muchas conversaciones y deja unos 1.400 caracteres por turno, que le basta para resumir. Al extractor eso le hacía ver sólo el principio de cada turno y marcar el turno entero como revisado: una promesa dicha a la mitad de una respuesta larga se perdía para siempre. `turnAllowance` acepta ahora un `cap`, y `vault-relation.ts` exporta `RELATION_TURN_CHARS` (sin techo por turno), `relationTurnAllowance` y `countClippedRelationTurns`. Lo que aun así se recorte se cuenta en `clipped` y se avisa en pantalla.
 
 ### 2.2 Línea del prompt (`packages/shared/src/vault-prompt.ts`)
 
@@ -244,7 +246,7 @@ Todo corre en el proceso principal (`apps/desktop/src/main/vault/relation-sync.t
 **Guarda del catálogo, que va en el mismo cambio y como paso 1.** Hoy `catalogOnce` llama a `runLocalTurn` con `args.provider` (`handlers.ts:1355-1357`), que es el proveedor del compositor (`Vault.tsx:205` y `343`). Con DeepSeek, abrir el panel cuesta llamadas de pago. A partir de ahora:
 - `catalogOnce` usa `resolveAuxiliaryTarget(args, context.memoryPreferences.auxiliary())`: un proveedor que no esté en `LOCAL_CLI_PROVIDERS` se sustituye y se descartan su modelo y su esfuerzo;
 - cada entrada guarda `provider`;
-- el bucle de `Vault.tsx:4227` corta solo con `result.cataloged === 0`, y no con `failed > 0`;
+- el bucle de `Vault.tsx:4227` corta con `result.cataloged === 0 && failed === 0` (corregido tras la revisión: cortar sólo con `cataloged === 0` paraba la pasada entera si las primeras conversaciones fallaban o se negaban, y el panel decía que no quedaba nada);
 - el aviso de `Vault.tsx:4246` dice que el texto va a Codex o a Claude, el elegido en el panel, y nunca a una API de pago.
 
 ## 5. Ciclo de vida y edición manual
@@ -343,7 +345,7 @@ Entradas: las notas, los cursores y la línea temporal del personaje, que da `Pr
 Lo ve DeepSeek. Va sin tildes y con ñ y «», como el resto de `vault-prompt.ts`. `formatPendingAffairs(lines)` devuelve:
 
 ```
-Cosas que quedaron pendientes entre los dos en otras conversaciones: algo que uno le prometio
+Cosas que quedaron pendientes entre los dos, en esta conversacion o en otras: algo que uno le prometio
 al otro o que quedasteis en hacer juntos, y que por lo que consta sigue sin cumplirse. Tu te
 acuerdas aunque el no las nombre, y puede que el ya no se acuerde.
 No son una lista de tareas ni un guion. Puedes sacar una tu sola, sin esperar a que el la
@@ -683,3 +685,44 @@ Todas van sin red ni tokens. Cierre: `npm run lint`, `npm run typecheck` (que in
 - Mensajes proactivos en diferido (fase 7), que reutilizarían `selectPendingForTurn` al abrir la bóveda.
 - La memoria acumulativa rota, que no se toca aquí: `job-runner.ts` separa el bloque, `local-turn.ts:215` devuelve `result.summary` ya limpio y `packages/shared/src/host-protocol.ts:213-224` no lleva memoria, así que `memoryStatus` siempre sale `absent`. Este diseño no depende de ella, pero hay que arreglarla antes de la fase 2.
 - Que `CatalogStore.list()` deje de devolver `[]` sin avisar: aquí solo se protege con valores por defecto y una prueba.
+
+## 11. Correcciones tras la implementación (2026-09-14)
+
+Este documento se escribió **antes** de tocar código. Los pasos 1 a 10 están
+hechos y comprobados, y la revisión adversarial confirmó nueve defectos que
+obligaron a cambiar el diseño. Lo que sigue manda sobre lo escrito arriba.
+
+**§2.1** — `relationCountersSchema` gana `clipped`: turnos de la parte nueva
+que aun así hubo que recortar. Sólo cuenta la parte nueva; el contexto entra en
+el reparto pero no en la alarma, porque de ahí no se apunta nada.
+
+**§3.9** — una conversación fallida o negada se salta **sólo para ese CLI**.
+`refusedStill` compara el proveedor guardado con el de ahora, y el registro de
+fallos es un `Map<conversationId, LocalCliProvider>`. Nunca hay caída
+automática al otro CLI: eso sería mandar a otro sitio el contenido que el
+primero rechazó. El botón manda `force: true` en la primera vuelta.
+
+**§4** — el arranque del bucle corta cuando no pasa nada (`pending === 0` o
+ninguna revisada, negada ni fallida), no cuando ningún cursor avanza. Y
+`pending` se recalcula **al terminar**, con los mismos filtros que eligieron las
+candidatas.
+
+**§6.2** — dentro de la conversación ACTUAL, un turno a menos de 6 h del origen
+sí cuenta para «en escena» y para el reposo de 72 h, aunque siga sin contar para
+las cifras que se le enseñan. En cualquier otra conversación el hueco de 6 h se
+comporta como estaba escrito. Sin esto, el bloque ofrecía una promesa recién
+hecha en el hilo vivo y podía repetirla dos turnos seguidos.
+
+**§6.2** — `selectPendingForTurn` acepta `failed`, que se trata como una
+negativa persistida dentro de la guarda de desfase. Sin esto, un fallo del CLI
+—no una negativa— silenciaba todas las promesas del personaje.
+
+**§7** — `extraction` lleva `clipped`. Y `diagnoseRelations` resuelve los
+instantes una sola vez por turno: con 30 notas y el volumen de hoy tarda 604 ms
+en el proceso principal, y crece con el cuadrado.
+
+**§10** — a los riesgos de las negativas: están atadas al proveedor y hay salida
+manual. Al de «perder material»: lo cubre `D-088`.
+
+**Sigue pendiente, y es del paso 12:** nada de esto se ha ejecutado con la
+bóveda abierta. Ver `LA-045`.
