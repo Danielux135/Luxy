@@ -1,5 +1,28 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-14 — F24-RECAP-001, pasos 2 a 5
+
+`npm run check` exit 0.
+
+```
+Test Files  169 passed (169)
+     Tests   3317 passed | 12 skipped
+```
+
+Nuevos: `vault-recap.test.ts`, `recap-store.test.ts`, `recap-sync.test.ts` y
+las añadidas a `vault-prompt.test.ts`. 185 pruebas entre los cuatro.
+
+Dos comprobaciones que no son de contar y conviene que consten:
+
+- **el texto del prompt se verifico con `diff` contra el §5 del diseño**, no a
+  ojo: cabecera, bloque de primera ventana y bloque de segunda salen identicos;
+- **sin recap, el prompt privado sale identico al de antes**, y hay prueba.
+
+**Sin ejecutar con la boveda abierta, y sin una sola llamada a un CLI.** La
+tasa de negativa de Claude y Codex sobre este material **sigue sin medirse**:
+es lo primero que dira la pasada real.
+
+
 ### 2026-09-14 — F23-PENDIENTES-001, pasos 5 a 10
 
 `npm run check` exit 0.

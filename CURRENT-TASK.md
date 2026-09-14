@@ -42,8 +42,9 @@ recuerda».
 
 ## F24-RECAP-001 — memoria acumulativa para los chats que ya existen
 
-Estado: **diseñado y aprobado; construyendo el nucleo (pasos 2 a 5) — Claude,
-2026-09-14.** Diseño en `docs/RECAP-DISENO.md`.
+Estado: **pasos 2 a 5 hechos y comprobados; faltan el IPC (6), el enganche (7)
+y la pantalla (8) — Claude, 2026-09-14.** Diseño en `docs/RECAP-DISENO.md`,
+con las correcciones de la revision en su §16.
 
 Origen, de Daniel: «Quiero generar la memoria acumulativa de los chats
 antiguos». Cierra la linea que quedo abierta en `F22-MEMORIA-ACUMULATIVA-001`:
@@ -2236,3 +2237,25 @@ canónica actual. El registro completo, paso a paso, vive en
 capacidades del producto en `PROJECT-STATE.md`. No se repite aquí para que
 este archivo siga señalando un único trabajo activo, tal como exige
 `AI-WORK-PROTOCOL.md`.
+
+
+### F24, lo hecho y lo que falta
+
+- **Paso 2, el nucleo puro**: `packages/shared/src/vault-recap.ts` (1.485
+  lineas). Esquemas, el prompt del §5 —verificado con `diff` contra el diseño,
+  no copiado a ojo—, el parseo, la verificacion, el recorte, el detector de
+  vaguedad, la ventana, el indice deducido y la eleccion entre memoria sellada y
+  recap. **El presupuesto por turno NO hereda el del catalogo**, que es el error
+  que ya se cometio con las promesas;
+- **Paso 3, el bloque del prompt**: hecho, y arregla de paso la regresion que ya
+  existia: cualquier memoria, aunque fuera parcial, apagaba el aviso de turnos
+  omitidos. Sin recap, el prompt sale identico al de antes;
+- **Paso 4, el almacen**: `recap-store.ts`, con el molde de `relation-store`
+  (`fsync`, carril, lectura tolerante, `checkedForWrite`), no con el del
+  catalogo;
+- **Paso 5, la pasada**: `recap-sync.ts` (1.229 lineas), con los cinco estados
+  separados de §8 y la negativa clasificada con `classifyReply`.
+
+**Falta**: el IPC con `dryRun` (6), el enganche en el turno y el borrado de
+conversacion (7), y la pantalla (8). Y despues, la pasada real de Daniel, que
+es la unica forma de saber si los CLI se niegan.

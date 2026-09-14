@@ -1,5 +1,42 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-09-14 — Claude — F24-RECAP-001, pasos 2 a 5
+
+Cuatro agentes construyeron el nucleo, el bloque del prompt, el almacen y la
+pasada; despues tres revisores con lentes distintas y un esceptico por hallazgo.
+**Ocho hallazgos confirmados, seis graves, todos arreglados con prueba.**
+
+Cinco de los ocho eran `D-088` otra vez, en codigo nuevo y con otra cara: algo
+se daba por leido sin haberse leido. Los dos que mas habrian dolido:
+
+- **el encadenado tiraba lo NUEVO.** Con seis entradas por lista, la segunda
+  ventana no podia aportar nada: el recorte conservaba las primeras, que son
+  siempre las de la ventana anterior. La conversacion de 65 turnos habria
+  resumido solo sus primeros 40, y nadie lo habria notado;
+- **se clasificaba la negativa antes de leer el bloque.** Una ficha correcta con
+  vocabulario de escena —que es justo lo que se le pide— se tiraba como negativa
+  y su tramo se declaraba como hueco.
+
+Y el mas sutil: `verifyRecap` validaba los tramos saltados contra el `covered`
+que declaraba el propio modelo, asi que **la respuesta honesta —estrechar lo
+cubierto y declarar el tramo— se invalidaba entera, y la silenciosa pasaba.**
+Ahora se valida contra la ventana que se envio.
+
+Ademas: una ventana ilegible borraba la aprobacion de Daniel sin cambiar una
+palabra; y tras una ventana negada, a la siguiente se le decia que era el
+principio de la conversacion y se le pedia contar como empezo, o sea inventar.
+
+Nuevos: `vault-recap.ts` (1.485 lineas), `recap-sync.ts` (1.229),
+`recap-store.ts` (392), con sus pruebas. Tocados: `vault-prompt.ts` y
+`packages/shared/src/index.ts`. **Ni un byte de `conversation-store.ts`,
+`private-store.ts`, `schemas.ts`, `vault.ts`, `vault-payloads.ts`,
+`vault-crypto`, las migraciones ni el gateway.**
+
+`npm run check` exit 0: 169 archivos, 3317 pruebas, 12 saltadas.
+
+Nada de esto se nota todavia: falta el IPC, el enganche y la pantalla, y nadie
+lo ha ejecutado con la boveda abierta.
+
 ### 2026-09-14 — Claude — F23-PENDIENTES-001, pasos 5 a 10
 
 Cuatro agentes escribieron la extraccion, la lista, el diagnostico y el

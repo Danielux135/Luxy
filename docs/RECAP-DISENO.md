@@ -669,3 +669,77 @@ Reabrir una conversación del 1 de septiembre y mirar dos cosas: que «prompt pr
 ## 15. La pregunta que conviene hacerle a Daniel antes del paso 2
 
 «Memoria acumulativa de los chats antiguos» puede querer decir dos cosas, y esto sólo da una: **que al reabrir una conversación antigua, Lía sepa en qué punto quedó esa conversación**. Si lo que espera es **que se acuerde de un hilo cuando está en otro**, esto no se lo da: la memoria es por conversación (`latestMemory` es por hilo, el bloque se titula «DE ESTA CONVERSACION»), y ese canal son los recuerdos y los pendientes. Merece la pena preguntárselo antes de gastar el trabajo.
+
+---
+
+## 16. Correcciones tras implementar los pasos 2 a 5 (2026-09-14)
+
+Este diseño se escribió antes de tocar código. Los pasos 2 a 5 están hechos y
+comprobados, y una revisión adversarial con tres lentes confirmó **ocho**
+defectos, **seis de ellos graves**. Lo que sigue manda sobre lo escrito arriba.
+
+**El patrón, otra vez.** Cinco de los ocho eran variantes de `D-088`: algo se
+daba por leído sin haberse leído, o se perdía sin avisar. Es el mismo defecto
+que apareció en las promesas, en otro código y con otra cara.
+
+### Los graves
+
+**§4.4 y §5 — el encadenado tiraba lo NUEVO.** Con seis entradas por lista, la
+ventana 2 **no podía aportar nada** a `facts`: el recorte se quedaba con las
+primeras, que son siempre las de la ventana anterior. Una conversación de 65
+turnos habría resumido sólo sus primeros 40. `clampRecapMemory` recibe ahora
+`{chained}` y, si hay ficha anterior, conserva el ancla y las ÚLTIMAS entradas;
+el prompt de la segunda ventana lo dice expreso («lo nuevo NO se queda fuera»);
+y `RecapDrift` gana `added`, para poder ver si una ventana aportó algo.
+
+**§4.3 y §7 — el hueco sólo se declaraba por la cola.** Un `covered.from` mayor
+que el de la ventana dejaba turnos del PRINCIPIO dados por leídos sin leerse, y
+sin declarar. Peor: `verifyRecap` validaba los tramos saltados contra el
+`covered` que decía el propio modelo, así que **la respuesta honesta se
+invalidaba entera y la silenciosa pasaba**. Ahora se valida contra la ventana
+que se envió, y el tramo de cabecera se declara solo.
+
+**§8 — una ventana ilegible borraba la aprobación de Daniel** sin cambiar una
+palabra del contenido. Si la pasada no cambia nada, la entrada anterior se
+conserva entera y sólo se le estampa el motivo encima.
+
+**§8 — se clasificaba antes de leer.** `classifyReply` corría sobre el texto
+entero antes de intentar el bloque, así que una ficha correcta **con vocabulario
+de escena** —que es exactamente lo que se le ha pedido— se tiraba como negativa
+y su tramo se declaraba como hueco. Ahora: leer, verificar, y clasificar sólo si
+no hay ficha que valga, y sobre el texto de fuera del bloque.
+
+**§5 — tras una ventana negada, a la siguiente se le decía que era «la PRIMERA
+parte de la conversación»** y se le pedía contar cómo empezó. Se le estaba
+pidiendo que inventara. Hay ahora tres arranques de prompt, y el del principio
+se elige por empezar en el primer turno, no por no tener ficha previa.
+
+### Los menores
+
+**§6** — el índice deducido da dos cifras cuando hay más de seis escenas («6 de
+las 9»): decir 9 y enseñar 6 invita a suponer las otras tres.
+
+**§10** — la línea de la tanda gana `aportadas`. Es una cifra.
+
+### Firmas que cambian, para el paso 6
+
+`clampRecapMemory(memory, { chained })`, `RecapVerificationContext.chained?`,
+`RecapPromptInput.startsAtFirstTurn` (obligatorio), `RecapDrift.added`,
+`RecapCounters.added` y `RecapRunResult.added`.
+
+### Dos cosas vistas y NO arregladas, por estar fuera del encargo
+
+- `result.chars` de una tanda que no cambia nada suma los caracteres de la ficha
+  que sigue en disco. Es un contador de registro y las dos lecturas se defienden;
+- una conversación cuyo recap sea un índice deducido vuelve a entrar en cada
+  pasada (su cursor es -1 por diseño) y gasta un hueco de la tanda aunque no
+  haya nada que hacer. Merece su propia tarea.
+
+### Y un incidente que confirma la regla 2 bis de `CLAUDE.md`
+
+Una clase de caracteres con marcas combinantes **se transformó al escribirse**,
+aun usando la herramienta de edición: llegó al disco con los caracteres
+combinantes literales, invisibles en el editor. No se re-escapó: se sustituyó
+por un recorrido comparando puntos de código contra dos constantes, que no puede
+romperse por ese camino. Las cuatro expresiones regulares que quedan se
+comprobaron con `grep` **sobre el archivo**, no sobre el comando.
