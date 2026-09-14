@@ -2010,6 +2010,22 @@ input[aria-invalid='true'] {
 }
 
 /*
+ * «Lo que teneis pendiente», dentro del panel de memoria.
+ *
+ * Va separado por una linea porque no es lo mismo que los momentos de encima:
+ * aquellos se miran, y esto se corrige. Sin la separacion, los botones de
+ * decidir quedaban pegados a la lista de momentos y parecian suyos.
+ */
+.vault-generate__section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+/*
  * los modelos de AI Horde son una docena y cada uno lleva debajo su familia y
  * su disponibilidad. En una fila que envuelve quedaban de anchos distintos y no
  * se podian comparar; en una columna ocupaban la pantalla entera.

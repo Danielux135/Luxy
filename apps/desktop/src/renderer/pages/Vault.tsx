@@ -10,6 +10,16 @@ import {
   describeWhen,
   groupConversationsByCharacter,
 } from '../vault-conversation-groups.js';
+import {
+  PENDING_DECISION_HINTS,
+  PENDING_DECISION_LABELS,
+  PENDING_PARTY_LABELS,
+  PENDING_STATUS_LABELS,
+  PENDING_STATUS_TONES,
+  groupPendingByCharacter,
+  pendingDecisionsFor,
+} from '../vault-pending.js';
+import { keepSweepingCatalog, keepSweepingRelations } from '../vault-sweep.js';
 import type { ConfigSummary } from '../useConfig.js';
 import {
   formatAutoLockOption,
@@ -4210,6 +4220,31 @@ function MemoryPanel({
     void loadAuxiliary();
   }, [loadAuxiliary]);
 
+  /**
+   * busca en lo ya hablado lo que quedó pendiente entre los dos.
+   *
+   * En tandas y hasta acabar, igual que el catálogo y con el mismo tope de
+   * vueltas: una cola que no baja es un fallo, no un motivo para seguir
+   * arrancando el CLI. Cuándo parar lo decide `keepSweepingRelations`, que se
+   * prueba aparte.
+   *
+   * `force` solo lo manda el botón, y solo en la primera vuelta: es Daniel quien
+   * pide reintentar lo que se negó o falló, y repetirlo en las doce volvería a
+   * arrancar el CLI para las mismas conversaciones rotas.
+   */
+  const buscarPendientes = async (force = false): Promise<void> => {
+    for (let vuelta = 0; vuelta < 12; vuelta += 1) {
+      const result = await vault.syncRelations({
+        projectAlias: project,
+        force: force && vuelta === 0,
+      });
+      if (!keepSweepingRelations(result)) break;
+    }
+    // y se recarga la lista SIEMPRE, aunque la pasada no apunte nada nuevo: la
+    // primera apertura no busca nada y aun así tiene que enseñar lo que ya hay
+    await vault.loadPendingAffairs();
+  };
+
   return (
     <details
       className="vault-generate"
@@ -4234,14 +4269,15 @@ function MemoryPanel({
           // tope de vueltas: una cola que no baja es un fallo, no un motivo
           // para seguir gastando llamadas
           for (let vuelta = 0; vuelta < 12; vuelta += 1) {
-            const result = await vault.syncCatalog(target);
-            if (result === null || result.pending === 0) break;
-            // si una tanda no cataloga NADA, algo va mal de forma sistematica
-            // —un modelo que no existe, por ejemplo— y seguir no sirve. Pero una
-            // sola negativa no para las demas: con contenido explicito, un CLI
-            // puede negarse a una conversacion y aceptar el resto
-            if (result.cataloged === 0) break;
+            // si una tanda no cataloga NADA y ademas no falla nada, algo va mal
+            // de forma sistematica —un modelo que no existe, por ejemplo— y
+            // seguir no sirve. Pero una negativa no para las demas: la
+            // conversacion negada queda marcada y la tanda siguiente coge otras
+            if (!keepSweepingCatalog(await vault.syncCatalog(target))) break;
           }
+          // y despues, en el mismo carril, lo que quedo pendiente entre los dos:
+          // asi ella puede sacarlo sola sin que el se lo recuerde
+          await buscarPendientes();
           await vault.loadMemory();
         })();
       }}
@@ -4292,7 +4328,33 @@ function MemoryPanel({
         >
           {vault.diagnosingMemory ? 'Comprobando…' : 'Comprobar la memoria'}
         </button>
+        {/* se hace solo al abrir el panel y despues de cada turno; el boton está
+            para volver a pasarlo cuando se cambia de CLI o se corrige algo */}
+        <button
+          className="btn btn--quiet"
+          disabled={vault.syncingRelations || vault.catalogingMemory}
+          title={`Lee lo que ya habéis hablado con ${destinoNombre} y apunta lo que quedó pendiente entre los dos. Reintenta también lo que se negó o falló antes`}
+          onClick={() => void buscarPendientes(true)}
+        >
+          {vault.syncingRelations ? 'Buscando…' : 'Buscar lo pendiente en lo ya hablado'}
+        </button>
       </div>
+
+      {vault.lastRelationSync !== null && (
+        <p className="field__hint">
+          {vault.lastRelationSync.notes > 0
+            ? `Se han apuntado ${vault.lastRelationSync.notes} promesa(s) o plan(es) pendientes.`
+            : 'No había nada pendiente nuevo que apuntar.'}
+          {vault.lastRelationSync.closed > 0 &&
+            ` ${vault.lastRelationSync.closed} se dieron por cumplidos.`}
+          {vault.lastRelationSync.pending > 0 &&
+            ` Quedan ${vault.lastRelationSync.pending} conversación(es) por leer.`}
+          {vault.lastRelationSync.refused > 0 &&
+            ` ${vault.lastRelationSync.refused} no se pudo leer con ${destinoNombre}: cambia arriba de CLI y vuelve a pulsar, o púlsalo otra vez para reintentar con el mismo.`}
+        </p>
+      )}
+      <PendingAffairsSection vault={vault} />
+
       {vault.lastDiagnostics !== null && (
         <MemoryDiagnosticsSummary diagnostics={vault.lastDiagnostics} />
       )}
@@ -4463,6 +4525,157 @@ function MemoryPanel({
 }
 
 /**
+ * lo que quedó pendiente entre los dos, para repasarlo.
+ *
+ * Por qué existe esta pantalla. El extractor comprueba la cita letra por letra
+ * y comprueba quién la dijo, pero la INTENCIÓN no se puede comprobar: una frase
+ * de coqueteo puede parecer un compromiso. Que una promesa no se apunte sólo es
+ * molesto; que se apunte una que nadie hizo acaba en un reproche de ella por
+ * algo que no pasó. Así que Daniel repasa esto ANTES de que ella vea nada, y
+ * tiene la última palabra después: lo que descarte aquí no se vuelve a apuntar.
+ *
+ * No hay alta a mano a propósito. Todo pendiente señala un turno real con una
+ * cita verificada; uno escrito a mano no tendría contra qué comprobarse, y sería
+ * justo el agujero por el que ella podría reclamar lo que nunca se dijo.
+ */
+function PendingAffairsSection({ vault }: { vault: VaultController }): JSX.Element | null {
+  /** qué pendiente tiene el turno abierto, por su identificador */
+  const [openTurn, setOpenTurn] = useState<string | null>(null);
+  const [turns, setTurns] = useState<{ role: 'user' | 'assistant'; text: string }[]>([]);
+
+  const pending = vault.pendingAffairs;
+  const characters = vault.characters;
+  const labels = useMemo(
+    () => new Map(characters.map((character) => [character.characterId, character.label])),
+    [characters],
+  );
+  const groups = useMemo(
+    () => groupPendingByCharacter(pending ?? [], labels),
+    [pending, labels],
+  );
+
+  // todavía no se ha pedido: no es lo mismo que «no hay ninguno»
+  if (pending === null) return null;
+
+  return (
+    <div className="vault-generate__section">
+      <p className="field__hint">
+        <strong>Lo que tenéis pendiente.</strong> Promesas y planes que salieron
+        en vuestras conversaciones y que, por lo que consta, siguen sin cumplirse.
+        Ella puede sacarlos sola, sin que tú los nombres, así que repásalos: lo
+        que descartes aquí no se vuelve a apuntar y lo que des por cumplido deja
+        de poder salir. Cada uno señala un turno de verdad y la frase entre
+        comillas es literal.
+      </p>
+
+      {pending.length === 0 && (
+        <Empty title="Todavía no hay nada pendiente">
+          Aparecerán solos cuando alguno de los dos prometa algo o quedéis en algo.
+        </Empty>
+      )}
+
+      {groups.map((group) => (
+        <div key={group.characterId ?? 'sin-personaje'}>
+          <p className="field__hint">
+            <Tag tone={group.open > 0 ? 'busy' : 'idle'}>{group.label}</Tag>{' '}
+            <span className="vault-list__meta">
+              {group.open === 0
+                ? 'nada pendiente ahora mismo'
+                : group.open === 1
+                  ? '1 pendiente'
+                  : `${group.open} pendientes`}
+            </span>
+          </p>
+
+          {group.pending.map((affair) => (
+            <div key={affair.id} className="vault-media__item">
+              <p className="field__hint">
+                <Tag tone={PENDING_STATUS_TONES[affair.status]}>
+                  {PENDING_STATUS_LABELS[affair.status]}
+                </Tag>{' '}
+                {PENDING_PARTY_LABELS[affair.by]}{' '}
+                <span className="vault-list__meta">
+                  · {affair.kind === 'plan' ? 'plan' : 'promesa'} del {affair.day}
+                  {affair.closedDay !== null && ` · cerrado el ${affair.closedDay}`}
+                  {affair.decidedBy === 'daniel'
+                    ? ' · lo decidiste tú'
+                    : affair.extractedBy === null
+                      ? ''
+                      : ` · revisado con ${affair.extractedBy}`}
+                  {affair.reopenedByDaniel && ' · lo reabriste'}
+                </span>
+              </p>
+
+              {/* la cita va tal y como se dijo: es lo único con lo que se puede
+                  juzgar si de verdad hubo una promesa */}
+              <p className="vault-turn__text">«{affair.quote}»</p>
+
+              {affair.quoteBroken && (
+                <Notice tone="warn">
+                  Esta frase ya no está en su turno —se retiró o se reescribió—, así
+                  que ella no va a sacarlo nunca. Puedes descartarlo sin perder nada.
+                </Notice>
+              )}
+
+              <div className="row">
+                <button
+                  className="btn btn--quiet"
+                  onClick={() => {
+                    if (openTurn === affair.id) {
+                      setOpenTurn(null);
+                      return;
+                    }
+                    // el mismo canal que los momentos, con un solo turno: un
+                    // pendiente no es un resumen, es un puntero a lo que se dijo
+                    void vault
+                      .readMemoryTurns({
+                        conversationId: affair.origin.conversationId,
+                        from: affair.origin.sequence,
+                        to: affair.origin.sequence,
+                      })
+                      .then((read) => {
+                        setTurns(read);
+                        setOpenTurn(affair.id);
+                      });
+                  }}
+                >
+                  {openTurn === affair.id ? 'Cerrar' : 'Ver turno'}
+                </button>
+
+                {pendingDecisionsFor(affair.status).map((decision) => (
+                  <button
+                    key={decision}
+                    className="btn btn--quiet"
+                    disabled={vault.decidingPendingAffair}
+                    title={PENDING_DECISION_HINTS[decision]}
+                    onClick={() => void vault.decidePendingAffair(affair.id, decision)}
+                  >
+                    {PENDING_DECISION_LABELS[decision]}
+                  </button>
+                ))}
+              </div>
+
+              {openTurn === affair.id && (
+                <div className="vault-thread">
+                  {turns.map((turn, index) => (
+                    <div key={index} className={`vault-turn vault-turn--${turn.role}`}>
+                      <span className="vault-turn__who">
+                        {turn.role === 'user' ? 'Tú' : 'Ella'}
+                      </span>
+                      <p className="vault-turn__text">{turn.text}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/**
  * el diagnostico de la memoria, en frases.
  *
  * Solo cifras sobre todas las conversaciones, nunca su contenido: es lo que
@@ -4526,6 +4739,78 @@ function MemoryDiagnosticsSummary({
           sin personaje quedan fuera.
         </p>
       )}
+      {diagnostics.relations !== undefined && (
+        <PendingDiagnosticsSummary relations={diagnostics.relations} />
+      )}
     </div>
+  );
+}
+
+/**
+ * lo pendiente entre los dos, en tres frases.
+ *
+ * Las tres contestan a preguntas distintas: si el trabajo de fondo va donde
+ * debe y cuanto le queda, que hay apuntado, y —la que decide si merece la pena—
+ * cada cuanto saldria y cuanto se inventa ella hoy.
+ *
+ * Va aparte de las de la memoria porque se lee aparte: son la misma pantalla
+ * pero no la misma pregunta.
+ */
+function PendingDiagnosticsSummary({
+  relations,
+}: {
+  relations: NonNullable<NonNullable<VaultController['lastDiagnostics']>['relations']>;
+}): JSX.Element {
+  const g = relations.catalogGuard;
+  const c = relations.coverage;
+  const n = relations.notes;
+  const d = relations.dosing;
+  const r = relations.raising;
+  const revisadas = c.conversations - c.excludedSkipped;
+  const frecuencia =
+    d.userTurnsSimulated === 0
+      ? 0
+      : Math.round((100 * d.turnsWithBlock) / d.userTurnsSimulated);
+  return (
+    <>
+      <p>
+        <strong>Trabajo de fondo:</strong> {c.upToDate} de {revisadas} conversaciones revisadas
+        con Codex o Claude, {c.behind} por detrás
+        {c.turnsBehind > 0 ? ` (${c.turnsBehind} turnos sin leer)` : ''}
+        {c.refusedPersisted > 0 ? `, ${c.refusedPersisted} negativas` : ''}
+        {c.failedThisSession > 0 ? `, ${c.failedThisSession} fallidas en esta sesión` : ''}.
+        {c.excludedSkipped > 0 ? ` ${c.excludedSkipped} excluidas quedan fuera.` : ''}
+        {g.byOther > 0
+          ? ` Cuidado: ${g.byOther} escenas del catálogo se hicieron con otro proveedor.`
+          : ' Ninguna escena del catálogo salió a una API de pago.'}
+        {g.legacyUnknown > 0
+          ? ` ${g.legacyUnknown} son anteriores a la guarda y no dicen con qué se hicieron.`
+          : ''}
+      </p>
+      <p>
+        <strong>Pendientes:</strong> {n.byStatus.open} abiertos ({n.byWho.user} tuyos,{' '}
+        {n.byWho.character} suyos, {n.byWho.both} de los dos), {n.byStatus.fulfilled} cumplidos,{' '}
+        {n.byStatus.released} anulados y {n.byStatus.dismissed} descartados por ti.{' '}
+        {relations.extraction.rejectedQuote} citas se rechazaron por no aparecer tal cual
+        {relations.integrity.quoteBroken > 0
+          ? `; ${relations.integrity.quoteBroken} apuntados ya no casan con su turno`
+          : ''}
+        {n.dormant > 0 ? `; ${n.dormant} llevan tanto tiempo callados que no saldrían` : ''}.
+        {/* sólo si pasa: es la cifra que distingue «no había promesas» de «no se
+            llegó a leer», y esa segunda se arregla en un sitio muy distinto */}
+        {relations.extraction.clipped > 0
+          ? ` Cuidado: ${relations.extraction.clipped} turnos se enviaron recortados, así que lo que se dijera en su centro no se apuntó.`
+          : ''}
+      </p>
+      <p>
+        <strong>Dosificación:</strong> saldría en el {frecuencia} % de tus mensajes (
+        {d.turnsWithBlock} de {d.userTurnsSimulated}), como mucho{' '}
+        {d.maxConsecutiveOffersSameNote} veces seguidas el mismo. Ella sacó{' '}
+        {r.notesRaisedByHerBeforeHim} antes que tú, repitió {r.sameNoteWithin24h} dentro de las
+        mismas 24 horas y reclamó {relations.inventionGuard.unbacked} cosas que no constan, de{' '}
+        {relations.inventionGuard.herClaims}. Si ahora mismo le escribieras, saldrían{' '}
+        {relations.nextTurn.linesForLatestConversation}.
+      </p>
+    </>
   );
 }

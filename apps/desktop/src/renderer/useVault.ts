@@ -15,11 +15,13 @@ import type {
   ConversationMemoryStatus,
   HordeRecipe,
   ReasoningEffort,
+  RelationStatus,
 } from '@luxy/shared';
 import type { HordeQueueProgress } from '../shared/horde-progress.js';
 import type {
   vaultCompatibilityResultSchema,
   vaultMemoryListResultSchema,
+  vaultRelationListResultSchema,
   vaultVisionProbeResultSchema,
   vaultMemoryDiagnosticsResultSchema,
 } from '../shared/ipc.js';
@@ -27,6 +29,15 @@ import type { z } from 'zod';
 
 type CompatibilityResult = z.infer<typeof vaultCompatibilityResultSchema>['results'][number];
 type MemoryEpisode = z.infer<typeof vaultMemoryListResultSchema>['episodes'][number];
+
+/**
+ * una promesa o un plan que quedo pendiente entre los dos.
+ *
+ * Lleva la cita literal porque es lo unico con lo que Daniel puede juzgar si de
+ * verdad se prometio algo. Vive en el estado de la ventana y desaparece al
+ * cerrar la boveda, como el resto del contenido privado.
+ */
+export type PendingAffair = z.infer<typeof vaultRelationListResultSchema>['notes'][number];
 
 /**
  * lo que devuelve el banco de pruebas de visión.
@@ -451,9 +462,74 @@ export interface VaultController {
      */
     uneven: { conversationId: string; scenes: number }[];
   } | null;
+  /**
+   * busca en lo ya hablado las promesas y los planes que quedaron pendientes.
+   *
+   * Va al mismo sitio que catalogar —Claude o Codex con la sesión local— y por
+   * el mismo carril, así que nunca corren los dos a la vez. Devuelve `null` si
+   * ya había una en marcha.
+   */
+  syncRelations: (input: {
+    projectAlias: string;
+    /** sólo ésta, y reintentándola aunque se hubiera negado antes */
+    conversationId?: string;
+    /**
+     * pedida a mano: reintenta lo que se negó o falló antes.
+     *
+     * Sin esto, una negativa no tenía salida desde ninguna pantalla: quedaba
+     * persistida en el almacén y ni cambiar de CLI ni reiniciar la volvían a
+     * intentar.
+     */
+    force?: boolean;
+  }) => Promise<{
+    pending: number;
+    reviewed: number;
+    notes: number;
+    refused: number;
+    failed: number;
+  } | null>;
+  syncingRelations: boolean;
+  /** qué pasó en la última búsqueda; null si no se ha hecho ninguna */
+  lastRelationSync: {
+    reviewed: number;
+    notes: number;
+    closed: number;
+    refused: number;
+    failed: { conversationId: string; reason: string }[];
+    pending: number;
+  } | null;
+  /**
+   * lo que quedó pendiente entre los dos; `null` hasta que se pide.
+   *
+   * Es una lista para CORREGIR: lo que Daniel descarte aquí no vuelve a
+   * apuntarse, y lo que dé por cumplido deja de poder salir por boca de ella.
+   */
+  pendingAffairs: PendingAffair[] | null;
+  loadPendingAffairs: () => Promise<void>;
+  /**
+   * la última palabra sobre un pendiente.
+   *
+   * El estado es la decisión: cumplida, ya no vale, no era una promesa y
+   * reabrir. El extractor no la pisa nunca.
+   */
+  decidePendingAffair: (id: string, status: RelationStatus) => Promise<void>;
+  /** hay una decisión escribiéndose: los botones se apagan mientras tanto */
+  decidingPendingAffair: boolean;
   readMemoryEpisode: (
     episode: MemoryEpisode,
   ) => Promise<{ role: 'user' | 'assistant'; text: string }[]>;
+  /**
+   * los turnos de un tramo cualquiera, para verlos tal y como se dijeron.
+   *
+   * Lo usan los episodios y el «Ver turno» de un pendiente, que apunta a un
+   * turno suelto (`from === to`). Es el mismo canal: un pendiente no es un
+   * resumen, es un puntero a algo que se dijo de verdad.
+   */
+  readMemoryTurns: (input: {
+    conversationId: string;
+    from: number;
+    to: number;
+  }) => Promise<{ role: 'user' | 'assistant'; text: string }[]>;
   excludeFromMemory: (conversationId: string, excluded: boolean) => Promise<void>;
   compatibility: CompatibilityResult[] | null;
   checkingCompatibility: boolean;
@@ -606,6 +682,14 @@ export function useVault(): VaultController {
   // la ultima renderizacion, y dos disparos seguidos lo leen los dos en `false`
   const catalogingRef = useRef(false);
   const [lastCatalog, setLastCatalog] = useState<VaultController['lastCatalog']>(null);
+  const [syncingRelations, setSyncingRelations] = useState(false);
+  // por el mismo motivo que el del catálogo: dentro del callback, un `useState`
+  // llega con el valor de la última renderización
+  const relationsRef = useRef(false);
+  const [lastRelationSync, setLastRelationSync] =
+    useState<VaultController['lastRelationSync']>(null);
+  const [pendingAffairs, setPendingAffairs] = useState<PendingAffair[] | null>(null);
+  const [decidingPendingAffair, setDecidingPendingAffair] = useState(false);
   const [compatibility, setCompatibility] = useState<CompatibilityResult[] | null>(null);
   const [checkingCompatibility, setCheckingCompatibility] = useState(false);
   const [sending, setSending] = useState(false);
@@ -653,6 +737,9 @@ export function useVault(): VaultController {
         setProbes([]);
         setInstructions(null);
         setOpenConversationId(null);
+        // los pendientes llevan la cita LITERAL de un turno: es contenido
+        // descifrado y se va con lo demas
+        setPendingAffairs(null);
       }
     }
     setLoading(false);
@@ -974,13 +1061,89 @@ export function useVault(): VaultController {
     [],
   );
 
-  const readMemoryEpisode = useCallback(
-    async (episode: MemoryEpisode): Promise<{ role: 'user' | 'assistant'; text: string }[]> => {
-      const result = await window.luxy.readVaultMemory({
-        conversationId: episode.conversationId,
-        from: episode.from,
-        to: episode.to,
-      });
+  const syncRelations = useCallback(
+    async (input: {
+      projectAlias: string;
+      conversationId?: string;
+      /** pedida a mano: reintenta lo que se nego o fallo antes */
+      force?: boolean;
+    }): Promise<{
+      pending: number;
+      reviewed: number;
+      notes: number;
+      refused: number;
+      failed: number;
+    } | null> => {
+      if (relationsRef.current) return null;
+      relationsRef.current = true;
+      setSyncingRelations(true);
+      try {
+        const result = await window.luxy.syncVaultRelations({
+          ...input,
+          limit: 3,
+          force: input.force ?? false,
+        });
+        if (!result.ok) {
+          setError(result.error);
+          return null;
+        }
+        if (!mounted.current) return null;
+        setLastRelationSync(result.value);
+        // van tambien las negativas y los fallos: quien decide si dar otra vuelta
+        // los necesita, porque una tanda entera negada no avanza ningun cursor y
+        // aun asi la siguiente coge otras tres conversaciones
+        return {
+          pending: result.value.pending,
+          reviewed: result.value.reviewed,
+          notes: result.value.notes,
+          refused: result.value.refused,
+          failed: result.value.failed.length,
+        };
+      } finally {
+        relationsRef.current = false;
+        if (mounted.current) setSyncingRelations(false);
+      }
+    },
+    [],
+  );
+
+  const loadPendingAffairs = useCallback(async (): Promise<void> => {
+    const result = await window.luxy.listVaultRelations();
+    if (!mounted.current) return;
+    if (!result.ok) {
+      setError(result.error);
+      return;
+    }
+    setPendingAffairs(result.value.notes);
+  }, []);
+
+  const decidePendingAffair = useCallback(
+    async (id: string, status: RelationStatus): Promise<void> => {
+      setDecidingPendingAffair(true);
+      try {
+        const result = await window.luxy.updateVaultRelation({ id, status });
+        if (!mounted.current) return;
+        if (!result.ok) {
+          setError(result.error);
+          return;
+        }
+        // el proceso principal devuelve la lista ya rehecha: volver a pedirla
+        // abriria una ventana en la que los botones enseñan el estado anterior
+        setPendingAffairs(result.value.notes);
+      } finally {
+        if (mounted.current) setDecidingPendingAffair(false);
+      }
+    },
+    [],
+  );
+
+  const readMemoryTurns = useCallback(
+    async (input: {
+      conversationId: string;
+      from: number;
+      to: number;
+    }): Promise<{ role: 'user' | 'assistant'; text: string }[]> => {
+      const result = await window.luxy.readVaultMemory(input);
       if (!result.ok) {
         setError(result.error);
         return [];
@@ -988,6 +1151,16 @@ export function useVault(): VaultController {
       return result.value.turns;
     },
     [],
+  );
+
+  const readMemoryEpisode = useCallback(
+    async (episode: MemoryEpisode): Promise<{ role: 'user' | 'assistant'; text: string }[]> =>
+      readMemoryTurns({
+        conversationId: episode.conversationId,
+        from: episode.from,
+        to: episode.to,
+      }),
+    [readMemoryTurns],
   );
 
   const excludeFromMemory = useCallback(
@@ -1586,7 +1759,15 @@ export function useVault(): VaultController {
     syncCatalog,
     catalogingMemory,
     lastCatalog,
+    syncRelations,
+    syncingRelations,
+    lastRelationSync,
+    pendingAffairs,
+    loadPendingAffairs,
+    decidePendingAffair,
+    decidingPendingAffair,
     readMemoryEpisode,
+    readMemoryTurns,
     excludeFromMemory,
     compatibility,
     checkingCompatibility,
