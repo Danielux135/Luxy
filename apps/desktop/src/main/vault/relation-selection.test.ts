@@ -43,6 +43,10 @@ interface Fixture {
   turns?: readonly FixtureTurn[];
   cursors?: readonly RelationCursor[];
   conversations?: readonly string[];
+  /** las que no se han podido leer en esta sesion */
+  failed?: readonly string[];
+  /** con el instante ya resuelto, como lo pasa el diagnostico */
+  withInstants?: boolean;
   current?: Partial<{
     conversationId: string;
     sequence: number;
@@ -126,12 +130,14 @@ function select(fixture: Fixture): PendingSelection {
   return selectPendingForTurn({
     notes: fixture.notes,
     cursors: fixture.cursors ?? [...latest].map(([id, through]) => cursor(id, through)),
+    ...(fixture.failed === undefined ? {} : { failed: new Set(fixture.failed) }),
     timeline: turns.map((item) => ({
       conversationId: item.conversationId,
       sequence: item.sequence,
       role: item.role,
       createdAt: item.createdAt,
       stems: new Set(tokenize(item.text)),
+      ...(fixture.withInstants === true ? { at: Date.parse(item.createdAt) } : {}),
     })),
     conversations: new Set(
       fixture.conversations ?? [...turns.map((item) => item.conversationId), current.conversationId],
@@ -464,6 +470,22 @@ describe('26. desfase: solo el hueco posterior al origen de ESA nota', () => {
     expect(result.lines).toHaveLength(1);
   });
 
+  it('ni una que no se ha podido leer en esta sesion', () => {
+    // un CLI que no arranca, un timeout, la boveda cerrada a mitad: no escriben
+    // cursor y esa conversacion no se reintenta hoy. Contar su hueco dejaba al
+    // personaje mudo sobre TODO lo demas durante toda la sesion, sin mas rastro
+    // que un contador en otra pantalla
+    const result = select({
+      notes: [VIEJA],
+      turns: CON_HUECO,
+      cursors: [cursor(CONV_A, 2), cursor(CONV_C, 2)],
+      failed: [CONV_C],
+    });
+
+    expect(result.counters.blockedStale).toBe(0);
+    expect(result.lines).toHaveLength(1);
+  });
+
   it('y un hueco de otro personaje tampoco', () => {
     const result = select({
       notes: [VIEJA],
@@ -587,6 +609,83 @@ describe('30. en la misma conversacion, antes de seis horas no es otra vez', () 
 
     expect(result.counters.cooling).toBe(1);
     expect(result.lines).toEqual([]);
+  });
+});
+
+describe('30 ter. en la conversacion de AHORA, el mismo rato si la calla', () => {
+  // una promesa de hace un rato, en este mismo hilo: el hueco de seis horas la
+  // sacaba de las menciones y con eso cegaba las dos cosas para las que existe
+  // el filtro de escena —si ella ya lo tiene delante y si acaba de decirlo—. El
+  // resultado era ofrecerle, como asunto de otra conversacion, algo dicho veinte
+  // minutos antes, y volver a ofrecerselo el turno siguiente a que lo sacara
+  const PROMETIDA_AL_4 = '2026-09-11T12:20:00.000Z';
+  const HILO = note({
+    quote: CAFES,
+    origin: { conversationId: CONV_NOW, sequence: 4, role: 'user', at: PROMETIDA_AL_4 },
+  });
+  const origen = turn(CONV_NOW, 4, 'user', PROMETIDA_AL_4, `${CAFES}, te lo juro`);
+  const relleno = (sequence: number, minuto: number): FixtureTurn =>
+    turn(
+      CONV_NOW,
+      sequence,
+      sequence % 2 === 0 ? 'user' : 'assistant',
+      `2026-09-11T12:${String(minuto).padStart(2, '0')}:00.000Z`,
+      'seguimos con otra cosa',
+    );
+  const resto = [relleno(8, 40), relleno(9, 45), relleno(10, 50), relleno(11, 55)];
+  const ahora = { conversationId: CONV_NOW, sequence: 12, oldestRecent: 6 };
+
+  it('si ella la comento en el mismo rato, descansa aunque quede fuera de los recientes', () => {
+    const result = select({
+      notes: [HILO],
+      turns: [
+        origen,
+        turn(CONV_NOW, 5, 'assistant', '2026-09-11T12:25:00.000Z', RECUERDA_CAFES),
+        ...resto,
+      ],
+      current: ahora,
+    });
+
+    expect(result.counters.cooling).toBe(1);
+    expect(result.lines).toEqual([]);
+  });
+
+  it('y si ese comentario sigue en los ocho recientes, es que ya lo tiene delante', () => {
+    const result = select({
+      notes: [HILO],
+      turns: [
+        origen,
+        turn(CONV_NOW, 7, 'assistant', '2026-09-11T12:35:00.000Z', RECUERDA_CAFES),
+        ...resto,
+      ],
+      current: ahora,
+    });
+
+    expect(result.counters.inScene).toBe(1);
+    expect(result.lines).toEqual([]);
+  });
+
+  it('pero sigue sin contar como haberla sacado: eso no ha pasado', () => {
+    // si nadie la comenta, la promesa vieja del hilo se ofrece igual, y su linea
+    // dice la verdad: ella no la ha sacado nunca
+    const result = select({
+      notes: [HILO],
+      turns: [origen, ...resto],
+      current: ahora,
+    });
+
+    expect(result.lines).toHaveLength(1);
+    expect(result.lines[0]).toMatchObject({ raisedCount: 0, lastRaisedDaysAgo: null });
+  });
+});
+
+describe('30 quater. el instante ya resuelto no cambia nada', () => {
+  it('la linea temporal con «at» hecho da exactamente lo mismo', () => {
+    // el diagnostico lo pasa ya calculado para no volver a leer 137 veces las
+    // mismas fechas; si eso cambiara una sola cifra, la simulacion mediria otra
+    // cosa que el turno real
+    const fixture: Fixture = { notes: [LIBRO_NOTE, PLAYA_NOTE, MERCADO_NOTE], turns: TARDE };
+    expect(select({ ...fixture, withInstants: true })).toEqual(select(fixture));
   });
 });
 

@@ -89,6 +89,8 @@ import {
   vaultMediaDescribeArgsSchema,
   vaultMediaRewriteCaptionArgsSchema,
   vaultMemoryDiagnosticsArgsSchema,
+  vaultRelationSyncArgsSchema,
+  vaultRelationUpdateArgsSchema,
   vaultAuxiliaryGetArgsSchema,
   vaultAuxiliarySetArgsSchema,
   vaultVisionProbeArgsSchema,
@@ -173,8 +175,20 @@ import type { PrivateMemory } from '../vault/private-memory.js';
 import type { MemoryPreferences } from '../vault/memory-preferences.js';
 import type { CatalogStore } from '../vault/catalog-store.js';
 import type { RelationStore } from '../vault/relation-store.js';
+import { RelationSync, createAuxiliaryLane } from '../vault/relation-sync.js';
+import {
+  decideRelation,
+  listRelationsForReview,
+  type RelationReviewItem,
+} from '../vault/relation-review.js';
 import { buildRecall } from '../vault/recall.js';
 import { diagnoseMemory, type DiagnosticMessage } from '../vault/memory-diagnostics.js';
+import { diagnoseRelations } from '../vault/relation-diagnostics.js';
+import {
+  selectPendingForTurn,
+  type PendingSelection,
+} from '../vault/relation-selection.js';
+import { matchesNote, quoteStems, type CharacterReply } from '../vault/relation.js';
 import { memoryOfTurn } from '../vault/turn-memory.js';
 
 /**
@@ -1303,7 +1317,7 @@ export function registerIpcHandlers(context: HandlerContext): void {
   const catalogFailures = new Set<string>();
 
   /**
-   * catalogado en curso, si lo hay.
+   * el carril del trabajo de fondo: catalogar y apuntar pendientes lo comparten.
    *
    * La guarda va AQUI y no solo en la pantalla porque el fallo no era un doble
    * clic: es una carrera. Dos syncs simultaneos leen la misma lista de
@@ -1311,25 +1325,150 @@ export function registerIpcHandlers(context: HandlerContext): void {
    * conversaciones. Se vio en los registros de la pasarela: dos llamadas con
    * los mismos tokens de entrada, a cuatro segundos, las dos con respuesta.
    *
-   * El segundo espera al primero en vez de rechazarse: quien llamo quiere el
-   * resultado, y despues del primero la lista de pendientes ya esta bien.
+   * Y lo comparte con la extraccion de pendientes porque las dos arrancan un CLI
+   * local con una conversacion entera: dos a la vez se pelean por la maquina y,
+   * peor, la segunda lee un almacen que la primera esta a punto de reescribir.
    */
-  let catalogInFlight: Promise<unknown> | null = null;
+  const runOnAuxiliaryLane = createAuxiliaryLane();
+
+  /**
+   * conversaciones a las que se les esta contestando ahora mismo.
+   *
+   * Mientras una este aqui, ningun trabajo de fondo la lee: un mensaje del
+   * usuario que todavia no tiene respuesta puede retirarse y su numero
+   * reutilizarse, asi que darlo por revisado perderia lo que de verdad se diga.
+   */
+  const sendInFlight = new Set<string>();
 
   handle(IPC_INVOKE.vaultCatalogSync, vaultCatalogSyncArgsSchema, async (args) => {
     if (!context.vault.isUnlocked()) throw new VaultError('la boveda esta bloqueada');
+    return runOnAuxiliaryLane(() => catalogOnce(args));
+  });
 
-    // se serializa: dos a la vez catalogaban lo mismo dos veces, y cada llamada
-    // se paga entera
-    while (catalogInFlight !== null) await catalogInFlight.catch(() => undefined);
+  /**
+   * apunta las promesas y los planes de lo que ya se hablo.
+   *
+   * Va por el mismo carril que el catalogo y al mismo sitio: Claude o Codex con
+   * la sesion local, nunca una API de pago. Lo dispara el panel al abrirse, el
+   * boton «Buscar lo pendiente en lo ya hablado» y, por detras, el final de cada
+   * turno privado.
+   */
+  const relationSync = new RelationSync({
+    vault: context.vault,
+    conversations: context.privateConversations,
+    relations: context.relations,
+    preferences: context.memoryPreferences,
+    controller: context.controller,
+    // la misma linea temporal que ya construye la memoria episodica: leer otra
+    // vez todo el historial para esto seria descifrarlo dos veces
+    timeline: () => context.privateMemory.timeline(context.vault),
+    lane: runOnAuxiliaryLane,
+    isSending: (conversationId) => sendInFlight.has(conversationId),
+    anchor: () => ({
+      instant: new Date().toISOString(),
+      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      dayStartsAtHour: 5,
+    }),
+    log: context.log,
+  });
 
-    const run = catalogOnce(args);
-    catalogInFlight = run;
-    try {
-      return await run;
-    } finally {
-      catalogInFlight = null;
+  // sin boveda no hay llave con la que sellar: un temporizador que salte despues
+  // solo produciria errores
+  context.vault.onLock(() => relationSync.cancel());
+
+  handle(IPC_INVOKE.vaultRelationSync, vaultRelationSyncArgsSchema, async (args) => {
+    if (!context.vault.isUnlocked()) throw new VaultError('la boveda esta bloqueada');
+    return relationSync.runOnce({
+      projectAlias: args.projectAlias,
+      limit: args.limit,
+      // pedirla expresamente reintenta aunque se hubiera negado antes, tanto una
+      // conversacion concreta como la pasada entera desde el boton
+      force: args.force || args.conversationId !== undefined,
+      ...(args.conversationId === undefined ? {} : { conversationId: args.conversationId }),
+    });
+  });
+
+  /**
+   * lo apuntado, con la cita literal y si sigue apareciendo en su turno.
+   *
+   * Se comprueba la cita AQUI y no al enseñarla: la seleccion ya descarta una
+   * nota cuyo turno se retiro, asi que sin esto un pendiente podria estar en la
+   * lista sin salir jamas y sin que se pudiera saber por que.
+   *
+   * Se descifran solo las conversaciones que tienen algo apuntado. Leerlas
+   * todas costaria la boveda entera en cada pulsacion de un boton, y lo que
+   * hace falta es el texto de un puñado de turnos.
+   */
+  const readRelationList = async (): Promise<{ notes: RelationReviewItem[] }> => {
+    const snapshot = await context.relations.read(context.vault);
+    const summaries = await context.privateConversations.list(context.vault);
+    const owners = new Map(summaries.map((each) => [each.conversationId, each.characterId]));
+
+    const texts = new Map<string, Map<number, string>>();
+    for (const conversationId of new Set(
+      snapshot.notes.map((note) => note.origin.conversationId),
+    )) {
+      if (!owners.has(conversationId)) continue;
+      const turns = await context.privateConversations.read(context.vault, conversationId);
+      texts.set(conversationId, new Map(turns.map((turn) => [turn.sequence, turn.text])));
     }
+
+    return {
+      notes: listRelationsForReview({
+        notes: snapshot.notes,
+        owners,
+        turnAt: (ref) => {
+          const text = texts.get(ref.conversationId)?.get(ref.sequence);
+          return text === undefined ? null : { text };
+        },
+        anchor: {
+          instant: new Date().toISOString(),
+          timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+          // el mismo corte que el resto de la boveda: de madrugada se sigue
+          // hablando de «esta noche», no de la noche de ayer
+          dayStartsAtHour: 5,
+        },
+      }),
+    };
+  };
+
+  handle(IPC_INVOKE.vaultRelationList, emptyArgsSchema, async () => {
+    if (!context.vault.isUnlocked()) throw new VaultError('la boveda esta bloqueada');
+    return readRelationList();
+  });
+
+  /**
+   * la ultima palabra de Daniel.
+   *
+   * Va por el carril del almacen —`apply` relee dentro—, asi que pulsar un
+   * boton mientras el extractor termina una ventana no pierde ninguna de las
+   * dos cosas. Y lo que deja escrito es `decidedBy: 'daniel'`, que
+   * `mergeExtraction` no toca: sin eso, descartar un falso positivo duraria
+   * hasta la siguiente pasada.
+   */
+  handle(IPC_INVOKE.vaultRelationUpdate, vaultRelationUpdateArgsSchema, async (args) => {
+    if (!context.vault.isUnlocked()) throw new VaultError('la boveda esta bloqueada');
+
+    const now = new Date().toISOString();
+    await context.relations.apply(context.vault, (current) => {
+      if (!current.notes.some((note) => note.id === args.id)) {
+        throw new VaultError(
+          'ese pendiente ya no esta',
+          'vuelve a abrir la lista: puede que se borrara su conversacion',
+        );
+      }
+      return {
+        counters: current.counters,
+        cursors: current.cursors,
+        notes: current.notes.map((note) =>
+          note.id === args.id ? decideRelation(note, args.status, now) : note,
+        ),
+      };
+    });
+
+    // ni la cita, ni de quien es, ni a que turno apunta: solo que se decidio
+    context.log('pendiente corregido', { estado: args.status, decidido: 'daniel' });
+    return readRelationList();
   });
 
   /**
@@ -1732,18 +1871,36 @@ export function registerIpcHandlers(context: HandlerContext): void {
     // mensaje por la memoria tal y como estaba cuando se escribio, con la misma
     // ventana de historial reciente que un turno real
     const userMessages: DiagnosticMessage[] = [];
+    // y las suyas, que son donde se mira si reclama algo que no consta
+    const replies: CharacterReply[] = [];
     for (const conversacion of conversaciones) {
       const turnos = await store.read(context.vault, conversacion.conversationId);
       for (const turno of turnos) {
-        if (turno.role !== 'user') continue;
-        userMessages.push({
-          text: turno.text,
-          createdAt: turno.createdAt,
-          conversationId: conversacion.conversationId,
-          sequence: turno.sequence,
-        });
+        if (turno.role === 'user') {
+          userMessages.push({
+            text: turno.text,
+            createdAt: turno.createdAt,
+            conversationId: conversacion.conversationId,
+            sequence: turno.sequence,
+          });
+        } else {
+          replies.push({
+            text: turno.text,
+            createdAt: turno.createdAt,
+            characterId: conversacion.characterId,
+          });
+        }
       }
     }
+
+    // el mismo ancla que un turno real, o la prueba mediria otra cosa. Se saca
+    // fuera para que los dos diagnosticos usen el mismo instante: con dos
+    // relojes, «hace 30 dias» podria caer a un lado en uno y al otro en el otro
+    const anchor = {
+      instant: new Date().toISOString(),
+      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      dayStartsAtHour: 5,
+    };
 
     const diagnostico = diagnoseMemory({
       episodes: await context.privateMemory.listEpisodes(context.vault, principal),
@@ -1751,13 +1908,54 @@ export function registerIpcHandlers(context: HandlerContext): void {
       conversationIds: conversaciones.map((conversacion) => conversacion.conversationId),
       otherConversations: todas.length - conversaciones.length,
       characterName: nombre,
-      // el mismo ancla que un turno real, o la prueba mediria otra cosa
-      anchor: {
-        instant: new Date().toISOString(),
-        timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-        dayStartsAtHour: 5,
-      },
+      anchor,
     });
+
+    // los pendientes van aparte y NO pueden tumbar el resto: un almacen que no
+    // se abre es justo lo que hay que poder ver, y perder tambien las cifras de
+    // la memoria por eso dejaria a Daniel sin nada que mirar
+    let relations: ReturnType<typeof diagnoseRelations> | undefined;
+    try {
+      const apuntado = await context.relations.read(context.vault);
+      relations = diagnoseRelations({
+        notes: apuntado.notes,
+        cursors: apuntado.cursors,
+        counters: apuntado.counters,
+        droppedOnRead: apuntado.droppedOnRead,
+        conversations: todas.map((conversacion) => ({
+          conversationId: conversacion.conversationId,
+          characterId: conversacion.characterId,
+        })),
+        excluded: context.memoryPreferences.excluded(),
+        // la de TODOS los personajes: las notas se reparten por su conversacion
+        // de origen, no por quien se este midiendo
+        timeline: await context.privateMemory.timeline(context.vault),
+        userMessages,
+        replies,
+        catalog: await context.catalogs.list(context.vault),
+        // del indice que ya esta construido: sin descifrar nada otra vez
+        turnAt: (ref) => context.privateMemory.turnAt(ref.conversationId, ref.sequence),
+        failedThisSession: relationSync.failedThisSession,
+        // las que no se han podido leer no cuentan como desfase: la misma regla
+        // que en un turno real, o la simulacion mediria otra cosa
+        failedConversations: relationSync.failedConversations,
+        auxiliaryConfigured: context.memoryPreferences.auxiliary() !== null,
+        anchor,
+      });
+    } catch (error) {
+      // el motivo NO se escribe, igual que en el camino del turno. Aqui se
+      // descifran el historial, el catalogo y el almacen de pendientes: un error
+      // de ruta trae el uuid de la conversacion y uno de validacion trae dentro
+      // el dato que no valido, que es una cita. `redact` tapa secretos, no la
+      // boveda. Lo unico que hace falta saber es que no se pudo, y eso ya se ve
+      // en que el resultado sale sin `relations`
+      context.log('diagnostico de pendientes fallido', {
+        leido: false,
+        // de donde vino, sin decir que decia: una boveda cerrada se arregla de
+        // una forma y un archivo roto de otra
+        causa: error instanceof VaultError ? 'boveda' : 'otro',
+      });
+    }
 
     // CIFRAS, nunca texto. Los dias fallidos son cuando se hablo, no que se
     // dijo, y el registro ya lleva la hora de cada turno
@@ -1771,8 +1969,10 @@ export function registerIpcHandlers(context: HandlerContext): void {
       principio: diagnostico.origin,
       estilo: diagnostico.style,
       disparos: diagnostico.triggers,
+      // enteros y booleanos, como todo lo demas: ni una cita ni un identificador
+      ...(relations === undefined ? {} : { relaciones: relations }),
     });
-    return diagnostico;
+    return { ...diagnostico, ...(relations === undefined ? {} : { relations }) };
   });
 
   /**
@@ -2584,14 +2784,23 @@ export function registerIpcHandlers(context: HandlerContext): void {
     };
   });
 
-  handle(IPC_INVOKE.vaultConversationSend, vaultConversationSendArgsSchema, async (args) => {
+  /**
+   * un turno privado de principio a fin.
+   *
+   * Va aparte del handler para que el envio pueda marcarse en curso ANTES de
+   * empezar y borrarse pase lo que pase: mientras dure, el trabajo de fondo no
+   * puede leer esta conversacion, porque sus turnos estan cambiando.
+   */
+  const runPrivateTurn = async (
+    args: z.infer<typeof vaultConversationSendArgsSchema>,
+    conversationId: string,
+  ) => {
     if (!context.vault.isUnlocked()) {
       throw new VaultError(
         'la boveda esta bloqueada',
         'abrela para poder escribir en una conversacion privada',
       );
     }
-    const conversationId = args.conversationId ?? randomUUID();
     const store = context.privateConversations;
 
     // el titulo sale del primer mensaje y viaja cifrado con cada turno
@@ -2738,21 +2947,28 @@ export function registerIpcHandlers(context: HandlerContext): void {
     // los turnos que ya viajan como historial reciente no se transcriben otra
     // vez: estarian dos veces en el mismo prompt
     const oldestRecent = history.slice(-1 - VAULT_RECENT_TURNS)[0]?.sequence;
+
+    // el reloj y la zona se leen AQUI y se pasan como dato: lo que fecha el
+    // turno —los recuerdos y los pendientes— es puro en esa parte, y asi se
+    // puede probar «el jueves dicho en jueves» sin esperar a que sea jueves.
+    //
+    // La zona sale del sistema porque es donde vive quien escribe: una
+    // conversacion de las once de la noche tiene que fecharse en SU dia, no en
+    // el UTC, que iba un dia por detras a partir de las diez.
+    //
+    // Y es UNO para todo el turno. Con dos relojes, «hace 7 dias» podria salir
+    // en el recuerdo y «hace 8» en la promesa del mismo dia, que es exactamente
+    // la clase de contradiccion que delata a una maquina.
+    const anchor = {
+      instant: new Date().toISOString(),
+      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      // el dia civil empieza a las cinco: de madrugada se sigue hablando de
+      // «esta noche», no de la noche de ayer
+      dayStartsAtHour: 5,
+    };
+
     const recall = await buildRecall(context.privateMemory, context.vault, args.message, {
-      // el reloj y la zona se leen AQUI y se pasan como dato: `recall` es puro
-      // en esa parte y asi se puede probar «el jueves dicho en jueves» sin
-      // esperar a que sea jueves.
-      //
-      // La zona sale del sistema porque es donde vive quien escribe: una
-      // conversacion de las once de la noche tiene que fecharse en SU dia, no
-      // en el UTC, que iba un dia por detras a partir de las diez
-      anchor: {
-        instant: new Date().toISOString(),
-        timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-        // el dia civil empieza a las cinco: de madrugada se sigue hablando de
-        // «esta noche», no de la noche de ayer
-        dayStartsAtHour: 5,
-      },
+      anchor,
       // los recuerdos son del personaje: un hilo sin personaje no hereda los de
       // nadie, y uno con otro personaje tampoco ve los de este
       characterId,
@@ -2763,9 +2979,56 @@ export function registerIpcHandlers(context: HandlerContext): void {
         : { alreadyInPrompt: { conversationId, fromSequence: oldestRecent } }),
     });
 
+    // lo que quedo pendiente entre los dos y toca sacar HOY, si toca alguno.
+    //
+    // Va entero dentro de un `try`. El almacen se lee de disco y se abre con la
+    // boveda, la linea temporal descifra el historial y la seleccion es
+    // aritmetica sobre las dos: cualquiera de esas tres cosas puede fallar, y
+    // ninguna vale un turno de pago perdido. Sin pendientes el prompt queda
+    // exactamente como estaba, que es el lado seguro.
+    let pendientes: PendingSelection | null = null;
+    try {
+      const apuntado = await context.relations.read(context.vault);
+      // primero la linea temporal, que es la que construye el indice si aun no
+      // esta: `conversationsFor` y `turnAt` leen lo ya construido y sin esto
+      // devolverian el conjunto vacio y `null`, es decir, ningun pendiente
+      const linea = await context.privateMemory.timeline(context.vault, characterId);
+      pendientes = selectPendingForTurn({
+        notes: apuntado.notes,
+        cursors: apuntado.cursors,
+        // una conversacion que no se ha podido leer en esta sesion deja turnos
+        // sin extraer que hoy no se van a extraer. Contarlos como desfase
+        // callaba TODAS las promesas del personaje sin mas aviso que un contador
+        // en otra pantalla
+        failed: relationSync.failedConversations,
+        timeline: linea,
+        // el alcance es del PERSONAJE: un hilo sin personaje no hereda las
+        // promesas de nadie (`D-062`), igual que no hereda sus recuerdos
+        conversations: context.privateMemory.conversationsFor(characterId),
+        turnAt: (ref) => context.privateMemory.turnAt(ref.conversationId, ref.sequence),
+        current: {
+          conversationId,
+          // el mensaje que se acaba de guardar: es el ultimo del historial
+          sequence: history[history.length - 1]?.sequence ?? 0,
+          text: args.message,
+          oldestRecent: oldestRecent ?? null,
+        },
+        anchor,
+        now: anchor.instant,
+      });
+    } catch {
+      // el motivo NO se registra. Un error de validacion trae dentro el dato que
+      // no valido, y ese dato es una cita de la boveda: contarlo aqui seria
+      // sacar al log justo lo que este archivo nunca escribe
+      pendientes = null;
+    }
+
     const bloques = composeVaultPrompt({
       memory,
       recall,
+      // ya elegidos y dosificados: el modelo no decide cual sale, porque
+      // preguntarselo costaria otra llamada de pago por turno
+      pending: pendientes?.lines ?? [],
       // el ultimo es el que se acaba de guardar: va aparte como mensaje nuevo
       turns: history.slice(0, -1).map((turn) => ({ role: turn.role, text: turn.text })),
       message: args.message,
@@ -2809,6 +3072,27 @@ export function registerIpcHandlers(context: HandlerContext): void {
             : `${recall.quoted.excerpt.first}-${recall.quoted.excerpt.last}/${recall.quoted.excerpt.total}`,
       lineasIndice: recall.episodes.length,
       fueraDelIndice: recall.omitted ?? 0,
+      // por que NO salio ninguna promesa, que es la pregunta que se hace
+      // siempre. «Cero ofrecidas» no dice nada; «cuatro abiertas, tres en
+      // reposo y una bloqueada por desfase» se arregla en sitios distintos.
+      // Enteros, nunca la cita ni de que iba
+      pendientes:
+        pendientes === null
+          ? null
+          : {
+              abiertas: pendientes.counters.open,
+              ofrecidas: pendientes.counters.offered,
+              tocadas: pendientes.counters.touched,
+              enEscena: pendientes.counters.inScene,
+              enReposo: pendientes.counters.cooling,
+              enEspera: pendientes.counters.waiting,
+              dormidas: pendientes.counters.dormant,
+              bloqueadasPorDesfase: pendientes.counters.blockedStale,
+              citaRota: pendientes.counters.quoteBroken,
+            },
+      // y si no salio ninguna porque la seleccion se cayo. Sin distinguirlo,
+      // un almacen ilegible se lee igual que «hoy no tocaba»
+      pendientesError: pendientes === null,
     });
 
     // dicho ya, se olvida: si no, el personaje seguiria disculpandose por una
@@ -2868,6 +3152,10 @@ export function registerIpcHandlers(context: HandlerContext): void {
       result.outcome === 'failed' ? null : 'absent';
 
     let wroteReply = false;
+    // lo que de verdad leyo el usuario, sin el bloque de memoria ni la peticion
+    // de imagen. Es contra esto —y no contra la respuesta cruda— contra lo que
+    // se mira si ella saco alguna de las promesas que se le enseñaron
+    let respuestaVisible = '';
     if (result.outcome !== 'failed' && result.text.length > 0) {
       wroteReply = true;
       // la memoria viaja DENTRO de la respuesta y se separa aqui: lo que se
@@ -2881,6 +3169,7 @@ export function registerIpcHandlers(context: HandlerContext): void {
       // y despues la peticion de imagen, sobre lo que quedo. El orden es el
       // inverso al del prompt: la memoria va la ultima, asi que sale la primera
       const imageRequest = parseVaultImageRequest(parsed.visibleText);
+      respuestaVisible = imageRequest.visibleText;
 
       if (imageRequest.request?.mediaId !== undefined) {
         // reenviar lo que ya existe: gratis e inmediato. Se comprueba que sea
@@ -2973,6 +3262,34 @@ export function registerIpcHandlers(context: HandlerContext): void {
     // al dia. Se reconstruye solo, y perezosamente, en la siguiente busqueda
     context.privateMemory.invalidate();
 
+    // si de lo que se le enseño acabo saliendo algo. Es la unica medida de que
+    // el bloque sirve para algo: se le pueden estar ofreciendo dos promesas en
+    // cada turno y no sacar ninguna nunca, y desde fuera eso se ve igual que no
+    // haberselas enseñado. Se compara con las mismas raices que usa la
+    // seleccion, asi que cuenta tambien si lo dijo con otras palabras.
+    //
+    // Solo cuando hubo algo que enseñar y algo que leer: un «mostrados: 0» en
+    // cada turno seria ruido en el unico sitio donde se mira lo que paso, y un
+    // turno que no llego a contestar contaria como que ella lo ignoro, que es
+    // exactamente lo contrario de lo que paso
+    if (wroteReply && pendientes !== null && pendientes.lines.length > 0) {
+      context.log('pendientes en la respuesta', {
+        mostrados: pendientes.lines.length,
+        aludidos: pendientes.lines.filter((linea) =>
+          matchesNote(respuestaVisible, quoteStems(linea.quote)),
+        ).length,
+      });
+    }
+
+    // cuanto tardo el turno de pago y si habia una extraccion corriendo por
+    // detras. Son las dos cifras con las que se decide si el disparo inmediato
+    // se queda o se deja solo el de inactividad: sin medirlo seria una opinion
+    context.log('turno privado terminado', {
+      duracionMs: result.durationMs,
+      extraccionEnCurso: relationSync.busy,
+      final: result.outcome,
+    });
+
     return {
       conversationId,
       outcome: result.outcome,
@@ -2987,6 +3304,34 @@ export function registerIpcHandlers(context: HandlerContext): void {
       image,
       error: result.error,
     };
+  };
+
+  handle(IPC_INVOKE.vaultConversationSend, vaultConversationSendArgsSchema, async (args) => {
+    const conversationId = args.conversationId ?? randomUUID();
+    // mientras dure el envio, esta conversacion no se le manda a ningun CLI de
+    // fondo: sus turnos estan cambiando, y uno del usuario sin respuesta puede
+    // retirarse y reutilizar su numero
+    sendInFlight.add(conversationId);
+    let turn: Awaited<ReturnType<typeof runPrivateTurn>>;
+    try {
+      turn = await runPrivateTurn(args, conversationId);
+    } finally {
+      sendInFlight.delete(conversationId);
+    }
+
+    // y con el envio ya cerrado se apunta lo que se haya prometido. Sin esperar:
+    // la respuesta de Lia no puede depender de que Codex arranque, y un fallo de
+    // fondo no puede costar un turno
+    void relationSync.afterTurn({
+      conversationId,
+      projectAlias: args.projectAlias,
+      wroteReply: turn.userTurnKept,
+      // una conversacion recien empezada tiene exactamente los dos turnos de
+      // ahora: el suyo y el de ella
+      firstTurn: turn.turns.length <= 2,
+    });
+
+    return turn;
   });
 }
 

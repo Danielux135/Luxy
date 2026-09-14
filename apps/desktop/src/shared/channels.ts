@@ -65,6 +65,12 @@ export const IPC_INVOKE = {
   vaultMemoryRead: 'luxy:vault:memory:read',
   vaultMemoryExclude: 'luxy:vault:memory:exclude',
   vaultCatalogSync: 'luxy:vault:catalog:sync',
+  /** apunta las promesas y los planes que quedaron pendientes entre los dos */
+  vaultRelationSync: 'luxy:vault:relation:sync',
+  /** lo apuntado, para repasarlo: la cita literal y a que turno apunta */
+  vaultRelationList: 'luxy:vault:relation:list',
+  /** la ultima palabra de Daniel sobre un pendiente; el extractor no la pisa */
+  vaultRelationUpdate: 'luxy:vault:relation:update',
   /** quien hace el trabajo de fondo de la boveda: solo Claude o Codex */
   vaultAuxiliaryGet: 'luxy:vault:auxiliary:get',
   vaultAuxiliarySet: 'luxy:vault:auxiliary:set',

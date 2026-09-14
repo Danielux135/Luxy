@@ -81,6 +81,21 @@ export interface TimelineTurn {
   role: 'user' | 'assistant';
   createdAt: string;
   stems: ReadonlySet<string>;
+  /**
+   * el instante ya leido, si quien lo construyo lo tenia.
+   *
+   * Opcional porque la linea temporal de la boveda guarda fechas ISO. Volver a
+   * leerlas en cada comparacion es lo que hacia que el diagnostico tardara
+   * segundos: son dos por comparacion del orden y otras tantas por nota y turno.
+   * Quien vaya a llamar muchas veces —la simulacion de la dosificacion— lo
+   * calcula una vez y lo pasa hecho.
+   */
+  at?: number;
+}
+
+/** el mismo turno con el instante ya resuelto: dentro de aqui no se reparsea */
+interface DatedTurn extends TimelineTurn {
+  at: number;
 }
 
 export interface PendingSelectionInput {
@@ -88,6 +103,16 @@ export interface PendingSelectionInput {
   notes: readonly RelationNote[];
   /** para la guarda de desfase */
   cursors: readonly RelationCursor[];
+  /**
+   * conversaciones que no se han podido leer en esta sesion.
+   *
+   * Igual que una negativa persistida, un fallo del CLI —que no arranca, que se
+   * queda sin tiempo, un modelo que no existe— deja turnos sin extraer que no
+   * son culpa de nadie y que no se van a extraer hoy. Sin esto, esos turnos
+   * hacen `stale` a TODAS las notas anteriores y el personaje se queda mudo toda
+   * la sesion, sin mas rastro que un contador en otra pantalla.
+   */
+  failed?: ReadonlySet<string>;
   /** la linea temporal del personaje, ya sin las conversaciones excluidas */
   timeline: readonly TimelineTurn[];
   /** `conversationsFor(characterId)`: con `null` son solo los hilos sin personaje */
@@ -161,12 +186,19 @@ function sharesAtLeast(
   return false;
 }
 
-function lastOf(turns: readonly TimelineTurn[]): TimelineTurn | null {
-  let latest: TimelineTurn | null = null;
+function lastOf(turns: readonly DatedTurn[]): DatedTurn | null {
+  let latest: DatedTurn | null = null;
   for (const turn of turns) {
-    if (latest === null || Date.parse(turn.createdAt) > Date.parse(latest.createdAt)) latest = turn;
+    if (latest === null || turn.at > latest.at) latest = turn;
   }
   return latest;
+}
+
+/** el orden de la linea temporal: cronologico y estable */
+function chronological(a: DatedTurn, b: DatedTurn): number {
+  return (
+    a.at - b.at || a.conversationId.localeCompare(b.conversationId) || a.sequence - b.sequence
+  );
 }
 
 /**
@@ -176,31 +208,37 @@ function lastOf(turns: readonly TimelineTurn[]): TimelineTurn | null {
  * tanda cuenta mensajes del usuario, asi que dejarlo fuera correria una posicion
  * la espera de 48 horas. El orden se rehace aqui porque la linea llega agrupada
  * por conversacion y la tanda es una recurrencia cronologica.
+ *
+ * Las fechas se leen UNA vez, aqui: a partir de este punto nadie vuelve a
+ * interpretar una cadena ISO, ni al ordenar ni al recorrer las notas. Y si la
+ * linea ya llega ordenada —el diagnostico la pasa asi, y son 137 llamadas
+ * seguidas— se salta la ordenacion entera.
  */
-function withCurrentMessage(input: PendingSelectionInput): TimelineTurn[] {
+function withCurrentMessage(input: PendingSelectionInput): DatedTurn[] {
   const present = input.timeline.some(
     (turn) =>
       turn.conversationId === input.current.conversationId &&
       turn.sequence === input.current.sequence,
   );
-  const turns = present
-    ? [...input.timeline]
-    : [
-        ...input.timeline,
-        {
-          conversationId: input.current.conversationId,
-          sequence: input.current.sequence,
-          role: 'user' as const,
-          createdAt: input.now,
-          stems: new Set(tokenize(input.current.text)),
-        },
-      ];
-  return turns.sort(
-    (a, b) =>
-      Date.parse(a.createdAt) - Date.parse(b.createdAt) ||
-      a.conversationId.localeCompare(b.conversationId) ||
-      a.sequence - b.sequence,
-  );
+  const turns: DatedTurn[] = input.timeline.map((turn) => ({
+    ...turn,
+    at: turn.at ?? Date.parse(turn.createdAt),
+  }));
+  if (!present) {
+    turns.push({
+      conversationId: input.current.conversationId,
+      sequence: input.current.sequence,
+      role: 'user',
+      createdAt: input.now,
+      stems: new Set(tokenize(input.current.text)),
+      at: Date.parse(input.now),
+    });
+  }
+
+  for (let index = 1; index < turns.length; index += 1) {
+    if (chronological(turns[index - 1]!, turns[index]!) > 0) return turns.sort(chronological);
+  }
+  return turns;
 }
 
 /** un pendiente que ha pasado todos los filtros, con lo que hace falta para ordenarlo */
@@ -235,13 +273,17 @@ export function selectPendingForTurn(input: PendingSelectionInput): PendingSelec
   const userMessages = timeline.filter((turn) => turn.role === 'user');
 
   const through = new Map<string, number>();
-  const refused = new Set<string>();
+  // conversaciones cuyo hueco NO cuenta como desfase. Son dos casos con el mismo
+  // efecto y ningun remedio dentro del turno: el CLI se nego, o no se pudo leer.
+  // Contarlas dejaria al personaje mudo sobre todo lo demas por algo que no va a
+  // arreglarse hablando
+  const unreadable = new Set<string>(input.failed ?? []);
   for (const cursor of input.cursors) {
     through.set(cursor.conversationId, cursor.through);
     // una negativa persistida no silencia al personaje para siempre: esa
     // conversacion deja de contar como hueco hasta que crezca
     if (cursor.refusedVersion === RELATION_EXTRACTOR_VERSION) {
-      refused.add(cursor.conversationId);
+      unreadable.add(cursor.conversationId);
     }
   }
 
@@ -277,11 +319,11 @@ export function selectPendingForTurn(input: PendingSelectionInput): PendingSelec
     const keywordStems = [...new Set(note.keywords.flatMap((word) => tokenize(word)))];
     const originAt = Date.parse(note.origin.at);
 
-    const herByQuote: TimelineTurn[] = [];
-    const herByAnything: TimelineTurn[] = [];
-    const hisByQuote: TimelineTurn[] = [];
-    const anyByQuote: TimelineTurn[] = [];
-    const anyByAnything: TimelineTurn[] = [];
+    const herByQuote: DatedTurn[] = [];
+    const herByAnything: DatedTurn[] = [];
+    const hisByQuote: DatedTurn[] = [];
+    const anyByQuote: DatedTurn[] = [];
+    const anyByAnything: DatedTurn[] = [];
 
     for (const turn of timeline) {
       // el mensaje de ahora no es una mencion: es «tocada», que se decide aparte
@@ -298,28 +340,34 @@ export function selectPendingForTurn(input: PendingSelectionInput): PendingSelec
       // y «volver a nombrarlo» exige que lo de antes fuera despues. Ademas la
       // sacaria del grupo «nunca sacadas por ella» y la callaria 72 h por algo
       // anterior a ella misma
-      if (Date.parse(turn.createdAt) <= originAt) continue;
+      if (turn.at <= originAt) continue;
+
       // en la misma conversacion y a menos de seis horas todavia se esta
       // hablando de lo mismo: no es que se haya vuelto a sacar
-      if (
+      const sameRun =
         turn.conversationId === note.origin.conversationId &&
-        Math.abs(Date.parse(turn.createdAt) - originAt) < MENTION_MIN_GAP_MS
-      ) {
-        continue;
-      }
+        turn.at - originAt < MENTION_MIN_GAP_MS;
+      // ...pero si ese rato es el de AHORA, el hueco de seis horas ciega
+      // justamente las dos cosas para las que existe el filtro: si ella ya lo
+      // tiene delante y si acaba de decirlo. En una sesion seguida eso hacia que
+      // una promesa de hace veinte minutos se ofreciera como asunto antiguo, y
+      // que se le volviera a ofrecer el turno siguiente a sacarla. Cuenta para
+      // callarla; para las cifras que se le enseñan, sigue sin contar
+      if (sameRun && turn.conversationId !== input.current.conversationId) continue;
 
       const byQuote = matchesStems(turn.stems, stems);
       // las keywords solo sirven para CALLARLA antes: nunca cuentan para las
       // cifras que se le enseñan ni para «el lo nombro»
       const byAnything = byQuote || sharesAtLeast(turn.stems, keywordStems, MENTION_MIN_SHARED);
-      if (byAnything) anyByAnything.push(turn);
+      if (byAnything) {
+        anyByAnything.push(turn);
+        if (turn.role === 'assistant') herByAnything.push(turn);
+      }
+      if (sameRun) continue;
       if (!byQuote) continue;
       anyByQuote.push(turn);
       if (turn.role === 'assistant') herByQuote.push(turn);
       else hisByQuote.push(turn);
-    }
-    for (const turn of anyByAnything) {
-      if (turn.role === 'assistant') herByAnything.push(turn);
     }
 
     if (inRecentWindow(note.origin) || anyByAnything.some((turn) => inRecentWindow(turn))) {
@@ -334,13 +382,13 @@ export function selectPendingForTurn(input: PendingSelectionInput): PendingSelec
 
     if (!touched) {
       const lastRaised = lastOf(herByAnything);
-      if (lastRaised !== null && now - Date.parse(lastRaised.createdAt) < HER_COOLDOWN_MS) {
+      if (lastRaised !== null && now - lastRaised.at < HER_COOLDOWN_MS) {
         counters.cooling += 1;
         continue;
       }
 
       const lastMention = lastOf(anyByQuote);
-      const quietSince = lastMention === null ? originAt : Date.parse(lastMention.createdAt);
+      const quietSince = lastMention === null ? originAt : lastMention.at;
       if (
         now - originAt > DORMANT_AFTER_DAYS * DAY_MS &&
         now - quietSince >= DORMANT_QUIET_DAYS * DAY_MS
@@ -357,9 +405,9 @@ export function selectPendingForTurn(input: PendingSelectionInput): PendingSelec
       const stale = timeline.some(
         (turn) =>
           input.conversations.has(turn.conversationId) &&
-          !refused.has(turn.conversationId) &&
+          !unreadable.has(turn.conversationId) &&
           turn.sequence > (through.get(turn.conversationId) ?? -1) &&
-          Date.parse(turn.createdAt) > originAt &&
+          turn.at > originAt &&
           !inRecentWindow(turn),
       );
       if (stale) {
@@ -418,21 +466,19 @@ export function selectPendingForTurn(input: PendingSelectionInput): PendingSelec
  * en todos los mensajes de una tarde larga.
  */
 function availableInRun(
-  userMessages: readonly TimelineTurn[],
+  userMessages: readonly DatedTurn[],
   originAt: number,
-  lastRaised: TimelineTurn | null,
+  lastRaised: DatedTurn | null,
   isCurrentMessage: (ref: { conversationId: string; sequence: number }) => boolean,
 ): boolean {
   const runStart =
-    lastRaised === null
-      ? originAt
-      : Math.max(originAt, Date.parse(lastRaised.createdAt) + HER_COOLDOWN_MS);
+    lastRaised === null ? originAt : Math.max(originAt, lastRaised.at + HER_COOLDOWN_MS);
 
   let count = 0;
   let waitingUntil: number | null = null;
 
   for (const message of userMessages) {
-    const at = Date.parse(message.createdAt);
+    const at = message.at;
     if (at < runStart) continue;
 
     const held = waitingUntil !== null && at < waitingUntil;

@@ -46,7 +46,10 @@ interface Huella {
 function registrar(relations: { removeConversation: () => Promise<void> }): Huella {
   const huella: Huella = { invalidated: 0, deleted: [] };
   const context = {
-    vault: {},
+    // `registerIpcHandlers` engancha el trabajo de fondo al cierre de la boveda
+    // nada mas registrar: sin estos dos, el registro ni siquiera llegaria a los
+    // handlers que esta prueba quiere invocar
+    vault: { isUnlocked: () => true, onLock: () => () => undefined },
     privateMedia: {
       deleteConversation: async (id: string) => {
         huella.deleted.push(`medios:${id}`);

@@ -9,8 +9,11 @@
 import { z } from 'zod';
 import type { HordeQueueProgress } from './horde-progress.js';
 import {
+  ACTIVE_RELATION_KINDS,
   LOCAL_CLI_PROVIDERS,
   REASONING_EFFORTS,
+  RELATION_PARTIES,
+  RELATION_STATUSES,
   type agentEventSchema,
   agentHostStatusSchema,
   conversationMemoryStatusSchema,
@@ -577,6 +580,106 @@ export const vaultCatalogSyncArgsSchema = z.object({
 });
 
 /**
+ * apunta las promesas y los planes que quedaron pendientes.
+ *
+ * No lleva proveedor: el trabajo de fondo va SIEMPRE al CLI elegido en el panel,
+ * nunca al de la ventana. Por eso aqui solo viaja en que proyecto corre.
+ */
+export const vaultRelationSyncArgsSchema = z.object({
+  projectAlias: projectAliasSchema,
+  /** solo esta, y reintentandola aunque se hubiera negado antes */
+  conversationId: conversationIdSchema.optional(),
+  /** tope de conversaciones por tanda: cada una es una llamada de verdad */
+  limit: z.number().int().min(1).max(10).default(3),
+  /**
+   * pedida a mano: se reintenta lo que se nego o fallo antes.
+   *
+   * Existe porque sin ella una negativa no tenia salida desde ninguna pantalla.
+   * Solo la manda el boton, y solo en su primera vuelta: repetirla en las doce
+   * volveria a arrancar el CLI para las mismas conversaciones rotas.
+   */
+  force: z.boolean().default(false),
+});
+
+export const vaultRelationSyncResultSchema = z.object({
+  /**
+   * conversaciones cuyo cursor avanzo.
+   *
+   * No basta para decidir si dar otra vuelta: una tanda entera negada no avanza
+   * ningun cursor y la siguiente coge OTRAS tres conversaciones, porque las
+   * negadas quedan marcadas. Lo que dice que no vale la pena seguir es que no
+   * pase nada de nada: ni revisadas, ni negativas, ni fallos.
+   */
+  reviewed: z.number().int().min(0),
+  /** promesas y planes nuevos apuntados */
+  notes: z.number().int().min(0),
+  /** los que esta tanda dio por cerrados */
+  closed: z.number().int().min(0),
+  /** conversaciones que no contestaron con el bloque pedido */
+  refused: z.number().int().min(0),
+  failed: z.array(z.object({ conversationId: z.string(), reason: z.string() })),
+  /** cuantas siguen por revisar AL TERMINAR esta tanda, recalculado */
+  pending: z.number().int().min(0),
+});
+
+/**
+ * un pendiente tal y como se repasa.
+ *
+ * Lleva la CITA LITERAL a proposito: es lo unico con lo que se puede juzgar si
+ * de verdad se prometio algo, y sin ella la lista solo diria «hay 9 promesas».
+ * Viaja al renderer igual que los turnos de una conversacion, que ya son texto
+ * descifrado de la misma boveda; lo que no sale de aqui nunca son las palabras
+ * clave del extractor, que solo sirven para callarla antes.
+ */
+export const vaultRelationNoteSchema = z.object({
+  id: z.string(),
+  /** de quien es; `null` son los hilos que nunca tuvieron personaje */
+  characterId: z.string().nullable(),
+  kind: z.enum(ACTIVE_RELATION_KINDS),
+  by: z.enum(RELATION_PARTIES),
+  quote: z.string(),
+  /** el dia civil en que se prometio, con el corte de las 05:00 */
+  day: z.string(),
+  status: z.enum(RELATION_STATUSES),
+  /** el extractor nunca pisa lo que decidio Daniel */
+  decidedBy: z.enum(['extractor', 'daniel']),
+  reopenedByDaniel: z.boolean(),
+  /** con que CLI se reviso: «revisado con Codex» */
+  extractedBy: z.string().nullable(),
+  /** el turno al que apunta; con el se abre y se lee en su contexto */
+  origin: z.object({ conversationId: z.string(), sequence: z.number().int().min(0) }),
+  /**
+   * la cita ya no aparece en su turno.
+   *
+   * Una nota asi no se le ofrece a ella. Se enseña porque es la unica forma de
+   * entender por que un pendiente que esta en la lista no sale nunca.
+   */
+  quoteBroken: z.boolean(),
+  closedDay: z.string().nullable(),
+});
+
+export const vaultRelationListResultSchema = z.object({
+  notes: z.array(vaultRelationNoteSchema),
+});
+
+/**
+ * la ultima palabra de Daniel sobre un pendiente.
+ *
+ * El estado ES la decision: `fulfilled` (cumplida), `released` (ya no vale),
+ * `dismissed` (no era una promesa) y `open` (reabrir). Un enum aparte acabaria
+ * separandose del que guarda el almacen, y entonces un boton dejaria de hacer
+ * lo que dice.
+ *
+ * No hay alta a mano: toda promesa señala un turno con una cita verificada, y
+ * una escrita a mano no tendria contra que comprobarse.
+ */
+export const vaultRelationUpdateArgsSchema = z.object({
+  /** los 16 hex deterministas de la nota */
+  id: z.string().regex(/^[0-9a-f]{16}$/),
+  status: z.enum(RELATION_STATUSES),
+});
+
+/**
  * quien hace el trabajo de fondo de la boveda.
  *
  * Solo Claude o Codex, que van con la sesion local: con la API de pago de la
@@ -783,6 +886,120 @@ export const vaultMediaRewriteCaptionResultSchema = z.object({
  */
 export const vaultMemoryDiagnosticsArgsSchema = z.object({});
 
+/** un entero no negativo: el diagnostico de pendientes no devuelve otra cosa */
+const diagnosticCount = z.number().int().min(0);
+
+/**
+ * los asuntos pendientes, en cifras.
+ *
+ * Va como campo aparte y opcional: un diagnostico hecho con una version
+ * anterior —o con la boveda sin nada apuntado todavia— sigue siendo valido sin
+ * el, y la pantalla solo enseña sus parrafos cuando llega.
+ *
+ * Todo son enteros y booleanos. Ni citas, ni identificadores, ni dias: esto
+ * cruza el IPC y acaba en el registro.
+ */
+export const vaultRelationDiagnosticsSchema = z.object({
+  /** la guarda del trabajo auxiliar: `byOther` tiene que ser 0 */
+  catalogGuard: z.object({
+    entries: diagnosticCount,
+    byLocalCli: diagnosticCount,
+    byOther: diagnosticCount,
+    legacyUnknown: diagnosticCount,
+  }),
+  coverage: z.object({
+    conversations: diagnosticCount,
+    upToDate: diagnosticCount,
+    behind: diagnosticCount,
+    turnsBehind: diagnosticCount,
+    outdatedVersion: diagnosticCount,
+    excludedSkipped: diagnosticCount,
+    refusedPersisted: diagnosticCount,
+    failedThisSession: diagnosticCount,
+    auxiliaryConfigured: z.boolean(),
+  }),
+  extraction: z.object({
+    proposed: diagnosticCount,
+    accepted: diagnosticCount,
+    rejectedShape: diagnosticCount,
+    rejectedQuote: diagnosticCount,
+    rejectedRole: diagnosticCount,
+    rejectedWindow: diagnosticCount,
+    rejectedClosure: diagnosticCount,
+    merged: diagnosticCount,
+    refused: diagnosticCount,
+    /**
+     * turnos que no se le enseñaron enteros al extractor.
+     *
+     * Tiene que ser 0. Si sube, el cursor esta avanzando sobre texto que nadie
+     * ha mirado: una promesa dicha ahi no se apunta y ese turno no se vuelve a
+     * leer nunca. Es lo que distingue «no habia promesas» de «no se llego a
+     * leer», que sin esta cifra se ven exactamente igual.
+     */
+    clipped: diagnosticCount,
+    byProvider: z.object({
+      claude: diagnosticCount,
+      codex: diagnosticCount,
+      other: diagnosticCount,
+    }),
+  }),
+  notes: z.object({
+    total: diagnosticCount,
+    byStatus: z.object({
+      open: diagnosticCount,
+      fulfilled: diagnosticCount,
+      released: diagnosticCount,
+      dismissed: diagnosticCount,
+    }),
+    byKind: z.object({ promise: diagnosticCount, plan: diagnosticCount }),
+    byWho: z.object({
+      user: diagnosticCount,
+      character: diagnosticCount,
+      both: diagnosticCount,
+    }),
+    decidedByDaniel: diagnosticCount,
+    reopenedByDaniel: diagnosticCount,
+    dormant: diagnosticCount,
+  }),
+  integrity: z.object({
+    quoteValid: diagnosticCount,
+    quoteBroken: diagnosticCount,
+    closuresOrphaned: diagnosticCount,
+    droppedOnRead: diagnosticCount,
+    orphanNoCharacter: diagnosticCount,
+  }),
+  /** que habria salido en cada mensaje real, con la misma funcion del turno */
+  dosing: z.object({
+    userTurnsSimulated: diagnosticCount,
+    turnsWithBlock: diagnosticCount,
+    linesOffered: diagnosticCount,
+    touched: diagnosticCount,
+    suppressedInScene: diagnosticCount,
+    suppressedCooldown: diagnosticCount,
+    suppressedWaiting: diagnosticCount,
+    dormant: diagnosticCount,
+    blockedStale: diagnosticCount,
+    quoteBroken: diagnosticCount,
+    maxConsecutiveOffersSameNote: diagnosticCount,
+  }),
+  raising: z.object({
+    herMentions: diagnosticCount,
+    notesRaisedByHer: diagnosticCount,
+    /** la medida exacta de «sin que yo se lo recuerde» */
+    notesRaisedByHerBeforeHim: diagnosticCount,
+    sameNoteWithin24h: diagnosticCount,
+    maxRaisesPerNote: diagnosticCount,
+    medianDaysToFirstRaise: diagnosticCount,
+  }),
+  /** lo que reclama ella y cuanto de eso consta; `unbacked` no puede subir */
+  inventionGuard: z.object({
+    herClaims: diagnosticCount,
+    backed: diagnosticCount,
+    unbacked: diagnosticCount,
+  }),
+  nextTurn: z.object({ linesForLatestConversation: diagnosticCount }),
+});
+
 export const vaultMemoryDiagnosticsResultSchema = z.object({
   scope: z.object({
     otherConversations: z.number().int().min(0),
@@ -835,6 +1052,8 @@ export const vaultMemoryDiagnosticsResultSchema = z.object({
     dateWithoutMoment: z.number().int().min(0),
     dateInHistory: z.number().int().min(0),
   }),
+  /** los asuntos pendientes, si hay almacen que leer */
+  relations: vaultRelationDiagnosticsSchema.optional(),
 });
 
 /**
@@ -1509,6 +1728,15 @@ export interface LuxyBridge {
   syncVaultCatalog(
     args: z.infer<typeof vaultCatalogSyncArgsSchema>,
   ): Promise<IpcResult<z.infer<typeof vaultCatalogSyncResultSchema>>>;
+  syncVaultRelations(
+    args: z.infer<typeof vaultRelationSyncArgsSchema>,
+  ): Promise<IpcResult<z.infer<typeof vaultRelationSyncResultSchema>>>;
+  /** lo apuntado, para repasarlo antes de que ella lo saque */
+  listVaultRelations(): Promise<IpcResult<z.infer<typeof vaultRelationListResultSchema>>>;
+  /** aplica la decision de Daniel y devuelve la lista ya actualizada */
+  updateVaultRelation(
+    args: z.infer<typeof vaultRelationUpdateArgsSchema>,
+  ): Promise<IpcResult<z.infer<typeof vaultRelationListResultSchema>>>;
   getVaultAuxiliary(): Promise<IpcResult<z.infer<typeof vaultAuxiliaryChoiceSchema> | null>>;
   setVaultAuxiliary(
     args: z.infer<typeof vaultAuxiliarySetArgsSchema>,
