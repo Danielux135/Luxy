@@ -27,10 +27,19 @@ suscripcion queda por decidir.
 
 ## F23-PENDIENTES-001 — que Lia saque sola las promesas y lo pendiente
 
-Estado: **`diseño hecho`, sin implementar — Claude, 2026-09-11.** Diseño en
-`docs/PENDIENTES-DISENO.md`: tres propuestas independientes, dos jueces y una
-sintesis. Se implementa despues de cerrar `F22-ALCANCE-MEMORIA-001` y
-`F22-MEMORIA-ACUMULATIVA-001`. Su paso 1 es la guarda del catalogo.
+Estado: **pasos 1, 2 y 3 hechos; del 4 al 12 pendientes — Claude, 2026-09-14.**
+Diseño en `docs/PENDIENTES-DISENO.md`.
+
+- **Paso 1, el trabajo de fondo (`D-087`)**: catalogar ya no usa la API de pago.
+  Hecho, con selector en el panel. Sin ver todavia con la boveda abierta;
+- **Pasos 2 y 3, el nucleo puro**: hechos por agentes, con dos revisores y un
+  esceptico por hallazgo. `vault-relation.ts` (esquemas, prompt del extractor,
+  lectura y verificacion de la respuesta), `relation.ts` (fusion, coincidencias
+  y reclamaciones) y `relation-selection.ts` (que promesa sale en cada turno y
+  cual se calla). Nada de esto esta enganchado todavia: son funciones puras;
+- **Falta**: el almacen cifrado (4), el diagnostico (5), la pasada sobre las 17
+  conversaciones (6), la lista para corregirlas (7), la captura en los turnos
+  nuevos (8) y el bloque en el prompt (9).
 
 Origen, de Daniel: «que ella misma pueda sacar recuerdos sola: por ejemplo, le
 prometi dos cafes y una tarta de chocolate en la cama. Ella podria

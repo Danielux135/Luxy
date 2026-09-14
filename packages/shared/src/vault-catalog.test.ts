@@ -7,14 +7,18 @@
 import { describe, it, expect } from 'vitest';
 import {
   CATALOG_CLOSE,
+  CATALOG_CUT_MARK,
   CATALOG_MAX_TURNS,
   CATALOG_OPEN,
   CATALOG_PROMPT_CHARS,
   CATALOG_TURN_CHARS,
   buildCatalogPrompt,
+  clipMiddle,
   describeCatalogFailure,
   detectEvenSplit,
+  flattenTurnText,
   parseCatalogResponse,
+  turnAllowance,
   type CatalogTurn,
   type CatalogedScene,
 } from './vault-catalog.js';
@@ -394,5 +398,80 @@ describe('reparto uniforme', () => {
     );
     expect(parsed.status).toBe('structured');
     expect(detectEvenSplit(parsed.scenes).even).toBe(true);
+  });
+});
+
+describe('las piezas de recorte exportadas', () => {
+  // el extractor de pendientes recorta con estas mismas piezas, y exportarlas no
+  // puede cambiar ni un caracter del prompt del catalogo. Las huellas de abajo se
+  // tomaron con el codigo de ANTES de exportarlas, sobre estos mismos turnos
+  const PALABRAS = ['hola', 'mañana', 'te', 'traigo', 'cafés', 'y', 'una', 'tarta', 'de', 'chocolate', '*sonríe*', '«vale»'];
+
+  function textoDe(semilla: number, palabras: number): string {
+    const trozos: string[] = [];
+    for (let i = 0; i < palabras; i += 1) {
+      trozos.push(PALABRAS[(semilla * 7 + i * 3) % PALABRAS.length]!);
+      if (i % 17 === 16) trozos.push('\n\n');
+      else if (i % 11 === 10) trozos.push('\t');
+    }
+    return `  ${trozos.join(' ')}  `;
+  }
+
+  const turno = (sequence: number, text: string): CatalogTurn => ({
+    sequence,
+    role: sequence % 2 === 0 ? 'user' : 'assistant',
+    text,
+  });
+
+  // cortos: todo cabe. mezclados: 70 turnos (se enseñan 60) y el presupuesto
+  // global deja cada turno por debajo de 1.400. enorme: un solo turno recortado
+  const FIJOS: Record<string, CatalogTurn[]> = {
+    cortos: Array.from({ length: 8 }, (_, i) => turno(i, textoDe(i, 5 + i))),
+    mezclados: Array.from({ length: 70 }, (_, i) =>
+      turno(i + 3, textoDe(i, i % 6 === 0 ? 12 : i % 6 === 3 ? 150 : 900)),
+    ),
+    enorme: [turno(0, textoDe(1, 20)), turno(1, textoDe(2, 4000)), turno(2, textoDe(3, 3))],
+  };
+
+  /** FNV-1a de 32 bits: basta para notar un caracter distinto, sin importar node:crypto */
+  function fnv1a(text: string): string {
+    let hash = 0x811c9dc5;
+    for (let i = 0; i < text.length; i += 1) {
+      hash ^= text.charCodeAt(i);
+      hash = Math.imul(hash, 0x01000193) >>> 0;
+    }
+    return hash.toString(16).padStart(8, '0');
+  }
+
+  it('el prompt del catalogo sale identico al de antes de exportarlas', () => {
+    const huellas = Object.fromEntries(
+      Object.entries(FIJOS).map(([nombre, turnos]) => {
+        const prompt = buildCatalogPrompt(turnos);
+        return [nombre, `${prompt.length}:${fnv1a(prompt)}`];
+      }),
+    );
+    expect(huellas).toEqual({
+      cortos: '2489:dbace8f4',
+      mezclados: '62915:1855ad7f',
+      enorme: '3575:94cfe7a7',
+    });
+  });
+
+  it('las lineas de datos son exactamente las piezas exportadas', () => {
+    // si el catalogo dejara de usarlas, el extractor recortaria distinto sin que
+    // nada lo avisara
+    for (const turnos of Object.values(FIJOS)) {
+      const shown = turnos.slice(0, CATALOG_MAX_TURNS);
+      const planos = shown.map((t) => flattenTurnText(t.text));
+      const allowance = turnAllowance(planos.map((plano) => plano.length));
+      const esperado = shown.map(
+        (t, i) =>
+          `[${t.sequence}] ${t.role === 'user' ? 'Usuario' : 'Personaje'}: ${clipMiddle(planos[i]!, allowance)}`,
+      );
+      expect(buildCatalogPrompt(turnos).endsWith(`CONVERSACION (DATOS):\n${esperado.join('\n')}`)).toBe(
+        true,
+      );
+    }
+    expect(CATALOG_CUT_MARK).toBe(' […recorte…] ');
   });
 });

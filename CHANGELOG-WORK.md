@@ -1,5 +1,31 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-09-14 — Claude — F23-PENDIENTES-001, pasos 2 y 3: el nucleo puro
+
+Escrito por agentes siguiendo `docs/PENDIENTES-DISENO.md`, con dos revisores,
+un esceptico por hallazgo y un ultimo agente que aplico lo confirmado.
+
+Archivos nuevos: `packages/shared/src/vault-relation.ts` (esquemas Zod de una
+promesa, normalizacion y verificacion literal de la cita, prompt del extractor y
+lectura de su respuesta), `apps/desktop/src/main/vault/relation.ts` (id
+determinista, fusion con lapidas, coincidencia por raices y deteccion de
+reclamaciones) y `relation-selection.ts` (que promesa sale en cada turno: en
+escena, en reposo, en espera, dormida, tocada o bloqueada por desfase). Con sus
+pruebas. `vault-catalog.ts` exporta sus piezas de recorte sin cambiar nada, y una
+prueba compara huellas del prompt del catalogo antes y despues para demostrarlo.
+
+De seis hallazgos, los escepticos tumbaron tres y se aplicaron dos (el tercero
+era el mismo defecto contado dos veces):
+
+- la lapida «no era una promesa» dejaba de bloquear si el extractor reapuntaba la
+  misma promesa cambiando quien se comprometia. Ahora bloquea por cita y
+  personaje, y la igualdad de `by` solo cuenta para repetir una abierta;
+- lo hablado ANTES de la promesa contaba como «ya lo sacaste»: la callaba 72
+  horas por algo anterior a la promesa misma.
+
+`npm run check` exit 0: 156 archivos, 3060 pruebas, 12 saltadas.
+Nada esta enganchado: sin almacen, sin pasada y sin bloque en el prompt.
+
 ### 2026-09-11 — Claude — F23-PENDIENTES-001, paso 1: el trabajo de fondo (D-087)
 
 Pedido por Daniel: «haz lo de Claude/Codex». Catalogar con DeepSeek elegido

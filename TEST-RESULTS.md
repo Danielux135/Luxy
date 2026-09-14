@@ -1,5 +1,22 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-14 — F23-PENDIENTES-001, pasos 1, 2 y 3
+
+`npm run check` exit 0.
+
+```
+Test Files  156 passed (156)
+     Tests   3060 passed | 12 skipped
+```
+
+Lo nuevo: `auxiliary-target.test.ts` y `memory-preferences-auxiliary.test.ts`
+(paso 1), `vault-relation.test.ts`, `relation.test.ts` y
+`relation-selection.test.ts` (pasos 2 y 3), mas la prueba del catalogo que
+compara huellas del prompt antes y despues de exportar sus piezas.
+
+**Sin ejecutar con la boveda abierta.** El nucleo no esta enganchado a nada.
+
+
 ### 2026-09-11 — F23-PENDIENTES-001, paso 1 (D-087)
 
 `npm run check` exit 0.

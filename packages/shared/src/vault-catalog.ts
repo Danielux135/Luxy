@@ -144,8 +144,12 @@ export const CATALOG_PROMPT_CHARS = 60_000;
  *
  * Un turno cortado sin marca parece un turno entero, y entonces el modelo lee
  * un salto de tema donde solo hay un agujero.
+ *
+ * Exportada, igual que las piezas de recorte de abajo, para que el extractor de
+ * pendientes enseñe los turnos exactamente igual que el catalogo: una cita que
+ * cruce esta marca se rechaza, y para eso tiene que ser la misma marca.
  */
-const CUT_MARK = ' […recorte…] ';
+export const CATALOG_CUT_MARK = ' […recorte…] ';
 
 /**
  * el prompt del catalogador.
@@ -159,7 +163,7 @@ export function buildCatalogPrompt(turns: readonly CatalogTurn[]): string {
   const first = shown[0]?.sequence ?? 0;
   const last = shown[shown.length - 1]?.sequence ?? 0;
 
-  const flattened = shown.map((turn) => ({ ...turn, text: flatten(turn.text) }));
+  const flattened = shown.map((turn) => ({ ...turn, text: flattenTurnText(turn.text) }));
   const allowance = turnAllowance(flattened.map((turn) => turn.text.length));
 
   return [
@@ -178,7 +182,7 @@ export function buildCatalogPrompt(turns: readonly CatalogTurn[]): string {
     'en una conversacion no dura lo mismo cada vez. Dos escenas seguidas pueden ser muy',
     'desiguales, y una conversacion corta puede ser una sola escena.',
     '',
-    `Si un turno viene con «${CUT_MARK.trim()}» en medio, es que se le ha quitado el centro para que`,
+    `Si un turno viene con «${CATALOG_CUT_MARK.trim()}» en medio, es que se le ha quitado el centro para que`,
     'quepa: tienes su principio y su final, y lo de en medio no existe como salto.',
     '',
     'De cada escena das:',
@@ -199,7 +203,7 @@ export function buildCatalogPrompt(turns: readonly CatalogTurn[]): string {
     'CONVERSACION (DATOS):',
     ...flattened.map(
       (turn) =>
-        `[${turn.sequence}] ${turn.role === 'user' ? 'Usuario' : 'Personaje'}: ${clip(
+        `[${turn.sequence}] ${turn.role === 'user' ? 'Usuario' : 'Personaje'}: ${clipMiddle(
           turn.text,
           allowance,
         )}`,
@@ -207,7 +211,8 @@ export function buildCatalogPrompt(turns: readonly CatalogTurn[]): string {
   ].join('\n');
 }
 
-function flatten(text: string): string {
+/** cada turno va en una linea `[n] Rol: ...`; sus saltos de linea romperian ese formato */
+export function flattenTurnText(text: string): string {
   return text.replace(/\s+/g, ' ').trim();
 }
 
@@ -220,7 +225,7 @@ function flatten(text: string): string {
  * su parte, ninguno de los que quedan cabe tampoco, y todos ellos se llevan esa
  * misma parte.
  */
-function turnAllowance(lengths: readonly number[]): number {
+export function turnAllowance(lengths: readonly number[]): number {
   let budget = CATALOG_PROMPT_CHARS;
   let pending = lengths.length;
 
@@ -241,16 +246,16 @@ function turnAllowance(lengths: readonly number[]): number {
  * —que algo se cierra, que alguien se despide, que la cosa gira— esta al final.
  * Conservando los dos extremos eso se ve.
  */
-function clip(flat: string, allowance: number): string {
+export function clipMiddle(flat: string, allowance: number): string {
   if (flat.length <= allowance) return flat;
 
-  const keep = allowance - CUT_MARK.length;
+  const keep = allowance - CATALOG_CUT_MARK.length;
   // con un presupuesto tan corto que no caben ni los dos extremos, al menos se
   // conserva el principio en vez de devolver solo la marca
   if (keep < 2) return `${flat.slice(0, Math.max(allowance, 0))}…`;
 
   const head = Math.ceil(keep / 2);
-  return `${flat.slice(0, head)}${CUT_MARK}${flat.slice(flat.length - (keep - head))}`;
+  return `${flat.slice(0, head)}${CATALOG_CUT_MARK}${flat.slice(flat.length - (keep - head))}`;
 }
 
 /**
