@@ -2,8 +2,8 @@
 
 ## F24-RECAP-001 — memoria acumulativa para los chats que ya existen
 
-Estado: **diseñado, sin escribir codigo. ESPERANDO UNA RESPUESTA DE DANIEL —
-Claude, 2026-09-14.** Diseño en `docs/RECAP-DISENO.md`.
+Estado: **diseñado y aprobado; construyendo el nucleo (pasos 2 a 5) — Claude,
+2026-09-14.** Diseño en `docs/RECAP-DISENO.md`.
 
 Origen, de Daniel: «Quiero generar la memoria acumulativa de los chats
 antiguos». Cierra la linea que quedo abierta en `F22-MEMORIA-ACUMULATIVA-001`:
@@ -33,12 +33,13 @@ Lo esencial del diseño, que salio de tres propuestas y dos jueces:
 - **una regresion ya existente, que este diseño arregla de paso**: cualquier
   memoria, aunque sea parcial, apaga hoy el aviso de turnos omitidos.
 
-**Bloqueado a proposito.** «Memoria de los chats antiguos» puede querer decir
-dos cosas y esto solo da una: que al reabrir una conversacion antigua Lia sepa
-en que punto quedo ESA conversacion. Que se acuerde de un hilo estando en otro
-NO es esto —la memoria es por conversacion—: ese canal son los recuerdos y los
-pendientes. Preguntado a Daniel el 2026-09-14; no se escribe codigo hasta que
-conteste.
+**Contestado por Daniel el 2026-09-14: quiere LAS DOS COSAS.** Esto le da la
+primera —que al reabrir una conversacion antigua Lia sepa en que punto quedo
+ESA conversacion—, porque la memoria acumulativa es por hilo. La segunda —que
+se acuerde de un hilo estando en otro— es otro canal: los recuerdos y los
+pendientes, que ya existen. Se investiga aparte que le falta a ese canal, en
+`F25-ENTRE-HILOS-001`; puede que la pasada de promesas ya lo cubra y no haga
+falta codigo nuevo.
 
 ## F22-MEMORIA-ACUMULATIVA-001 — la memoria de cada conversacion privada no se guardaba
 
