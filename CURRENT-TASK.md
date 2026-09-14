@@ -1,5 +1,45 @@
 # Luxy — tarea activa
 
+## F24-RECAP-001 — memoria acumulativa para los chats que ya existen
+
+Estado: **diseñado, sin escribir codigo. ESPERANDO UNA RESPUESTA DE DANIEL —
+Claude, 2026-09-14.** Diseño en `docs/RECAP-DISENO.md`.
+
+Origen, de Daniel: «Quiero generar la memoria acumulativa de los chats
+antiguos». Cierra la linea que quedo abierta en `F22-MEMORIA-ACUMULATIVA-001`:
+«generarla de golpe por suscripcion queda por decidir».
+
+Medido sin descifrar nada: **18 archivos, 308 turnos; solo 9 registros llevan
+memoria sellada y los 9 estan en la misma conversacion**, la posterior al
+arreglo del 11-09. O sea 17 conversaciones y 280 turnos sin memoria. Con
+ventanas de 40 turnos, 16 de las 17 caben en una llamada: **20 llamadas de
+suscripcion, una sola vez.**
+
+Lo esencial del diseño, que salio de tres propuestas y dos jueces:
+
+- **no se toca ni un byte de los `.jsonl` sellados.** No existe API para
+  re-sellar; `sealTurn` estampa `recordId` y `createdAt` nuevos y pondria las
+  17 con fecha de hoy; y una memoria que no abra **apaga la lista entera de
+  Privado**, porque `list()` abre el ultimo registro de cada conversacion sin
+  `try/catch`;
+- la memoria retroactiva vive en `vault/recap.json`, con el molde de
+  `relation-store.ts` (`fsync`, carril, lectura tolerante). La **sellada gana
+  siempre**; el recap solo es respaldo mientras no haya sellada;
+- **una negativa parcial es un EXITO**: el modelo dice donde no llego y el
+  hueco viaja al prompt. Cinco estados distintos, no un contador unico;
+- el caso peor no es que se nieguen, es que **obedezcan y saneen**: un
+  detector de vaguedad sin modelo lo caza en su version tosca. La competente
+  no la caza nadie, y por eso Daniel aprueba antes de que se use;
+- **una regresion ya existente, que este diseño arregla de paso**: cualquier
+  memoria, aunque sea parcial, apaga hoy el aviso de turnos omitidos.
+
+**Bloqueado a proposito.** «Memoria de los chats antiguos» puede querer decir
+dos cosas y esto solo da una: que al reabrir una conversacion antigua Lia sepa
+en que punto quedo ESA conversacion. Que se acuerde de un hilo estando en otro
+NO es esto —la memoria es por conversacion—: ese canal son los recuerdos y los
+pendientes. Preguntado a Daniel el 2026-09-14; no se escribe codigo hasta que
+conteste.
+
 ## F22-MEMORIA-ACUMULATIVA-001 — la memoria de cada conversacion privada no se guardaba
 
 Estado: **`done` y verificado en turnos reales — Claude, 2026-09-11.**
