@@ -18,6 +18,7 @@ import { z } from 'zod';
 import { LOCAL_CLI_PROVIDERS } from './constants.js';
 import {
   CATALOG_CUT_MARK,
+  CATALOG_PROMPT_CHARS,
   clipMiddle,
   flattenTurnText,
   turnAllowance,
@@ -50,6 +51,22 @@ export const RELATION_CONTEXT_TURNS = 4;
 export const RELATION_OPEN_LIST_MAX = 30;
 export const QUOTE_MIN_CHARS = 12;
 export const QUOTE_MAX_CHARS = 240;
+/**
+ * cuanto se le enseña de cada turno, como mucho.
+ *
+ * NO es el tope del catalogo. Alli 1.400 caracteres bastan porque una escena se
+ * abre al principio de un turno y se cierra al final, asi que enseñar los dos
+ * extremos alcanza. Aqui no: una promesa se dice donde se diga, y el centro que
+ * `clipMiddle` quita es un agujero del que no se puede sacar ninguna cita
+ * —`quoteAppearsIn` la rechazaria— mientras el cursor avanza igual. Es decir,
+ * ese turno se daria por revisado sin haberse leido entero, que es exactamente
+ * lo que este archivo existe para impedir.
+ *
+ * Al valer lo mismo que el presupuesto global, el tope por turno nunca recorta
+ * por debajo del reparto: una ventana que cabe entera se envia entera, y una que
+ * no cabe reparte lo que hay sin un techo artificial encima.
+ */
+export const RELATION_TURN_CHARS = CATALOG_PROMPT_CHARS;
 /**
  * el minimo de palabras que ya pide el prompt («de 3 a 30 palabras»).
  *
@@ -129,6 +146,15 @@ export const relationCountersSchema = z.object({
   rejectedClosure: z.number().int().min(0).default(0),
   merged: z.number().int().min(0).default(0),
   refused: z.number().int().min(0).default(0),
+  /**
+   * turnos que no se le enseñaron enteros.
+   *
+   * Sin esta cifra, «no habia promesas» y «no se llego a leer» salen igual en el
+   * diagnostico: cero notas nuevas y el cursor al dia. Tiene que quedarse en 0
+   * con las conversaciones de hoy; si sube, el presupuesto se esta quedando
+   * corto y hay ventanas cuyo centro nadie ha mirado.
+   */
+  clipped: z.number().int().min(0).default(0),
 });
 export type RelationCounters = z.infer<typeof relationCountersSchema>;
 
@@ -422,15 +448,49 @@ const WHO_PROMISED: Record<RelationParty, string> = {
 };
 
 /**
+ * cuanto le toca a cada turno de la ventana del extractor.
+ *
+ * Las mismas piezas de reparto que el catalogo y el mismo tope global, pero SIN
+ * su tope por turno: ver `RELATION_TURN_CHARS`. Va aparte y exportada para que
+ * quien manda la ventana pueda contar cuantos turnos se han quedado a medias sin
+ * volver a armar el prompt.
+ */
+export function relationTurnAllowance(lengths: readonly number[]): number {
+  return turnAllowance(lengths, RELATION_TURN_CHARS);
+}
+
+/**
+ * cuantos turnos de la PARTE NUEVA no caben enteros.
+ *
+ * Es la cifra que distingue «no habia promesas» de «no se llego a leer». Se
+ * calcula con las mismas dos funciones que arman el prompt, asi que no puede
+ * decir una cosa distinta de lo que de verdad se envio.
+ *
+ * El contexto entra en el reparto —ocupa sitio— pero no en la cuenta: de ahi no
+ * se apunta nada, ya se reviso, y contarlo daria una alarma por algo que no
+ * pierde ninguna promesa.
+ */
+export function countClippedRelationTurns(input: {
+  context: readonly { text: string }[];
+  turns: readonly { text: string }[];
+}): number {
+  const context = input.context.map((turn) => flattenTurnText(turn.text).length);
+  const fresh = input.turns.map((turn) => flattenTurnText(turn.text).length);
+  const allowance = relationTurnAllowance([...context, ...fresh]);
+  return fresh.filter((length) => length > allowance).length;
+}
+
+/**
  * el prompt del extractor.
  *
  * NO va en personaje, igual que el del catalogo: es una tarea tecnica sobre un
  * texto. Todo lo que viene de la conversacion va como DATOS.
  *
  * Los turnos se recortan con las MISMAS piezas que el catalogo —por el medio y
- * con el mismo tope global—, contando juntos el contexto y la parte nueva. La
- * ventana la decide quien llama: aqui no se descarta ningun turno, porque un
- * turno que no se enseña y aun asi se da por revisado es una promesa perdida.
+ * con el mismo tope global—, contando juntos el contexto y la parte nueva, pero
+ * con su propio tope por turno. La ventana la decide quien llama: aqui no se
+ * descarta ningun turno, porque un turno que no se enseña y aun asi se da por
+ * revisado es una promesa perdida.
  */
 export function buildRelationExtractionPrompt(input: RelationExtractionPromptInput): string {
   const first = input.turns[0]?.sequence ?? 0;
@@ -442,7 +502,7 @@ export function buildRelationExtractionPrompt(input: RelationExtractionPromptInp
   });
   const context = input.context.map(flatten);
   const fresh = input.turns.map(flatten);
-  const allowance = turnAllowance([...context, ...fresh].map((turn) => turn.text.length));
+  const allowance = relationTurnAllowance([...context, ...fresh].map((turn) => turn.text.length));
 
   const line = (turn: RelationPromptTurn): string =>
     `[${turn.sequence}] ${turn.role === 'user' ? 'Usuario' : 'Personaje'}: ${clipMiddle(

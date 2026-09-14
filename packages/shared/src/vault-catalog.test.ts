@@ -474,4 +474,22 @@ describe('las piezas de recorte exportadas', () => {
     }
     expect(CATALOG_CUT_MARK).toBe(' […recorte…] ');
   });
+
+  it('el tope por turno es un parametro, y sin pasarlo el catalogo no cambia', () => {
+    // el extractor de pendientes pasa uno mas alto: a una escena le basta con
+    // ver como empieza y como acaba un turno, pero una promesa se dice donde se
+    // diga y el centro que se quita es un agujero. Lo que no puede es cambiarle
+    // el reparto al catalogo, que es lo que fija esta prueba
+    // caben de sobra en los 60.000, y aun asi el catalogo los recorta a 1.400
+    const caben = [4_000, 5_000, 6_000];
+    // y estos no caben: hay que repartir
+    const nocaben = [30_000, 40_000, 50_000];
+    expect(turnAllowance(caben)).toBe(1400);
+    expect(turnAllowance(nocaben)).toBe(1400);
+    // con un tope alto se lleva lo que le toca del reparto, sin techo encima
+    expect(turnAllowance(nocaben, 60_000)).toBe(20_000);
+    // y si caben todos enteros, el tope que se pase es el que manda: con 60.000
+    // ningun turno real se recorta
+    expect(turnAllowance(caben, 60_000)).toBe(60_000);
+  });
 });

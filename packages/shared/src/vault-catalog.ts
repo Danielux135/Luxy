@@ -224,18 +224,28 @@ export function flattenTurnText(text: string): string {
  * les quita algo. Se recorre de mas corto a mas largo: en cuanto uno no cabe en
  * su parte, ninguno de los que quedan cabe tampoco, y todos ellos se llevan esa
  * misma parte.
+ *
+ * `cap` existe porque el tope del catalogo NO vale para todos. Al catalogo le
+ * sobra con 1.400 caracteres: una escena se abre al principio de un turno y se
+ * cierra al final, asi que enseñar los dos extremos basta. A quien busca
+ * promesas no: una promesa se dice donde se diga, y el centro que se quita es un
+ * agujero del que no se puede sacar ninguna cita. Quien necesite el turno entero
+ * pasa un tope mas alto y se lleva lo que quepa del reparto.
  */
-export function turnAllowance(lengths: readonly number[]): number {
+export function turnAllowance(
+  lengths: readonly number[],
+  cap: number = CATALOG_TURN_CHARS,
+): number {
   let budget = CATALOG_PROMPT_CHARS;
   let pending = lengths.length;
 
   for (const length of [...lengths].sort((a, b) => a - b)) {
     const share = Math.floor(budget / pending);
-    if (length > share) return Math.min(CATALOG_TURN_CHARS, share);
+    if (length > share) return Math.min(cap, share);
     budget -= length;
     pending -= 1;
   }
-  return CATALOG_TURN_CHARS;
+  return cap;
 }
 
 /**

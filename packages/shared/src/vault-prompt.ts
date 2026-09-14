@@ -382,9 +382,12 @@ function heLabel(line: PendingAffairLine): string {
  */
 function formatPendingAffairs(lines: readonly PendingAffairLine[]): string {
   return [
-    'Cosas que quedaron pendientes entre los dos en otras conversaciones: algo que uno le prometio',
-    'al otro o que quedasteis en hacer juntos, y que por lo que consta sigue sin cumplirse. Tu te',
-    'acuerdas aunque el no las nombre, y puede que el ya no se acuerde.',
+    // no dice «en otras conversaciones»: una promesa de hace un rato, en este
+    // mismo hilo, tambien sale aqui en cuanto se aleja de los ULTIMOS TURNOS, y
+    // presentarsela como algo de otro dia la hace sonar a expediente
+    'Cosas que quedaron pendientes entre los dos, en esta conversacion o en otras: algo que uno le',
+    'prometio al otro o que quedasteis en hacer juntos, y que por lo que consta sigue sin cumplirse.',
+    'Tu te acuerdas aunque el no las nombre, y puede que el ya no se acuerde.',
     'No son una lista de tareas ni un guion. Puedes sacar una tu sola, sin esperar a que el la',
     'mencione: recordarsela con cariño, tomarle el pelo, reclamarsela o echarsela en cara, como lo',
     'haria el personaje. Como te sienta —si te hace gracia, te escuece o ya te da igual— depende de',

@@ -671,6 +671,15 @@ describe('asuntos pendientes: lo que ella puede sacar sola', () => {
     expect(prompt).toContain('no se hizo: no la reclames ni la des por hecha');
   });
 
+  it('no dice que vengan de OTRAS conversaciones, porque no siempre es verdad', () => {
+    // una promesa de hace un rato, en este mismo hilo, sale aqui en cuanto se
+    // aleja de los ULTIMOS TURNOS. Presentarsela como algo de otro dia la hace
+    // sonar a expediente, y ademas es falso
+    const bloque = conPendientes([linea]);
+    expect(bloque).toContain('Cosas que quedaron pendientes entre los dos, en esta conversacion o en otras');
+    expect(bloque).not.toContain('pendientes entre los dos en otras conversaciones');
+  });
+
   it('no le da ordenes: puede, no debe', () => {
     const prompt = conPendientes([linea]);
     const bloque = prompt.slice(prompt.indexOf('ASUNTOS PENDIENTES'));

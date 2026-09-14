@@ -9,6 +9,7 @@ import {
   RELATION_CLOSE,
   RELATION_OPEN,
   buildRelationExtractionPrompt,
+  countClippedRelationTurns,
   normalizeQuote,
   offerOpenRelations,
   parseRelationExtraction,
@@ -151,10 +152,13 @@ describe('la cita tiene que estar tal cual en el turno', () => {
   });
 
   it('una cita que cruza «[…recorte…]» se rechaza, porque junta dos trozos que no van seguidos', () => {
+    // tiene que pasarse del presupuesto ENTERO de la ventana, no del tope del
+    // catalogo: el extractor ya no recorta a 1.400 caracteres, porque una
+    // promesa se dice donde se diga y el centro que se quita es un agujero
     const largo: RelationWindowTurn = {
       sequence: 20,
       role: 'user',
-      text: `Te prometo que mañana ${'bla '.repeat(3000)}te llevo a cenar al italiano`,
+      text: `Te prometo que mañana ${'bla '.repeat(20_000)}te llevo a cenar al italiano`,
       createdAt: '2026-09-06T10:00:00.000Z',
     };
     // el extractor de verdad ve el turno recortado
@@ -383,6 +387,64 @@ describe('prompt del extractor', () => {
     expect(prompt).not.toContain('- ninguno');
     // sin nada revisado antes, no hay contexto que marcar
     expect(prompt).not.toContain('CONTEXTO YA REVISADO');
+  });
+
+  it('no hereda el tope por turno del catalogo: una ventana que cabe va entera', () => {
+    // el catalogo recorta a 1.400 caracteres y le basta: una escena se abre al
+    // principio de un turno y se cierra al final. Una promesa no: se dice donde
+    // se diga, y con aquel tope una dicha en mitad de una respuesta de 1.800
+    // caracteres caia en el agujero del recorte Y el cursor avanzaba igual, asi
+    // que ese turno no se volvia a leer nunca
+    const enMedio = `${'bla '.repeat(200)}${PROMESA}${' bla'.repeat(200)}`;
+    const ventana: RelationWindowTurn[] = Array.from({ length: 16 }, (_unused, index) => ({
+      sequence: 100 + index,
+      role: index % 2 === 0 ? ('user' as const) : ('assistant' as const),
+      text: index === 4 ? enMedio : `turno ${index} ${'relleno '.repeat(200)}`,
+      createdAt: '2026-09-06T10:00:00.000Z',
+    }));
+
+    expect(countClippedRelationTurns({ context: [], turns: ventana })).toBe(0);
+
+    const linea = buildRelationExtractionPrompt({
+      context: [],
+      turns: ventana,
+      open: [],
+      anchor: ANCLA,
+    })
+      .split('\n')
+      .find((each) => each.startsWith('[104] '));
+    // la marca sale tambien en las instrucciones, asi que se mira SU linea
+    expect(linea).not.toContain('[…recorte…]');
+    expect(linea).toContain(PROMESA);
+  });
+
+  it('y cuando de verdad no cabe, se cuenta cuantos turnos se quedaron a medias', () => {
+    // el tope global sigue existiendo: lo que se quita es el techo artificial
+    // por turno, no el presupuesto. Que se recorte tiene que CONSTAR, o «no
+    // habia promesas» y «no se llego a leer» se leen igual en el diagnostico
+    const enorme: RelationWindowTurn[] = [
+      {
+        sequence: 200,
+        role: 'user',
+        text: 'x'.repeat(80_000),
+        createdAt: '2026-09-06T10:00:00.000Z',
+      },
+      {
+        sequence: 201,
+        role: 'assistant',
+        text: 'vale',
+        createdAt: '2026-09-06T10:01:00.000Z',
+      },
+    ];
+
+    expect(countClippedRelationTurns({ context: [], turns: enorme })).toBe(1);
+  });
+
+  it('el contexto ocupa sitio en el reparto, pero no cuenta como promesa perdida', () => {
+    // de los turnos ya revisados no se apunta nada: que se recorten no pierde
+    // ninguna promesa, y contarlos daria una alarma por algo que no pasa
+    const gordo = { text: 'x'.repeat(80_000) };
+    expect(countClippedRelationTurns({ context: [gordo], turns: [{ text: 'vale' }] })).toBe(0);
   });
 });
 
