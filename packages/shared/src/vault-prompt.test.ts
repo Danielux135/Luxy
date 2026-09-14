@@ -6,6 +6,7 @@ import {
   estimateTokens,
   measureVaultPrompt,
   omittedTurnCount,
+  type PendingAffairLine,
 } from './vault-prompt.js';
 import { CONVERSATION_MEMORY_OPEN, type ConversationMemory } from './schemas.js';
 
@@ -623,5 +624,95 @@ describe('un trozo del momento se dice que es un trozo', () => {
       recall: { episodes: [citado], quoted: { ...citado, via: 'palabras' } },
     });
     expect(prompt).not.toContain('Es solo un trozo');
+  });
+});
+
+describe('asuntos pendientes: lo que ella puede sacar sola', () => {
+  // anotada, y sin `as const`: inferida, `by` valdria solo 'user' y los dos
+  // campos en null no admitirian un numero, asi que las variantes de mas abajo
+  // no compilarian. Lo cazo `typecheck:tests`, no vitest
+  const linea: PendingAffairLine = {
+    by: 'user',
+    day: '2026-09-04',
+    daysAgo: 7,
+    quote: 'mañana te traigo dos cafés y una tarta de chocolate a la cama',
+    raisedCount: 0,
+    lastRaisedDaysAgo: null,
+    heMentionedDaysAgo: null,
+    touchedNow: false,
+  };
+  const conPendientes = (pending: readonly PendingAffairLine[]) =>
+    buildVaultPrompt({ memory: null, turns: [], message: 'buenos días', pending });
+
+  it('sin pendientes el prompt queda igual que antes', () => {
+    const sin = buildVaultPrompt({ memory: null, turns: [], message: 'buenos días' });
+    const vacio = buildVaultPrompt({ memory: null, turns: [], message: 'buenos días', pending: [] });
+    expect(vacio).toBe(sin);
+    expect(sin).not.toContain('ASUNTOS PENDIENTES');
+  });
+
+  it('con una promesa, va como datos y con su cita literal', () => {
+    const prompt = conPendientes([linea]);
+    expect(prompt).toContain('ASUNTOS PENDIENTES ENTRE VOSOTROS (DATOS)');
+    expect(prompt).toContain(
+      '- Te lo prometio el · 2026-09-04, hace 7 dias · «mañana te traigo dos cafés y una tarta de chocolate a la cama» · no lo has sacado nunca · el no ha vuelto a nombrarlo',
+    );
+  });
+
+  it('le deja sacarlo sola, y tambien callarselo', () => {
+    const prompt = conPendientes([linea]);
+    expect(prompt).toContain('Puedes sacar una tu sola, sin esperar a que el la');
+    // el permiso a tener reaccion propia, con el verbo del diseño: «como te
+    // sienta (a ti) esto», no «como te siente», que deja la frase sin sujeto
+    expect(prompt).toContain('Como te sienta —si te hace gracia, te escuece o ya te da igual—');
+    expect(prompt).toContain('Callartela tambien es una respuesta');
+    expect(prompt).toContain('puedes creerle o pedirle que te lo demuestre');
+    // y la regla que impide inventarse una promesa
+    expect(prompt).toContain('no se hizo: no la reclames ni la des por hecha');
+  });
+
+  it('no le da ordenes: puede, no debe', () => {
+    const prompt = conPendientes([linea]);
+    const bloque = prompt.slice(prompt.indexOf('ASUNTOS PENDIENTES'));
+    for (const orden of ['debes', 'tienes que']) {
+      expect(bloque, orden).not.toContain(orden);
+    }
+  });
+
+  it('las tres voces de quien prometio', () => {
+    const prompt = conPendientes([
+      linea,
+      { ...linea, by: 'character' as const, day: '2026-09-09', daysAgo: 1 },
+      { ...linea, by: 'both' as const, day: '2026-09-10', daysAgo: 0 },
+    ]);
+    expect(prompt).toContain('Te lo prometio el · 2026-09-04, hace 7 dias');
+    expect(prompt).toContain('Se lo prometiste tu · 2026-09-09, ayer');
+    expect(prompt).toContain('Lo quedasteis los dos · 2026-09-10, hoy');
+  });
+
+  it('cuenta las veces que ella lo saco y si el lo ha nombrado', () => {
+    const prompt = conPendientes([
+      { ...linea, raisedCount: 1, lastRaisedDaysAgo: 1 },
+      { ...linea, raisedCount: 3, lastRaisedDaysAgo: 0, heMentionedDaysAgo: 2 },
+      { ...linea, touchedNow: true, heMentionedDaysAgo: 5 },
+    ]);
+    expect(prompt).toContain('lo sacaste una vez, ayer');
+    expect(prompt).toContain('lo has sacado 3 veces, la ultima hoy');
+    // lo de ahora manda sobre cualquier mencion anterior
+    expect(prompt).toContain('lo nombra en su mensaje de ahora');
+  });
+
+  it('va antes de la memoria y del mensaje nuevo', () => {
+    const bloques = composeVaultPrompt({
+      memory: memoria,
+      turns: turnos(2),
+      message: 'buenos días',
+      pending: [linea],
+    }).map((bloque) => bloque.label);
+    expect(bloques).toContain('pendientes');
+    expect(bloques.indexOf('pendientes')).toBeLessThan(bloques.indexOf('memoria'));
+    expect(bloques.indexOf('pendientes')).toBeLessThan(bloques.indexOf('mensaje-nuevo'));
+    // la instruccion de memoria sigue siendo lo ultimo
+    expect(bloques[bloques.length - 1]).toBe('instruccion-memoria');
   });
 });

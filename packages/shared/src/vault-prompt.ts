@@ -18,6 +18,7 @@ import {
   formatConversationMemory,
   type ConversationMemory,
 } from './schemas.js';
+import type { RelationParty } from './vault-relation.js';
 
 /**
  * cuantos turnos recientes se envian literalmente.
@@ -108,6 +109,29 @@ export interface RecalledEpisodeLine {
 /** en que parte del dia local empezo un momento */
 export type PartOfDay = 'madrugada' | 'mañana' | 'tarde' | 'noche';
 
+/**
+ * una promesa o un plan que sigue pendiente entre los dos.
+ *
+ * Los hechos van CALCULADOS —cuantos dias hace, cuantas veces lo saco ella, si
+ * el lo ha vuelto a nombrar— porque el modelo no sabe contar dias ni tiene la
+ * conversacion entera delante. Asi puede sacarlo con naturalidad sin inventarse
+ * cuando fue ni cuantas veces se hablo de ello.
+ */
+export interface PendingAffairLine {
+  by: RelationParty;
+  /** `AAAA-MM-DD`, con el corte del dia civil a las 05:00 */
+  day: string;
+  daysAgo: number;
+  /** literal, tal y como se dijo */
+  quote: string;
+  /** veces que ELLA lo saco, contadas solo por la cita */
+  raisedCount: number;
+  lastRaisedDaysAgo: number | null;
+  heMentionedDaysAgo: number | null;
+  /** lo nombra en su mensaje de ahora */
+  touchedNow: boolean;
+}
+
 /** por que camino se trajo un momento transcrito */
 export type RecallVia = 'principio' | 'fecha' | 'palabras';
 
@@ -180,6 +204,12 @@ export interface VaultRecall {
 }
 
 export interface VaultPromptInput {
+  /**
+   * promesas y planes que siguen pendientes, ya elegidos y dosificados.
+   *
+   * Ausente o vacio deja el prompt exactamente como estaba.
+   */
+  pending?: readonly PendingAffairLine[];
   /** memoria acumulativa de turnos anteriores; null en el primer turno */
   memory: ConversationMemory | null;
   /** historial completo, en orden. la funcion decide cuanto usa */
@@ -313,6 +343,70 @@ function formatRecallLines(episodes: readonly RecalledEpisodeLine[], omitted = 0
 /** «por la tarde», «de madrugada» */
 function whenLabel(when: PartOfDay): string {
   return when === 'madrugada' ? 'de madrugada' : `por la ${when}`;
+}
+
+/** «hoy», «ayer», «hace 7 dias» */
+function daysAgoLabel(days: number): string {
+  if (days <= 0) return 'hoy';
+  if (days === 1) return 'ayer';
+  return `hace ${days} dias`;
+}
+
+function whoPromised(by: RelationParty): string {
+  if (by === 'user') return 'Te lo prometio el';
+  if (by === 'character') return 'Se lo prometiste tu';
+  return 'Lo quedasteis los dos';
+}
+
+/** «no lo has sacado nunca», «lo sacaste una vez, ayer» */
+function raisedLabel(line: PendingAffairLine): string {
+  if (line.raisedCount === 0) return 'no lo has sacado nunca';
+  const cuando = line.lastRaisedDaysAgo === null ? '' : `, ${daysAgoLabel(line.lastRaisedDaysAgo)}`;
+  if (line.raisedCount === 1) return `lo sacaste una vez${cuando}`;
+  return `lo has sacado ${line.raisedCount} veces, la ultima${cuando.slice(1)}`;
+}
+
+function heLabel(line: PendingAffairLine): string {
+  if (line.touchedNow) return 'lo nombra en su mensaje de ahora';
+  if (line.heMentionedDaysAgo === null) return 'el no ha vuelto a nombrarlo';
+  return `el lo nombro ${daysAgoLabel(line.heMentionedDaysAgo)}`;
+}
+
+/**
+ * lo que queda pendiente entre los dos, con permiso para sacarlo ella sola.
+ *
+ * Es la diferencia con los recuerdos: aquellos esperan a que se pregunte por
+ * ellos, y esto no. Va como DATOS, y con la misma regla de siempre —lo que no
+ * este escrito aqui no se sabe— porque una promesa inventada suena igual de
+ * bien que una cierta y no hay forma de distinguirlas desde fuera.
+ */
+function formatPendingAffairs(lines: readonly PendingAffairLine[]): string {
+  return [
+    'Cosas que quedaron pendientes entre los dos en otras conversaciones: algo que uno le prometio',
+    'al otro o que quedasteis en hacer juntos, y que por lo que consta sigue sin cumplirse. Tu te',
+    'acuerdas aunque el no las nombre, y puede que el ya no se acuerde.',
+    'No son una lista de tareas ni un guion. Puedes sacar una tu sola, sin esperar a que el la',
+    'mencione: recordarsela con cariño, tomarle el pelo, reclamarsela o echarsela en cara, como lo',
+    'haria el personaje. Como te sienta —si te hace gracia, te escuece o ya te da igual— depende de',
+    'quien eres y de como estais ahora.',
+    'Callartela tambien es una respuesta: si la escena va por otro lado, puede esperar a otro',
+    'momento. Si la sacas, que sea UNA y dentro de la escena, con tu voz, como algo que se te pasa',
+    'por la cabeza y no como un aviso.',
+    'Si el la esta cumpliendo en su mensaje nuevo, eso es lo que cuenta ahora. Si dice que ya la',
+    'cumplio, puedes creerle o pedirle que te lo demuestre, dentro del personaje: puede que se',
+    'cumpliera y no conste aqui.',
+    'Si el esta hablando fuera de la historia, dejalas para luego.',
+    'De cada asunto sabes SOLO lo que dice su linea. Lo que va entre comillas se dijo tal cual y',
+    'puedes citarlo; el resto no lo sabes. No le añadas cuantos, donde, cuando ni por que si no',
+    'esta ahi.',
+    'Una promesa que no aparezca en esta lista, en los ULTIMOS TURNOS ni en el momento que tienes',
+    'transcrito no se hizo: no la reclames ni la des por hecha.',
+    '',
+    ...lines.map(
+      (line) =>
+        `- ${whoPromised(line.by)} · ${line.day}, ${daysAgoLabel(line.daysAgo)} · «${line.quote}» · ${raisedLabel(line)} · ${heLabel(line)}`,
+    ),
+  ].join('\n');
 }
 
 function formatQuotedEpisode(quoted: QuotedEpisode): string {
@@ -452,6 +546,18 @@ export function composeVaultPrompt(input: VaultPromptInput): VaultPromptBlock[] 
           : 'UNO DE ESOS MOMENTOS, TAL Y COMO OCURRIO',
         formatQuotedEpisode(recall.quoted),
       ),
+    });
+  }
+
+  // va despues de los recuerdos y ANTES de la memoria y del mensaje nuevo: el
+  // final del prompt gobierna la respuesta inmediata, y pegarlo al final la
+  // haria soltar la promesa en cada turno. Sin lineas no se emite: un prompt sin
+  // pendientes queda igual que antes
+  const pending = input.pending ?? [];
+  if (pending.length > 0) {
+    blocks.push({
+      label: 'pendientes',
+      text: dataBlock('ASUNTOS PENDIENTES ENTRE VOSOTROS', formatPendingAffairs(pending)),
     });
   }
 

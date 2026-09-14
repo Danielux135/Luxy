@@ -21,6 +21,7 @@ import {
   quoteAppearsIn,
   type RelationCursor,
   type RelationNote,
+  type PendingAffairLine,
   type RelationParty,
   type RelationTurnRef,
   type TemporalAnchor,
@@ -69,20 +70,9 @@ const activeKinds: readonly string[] = ACTIVE_RELATION_KINDS;
  * son cifras y una cita, nunca la nota entera. De cada asunto sabe solo lo que
  * dice su linea, y esa regla empieza por no darle mas.
  */
-export interface PendingAffairLine {
-  by: RelationParty;
-  /** `AAAA-MM-DD`, con el corte del dia civil a las 05:00 */
-  day: string;
-  daysAgo: number;
-  /** literal, tal y como se dijo */
-  quote: string;
-  /** veces que ELLA lo saco, contadas solo por la cita */
-  raisedCount: number;
-  lastRaisedDaysAgo: number | null;
-  heMentionedDaysAgo: number | null;
-  /** lo nombra en su mensaje de ahora */
-  touchedNow: boolean;
-}
+// la linea la define el paquete compartido, que es quien arma el prompt: tenerla
+// en dos sitios garantizaba que un dia dejaran de coincidir
+export type { PendingAffairLine };
 
 /** un turno del personaje con sus raices ya calculadas, como lo da `timeline()` */
 export interface TimelineTurn {
