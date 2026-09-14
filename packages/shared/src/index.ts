@@ -30,3 +30,4 @@ export * from './telegram/commands.js';
 export * from './telegram/format.js';
 export * from './telegram/markdown.js';
 export * from './vault-relation.js';
+export * from './vault-recap.js';

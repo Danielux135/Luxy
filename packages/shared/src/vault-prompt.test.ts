@@ -8,7 +8,11 @@ import {
   omittedTurnCount,
   type PendingAffairLine,
 } from './vault-prompt.js';
-import { CONVERSATION_MEMORY_OPEN, type ConversationMemory } from './schemas.js';
+import {
+  CONVERSATION_MEMORY_INSTRUCTION,
+  CONVERSATION_MEMORY_OPEN,
+  type ConversationMemory,
+} from './schemas.js';
 
 const memoria: ConversationMemory = {
   version: 1,
@@ -73,7 +77,9 @@ describe('prompt de conversacion privada', () => {
     expect(prompt).toContain('pidelo en vez de suponerlo');
   });
 
-  it('no avisa si hay memoria: lo omitido esta resumido ahi', () => {
+  it('no avisa si hay memoria COMPLETA: lo omitido esta resumido ahi', () => {
+    // «completa» no es un matiz: una memoria con tramos sin resumir, o un
+    // indice, dejan hueco y el aviso tiene que seguir ahi (ver mas abajo)
     const prompt = buildVaultPrompt({ memory: memoria, turns: turnos(30), message: 'x' });
     expect(prompt).not.toContain('se omiten');
   });
@@ -301,7 +307,9 @@ describe('prompt de conversacion privada', () => {
 
   it('la instruccion de memoria va siempre al final', () => {
     const prompt = buildVaultPrompt({ memory: memoria, turns: turnos(5), message: 'x' });
-    expect(prompt.indexOf(CONVERSATION_MEMORY_OPEN)).toBeGreaterThan(prompt.indexOf('MENSAJE NUEVO'));
+    expect(prompt.indexOf(CONVERSATION_MEMORY_OPEN)).toBeGreaterThan(
+      prompt.indexOf('MENSAJE NUEVO'),
+    );
   });
 
   it('omittedTurnCount cuadra con lo que hace el prompt', () => {
@@ -435,7 +443,9 @@ describe('recuerdos: el principio, los otros momentos del dia y el hueco del ind
         },
       },
     });
-    expect(prompt).toContain('Ese mismo dia hubo 2 momentos mas: «la caja de música» (3 turnos), «el mercado» (2 turnos).');
+    expect(prompt).toContain(
+      'Ese mismo dia hubo 2 momentos mas: «la caja de música» (3 turnos), «el mercado» (2 turnos).',
+    );
     expect(prompt).toContain('preguntaselo');
   });
 
@@ -458,7 +468,10 @@ describe('recuerdos: el principio, los otros momentos del dia y el hueco del ind
       turns: [],
       message: 'hola',
       recall: {
-        episodes: [linea('r1', '2026-09-10', 'lo de hoy'), linea('r2', '2026-09-01', 'el principio')],
+        episodes: [
+          linea('r1', '2026-09-10', 'lo de hoy'),
+          linea('r2', '2026-09-01', 'el principio'),
+        ],
         quoted: null,
         omitted: 38,
       },
@@ -531,7 +544,9 @@ describe('recuerdos: como se eligio, cuantos hubo y si esta en la lista', () => 
       ],
       sameDayTotal: 5,
     });
-    expect(prompt).toContain('Ese mismo dia hubo 5 momentos mas: «a» (2 turnos), «b» (2 turnos) y 3 mas.');
+    expect(prompt).toContain(
+      'Ese mismo dia hubo 5 momentos mas: «a» (2 turnos), «b» (2 turnos) y 3 mas.',
+    );
   });
 
   it('un momento que no esta en la lista no se presenta como «uno de esos»', () => {
@@ -646,7 +661,12 @@ describe('asuntos pendientes: lo que ella puede sacar sola', () => {
 
   it('sin pendientes el prompt queda igual que antes', () => {
     const sin = buildVaultPrompt({ memory: null, turns: [], message: 'buenos días' });
-    const vacio = buildVaultPrompt({ memory: null, turns: [], message: 'buenos días', pending: [] });
+    const vacio = buildVaultPrompt({
+      memory: null,
+      turns: [],
+      message: 'buenos días',
+      pending: [],
+    });
     expect(vacio).toBe(sin);
     expect(sin).not.toContain('ASUNTOS PENDIENTES');
   });
@@ -676,7 +696,9 @@ describe('asuntos pendientes: lo que ella puede sacar sola', () => {
     // aleja de los ULTIMOS TURNOS. Presentarsela como algo de otro dia la hace
     // sonar a expediente, y ademas es falso
     const bloque = conPendientes([linea]);
-    expect(bloque).toContain('Cosas que quedaron pendientes entre los dos, en esta conversacion o en otras');
+    expect(bloque).toContain(
+      'Cosas que quedaron pendientes entre los dos, en esta conversacion o en otras',
+    );
     expect(bloque).not.toContain('pendientes entre los dos en otras conversaciones');
   });
 
@@ -723,5 +745,212 @@ describe('asuntos pendientes: lo que ella puede sacar sola', () => {
     expect(bloques.indexOf('pendientes')).toBeLessThan(bloques.indexOf('mensaje-nuevo'));
     // la instruccion de memoria sigue siendo lo ultimo
     expect(bloques[bloques.length - 1]).toBe('instruccion-memoria');
+  });
+});
+
+// -----------------------------------------------------------------------------
+// de donde sale la memoria (F24-RECAP-001, §7)
+// -----------------------------------------------------------------------------
+
+/** la regla de `D-061` en el bloque de memoria, tal y como se renderiza */
+const REGLA_SIN_INVENTAR = [
+  'De aqui sabes SOLO lo que pone. Es un resumen, no la transcripcion: no sabes',
+  'como se dijo cada cosa. Si te falta un detalle, preguntalo; no lo supongas ni',
+  'lo rellenes, y si al enumerar te falta uno, di dos ciertos antes que tres con',
+  'uno inventado.',
+].join('\n');
+
+const bloqueMemoria = (input: Parameters<typeof composeVaultPrompt>[0]): string | undefined =>
+  composeVaultPrompt(input).find((bloque) => bloque.label === 'memoria')?.text;
+
+describe('origen de la memoria en el prompt', () => {
+  it('sin los campos nuevos y sin memoria, el prompt sale byte a byte como antes', () => {
+    // el literal se capturo de la implementacion ANTERIOR al cambio. Si algo lo
+    // mueve, no es un detalle de formato: es el camino de pago, que se paga en
+    // cada turno de cada conversacion privada
+    const esperado = `NOTA: se omiten 22 turnos anteriores y todavia no hay memoria acumulativa. Si necesitas algo de esa parte, pidelo en vez de suponerlo.
+
+ULTIMOS TURNOS (DATOS):
+Usuario: turno 22
+
+Asistente: turno 23
+
+Usuario: turno 24
+
+Asistente: turno 25
+
+Usuario: turno 26
+
+Asistente: turno 27
+
+Usuario: turno 28
+
+Asistente: turno 29
+
+MENSAJE NUEVO DEL USUARIO (DATOS):
+x
+
+${CONVERSATION_MEMORY_INSTRUCTION}`;
+
+    expect(buildVaultPrompt({ memory: null, turns: turnos(30), message: 'x' })).toBe(esperado);
+  });
+
+  it('con memoria y sin origen, lo unico nuevo es la regla contra la invencion', () => {
+    expect(bloqueMemoria({ memory: memoria, turns: turnos(30), message: 'x' })).toBe(
+      `MEMORIA ACUMULATIVA DE ESTA CONVERSACION (DATOS):
+${REGLA_SIN_INVENTAR}
+
+Resumen: un resumen acumulativo
+Hechos:
+- un hecho confirmado`,
+    );
+  });
+
+  it('la regla contra la invencion va en los TRES origenes', () => {
+    // la leccion de `D-061` es que no se hereda de otro bloque parecido: o esta
+    // aqui, o no esta
+    for (const memorySource of ['turn', 'recap', 'index'] as const) {
+      const texto = bloqueMemoria({
+        memory: memoria,
+        memorySource,
+        turns: turnos(30),
+        message: 'x',
+      });
+      expect(texto).toContain(REGLA_SIN_INVENTAR);
+    }
+  });
+
+  it('el turno vivo no emite coletilla ni aviso: es el comportamiento de hoy', () => {
+    const prompt = buildVaultPrompt({
+      memory: memoria,
+      memorySource: 'turn',
+      turns: turnos(30),
+      message: 'x',
+    });
+    expect(prompt).toContain('MEMORIA ACUMULATIVA DE ESTA CONVERSACION');
+    expect(prompt).not.toContain('se omiten');
+    expect(prompt).not.toContain('no se pudieron resumir');
+  });
+
+  it('un relleno sin huecos se comporta como la memoria del turno vivo', () => {
+    const prompt = buildVaultPrompt({
+      memory: memoria,
+      memorySource: 'recap',
+      memoryGaps: 0,
+      turns: turnos(30),
+      message: 'x',
+    });
+    expect(prompt).toContain('MEMORIA ACUMULATIVA DE ESTA CONVERSACION');
+    expect(prompt).not.toContain('se omiten');
+    expect(prompt).not.toContain('no se pudieron resumir');
+  });
+
+  it('un relleno con huecos los declara Y conserva el aviso de turnos omitidos', () => {
+    // este es el caso que hoy sale mal: la mera presencia de memoria apagaba el
+    // aviso, asi que un resumen con agujeros le quitaba la orden de preguntar
+    const prompt = buildVaultPrompt({
+      memory: memoria,
+      memorySource: 'recap',
+      memoryGaps: 2,
+      turns: turnos(30),
+      message: 'x',
+    });
+    expect(prompt).toContain('De esta conversacion hay 2 tramos que no se pudieron resumir.');
+    expect(prompt).toContain(
+      'De esos tramos no sabes nada: si hace falta algo de ahi, preguntalo en vez de suponerlo.',
+    );
+    expect(prompt).toContain('se omiten 22 turnos');
+    expect(prompt).toContain('pidelo en vez de suponerlo');
+    // con el bloque de memoria delante, decir «todavia no hay memoria» seria
+    // mentira y le daria permiso para desatender el aviso
+    expect(prompt).not.toContain('todavia no hay memoria acumulativa');
+    expect(prompt).toContain('lo que tienes anotado arriba no los cubre enteros');
+  });
+
+  it('un solo hueco se dice en singular', () => {
+    // «hay 1 tramos» delata la plantilla, y una ficha que suena a formulario
+    // arrastra al modelo a contestar como un formulario
+    const prompt = buildVaultPrompt({
+      memory: memoria,
+      memorySource: 'recap',
+      memoryGaps: 1,
+      turns: turnos(30),
+      message: 'x',
+    });
+    expect(prompt).toContain('De esta conversacion hay 1 tramo que no se pudo resumir.');
+    expect(prompt).toContain('De ese tramo no sabes nada');
+  });
+
+  it('el indice deducido cambia el titulo, se explica, y conserva el aviso', () => {
+    const prompt = buildVaultPrompt({
+      memory: memoria,
+      memorySource: 'index',
+      turns: turnos(30),
+      message: 'x',
+    });
+    expect(prompt).toContain('INDICE DE ESTA CONVERSACION (no es un resumen de lo que se dijo)');
+    expect(prompt).not.toContain('MEMORIA ACUMULATIVA DE ESTA CONVERSACION (DATOS)');
+    expect(prompt).toContain('Son los titulos de sus escenas y una frase de cada una.');
+    expect(prompt).toContain('No sabes que se dijo dentro: si hace falta, preguntalo.');
+    expect(prompt).toContain('No supongas el contenido a partir del titulo.');
+    expect(prompt).toContain('se omiten 22 turnos');
+  });
+
+  it('el indice NO declara tramos: no resume ninguno', () => {
+    const prompt = buildVaultPrompt({
+      memory: memoria,
+      memorySource: 'index',
+      memoryGaps: 3,
+      turns: turnos(30),
+      message: 'x',
+    });
+    expect(prompt).not.toContain('no se pudieron resumir');
+    // el aviso sigue, que es lo que de verdad protege el caso
+    expect(prompt).toContain('se omiten 22 turnos');
+  });
+
+  it('sin turnos omitidos no hay aviso, aunque la memoria venga con huecos', () => {
+    // el aviso habla de los turnos que NO viajan; con ocho turnos viajan todos
+    const prompt = buildVaultPrompt({
+      memory: memoria,
+      memorySource: 'recap',
+      memoryGaps: 2,
+      turns: turnos(4),
+      message: 'x',
+    });
+    expect(prompt).not.toContain('se omiten');
+    // lo que si viaja es el hueco declarado
+    expect(prompt).toContain('De esta conversacion hay 2 tramos');
+  });
+
+  it('un numero de huecos absurdo no rompe el prompt ni apaga el aviso', () => {
+    // llega de un almacen en disco: vale mas tratarlo como «ninguno» que
+    // renderizar «hay -1 tramos»
+    for (const memoryGaps of [-3, Number.NaN, 0.6]) {
+      const prompt = buildVaultPrompt({
+        memory: memoria,
+        memorySource: 'recap',
+        memoryGaps,
+        turns: turnos(30),
+        message: 'x',
+      });
+      expect(prompt).not.toContain('no se pudieron resumir');
+      expect(prompt).not.toContain('no se pudo resumir');
+      expect(prompt).not.toContain('se omiten');
+    }
+  });
+
+  it('sin memoria, el origen no cambia nada', () => {
+    const prompt = buildVaultPrompt({
+      memory: null,
+      memorySource: 'index',
+      memoryGaps: 4,
+      turns: turnos(30),
+      message: 'x',
+    });
+    expect(prompt).not.toContain('INDICE DE ESTA CONVERSACION');
+    expect(prompt).not.toContain('no se pudieron resumir');
+    // el aviso de siempre, con su texto de siempre
+    expect(prompt).toContain('todavia no hay memoria acumulativa');
   });
 });

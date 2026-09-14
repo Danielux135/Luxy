@@ -19,6 +19,10 @@ import {
   type ConversationMemory,
 } from './schemas.js';
 import type { RelationParty } from './vault-relation.js';
+// `import type` a proposito: `vault-recap.ts` importa VAULT_RECENT_TURNS de
+// aqui, asi que un import normal crearia un ciclo en tiempo de ejecucion. Con
+// `verbatimModuleSyntax` esta linea se borra al compilar y el ciclo no existe.
+import type { MemorySource } from './vault-recap.js';
 
 /**
  * cuantos turnos recientes se envian literalmente.
@@ -212,6 +216,27 @@ export interface VaultPromptInput {
   pending?: readonly PendingAffairLine[];
   /** memoria acumulativa de turnos anteriores; null en el primer turno */
   memory: ConversationMemory | null;
+  /**
+   * de donde sale esa memoria: del turno vivo, del relleno retroactivo, o es
+   * solo un indice deducido del catalogo.
+   *
+   * Ausente equivale a `'turn'`, que es lo que habia siempre: asi un prompt que
+   * no pase el campo sale byte a byte como antes de que existiera.
+   *
+   * Importa porque los tres NO valen lo mismo. Una memoria escrita por el
+   * modelo que vivio la conversacion la cubre entera; un relleno puede traer
+   * tramos que nadie resumio; y un indice no sabe QUE se dijo, solo de que iba
+   * cada escena. Presentarlos igual seria mentirle sobre lo que sabe.
+   */
+  memorySource?: MemorySource;
+  /**
+   * tramos que nadie resumio DENTRO de lo que la memoria dice cubrir.
+   *
+   * Un hueco declarado es una respuesta valida —mejor que inventarselo— pero
+   * tiene que llegar hasta ella: si no, lee un resumen con agujeros como si
+   * fuera completo y rellena la parte que falta con toda naturalidad.
+   */
+  memoryGaps?: number;
   /** historial completo, en orden. la funcion decide cuanto usa */
   turns: VaultPromptTurn[];
   /** lo que el usuario acaba de escribir */
@@ -412,6 +437,53 @@ function formatPendingAffairs(lines: readonly PendingAffairLine[]): string {
   ].join('\n');
 }
 
+/**
+ * la regla contra la invencion del bloque de memoria.
+ *
+ * Era el UNICO bloque de resumen del prompt que no la llevaba: las lineas de
+ * indice la tienen y los pendientes tambien. La leccion de `D-061` es
+ * justamente que no basta con haberla escrito en un bloque parecido —el modelo
+ * no la traslada— y que todo bloque que entrega resumen en vez de texto literal
+ * necesita la suya.
+ *
+ * Va para los TRES origenes, incluida la memoria del turno vivo: tampoco esa es
+ * la transcripcion.
+ */
+const MEMORY_NO_INVENTION = [
+  'De aqui sabes SOLO lo que pone. Es un resumen, no la transcripcion: no sabes',
+  'como se dijo cada cosa. Si te falta un detalle, preguntalo; no lo supongas ni',
+  'lo rellenes, y si al enumerar te falta uno, di dos ciertos antes que tres con',
+  'uno inventado.',
+];
+
+/**
+ * lo que se le dice cuando lo que lleva es un indice y no un resumen.
+ *
+ * Un indice deducido sabe los titulos de las escenas y una frase de cada una, y
+ * nada mas. Sin esta coletilla, un titulo como «la ducha» invita a contar lo
+ * que paso en la ducha, que es exactamente lo que nadie le ha contado.
+ */
+const MEMORY_INDEX_NOTE = [
+  'Son los titulos de sus escenas y una frase de cada una.',
+  'No sabes que se dijo dentro: si hace falta, preguntalo.',
+  'No supongas el contenido a partir del titulo.',
+];
+
+/**
+ * los tramos que nadie resumio, dichos en voz alta.
+ *
+ * El plural va calculado porque «hay 1 tramos» delata que esto lo escribe una
+ * plantilla, y una ficha que suena a formulario arrastra al modelo a contestar
+ * como un formulario.
+ */
+function formatMemoryGaps(gaps: number): string[] {
+  const uno = gaps === 1;
+  return [
+    `De esta conversacion hay ${gaps} ${uno ? 'tramo que no se pudo' : 'tramos que no se pudieron'} resumir.`,
+    `De ${uno ? 'ese tramo' : 'esos tramos'} no sabes nada: si hace falta algo de ahi, preguntalo en vez de suponerlo.`,
+  ];
+}
+
 function formatQuotedEpisode(quoted: QuotedEpisode): string {
   const sameDay = quoted.sameDay ?? [];
   // el total real, no el recortado: con nueve y seis nombrados, decir «seis»
@@ -564,12 +636,33 @@ export function composeVaultPrompt(input: VaultPromptInput): VaultPromptBlock[] 
     });
   }
 
+  // ausente es `'turn'`: sin el campo, el prompt es el de siempre
+  const memorySource: MemorySource = input.memorySource ?? 'turn';
+  // un indice no declara tramos porque no resume ninguno. Fuera de ahi se honra
+  // lo que llegue, incluido en `'turn'`: equivocarse hacia el aviso añade una
+  // advertencia de mas, y equivocarse al reves le quita la orden de preguntar
+  const declaredGaps = input.memoryGaps;
+  const memoryGaps =
+    memorySource === 'index' || typeof declaredGaps !== 'number' || !Number.isFinite(declaredGaps)
+      ? 0
+      : Math.max(0, Math.trunc(declaredGaps));
+
   if (input.memory !== null) {
     blocks.push({
       label: 'memoria',
       text: dataBlock(
-        'MEMORIA ACUMULATIVA DE ESTA CONVERSACION',
-        formatConversationMemory(input.memory),
+        memorySource === 'index'
+          ? // el titulo es la primera defensa: llamar «memoria» a un indice hace
+            // que de por sabido lo que solo esta enunciado
+            'INDICE DE ESTA CONVERSACION (no es un resumen de lo que se dijo)'
+          : 'MEMORIA ACUMULATIVA DE ESTA CONVERSACION',
+        [
+          ...MEMORY_NO_INVENTION,
+          ...(memorySource === 'index' ? MEMORY_INDEX_NOTE : []),
+          ...(memoryGaps > 0 ? formatMemoryGaps(memoryGaps) : []),
+          '',
+          formatConversationMemory(input.memory),
+        ].join('\n'),
       ),
     });
   }
@@ -579,12 +672,25 @@ export function composeVaultPrompt(input: VaultPromptInput): VaultPromptBlock[] 
   const tail = recent <= 0 ? [] : input.turns.slice(-recent);
   const omitted = input.turns.length - tail.length;
 
-  if (omitted > 0 && input.memory === null) {
+  // la condicion era `input.memory === null`, y eso bastaba mientras la unica
+  // memoria posible fuera la del turno vivo, que cubre la conversacion entera.
+  // Con relleno retroactivo deja de bastar: CUALQUIER memoria apagaba el aviso,
+  // incluido un indice que no sabe que se dijo dentro de ninguna escena. Es
+  // decir, la mera presencia del bloque le quitaba la orden de preguntar justo
+  // cuando menos sabia
+  const memoryCoversOmitted = input.memory !== null && memorySource !== 'index' && memoryGaps === 0;
+
+  if (omitted > 0 && !memoryCoversOmitted) {
     // decirlo importa: un modelo que no sabe que le falta contexto se inventa
     // la parte que falta con toda naturalidad
     blocks.push({
       label: 'aviso-turnos-omitidos',
-      text: `NOTA: se omiten ${omitted} turnos anteriores y todavia no hay memoria acumulativa. Si necesitas algo de esa parte, pidelo en vez de suponerlo.`,
+      text:
+        input.memory === null
+          ? `NOTA: se omiten ${omitted} turnos anteriores y todavia no hay memoria acumulativa. Si necesitas algo de esa parte, pidelo en vez de suponerlo.`
+          : // con el bloque de memoria delante, «todavia no hay memoria» seria
+            // mentira y le daria permiso para ignorar el aviso
+            `NOTA: se omiten ${omitted} turnos anteriores y lo que tienes anotado arriba no los cubre enteros. Si necesitas algo de esa parte, pidelo en vez de suponerlo.`,
     });
   }
 
