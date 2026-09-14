@@ -84,6 +84,14 @@ function montar(fallo?: Error): { registros: Registro[] } {
     privateMedia: { list: async () => [] },
     secretStore: { get: () => undefined },
     catalogs: { list: async () => [] },
+    recaps: {
+      read: async () => ({
+        entries: [],
+        counters: {},
+        droppedOnRead: 0,
+        unreadable: { entries: [] },
+      }),
+    },
     relations: {
       read: async () => {
         if (fallo !== undefined) throw fallo;
@@ -181,5 +189,37 @@ describe('«Comprobar la memoria» y el registro', () => {
     // y siguen siendo cifras: ni la cita del turno ni el uuid
     expect(JSON.stringify(memoria?.relaciones)).not.toContain('TARTA_SENTINEL');
     expect(JSON.stringify(memoria?.relaciones)).not.toContain(CONV);
+  });
+
+  it('cuenta cuantas conversaciones pueden retomarse, y sus cifras SUMAN', async () => {
+    // es la unica medida de cobertura de la MEMORIA que hay: lo demas mide
+    // catalogo, fechas, estilo y disparos. Una conversacion sin ficha cuenta
+    // como «sin nada», que es el estado seguro y el que hay que poder ver
+    const { registros } = montar();
+
+    const respuesta = await comprobar();
+    expect(respuesta.ok).toBe(true);
+    if (!respuesta.ok) return;
+
+    const recaps = respuesta.value.recaps as {
+      total: number;
+      excluded: number;
+      summarized: number;
+      withGaps: number;
+      indexOnly: number;
+      missing: number;
+      sealed: number;
+    };
+    expect(recaps).toBeDefined();
+    expect(recaps.total).toBe(1);
+    expect(recaps.missing).toBe(1);
+    expect(
+      recaps.summarized + recaps.withGaps + recaps.indexOnly + recaps.missing + recaps.sealed,
+    ).toBe(recaps.total - recaps.excluded);
+
+    // y al registro van esas cifras, no de que conversacion son
+    const memoria = registros.find((r) => r.mensaje === 'diagnostico de memoria')?.campos;
+    expect(memoria?.memoriaRetroactiva).toBeDefined();
+    expect(JSON.stringify(memoria?.memoriaRetroactiva)).not.toContain(CONV);
   });
 });

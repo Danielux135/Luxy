@@ -1424,7 +1424,21 @@ export interface RecapCoverage {
   withGaps: number;
   /** solo el indice deducido: NO cuenta como cobertura */
   indexOnly: number;
-  /** sin nada; conserva el aviso de turnos omitidos, que es el estado seguro */
+  /**
+   * escritas y a la espera de que Daniel las lea y las apruebe.
+   *
+   * Van aparte de `missing` porque no son el mismo estado y el arreglo de cada
+   * uno es distinto: una espera un minuto de lectura, la otra una llamada a un
+   * CLI. Mezclarlas hacia que, justo despues de una pasada que escribia las
+   * diecisiete fichas, la unica linea que mide esto dijera «17 sin leer» —lo
+   * contrario de lo que acababa de pasar—, y eso invita a repetir la pasada.
+   *
+   * Solo cuenta aqui la que entraria en el prompt con aprobarla y nada mas: una
+   * que ademas no llegue hasta la cola literal sigue siendo `missing`, porque
+   * ahi aprobar no basta.
+   */
+  awaitingApproval: number;
+  /** sin nada que pueda viajar; conserva el aviso de turnos omitidos, que es el estado seguro */
   missing: number;
   /** las que ya tenian memoria propia */
   sealed: number;
@@ -1433,7 +1447,8 @@ export interface RecapCoverage {
 /**
  * los numeros de la linea del panel, y SUMAN.
  *
- * `summarized + withGaps + indexOnly + missing + sealed === total - excluded`.
+ * `summarized + withGaps + indexOnly + awaitingApproval + missing + sealed ===
+ * total - excluded`.
  * Si no cuadra es un fallo, no un redondeo: es el equivalente al
  * `coverage.behind === 0` de los pendientes, que hoy no existe para la memoria.
  *
@@ -1454,6 +1469,7 @@ export function recapCoverage(input: {
     summarized: 0,
     withGaps: 0,
     indexOnly: 0,
+    awaitingApproval: 0,
     missing: 0,
     sealed: 0,
   };
@@ -1468,15 +1484,34 @@ export function recapCoverage(input: {
       continue;
     }
 
+    const entry = byConversation.get(conversation.conversationId);
     const chosen = chooseConversationMemory({
       sealed: null,
-      entry: byConversation.get(conversation.conversationId),
+      entry,
       turns: conversation.turns,
       recentTurns: input.recentTurns,
     });
 
-    if (chosen.memory === null) coverage.missing += 1;
-    else if (chosen.source === 'index') coverage.indexOnly += 1;
+    if (chosen.memory === null) {
+      // «no hay nada» y «hay algo escrito que solo espera tu visto bueno» no
+      // son el mismo estado. Se distingue con la MISMA funcion, preguntandole
+      // que pasaria si estuviera aprobada: asi una ficha que ademas no llega
+      // hasta la cola literal no se cuenta como «esperando», porque aprobarla
+      // no la haria viajar
+      if (entry !== undefined && entry.memory !== null && !entry.approved) {
+        const conVisto = chooseConversationMemory({
+          sealed: null,
+          entry: { ...entry, approved: true },
+          turns: conversation.turns,
+          recentTurns: input.recentTurns,
+        });
+        if (conVisto.memory !== null) {
+          coverage.awaitingApproval += 1;
+          continue;
+        }
+      }
+      coverage.missing += 1;
+    } else if (chosen.source === 'index') coverage.indexOnly += 1;
     else if (chosen.gaps > 0) coverage.withGaps += 1;
     else coverage.summarized += 1;
   }

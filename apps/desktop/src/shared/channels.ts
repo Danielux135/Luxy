@@ -71,6 +71,20 @@ export const IPC_INVOKE = {
   vaultRelationList: 'luxy:vault:relation:list',
   /** la ultima palabra de Daniel sobre un pendiente; el extractor no la pisa */
   vaultRelationUpdate: 'luxy:vault:relation:update',
+  /**
+   * rellena hacia atras la memoria acumulativa de las conversaciones que nunca
+   * la tuvieron. Ventana a ventana, y siempre por el CLI local
+   */
+  vaultRecapSync: 'luxy:vault:recap:sync',
+  /**
+   * lo rellenado, para poder LEERLO.
+   *
+   * No es un adorno: es la unica pantalla desde la que se puede leer la memoria
+   * de una conversacion antes de que el modelo de pago la arrastre para siempre
+   */
+  vaultRecapList: 'luxy:vault:recap:list',
+  /** la ultima palabra de Daniel: aprobar una, aprobarlas todas, o borrarla */
+  vaultRecapUpdate: 'luxy:vault:recap:update',
   /** quien hace el trabajo de fondo de la boveda: solo Claude o Codex */
   vaultAuxiliaryGet: 'luxy:vault:auxiliary:get',
   vaultAuxiliarySet: 'luxy:vault:auxiliary:set',

@@ -906,6 +906,8 @@ describe('recapCoverage', () => {
         conversacion('44444444-4444-4444-8444-444444444444'),
         conversacion('55555555-5555-4555-8555-555555555555', { sealed: true }),
         conversacion('66666666-6666-4666-8666-666666666666', { excluded: true }),
+        conversacion('77777777-7777-4777-8777-777777777777'),
+        conversacion('88888888-8888-4888-8888-888888888888'),
       ],
       entries: [
         entrada(),
@@ -919,16 +921,27 @@ describe('recapCoverage', () => {
           refusedAtTurns: 10,
           refusedProvider: 'codex',
         }),
+        // escrita y solo a la espera del visto bueno: ni resumida ni «sin nada»
+        entrada({ conversationId: '77777777-7777-4777-8777-777777777777', approved: false }),
+        // escrita, sin aprobar Y ademas no llega hasta la cola literal: aprobarla
+        // no bastaria, asi que NO puede contarse como «esperando»
+        entrada({
+          conversationId: '88888888-8888-4888-8888-888888888888',
+          approved: false,
+          covered: { from: 0, to: 0 },
+          coveredAt: instante(0),
+        }),
       ],
     });
 
     expect(coverage).toEqual({
-      total: 6,
+      total: 8,
       excluded: 1,
       summarized: 1,
       withGaps: 1,
       indexOnly: 1,
-      missing: 1,
+      awaitingApproval: 1,
+      missing: 2,
       sealed: 1,
     });
 
@@ -936,8 +949,40 @@ describe('recapCoverage', () => {
       coverage.summarized +
       coverage.withGaps +
       coverage.indexOnly +
+      coverage.awaitingApproval +
       coverage.missing +
       coverage.sealed;
     expect(suma).toBe(coverage.total - coverage.excluded);
+  });
+
+  it('«escrita esperando tu visto bueno» NO es lo mismo que «sin nada»', () => {
+    // justo despues de la pasada las diecisiete fichas estan sin aprobar, y la
+    // unica linea que mide esto decia «17 sin leer», que es lo contrario de lo
+    // que acababa de pasar. Y lo que eso invita a pulsar es volver a rellenar
+    const conversacion = {
+      conversationId: CONV,
+      sealed: false,
+      excluded: false,
+      turns: referencias(10),
+    };
+
+    const recienEscrita = recapCoverage({
+      conversations: [conversacion],
+      entries: [entrada({ approved: false })],
+    });
+    expect(recienEscrita.awaitingApproval).toBe(1);
+    expect(recienEscrita.missing).toBe(0);
+
+    const sinNada = recapCoverage({ conversations: [conversacion], entries: [] });
+    expect(sinNada.awaitingApproval).toBe(0);
+    expect(sinNada.missing).toBe(1);
+
+    // y aprobarla la pasa a resumida, sin tocar ningun otro cajon
+    const aprobada = recapCoverage({
+      conversations: [conversacion],
+      entries: [entrada({ approved: true })],
+    });
+    expect(aprobada.summarized).toBe(1);
+    expect(aprobada.awaitingApproval).toBe(0);
   });
 });

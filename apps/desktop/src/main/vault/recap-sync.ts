@@ -570,7 +570,7 @@ export class RecapSync {
         // la misma conversacion. Sin esto la excepcion saldria de la tanda, la
         // conversacion no quedaria marcada y, como el orden es cronologico,
         // volveria a ser la primera candidata en cada disparo
-        this.failures.set(candidate.conversationId, target.provider);
+        this.markFailure(candidate.conversationId, target.provider, options);
         result.failed.push({
           conversationId: candidate.conversationId,
           reason: redact(error instanceof Error ? error.message : String(error)),
@@ -613,6 +613,25 @@ export class RecapSync {
   /** la boveda se ha cerrado, o alguien ha pedido parar */
   private stopped(): boolean {
     return this.cancelled || !this.deps.vault.isUnlocked();
+  }
+
+  /**
+   * apunta que esa conversacion fallo con ese CLI, salvo en el vistazo.
+   *
+   * `dryRun` promete correr la pasada entera y NO dejar rastro, y esto es
+   * rastro aunque no toque el disco: `pending()` salta lo que hay en este mapa
+   * durante el resto de la sesion, asi que un CLI que no arrancaba durante la
+   * prueba dejaba a esas conversaciones fuera de la pasada de VERDAD, sin
+   * contarlas en «quedan» y sin salir en el aviso de fallidas. Un vistazo no
+   * puede cambiar lo que hara la pasada de verdad.
+   */
+  private markFailure(
+    conversationId: string,
+    provider: LocalCliProvider,
+    options: RecapRunOptions,
+  ): void {
+    if (options.dryRun === true) return;
+    this.failures.set(conversationId, provider);
   }
 
   /**
@@ -739,6 +758,12 @@ export class RecapSync {
    * No es «las que quedaban menos las que se han intentado»: una conversacion
    * larga puede seguir teniendo cola. Se recalcula con los MISMOS filtros y
    * siempre sin `force`, porque lo que queda es lo que la pasada haria sola.
+   *
+   * Y sin `conversationId`, por lo mismo: arrastrarlo hacia aqui hacia que
+   * «Rehacerlo» de UNA conversacion contestara «quedan 0» con catorce sin
+   * tocar, tres parrafos debajo de una linea de cobertura que decia otra cosa.
+   * Lo que se anuncia como «lo que queda» es lo que la pasada normal haria
+   * sola, no lo que queda de lo que se acaba de pedir.
    */
   private async remaining(
     target: Target,
@@ -750,8 +775,8 @@ export class RecapSync {
       const snapshot = await this.deps.recaps.read(this.deps.vault);
       const entries = new Map(snapshot.entries.map((entry) => [entry.conversationId, entry]));
       return this.pending(await this.deps.timeline(), entries, target, {
-        ...options,
-        force: false,
+        projectAlias: options.projectAlias,
+        ...(options.limit === undefined ? {} : { limit: options.limit }),
       }).length;
     } catch {
       return fallback;
@@ -793,8 +818,19 @@ export class RecapSync {
     // todas las ventanas fallaron y no habia nada de antes: queda el indice
     // deducido, que no es memoria —solo dice que escenas hubo— pero es cero
     // llamadas e imposible que se niegue. Con la boveda cerrada tampoco, que
-    // sellarlo es lo unico que no se puede hacer sin llave
-    if (state.memory === null && state.windows > 0 && !this.stopped()) {
+    // sellarlo es lo unico que no se puede hacer sin llave.
+    //
+    // «Y no habia nada de antes» es literal: el indice es la caida de quien NO
+    // tiene ficha, nunca el sustituto de una que si se leyo. Sin esa condicion,
+    // «Rehacerlo» sobre una ficha aprobada y en uso la cambiaba por un «no se
+    // sabe que se dijo dentro» —aprobado ademas sin que nadie lo aprobara— en
+    // cuanto el CLI se negaba una vez
+    if (
+      state.memory === null &&
+      state.windows > 0 &&
+      !this.stopped() &&
+      !this.keepsPrevious(state)
+    ) {
       const deduced = this.deduce(state, catalog, pass);
       if (deduced !== null) {
         pass.result.deduced += 1;
@@ -923,7 +959,7 @@ export class RecapSync {
       } catch (error) {
         // el proceso no termino. No dice nada del contenido, asi que no se
         // persiste como negativa: se marca en la sesion y se deja para otro rato
-        this.failures.set(state.conversationId, pass.target.provider);
+        this.markFailure(state.conversationId, pass.target.provider, pass.options);
         pass.result.failed.push({
           conversationId: state.conversationId,
           reason: redact(error instanceof Error ? error.message : String(error)),
@@ -1089,16 +1125,40 @@ export class RecapSync {
     pass.result[field] = pass.result[field] + amount;
   }
 
+  /**
+   * true cuando esta pasada se va de vacio y lo que ya habia SI valia.
+   *
+   * Es la otra mitad de la regla de la §16. La primera mitad —«si la pasada no
+   * cambia nada, la entrada anterior se conserva entera»— miraba `mutated`, y
+   * una negativa SI muta el estado: declara su hueco y mueve el cursor. Eso
+   * bastaba mientras el estado partiera de la ficha anterior, porque entonces
+   * `state.memory` seguia llena; con «Rehacerlo» se parte de cero a proposito,
+   * asi que una sola negativa dejaba `memory` en `null` con `mutated` en true y
+   * la entrada se reescribia vacia. Perdido el texto que Daniel habia leido y
+   * aprobado, y `recap.json` es la unica copia.
+   *
+   * Un indice deducido no cuenta: ese si puede sustituirse por otro indice o
+   * por una ficha de verdad, porque no lo escribio nadie leyendo la
+   * conversacion.
+   */
+  private keepsPrevious(state: ConversationState): boolean {
+    if (state.memory !== null) return false;
+    const previous = state.previous;
+    return previous !== null && previous.memory !== null && previous.source === 'cli';
+  }
+
   private entryOf(state: ConversationState, pass: PassState): RecapEntry {
     const memory = state.memory;
 
-    // esta pasada no ha cambiado NADA de lo que habia —ni la ficha, ni el tramo
-    // cubierto, ni los huecos—, asi que lo unico que hay que apuntar es que el
-    // CLI no dio nada. Reescribir la entrada entera borraria la aprobacion de
-    // Daniel, y con ella la memoria de todos los prompts futuros de ese hilo,
-    // por un fallo del trabajo de fondo: justo lo que `D-088` prohibe. El texto
-    // seria byte a byte el mismo y no habria nada que dijera por que
-    if (!state.mutated && state.previous !== null) {
+    // dos casos en los que lo que habia se conserva ENTERO y lo unico que se
+    // apunta es que el CLI no dio nada: que esta pasada no haya cambiado NADA
+    // —ni la ficha, ni el tramo cubierto, ni los huecos—, y que se haya ido de
+    // vacio habiendo una ficha de CLI detras. Reescribir la entrada borraria la
+    // aprobacion de Daniel, y con ella la memoria de todos los prompts futuros
+    // de ese hilo, por un fallo del trabajo de fondo: justo lo que `D-088`
+    // prohibe. Y el motivo si se estampa, para que el panel pueda decir a que
+    // CLI cambiar
+    if (state.previous !== null && (!state.mutated || this.keepsPrevious(state))) {
       return recapEntrySchema.parse({
         ...state.previous,
         refusedKind: state.refusedKind,

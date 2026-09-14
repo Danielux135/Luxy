@@ -61,6 +61,10 @@ const NEGATIVA =
 /** obedecio y saneo, que es el caso peor: valida, pero no dice nada */
 const VAGA = 'Tuvieron un momento intimo y despues hablaron de otras cosas.';
 
+/** otra ficha buena, para distinguir la que sustituye de la que se conserva */
+const OTRO_RESUMEN =
+  'Siguen en su casa: el ha bajado a por vino y ella le espera en el sofa con la manta puesta, hablandole de la llamada de su hermana.';
+
 interface FichaOverrides {
   summary?: string;
   facts?: string[];
@@ -428,13 +432,13 @@ describe('la ficha que se guarda', () => {
   });
 });
 
-describe('el orden de la pasada', () => {
-  const dosConversaciones = (): MontajeOptions['conversations'] => [
-    // la nueva se lista primero, como haria el almacen: ordena por actividad
-    { conversationId: CONV_NUEVA, turns: conversacion(4, 10) },
-    { conversationId: CONV_VIEJA, turns: conversacion(4, 1) },
-  ];
+/** dos conversaciones; la nueva se lista primero, como haria el almacen */
+const dosConversaciones = (): MontajeOptions['conversations'] => [
+  { conversationId: CONV_NUEVA, turns: conversacion(4, 10) },
+  { conversationId: CONV_VIEJA, turns: conversacion(4, 1) },
+];
 
+describe('el orden de la pasada', () => {
   it('va en orden cronologico: primero la mas antigua', async () => {
     // la ficha se acumula hacia delante: empezar por el final daria una memoria
     // que habla del desenlace antes que del principio
@@ -708,6 +712,182 @@ describe('la escalera de negativas', () => {
     expect(montaje.calls).toHaveLength(2);
     expect(result.reviewed).toBe(1);
     expect(montaje.recaps.entry(CONV_VIEJA)!.gaps).toHaveLength(0);
+  });
+});
+
+describe('«Rehacerlo» sobre una ficha que ya valia', () => {
+  /** una ficha leida, aprobada y viajando hoy en cada turno de ese hilo */
+  function conFichaAprobada(turns: PrivateTurnView[]): RecapEntry {
+    return recapEntrySchema.parse({
+      conversationId: CONV_VIEJA,
+      memory: memoria(RESUMEN),
+      source: 'cli',
+      covered: { from: 0, to: turns.length - 1 },
+      coveredAt: turns[turns.length - 1]!.createdAt,
+      turnsAtRecap: turns.length,
+      version: RECAP_VERSION,
+      provider: 'codex',
+      model: null,
+      at: ANCHOR.instant,
+      chars: 120,
+      approved: true,
+    });
+  }
+
+  it('NO la cambia por una vacia cuando el CLI se niega esta vez', async () => {
+    // `force` empieza de cero a proposito, asi que el estado arranca sin ficha;
+    // una sola negativa declara su hueco y mueve el cursor, y con eso la
+    // proteccion que miraba «esta pasada no ha cambiado nada» dejaba de aplicar
+    // y la entrada se reescribia vacia. `recap.json` es la unica copia
+    const turns = conversacion(4);
+    const montaje = montar({
+      conversations: [{ conversationId: CONV_VIEJA, turns }],
+      replies: [NEGATIVA],
+    });
+    montaje.recaps.state = {
+      counters: recapCountersSchema.parse({}),
+      entries: [conFichaAprobada(turns)],
+    };
+
+    const result = await montaje.sync.runOnce({ projectAlias: 'luxy', force: true });
+
+    expect(result.refused).toBe(1);
+    const entry = montaje.recaps.entry(CONV_VIEJA)!;
+    expect(entry.memory?.summary).toBe(RESUMEN);
+    expect(entry.approved).toBe(true);
+    expect(entry.covered).toEqual({ from: 0, to: 3 });
+    // y el motivo si se estampa: el panel tiene que poder decir a que CLI cambiar
+    expect(entry.refusedKind).toBe('refused');
+    expect(entry.refusedProvider).toBe('codex');
+  });
+
+  it('ni por el indice deducido, que es la caida de quien NO tiene nada', async () => {
+    // el indice dice que escenas hubo y declara que no se sabe que se dijo
+    // dentro; ademas nace aprobado. Sustituir con el una ficha leida y aprobada
+    // metia en el prompt algo que nadie aprobo, y peor que lo que habia
+    const turns = conversacion(4);
+    const montaje = montar({
+      conversations: [{ conversationId: CONV_VIEJA, turns }],
+      replies: [NEGATIVA],
+      scenes: [
+        escena(CONV_VIEJA, {
+          from: 0,
+          to: 1,
+          title: 'la primera noche',
+          summary: 'se escriben hasta tarde y quedan en seguir al dia siguiente',
+        }),
+      ],
+    });
+    montaje.recaps.state = {
+      counters: recapCountersSchema.parse({}),
+      entries: [conFichaAprobada(turns)],
+    };
+
+    const result = await montaje.sync.runOnce({ projectAlias: 'luxy', force: true });
+
+    expect(result.deduced).toBe(0);
+    const entry = montaje.recaps.entry(CONV_VIEJA)!;
+    expect(entry.source).toBe('cli');
+    expect(entry.memory?.summary).toBe(RESUMEN);
+    expect(entry.approved).toBe(true);
+  });
+
+  it('tampoco cuando lo que sale esta vez es una ficha vaga', async () => {
+    // una vaga no declara hueco ni mueve el cursor, pero deja `memory` en null,
+    // que es lo que disparaba el indice. El guardia de la entrada y el disparo
+    // del indice miraban cosas distintas, y por ese hueco se perdia lo aprobado
+    const turns = conversacion(4);
+    const montaje = montar({
+      conversations: [{ conversationId: CONV_VIEJA, turns }],
+      replies: [ficha({ from: 0, to: 3 }, { summary: VAGA, facts: [], decisions: [] })],
+      scenes: [
+        escena(CONV_VIEJA, {
+          from: 0,
+          to: 3,
+          title: 'la cocina',
+          summary: 'ella le cuenta como le ha ido el dia mientras cena de pie',
+        }),
+      ],
+    });
+    montaje.recaps.state = {
+      counters: recapCountersSchema.parse({}),
+      entries: [conFichaAprobada(turns)],
+    };
+
+    const result = await montaje.sync.runOnce({ projectAlias: 'luxy', force: true });
+
+    expect(result.vague).toBe(1);
+    const entry = montaje.recaps.entry(CONV_VIEJA)!;
+    expect(entry.source).toBe('cli');
+    expect(entry.memory?.summary).toBe(RESUMEN);
+    expect(entry.approved).toBe(true);
+    expect(entry.refusedKind).toBe('vague');
+  });
+
+  it('pero SI la sustituye cuando esta vez sale una ficha buena', async () => {
+    // conservar lo anterior no puede convertirse en «no se puede rehacer nada»
+    const turns = conversacion(4);
+    const montaje = montar({
+      conversations: [{ conversationId: CONV_VIEJA, turns }],
+      replies: [ficha({ from: 0, to: 3 }, { summary: OTRO_RESUMEN })],
+    });
+    montaje.recaps.state = {
+      counters: recapCountersSchema.parse({}),
+      entries: [conFichaAprobada(turns)],
+    };
+
+    await montaje.sync.runOnce({ projectAlias: 'luxy', force: true });
+
+    const entry = montaje.recaps.entry(CONV_VIEJA)!;
+    expect(entry.memory?.summary).toBe(OTRO_RESUMEN);
+    // texto nuevo, aprobacion nueva: se lee antes de dejarla entrar
+    expect(entry.approved).toBe(false);
+  });
+
+  it('y lo que queda por rellenar se cuenta sobre TODAS, no sobre la pedida', async () => {
+    // `remaining` arrastraba el `conversationId` de la peticion, asi que tras
+    // «Rehacerlo» de una sola el panel decia «quedan 0» con las demas sin tocar,
+    // tres parrafos debajo de una linea de cobertura que decia otra cosa
+    const montaje = montar({
+      conversations: dosConversaciones(),
+      replies: [ficha({ from: 0, to: 3 })],
+    });
+
+    const result = await montaje.sync.runOnce({
+      projectAlias: 'luxy',
+      conversationId: CONV_VIEJA,
+      force: true,
+    });
+
+    expect(montaje.calls).toHaveLength(1);
+    expect(result.pending).toBe(1);
+  });
+});
+
+describe('el vistazo que no deja rastro', () => {
+  it('un fallo durante la prueba NO saca esa conversacion de la pasada de verdad', async () => {
+    // `dryRun` promete correr la pasada entera y no dejar rastro. Los fallos de
+    // sesion son rastro aunque no toquen el disco: `pending` los salta durante
+    // el resto de la sesion, asi que un CLI que no arrancaba durante la prueba
+    // dejaba esas conversaciones sin leer y sin salir en ningun aviso
+    let fallar = true;
+    const montaje = montar({
+      conversations: corta(),
+      replies: [ficha({ from: 0, to: 3 })],
+      onCall: () => {
+        if (fallar) throw new Error('el agente no respondio a tiempo');
+      },
+    });
+
+    const prueba = await montaje.sync.runOnce({ projectAlias: 'luxy', dryRun: true });
+    expect(prueba.failed).toHaveLength(1);
+    expect(montaje.sync.failedThisSession).toBe(0);
+
+    fallar = false;
+    const real = await montaje.sync.runOnce({ projectAlias: 'luxy' });
+
+    expect(real.reviewed).toBe(1);
+    expect(montaje.recaps.entry(CONV_VIEJA)!.memory?.summary).toBe(RESUMEN);
   });
 });
 

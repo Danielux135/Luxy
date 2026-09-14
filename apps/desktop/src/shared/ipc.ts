@@ -12,6 +12,8 @@ import {
   ACTIVE_RELATION_KINDS,
   LOCAL_CLI_PROVIDERS,
   REASONING_EFFORTS,
+  RECAP_REFUSAL_KINDS,
+  RECAP_SOURCES,
   RELATION_PARTIES,
   RELATION_STATUSES,
   type agentEventSchema,
@@ -680,6 +682,249 @@ export const vaultRelationUpdateArgsSchema = z.object({
 });
 
 /**
+ * rellena hacia atras la memoria acumulativa de las conversaciones viejas.
+ *
+ * Como la de pendientes, no lleva proveedor: el trabajo de fondo va SIEMPRE al
+ * CLI elegido en el panel, nunca al de la ventana, y nunca a una API de pago.
+ */
+export const vaultRecapSyncArgsSchema = z.object({
+  projectAlias: projectAliasSchema,
+  /** solo esta, y empezandola desde cero si ademas viene `force` */
+  conversationId: conversationIdSchema.optional(),
+  /**
+   * tope de conversaciones por tanda.
+   *
+   * Dos, y no tres como los pendientes, porque aqui una sola conversacion puede
+   * gastar varias llamadas: una ventana por cada cuarenta turnos. Es el mismo
+   * numero que `RECAP_DEFAULT_LIMIT` en la pasada, repetido aqui porque esta
+   * capa no puede importar del proceso principal; la prueba lo fija.
+   */
+  limit: z.number().int().min(1).max(10).default(2),
+  /**
+   * pedida a mano: es «Rehacerlo».
+   *
+   * No solo se salta la negativa persistida, ademas empieza la conversacion
+   * desde cero. Sin eso, una ya cubierta con huecos no se podria reintentar con
+   * el otro CLI, que es justo lo que promete el boton.
+   */
+  force: z.boolean().default(false),
+  /**
+   * corre la pasada entera y NO guarda nada.
+   *
+   * Es lo unico que contesta a la vez «¿se niegan los CLI?» y «¿sale bueno el
+   * resumen?», y hoy no hay en todo el repositorio ni una medida de negativa de
+   * Claude o de Codex sobre esta boveda. Lo que devuelve es contenido de la
+   * boveda: viaja al renderer como cualquier turno, y a ningun registro.
+   */
+  dryRun: z.boolean().default(false),
+});
+
+/**
+ * lo que se HABRIA guardado, para poder leerlo antes de decidir.
+ *
+ * Solo viene con `dryRun`. `block` es el texto ya renderizado de la ficha, o
+ * sea contenido descifrado de la boveda: se enseña y se tira, nunca se registra.
+ */
+export const vaultRecapPreviewSchema = z.object({
+  conversationId: z.string(),
+  block: z.string(),
+  source: z.enum(RECAP_SOURCES),
+  covered: z.object({
+    from: z.number().int().min(0),
+    to: z.number().int().min(0),
+  }),
+  /** tramos que el CLI prefirio no resumir: declararlos es un EXITO */
+  gaps: z.number().int().min(0),
+  chars: z.number().int().min(0),
+  /**
+   * la CLASIFICACION de lo que paso, jamas el texto.
+   *
+   * A este CLI se le ha pedido describir la escena, asi que lo que conteste en
+   * lugar de la ficha puede citarla. La clasificacion da la misma informacion
+   * operativa —que boton pulsar— sin traerse nada de la conversacion.
+   */
+  refusedKind: z.enum(RECAP_REFUSAL_KINDS).nullable(),
+});
+
+export const vaultRecapSyncResultSchema = z.object({
+  /** conversaciones cuya ficha se escribio o se amplio */
+  reviewed: z.number().int().min(0),
+  /** llamadas al CLI: una por ventana */
+  windows: z.number().int().min(0),
+  /** ventanas que salieron enteras */
+  ok: z.number().int().min(0),
+  /** ventanas con tramos declarados. Es un EXITO: el hueco viaja al prompt */
+  partial: z.number().int().min(0),
+  /** conversaciones que se quedaron en el indice deducido, sin llamar a nadie */
+  deduced: z.number().int().min(0),
+  /** ventanas en las que el CLI se nego */
+  refused: z.number().int().min(0),
+  /** ventanas que obedecieron y sanearon: el caso peor, porque valida */
+  vague: z.number().int().min(0),
+  /** ventanas cuyo bloque no se pudo leer: ausente, cortado o mal formado */
+  invalid: z.number().int().min(0),
+  failed: z.array(z.object({ conversationId: z.string(), reason: z.string() })),
+  /** conversaciones que ya tenian memoria propia: la sellada gana siempre */
+  superseded: z.number().int().min(0),
+  gaps: z.number().int().min(0),
+  /** turnos que no se enseñaron enteros. Con el presupuesto de hoy es 0 */
+  clipped: z.number().int().min(0),
+  kept: z.number().int().min(0),
+  rewritten: z.number().int().min(0),
+  dropped: z.number().int().min(0),
+  /** lo que las ventanas encadenadas APORTARON: sin esto una esteril parece perfecta */
+  added: z.number().int().min(0),
+  /** suma de los bloques renderizados: lo que se paga en cada turno futuro */
+  chars: z.number().int().min(0),
+  /**
+   * las que siguen por rellenar AL TERMINAR la tanda, recalculado.
+   *
+   * Como en los pendientes, no basta para decidir si dar otra vuelta: una tanda
+   * entera negada no avanza ningun cursor. Lo que dice que pare es que no pase
+   * nada de nada.
+   */
+  pending: z.number().int().min(0),
+  provider: z.enum(LOCAL_CLI_PROVIDERS),
+  /** true si la preferencia guardada pedia un proveedor de pago y se sustituyo */
+  replaced: z.boolean(),
+  /** vacio salvo con `dryRun` */
+  preview: z.array(vaultRecapPreviewSchema).default([]),
+});
+
+/**
+ * una conversacion rellenada, tal y como se repasa.
+ *
+ * Lleva el bloque ENTERO a proposito, igual que los pendientes llevan la cita:
+ * es lo unico con lo que se puede juzgar si lo escrito vale, y desde el primer
+ * turno nuevo el modelo de pago lo va a arrastrar para siempre. Lo que no sale
+ * de aqui nunca es lo que dijo el CLI cuando se nego a escribirlo.
+ */
+export const vaultRecapRowSchema = z.object({
+  conversationId: z.string(),
+  /** el mismo que se ve en la lista de Privado */
+  title: z.string(),
+  /** el dia civil del ultimo turno, con el corte de las 05:00 */
+  day: z.string(),
+  /** «cubre 40 de 65»: turnos cubiertos por la ficha y turnos que hay */
+  covered: z.number().int().min(0),
+  turns: z.number().int().min(0),
+  /** `formatConversationMemory` de la ficha; cadena vacia si no hay nada que leer */
+  block: z.string(),
+  chars: z.number().int().min(0),
+  source: z.enum(RECAP_SOURCES),
+  /** tramos declarados que nadie resumio: de esos no se sabe nada */
+  gaps: z.number().int().min(0),
+  approved: z.boolean(),
+  /** con que CLI se escribio: «revisado con Codex» */
+  provider: z.enum(LOCAL_CLI_PROVIDERS).nullable(),
+  model: z.string().nullable(),
+  at: z.string(),
+  /**
+   * que paso, clasificado. NUNCA lo que contesto el modelo.
+   *
+   * La fila de un fallo se enseña con el dia, el numero de mensajes y esto; el
+   * titulo se queda fuera, porque una negativa no tiene por que decir de que iba
+   * la conversacion.
+   */
+  refusedKind: z.enum(RECAP_REFUSAL_KINDS).nullable(),
+  /** a que CLI se le nego: el boton de reintentar apunta al OTRO por su nombre */
+  refusedProvider: z.enum(LOCAL_CLI_PROVIDERS).nullable(),
+  /** ya tiene memoria sellada viva: el relleno no la toca y se marco */
+  superseded: z.boolean(),
+  /**
+   * esa conversacion tiene memoria sellada AHORA MISMO.
+   *
+   * No es lo mismo que `superseded`, que es la marca que estampa la pasada: en
+   * cuanto Daniel contesta un turno de un hilo sin aprobar, ese turno sella su
+   * propia memoria y la ficha deja de poder entrar, pero la marca no llega
+   * hasta la pasada siguiente. Sin esto, entre medias la fila decia «aprobada,
+   * pero todavia no llega hasta los ultimos turnos», que es falso: no llega
+   * porque la conversacion ya tiene memoria propia, y la sellada gana siempre.
+   */
+  sealed: z.boolean(),
+  /**
+   * excluida a mano del trabajo de fondo.
+   *
+   * Excluir no borra su ficha ni se la quita a su propio hilo —el turno no
+   * consulta las exclusiones—, solo la saca de la pasada. La fila lo dice para
+   * que «en uso» no parezca contradecir a un «Rehacerlo» que ahi no haria nada.
+   */
+  excluded: z.boolean(),
+  /**
+   * hay una entrada suya en el almacen.
+   *
+   * Falso en las filas de una conversacion que todavia no se ha leido nunca.
+   * Existen para contestar «¿cuales quedaron sin resumir?», que antes solo era
+   * un numero, y sobre todo para que una conversacion que ni se pudo leer ni se
+   * pudo guardar tenga desde donde reintentarse: el aviso mandaba pulsar
+   * «Rehacerlo» en una fila que no existia.
+   */
+  hasEntry: z.boolean(),
+  /**
+   * si hoy viajaria de verdad en el prompt.
+   *
+   * No es lo mismo que tener ficha: una sin aprobar, o una que no llega hasta la
+   * cola literal, existe y no se usa. Se calcula con la MISMA funcion que decide
+   * en el turno, para que el panel no pueda decir «resumida» de algo que el
+   * turno esta descartando.
+   */
+  inPrompt: z.boolean(),
+});
+
+/**
+ * la linea de cobertura, y sus numeros SUMAN.
+ *
+ * `summarized + withGaps + indexOnly + awaitingApproval + missing + sealed ===
+ * total - excluded`. Si no cuadra es un fallo, no un redondeo.
+ */
+export const vaultRecapCoverageSchema = z.object({
+  total: z.number().int().min(0),
+  excluded: z.number().int().min(0),
+  /** con ficha completa de un CLI, aprobada y al dia */
+  summarized: z.number().int().min(0),
+  /** con ficha, pero con tramos que nadie resumio */
+  withGaps: z.number().int().min(0),
+  /** solo el indice deducido: NO cuenta como cobertura */
+  indexOnly: z.number().int().min(0),
+  /**
+   * escritas y esperando que Daniel las lea y las apruebe.
+   *
+   * Sin este cajon, la linea decia «17 sin leer» justo despues de la pasada que
+   * escribia las diecisiete, que es lo contrario de lo que habia pasado.
+   */
+  awaitingApproval: z.number().int().min(0),
+  /** sin nada que pueda viajar; conserva el aviso de turnos omitidos, que es el estado seguro */
+  missing: z.number().int().min(0),
+  /** las que ya tenian memoria propia */
+  sealed: z.number().int().min(0),
+});
+
+export const vaultRecapListResultSchema = z.object({
+  rows: z.array(vaultRecapRowSchema),
+  coverage: vaultRecapCoverageSchema,
+});
+
+/**
+ * la ultima palabra de Daniel sobre una ficha.
+ *
+ * Tres verbos y ninguna edicion libre: `approve` la deja entrar en el prompt,
+ * `approve-all` hace lo mismo con todas las que esperan —son diecisiete textos
+ * cortos—, y `forget` borra la entrada y devuelve esa conversacion a su aviso de
+ * turnos omitidos, que es el estado seguro. Eso hace el trabajo reversible.
+ *
+ * Es una union discriminada, y ESTRICTA, y las dos cosas por lo mismo: que
+ * `approve-all` no pueda llegar con un `conversationId` que nadie mire ni
+ * `approve` con un texto que nadie escriba. Sin `strict` un campo de mas se
+ * descarta en silencio, y entonces un boton dice una cosa y hace otra; con el,
+ * el fallo del que llama se ve en vez de aprobar diecisiete fichas.
+ */
+export const vaultRecapUpdateArgsSchema = z.discriminatedUnion('action', [
+  z.object({ action: z.literal('approve'), conversationId: conversationIdSchema }).strict(),
+  z.object({ action: z.literal('forget'), conversationId: conversationIdSchema }).strict(),
+  z.object({ action: z.literal('approve-all') }).strict(),
+]);
+
+/**
  * quien hace el trabajo de fondo de la boveda.
  *
  * Solo Claude o Codex, que van con la sesion local: con la API de pago de la
@@ -1054,6 +1299,15 @@ export const vaultMemoryDiagnosticsResultSchema = z.object({
   }),
   /** los asuntos pendientes, si hay almacen que leer */
   relations: vaultRelationDiagnosticsSchema.optional(),
+  /**
+   * cuantas conversaciones pueden retomarse, y de que clase es su memoria.
+   *
+   * Va como campo aparte y opcional, igual que los pendientes: un almacen que no
+   * se abre no puede dejar sin cifras al resto del diagnostico. Es la unica
+   * medida de cobertura de la MEMORIA que hay; lo demas mide catalogo, fechas,
+   * estilo y disparos.
+   */
+  recaps: vaultRecapCoverageSchema.optional(),
 });
 
 /**
@@ -1737,6 +1991,21 @@ export interface LuxyBridge {
   updateVaultRelation(
     args: z.infer<typeof vaultRelationUpdateArgsSchema>,
   ): Promise<IpcResult<z.infer<typeof vaultRelationListResultSchema>>>;
+  /**
+   * rellena hacia atras la memoria de lo ya hablado.
+   *
+   * Con `dryRun` corre la pasada entera y no guarda nada: devuelve el texto que
+   * escribiria para poder leerlo antes de dejarlo entrar en ningun prompt.
+   */
+  syncVaultRecaps(
+    args: z.infer<typeof vaultRecapSyncArgsSchema>,
+  ): Promise<IpcResult<z.infer<typeof vaultRecapSyncResultSchema>>>;
+  /** lo rellenado, para leerlo y aprobarlo; incluye la linea de cobertura */
+  listVaultRecaps(): Promise<IpcResult<z.infer<typeof vaultRecapListResultSchema>>>;
+  /** aprueba, aprueba todas o borra, y devuelve la lista ya actualizada */
+  updateVaultRecap(
+    args: z.infer<typeof vaultRecapUpdateArgsSchema>,
+  ): Promise<IpcResult<z.infer<typeof vaultRecapListResultSchema>>>;
   getVaultAuxiliary(): Promise<IpcResult<z.infer<typeof vaultAuxiliaryChoiceSchema> | null>>;
   setVaultAuxiliary(
     args: z.infer<typeof vaultAuxiliarySetArgsSchema>,

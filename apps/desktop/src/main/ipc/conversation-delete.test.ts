@@ -1,11 +1,11 @@
 // borrar una conversacion privada: lo que tiene que pasar aunque algo falle.
 //
-// El handler toca cuatro sitios —medios, archivo, catalogo y pendientes— y
-// termina invalidando la memoria episodica, que es la unica de las cinco cosas
-// que guarda los turnos DESCIFRADOS en RAM. Los dos almacenes cifrados pueden
-// pararse en seco (el de pendientes lo hace a proposito cuando su archivo no
-// abre), asi que lo que se prueba aqui es que ese fallo no deja al personaje
-// pudiendo citar lo que Daniel acaba de borrar.
+// El handler toca cinco sitios —medios, archivo, catalogo, pendientes y la
+// memoria retroactiva— y termina invalidando la memoria episodica, que es la
+// unica de las seis cosas que guarda los turnos DESCIFRADOS en RAM. Los tres
+// almacenes cifrados pueden pararse en seco (el de pendientes lo hace a
+// proposito cuando su archivo no abre), asi que lo que se prueba aqui es que ese
+// fallo no deja al personaje pudiendo citar lo que Daniel acaba de borrar.
 import { describe, it, expect, vi } from 'vitest';
 
 /** canales registrados por `registerIpcHandlers`, para poder invocarlos */
@@ -43,9 +43,19 @@ interface Huella {
   deleted: string[];
 }
 
-function registrar(relations: { removeConversation: () => Promise<void> }): Huella {
+function registrar(
+  relations: { removeConversation: () => Promise<void> },
+  catalogs: { removeConversation: () => Promise<void> } = {
+    removeConversation: async () => undefined,
+  },
+): Huella {
   const huella: Huella = { invalidated: 0, deleted: [] };
   const context = {
+    recaps: {
+      removeConversation: async (_vault: unknown, id: string) => {
+        huella.deleted.push(`recap:${id}`);
+      },
+    },
     // `registerIpcHandlers` engancha el trabajo de fondo al cierre de la boveda
     // nada mas registrar: sin estos dos, el registro ni siquiera llegaria a los
     // handlers que esta prueba quiere invocar
@@ -60,7 +70,7 @@ function registrar(relations: { removeConversation: () => Promise<void> }): Huel
         huella.deleted.push(`archivo:${id}`);
       },
     },
-    catalogs: { removeConversation: async () => undefined },
+    catalogs,
     relations,
     privateMemory: {
       invalidate: () => {
@@ -84,8 +94,19 @@ describe('borrar una conversacion privada', () => {
     const huella = registrar({ removeConversation: async () => undefined });
 
     expect(await borrar()).toMatchObject({ ok: true });
-    expect(huella.deleted).toEqual([`medios:${CONV}`, `archivo:${CONV}`]);
+    expect(huella.deleted).toEqual([`medios:${CONV}`, `archivo:${CONV}`, `recap:${CONV}`]);
     expect(huella.invalidated).toBe(1);
+  });
+
+  it('SE LLEVA TAMBIEN SU MEMORIA RETROACTIVA', async () => {
+    // un recap es un resumen de lo que se dijo ahi dentro: dejarlo seria
+    // conservar cifrado en disco justo lo que Daniel acaba de mandar borrar, y
+    // ademas seguiria viajando en el prompt si la conversacion se recreara con
+    // el mismo identificador
+    const huella = registrar({ removeConversation: async () => undefined });
+
+    expect(await borrar()).toMatchObject({ ok: true });
+    expect(huella.deleted).toContain(`recap:${CONV}`);
   });
 
   it('SI EL ALMACEN DE PENDIENTES FALLA, la memoria se invalida igual', async () => {
@@ -101,6 +122,39 @@ describe('borrar una conversacion privada', () => {
     expect(await borrar()).toMatchObject({ ok: false });
     // pero la conversacion ya no esta en disco, asi que el indice con los
     // turnos descifrados no puede seguir sirviendolos como recuerdos
+    expect(huella.invalidated).toBe(1);
+  });
+
+  it('Y SU MEMORIA RETROACTIVA SE VA IGUAL, aunque los pendientes revienten', async () => {
+    // encadenados en un solo `try`, el fallo de uno cancelaba a los que venian
+    // detras. Lo que quedaba en disco era el resumen de lo que se dijo en la
+    // conversacion que Daniel acaba de mandar borrar, y ademas inalcanzable: sin
+    // conversacion no hay fila, y sin fila no hay «Borrarlo»
+    const huella = registrar({
+      removeConversation: async () => {
+        throw new Error('el indice de pendientes no se puede descifrar');
+      },
+    });
+
+    expect(await borrar()).toMatchObject({ ok: false });
+    expect(huella.deleted).toContain(`recap:${CONV}`);
+  });
+
+  it('y tambien cuando el que revienta es el CATALOGO', async () => {
+    // el catalogo va delante de los otros dos, asi que era el que mas se los
+    // llevaba por delante. Y la boveda puede bloquearse sola entre dos `await`,
+    // que no necesita ningun archivo corrupto
+    const huella = registrar(
+      { removeConversation: async () => undefined },
+      {
+        removeConversation: async () => {
+          throw new Error('la boveda esta bloqueada');
+        },
+      },
+    );
+
+    expect(await borrar()).toMatchObject({ ok: false });
+    expect(huella.deleted).toContain(`recap:${CONV}`);
     expect(huella.invalidated).toBe(1);
   });
 });

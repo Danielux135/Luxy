@@ -4,7 +4,12 @@
 // darse cuenta al editar el contrato, que son justo las de seguridad.
 import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
-import { agentEventSchema, hostRequestSchema, hostResponseSchema } from '@luxy/shared';
+import {
+  agentEventSchema,
+  hostRequestSchema,
+  hostResponseSchema,
+  type RecapCoverage,
+} from '@luxy/shared';
 // el modulo entero, para poder barrer sus esquemas en vez de listarlos a mano
 import * as ipc from './ipc.js';
 import {
@@ -28,6 +33,10 @@ import {
   vaultCompatibilityArgsSchema,
   vaultMediaAttachArgsSchema,
   vaultMemoryReadArgsSchema,
+  vaultRecapCoverageSchema,
+  vaultRecapSyncArgsSchema,
+  vaultRecapSyncResultSchema,
+  vaultRecapUpdateArgsSchema,
   worktreeOpenFolderArgsSchema,
   studioJobActionArgsSchema,
   studioJobsListArgsSchema,
@@ -316,6 +325,149 @@ describe('validacion de argumentos', () => {
       }).success,
     ).toBe(false);
     expect(secretNameSchema.safeParse('LUXY_HTTP_EXTERNO_API_KEY').success).toBe(true);
+  });
+});
+
+describe('el relleno de la memoria de lo ya hablado', () => {
+  const MINIMO = { projectAlias: 'luxy' };
+  const CONV = 'aaaaaaaa-1111-4111-8111-111111111111';
+
+  it('mira sin guardar solo cuando se pide: por defecto el relleno escribe', () => {
+    // el valor por defecto decide lo que pasa cuando el renderer no dice nada.
+    // Al reves —`dryRun` a true por defecto— el panel diria que ha rellenado
+    // diecisiete conversaciones y no habria ni una ficha en disco
+    expect(vaultRecapSyncArgsSchema.parse(MINIMO).dryRun).toBe(false);
+    expect(vaultRecapSyncArgsSchema.parse({ ...MINIMO, dryRun: true }).dryRun).toBe(true);
+  });
+
+  it('la tanda son dos conversaciones, no tres como la de pendientes', () => {
+    // aqui una sola conversacion puede gastar varias llamadas: una ventana por
+    // cada cuarenta turnos. Es `RECAP_DEFAULT_LIMIT`, que vive en la pasada
+    expect(vaultRecapSyncArgsSchema.parse(MINIMO).limit).toBe(2);
+    expect(vaultRecapSyncArgsSchema.parse(MINIMO).force).toBe(false);
+  });
+
+  it('acota la tanda y el proyecto que puede pedir el renderer', () => {
+    expect(vaultRecapSyncArgsSchema.safeParse({ ...MINIMO, limit: 0 }).success).toBe(false);
+    expect(vaultRecapSyncArgsSchema.safeParse({ ...MINIMO, limit: 11 }).success).toBe(false);
+    expect(vaultRecapSyncArgsSchema.safeParse({ projectAlias: '../otro' }).success).toBe(false);
+  });
+
+  it('rehacer una sola conversacion exige su UUID, no un nombre', () => {
+    expect(vaultRecapSyncArgsSchema.safeParse({ ...MINIMO, conversationId: CONV }).success).toBe(
+      true,
+    );
+    expect(
+      vaultRecapSyncArgsSchema.safeParse({ ...MINIMO, conversationId: 'la de agosto' }).success,
+    ).toBe(false);
+  });
+
+  it('no lleva proveedor: el trabajo de fondo nunca sale por la API de la ventana', () => {
+    // si el renderer pudiera elegir a quien se le manda, un descuido costaria
+    // una llamada cobrada POR VENTANA sobre la boveda entera
+    expect(Object.keys(vaultRecapSyncArgsSchema.shape)).not.toContain('provider');
+    expect(Object.keys(vaultRecapSyncArgsSchema.shape)).not.toContain('model');
+  });
+
+  it('el resultado separa los cinco finales de una ventana en vez de mezclarlos', () => {
+    // mezclar negativa, ficha ilegible y ficha vacia en un solo contador es el
+    // defecto que ya tiene la pasada de pendientes: el arreglo de cada uno es
+    // distinto, y con un numero solo no se sabe que boton pulsar
+    const campos = Object.keys(vaultRecapSyncResultSchema.shape);
+    for (const campo of ['ok', 'partial', 'refused', 'vague', 'invalid', 'failed', 'deduced']) {
+      expect(campos).toContain(campo);
+    }
+  });
+
+  it('sin vistazo, el resultado no lleva ni un texto de la boveda', () => {
+    const parsed = vaultRecapSyncResultSchema.parse({
+      reviewed: 1,
+      windows: 1,
+      ok: 1,
+      partial: 0,
+      deduced: 0,
+      refused: 0,
+      vague: 0,
+      invalid: 0,
+      failed: [],
+      superseded: 0,
+      gaps: 0,
+      clipped: 0,
+      kept: 0,
+      rewritten: 0,
+      dropped: 0,
+      added: 0,
+      chars: 342,
+      pending: 16,
+      provider: 'codex',
+      replaced: false,
+    });
+    expect(parsed.preview).toEqual([]);
+  });
+
+  it('la linea de cobertura que cruza el IPC es la que calcula `recapCoverage`', () => {
+    // el literal va anotado a proposito: si alguna vez se renombra un campo alla,
+    // esto deja de compilar en vez de enseñar un cero donde habia diecisiete
+    const calculada: RecapCoverage = {
+      total: 18,
+      excluded: 0,
+      summarized: 9,
+      withGaps: 3,
+      indexOnly: 2,
+      // escritas y esperando el visto bueno: NO es lo mismo que no tener nada,
+      // y contarlas juntas hacia que la linea dijera «17 sin leer» justo despues
+      // de la pasada que escribio las diecisiete
+      awaitingApproval: 2,
+      missing: 1,
+      sealed: 1,
+    };
+
+    const parsed = vaultRecapCoverageSchema.parse(calculada);
+    expect(parsed).toEqual(calculada);
+    // y los numeros SUMAN: si no cuadra es un fallo, no un redondeo
+    const suma =
+      parsed.summarized +
+      parsed.withGaps +
+      parsed.indexOnly +
+      parsed.awaitingApproval +
+      parsed.missing +
+      parsed.sealed;
+    expect(suma).toBe(parsed.total - parsed.excluded);
+  });
+
+  it('aprobarlas todas no puede llevar una conversacion que nadie mire', () => {
+    // seria un boton que dice una cosa y hace otra
+    expect(vaultRecapUpdateArgsSchema.safeParse({ action: 'approve-all' }).success).toBe(true);
+    expect(
+      vaultRecapUpdateArgsSchema.safeParse({ action: 'approve-all', conversationId: CONV }).success,
+    ).toBe(false);
+  });
+
+  it('aprobar y borrar exigen decir cual', () => {
+    expect(
+      vaultRecapUpdateArgsSchema.safeParse({ action: 'approve', conversationId: CONV }).success,
+    ).toBe(true);
+    expect(
+      vaultRecapUpdateArgsSchema.safeParse({ action: 'forget', conversationId: CONV }).success,
+    ).toBe(true);
+    expect(vaultRecapUpdateArgsSchema.safeParse({ action: 'approve' }).success).toBe(false);
+    expect(vaultRecapUpdateArgsSchema.safeParse({ action: 'forget' }).success).toBe(false);
+  });
+
+  it('no hay edicion libre del texto por IPC', () => {
+    // la v1 no edita: «Borrarlo» y «Rehacerlo con el otro CLI» cubren el caso.
+    // Un verbo que aceptara texto seria una ficha escrita a mano sin nada
+    // contra lo que comprobarse, y se propagaria a cada turno futuro del hilo
+    expect(
+      vaultRecapUpdateArgsSchema.safeParse({ action: 'edit', conversationId: CONV }).success,
+    ).toBe(false);
+    expect(
+      vaultRecapUpdateArgsSchema.safeParse({
+        action: 'approve',
+        conversationId: CONV,
+        summary: 'lo que yo diga',
+      }).success,
+    ).toBe(false);
   });
 });
 

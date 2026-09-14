@@ -41,6 +41,13 @@ import {
   imagePromptStyleFor,
   type HordeRecipe,
   resolveAuxiliaryTarget,
+  chooseConversationMemory,
+  recapCoverage,
+  formatConversationMemory,
+  civilDayLabel,
+  type ChosenMemory,
+  type RecapCoverage,
+  type RecapTurnRef,
 } from '@luxy/shared';
 import { detectEnvironment } from '@luxy/agent/dist/detect.js';
 import { GatewayClient } from '@luxy/agent/dist/gateway-client.js';
@@ -91,6 +98,8 @@ import {
   vaultMemoryDiagnosticsArgsSchema,
   vaultRelationSyncArgsSchema,
   vaultRelationUpdateArgsSchema,
+  vaultRecapSyncArgsSchema,
+  vaultRecapUpdateArgsSchema,
   vaultAuxiliaryGetArgsSchema,
   vaultAuxiliarySetArgsSchema,
   vaultVisionProbeArgsSchema,
@@ -108,6 +117,7 @@ import {
   vaultPasswordArgsSchema,
   vaultUnlockArgsSchema,
   type vaultStatusSchema,
+  type vaultRecapListResultSchema,
   type IpcResult,
 } from '../../shared/ipc.js';
 import type { AgentController } from '../agent-controller.js';
@@ -175,7 +185,9 @@ import type { PrivateMemory } from '../vault/private-memory.js';
 import type { MemoryPreferences } from '../vault/memory-preferences.js';
 import type { CatalogStore } from '../vault/catalog-store.js';
 import type { RelationStore } from '../vault/relation-store.js';
+import type { RecapStore } from '../vault/recap-store.js';
 import { RelationSync, createAuxiliaryLane } from '../vault/relation-sync.js';
+import { RecapSync } from '../vault/recap-sync.js';
 import {
   decideRelation,
   listRelationsForReview,
@@ -255,6 +267,15 @@ export interface HandlerContext {
   catalogs: CatalogStore;
   /** promesas y planes pendientes entre los dos, cifrados */
   relations: RelationStore;
+  /**
+   * memoria acumulativa generada hacia atras, cifrada.
+   *
+   * Vive FUERA de los `.jsonl` sellados: no hay API para reescribir un registro
+   * y una memoria mal escrita ahi dentro apaga la lista entera de Privado. Lo
+   * que guarda solo llega a un prompt cuando la conversacion NO tiene memoria
+   * propia, porque la sellada gana siempre.
+   */
+  recaps: RecapStore;
   /** imagenes y videos privados, cifrados en disco */
   privateMedia: PrivateMediaStore;
   /** raiz de los artefactos generados; se abre, nunca se sirve por HTTP */
@@ -1079,21 +1100,60 @@ export function registerIpcHandlers(context: HandlerContext): void {
     // cifrados quedarian ocupando disco sin nada que los referenciara
     await context.privateMedia.deleteConversation(args.conversationId);
     context.privateConversations.delete(args.conversationId);
+
+    /**
+     * cada almacen, con su propio `try`.
+     *
+     * Encadenados en uno solo, el fallo del primero cancelaba a los otros dos:
+     * `RelationStore` se para en seco a proposito cuando su archivo no abre, y
+     * la boveda puede bloquearse sola entre dos `await`. Lo que quedaba en
+     * disco era contenido de una conversacion que Daniel acaba de mandar
+     * borrar —el resumen de lo que se dijo, las citas literales de lo apuntado,
+     * el resumen de cada escena— y ademas INALCANZABLE: la lista descarta lo
+     * que ya no tiene conversacion, asi que no habia fila desde la que
+     * quitarlo. Ahora el que falla se deja a si mismo sin limpiar y nada mas, y
+     * el primer error sale al final para que el borrado siga contando como
+     * fallido.
+     */
+    const fallos: unknown[] = [];
+    const intentar = async (task: () => Promise<void>): Promise<void> => {
+      try {
+        await task();
+      } catch (error) {
+        fallos.push(error);
+      }
+    };
+
     try {
+      // el recap PRIMERO: es el almacen con mas texto de la conversacion dentro
+      // —resumen, hechos, acuerdos y lecciones—, asi que es el que menos puede
+      // depender de que los otros dos hayan ido bien
+      await intentar(() =>
+        context.recaps.removeConversation(context.vault, args.conversationId),
+      );
       // sin esto, el personaje seguiria recordando una conversacion borrada
-      await context.catalogs.removeConversation(context.vault, args.conversationId);
+      await intentar(() =>
+        context.catalogs.removeConversation(context.vault, args.conversationId),
+      );
       // y sin esto reclamaria una promesa cuyo turno ya no existe: sin cita que
       // verificar, la nota no tiene respaldo. Los cierres que ocurrieron aqui se
       // conservan sin turno, que es el lado seguro
-      await context.relations.removeConversation(context.vault, args.conversationId);
+      await intentar(() =>
+        context.relations.removeConversation(context.vault, args.conversationId),
+      );
     } finally {
-      // pase lo que pase con los dos almacenes. El indice guarda los turnos ya
+      // pase lo que pase con los tres almacenes. El indice guarda los turnos ya
       // DESCIFRADOS: si un almacen se para en seco —el de pendientes lo hace a
       // proposito cuando su archivo no abre— y esto quedara fuera, la
       // conversacion ya no estaria en disco pero el personaje podria seguir
       // citandola en el turno siguiente
       context.privateMemory.invalidate();
     }
+
+    // se devuelve el primero y se pierde el resto a proposito: lo que hace
+    // falta saber es que el borrado no se completo, y el motivo de un almacen
+    // cifrado puede traer dentro lo que no validaba
+    if (fallos.length > 0) throw fallos[0];
     return { deleted: true };
   });
 
@@ -1172,8 +1232,28 @@ export function registerIpcHandlers(context: HandlerContext): void {
     }
 
     const before = history.filter((turn) => turn.sequence < lastUser.sequence);
+
+    // la misma eleccion que hace el turno de verdad, y por el mismo camino: una
+    // sonda que midiera sobre un prompt sin el bloque de memoria estaria midiendo
+    // otra cosa. Tambien dentro de un `try`: aqui no hay turno que perder, pero
+    // un almacen ilegible no puede dejar sin comprobacion a los demas modelos
+    const sealedMemory = await store.latestMemory(context.vault, args.conversationId);
+    let memoria: ChosenMemory = { memory: sealedMemory, source: 'turn', gaps: 0 };
+    try {
+      memoria = chooseConversationMemory({
+        sealed: sealedMemory,
+        entry: await context.recaps.entryFor(context.vault, args.conversationId),
+        turns: history,
+      });
+    } catch {
+      // el motivo no se registra: traeria dentro la ficha que no valido
+      memoria = { memory: sealedMemory, source: 'turn', gaps: 0 };
+    }
+
     const prompt = buildVaultPrompt({
-      memory: await store.latestMemory(context.vault, args.conversationId),
+      memory: memoria.memory,
+      memorySource: memoria.source,
+      memoryGaps: memoria.gaps,
       turns: before.map((turn) => ({ role: turn.role, text: turn.text })),
       message: lastUser.text,
       instructions: await store.latestInstructions(context.vault, args.conversationId),
@@ -1376,6 +1456,43 @@ export function registerIpcHandlers(context: HandlerContext): void {
   // solo produciria errores
   context.vault.onLock(() => relationSync.cancel());
 
+  /**
+   * rellena hacia atras la memoria de las conversaciones que nunca la tuvieron.
+   *
+   * MISMO carril que el catalogo y los pendientes, y a proposito: los tres
+   * arrancan un CLI local con una conversacion entera dentro, asi que dos a la
+   * vez se pelean por la maquina y el segundo lee un almacen que el primero esta
+   * a punto de reescribir. Y el mismo `isSending`: una conversacion a la que se
+   * le esta contestando tiene turnos que aun pueden retirarse, asi que darlos por
+   * leidos perderia lo que de verdad se diga ahi.
+   *
+   * A diferencia de los pendientes, esto NO se dispara al abrir el panel ni al
+   * terminar un turno: solo desde su boton. Abrir «Lo que recuerda» no puede
+   * convertirse en media hora de proceso arrancando.
+   */
+  const recapSync = new RecapSync({
+    vault: context.vault,
+    conversations: context.privateConversations,
+    recaps: context.recaps,
+    // las escenas ya catalogadas dan los cortes de ventana y el indice deducido
+    catalog: context.catalogs,
+    preferences: context.memoryPreferences,
+    controller: context.controller,
+    timeline: () => context.privateMemory.timeline(context.vault),
+    lane: runOnAuxiliaryLane,
+    isSending: (conversationId) => sendInFlight.has(conversationId),
+    anchor: () => ({
+      instant: new Date().toISOString(),
+      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      dayStartsAtHour: 5,
+    }),
+    log: context.log,
+  });
+
+  // la pasada se mira entre VENTANA y ventana, no solo entre conversaciones: una
+  // ventana tarda un minuto y la boveda puede cerrarse dentro
+  context.vault.onLock(() => recapSync.cancel());
+
   handle(IPC_INVOKE.vaultRelationSync, vaultRelationSyncArgsSchema, async (args) => {
     if (!context.vault.isUnlocked()) throw new VaultError('la boveda esta bloqueada');
     return relationSync.runOnce({
@@ -1469,6 +1586,246 @@ export function registerIpcHandlers(context: HandlerContext): void {
     // ni la cita, ni de quien es, ni a que turno apunta: solo que se decidio
     context.log('pendiente corregido', { estado: args.status, decidido: 'daniel' });
     return readRelationList();
+  });
+
+  handle(IPC_INVOKE.vaultRecapSync, vaultRecapSyncArgsSchema, async (args) => {
+    if (!context.vault.isUnlocked()) throw new VaultError('la boveda esta bloqueada');
+    return recapSync.runOnce({
+      projectAlias: args.projectAlias,
+      limit: args.limit,
+      // `force` NO se deduce de que venga una conversacion, al reves que en los
+      // pendientes: aqui significa «empezar esa conversacion DESDE CERO», asi
+      // que deducirlo tiraria lo ya resumido cada vez que se pidiera continuar
+      // una sola. Quien quiere rehacerla manda las dos cosas
+      force: args.force,
+      dryRun: args.dryRun,
+      ...(args.conversationId === undefined ? {} : { conversationId: args.conversationId }),
+    });
+  });
+
+  /**
+   * lo rellenado, con su ficha entera y la linea de cobertura.
+   *
+   * Lleva el bloque COMPLETO a proposito, igual que los pendientes llevan la
+   * cita: hoy no hay ni una pantalla en todo Luxy donde se pueda leer la memoria
+   * de una conversacion, y desde el primer turno nuevo el modelo de pago va a
+   * arrastrar lo que aqui ponga para siempre. Lo que NUNCA sale de aqui es lo
+   * que dijo el CLI cuando se nego a escribirla: de eso viaja la clasificacion.
+   */
+  const readRecapList = async (): Promise<z.infer<typeof vaultRecapListResultSchema>> => {
+    const snapshot = await context.recaps.read(context.vault);
+    const summaries = await context.privateConversations.list(context.vault);
+    const excluded = context.memoryPreferences.excluded();
+    const anchor = {
+      instant: new Date().toISOString(),
+      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      // el mismo corte que el resto de la boveda: de madrugada se sigue hablando
+      // de «esta noche», no de la noche de ayer
+      dayStartsAtHour: 5,
+    };
+
+    // del indice que ya esta construido: descifrar otra vez el historial entero
+    // en cada pulsacion de un boton costaria la boveda completa
+    const turnsOf = new Map<string, RecapTurnRef[]>();
+    for (const turn of await context.privateMemory.timeline(context.vault)) {
+      const ref = { sequence: turn.sequence, createdAt: turn.createdAt };
+      const own = turnsOf.get(turn.conversationId);
+      if (own === undefined) turnsOf.set(turn.conversationId, [ref]);
+      else own.push(ref);
+    }
+
+    /**
+     * los turnos de una conversacion, midiendo lo MISMO que mide el turno.
+     *
+     * El indice episodico no sirve solo: se salta las excluidas, y una
+     * construccion abortada por un `invalidate` a la vez lo deja vacio entero.
+     * Con esa lista, `chooseConversationMemory` contestaba «no llega hasta los
+     * ultimos turnos» de una ficha que el turno SI estaba metiendo en el
+     * prompt, porque el camino del turno lee el historial de verdad y no
+     * consulta las exclusiones. El panel decia entonces «cubre 0 de 18» de algo
+     * en uso.
+     *
+     * Asi que cuando el indice no puede medir una conversacion que si tiene
+     * turnos, se descifra esa y solo esa. Son las excluidas, que son pocas, y
+     * el caso raro de la carrera; el camino normal sigue saliendo del indice.
+     */
+    const turnRefs = async (summary: {
+      conversationId: string;
+      turns: number;
+    }): Promise<RecapTurnRef[]> => {
+      const known = turnsOf.get(summary.conversationId);
+      if (known !== undefined && known.length > 0) return known;
+      if (summary.turns === 0) return [];
+      const full = await context.privateConversations.read(
+        context.vault,
+        summary.conversationId,
+      );
+      const refs = full.map((turn) => ({
+        sequence: turn.sequence,
+        createdAt: turn.createdAt,
+      }));
+      turnsOf.set(summary.conversationId, refs);
+      return refs;
+    };
+
+    // la sellada gana siempre. Sin mirarla, el panel diria «resumida» de una
+    // conversacion cuyo relleno el turno ni llega a mirar
+    const sealed = new Set<string>();
+    for (const summary of summaries) {
+      const memory = await context.privateConversations.latestMemory(
+        context.vault,
+        summary.conversationId,
+      );
+      if (memory !== null) sealed.add(summary.conversationId);
+    }
+
+    const byEntry = new Map(snapshot.entries.map((entry) => [entry.conversationId, entry]));
+    for (const summary of summaries) {
+      // solo hace falta medir las que se van a juzgar: una sin entrada y sin
+      // ficha no necesita sus turnos para nada
+      if (byEntry.has(summary.conversationId)) await turnRefs(summary);
+    }
+
+    const coverage = recapCoverage({
+      conversations: summaries.map((summary) => ({
+        conversationId: summary.conversationId,
+        sealed: sealed.has(summary.conversationId),
+        excluded: excluded.has(summary.conversationId),
+        turns: turnsOf.get(summary.conversationId) ?? [],
+      })),
+      entries: snapshot.entries,
+    });
+
+    /**
+     * una fila por CONVERSACION rellenable, no por entrada del almacen.
+     *
+     * Las que todavia no tienen entrada salen igual, vacias. Hacen dos cosas
+     * que antes no hacia nadie: contestar «¿cuales quedaron sin resumir?»
+     * —antes solo existia como numero— y dar un «Rehacerlo» a la conversacion
+     * que ni se pudo leer ni se pudo guardar, que es la que el aviso mandaba
+     * reintentar desde un boton que no existia.
+     *
+     * Una entrada cuya conversacion ya no esta no produce fila: sin titulo ni
+     * turnos no hay nada que juzgar, y de quitarla se encarga el borrado.
+     */
+    const rows: z.infer<typeof vaultRecapListResultSchema>['rows'] = [];
+    for (const summary of summaries) {
+      const entry = byEntry.get(summary.conversationId);
+      const esSellada = sealed.has(summary.conversationId);
+      const esExcluida = excluded.has(summary.conversationId);
+      // sin entrada, solo sale lo que la pasada podria coger algun dia
+      if (entry === undefined && (esExcluida || summary.turns === 0)) continue;
+
+      const turns = turnsOf.get(summary.conversationId) ?? [];
+      // la MISMA funcion que decide en el turno, con la sellada tratada aparte
+      // exactamente como hace `recapCoverage`: si el panel y el prompt pudieran
+      // discrepar, «resumida» dejaria de significar nada
+      const chosen =
+        entry === undefined || esSellada
+          ? null
+          : chooseConversationMemory({ sealed: null, entry, turns });
+
+      rows.push({
+        conversationId: summary.conversationId,
+        title: summary.title,
+        day: civilDayLabel(summary.updatedAt, anchor),
+        // turnos de VERDAD dentro del tramo, no `to - from`: un numero de
+        // secuencia retirado dejaria un hueco que inflaria la cuenta y haria
+        // decir «cubre 41 de 40»
+        covered:
+          entry === undefined || entry.memory === null
+            ? 0
+            : turns.filter(
+                (turn) =>
+                  turn.sequence >= entry.covered.from && turn.sequence <= entry.covered.to,
+              ).length,
+        turns: summary.turns,
+        block:
+          entry === undefined || entry.memory === null
+            ? ''
+            : formatConversationMemory(entry.memory),
+        chars: entry?.chars ?? 0,
+        source: entry?.source ?? 'cli',
+        gaps: entry?.gaps.length ?? 0,
+        approved: entry?.approved ?? false,
+        provider: entry?.provider ?? null,
+        model: entry?.model ?? null,
+        at: entry?.at ?? summary.updatedAt,
+        refusedKind: entry?.refusedKind ?? null,
+        refusedProvider: entry?.refusedProvider ?? null,
+        superseded: entry !== undefined && entry.supersededAt !== null,
+        sealed: esSellada,
+        excluded: esExcluida,
+        hasEntry: entry !== undefined,
+        inPrompt: chosen !== null && chosen.memory !== null && chosen.source !== 'turn',
+      });
+    }
+
+    return { rows, coverage };
+  };
+
+  handle(IPC_INVOKE.vaultRecapList, emptyArgsSchema, async () => {
+    if (!context.vault.isUnlocked()) throw new VaultError('la boveda esta bloqueada');
+    return readRecapList();
+  });
+
+  /**
+   * la ultima palabra de Daniel sobre una ficha retroactiva.
+   *
+   * Tres verbos y ninguna edicion libre. Por defecto una ficha escrita por un
+   * CLI NO entra en ningun prompt hasta que la aprueba, porque lo que ponga ahi
+   * se propaga a todos los turnos futuros de ese hilo; «olvidar» la quita y
+   * devuelve esa conversacion a su aviso de turnos omitidos, que es el estado
+   * seguro. Eso hace el trabajo entero reversible.
+   */
+  handle(IPC_INVOKE.vaultRecapUpdate, vaultRecapUpdateArgsSchema, async (args) => {
+    if (!context.vault.isUnlocked()) throw new VaultError('la boveda esta bloqueada');
+
+    if (args.action === 'forget') {
+      const entry = await context.recaps.entryFor(context.vault, args.conversationId);
+      if (entry === undefined) {
+        throw new VaultError(
+          'esa ficha ya no esta',
+          'vuelve a abrir la lista: puede que se borrara su conversacion',
+        );
+      }
+      await context.recaps.removeConversation(context.vault, args.conversationId);
+      // ni el titulo, ni una entrada, ni de que conversacion: una cifra
+      context.log('memoria de lo ya hablado corregida', { accion: 'olvidar', fichas: 1 });
+      return readRecapList();
+    }
+
+    // se saca del `args` aqui y no dentro del mutador: el estrechamiento de una
+    // union discriminada no sobrevive a entrar en otra funcion
+    const only = args.action === 'approve' ? args.conversationId : null;
+    let aprobadas = 0;
+    await context.recaps.apply(context.vault, (current) => {
+      if (only !== null && !current.entries.some((each) => each.conversationId === only)) {
+        throw new VaultError(
+          'esa ficha ya no esta',
+          'vuelve a abrir la lista: puede que se borrara su conversacion',
+        );
+      }
+      return {
+        counters: current.counters,
+        entries: current.entries.map((entry) => {
+          if (only !== null && entry.conversationId !== only) return entry;
+          // aprobar lo que no es una ficha —una negativa, o una conversacion que
+          // ya tiene memoria propia— no la haria entrar en ningun prompt y
+          // dejaria en disco un `approved` que no significa nada
+          if (entry.memory === null || entry.supersededAt !== null) return entry;
+          if (entry.approved) return entry;
+          aprobadas += 1;
+          return { ...entry, approved: true };
+        }),
+      };
+    });
+
+    context.log('memoria de lo ya hablado corregida', {
+      accion: only === null ? 'aprobar-todas' : 'aprobar',
+      fichas: aprobadas,
+    });
+    return readRecapList();
   });
 
   /**
@@ -1957,6 +2314,63 @@ export function registerIpcHandlers(context: HandlerContext): void {
       });
     }
 
+    // cuantas conversaciones tienen memoria de lo ya hablado, y de que clase.
+    //
+    // Hasta ahora el diagnostico media catalogo, fechas, estilo y disparos y NO
+    // media esto: cuantas conversaciones pueden retomarse. Va aparte y en su
+    // propio `try` por el mismo motivo que los pendientes, y sus cinco numeros
+    // SUMAN —`total − excluded`—; si no cuadran es un fallo, no un redondeo.
+    let recaps: RecapCoverage | undefined;
+    try {
+      const guardado = await context.recaps.read(context.vault);
+      const turnosDe = new Map<string, RecapTurnRef[]>();
+      for (const turno of await context.privateMemory.timeline(context.vault)) {
+        const ref = { sequence: turno.sequence, createdAt: turno.createdAt };
+        const propios = turnosDe.get(turno.conversationId);
+        if (propios === undefined) turnosDe.set(turno.conversationId, [ref]);
+        else propios.push(ref);
+      }
+      // y las que el indice no puede medir —las excluidas, y todas si una
+      // construccion se abortó a medias— se descifran una a una. Sin esto, el
+      // diagnostico contaba «sin nada» una conversacion cuya ficha el turno si
+      // esta usando, que es justo la cifra por la que existe esta linea
+      for (const conversacion of todas) {
+        const conEntrada = guardado.entries.some(
+          (entrada) => entrada.conversationId === conversacion.conversationId,
+        );
+        if (!conEntrada) continue;
+        const propios = turnosDe.get(conversacion.conversationId);
+        if (propios !== undefined && propios.length > 0) continue;
+        const completa = await store.read(context.vault, conversacion.conversationId);
+        turnosDe.set(
+          conversacion.conversationId,
+          completa.map((turno) => ({ sequence: turno.sequence, createdAt: turno.createdAt })),
+        );
+      }
+      const conSellada = new Set<string>();
+      for (const conversacion of todas) {
+        const sellada = await store.latestMemory(context.vault, conversacion.conversationId);
+        if (sellada !== null) conSellada.add(conversacion.conversationId);
+      }
+      const excluidas = context.memoryPreferences.excluded();
+      recaps = recapCoverage({
+        conversations: todas.map((conversacion) => ({
+          conversationId: conversacion.conversationId,
+          sealed: conSellada.has(conversacion.conversationId),
+          excluded: excluidas.has(conversacion.conversationId),
+          turns: turnosDe.get(conversacion.conversationId) ?? [],
+        })),
+        entries: guardado.entries,
+      });
+    } catch (error) {
+      // el motivo NO se escribe: un error de validacion trae dentro la ficha que
+      // no valido, y esa ficha es un resumen de la conversacion
+      context.log('diagnostico de memoria retroactiva fallido', {
+        leido: false,
+        causa: error instanceof VaultError ? 'boveda' : 'otro',
+      });
+    }
+
     // CIFRAS, nunca texto. Los dias fallidos son cuando se hablo, no que se
     // dijo, y el registro ya lleva la hora de cada turno
     context.log('diagnostico de memoria', {
@@ -1971,8 +2385,14 @@ export function registerIpcHandlers(context: HandlerContext): void {
       disparos: diagnostico.triggers,
       // enteros y booleanos, como todo lo demas: ni una cita ni un identificador
       ...(relations === undefined ? {} : { relaciones: relations }),
+      // cinco cifras que suman: es la linea de cobertura del panel, medida aqui
+      ...(recaps === undefined ? {} : { memoriaRetroactiva: recaps }),
     });
-    return { ...diagnostico, ...(relations === undefined ? {} : { relations }) };
+    return {
+      ...diagnostico,
+      ...(relations === undefined ? {} : { relations }),
+      ...(recaps === undefined ? {} : { recaps }),
+    };
   });
 
   /**
@@ -2923,7 +3343,35 @@ export function registerIpcHandlers(context: HandlerContext): void {
     // a enviarlo todo y el coste y la latencia crecerian sin techo hasta chocar
     // con el limite de contexto del modelo.
     const history = await store.read(context.vault, conversationId);
-    const memory = await store.latestMemory(context.vault, conversationId);
+    const sealedMemory = await store.latestMemory(context.vault, conversationId);
+
+    // de donde sale la memoria de esta conversacion.
+    //
+    // La SELLADA gana siempre: `chooseConversationMemory` solo mira el relleno
+    // retroactivo cuando no hay ninguna, asi que una conversacion con memoria
+    // propia sale de aqui exactamente igual que antes de que esto existiera.
+    //
+    // Y va entero dentro de un `try`, como los pendientes y por lo mismo: leer el
+    // almacen descifra un archivo de disco y eso puede fallar. Un fallo del
+    // trabajo de fondo NO puede costar un turno de pago (`D-088`); sin relleno
+    // el prompt queda con la memoria de siempre —o sin ninguna, con su aviso de
+    // turnos omitidos—, que es el lado seguro.
+    let memoriaElegida: ChosenMemory = { memory: sealedMemory, source: 'turn', gaps: 0 };
+    try {
+      memoriaElegida = chooseConversationMemory({
+        sealed: sealedMemory,
+        entry: await context.recaps.entryFor(context.vault, conversationId),
+        // el historial ENTERO, con el mensaje que se acaba de guardar: la
+        // invariante de cobertura se mide contra la cola literal que viaja en
+        // este prompt, no contra la que viajaba cuando se escribio la ficha
+        turns: history,
+      });
+    } catch {
+      // el motivo NO se registra. Un error de validacion trae dentro el dato que
+      // no valido, y ese dato es la ficha de la conversacion: contarlo aqui seria
+      // sacar al log justo lo que este archivo nunca escribe
+      memoriaElegida = { memory: sealedMemory, source: 'turn', gaps: 0 };
+    }
 
     // sin esta lista el modelo no puede reenviar nada: no sabe que hay, asi que
     // genera otra —pagando— cada vez que le piden «la de antes»
@@ -3024,7 +3472,13 @@ export function registerIpcHandlers(context: HandlerContext): void {
     }
 
     const bloques = composeVaultPrompt({
-      memory,
+      memory: memoriaElegida.memory,
+      // los tres origenes NO valen lo mismo y el prompt tiene que decirlo: un
+      // relleno puede traer tramos que nadie resumio y un indice no sabe QUE se
+      // dijo dentro de ninguna escena. Sin esto, la mera presencia del bloque le
+      // quitaria la orden de preguntar justo cuando menos sabe
+      memorySource: memoriaElegida.source,
+      memoryGaps: memoriaElegida.gaps,
       recall,
       // ya elegidos y dosificados: el modelo no decide cual sale, porque
       // preguntarselo costaria otra llamada de pago por turno
@@ -3072,6 +3526,11 @@ export function registerIpcHandlers(context: HandlerContext): void {
             : `${recall.quoted.excerpt.first}-${recall.quoted.excerpt.last}/${recall.quoted.excerpt.total}`,
       lineasIndice: recall.episodes.length,
       fueraDelIndice: recall.omitted ?? 0,
+      // de donde salio la memoria y cuantos tramos declarados lleva. Es una
+      // CLASIFICACION y una cifra: sin esto, «memoria 380c» no distingue una
+      // ficha que vivio la conversacion de un indice que solo sabe los titulos
+      memoriaOrigen: memoriaElegida.memory === null ? 'ninguna' : memoriaElegida.source,
+      memoriaHuecos: memoriaElegida.gaps,
       // por que NO salio ninguna promesa, que es la pregunta que se hace
       // siempre. «Cero ofrecidas» no dice nada; «cuatro abiertas, tres en
       // reposo y una bloqueada por desfase» se arregla en sitios distintos.
