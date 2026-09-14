@@ -1,5 +1,61 @@
 # Luxy — tarea activa
 
+## F26-LLAMADAS-VACIAS-001 — el 18% de lo que paga por Lia no compra nada
+
+Estado: **investigado y APROBADO por Daniel; los cuatro arreglos, sin empezar
+— Claude, 2026-09-14.** Informe en `docs/DEEPSEEK-LLAMADAS-VACIAS.md`.
+
+Origen: Daniel vio turnos con `modelCalls: 2` y `3` en su panel de gasto y dijo
+«investiga con los datos que tienes».
+
+**La cadena, verificada:** Node v24 aborta una peticion a los **300.000 ms** por
+defecto y **nadie configuro otra cosa en todo el proyecto**; ese error llega
+**sin codigo de estado**; y el filtro de reintentos trata como reintentable todo
+lo que no trae codigo. Asi que Luxy reenvia el prompt entero hasta tres veces.
+**Los reintentos son de Luxy, no del proveedor**: los huecos entre llamadas —2,
+4 y 5 segundos— son su espera programada. Dos de las tres llamadas vacias del
+2026-09-14 murieron a los 302 y 300 segundos.
+
+La tarifa es **por llamada** (~6,935 ¥), asi que un intento que devuelve 0
+tokens cuesta lo mismo que uno bueno. Medido del 4 al 14 de septiembre: **73
+llamadas pagadas para 60 turnos; 90 ¥ tirados de 506 ¥, un 18%**. Y es un suelo:
+hay 7 turnos mas cuyo contador quedo a cero.
+
+**Mi hipotesis inicial era falsa y conviene que conste**: propuse que la causa
+era el tamaño del prompt, a partir de seis puntos de una captura. Dos agentes
+independientes —uno atacandola, otro defendiendola— la **refutaron**: la
+correlacion es 0,025. Los prompts mas grandes de ese dia salieron a la primera.
+Lo que cambio fue la velocidad del proveedor: mediana de 203 s frente a 61 s.
+
+**Aprobado por Daniel el 2026-09-14, los cuatro:**
+
+1. subir el tope de espera, que hoy es el de fabrica de Node y nadie eligio;
+2. no reintentar a ciegas una respuesta vacia, y **avisar en pantalla**: no
+   ahorra por si solo, pero devuelve la decision a Daniel en vez de gastar sin
+   que se entere;
+3. **una linea de registro POR LLAMADA** —espera hasta la primera palabra,
+   tokens enviados, como murio—. Hoy solo se apunta una por turno, asi que de
+   las tres llamadas muertas no queda constancia de nada;
+4. contar **todos** los intentos en el presupuesto. Hoy solo cuenta el que
+   salio bien, asi que Luxy cree que se gasta menos de lo que se gasta. Y como
+   esta pasarela cobra por llamada, el presupuesto por tokens es
+   estructuralmente ciego: hace falta un contador de llamadas.
+
+**Dos cabos sueltos del informe, que NO cierran estos arreglos:**
+
+- de las 13 llamadas de mas, **solo 3 encajan con el tope de 5 minutos**. Las
+  otras 10 pasaron en turnos cuyas llamadas duraban entre 29 y 135 segundos:
+  **hay una segunda causa que el registro no guarda**. El arreglo 3 es lo que
+  permitira verla;
+- `tokensEstimados` se queda corto **~1.650 tokens siempre**. Acierta el ritmo
+  de crecimiento (3% de error), asi que sirve para «cuanto añade este bloque»,
+  no para «cuanto estoy mandando».
+
+**Lo que NO se hace, y por que**: recortar el prompt. Se cobra por llamada, asi
+que el texto es gratis en dinero; el tamaño no dispara los fallos; y lo unico
+que compra son ~2,3 s por cada 1.000 tokens sobre llamadas de 250 s. Los bloques
+de promesas y memoria retroactiva suman ~2 segundos: se enchufan sin miedo.
+
 ## F25-ENTRE-HILOS-001 — que recuerde algo de un hilo estando en otro
 
 Estado: **investigado; NO hace falta codigo para lo que pidio Daniel —
