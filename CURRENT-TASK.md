@@ -37,9 +37,19 @@ Diseño en `docs/PENDIENTES-DISENO.md`.
   lectura y verificacion de la respuesta), `relation.ts` (fusion, coincidencias
   y reclamaciones) y `relation-selection.ts` (que promesa sale en cada turno y
   cual se calla). Nada de esto esta enganchado todavia: son funciones puras;
-- **Falta**: el almacen cifrado (4), el diagnostico (5), la pasada sobre las 17
-  conversaciones (6), la lista para corregirlas (7), la captura en los turnos
-  nuevos (8) y el bloque en el prompt (9).
+- **Paso 4, el almacen cifrado**: hecho. `relation-store.ts` sella con la
+  subclave de identidad, escribe de forma atomica con `fsync`, serializa las
+  escrituras y lee con tolerancia: lo que no valida se CONSERVA en crudo y se
+  reescribe, en vez de desaparecer. `PrivateMemory` gana la linea temporal,
+  `conversationsFor`, `turnAt` y `timeline`. Borrar una conversacion borra sus
+  notas y deja los cierres sin referencia;
+- **Paso 9, el bloque del prompt**: hecha la parte compartida.
+  `formatPendingAffairs` arma «ASUNTOS PENDIENTES ENTRE VOSOTROS» con los
+  hechos calculados por linea. Sin pendientes, el prompt es identico al de
+  antes. Falta engancharlo en el turno;
+- **Falta**: el diagnostico (5), la pasada sobre las 17 conversaciones (6), la
+  lista para corregirlas (7), la captura en los turnos nuevos (8) y enganchar
+  el bloque en `vaultConversationSend` (9).
 
 Origen, de Daniel: «que ella misma pueda sacar recuerdos sola: por ejemplo, le
 prometi dos cafes y una tarta de chocolate en la cama. Ella podria

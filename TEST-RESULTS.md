@@ -1,5 +1,23 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-14 — F23-PENDIENTES-001, paso 4 y bloque del prompt
+
+`npm run check` exit 0.
+
+```
+Test Files  158 passed (158)
+     Tests   3084 passed | 12 skipped
+```
+
+Nuevo: `relation-store.test.ts` (ida y vuelta sellada, notas de un tipo futuro,
+sobre que no abre, escritura atomica, dos escrituras a la vez y borrado de una
+conversacion), las tres nuevas de `private-memory.test.ts`, la primera prueba de
+`handlers.ts` (`conversation-delete.test.ts`) y las del bloque de pendientes en
+`vault-prompt.test.ts`.
+
+**Sin ejecutar con la boveda abierta.**
+
+
 ### 2026-09-14 — F23-PENDIENTES-001, pasos 1, 2 y 3
 
 `npm run check` exit 0.

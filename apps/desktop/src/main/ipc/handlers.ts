@@ -172,6 +172,7 @@ import {
 import type { PrivateMemory } from '../vault/private-memory.js';
 import type { MemoryPreferences } from '../vault/memory-preferences.js';
 import type { CatalogStore } from '../vault/catalog-store.js';
+import type { RelationStore } from '../vault/relation-store.js';
 import { buildRecall } from '../vault/recall.js';
 import { diagnoseMemory, type DiagnosticMessage } from '../vault/memory-diagnostics.js';
 import { memoryOfTurn } from '../vault/turn-memory.js';
@@ -238,6 +239,8 @@ export interface HandlerContext {
   memoryPreferences: MemoryPreferences;
   /** escenas catalogadas por un modelo, cifradas */
   catalogs: CatalogStore;
+  /** promesas y planes pendientes entre los dos, cifrados */
+  relations: RelationStore;
   /** imagenes y videos privados, cifrados en disco */
   privateMedia: PrivateMediaStore;
   /** raiz de los artefactos generados; se abre, nunca se sirve por HTTP */
@@ -1062,9 +1065,21 @@ export function registerIpcHandlers(context: HandlerContext): void {
     // cifrados quedarian ocupando disco sin nada que los referenciara
     await context.privateMedia.deleteConversation(args.conversationId);
     context.privateConversations.delete(args.conversationId);
-    // sin esto, el personaje seguiria recordando una conversacion borrada
-    await context.catalogs.removeConversation(context.vault, args.conversationId);
-    context.privateMemory.invalidate();
+    try {
+      // sin esto, el personaje seguiria recordando una conversacion borrada
+      await context.catalogs.removeConversation(context.vault, args.conversationId);
+      // y sin esto reclamaria una promesa cuyo turno ya no existe: sin cita que
+      // verificar, la nota no tiene respaldo. Los cierres que ocurrieron aqui se
+      // conservan sin turno, que es el lado seguro
+      await context.relations.removeConversation(context.vault, args.conversationId);
+    } finally {
+      // pase lo que pase con los dos almacenes. El indice guarda los turnos ya
+      // DESCIFRADOS: si un almacen se para en seco —el de pendientes lo hace a
+      // proposito cuando su archivo no abre— y esto quedara fuera, la
+      // conversacion ya no estaria en disco pero el personaje podria seguir
+      // citandola en el turno siguiente
+      context.privateMemory.invalidate();
+    }
     return { deleted: true };
   });
 

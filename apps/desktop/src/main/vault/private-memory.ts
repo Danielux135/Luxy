@@ -14,8 +14,9 @@
 import type { PrivateConversationStore } from './conversation-store.js';
 import type { VaultService } from './vault-service.js';
 import { segmentIntoEpisodes, type Episode, type SegmentOptions } from './episodes.js';
-import { TurnIndex, type IndexedTurn, type TurnMatch } from './turn-index.js';
+import { TurnIndex, tokenize, type IndexedTurn, type TurnMatch } from './turn-index.js';
 import type { CatalogedEpisode } from './catalog-store.js';
+import type { TimelineTurn } from './relation-selection.js';
 
 export interface PrivateMemoryOptions extends SegmentOptions {
   /**
@@ -62,7 +63,29 @@ export class PrivateMemory {
    */
   private characterOf = new Map<string, string | null>();
   private episodes: Episode[] = [];
+  /**
+   * cuando se dijo cada cosa y con que palabras, sin el texto.
+   *
+   * La dosificacion de los pendientes es aritmetica sobre esto —cuantos
+   * mensajes van desde que se prometio, cuando lo saco ella—, y hacerlo con el
+   * indice de busqueda no sirve: el indice contesta «quien habla de esto», no
+   * «en que orden pasaron las cosas». Se construye aqui, en la misma pasada que
+   * ya descifra todo, porque leer el historial otra vez para esto seria pagarlo
+   * dos veces.
+   */
+  private turns: TimelineTurn[] = [];
   private building: Promise<void> | null = null;
+  /**
+   * cuantas veces se ha tirado lo construido.
+   *
+   * Una pasada descifra todo el historial y tarda, y en ese rato Daniel puede
+   * excluir una conversacion, borrarla o cerrar la boveda. Sin esto, la pasada
+   * que ya iba en camino publicaba igual su foto vieja: lo excluido volvia al
+   * indice, y con la boveda cerrada el texto en claro volvia a memoria despues
+   * de haberla vaciado. El numero es lo unico que sobrevive a `invalidate()`,
+   * asi que es lo que permite reconocer el trabajo que ya no vale.
+   */
+  private generation = 0;
 
   constructor(
     private readonly conversations: PrivateConversationStore,
@@ -88,6 +111,11 @@ export class PrivateMemory {
     return this.episodes.length;
   }
 
+  /** turnos en la linea temporal; para diagnosticar y para comprobar que se vacia */
+  get timelineSize(): number {
+    return this.turns.length;
+  }
+
   /**
    * tira lo construido.
    *
@@ -102,20 +130,35 @@ export class PrivateMemory {
     this.scenes = null;
     this.characterOf.clear();
     this.episodes = [];
+    // las raices tambien salen de lo que se dijo: una boveda cerrada no puede
+    // seguir sabiendo de que hablaba cada turno
+    this.turns = [];
     this.building = null;
+    // lo que se este construyendo AHORA describe un historial que ya no es
+    // este: subir el numero es como se le dice que no publique
+    this.generation += 1;
   }
 
-  private async build(vault: VaultService): Promise<void> {
+  private async build(vault: VaultService, generation: number): Promise<void> {
     const index = new TurnIndex();
     const scenes = new TurnIndex();
     const episodes: Episode[] = [];
+    const timeline: TimelineTurn[] = [];
+    /**
+     * el dueño de cada conversacion, LOCAL y publicado al final como todo lo
+     * demas. Escribirlo sobre la instancia dentro del bucle dejaba el conjunto
+     * que decide el alcance del personaje describiendo una pasada distinta de
+     * la del indice: o con conversaciones que ya no estan, o vacio mientras el
+     * indice si tenia turnos, que callaba los recuerdos del personaje entero.
+     */
+    const characterOf = new Map<string, string | null>();
     const excluded = this.options.excluded?.() ?? new Set<string>();
     const cataloged = (await this.options.catalog?.()) ?? [];
 
     for (const conversation of await this.conversations.list(vault)) {
       if (excluded.has(conversation.conversationId)) continue;
 
-      this.characterOf.set(
+      characterOf.set(
         conversation.conversationId,
         await this.conversations.latestCharacterId(vault, conversation.conversationId),
       );
@@ -130,6 +173,17 @@ export class PrivateMemory {
       }));
 
       index.addAll(withId);
+
+      for (const turn of withId) {
+        timeline.push({
+          conversationId: turn.conversationId,
+          sequence: turn.sequence,
+          role: turn.role,
+          createdAt: turn.createdAt,
+          // sin repetidas: lo que se compara es si se habla de algo, no cuanto
+          stems: new Set(tokenize(turn.text)),
+        });
+      }
 
       const own = cataloged.filter(
         (scene) => scene.conversationId === conversation.conversationId,
@@ -151,8 +205,25 @@ export class PrivateMemory {
       }
     }
 
+    // mientras se descifraba, alguien tiro lo construido. Publicar ahora
+    // devolveria lo que acababa de salir —una conversacion excluida o borrada—
+    // y, si lo que paso fue cerrar la boveda, dejaria el texto en claro dentro
+    // de una boveda cerrada. Quien esperaba esta pasada se queda sin indice,
+    // que es el lado seguro que ya asumen `search` y `listEpisodes`: no ofrecer
+    // nada.
+    if (generation !== this.generation) {
+      index.clear();
+      scenes.clear();
+      return;
+    }
+
     this.index = index;
     this.scenes = scenes;
+    this.characterOf = characterOf;
+    // agrupada por conversacion, que es como se leyo. Quien necesite orden
+    // cronologico lo rehace: mezclar aqui costaria una ordenacion en cada
+    // arranque que casi nadie usa
+    this.turns = timeline;
     // del mas reciente al mas antiguo: es el orden en que se enseñan y en que
     // se recortan cuando no caben todos
     this.episodes = episodes.sort((a, b) => b.startedAt.localeCompare(a.startedAt));
@@ -161,9 +232,15 @@ export class PrivateMemory {
   /** construye si hace falta; dos llamadas a la vez comparten la misma pasada */
   private async ensureBuilt(vault: VaultService): Promise<void> {
     if (this.index !== null) return;
-    this.building ??= this.build(vault).finally(() => {
-      this.building = null;
-    });
+    if (this.building === null) {
+      const generation = this.generation;
+      this.building = this.build(vault, generation).finally(() => {
+        // solo la pasada vigente borra la marca: una tardia que la borrara
+        // dejaria sin dueño a la que corre ahora, y la siguiente busqueda
+        // arrancaria una tercera en paralelo sobre el mismo historial
+        if (generation === this.generation) this.building = null;
+      });
+    }
     await this.building;
   }
 
@@ -172,13 +249,44 @@ export class PrivateMemory {
    *
    * `null` no significa «todas»: significa «las que tampoco tienen personaje».
    * Un hilo sin personaje no hereda la memoria de nadie.
+   *
+   * Lee lo ya construido, asi que antes hay que haber pedido algo que
+   * construya —`timeline`, `search` o `listEpisodes`—. Sin eso devuelve el
+   * conjunto vacio, que es el lado seguro: no ofrecer nada.
    */
-  private conversationsOf(characterId: string | null): ReadonlySet<string> {
+  conversationsFor(characterId: string | null): ReadonlySet<string> {
     const own = new Set<string>();
     for (const [conversationId, owner] of this.characterOf) {
       if (owner === characterId) own.add(conversationId);
     }
     return own;
+  }
+
+  /**
+   * un turno tal y como esta AHORA, sin volver a descifrar nada.
+   *
+   * Es lo que permite comprobar que la cita de un pendiente sigue apareciendo
+   * en su turno antes de enseñarla. Devuelve `null` si el turno se retiro o si
+   * su numero se reutilizo, que es exactamente el caso en el que la nota deja de
+   * tener respaldo y no debe ofrecerse.
+   */
+  turnAt(conversationId: string, sequence: number): IndexedTurn | null {
+    return this.index?.get(conversationId, sequence) ?? null;
+  }
+
+  /**
+   * cuando se dijo cada turno del personaje y con que raices.
+   *
+   * Sin `characterId` van todos, como en `listEpisodes`: lo usa el diagnostico.
+   * Va agrupada por conversacion y no en orden cronologico; quien cuente
+   * mensajes seguidos la reordena.
+   */
+  async timeline(vault: VaultService, characterId?: string | null): Promise<TimelineTurn[]> {
+    await this.ensureBuilt(vault);
+    if (characterId === undefined) return [...this.turns];
+
+    const own = this.conversationsFor(characterId);
+    return this.turns.filter((turn) => own.has(turn.conversationId));
   }
 
   /**
@@ -191,7 +299,7 @@ export class PrivateMemory {
     await this.ensureBuilt(vault);
     if (characterId === undefined) return this.episodes;
 
-    const own = this.conversationsOf(characterId);
+    const own = this.conversationsFor(characterId);
     return this.episodes.filter((episode) => own.has(episode.conversationId));
   }
 
@@ -223,7 +331,7 @@ export class PrivateMemory {
     const limit = options.limit ?? 5;
     // sin personaje indicado se busca en todo; con el, solo en lo suyo
     const delPersonaje =
-      options.characterId === undefined ? undefined : this.conversationsOf(options.characterId);
+      options.characterId === undefined ? undefined : this.conversationsFor(options.characterId);
     const pedidas = options.conversationIds;
     const only =
       pedidas === undefined

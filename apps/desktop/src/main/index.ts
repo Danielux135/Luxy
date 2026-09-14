@@ -21,6 +21,7 @@ import {
 import { PrivateMemory } from './vault/private-memory.js';
 import { MemoryPreferences, memoryPreferencesPath } from './vault/memory-preferences.js';
 import { CatalogStore, catalogFilePath } from './vault/catalog-store.js';
+import { RelationStore, relationFilePath } from './vault/relation-store.js';
 import { PrivateMediaStore, mediaIndexDirectory } from './vault/media-store.js';
 import { VaultCharacterStore, charactersFilePath } from './vault/character-store.js';
 import { LocalBlobStore, mediaDirectory } from './vault/blob-store.js';
@@ -51,6 +52,7 @@ let privateConversations: PrivateConversationStore | null = null;
 let privateMemory: PrivateMemory | null = null;
 let memoryPreferences: MemoryPreferences | null = null;
 let catalogs: CatalogStore | null = null;
+let relations: RelationStore | null = null;
 let privateMedia: PrivateMediaStore | null = null;
 let autoLockTimer: NodeJS.Timeout | null = null;
 let captureHost: CaptureHost | null = null;
@@ -331,6 +333,9 @@ async function bootstrap(): Promise<void> {
   );
   memoryPreferences = new MemoryPreferences(memoryPreferencesPath(luxyConfigDir()));
   catalogs = new CatalogStore(catalogFilePath(luxyConfigDir()));
+  // al lado del catalogo y con la misma llave de dominio: los dos guardan lo que
+  // un modelo leyo de las conversaciones, y los dos se cifran por eso
+  relations = new RelationStore(relationFilePath(luxyConfigDir()));
   privateMemory = new PrivateMemory(privateConversations, {
     excluded: () => memoryPreferences?.excluded() ?? new Set(),
     // el catalogo manda sobre la segmentacion por silencios cuando existe
@@ -377,6 +382,7 @@ async function bootstrap(): Promise<void> {
     privateMemory,
     memoryPreferences,
     catalogs,
+    relations,
     privateMedia,
     logsDirectory: logsDirectory(),
     artifactsDirectory: artifactsDirectory(),

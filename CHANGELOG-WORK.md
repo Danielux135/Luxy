@@ -1,5 +1,34 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-09-14 — Claude — F23-PENDIENTES-001, paso 4 y el bloque del prompt
+
+El almacen lo escribieron agentes con dos revisores y un esceptico por hallazgo;
+el bloque del prompt lo escribi yo. Seis hallazgos confirmados, todos aplicados:
+
+- **escribir encima de lo ilegible**: si una nota no validaba al leer, se
+  contaba y se tiraba, y la siguiente escritura la borraba para siempre. Ahora
+  lo que no valida se conserva en crudo y se vuelve a escribir tal cual;
+- **un corte a mitad de escritura**: faltaba `fsync` antes del renombrado. Se
+  descarto guardar una copia anterior: el esceptico demostro que renombrar el
+  archivo vivo abre un hueco en el que no existe, y eso se lee como almacen
+  vacio, que es peor;
+- **borrar una conversacion**: si fallaba el borrado de sus notas, sus turnos
+  descifrados se quedaban en memoria;
+- **la memoria publicaba un indice viejo**: `build()` guardaba su resultado
+  aunque `invalidate()` hubiera corrido mientras tanto;
+- dos mios en el bloque del prompt: las pruebas nuevas no compilaban en el
+  typecheck de pruebas, y el texto decia «Como te siente» en vez de «Como te
+  sienta».
+
+Archivos: `relation-store.ts` y su prueba, `private-memory.ts` (linea temporal,
+`conversationsFor`, `turnAt`, `timeline`), `main/index.ts`, `handlers.ts` (solo
+el contexto y el borrado) con su primera prueba, `conversation-delete.test.ts`, y
+en shared `vault-prompt.ts` con `PendingAffairLine` y `formatPendingAffairs`.
+
+`npm run check` exit 0: 158 archivos, 3084 pruebas, 12 saltadas.
+Nada de esto se nota todavia al hablar con ella: falta la pasada sobre lo ya
+hablado y enganchar el bloque al turno.
+
 ### 2026-09-14 — Claude — F23-PENDIENTES-001, pasos 2 y 3: el nucleo puro
 
 Escrito por agentes siguiendo `docs/PENDIENTES-DISENO.md`, con dos revisores,
