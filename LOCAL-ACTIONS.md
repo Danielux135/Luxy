@@ -12,11 +12,21 @@ para que Daniel vea y corrija lo que se apuntó antes de que Lía lo lea.
    extraer nada. Es la línea base: se esperan 0 notas, `raising` a 0 y
    `inventionGuard.unbacked` con su valor de partida. Las cifras salen en
    `studio.log` y se apuntan en `TEST-RESULTS.md`, sólo cifras.
-3. Pulsar **«Buscar lo pendiente en lo ya hablado»** y dejar que termine.
-   Recorre las 17 conversaciones en orden cronológico. Se espera `behind 0` y
-   que aparezca al menos una nota abierta con `by: user`: **la de los dos cafés
-   y el trozo de tarta de chocolate en la cama.** Si no aparece, esto ha
-   fallado y hay que mirar `refused` y `clipped` en el registro.
+3. Pulsar **«Buscar lo pendiente en lo ya hablado»** y **dejar que termine del
+   todo, en una sola sesión**. Recorre las 18 conversaciones en orden
+   cronológico. Se espera `behind 0` y que aparezca al menos una nota abierta
+   con `by: user`: **la de los dos cafés y el trozo de tarta de chocolate en la
+   cama.** Si no aparece, esto ha fallado y hay que mirar `refused` y `clipped`
+   en el registro.
+
+   **Terminar entera no es una recomendación, es un requisito.** La guarda de
+   desfase de `selectPendingForTurn` bloquea una nota mientras quede cualquier
+   turno posterior sin revisar **en cualquier conversación del personaje**, no
+   sólo en la que se tiene abierta: los únicos perdonados son los turnos de la
+   conversación en curso. Así que hasta que la pasada no llegue al final de las
+   18, el bloque no ofrece **nada**, y parecerá que no funciona. El botón da
+   hasta 12 vueltas de 3 y lo resuelve de una sentada; dejándolo al disparo
+   automático entre turnos tardaría días.
 4. Repasar **«Lo que tenéis pendiente»** y descartar lo que no sea una promesa
    («No era una promesa»). Lo que decida Daniel no lo pisa el extractor.
 5. Sólo entonces, abrir una conversación con Lía **sin nombrar la deuda** y ver

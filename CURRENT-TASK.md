@@ -1,5 +1,45 @@
 # Luxy — tarea activa
 
+## F25-ENTRE-HILOS-001 — que recuerde algo de un hilo estando en otro
+
+Estado: **investigado; NO hace falta codigo para lo que pidio Daniel —
+Claude, 2026-09-14.** Informe completo en `docs/ENTRE-HILOS-INFORME.md`.
+
+Origen: Daniel contesto que queria «las dos cosas», y esta es la segunda.
+
+Veredicto, verificado contra el codigo: **para su ejemplo —los dos cafes y la
+tarta— no hay que escribir nada.** Una promesa es exactamente lo que cruza
+hilos por diseño, con cita literal, y el prompt ya le da permiso escrito para
+sacarla sola. Falta ejecutarlo: `LA-045`.
+
+Lo que SI cruza hoy, en tres niveles muy distintos:
+
+1. **la lista de momentos**, en todos los turnos y de todas las conversaciones:
+   fecha, titulo y cuantos turnos. Nada mas. Con la orden expresa de preguntar
+   en vez de rellenar;
+2. **un momento transcrito entero** (12 turnos, 6.000 caracteres) de cualquier
+   conversacion, pero **solo si Daniel lo pide** por una de las tres puertas
+   de `D-085`;
+3. **las promesas**, que es el unico canal donde ella tiene INICIATIVA.
+
+Lo que NO cruza: el contenido de una escena ajena, y todo lo que no sea una
+promesa —el animo, los gustos, las personas—, cuyos campos existen en el
+codigo (`joy`, `hurt`, `taste`, `person`) pero estan apagados.
+
+**El cambio barato, pendiente de decidir.** El resumen de cada escena YA existe,
+ya esta pagado y ya esta cifrado en `catalog.json`, pero solo se le enseña el
+del momento MAS ANTIGUO (`recall.ts`, `lineFor`). Enseñar tambien los N mas
+recientes son cinco lineas y una constante. Coste: no en dinero —se cobra por
+llamada—, sino en atencion del modelo: los 40 enteros casi doblarian el prompt;
+los 10 mas recientes son unas 900 palabras-token sobre las 4.800 de hoy.
+Decision aplazada a DESPUES de `LA-045`, para tener el prompt real delante.
+
+**Riesgo detectado, sin confirmar:** el indice tiene tope de 40 lineas y el
+2026-09-11 ya habia exactamente 40 momentos. Al pasarse se conservan los 39 mas
+recientes y el primero de todos: **lo que se cae es el medio**, y ella recibe un
+aviso de que faltan pero no de cuales. Se confirma mirando el numero en «Lo que
+recuerda».
+
 ## F24-RECAP-001 — memoria acumulativa para los chats que ya existen
 
 Estado: **diseñado y aprobado; construyendo el nucleo (pasos 2 a 5) — Claude,
