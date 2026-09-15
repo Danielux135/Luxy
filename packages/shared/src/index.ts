@@ -13,6 +13,7 @@ export * from './temporal-reference.js';
 export * from './auxiliary-target.js';
 export * from './vault-catalog.js';
 export * from './response-outcome.js';
+export * from './provider-call.js';
 export * from './continuation.js';
 export * from './artifacts.js';
 export * from './ids.js';

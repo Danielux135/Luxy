@@ -241,6 +241,36 @@ export const TERMINAL_GRACE_MS = 1000;
 // salida y un tope de 8.192. Un modelo que sigue escribiendo no calla 15 s.
 export const SOFT_TERMINAL_GRACE_MS = 15_000;
 
+// silencio que se le concede a un proveedor HTTP antes de dar la llamada por
+// muerta: tiempo sin recibir NADA, no duracion total de la respuesta.
+//
+// POR QUE EXISTE: hasta ahora este tope no lo habia elegido nadie. Era el de
+// fabrica de Node —300.000 ms exactos de `headersTimeout`/`bodyTimeout`— y no
+// habia una sola linea en el proyecto que lo cambiara. El 2026-09-14 dos
+// llamadas de DeepSeek murieron a los 302 y 300 segundos justos, el reintento
+// siguiente contesto a los 304, y cada intento se cobro entero porque la
+// pasarela cobra POR LLAMADA. Quince minutos es el numero que cabia elegir: da
+// sitio a un modelo lento sin dejar colgada para siempre una llamada muerta.
+//
+// una respuesta larga que va llegando NO muere por durar mucho: cada byte
+// reinicia la cuenta. Lo que la mata es el silencio.
+export const PROVIDER_SILENCE_TIMEOUT_MS = 900_000;
+
+// tiempo en vuelo a partir del cual una peticion que murio SIN cabeceras se da
+// por atendida —y por tanto cobrada— en vez de por no conectada.
+//
+// POR QUE HACE FALTA UN UMBRAL: sin el, un `ECONNREFUSED` de 5 ms y un socket
+// que la pasarela mantuvo abierto cuatro minutos y medio son literalmente el
+// mismo caso para el codigo. La tercera llamada vacia del 2026-09-14 murio a
+// los 268 s «porque la corto el otro lado», y como esta pasarela no manda
+// cabeceras hasta que el modelo contesta, llego aqui sin codigo de estado: se
+// declaraba gratis y se reenviaba sola, hasta tres veces.
+//
+// diez segundos son de sobra: un fallo de conexion real —DNS, rechazo del
+// socket, TLS caido— ocurre en milisegundos, y equivocarse por este lado solo
+// obliga a reenviar a mano una llamada que probablemente ya se pago.
+export const CALL_ATTENDED_AFTER_MS = 10_000;
+
 // como termino de verdad una respuesta.
 //
 // el estado de un trabajo en Postgres es mas grueso a proposito (no se toca el
@@ -297,6 +327,55 @@ export const CONTINUATION_RESYNC_WINDOW_CHARS = 2000;
 // ancla maxima del final del parcial al resincronizar. Se prueba de mas larga a
 // mas corta: cuanto mas larga case, mas evidencia hay de que es el corte.
 export const CONTINUATION_ANCHOR_CHARS = 120;
+
+// como acabo UNA llamada al proveedor. No es lo mismo que como acabo el turno.
+//
+// POR QUE EXISTE, y es la razon entera de esta lista: un turno puede costar
+// tres llamadas y hasta ahora solo quedaba constancia de la ultima. De las tres
+// llamadas vacias del 2026-09-14 no quedo rastro de ninguna clase —ni de por
+// que murieron, ni de cuantos tokens se pagaron— porque Luxy solo apuntaba una
+// linea POR TURNO. Y hay algo mas que encontrar: de las 13 llamadas de mas del
+// historico, solo 3 encajan con la pared de los 300 s de Node; las otras 10
+// pasaron en turnos cuyas llamadas duraban entre 29 y 135 segundos. Hay una
+// segunda causa que nadie ha visto todavia, y separar los finales es lo que
+// permitira reconocerla cuando vuelva a pasar.
+//
+// el orden va de «hubo respuesta» a «no hubo nada», y cada valor nombra una
+// causa distinta a proposito: juntarlas es exactamente lo que hizo invisible el
+// problema durante diez dias.
+export const PROVIDER_CALL_ENDINGS = [
+  // llego texto visible y el cierre fue normal
+  'answered',
+  // llego texto pero se corto por el tope de salida (`finish_reason: length`)
+  'truncated',
+  // cierre limpio y CERO texto visible: la llamada se paga igual
+  'empty',
+  // el proveedor estuvo hasta el tope sin enviar un solo byte
+  'silence',
+  // lo corto el reloj propio de Luxy, no el silencio de la conexion
+  'timed_out',
+  // lo paro una persona
+  'cancelled',
+  // el socket se cayo a mitad: lo corto el otro lado
+  'remote_close',
+  // no llegaron cabeceras nunca, pero la peticion llevaba minutos en vuelo.
+  //
+  // POR QUE NO ES `connect_failed`: esta pasarela retiene las cabeceras hasta
+  // que el modelo empieza a contestar, asi que «sin cabeceras» no significa
+  // «sin atender». La tercera llamada vacia del 2026-09-14 murio a los 268
+  // segundos y se cobro igual; contarla como un socket rechazado la declaraba
+  // gratis y la reenviaba sola. Un fallo de conexion de verdad ocurre en
+  // milisegundos, no en cuatro minutos y medio.
+  'dropped',
+  // el proveedor rechazo la peticion con un codigo de estado
+  'http_error',
+  // error DENTRO del flujo, con HTTP 200: se paga como cualquier otra
+  'stream_error',
+  // no se llego a conectar. Es el unico final que NO cuesta dinero
+  'connect_failed',
+  // agoto el presupuesto de salida razonando, antes de escribir nada visible
+  'output_budget',
+] as const;
 
 // quien pidio el aborto de una peticion, cuando lo hubo
 export const RESPONSE_ABORT_SOURCES = [

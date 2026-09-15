@@ -11,6 +11,7 @@ import {
   RESPONSE_ABORT_SOURCES,
   RESPONSE_OUTCOMES,
   SOFT_TERMINAL_GRACE_MS,
+  PROVIDER_SILENCE_TIMEOUT_MS,
   CONVERSATION_MEMORY_STATUSES,
   MAX_CONVERSATION_RESULT_CHARS,
   ARTIFACT_KINDS,
@@ -510,6 +511,17 @@ export const jobCompleteRequestSchema = z.object({
     .object({
       modelCalls: z.number().int().min(0),
       toolCalls: z.number().int().min(0),
+      /**
+       * lo que la pasarela cobra de verdad por este turno.
+       *
+       * va aparte de `usage` a proposito: `usage` son los tokens del intento
+       * que produjo la respuesta —el tamaño del contexto que se conservo— y
+       * esto es lo que se pago. Cuando difieren, la diferencia son llamadas que
+       * no devolvieron nada. Opcionales: solo los rellenan los proveedores HTTP.
+       */
+      billedCalls: z.number().int().min(0).optional(),
+      billedInputTokens: z.number().int().min(0).optional(),
+      billedOutputTokens: z.number().int().min(0).optional(),
     })
     .optional(),
   /**
@@ -937,6 +949,20 @@ export const httpProviderConfigSchema = z.object({
   maxOutputTokens: z.number().int().min(256).max(200_000).default(8192),
   dailyBudget: z.number().min(0).max(1_000_000).default(0),
   /**
+   * tope de LLAMADAS al dia a esta conexion. 0 = sin limite, y es el defecto.
+   *
+   * POR QUE NO BASTA `dailyBudget`: ese multiplica tokens por precio, y hay
+   * pasarelas con tarifa PLANA POR LLAMADA. Contra esa tarifa el presupuesto
+   * por tokens es ciego por construccion —una llamada que devuelve cero tokens
+   * suma cero al gasto y cuesta lo mismo que una buena—, asi que el 18% de lo
+   * gastado entre el 4 y el 14 de septiembre no compro nada y ningun limite
+   * llego a saltar. Lo unico que protege contra esa tarifa es contar llamadas.
+   *
+   * El techo de 10.000 no es una politica: es el limite superior de lo que
+   * puede escribirse por error sin que el campo deje de tener sentido.
+   */
+  dailyCallLimit: z.number().int().min(0).max(10_000).default(0),
+  /**
    * silencio que hay que ver tras una señal DEBIL antes de cerrar el flujo.
    *
    * un `usage` sin `choices` suele ser el ultimo evento, pero no lo demuestra:
@@ -945,6 +971,22 @@ export const httpProviderConfigSchema = z.object({
    * margen sigue siendo corto, porque ahi el mensaje SI termino.
    */
   softTerminalGraceMs: z.number().int().min(1).max(120_000).default(SOFT_TERMINAL_GRACE_MS),
+  /**
+   * silencio que aguanta una llamada a esta conexion antes de darla por muerta.
+   *
+   * es tiempo SIN RECIBIR NADA, no duracion total: una respuesta larga que va
+   * llegando reinicia la cuenta con cada byte y no muere por tardar.
+   *
+   * es por conexion porque no todas las pasarelas van igual de lentas, y el
+   * suelo de 30 s evita que un valor mal puesto convierta cada turno en un
+   * fallo. El techo de una hora es el mismo tope que el del trabajo entero.
+   */
+  silenceTimeoutMs: z
+    .number()
+    .int()
+    .min(30_000)
+    .max(3_600_000)
+    .default(PROVIDER_SILENCE_TIMEOUT_MS),
   /**
    * como manda esta conexion el campo `image_url` de una parte de imagen.
    *

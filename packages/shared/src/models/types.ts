@@ -169,6 +169,15 @@ export const modelLimitsSchema = z.object({
   maxTotalDurationMs: z.number().int().min(1000).max(21_600_000).default(3_600_000),
   /** limite de gasto diario en la moneda del proveedor. 0 = sin limite */
   dailyBudget: z.number().min(0).default(0),
+  /**
+   * limite de LLAMADAS al dia. 0 = sin limite.
+   *
+   * existe porque `dailyBudget` multiplica tokens por precio y hay pasarelas
+   * con tarifa plana por llamada: contra esas, un intento que devuelve cero
+   * tokens suma cero al gasto y cuesta lo mismo que uno bueno, asi que el
+   * presupuesto por tokens no puede frenarlo por construccion.
+   */
+  dailyCalls: z.number().int().min(0).max(10_000).default(0),
   retryPolicy: retryPolicySchema.default({}),
 });
 

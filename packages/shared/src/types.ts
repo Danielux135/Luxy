@@ -10,12 +10,15 @@ import type {
   STREAM_TRANSPORT_ENDS,
   RESPONSE_ABORT_SOURCES,
   RESPONSE_OUTCOMES,
+  PROVIDER_CALL_ENDINGS,
 } from './constants.js';
 import type { ReasoningEffort } from './constants.js';
 
 export type JobStatus = (typeof JOB_STATUSES)[number];
 export type StreamTransportEnd = (typeof STREAM_TRANSPORT_ENDS)[number];
 export type ResponseOutcome = (typeof RESPONSE_OUTCOMES)[number];
+/** como acabo UNA llamada; el final del TURNO es `ResponseOutcome` */
+export type ProviderCallEnding = (typeof PROVIDER_CALL_ENDINGS)[number];
 export type ResponseAbortSource = (typeof RESPONSE_ABORT_SOURCES)[number];
 export type KnownProviderId = (typeof PROVIDER_IDS)[number];
 /** identificador externo validado en los bordes del sistema */
@@ -163,12 +166,33 @@ export interface HttpProviderConfig {
   maxOutputTokens: number;
   dailyBudget: number;
   /**
+   * tope de LLAMADAS al dia. 0 = sin limite, que es lo de siempre.
+   *
+   * POR QUE HACE FALTA ADEMAS DE `dailyBudget`: el presupuesto multiplica
+   * tokens por precio, y hay pasarelas que cobran una tarifa plana POR LLAMADA
+   * —6,935 ¥ digas 100 palabras o 10.000—. Contra esa tarifa el presupuesto por
+   * tokens es ciego por construccion: una llamada que devuelve cero tokens
+   * suma cero al gasto y cuesta lo mismo que una buena. Lo unico que protege
+   * ahi es contar llamadas.
+   */
+  dailyCallLimit?: number;
+  /**
    * silencio exigido tras una señal terminal debil antes de cerrar el flujo.
    *
    * opcional para no romper una configuracion anterior: sin valor se usa
    * `SOFT_TERMINAL_GRACE_MS`.
    */
   softTerminalGraceMs?: number;
+  /**
+   * silencio que aguanta una llamada antes de darse por muerta.
+   *
+   * tiempo SIN RECIBIR NADA, no duracion total. Opcional para no romper una
+   * configuracion anterior: sin valor se usa `PROVIDER_SILENCE_TIMEOUT_MS`,
+   * que es lo unico que ha elegido alguien a proposito. Lo que habia antes era
+   * el valor de fabrica de Node, 300.000 ms, y ese mataba llamadas que iban a
+   * contestar.
+   */
+  silenceTimeoutMs?: number;
   /**
    * forma en la que esta conexion espera `image_url` dentro de una parte de
    * imagen.
@@ -230,6 +254,27 @@ export interface ProviderCallMetrics {
   modelCalls: number;
   /** herramientas locales que el modelo llego a ejecutar */
   toolCalls: number;
+  /**
+   * intentos que la pasarela cobra, aunque no devolvieran ni una palabra.
+   *
+   * es casi siempre igual que `modelCalls`, y la diferencia es justo la que
+   * importa: una llamada que no llego a conectar no cuesta nada, y una que
+   * murio en silencio a los 300 s cuesta igual que una que contesto.
+   *
+   * opcional porque solo lo rellenan los proveedores HTTP: un CLI local con la
+   * sesion autenticada no tiene una tarifa por llamada que contar.
+   */
+  billedCalls?: number;
+  /**
+   * tokens sumados de TODOS los intentos, no solo del que salio bien.
+   *
+   * `usage` sigue siendo el del intento que produjo la respuesta —es el tamaño
+   * del contexto que se conservo, y hay analisis que dependen de eso—. Esto es
+   * otra cosa: lo que de verdad se pago. Un turno de tres llamadas figuraba con
+   * 7.601 tokens de entrada cuando se habian pagado 22.835.
+   */
+  billedInputTokens?: number;
+  billedOutputTokens?: number;
 }
 
 // interfaz comun de todos los proveedores de ejecucion.
