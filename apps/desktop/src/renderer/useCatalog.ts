@@ -9,6 +9,7 @@ import { useEffect, useState, useSyncExternalStore } from 'react';
 import {
   buildCatalogForConnection,
   buildDefaultCatalog,
+  mergeCatalogs,
   type CatalogSnapshot,
   type CatalogSource,
   type ModelDefinition,
@@ -162,14 +163,14 @@ export function useDetectedCatalog(summary: ConfigSummary): {
       });
 
   // dos orígenes pueden servir el mismo modelo, y su identificador se deriva
-  // del nombre: sin esto saldría repetido en cada selector. Gana el primero,
-  // que es el orden en que están configurados
-  const vistos = new Set<string>();
-  const models = todos.filter((model) => {
-    if (vistos.has(model.id)) return false;
-    vistos.add(model.id);
-    return true;
-  });
+  // del nombre: sin esto saldría repetido en cada selector.
+  //
+  // Se renombra en vez de descartar. Descartar era lo que había, y con las
+  // cuatro conexiones de Daniel a la MISMA pasarela de AI Horde —las cuatro
+  // devuelven los mismos 27 nombres— tres de ellas se quedaban sin un solo
+  // modelo: `modelsForProvider` empareja por `connectionId`, así que sus
+  // selectores salían vacíos sin ninguna explicación.
+  const models = mergeCatalogs(todos);
 
   return { models, loading };
 }

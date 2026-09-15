@@ -145,7 +145,7 @@ export function modelsForProvider(
   models: readonly SelectableModel[],
   provider: string,
 ): SelectableModel[] {
-  return models.filter(
+  const suyos = models.filter(
     (model) =>
       model.enabled &&
       // y que se pueda HABLAR con el. `enabled` no lo dice: un whisper y un
@@ -167,4 +167,15 @@ export function modelsForProvider(
         // lo arreglaba, porque el problema no era la frescura sino el criterio.
         model.connectionId === provider),
   );
+
+  // el catalogo junto conserva una ficha POR ORIGEN —hace falta para que cada
+  // conexion tenga las suyas—, y por la via de la FAMILIA eso puede traer el
+  // mismo `apiModel` dos veces. En el desplegable el valor de cada opcion es el
+  // `apiModel`: repetido, elegir una opcion deja de decir cual se eligio
+  const vistos = new Set<string>();
+  return suyos.filter((model) => {
+    if (vistos.has(model.apiModel)) return false;
+    vistos.add(model.apiModel);
+    return true;
+  });
 }

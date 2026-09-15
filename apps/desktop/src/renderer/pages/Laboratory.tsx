@@ -315,9 +315,18 @@ export function LaboratoryPage({ summary }: { summary: ConfigSummary }): JSX.Ele
     EXECUTABLE_MODEL_EVALUATIONS.find((item) => item.id === evaluationId) ??
     EXECUTABLE_MODEL_EVALUATIONS[0]!;
   const { models } = useDetectedCatalog(summary);
-  const compatibleModels = models.filter((model) =>
-    modelDeclaresEvaluationCapabilities(model, evaluation),
-  );
+  // por apiModel y no por id: el catalogo junto conserva una ficha por ORIGEN
+  // —cuatro conexiones al mismo AI Horde dan cuatro copias de cada modelo— y
+  // aqui el origen da igual, porque la prueba se ejecuta por FAMILIA. Sin esto
+  // el desplegable enseñaba cuatro opciones identicas entre las que no habia
+  // forma de elegir
+  const vistosPorNombre = new Set<string>();
+  const compatibleModels = models.filter((model) => {
+    if (!modelDeclaresEvaluationCapabilities(model, evaluation)) return false;
+    if (vistosPorNombre.has(model.apiModel)) return false;
+    vistosPorNombre.add(model.apiModel);
+    return true;
+  });
   const selectedModel =
     compatibleModels.find((model) => model.id === modelId) ?? compatibleModels[0] ?? null;
   const selectedSecondModel =

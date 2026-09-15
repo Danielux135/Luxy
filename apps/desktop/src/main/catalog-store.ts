@@ -7,7 +7,7 @@
 // El archivo NO lleva claves: solo nombres de modelo, multiplicadores y grupos.
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { CatalogSnapshot, CatalogSource } from '@luxy/shared';
+import { catalogSnapshotSchema, type CatalogSnapshot, type CatalogSource } from '@luxy/shared';
 
 /**
  * nombre de archivo seguro por origen; el identificador se filtra.
@@ -38,6 +38,15 @@ export function writeCatalogSnapshot(directory: string, snapshot: CatalogSnapsho
  *
  * devuelve null si no hay ninguno o si el archivo esta corrupto: un catalogo
  * ilegible se trata como ausente, nunca se propaga a medias.
+ *
+ * COMPROBAR LA FORMA Y NO SOLO EL JSON: esto era `JSON.parse(raw) as
+ * CatalogSnapshot`, un cast. El try de alrededor solo atrapaba el JSON
+ * ilegible, asi que un JSON perfectamente valido con otra forma pasaba entero
+ * —`models` sin `apiModel`, o `models` que ni siquiera es una lista— y viajaba
+ * por IPC hasta el renderer, donde el catalogo se construye en el CUERPO del
+ * render de la raiz del arbol: ventana en negro desde el arranque, y sin nada
+ * en pantalla que dijera que archivo borrar. Es el unico sitio por el que entra
+ * un dato sin comprobar a una API que asume `apiModel: string`.
  */
 export function readCatalogSnapshot(
   directory: string,
@@ -46,10 +55,12 @@ export function readCatalogSnapshot(
 ): CatalogSnapshot | null {
   try {
     const raw = readFileSync(snapshotPath(directory, connectionId, source), 'utf8');
-    const parsed = JSON.parse(raw) as CatalogSnapshot;
     // un archivo escrito antes de que existieran los dos origenes no lleva
-    // `source`, y sin esto el renderer no podria emparejarlo con lo que pidio
-    return { ...parsed, source: parsed.source ?? source };
+    // `source`, y sin esto el renderer no podria emparejarlo con lo que pidio.
+    // El valor por defecto del esquema no basta: el que toca es el PEDIDO
+    const parsed = catalogSnapshotSchema.safeParse(JSON.parse(raw));
+    if (!parsed.success) return null;
+    return { ...parsed.data, source: parsed.data.source ?? source };
   } catch {
     return null;
   }

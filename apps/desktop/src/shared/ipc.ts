@@ -21,6 +21,7 @@ import {
   RELATION_STATUSES,
   type agentEventSchema,
   agentHostStatusSchema,
+  catalogSnapshotSchema,
   conversationMemoryStatusSchema,
   hordeRecipeSchema,
   jobStatusSchema,
@@ -1807,36 +1808,14 @@ export const catalogRefreshArgsSchema = z.object({
   source: z.enum(['connection', 'http']).default('connection'),
 });
 
-export const catalogModelSchema = z.object({
-  apiModel: z.string(),
-  ownedBy: z.string().nullable(),
-  billing: z.enum(['token', 'call', 'unknown']),
-  modelRatio: z.number().nullable(),
-  completionRatio: z.number().nullable(),
-  perCall: z.number().nullable(),
-  groups: z.array(z.string()),
-});
-
-export const catalogSnapshotSchema = z.object({
-  connectionId: z.string(),
-  /** un catálogo guardado antes de que existieran los dos orígenes es de `connections` */
-  source: z.enum(['connection', 'http']).default('connection'),
-  fetchedAt: z.string(),
-  models: z.array(catalogModelSchema),
-  pricingAvailable: z.boolean(),
-  notice: z.string().nullable(),
-  /** que contesto cada ruta de precios probada */
-  pricingProbes: z
-    .array(
-      z.object({
-        url: z.string(),
-        status: z.number().nullable(),
-        topLevelKeys: z.array(z.string()),
-        entryCount: z.number(),
-      }),
-    )
-    .optional(),
-});
+// el esquema del catálogo vive en `@luxy/shared`, al lado del tipo que
+// describe, y se re-exporta desde aquí para que el contrato IPC siga nombrando
+// uno solo. El que había aquí escrito era una copia que NUNCA se ejecutaba
+// —sus dos usos eran `z.infer`, o sea posiciones de tipo— y que ya se había
+// quedado atrás: le faltaba `declaredCapabilities`, así que el día que alguien
+// lo aplicara habría borrado en silencio lo que la pasarela declara saber
+// hacer. Una sola definición, y viva: la ejecuta `readCatalogSnapshot`.
+export { catalogSnapshotSchema };
 
 export const approvalResolveArgsSchema = z.object({
   jobId: z.string().min(1).max(64),

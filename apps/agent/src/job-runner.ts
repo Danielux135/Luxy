@@ -7,6 +7,7 @@ import type {
   ProviderId,
   ProjectConfig,
   AgenticContext,
+  ModelDefinition,
   ResponseTermination,
   JobArtifact,
   ProviderImage,
@@ -190,6 +191,37 @@ export function resolveFamilyDefault(family: string, config: AgentConfig): strin
 }
 
 /**
+ * ficha de fabrica de un `apiModel`, buscando conexion por conexion.
+ *
+ * POR QUE NO UN REGISTRO CON TODAS JUNTAS, que es lo que habia: el catalogo de
+ * fabrica trae las MISMAS 19 ids para cualquier conexion —la id es literal en
+ * `RAW_CATALOG` y lo unico que cambia es `connectionId`—, asi que juntarlas con
+ * `flatMap` metia 19 ids repetidas en un mismo registro. Y ahi el `onConflict`
+ * por defecto es `throw`. Con una sola conexion no se notaba; con dos,
+ * `new ModelRegistry` lanzaba el MISMO `ModelRegistryError` del 2026-09-15
+ * —«hay dos modelos con la id "deepseek-v4-pro"»— y, como esto se evalua al
+ * construir el argumento de `provider.run`, TODO trabajo con modelo resoluble
+ * acababa en `failed` con un mensaje que no le dice nada a nadie.
+ * `agentConfigSchema` admite 16 conexiones: no es un caso raro, es el esquema.
+ *
+ * Un registro por conexion, como ya hacen `resolveFamilyDefault` y
+ * `findMediaModel`. No se filtra por `enabled` a proposito: aqui solo se lee el
+ * CONTRATO del modelo —si es agentic, sus limites y sus herramientas—, que no
+ * depende de la conexion, y filtrar cambiaria el comportamiento de antes.
+ */
+function findDefaultModel(apiModel: string, config: AgentConfig): ModelDefinition | undefined {
+  for (const connection of config.connections) {
+    const registry = new ModelRegistry({
+      connections: [connection],
+      models: buildDefaultCatalog(connection.id),
+    });
+    const found = registry.list().find((model) => model.apiModel === apiModel);
+    if (found !== undefined) return found;
+  }
+  return undefined;
+}
+
+/**
  * contexto de herramientas para un trabajo, si procede.
  *
  * devuelve undefined cuando el modelo no es agentic, cuando no hay worktree
@@ -206,11 +238,7 @@ export function buildAgenticContext(
   const apiModel = resolveJobModel(job, deps.config);
   if (apiModel === undefined) return undefined;
 
-  const registry = new ModelRegistry({
-    connections: deps.config.connections,
-    models: deps.config.connections.flatMap((connection) => buildDefaultCatalog(connection.id)),
-  });
-  const definition = registry.list().find((model) => model.apiModel === apiModel);
+  const definition = findDefaultModel(apiModel, deps.config);
 
   if (definition === undefined || !definition.agentic || definition.category !== 'text') {
     return undefined;

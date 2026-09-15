@@ -3,7 +3,7 @@ import { useEffect, useRef, useState, type JSX } from 'react';
 import {
   ALLOWED_TEST_EXECUTABLES,
   ModelRegistry,
-  buildCatalogForConnection,
+  buildCatalogReport,
   buildDefaultCatalog,
   connectionProfileSchema,
   guessModelFamily,
@@ -13,6 +13,7 @@ import {
   type ModelFamily,
   type ProjectType,
   type ResolvedModel,
+  type SkippedModel,
   type StoredAgentConfig,
 } from '@luxy/shared';
 import { connectionSecretName } from '../../shared/ipc.js';
@@ -81,7 +82,7 @@ function buildRegistry(
   summary: ConfigSummary,
   snapshot: CatalogSnapshot | null,
   origin: CatalogOrigin | null,
-): ModelRegistry {
+): { registry: ModelRegistry; skipped: SkippedModel[]; unreadable: number } {
   const declaradas = (summary.config?.connections ?? []) as ConnectionProfile[];
   // un proveedor HTTP no es una conexion, pero tiene lo que el registro
   // necesita para resolver: identificador, nombre y URL. Se construye uno
@@ -105,22 +106,24 @@ function buildRegistry(
     origin !== null &&
     snapshot?.connectionId === origin.id &&
     (snapshot.source ?? 'connection') === origin.source;
-  const models =
+  const report =
     origin === null
-      ? []
+      ? { models: [], skipped: [] }
       : leido
         ? // los registros enteros, no solo los nombres: llevan lo que la
           // pasarela declara que sabe hacer cada modelo
-          buildCatalogForConnection(origin.id, snapshot.models, origin.family ?? undefined)
-        : // de un proveedor HTTP no se sabe NADA hasta preguntarle: rellenarlo
-          // con el catalogo de fabrica ofreceria modelos de otra pasarela
-          origin.source === 'connection'
-          ? buildDefaultCatalog(origin.id)
-          : [];
+          buildCatalogReport(origin.id, snapshot.models, origin.family ?? undefined)
+        : {
+            // de un proveedor HTTP no se sabe NADA hasta preguntarle:
+            // rellenarlo con el catalogo de fabrica ofreceria modelos de otra
+            // pasarela
+            models: origin.source === 'connection' ? buildDefaultCatalog(origin.id) : [],
+            skipped: [],
+          };
 
-  return new ModelRegistry({
+  const registry = new ModelRegistry({
     connections,
-    models,
+    models: report.models,
     statuses: connections.map((connection) => ({
       connectionId: connection.id,
       hasApiKey:
@@ -138,7 +141,19 @@ function buildRegistry(
           : [],
       error: null,
     })),
+    // el catalogo lo sirve un tercero: una id repetida es un dato raro, no un
+    // fallo nuestro, y esto corre DENTRO del render. Lanzando aqui se pierde
+    // la aplicacion entera, no la lista
+    onConflict: 'skip',
   });
+
+  // lo que se cayo ANTES de llegar aqui, al parsear `/v1/models`: una fila sin
+  // `id`, un `id` que no es cadena, uno de mas de 200 caracteres. Eso no entra
+  // en `skipped` —el catalogo ya no lo ve— y sin sumarlo el aviso contaba menos
+  // modelos de los que de verdad faltaban
+  const unreadable = leido ? (snapshot.unreadableModels ?? 0) : 0;
+
+  return { registry, skipped: report.skipped, unreadable };
 }
 
 /**
@@ -1458,8 +1473,15 @@ function CatalogoReal({
 export function ModelsPage({ summary }: { summary: ConfigSummary }): JSX.Element {
   const { snapshot, setSnapshot, origins, origin, setOriginKey } = useCatalogSnapshot(summary);
   const localEvidence = useModelEvidence();
-  const registry = buildRegistry(summary, snapshot, origin);
+  const { registry, skipped, unreadable } = buildRegistry(summary, snapshot, origin);
   const resolved = registry.resolveAll();
+  // lo que la pasarela sirvio y no pudo entrar en el catalogo. Se dice en vez
+  // de callarlo: un modelo que falta sin explicacion se busca durante un rato.
+  // Los tres sumandos son tres sitios distintos donde se pierde un modelo —al
+  // leer la respuesta, al construir el catalogo y al meterlo en el registro— y
+  // hacen falta los tres: contando solo el de en medio, una pasarela con seis
+  // filas raras dejaba dos modelos y el aviso decia que faltaba uno
+  const descartados = unreadable + skipped.length + registry.conflicts.length;
 
   const porFamilia = new Map<ModelFamily, ResolvedModel[]>();
   for (const model of resolved) {
@@ -1486,6 +1508,15 @@ export function ModelsPage({ summary }: { summary: ConfigSummary }): JSX.Element
         onSnapshot={setSnapshot}
       />
 
+      {descartados > 0 && (
+        <Notice tone="warn">
+          {descartados === 1
+            ? 'Un modelo servido se quedo fuera del catalogo'
+            : `${descartados} modelos servidos se quedaron fuera del catalogo`}
+          : su entrada no se pudo leer, o el nombre esta repetido, vacio o no cabe. El resto de la
+          lista es correcto.
+        </Notice>
+      )}
       {localEvidence.error !== null && (
         <Notice tone="warn">No se pudo leer la evidencia local: {localEvidence.error}</Notice>
       )}

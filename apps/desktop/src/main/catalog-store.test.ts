@@ -97,6 +97,57 @@ describe('catalogos guardados de los dos origenes', () => {
     expect(readCatalogSnapshot(directory, 'no-existe', 'http')).toBeNull();
   });
 
+  it('un archivo con JSON valido y la forma equivocada se trata como ausente', () => {
+    // esto era un cast, `JSON.parse(raw) as CatalogSnapshot`. El try de
+    // alrededor solo atrapaba el JSON ilegible, asi que una de estas formas
+    // pasaba entera, viajaba por IPC y llegaba al catalogo, que se construye en
+    // el CUERPO del render de la raiz: ventana en negro desde el arranque y
+    // ninguna pista de que archivo borrar
+    const raros: Record<string, unknown>[] = [
+      { models: [{ id: 'x' }] },
+      { models: {} },
+      { ...snapshot(), models: [{ apiModel: 42 }] },
+      { ...snapshot(), fetchedAt: 17 },
+      { hola: 'que tal' },
+    ];
+    for (const [indice, raro] of raros.entries()) {
+      const id = `raro${indice}`;
+      writeFileSync(join(directory, `http-${id}.json`), JSON.stringify(raro), 'utf8');
+      expect(readCatalogSnapshot(directory, id, 'http')).toBeNull();
+    }
+  });
+
+  it('un archivo que no es siquiera un objeto se trata como ausente', () => {
+    writeFileSync(join(directory, 'http-lista.json'), '[1,2,3]', 'utf8');
+    expect(readCatalogSnapshot(directory, 'lista', 'http')).toBeNull();
+  });
+
+  it('conserva lo que la pasarela declara saber hacer', () => {
+    // el esquema que habia escrito en el contrato IPC no tenia este campo: el
+    // dia que alguien lo aplicara, habria borrado en silencio lo que marca cual
+    // acepta imagenes y volveriamos a deducirlo del nombre
+    writeCatalogSnapshot(
+      directory,
+      snapshot({
+        connectionId: 'declara',
+        models: [
+          {
+            apiModel: 'pixtral-12b-2409',
+            ownedBy: null,
+            billing: 'unknown',
+            modelRatio: null,
+            completionRatio: null,
+            perCall: null,
+            groups: [],
+            declaredCapabilities: ['vision', 'tools'],
+          },
+        ],
+      }),
+    );
+    const leido = readCatalogSnapshot(directory, 'declara', 'http');
+    expect(leido?.models[0]?.declaredCapabilities).toEqual(['vision', 'tools']);
+  });
+
   it('un identificador con separadores de ruta no escapa de la carpeta', () => {
     writeCatalogSnapshot(directory, snapshot({ connectionId: '../../fuera', source: 'http' }));
     for (const entry of readdirSync(directory)) {

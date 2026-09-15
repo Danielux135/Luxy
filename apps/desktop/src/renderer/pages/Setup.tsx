@@ -561,6 +561,10 @@ function SetupModels({ served }: { served: string[] }): JSX.Element {
         error: null,
       },
     ],
+    // `served` lo dice la pasarela, no nosotros, y esto corre dentro del
+    // render: un nombre repetido cuesta un renglon del catalogo, no el alta de
+    // la maquina a medias
+    onConflict: 'skip',
   });
 
   const modelos = registry.resolveAll();

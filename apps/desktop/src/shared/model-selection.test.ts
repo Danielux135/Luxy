@@ -130,6 +130,33 @@ describe('un proveedor HTTP cuyos modelos no son una familia nuestra', () => {
     expect(deep).toEqual(['DeepSeek-V4-Pro', 'DeepSeek-V4-Flash']);
   });
 
+  it('cada conexion ofrece los suyos aunque las dos sirvan el mismo nombre', () => {
+    // las cuatro altas de AI Horde apuntan a la MISMA pasarela y sirven los
+    // mismos nombres. El catalogo junto conserva una ficha por origen para que
+    // esto funcione: antes se quedaba con la primera y el resto de conexiones
+    // tenia el desplegable vacio
+    const dosHordes: SelectableModel[] = [
+      texto('koboldcpp/Cydonia-24B', 'other', 'horde-cydonia'),
+      texto('koboldcpp/Cydonia-24B', 'other', 'horde-behemoth'),
+    ];
+    expect(modelsForProvider(dosHordes, 'horde-cydonia').map((m) => m.apiModel)).toEqual([
+      'koboldcpp/Cydonia-24B',
+    ]);
+    expect(modelsForProvider(dosHordes, 'horde-behemoth').map((m) => m.apiModel)).toEqual([
+      'koboldcpp/Cydonia-24B',
+    ]);
+  });
+
+  it('por FAMILIA no se repite un nombre servido por dos origenes', () => {
+    // el valor de cada opcion del desplegable es el `apiModel`: repetido, la
+    // eleccion deja de decir cual se eligio
+    const dosOrigenes: SelectableModel[] = [
+      texto('Kimi-K3', 'kimi', 'hcnsec'),
+      texto('Kimi-K3', 'kimi', 'otra-pasarela'),
+    ];
+    expect(modelsForProvider(dosOrigenes, 'kimi').map((m) => m.apiModel)).toEqual(['Kimi-K3']);
+  });
+
   it('lo desactivado no se ofrece por ninguna de las dos vias', () => {
     expect(modelsForProvider(CATALOGO, 'hcnsec').map((m) => m.apiModel)).not.toContain(
       'retirado',
