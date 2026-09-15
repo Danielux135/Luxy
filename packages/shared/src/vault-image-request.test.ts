@@ -482,7 +482,11 @@ describe('la escena no puede redefinir al personaje', () => {
 // distinta de las que ya tienes»— y reenviar es el camino barato, asi que ante
 // la duda ganaba siempre. Empeoro cuando se le dijo «si dudas, manda una».
 describe('«otra foto» significa una nueva', () => {
-  const instruccion = buildVaultImageInstruction();
+  // el desempate solo se envia cuando hay algo que reenviar: sin lista no hay
+  // dos vias entre las que elegir
+  const instruccion = buildVaultImageInstruction([
+    { mediaId: 'med-1', description: 'de pie junto a la ventana' },
+  ]);
 
   it('lista las formas de pedir una nueva', () => {
     expect(instruccion).toContain('piden GENERAR');
@@ -492,13 +496,24 @@ describe('«otra foto» significa una nueva', () => {
   });
 
   it('acota cuando SI vale reenviar', () => {
+    // antes lo cerraba con «y solo entonces» sobre una lista de cuatro frases,
+    // y esa exhaustividad dejaba fuera «la ultima»: se acota por lo que la
+    // frase NOMBRA, no por una lista cerrada de ejemplos
     expect(instruccion).toContain('«la de antes»');
-    expect(instruccion).toContain('REENVIAR, y solo entonces');
+    expect(instruccion).toContain('piden REENVIAR: nombran una que YA existe');
+    expect(instruccion).not.toContain('y solo entonces');
   });
 
-  it('prohibe mandar dos veces seguidas la misma', () => {
-    // era exactamente lo que hacia: la misma foto, dos turnos seguidos
-    expect(instruccion).toContain('NUNCA reenvies dos veces seguidas la misma imagen');
+  it('prohibe mandar dos veces seguidas la misma, pero solo si piden «otra»', () => {
+    // era exactamente lo que hacia: la misma foto, dos turnos seguidos.
+    //
+    // La prohibicion NO puede ser incondicional, que es como estaba escrita:
+    // «no me ha llegado» y «no me carga, ponla otra vez» piden justo repetir
+    // la misma imagen, y estan dos lineas mas arriba del lado del reenvio
+    expect(instruccion).toContain(
+      'Si acabas de mandar una y te piden «otra», quieren una NUEVA: generala, no repitas esa.',
+    );
+    expect(instruccion).not.toContain('NUNCA reenvies dos veces seguidas');
   });
 
   it('sin poder generar no promete lo que no puede hacer', () => {
@@ -646,14 +661,20 @@ describe('una foto que hace EL dentro de la escena', () => {
     const instruction = buildVaultImageInstruction();
     expect(instruction).not.toContain('si no te la han pedido, no la mandes');
     expect(instruction).toContain('Que el haga la foto no es iniciativa tuya, es el caso 2');
-    expect(instruction).toContain('o cuando el haga una foto (ver CUANDO, caso 2)');
+    // el apartado b) y su remision solo existen cuando hay dos vias
+    expect(buildVaultImageInstruction([{ mediaId: 'med-1', description: 'en la ventana' }])).toContain(
+      'o cuando el haga una foto (ver CUANDO, caso 2)',
+    );
   });
 
-  it('decide por escrito la foto de los dos juntos y la que no llego a salir', () => {
+  it('decide por escrito la foto de los dos juntos y la que solo se dice', () => {
     const instruction = buildVaultImageInstruction();
     expect(instruction).toContain('Si salis los dos, o os la hace otra persona, generala solo contigo');
-    expect(instruction).toContain('es que no llego a generarse: generala');
     expect(instruction).toContain('Si solo se fotografia a si mismo, o solo lo dice o lo recuerda');
+    // la regla que adivinaba «esta mirando una foto que no esta en la lista,
+    // luego no llego a generarse» se borro: `lastError` lo sabe de cierto y
+    // aquella mandaba lo contrario que la linea de encima ante la misma frase
+    expect(instruction).not.toContain('es que no llego a generarse: generala');
   });
 
   it('sin poder generar no se le pide generarla', () => {
@@ -672,5 +693,229 @@ describe('una foto que hace EL dentro de la escena', () => {
     expect(instruction).toContain('tal como se ve desde donde esta el');
     expect(instruction).not.toContain('lo que ve su camara');
     expect(instruction).not.toContain('sin mirar a la camara');
+  });
+});
+
+// PASO DE VERDAD del 2026-09-14, y es el CONTRARIO del de `D-086`. Daniel
+// escribio, dentro de la escena, «Mira la ultima foto que te he hecho
+// durmiendo», refiriendose a una foto que YA estaba guardada.
+//
+// Lo importante es lo que hizo Lia: la identifico, cogio el movil, abrio la
+// galeria y la describio BIEN —ella dormida, la boca entreabierta, el pelo
+// esparcido, la luz de la tarde—. No fallo la comprension ni la identificacion.
+// Lo que sobro fue el bloque de GENERAR que escribio ademas: llego una imagen
+// distinta de la que el tenia en la cabeza, y eso rompe la escena.
+//
+// Fallo porque dos reglas mandaban cosas distintas ante esa misma frase: el
+// caso 2 traia el ejemplo «te hago una mientras duermes» —presente de hacer una
+// foto MAS complemento de dormir, las dos piezas de lo que el escribio— y a dos
+// lineas estaba la regla correcta, «solo lo dice o lo recuerda, no». Dos reglas
+// en conflicto son una moneda al aire en cada turno.
+//
+// Estas pruebas fijan los dos lados a la vez: el falso positivo de hoy y el
+// falso negativo de `D-086`, que es el que se arreglo antes y no puede volver.
+describe('lo que decide es CUANDO se hace la foto, no el tiempo verbal', () => {
+  // la foto de la que hablaba: dormida, y ya guardada
+  const guardadas = [
+    { mediaId: 'med-1', description: 'dormida en la cama, la boca entreabierta, luz de tarde' },
+  ];
+  // el modelo no lee el array de lineas, lee un texto corrido: las frases que
+  // cruzan un salto de linea hay que buscarlas asi o la prueba miente
+  const corrido = (texto: string): string => texto.replace(/\s+/g, ' ');
+
+  it('«Mira la ultima foto que te he hecho durmiendo» se REENVIA, no se genera', () => {
+    const instruction = buildVaultImageInstruction(guardadas);
+    // el determinante de su frase, del lado del reenvio
+    const bullet = instruction
+      .split('\n')
+      .find((linea) => linea.includes('«la ultima»') && linea.includes('«la de antes»'));
+    expect(bullet).toBeDefined();
+    expect(instruction).toContain('piden REENVIAR: nombran una que YA existe');
+    expect(instruction).toContain('Buscala en la lista de abajo y manda su id');
+    // y el caso 2 ya no la reclama: lo dice el, en el mismo sitio donde fallaba,
+    // y ademas dice a que caso pertenece, para que no caiga en «fuera de esos
+    // dos casos, nunca por iniciativa propia» y se quede sin mandar nada
+    expect(corrido(instruction)).toContain(
+      'la de antes de este mensaje («la ultima», «esa») es del caso 1',
+    );
+  });
+
+  it('«*click* ya te he hecho la foto» se GENERA: el perfecto no manda a reenviar', () => {
+    // el arreglo anterior escribia «el caso 2 es siempre el PRESENTE», y eso
+    // reabria `D-086` por la otra conjugacion: en castellano peninsular el
+    // preterito perfecto es la forma normal de contar lo que acaba de pasar.
+    // Con una foto parecida ya guardada —la de `guardadas`, dormida— aquella
+    // regla mandaba reenviar la vieja en vez de generar la que el acababa de
+    // hacer: una imagen equivocada, el daño exacto del 2026-09-14
+    const instruction = corrido(buildVaultImageInstruction(guardadas));
+    expect(instruction).not.toContain('El caso 2 es siempre el PRESENTE');
+    expect(instruction).toContain('Lo que decide es CUANDO se hace la foto, no el tiempo verbal');
+    expect(instruction).toContain('la que hace aqui es del 2, aunque escriba «ya te he hecho una»');
+    // y el disparador del caso 2 sigue acotado al mismo turno, que es el otro
+    // extremo de la misma vara de medir
+    expect(instruction).toContain('el usuario HACE UNA FOTO en este turno');
+  });
+
+  it('el perfecto ya no dispara el reenvio por si solo', () => {
+    // «la que te he hecho» estaba en la lista de formas que piden REENVIAR, y
+    // eso es un disparo por palabra suelta de los que prohibe `D-085`: la misma
+    // conjugacion sirve para la foto que se acaba de hacer en este mensaje.
+    // Los ejemplos del reenvio son ahora determinantes, que si distinguen
+    const instruction = buildVaultImageInstruction(guardadas);
+    expect(instruction).not.toContain('«la que te he hecho»');
+    for (const forma of ['«la ultima»', '«la de antes»', '«esa otra vez»']) {
+      expect(instruction).toContain(forma);
+    }
+  });
+
+  it('el ejemplo que se parecia a su frase ya no esta', () => {
+    // «te hago una mientras duermes» juntaba el verbo y el complemento de la
+    // frase que fallo, y se leia como permiso para generar
+    expect(corrido(buildVaultImageInstruction(guardadas))).not.toContain('mientras duermes');
+  });
+
+  it('«te saco una foto mientras duermes» sigue GENERANDO (`D-086` intacto)', () => {
+    const instruction = corrido(buildVaultImageInstruction(guardadas));
+    expect(instruction).toContain('el usuario HACE UNA FOTO en este turno, dentro de la escena');
+    expect(instruction).toContain('(«te saco una foto»');
+    expect(instruction).toContain('No la pide, pero tiene que existir: GENERALA');
+  });
+
+  it('«me incorporo y le saco una foto mientras duerme» sigue GENERANDO', () => {
+    // la frase literal de `D-086`. Lo que dispara es que la foto se hace en
+    // ESTE mensaje, no la palabra «foto» ni que ella este dormida: el
+    // complemento de sueño no cambia la decision en ninguno de los dos sentidos
+    const instruction = corrido(buildVaultImageInstruction(guardadas));
+    expect(instruction).toContain('el usuario HACE UNA FOTO en este turno, dentro de la escena');
+    expect(instruction).toContain('Que el haga la foto no es iniciativa tuya, es el caso 2');
+  });
+
+  it('«esa que me mandaste» y «la de antes» reenvian', () => {
+    const instruction = buildVaultImageInstruction(guardadas);
+    for (const forma of ['«la de antes»', '«esa otra vez»', '«tu foto de perfil»']) {
+      expect(instruction).toContain(forma);
+    }
+    expect(instruction).toContain('med-1: dormida en la cama');
+  });
+
+  it('«dame otra foto» despues de mandar una sigue GENERANDO', () => {
+    // el arreglo de hoy empuja hacia reenviar: esta es la prueba de que no se
+    // ha pasado de frenada y el fallo de «dame otra» no vuelve
+    const instruction = buildVaultImageInstruction(guardadas);
+    expect(instruction).toContain('«otra», «otra mas», «una nueva», «hazme una»');
+    expect(instruction).toContain('piden GENERAR');
+    expect(instruction).toContain('quieren una NUEVA: generala, no repitas esa');
+  });
+
+  it('«no me carga, ponla otra vez» SIN `lastError` reenvia la misma, no otra', () => {
+    // el caso corriente que quedaba sin cubrir: la imagen SI se genero y se
+    // guardo, y el no la vio o no le cargo. El aviso de `lastError` no existe
+    // aqui —solo salta cuando la generacion fallo de verdad— y la prohibicion
+    // «NUNCA reenvies dos veces seguidas» se lo llevaba por delante: tres
+    // minutos y medio de cola del horde para recibir otra imagen distinta,
+    // cuando repetir la que ya estaba era gratis e instantaneo
+    const instruction = buildVaultImageInstruction(guardadas);
+    expect(instruction).toContain('«vuelve a mandarmela»');
+    expect(instruction).toContain('piden REENVIAR');
+    // la prohibicion solo alcanza a «otra», que es la palabra del fallo real
+    expect(instruction).not.toContain('NUNCA reenvies');
+    expect(instruction).toContain('te piden «otra», quieren una NUEVA');
+  });
+
+  it('la lista dice en que orden va, que es lo que hace resoluble «la ultima»', () => {
+    // sin orden declarado, «la ultima» no se puede resolver contra una lista de
+    // `- <id>: <descripcion>` sin fecha ni numero. El caso del 2026-09-14 se
+    // salvaba de casualidad, porque «durmiendo» casaba con una sola linea
+    const instruction = buildVaultImageInstruction([
+      ...guardadas,
+      { mediaId: 'med-2', description: 'dormida boca abajo, la sabana enredada' },
+    ]);
+    expect(instruction).toContain(
+      'IMAGENES QUE YA EXISTEN AQUI, de la mas antigua a la mas reciente',
+    );
+    // y el orden que promete es el que le llega: `PrivateMediaStore.list` lo
+    // garantiza, esta funcion solo lo conserva
+    const lineas = instruction.split('\n').filter((linea) => linea.startsWith('- med-'));
+    expect(lineas).toEqual([
+      '- med-1: dormida en la cama, la boca entreabierta, luz de tarde',
+      '- med-2: dormida boca abajo, la sabana enredada',
+    ]);
+  });
+
+  it('una foto que NO esta en la lista se genera', () => {
+    // el reenvio manda solo si hay algo que reenviar; si no, generar
+    expect(buildVaultImageInstruction(guardadas)).toContain('Solo si ninguna encaja, generala.');
+  });
+
+  it('con `lastError` puesto, «no me ha llegado» sigue generando AQUELLA', () => {
+    // el aviso lleva un dato CIERTO —la generacion anterior lanzo— y por eso
+    // manda sobre la busqueda en la lista: la imagen que el no vio no esta ahi
+    const instruction = buildVaultImageInstruction(
+      guardadas,
+      'prose',
+      true,
+      'AI Horde: no estuvo lista a tiempo',
+    );
+    expect(instruction).toContain('NO llego a generarse');
+    expect(corrido(instruction)).toContain('El usuario no la ha visto nunca');
+    expect(instruction).toContain('vuelve a describir aquella escena');
+    expect(instruction).toContain('NO copies el prompt de una imagen mas antigua');
+  });
+
+  it('ya no quedan dos reglas que manden cosas distintas ante la misma frase', () => {
+    const instruction = buildVaultImageInstruction(guardadas);
+    // la que adivinaba del texto lo que `lastError` sabe de cierto
+    expect(instruction).not.toContain('es que no llego a generarse: generala');
+    // la lista cerrada que dejaba «la ultima» fuera del reenvio
+    expect(instruction).not.toContain('y solo entonces');
+    // la que excluia del caso 2 todo el preterito perfecto, incluido el de la
+    // foto que se acaba de hacer en este mismo mensaje
+    expect(instruction).not.toContain('siempre el PRESENTE');
+    // y la prohibicion incondicional de repetir una imagen, que chocaba con
+    // «vuelve a mandarmela» dos lineas mas arriba
+    expect(instruction).not.toContain('NUNCA reenvies');
+    // y los ejemplos de reenvio vivian duplicados en el apartado a) y en CUAL
+    // DE LAS DOS, con criterios distintos. Ahora hay una sola copia
+    expect(instruction.split('«la de antes»').length - 1).toBe(1);
+    expect(instruction).not.toContain('hay alguna que encaje');
+  });
+});
+
+// sin ninguna imagen guardada se enviaban igual 702 caracteres de maquinaria de
+// reenvio —el apartado a) y CUAL DE LAS DOS entero— que remitian dos veces a
+// «la lista de abajo», y la lista no se imprime en ese camino. Un bloque que ya
+// es el mas grande del prompt no puede gastar el 14% en mandar elegir entre dos
+// vias cuando solo existe una.
+describe('sin nada guardado no se le ofrece elegir', () => {
+  const vacio = buildVaultImageInstruction([], 'prose', true, null);
+  const conLista = buildVaultImageInstruction([
+    { mediaId: 'med-1', description: 'de pie junto a la ventana' },
+  ]);
+
+  it('no habla de dos formas ni del apartado a)', () => {
+    expect(vacio).toContain('solo de una forma: GENERANDOLA');
+    expect(vacio).not.toContain('tienes dos formas de hacerlo');
+    expect(vacio).not.toContain('a) REENVIAR');
+    expect(vacio).not.toContain('CUAL DE LAS DOS');
+  });
+
+  it('no remite a una lista que no se imprime', () => {
+    expect(vacio).not.toContain('lista de abajo');
+    expect(vacio).not.toContain('IMAGENES QUE YA EXISTEN');
+    // y con lista si remite: es lo que hace reenviable lo que ya existe
+    expect(conLista).toContain('lista de abajo');
+  });
+
+  it('conserva lo que NO depende de que haya lista', () => {
+    // el caso 2, la orden de no esquivar la peticion y el formato del prompt
+    // valen igual sin nada guardado: lo unico que sobraba era el desempate
+    expect(vacio).toContain('el usuario HACE UNA FOTO en este turno');
+    expect(vacio).toContain('ES UNA ORDEN');
+    expect(vacio).toContain('EN INGLES');
+  });
+
+  it('ese camino ocupa bastante menos', () => {
+    // la razon por la que se toco: las llamadas mueren cuando el prompt crece
+    expect(vacio.length).toBeLessThan(conLista.length - 600);
   });
 });

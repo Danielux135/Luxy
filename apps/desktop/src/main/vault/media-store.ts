@@ -175,12 +175,25 @@ export class PrivateMediaStore {
     );
   }
 
-  /** metadatos descifrados de los medios de una conversacion, sin los bytes */
+  /**
+   * metadatos descifrados de los medios de una conversacion, sin los bytes.
+   *
+   * SALEN DE LA MAS ANTIGUA A LA MAS RECIENTE, y eso no es el orden del indice.
+   * El JSONL se añade al final, asi que localmente coincide, pero la
+   * sincronizacion llama a `acceptRemote` en el orden del listado remoto: una
+   * foto de ayer traida del portatil queda DESPUES de una hecha hoy aqui.
+   *
+   * Importa porque el prompt de la conversacion le dice al modelo que la lista
+   * va de la mas antigua a la mas reciente —es lo unico que hace resoluble «la
+   * ultima», que es una de las formas que mandan reenviar en vez de generar—.
+   * Una mentira sobre el orden seria peor que el silencio: resolveria con
+   * seguridad a la linea equivocada.
+   */
   async list(
     vault: VaultService,
     conversationId: string,
   ): Promise<{ mediaId: string; metadata: VaultMediaPayload; hasThumbnail: boolean }[]> {
-    const out = [];
+    const out: { mediaId: string; metadata: VaultMediaPayload; hasThumbnail: boolean }[] = [];
     for (const record of this.readRecords(conversationId)) {
       out.push({
         mediaId: record.mediaId,
@@ -188,7 +201,12 @@ export class PrivateMediaStore {
         hasThumbnail: record.thumbnailObjectKey !== null,
       });
     }
-    return out;
+    // `createdAt` esta validado como fecha ISO por el esquema, asi que se puede
+    // parsear sin comprobarlo otra vez; con la misma fecha el orden del indice
+    // decide, porque `sort` es estable
+    return out.sort(
+      (a, b) => Date.parse(a.metadata.createdAt) - Date.parse(b.metadata.createdAt),
+    );
   }
 
   private find(conversationId: string, mediaId: string): PrivateMedia {

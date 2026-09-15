@@ -7,6 +7,7 @@ import { VaultService, VaultError, type DeviceKeyStore } from './vault-service.j
 import { vaultFilePathFor } from './key-file.js';
 import { LocalBlobStore, mediaDirectory } from './blob-store.js';
 import { PrivateMediaStore, mediaIndexDirectory } from './media-store.js';
+import { sealMedia } from './private-store.js';
 
 const PASSWORD = 'una frase larga de prueba';
 const FAST = { t: 1, m: 8 * 1024, p: 1 } as const;
@@ -129,6 +130,37 @@ describe('medios privados', () => {
 
       await expect(store.read(vault, CONVERSATION, stored.mediaId)).rejects.toThrow(VaultError);
       await expect(store.list(vault, CONVERSATION)).rejects.toThrow(VaultError);
+    });
+
+    it('salen de la mas antigua a la mas reciente, aunque llegaran desordenadas', async () => {
+      // el indice se añade al final, asi que localmente el orden ya es el de
+      // creacion. Pero la sincronizacion llama a `acceptRemote` en el orden del
+      // listado remoto: una foto de ayer traida del portatil quedaba DESPUES de
+      // una hecha hoy aqui. Importa porque el prompt de la conversacion le dice
+      // al modelo que la lista va de la mas antigua a la mas reciente, y eso es
+      // lo unico que hace resoluble «la ultima» —una de las formas que mandan
+      // reenviar en vez de pagar una generacion—. Una mentira sobre el orden
+      // seria peor que el silencio: resolveria con seguridad a la equivocada
+      const llegada = [
+        '2026-09-12T10:00:00.000Z',
+        '2026-09-10T10:00:00.000Z',
+        '2026-09-11T10:00:00.000Z',
+      ];
+      for (const createdAt of llegada) {
+        const sealed = await sealMedia(vault, {
+          conversationId: CONVERSATION,
+          bytes: randomBytes(512),
+          metadata: { ...metadata, createdAt },
+        });
+        await store.acceptRemote(vault, sealed.record, sealed.blob, null);
+      }
+
+      const lista = await store.list(vault, CONVERSATION);
+      expect(lista.map((item) => item.metadata.createdAt)).toEqual([
+        '2026-09-10T10:00:00.000Z',
+        '2026-09-11T10:00:00.000Z',
+        '2026-09-12T10:00:00.000Z',
+      ]);
     });
   });
 

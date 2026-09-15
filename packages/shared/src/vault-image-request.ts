@@ -65,7 +65,18 @@ export interface ParsedVaultImageRequest {
   status: VaultImageStatus;
 }
 
-/** lo que el modelo necesita saber de una imagen ya guardada para reenviarla */
+/**
+ * lo que el modelo necesita saber de una imagen ya guardada para reenviarla.
+ *
+ * EL ORDEN ES PARTE DEL DATO: de la mas antigua a la mas reciente. La lista no
+ * lleva fecha ni numero —200 caracteres por imagen es todo el presupuesto—, asi
+ * que sin un orden declarado «la ultima» no se puede resolver, y ese es
+ * justamente uno de los determinantes que mandan reenviar. El bloque se lo dice
+ * al modelo en su cabecera, de modo que quien la construya tiene que ordenarla:
+ * lo hace `PrivateMediaStore.list`, porque el indice es un JSONL que se añade
+ * al final y la sincronizacion escribe lo que baja de otro equipo en el orden
+ * del listado remoto, no por fecha.
+ */
 export interface VaultImageOnFile {
   mediaId: string;
   description: string;
@@ -200,32 +211,13 @@ export function buildVaultImageInstruction(
    */
   lastError: string | null = null,
 ): string {
-  const lines = canGenerate
+  // reenviar solo existe si hay algo que reenviar. Sin nada guardado se
+  // enviaban igual el apartado a) y CUAL DE LAS DOS entero —702 caracteres, el
+  // 14% del bloque— mandando elegir entre dos vias cuando solo hay una, y
+  // apuntando dos veces a «la lista de abajo», que en ese camino no se imprime
+  const canResend = available.length > 0;
+  const lines = !canGenerate
     ? [
-        'Puedes enseñar UNA imagen por respuesta, y tienes dos formas de hacerlo.',
-        '',
-        'a) REENVIAR una que ya existe en esta conversacion. Es gratis e inmediato, y es lo que',
-        '   hay que hacer cuando el usuario pide «otra vez esa», «la de antes» o «tu foto» y ya',
-        '   hay alguna que encaje:',
-        `   ${VAULT_IMAGE_OPEN}{"mediaId":"<id de la lista de abajo>"}${VAULT_IMAGE_CLOSE}`,
-        '',
-        'b) GENERAR una nueva. Cuesta creditos y tarda, asi que solo cuando pidan algo que aun',
-        '   no existe, o cuando el haga una foto (ver CUANDO, caso 2):',
-        `   ${VAULT_IMAGE_OPEN}{"prompt":"<descripcion en INGLES>","kind":"image"}${VAULT_IMAGE_CLOSE}`,
-        '',
-        // PASO DE VERDAD: pidio «dame otra foto» y le reenvio la que acababa de
-        // mandarle. «Otra» es ambiguo —«una mas» o «una distinta de las que ya
-        // tienes»— y reenviar es el camino barato, asi que ante la duda ganaba
-        // siempre. Se desempata por escrito, porque adivinarlo no es su trabajo.
-        'CUAL DE LAS DOS, que es donde mas se falla:',
-        '- «otra», «otra mas», «una nueva», «hazme una», «enseñame algo distinto» piden GENERAR:',
-        '  quieren una foto que todavia no existe, y reenviar una vieja es no hacer caso.',
-        '- «la de antes», «esa otra vez», «vuelve a mandarmela», «tu foto de perfil» piden',
-        '  REENVIAR, y solo entonces.',
-        '- NUNCA reenvies dos veces seguidas la misma imagen. Si acabas de mandar una y te piden',
-        '  otra, es que quieren una nueva: generala.',
-      ]
-    : [
         // sin clave del proveedor no se puede generar, pero reenviar SI: la
         // imagen ya esta guardada aqui. Ofrecer solo lo que de verdad se puede
         // es mejor que callarse las dos cosas, que es lo que se hacia
@@ -236,7 +228,59 @@ export function buildVaultImageInstruction(
         'NO puedes generar ninguna imagen nueva en este momento. Si te piden uno que no esta en',
         'la lista, dilo con naturalidad: no prometas mandarla despues y no finjas que no te la',
         'han pedido.',
-      ];
+      ]
+    : !canResend
+      ? [
+          'Puedes enseñar UNA imagen por respuesta, y solo de una forma: GENERANDOLA. En esta',
+          'conversacion todavia no hay ninguna guardada, asi que no hay nada que reenviar:',
+          `   ${VAULT_IMAGE_OPEN}{"prompt":"<descripcion en INGLES>","kind":"image"}${VAULT_IMAGE_CLOSE}`,
+        ]
+      : [
+          'Puedes enseñar UNA imagen por respuesta, y tienes dos formas de hacerlo.',
+          '',
+          // los ejemplos de cuando toca reenviar estaban aqui Y otra vez en CUAL
+          // DE LAS DOS, y las dos copias no decian lo mismo: aqui el criterio era
+          // «y ya hay alguna que encaje» —semantico— y alli «y solo entonces»
+          // sobre una lista cerrada de cuatro frases. Una sola copia, la de abajo
+          'a) REENVIAR una que ya existe en esta conversacion. Es gratis e inmediato:',
+          `   ${VAULT_IMAGE_OPEN}{"mediaId":"<id de la lista de abajo>"}${VAULT_IMAGE_CLOSE}`,
+          '',
+          'b) GENERAR una nueva. Cuesta creditos y tarda, asi que solo cuando pidan algo que aun',
+          '   no existe, o cuando el haga una foto (ver CUANDO, caso 2):',
+          `   ${VAULT_IMAGE_OPEN}{"prompt":"<descripcion en INGLES>","kind":"image"}${VAULT_IMAGE_CLOSE}`,
+          '',
+          // PASO DE VERDAD: pidio «dame otra foto» y le reenvio la que acababa de
+          // mandarle. «Otra» es ambiguo —«una mas» o «una distinta de las que ya
+          // tienes»— y reenviar es el camino barato, asi que ante la duda ganaba
+          // siempre. Se desempata por escrito, porque adivinarlo no es su trabajo.
+          //
+          // SEGUNDO PASO DE VERDAD, y es el contrario: «Mira la ultima foto que te
+          // he hecho durmiendo», con esa foto YA guardada. Ella la identifico y la
+          // describio bien —no fallo la comprension— y ademas genero una nueva, que
+          // llego distinta y rompio la escena. Fallo por dos motivos que se suman:
+          // este apartado cerraba el reenvio con «y solo entonces» sobre una lista
+          // de cuatro frases que no incluia «la ultima», y el caso 2 de mas abajo
+          // tenia un ejemplo casi calcado de esa frase.
+          //
+          // El desempate es la LISTA, no las palabras sueltas: si la foto de la
+          // que habla ya esta guardada, se reenvia; generar es para lo que aun no
+          // existe. Por eso aqui van determinantes —«la ultima», «la de antes»— y
+          // no formas verbales: «te he hecho» tambien es lo que se dice en
+          // castellano de la foto que se acaba de hacer en este mismo mensaje, y
+          // esa hay que generarla (`D-086`).
+          'CUAL DE LAS DOS, que es donde mas se falla:',
+          '- «otra», «otra mas», «una nueva», «hazme una», «enseñame algo distinto» piden GENERAR:',
+          '  quieren una foto que todavia no existe, y reenviar una vieja es no hacer caso.',
+          '- «la de antes», «esa otra vez», «la ultima», «vuelve a mandarmela», «tu foto de perfil»',
+          '  piden REENVIAR: nombran una que YA existe. Buscala en la lista de abajo y manda su id.',
+          '  Solo si ninguna encaja, generala.',
+          // el «NUNCA» de antes era incondicional y se comia la familia de
+          // frases en que repetir la misma imagen es justo lo que se pide —«no
+          // me ha llegado», «no me carga, ponla otra vez»—, que ademas esta dos
+          // lineas mas arriba del lado del reenvio. Acotado a «otra», que es la
+          // palabra del fallo real, la contradiccion desaparece y ocupa menos
+          '- Si acabas de mandar una y te piden «otra», quieren una NUEVA: generala, no repitas esa.',
+        ];
 
   if (lastError !== null) {
     // PASO DE VERDAD: fallo una generacion, ella no se entero, y cuando el
@@ -258,6 +302,30 @@ export function buildVaultImageInstruction(
   // contaba «el usuario pide ver una imagen», y hacer una foto no es pedirla.
   // Solo salio cuando el dijo «la he borrado, dame una nueva». Una foto hecha
   // DENTRO de la escena es una imagen que tiene que existir: la de su camara
+  //
+  // De aqui se han quitado dos cosas, por el fallo contrario del 2026-09-14:
+  //
+  // - el ejemplo «te hago una mientras duermes», que juntaba las dos piezas de
+  //   la frase que fallo —el verbo de hacer una foto y el complemento de
+  //   dormir— y se leia como permiso para generar ante «la foto que te he hecho
+  //   durmiendo». El ejemplo canonico de `D-086` («le saco una foto mientras
+  //   duerme») sigue entero: es el que manda y el unico que hace falta;
+  // - la regla «si mira una foto que te acaba de hacer y no esta en la lista,
+  //   es que no llego a generarse: generala», que adivinaba del texto del
+  //   usuario lo que el parametro `lastError` ya sabe de cierto, y que ante la
+  //   misma frase mandaba lo contrario que la linea de encima. Dos reglas que
+  //   se contradicen son una moneda al aire en cada turno; un dato cierto gana
+  //   siempre a una adivinanza. Lo poco que cubria de mas —el bloque cortado o
+  //   invalido— se tapa apuntando el error donde ya se apunta, no aqui
+  //
+  // Y lo que separa los dos casos es CUANDO se hace la foto, no el tiempo
+  // verbal. La primera version de este arreglo escribia «el caso 2 es siempre
+  // el PRESENTE», y eso reabria `D-086` por la otra conjugacion: en castellano
+  // peninsular el preterito perfecto es la forma normal de contar lo que acaba
+  // de pasar, asi que «*click* ya te he hecho la foto» describe una foto que
+  // NO existe todavia y hay que generar. Con una foto parecida ya guardada
+  // —lo normal en una conversacion larga— aquella regla la mandaba a reenviar
+  // la vieja: una imagen equivocada, que es el daño exacto del 2026-09-14
   lines.push(
     '',
     ...(canGenerate
@@ -265,11 +333,12 @@ export function buildVaultImageInstruction(
           'CUANDO escribir el bloque, en DOS casos y solo en esos:',
           '1. el usuario pide ver, recibir o volver a ver una imagen;',
           '2. el usuario HACE UNA FOTO en este turno, dentro de la escena, y sales tu en ella («te',
-          '   saco una foto», «te hago una mientras duermes»). No la pide, pero tiene que existir:',
+          '   saco una foto», «levanto el movil y disparo»). No la pide, pero tiene que existir:',
           '   GENERALA. Si salis los dos, o os la hace otra persona, generala solo contigo, en plano',
           '   cercano y sin el. Si solo se fotografia a si mismo, o solo lo dice o lo recuerda («ayer',
-          '   te hice una», «voy a hacerte una»), no. Y si mira una foto que te acaba de hacer y no',
-          '   esta en la lista de imagenes que ya existen, es que no llego a generarse: generala.',
+          '   te hice una», «voy a hacerte una»), no. Lo que decide es CUANDO se hace la foto, no el',
+          '   tiempo verbal: la de antes de este mensaje («la ultima», «esa») es del caso 1; la que',
+          '   hace aqui es del 2, aunque escriba «ya te he hecho una».',
           'Fuera de esos dos casos, nunca por iniciativa propia: un momento intenso, una promesa o un',
           'buen final de escena NO cuentan. Que el haga la foto no es iniciativa tuya, es el caso 2:',
           'reaccionas en personaje y escribes el bloque en el MISMO turno.',
@@ -368,7 +437,13 @@ function availableLines(available: VaultImageOnFile[]): string[] {
   if (available.length === 0) return [];
   return [
     '',
-    'IMAGENES QUE YA EXISTEN AQUI (su id sirve para reenviarlas):',
+    // el orden va DICHO. Sin el, «la ultima» —que es de los determinantes que
+    // mandan reenviar— no se puede resolver contra una lista sin fecha ni
+    // numero: el caso del 2026-09-14 se salvaba de casualidad, porque
+    // «durmiendo» casaba con una sola linea. Con dos fotos parecidas volvia a
+    // ser una moneda al aire. Decirlo solo vale si es cierto, y por eso la
+    // ordena `PrivateMediaStore.list` antes de llegar aqui
+    'IMAGENES QUE YA EXISTEN AQUI, de la mas antigua a la mas reciente (su id sirve para reenviarlas):',
     ...available.map((image) => {
       const description =
         image.description.trim().length === 0 ? 'sin descripcion' : image.description.trim();
