@@ -1,5 +1,35 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-15 — sonda con texto y contencion del catalogo
+
+`npm run check` exit 0.
+
+```
+Test Files  181 passed (181)
+     Tests   3569 passed | 12 skipped
+```
+
+Lo que estas pruebas fijan y antes no miraba nadie:
+
+- **el catalogo REAL de AI Horde como fixture**: 27 nombres, con los dos que
+  chocan. Da 27 identificadores distintos, y el de un modelo que no choca
+  coincide con la derivacion antigua copiada literalmente — o sea que no se
+  invalida ningun catalogo guardado;
+- **siete formas hostiles de catalogo** que antes reventaban: lista que no es
+  lista, `[null]`, un numero donde va el nombre, capacidades que no son lista,
+  nombres sin letras, nombres larguisimos. Ninguna lanza;
+- **un centinela en la sonda**: una frase que solo existe en la prueba sale por
+  el IPC y NO aparece en ninguna linea escrita. La prueba mira el JSON de los
+  registros, no el objeto en memoria — esa distincion ya se colo una vez este
+  mismo dia;
+- **la lista de purga al bloquear la boveda**, que no ejercia nadie.
+
+**Sin ver en pantalla.** Ninguno de los dos trabajos se ha ejecutado con Studio
+delante: las pruebas demuestran que el catalogo del horde produce 27
+identificadores y que ningun catalogo lanza, no que la pantalla de Modelos se
+pinte bien con las cinco conexiones nuevas.
+
+
 ### 2026-09-15 — F26-LLAMADAS-VACIAS-001
 
 `npm run check` exit 0.

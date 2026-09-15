@@ -1,5 +1,42 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-09-15 — Claude — la sonda con texto, y el catalogo que tumbaba Studio
+
+**Dos trabajos, los dos salidos de usar Luxy de verdad.**
+
+**1. La sonda de compatibilidad enseña lo que escribio cada modelo.** Ya cogia
+la conversacion abierta y armaba el prompt real sin escribir nada, pero solo
+devolvia contadores: servia para «¿este colabora?» y no para «¿cual escribe
+mejor?». Ocho hallazgos confirmados; los dos graves eran el mismo:
+
+- **el texto sobrevivia al cierre de la boveda**, y la pantalla habia empezado a
+  prometer que no. La lista de estado que se purga al bloquear estaba escrita
+  DOS veces a mano y las dos copias ya habian divergido. Ahora es un modulo con
+  un tipo: quien añada contenido de boveda y no lo vacie en los dos sitios no
+  compila;
+- las respuestas de una conversacion se seguian viendo al abrir otra.
+
+**2. Un catalogo de un tercero dejaba Studio en negro** (`D-089`). Daniel pulso
+«Actualizar modelos» y perdio la aplicacion. AI Horde sirve dos modelos que solo
+se diferencian en las mayusculas; al normalizar colapsan y el registro lanza
+dentro del render. **Doce hallazgos confirmados**, y los dos que mas importan no
+eran el fallo original:
+
+- **no existia ninguna barrera de React**: no era una bomba, eran todas. Ahora la
+  hay;
+- **el identificador derivado no llevaba la conexion**, asi que las cuatro
+  conexiones de Daniel a AI Horde producian los mismos y **tres de cada cuatro
+  modelos desaparecian sin aviso**.
+
+Y en la misma funcion habia dos excepciones mas con el mismo final —un nombre de
+mas de 64 caracteres, y uno que empieza por `_`, `.` o `-`—, mas un respaldo roto
+que producia `model--1` para todos.
+
+Nuevos: `vault-compatibility-reply.ts`, `vault-lock-reset.ts`, `catalog-ids`,
+`ErrorBoundary.tsx`, con sus pruebas.
+
+`npm run check` exit 0: 181 archivos, 3569 pruebas, 12 saltadas.
+
 ### 2026-09-15 — Claude — F26-LLAMADAS-VACIAS-001, los cuatro arreglos
 
 Dos agentes construyeron, tres revisores con lentes distintas y un esceptico por

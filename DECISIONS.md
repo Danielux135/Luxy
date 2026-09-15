@@ -2723,3 +2723,60 @@ Corolario sobre los registros. El diagnostico escribia el motivo del fallo al
 registro mientras el turno se guardaba de escribirlo. Ahora los dos caminos
 apuntan lo mismo: `{leido, causa}`, sin texto de la boveda. Lo fija
 `memory-diagnostics-log.test.ts` con un centinela.
+
+## D-089 — el dato de un tercero no puede tumbar la pantalla
+
+Fecha: 2026-09-15. Autor: Claude. Origen: Daniel pulso «Actualizar modelos» en
+una conexion nueva y **Studio se quedo en negro**.
+
+El error, capturado en su consola:
+
+```
+Uncaught ModelRegistryError: hay dos modelos con la id
+"koboldcpp-llama-3.2-3b-instruct-q4_k_m"
+    at new ModelRegistry -> buildRegistry -> ModelsPage -> renderWithHooks
+```
+
+AI Horde sirve `koboldcpp/llama-3.2-3b-instruct-q4_k_m` y
+`koboldcpp/Llama-3.2-3B-Instruct-Q4_K_M`: dos modelos DISTINTOS que solo se
+diferencian en las mayusculas. Al derivar el identificador interno se pasa a
+minusculas, los dos colapsan, y el registro lanza. Como eso ocurre DENTRO del
+render, se lleva por delante el arbol de React entero.
+
+La revision encontro que la colision era la punta: en la misma funcion habia
+**dos excepciones mas** con el mismo final —un nombre de mas de 64 caracteres y
+uno que empieza por `_`, `.` o `-`—, y que el respaldo que ya existia para un
+nombre sin letras estaba roto: buscaba el nombre en una lista que puede llevar
+objetos, devolvia -1, y producia `model--1` para todos, o sea otra colision.
+
+Decision, en cuatro capas y de fuera adentro:
+
+1. **`buildCatalogForConnection` es TOTAL.** Es la frontera por la que entra el
+   catalogo de un tercero, asi que es ahi donde el dato deja de poder hacer
+   daño: nunca lanza, nunca emite dos identificadores iguales y nunca emite una
+   definicion invalida. Contener solo en la pantalla dejaba la bomba puesta para
+   los demas consumidores;
+2. **el borde de disco valida en vez de creer**: `readCatalogSnapshot` ejecuta
+   un esquema en lugar de un cast. Era el otro sitio por el que entraba un dato
+   sin comprobar a una API que da por hecho que hay una cadena;
+3. **el registro conserva su excepcion por defecto** y gana `onConflict: skip`.
+   Un identificador repetido significa dos cosas distintas segun de donde venga
+   el catalogo: en el escrito a mano es un fallo NUESTRO y tiene que oirse; en
+   uno servido por una pasarela es un dato ajeno. Lo elige quien llama;
+4. **y una barrera de React**, que es la unica parte estructural: no habia
+   ninguna, asi que cualquier excepcion de cualquier pantalla dejaba Luxy en
+   negro. Esta no era una bomba: eran todas.
+
+La regla de los identificadores. El que no comparte su forma normalizada se
+queda con ella tal cual —asi **no cambia ningun identificador que hoy funcione**
+y los catalogos guardados siguen valiendo—. El que la comparte, no cabe en 64 o
+se queda sin letras, recibe un sufijo derivado **del nombre y de la conexion**,
+nunca de la posicion: un `-1`/`-2` por orden de llegada se reparte distinto en
+cuanto la pasarela reordena su catalogo, y el esquema promete que el
+identificador sobrevive. Lo de la conexion lo destapo la revision: sin ello las
+cuatro conexiones de Daniel a AI Horde producian identificadores identicos y
+**tres de cada cuatro modelos desaparecian sin aviso**.
+
+Y el `apiModel` no se toca nunca, ni se recorta: es lo que viaja a la pasarela.
+Si no cabe en el esquema sobra el modelo entero, porque un nombre recortado es
+pedir un modelo que no existe.
