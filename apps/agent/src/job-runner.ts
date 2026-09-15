@@ -11,6 +11,7 @@ import type {
   JobArtifact,
   ProviderImage,
   ReasoningEffort,
+  ProviderCallMetrics,
 } from '@luxy/shared';
 import {
   redact,
@@ -115,6 +116,14 @@ export type JobOutcome =
       worktreePath: string | null;
       durationMs: number;
       executedModel?: string;
+      /**
+       * lo que costo el turno aunque no haya respuesta que enseñar.
+       *
+       * un turno fallido es justo el que puede haber costado tres llamadas de
+       * pago, y era el unico que no dejaba ni el contador: la rama de fallo no
+       * llevaba metadata de ninguna clase.
+       */
+      callMetrics?: ProviderCallMetrics;
     }
   | {
       kind: 'cancelled';
@@ -915,6 +924,9 @@ export async function runJob(
         worktreePath: worktree?.path ?? null,
         durationMs: elapsed(),
         ...(executedModel === undefined ? {} : { executedModel }),
+        ...(providerResult.callMetrics === undefined
+          ? {}
+          : { callMetrics: providerResult.callMetrics }),
       };
     }
 

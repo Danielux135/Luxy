@@ -1,3 +1,6 @@
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, describe, it, expect, vi } from 'vitest';
 import {
   parseClaudeCapabilities,
@@ -22,19 +25,26 @@ import {
   HttpApiProvider,
   MemoryBudgetStore,
   EXAMPLE_HTTP_PROVIDERS,
-  isRetryableAgenticTurn,
+  classifyBilledFailure,
   resolveHttpRequestTimeout,
   buildUserContent,
+  measurePayload,
+  errorCodeOf,
 } from './http-provider.js';
 import {
   httpProviderConfigSchema,
   modelLimitsSchema,
   RetryError,
+  PROVIDER_CALL_LOG_MESSAGE,
+  PROVIDER_SILENCE_TIMEOUT_MS,
   SOFT_TERMINAL_GRACE_MS,
   TERMINAL_GRACE_MS,
   type ProviderRunRequest,
+  type ProviderCallRecord,
 } from '@luxy/shared';
+import { isSilenceTimeout, silenceTransportAvailable } from './http-dispatcher.js';
 import { helpHasFlag, extractVersion } from '../detect.js';
+import { AgentLogger } from '../logger.js';
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -564,14 +574,45 @@ describe('describeHttpError', () => {
 });
 
 describe('Retry-After', () => {
-  it('reintenta la red pero no la cancelacion ni un timeout del borde en un turno agentic', () => {
-    const active = new AbortController();
-    expect(isRetryableAgenticTurn(new TypeError('fetch failed'), active.signal)).toBe(true);
+  it('separa el socket rechazado de la llamada que ya se pago', () => {
+    // el filtro lo comparten AHORA las dos rutas —consulta y bucle de
+    // herramientas—, y decide por evidencia, no por «no trae codigo»
+    const caida = new TypeError('fetch failed');
+    const silencio = Object.assign(new TypeError('fetch failed'), {
+      cause: Object.assign(new Error('Headers Timeout Error'), {
+        code: 'UND_ERR_HEADERS_TIMEOUT',
+      }),
+    });
+
+    // sin cabeceras y en milisegundos: no hay llamada que cobrar
     expect(
-      isRetryableAgenticTurn(Object.assign(new Error('524'), { status: 524 }), active.signal),
-    ).toBe(false);
-    active.abort();
-    expect(isRetryableAgenticTurn(new TypeError('fetch failed'), active.signal)).toBe(false);
+      classifyBilledFailure(caida, { httpStatus: null, transportEnd: null, elapsedMs: 5 }, 0),
+    ).toBe('free_retry');
+    // sin cabeceras pero cuatro minutos en vuelo: la pasarela la atendio
+    expect(
+      classifyBilledFailure(caida, { httpStatus: null, transportEnd: null, elapsedMs: 268_000 }, 0),
+    ).toBe('give_up');
+    // un silencio hasta el tope no se repite NUNCA: son otros quince minutos
+    expect(
+      classifyBilledFailure(
+        silencio,
+        { httpStatus: null, transportEnd: null, elapsedMs: 900_000 },
+        0,
+      ),
+    ).toBe('give_up');
+    // socket caido a mitad del envio: UN reintento, el que historicamente
+    // devolvia la respuesta, y solo uno
+    const cortado = { httpStatus: 200, transportEnd: 'read_error' as const, elapsedMs: 40_000 };
+    expect(classifyBilledFailure(caida, cortado, 0)).toBe('retry_once');
+    expect(classifyBilledFailure(caida, cortado, 1)).toBe('give_up');
+    // cierre limpio sin una palabra: eso si es reintentar a ciegas
+    expect(
+      classifyBilledFailure(
+        caida,
+        { httpStatus: 200, transportEnd: 'done_marker', elapsedMs: 3_000 },
+        0,
+      ),
+    ).toBe('give_up');
   });
 
   it('acepta segundos', () => {
@@ -1224,10 +1265,67 @@ describe('HttpApiProvider: diagnostico del final de la respuesta', () => {
     expect(result).toMatchObject({
       ok: true,
       finalText: 'terminado tras reintento',
-      callMetrics: { modelCalls: 2, toolCalls: 1 },
+      // TRES peticiones salieron de verdad, y eso es lo que cuenta ahora
+      // `modelCalls`: antes contaba las vueltas del bucle (2) y un reintento
+      // quedaba invisible, que es el agujero entero de este trabajo.
+      //
+      // `billedCalls` son DOS: el `fetch failed` del medio no llego a conectar
+      // —sin cabeceras y sin silencio hasta el tope— y esa es la unica clase de
+      // llamada que no se paga.
+      callMetrics: { modelCalls: 3, toolCalls: 1, billedCalls: 2 },
     });
     expect(globalThis.fetch).toHaveBeenCalledTimes(3);
     expect(runner.execute).toHaveBeenCalledTimes(1);
+  }, 10_000);
+
+  // POR QUE EXISTE: el arreglo de las llamadas vacias solo se aplico a la ruta
+  // de consulta. El bucle de herramientas seguia reintentando a ciegas una
+  // llamada ya cobrada —hasta tres por vuelta, y una vuelta puede repetirse
+  // cincuenta veces— y anunciandolo como «conexion con el proveedor
+  // interrumpida», que culpa a la red de algo que el proveedor SI atendio.
+  it('el bucle de herramientas tampoco reintenta una llamada ya cobrada, y avisa', async () => {
+    let intentos = 0;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+      intentos += 1;
+      return new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode('data: [DONE]\n'));
+            controller.close();
+          },
+        }),
+        { status: 200 },
+      );
+    });
+
+    const events: string[] = [];
+    const runner = { execute: vi.fn(async () => ({ ok: true, content: 'nada' })) };
+    const provider = new HttpApiProvider(config, 'una-clave');
+
+    const result = await provider.run({
+      ...peticion({
+        model: 'kimi-k3',
+        readOnly: false,
+        onEvent: (event) => events.push(`${event.type}:${event.message}`),
+      }),
+      agentic: {
+        runner,
+        allowedTools: ['write_file'],
+        limits: modelLimitsSchema.parse({}),
+        useNativeTools: true,
+      },
+    });
+
+    expect(intentos).toBe(1);
+    expect(result.ok).toBe(false);
+    expect(result.callMetrics).toMatchObject({ modelCalls: 1, billedCalls: 1 });
+    // un `warning`, no un `phase` de rutina que culpa a la red
+    expect(events).toContainEqual(
+      expect.stringMatching(
+        /^warning:DeepSeek \(kimi-k3\) cerro la respuesta sin enviar ni una palabra\./,
+      ),
+    );
+    expect(events.join('\n')).not.toContain('conexion con el proveedor interrumpida');
   }, 10_000);
 
   it('conserva finish_reason length y los limites efectivos de una respuesta truncada', async () => {
@@ -1361,7 +1459,59 @@ describe('HttpApiProvider: diagnostico del final de la respuesta', () => {
     expect(result.finalText).toBe('<!doctype html><html>');
   });
 
-  it('un corte SIN texto si se reintenta: no hay nada que perder', async () => {
+  // POR QUE CAMBIO DE SENTIDO: esta prueba afirmaba lo contrario —«un corte
+  // SIN texto si se reintenta: no hay nada que perder»— y era falso. Esta
+  // pasarela cobra POR LLAMADA, asi que una llamada que el proveedor atendio
+  // (hubo cabeceras) y cerro vacia YA esta pagada: repetirla sola cobraba dos
+  // mas sin que nadie se enterara. Del 4 al 14 de septiembre eso fueron 73
+  // llamadas para 60 turnos, 90 ¥ de 506 que no compraron una sola palabra.
+  it('NO reintenta una llamada que el proveedor ya cobro, y avisa en pantalla', async () => {
+    // cierre LIMPIO y sin una palabra: el proveedor descolgo, cerro bien y no
+    // dijo nada. Esto es «reintentar a ciegas una respuesta vacia», y es lo que
+    // convirtio 60 turnos en 73 llamadas entre el 4 y el 14 de septiembre.
+    let intentos = 0;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+      intentos += 1;
+      return new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode('data: [DONE]\n'));
+            controller.close();
+          },
+        }),
+        { status: 200 },
+      );
+    });
+
+    const events: string[] = [];
+    const provider = new HttpApiProvider(config, 'una-clave');
+    const result = await provider.run(
+      peticion({ onEvent: (event) => events.push(`${event.type}:${event.message}`) }),
+    );
+
+    expect(intentos).toBe(1);
+    expect(result.ok).toBe(false);
+    expect(result.finalText).toBe('');
+    // la decision vuelve a ser suya, pero solo si la ve
+    expect(events).toContainEqual(
+      expect.stringMatching(/^warning:DeepSeek cerro la respuesta sin enviar ni una palabra\./),
+    );
+    // Y TIENE QUE LLEGARLE DONDE ESTA ESPERANDO: la pantalla de Privado no
+    // escucha los eventos del agente, solo pinta el mensaje de fallo. Sin esto
+    // el aviso se quedaba en la lista de actividad de otra pantalla.
+    expect(result.errorMessage).toContain('ya esta pagada');
+    // y ni el aviso ni el fallo llevan una palabra de la conversacion
+    expect(events.join('\n')).not.toContain('genera una web completa');
+    expect(result.errorMessage).not.toContain('genera una web completa');
+  });
+
+  // POR QUE UNO Y NO CERO: de las 13 llamadas de mas del historico solo 3
+  // encajan con la pared de los 300 s; las otras 10 pasaron en turnos cuyas
+  // llamadas duraban entre 29 y 135 segundos, y esos turnos ACABARON
+  // contestando. O sea que el reintento los estaba recuperando solo. Quitarlo
+  // entero cambiaba una perdida de dinero por una perdida de conversacion; el
+  // corte a mitad del envio conserva esa recuperacion y avisa igual.
+  it('un corte a mitad del envio se reintenta UNA vez, y solo una', async () => {
     let intentos = 0;
     vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
       intentos += 1;
@@ -1375,12 +1525,230 @@ describe('HttpApiProvider: diagnostico del final de la respuesta', () => {
       );
     });
 
+    const events: string[] = [];
+    const provider = new HttpApiProvider(config, 'una-clave');
+    const result = await provider.run(
+      peticion({ onEvent: (event) => events.push(`${event.type}:${event.message}`) }),
+    );
+
+    // dos, no tres: el reintento de cortesia se concede UNA vez por turno
+    expect(intentos).toBe(2);
+    expect(result.ok).toBe(false);
+    expect(events).toContainEqual(
+      expect.stringMatching(/^warning:DeepSeek corto el envio a mitad/),
+    );
+    expect(events.join('\n')).toContain('Lo reintento UNA vez');
+  }, 15_000);
+
+  // POR QUE EXISTE: la tercera llamada vacia del 2026-09-14 murio a los 268 s
+  // «porque la corto el otro lado». Esta pasarela retiene las cabeceras hasta
+  // que el modelo contesta, asi que llego sin codigo de estado y Luxy la
+  // trataba igual que un ECONNREFUSED de 5 ms: gratis y reenviable tres veces.
+  it('un corte del otro lado tras minutos en vuelo ni es gratis ni se reintenta', async () => {
+    // el reloj se adelanta en vez de esperar de verdad: lo que se prueba es que
+    // el TIEMPO EN VUELO entra en la decision, no el reloj del ordenador
+    const reloj = Date.now.bind(Date);
+    let desfase = 0;
+    vi.spyOn(Date, 'now').mockImplementation(() => reloj() + desfase);
+
+    let intentos = 0;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+      intentos += 1;
+      desfase = 268_000;
+      throw Object.assign(new TypeError('fetch failed'), {
+        cause: Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' }),
+      });
+    });
+
+    const events: string[] = [];
+    const lineas: ProviderCallRecord[] = [];
+    const store = new MemoryBudgetStore();
+    const provider = new HttpApiProvider(config, 'una-clave', store, undefined, (record) =>
+      lineas.push(record),
+    );
+    const result = await provider.run(
+      peticion({ onEvent: (event) => events.push(`${event.type}:${event.message}`) }),
+    );
+
+    expect(intentos).toBe(1);
+    expect(result.ok).toBe(false);
+    expect(lineas[0]?.ending).toBe('dropped');
+    expect(lineas[0]?.billed).toBe(true);
+    expect(lineas[0]?.errorCode).toBe('ECONNRESET');
+    // y se cuenta: el contador de llamadas es lo unico que ve esta tarifa
+    expect(store.read()['deepseek']?.calls).toBe(1);
+    expect(events).toContainEqual(expect.stringMatching(/^warning:DeepSeek corto la conexion/));
+  }, 15_000);
+
+  // POR QUE EXISTE: el reintento que SI tiene sentido es el que no le ha
+  // costado nada. Si la conexion se cae ANTES de que el proveedor conteste, no
+  // hay llamada que cobrar y repetirla es gratis; confundir este caso con el de
+  // arriba dejaria a Daniel reenviando a mano cortes de red de dos segundos.
+  it('una caida de red antes de conectar se sigue reintentando', async () => {
+    let intentos = 0;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+      intentos += 1;
+      throw Object.assign(new TypeError('fetch failed'), {
+        cause: Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:443'), {
+          code: 'ECONNREFUSED',
+        }),
+      });
+    });
+
     const provider = new HttpApiProvider(config, 'una-clave');
     const result = await provider.run(peticion());
 
     expect(intentos).toBe(3);
     expect(result.ok).toBe(false);
-    expect(result.finalText).toBe('');
+  });
+
+  // POR QUE EXISTE: al cerrar el agujero de las respuestas vacias habia que
+  // tocar el mismo filtro que decide los reintentos buenos. Un 5xx es un fallo
+  // declarado del proveedor y se repite desde siempre; si esta prueba cae, lo
+  // que se ha roto no es el ahorro, es la resistencia.
+  it('un 5xx se sigue reintentando hasta que el proveedor responde', async () => {
+    let intentos = 0;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+      intentos += 1;
+      if (intentos === 1) return new Response('boom', { status: 503 });
+      return new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(
+              new TextEncoder().encode(
+                'data: {"choices":[{"delta":{"content":"LISTO"},"finish_reason":"stop"}]}\n',
+              ),
+            );
+          },
+          cancel() {
+            /* el final fuerte hace que Luxy cierre el stream localmente */
+          },
+        }),
+        { status: 200 },
+      );
+    });
+
+    const provider = new HttpApiProvider(config, 'una-clave');
+    const result = await provider.run(peticion());
+
+    expect(intentos).toBe(2);
+    expect(result.ok).toBe(true);
+    expect(result.finalText).toBe('LISTO');
+  });
+
+  // POR QUE EXISTE: los dos fallos de silencio del 2026-09-14 murieron a los
+  // 302 y 300 segundos justos —el tope de fabrica de Node— y Luxy los reenvio
+  // porque llegan SIN codigo de estado. El reintento siguiente contesto a los
+  // 304, asi que la espera valia la pena; lo que no valia era pagarla tres
+  // veces. Ahora el silencio ni se reintenta ni se disfraza de "fetch failed".
+  it('un silencio hasta el tope no se reintenta y se explica como agotado', async () => {
+    let intentos = 0;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+      intentos += 1;
+      throw Object.assign(new TypeError('fetch failed'), {
+        cause: Object.assign(new Error('Headers Timeout Error'), {
+          name: 'HeadersTimeoutError',
+          code: 'UND_ERR_HEADERS_TIMEOUT',
+        }),
+      });
+    });
+
+    const events: string[] = [];
+    const provider = new HttpApiProvider({ ...config, silenceTimeoutMs: 900_000 }, 'una-clave');
+    const result = await provider.run(
+      peticion({ onEvent: (event) => events.push(`${event.type}:${event.message}`) }),
+    );
+
+    expect(intentos).toBe(1);
+    expect(result.ok).toBe(false);
+    expect(result.timedOut).toBe(true);
+    expect(result.errorMessage).toContain('estuvo 900 s sin enviar nada');
+    expect(result.errorMessage).not.toContain('fetch failed');
+    expect(events).toContainEqual(
+      expect.stringMatching(/^warning:DeepSeek estuvo 900 s sin enviar nada\./),
+    );
+  });
+
+  // POR QUE EXISTE: «no llego a empezar» y «hablo y se callo» son dos cosas y
+  // se contaban como una. Con texto delante, decir «estuvo 900 s sin enviar
+  // nada» se contradice con lo que Daniel tiene en pantalla —el parcial se
+  // conserva— y encima le manda a reenviar el mensaje entero, que es otra
+  // llamada de pago, cuando lo que hay se puede continuar.
+  it('un silencio DESPUES de empezar a hablar no dice que no llego nada', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+      let entregado = false;
+      return new Response(
+        new ReadableStream<Uint8Array>({
+          pull(controller) {
+            if (!entregado) {
+              entregado = true;
+              controller.enqueue(
+                new TextEncoder().encode(
+                  'data: {"choices":[{"delta":{"content":"Lia se gira despacio"}}]}\n',
+                ),
+              );
+              return;
+            }
+            controller.error(
+              Object.assign(new TypeError('terminated'), {
+                cause: Object.assign(new Error('Body Timeout Error'), {
+                  name: 'BodyTimeoutError',
+                  code: 'UND_ERR_BODY_TIMEOUT',
+                }),
+              }),
+            );
+          },
+        }),
+        { status: 200 },
+      );
+    });
+
+    const provider = new HttpApiProvider({ ...config, silenceTimeoutMs: 900_000 }, 'una-clave');
+    const result = await provider.run(peticion({ readOnly: false }));
+
+    expect(result.ok).toBe(false);
+    // lo que escribio se conserva: la invariante de continuacion depende de esto
+    expect(result.finalText).toBe('Lia se gira despacio');
+    expect(result.errorMessage).toContain('empezo a responder');
+    expect(result.errorMessage).toContain('20 caracteres');
+    // y NO le dice que no llego nada ni que reenvie el mensaje entero
+    expect(result.errorMessage).not.toContain('sin enviar nada');
+    expect(result.errorMessage).not.toContain('vuelve a enviar el mensaje');
+  }, 15_000);
+
+  // POR QUE EXISTE: el tope de silencio no lo aplica Luxy con un reloj propio,
+  // lo aplica la pila HTTP de Node. Si el despachador deja de viajar en la
+  // peticion, el tope vuelve a ser el de fabrica —300 s— y nada falla: se
+  // pierde el arreglo entero en silencio.
+  it('manda su propio tope de silencio en la peticion', async () => {
+    const vistos: unknown[] = [];
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (_url, init) => {
+      vistos.push((init as { dispatcher?: unknown }).dispatcher);
+      return new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(
+              new TextEncoder().encode(
+                'data: {"choices":[{"delta":{"content":"LISTO"},"finish_reason":"stop"}]}\n',
+              ),
+            );
+          },
+          cancel() {
+            /* el final fuerte hace que Luxy cierre el stream localmente */
+          },
+        }),
+        { status: 200 },
+      );
+    });
+
+    const provider = new HttpApiProvider(config, 'una-clave');
+    const result = await provider.run(peticion());
+
+    expect(result.ok).toBe(true);
+    // en un Node sin pila configurable el arreglo se degrada a proposito, pero
+    // en el Node de Luxy tiene que ir
+    expect(silenceTransportAvailable()).toBe(true);
+    expect(vistos[0]).toBeDefined();
   });
 
   it('un timeout con texto parcial lo conserva y se marca como agotado', async () => {
@@ -1501,6 +1869,69 @@ describe('margen de cierre por defecto', () => {
     });
     expect(parsed.softTerminalGraceMs).toBe(SOFT_TERMINAL_GRACE_MS);
     expect(SOFT_TERMINAL_GRACE_MS).toBeGreaterThan(TERMINAL_GRACE_MS * 5);
+  });
+
+  // POR QUE IMPORTA: el tope anterior era el de fabrica de Node, 300.000 ms, y
+  // no lo habia elegido nadie. Dos llamadas murieron ahi y el reintento
+  // siguiente contesto a los 304 s, asi que el tope tiene que dejar sitio por
+  // encima de los cinco minutos con holgura.
+  it('una conexion sin el campo aguanta quince minutos de silencio', () => {
+    const parsed = httpProviderConfigSchema.parse({
+      id: 'kimi',
+      displayName: 'Kimi',
+      baseUrl: 'https://ejemplo.test/v1',
+      model: 'Kimi-K2.6',
+      apiKeyEnv: 'connection:x',
+    });
+    expect(parsed.silenceTimeoutMs).toBe(PROVIDER_SILENCE_TIMEOUT_MS);
+    expect(PROVIDER_SILENCE_TIMEOUT_MS).toBeGreaterThan(300_000);
+  });
+
+  it('cada conexion puede elegir el suyo', () => {
+    const parsed = httpProviderConfigSchema.parse({
+      id: 'kimi',
+      displayName: 'Kimi',
+      baseUrl: 'https://ejemplo.test/v1',
+      model: 'Kimi-K2.6',
+      apiKeyEnv: 'connection:x',
+      silenceTimeoutMs: 120_000,
+    });
+    expect(parsed.silenceTimeoutMs).toBe(120_000);
+  });
+});
+
+// POR QUE EXISTE: `fetch` entrega siempre el mismo «fetch failed» y esconde el
+// motivo en `cause`; encima el reintento lo envuelve otra vez en `lastError`.
+// Si esto deja de mirar dentro de las dos capas, un silencio de quince minutos
+// vuelve a parecer una caida de red cualquiera y vuelve a reintentarse.
+describe('isSilenceTimeout', () => {
+  it('reconoce el tope de cabeceras dentro de cause', () => {
+    const error = Object.assign(new TypeError('fetch failed'), {
+      cause: Object.assign(new Error('Headers Timeout Error'), {
+        code: 'UND_ERR_HEADERS_TIMEOUT',
+      }),
+    });
+    expect(isSilenceTimeout(error)).toBe(true);
+  });
+
+  it('reconoce el tope de cuerpo aunque el reintento ya lo hubiera envuelto', () => {
+    const interno = Object.assign(new TypeError('fetch failed'), {
+      cause: Object.assign(new Error('Body Timeout Error'), { name: 'BodyTimeoutError' }),
+    });
+    expect(isSilenceTimeout(new RetryError('fallo tras 1 intento', 1, interno))).toBe(true);
+  });
+
+  it('no confunde una caida de red con un silencio', () => {
+    const error = Object.assign(new TypeError('fetch failed'), {
+      cause: Object.assign(new Error('socket hang up'), { code: 'ECONNRESET' }),
+    });
+    expect(isSilenceTimeout(error)).toBe(false);
+  });
+
+  it('aguanta un error con ciclos sin quedarse dando vueltas', () => {
+    const ciclo = new Error('vuelta') as Error & { cause?: unknown };
+    ciclo.cause = ciclo;
+    expect(isSilenceTimeout(ciclo)).toBe(false);
   });
 });
 
@@ -1756,4 +2187,387 @@ describe('cabeceras de limite en un 429', () => {
     const envuelto = new RetryError('la operacion fallo tras 3 intentos', 3, original);
     expect(describeHttpError(envuelto, 'Mistral')).toContain('ratelimitbysize-limit=0');
   });
+});
+
+// -----------------------------------------------------------------------------
+// una linea de registro POR LLAMADA
+//
+// hasta el 2026-09-15 solo habia una linea por TURNO, y un turno puede costar
+// tres llamadas de pago. De las tres que murieron vacias el 2026-09-14 no quedo
+// constancia de ninguna clase: ni de por que, ni de cuantos tokens se pagaron.
+// -----------------------------------------------------------------------------
+describe('measurePayload', () => {
+  it('cuenta caracteres, no contenido, y separa las imagenes', () => {
+    // las imagenes se cuentan aparte porque crecen solas: el bloque de imagen
+    // ya ocupa el 38% del prompt de una conversacion de boveda
+    const medido = measurePayload([
+      { content: 'sistema' },
+      {
+        content: [
+          { type: 'text', text: 'hola' },
+          { type: 'image_url', image_url: { url: 'data:image/png;base64,AAAA' } },
+          { type: 'image_url', image_url: 'data:image/png;base64,BB' },
+        ],
+      },
+    ]);
+
+    expect(medido).toEqual({
+      promptChars: 'sistema'.length + 'hola'.length,
+      messages: 2,
+      images: 2,
+      imageChars: 'data:image/png;base64,AAAA'.length + 'data:image/png;base64,BB'.length,
+    });
+  });
+});
+
+describe('errorCodeOf', () => {
+  it('saca el codigo de debajo de las dos envolturas', () => {
+    // `fetch` entrega siempre `TypeError: fetch failed` y esconde el motivo en
+    // `cause`; encima `retryWithBackoff` lo envuelve otra vez. Sin mirar dentro,
+    // un silencio de quince minutos y un socket rechazado son indistinguibles.
+    const dentro = Object.assign(new Error('Headers Timeout Error'), {
+      code: 'UND_ERR_HEADERS_TIMEOUT',
+    });
+    const fuera = Object.assign(new TypeError('fetch failed'), { cause: dentro });
+    expect(errorCodeOf(new RetryError('fallo tras 3 intentos', 3, fuera))).toBe(
+      'UND_ERR_HEADERS_TIMEOUT',
+    );
+  });
+
+  it('usa el nombre cuando no hay codigo, y nunca el mensaje', () => {
+    const abortado = Object.assign(new Error('la respuesta llevaba texto privado'), {
+      name: 'AbortError',
+    });
+    expect(errorCodeOf(abortado)).toBe('AbortError');
+  });
+
+  it('un Error pelado no aporta codigo: mejor nada que su mensaje', () => {
+    expect(errorCodeOf(new Error('texto que podria venir del proveedor'))).toBeNull();
+  });
+});
+
+describe('HttpApiProvider: una linea de registro por llamada', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const config = { ...EXAMPLE_HTTP_PROVIDERS[0]!, enabled: true, supportsStreaming: true };
+
+  function peticion(overrides: Partial<ProviderRunRequest> = {}): ProviderRunRequest {
+    return {
+      prompt: 'hola',
+      workingDirectory: 'C:/wt',
+      timeoutMs: 30_000,
+      signal: new AbortController().signal,
+      readOnly: true,
+      onEvent: () => undefined,
+      ...overrides,
+    };
+  }
+
+  /** un flujo SSE que cierra con `[DONE]`, para que la prueba no espere margen */
+  function flujo(lineas: string[], retrasoMs = 0): Response {
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        const emitir = (): void => {
+          for (const linea of lineas) {
+            controller.enqueue(new TextEncoder().encode(`${linea}\n`));
+          }
+          controller.enqueue(new TextEncoder().encode('data: [DONE]\n'));
+          controller.close();
+        };
+        if (retrasoMs === 0) emitir();
+        else setTimeout(emitir, retrasoMs);
+      },
+    });
+    return new Response(body, { status: 200 });
+  }
+
+  const respuestaBuena = [
+    'data: {"choices":[{"delta":{"content":"Hola"}}]}',
+    'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}',
+    'data: {"choices":[],"usage":{"prompt_tokens":7601,"completion_tokens":120}}',
+  ];
+
+  it('cada intento deja su propia linea, numerada y con el hueco entre ellas', async () => {
+    // ESTE es el agujero que se cierra: antes, dos llamadas y una respuesta
+    // eran indistinguibles de una llamada y una respuesta.
+    let intentos = 0;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+      intentos += 1;
+      if (intentos === 1) return new Response('se cayo', { status: 503 });
+      return flujo(respuestaBuena);
+    });
+
+    const lineas: ProviderCallRecord[] = [];
+    const provider = new HttpApiProvider(
+      config,
+      'una-clave',
+      new MemoryBudgetStore(),
+      undefined,
+      (record) => lineas.push(record),
+    );
+
+    const result = await provider.run(peticion());
+
+    expect(result.ok).toBe(true);
+    expect(lineas.map((l) => l.attempt)).toEqual([1, 2]);
+    expect(lineas[0]?.ending).toBe('http_error');
+    expect(lineas[0]?.httpStatus).toBe(503);
+    expect(lineas[1]?.ending).toBe('answered');
+    // el primer intento no tiene con quien compararse; el segundo si, y ese
+    // hueco es el que delata un reintento de Luxy en la factura
+    expect(lineas[0]?.gapMs).toBeNull();
+    expect(lineas[1]?.gapMs).not.toBeNull();
+    // y el turno declara lo que costo de verdad
+    expect(result.callMetrics).toMatchObject({ modelCalls: 2, billedCalls: 2 });
+  }, 15_000);
+
+  it('mide cuanto tardo en decir la primera palabra', async () => {
+    // la medida clave del informe, y la que no existia: el tope que mata una
+    // llamada cuenta SILENCIO, asi que sin esto una llamada lenta que iba a
+    // contestar y una muda se ven exactamente igual desde fuera
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => flujo(respuestaBuena, 80));
+
+    const lineas: ProviderCallRecord[] = [];
+    const provider = new HttpApiProvider(
+      config,
+      'una-clave',
+      new MemoryBudgetStore(),
+      undefined,
+      (record) => lineas.push(record),
+    );
+
+    await provider.run(peticion());
+
+    const linea = lineas[0];
+    expect(linea?.firstTokenMs).not.toBeNull();
+    expect(linea?.firstTokenMs ?? 0).toBeGreaterThanOrEqual(60);
+    // descolgar es una cosa y hablar es otra: el hueco entre las dos es
+    // justamente lo que el tope de silencio vigila
+    expect(linea?.headersMs ?? 0).toBeLessThan(linea?.firstTokenMs ?? 0);
+    expect(linea?.durationMs ?? 0).toBeGreaterThanOrEqual(linea?.firstTokenMs ?? 0);
+    expect(linea?.tokensIn).toBe(7601);
+    expect(linea?.tokensOut).toBe(120);
+  }, 15_000);
+
+  it('una llamada que cierra sin una palabra queda registrada, y se cobra', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => flujo([]));
+
+    const lineas: ProviderCallRecord[] = [];
+    const store = new MemoryBudgetStore();
+    const provider = new HttpApiProvider(config, 'una-clave', store, undefined, (record) =>
+      lineas.push(record),
+    );
+
+    const result = await provider.run(peticion());
+
+    expect(result.ok).toBe(false);
+    expect(lineas).toHaveLength(1);
+    expect(lineas[0]?.ending).toBe('empty');
+    expect(lineas[0]?.billed).toBe(true);
+    // sin primera palabra: el null NO es un cero, y la diferencia es el dato
+    expect(lineas[0]?.firstTokenMs).toBeNull();
+    expect(lineas[0]?.textChars).toBe(0);
+    // y el presupuesto la cuenta, que es lo que antes no pasaba
+    expect(store.read()['deepseek']?.calls).toBe(1);
+  }, 15_000);
+
+  it('el registro no lleva ni una palabra del prompt ni de la respuesta', async () => {
+    const secretoDelPrompt = 'LIA-SUSURRO-PRIVADO';
+    const secretoDeLaRespuesta = 'RESPUESTA-INTIMA-QUE-NO-SALE';
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
+      flujo([
+        `data: {"choices":[{"delta":{"content":"${secretoDeLaRespuesta}"}}]}`,
+        'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}',
+      ]),
+    );
+
+    const lineas: ProviderCallRecord[] = [];
+    const provider = new HttpApiProvider(
+      config,
+      'una-clave',
+      new MemoryBudgetStore(),
+      undefined,
+      (record) => lineas.push(record),
+    );
+
+    await provider.run(peticion({ prompt: secretoDelPrompt }));
+
+    const serializado = JSON.stringify(lineas);
+    expect(serializado).not.toContain(secretoDelPrompt);
+    expect(serializado).not.toContain(secretoDeLaRespuesta);
+    expect(serializado).not.toContain('una-clave');
+    // lo que si lleva son TAMAÑOS
+    expect(lineas[0]?.promptChars).toBeGreaterThan(0);
+    expect(lineas[0]?.textChars).toBe(secretoDeLaRespuesta.length);
+  }, 15_000);
+
+  it('una llamada que no llega a conectar no se apunta como gasto', async () => {
+    // es la unica que sale gratis, y distinguirla es lo que permite seguir
+    // reintentando un socket rechazado sin pagar por ello
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+      throw new TypeError('fetch failed');
+    });
+
+    const lineas: ProviderCallRecord[] = [];
+    const store = new MemoryBudgetStore();
+    const provider = new HttpApiProvider(config, 'una-clave', store, undefined, (record) =>
+      lineas.push(record),
+    );
+
+    await provider.run(peticion());
+
+    expect(lineas.length).toBeGreaterThan(0);
+    for (const linea of lineas) {
+      expect(linea.ending).toBe('connect_failed');
+      expect(linea.billed).toBe(false);
+    }
+    expect(store.read()['deepseek']).toBeUndefined();
+  }, 20_000);
+
+  it('el presupuesto suma TODOS los intentos, no solo el que salio bien', async () => {
+    // el turno del informe: tres llamadas cobradas figuraban con los tokens de
+    // una, asi que Luxy creia gastar la tercera parte de lo que gastaba
+    let intentos = 0;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+      intentos += 1;
+      if (intentos === 1) return new Response('error interno', { status: 500 });
+      return flujo(respuestaBuena);
+    });
+
+    const store = new MemoryBudgetStore();
+    const provider = new HttpApiProvider(config, 'una-clave', store);
+
+    const result = await provider.run(peticion());
+
+    expect(result.ok).toBe(true);
+    const entrada = store.read()['deepseek'];
+    expect(entrada?.calls).toBe(2);
+    // el 500 no informo tokens, asi que suma cero: el CONTADOR es lo unico que
+    // ve una llamada vacia, y por eso protege donde el dinero no llega
+    expect(entrada?.inputTokens).toBe(7601);
+  }, 15_000);
+
+  it('el limite diario de llamadas frena antes de gastar otra', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    const store = new MemoryBudgetStore({
+      deepseek: {
+        day: new Date().toISOString().slice(0, 10),
+        spent: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        calls: 12,
+      },
+    });
+    const provider = new HttpApiProvider({ ...config, dailyCallLimit: 12 }, 'una-clave', store);
+
+    const result = await provider.run(peticion());
+
+    expect(result.ok).toBe(false);
+    expect(result.errorMessage).toContain('limite diario de llamadas');
+    // y no se ha llamado a nadie: frenar despues de pagar no frena nada
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  // POR QUE NO BASTA LA DE ARRIBA: esa mira el OBJETO que sale del proveedor, y
+  // por el tramo que falta —`redactDeep`, el aplanado sobre {ts, level, msg} y
+  // la escritura— se colo un campo entero. `maxOutputTokens` acababa en
+  // `Tokens`, `redactDeep` tapa el valor de toda clave que acabe asi, y la
+  // linea salia a disco con «[REDACTADO]» justo en el unico tope contra el que
+  // se interpreta un final `output_budget`. Nada lo cazaba.
+  it('la linea que se ESCRIBE conserva todas las cifras y no lleva contenido', async () => {
+    const secretoDelPrompt = 'LIA-SUSURRO-PRIVADO';
+    const secretoDeLaRespuesta = 'RESPUESTA-INTIMA-QUE-NO-SALE';
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
+      flujo([
+        `data: {"choices":[{"delta":{"content":"${secretoDeLaRespuesta}"}}]}`,
+        'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}',
+      ]),
+    );
+
+    const carpeta = mkdtempSync(join(tmpdir(), 'luxy-registro-'));
+    try {
+      const logger = new AgentLogger('info', carpeta, false);
+      const lineas: ProviderCallRecord[] = [];
+      const provider = new HttpApiProvider(
+        config,
+        'una-clave',
+        new MemoryBudgetStore(),
+        undefined,
+        (record) => {
+          lineas.push(record);
+          // exactamente como lo escribe el agente: campos SUELTOS
+          logger.info(PROVIDER_CALL_LOG_MESSAGE, { ...record });
+        },
+      );
+
+      await provider.run(peticion({ prompt: secretoDelPrompt, maxOutputTokens: 4096 }));
+
+      const contenido = readFileSync(join(carpeta, 'luxy.log'), 'utf8').trim();
+      expect(contenido).not.toContain(secretoDelPrompt);
+      expect(contenido).not.toContain(secretoDeLaRespuesta);
+      expect(contenido).not.toContain('una-clave');
+
+      const escrita = JSON.parse(contenido.split('\n')[0]!) as Record<string, unknown>;
+      expect(escrita['msg']).toBe(PROVIDER_CALL_LOG_MESSAGE);
+      // NINGUN campo puede salir tapado ni desaparecer. El barrido va sobre
+      // `Object.keys`, no sobre una lista escrita a mano: asi caza tambien el
+      // proximo campo que alguien añada con un nombre desafortunado.
+      const registro = lineas[0]! as unknown as Record<string, unknown>;
+      for (const clave of Object.keys(registro)) {
+        expect(escrita[clave]).toBe(registro[clave]);
+      }
+      expect(escrita['outputCap']).toBe(4096);
+    } finally {
+      rmSync(carpeta, { recursive: true, force: true });
+    }
+  }, 15_000);
+
+  // POR QUE EXISTE: el cupo se miraba UNA vez, en `run()`, antes de los
+  // reintentos y antes de ramificar al bucle de herramientas. Un turno de tres
+  // intentos se pasaba del tope por dos; un trabajo agentic, por cuarenta y
+  // nueve. El tope existe precisamente porque esta pasarela cobra por llamada.
+  it('el limite diario de llamadas frena TAMBIEN entre reintentos', async () => {
+    let intentos = 0;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+      intentos += 1;
+      return new Response('error interno', { status: 500 });
+    });
+
+    const store = new MemoryBudgetStore();
+    const provider = new HttpApiProvider({ ...config, dailyCallLimit: 2 }, 'una-clave', store);
+
+    const result = await provider.run(peticion());
+
+    expect(result.ok).toBe(false);
+    // dos peticiones, no tres: la tercera ya no cabia en el cupo del dia
+    expect(intentos).toBe(2);
+    expect(result.callMetrics?.modelCalls).toBe(2);
+    expect(store.read()['deepseek']?.calls).toBe(2);
+    // y el motivo es el de Luxy, sin culpar al proveedor ni añadirle la prosa
+    // del envoltorio de reintentos
+    expect(result.errorMessage).toContain('limite diario de llamadas');
+    expect(result.errorMessage).not.toContain('la operacion fallo tras');
+  }, 20_000);
+
+  it('un fallo del registro no puede costar la respuesta', async () => {
+    // el turno de Daniel es una llamada de pago y una conversacion real
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => flujo(respuestaBuena));
+
+    const provider = new HttpApiProvider(
+      config,
+      'una-clave',
+      new MemoryBudgetStore(),
+      undefined,
+      () => {
+        throw new Error('el disco de registro esta lleno');
+      },
+    );
+
+    const result = await provider.run(peticion());
+
+    expect(result.ok).toBe(true);
+    expect(result.finalText).toBe('Hola');
+  }, 15_000);
 });

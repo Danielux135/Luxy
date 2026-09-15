@@ -13,6 +13,23 @@ export interface SseTransportReport {
   chunks: number;
   bytes: number;
   durationMs: number;
+  /**
+   * ms desde que empezo la lectura hasta el PRIMER trozo de red.
+   *
+   * null si no llego ninguno, que es en si mismo el diagnostico: la llamada se
+   * pago y no devolvio un solo byte.
+   */
+  firstChunkMs: number | null;
+  /** ms hasta el ULTIMO trozo; con `durationMs` da el silencio final */
+  lastChunkMs: number | null;
+  /**
+   * el hueco mas largo entre dos trozos SEGUIDOS. null con menos de dos.
+   *
+   * es lo que separa «va lento pero va» de «se quedo mudo»: el tope que mata
+   * una llamada es de silencio, no de duracion, y sin esta cifra las dos cosas
+   * se ven igual desde fuera.
+   */
+  longestSilenceMs: number | null;
 }
 
 /**
@@ -66,6 +83,11 @@ export async function* sseData(
   const startedAt = Date.now();
   let chunks = 0;
   let bytes = 0;
+  // los tiempos de arranque y de silencio del transporte. Son cifras: cuando
+  // llego el primer byte, cuando el ultimo y cuanto callo entre medias.
+  let firstChunkAt: number | null = null;
+  let lastChunkAt: number | null = null;
+  let longestSilenceMs: number | null = null;
   // si nadie lo cambia es que el cuerpo se cerro solo, sin marcador ni error
   let transportEnd: StreamTransportEnd = 'body_closed';
 
@@ -137,6 +159,13 @@ export async function* sseData(
       if (done) break;
       chunks += 1;
       bytes += value.byteLength;
+      const ahora = Date.now();
+      if (lastChunkAt !== null) {
+        const hueco = ahora - lastChunkAt;
+        if (longestSilenceMs === null || hueco > longestSilenceMs) longestSilenceMs = hueco;
+      }
+      firstChunkAt ??= ahora;
+      lastChunkAt = ahora;
       buffer += decoder.decode(value, { stream: true });
 
       const lines = buffer.split(/\r?\n/);
@@ -185,6 +214,9 @@ export async function* sseData(
       chunks,
       bytes,
       durationMs: Date.now() - startedAt,
+      firstChunkMs: firstChunkAt === null ? null : firstChunkAt - startedAt,
+      lastChunkMs: lastChunkAt === null ? null : lastChunkAt - startedAt,
+      longestSilenceMs,
     });
     // Tras un cierre local puede quedar un read pendiente durante un instante.
     // Liberar un lector en ese estado lanza; el transporte ya esta abortado y

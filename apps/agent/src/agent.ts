@@ -10,6 +10,7 @@ import type {
   ProviderExecution,
   ProviderId,
   MachineCapabilities,
+  ProviderCallRecord,
 } from '@luxy/shared';
 import {
   defaultSleep,
@@ -20,6 +21,7 @@ import {
   buildDefaultCatalog,
   ModelRegistry,
   PROVIDER_IDS,
+  PROVIDER_CALL_LOG_MESSAGE,
 } from '@luxy/shared';
 import { GatewayClient } from './gateway-client.js';
 import { EventQueue } from './event-queue.js';
@@ -28,7 +30,8 @@ import { type AgentLogger, describeError } from './logger.js';
 import { detectEnvironment, describeCapabilities } from './detect.js';
 import { ClaudeCodeProvider } from './providers/claude.js';
 import { CodexCliProvider } from './providers/codex.js';
-import { HttpApiProvider, MemoryBudgetStore } from './providers/http-provider.js';
+import { HttpApiProvider, type BudgetStore } from './providers/http-provider.js';
+import { FileBudgetStore } from './budget-store.js';
 import { runLocalTurn, type LocalTurnInput, type LocalTurnResult } from './local-turn.js';
 import { runJob } from './job-runner.js';
 import { worktreesDir, stateDir, logsDir } from './paths.js';
@@ -86,6 +89,15 @@ export class LuxyAgent {
   private readonly startedAt = new Date().toISOString();
 
   private readonly worktreesDirectory: string;
+  /**
+   * donde vive el estado local del agente.
+   *
+   * se guarda porque el presupuesto tambien se persiste ahi, y tiene que ser la
+   * MISMA carpeta que usan las colas: el proceso de escritorio pasa las rutas
+   * de Electron, y una prueba pasa una temporal. Resolverla otra vez con
+   * `stateDir()` escribiria en la carpeta real del usuario desde una prueba.
+   */
+  private readonly stateDirectory: string;
   private readonly emitEvent: AgentEventSink;
   private readonly notifyIdle: () => void;
 
@@ -129,6 +141,7 @@ export class LuxyAgent {
       machineToken: config.machineToken,
     });
     const stateDirectory = options.stateDirectory ?? stateDir();
+    this.stateDirectory = stateDirectory;
     this.queue = new EventQueue(this.client, {
       directory: stateDirectory,
       renewLeaseSeconds: config.leaseSeconds,
@@ -269,7 +282,12 @@ export class LuxyAgent {
       this.providers.set('codex', codex);
     }
 
-    const budgetStore = new MemoryBudgetStore();
+    // el presupuesto se persiste: un limite «diario» que se reinicia al cerrar
+    // la ventana no es un limite, y el contador de llamadas es lo unico que
+    // protege contra una pasarela que cobra por peticion
+    const budgetStore = new FileBudgetStore(this.stateDirectory, (error) => {
+      this.logger.warn('no se pudo guardar el presupuesto del dia', describeError(error));
+    });
     for (const providerConfig of enabledHttp) {
       this.providers.set(
         providerConfig.id as ProviderId,
@@ -277,6 +295,8 @@ export class LuxyAgent {
           providerConfig,
           this.providerKeys[providerConfig.apiKeyEnv],
           budgetStore,
+          undefined,
+          (record) => this.logCallRecord(record),
         ),
       );
     }
@@ -319,6 +339,25 @@ export class LuxyAgent {
   }
 
   /**
+   * una linea de registro POR LLAMADA al proveedor.
+   *
+   * POR QUE NO BASTABA LA DE SIEMPRE: hasta ahora solo se apuntaba una linea
+   * por TURNO, y un turno puede costar tres llamadas. De las tres llamadas que
+   * murieron vacias el 2026-09-14 no quedo constancia de nada —ni de por que,
+   * ni de cuantos tokens se pagaron— y reconstruirlo obligo a cruzar una
+   * captura de la factura con el reloj del log.
+   *
+   * Lo que entra aqui son CIFRAS, codigos y tamaños. Ni una palabra del prompt
+   * ni de la respuesta: lo que se conversa en la boveda es privado, y el
+   * logger ademas lo pasa todo por `redact()`.
+   */
+  private logCallRecord(record: ProviderCallRecord): void {
+    // los campos van SUELTOS, no anidados: asi la pantalla de Sistema de Studio
+    // los pinta uno a uno y un `grep` del archivo puede contarlos sin parsear
+    this.logger.info(PROVIDER_CALL_LOG_MESSAGE, { ...record });
+  }
+
+  /**
    * proveedores derivados del catalogo de modelos.
    *
    * antes solo existian los tres de providers.http, escritos a mano en la
@@ -326,7 +365,7 @@ export class LuxyAgent {
    * se registra sola, que es lo que hace que /kimi o /kat lleguen a ejecutarse.
    */
   private buildFamilyProviders(
-    budget: MemoryBudgetStore,
+    budget: BudgetStore,
   ): { id: ProviderId; provider: HttpApiProvider }[] {
     const built: { id: ProviderId; provider: HttpApiProvider }[] = [];
 
@@ -360,9 +399,15 @@ export class LuxyAgent {
               supportsStreaming: preferred.supportsStreaming,
               maxOutputTokens: preferred.maxOutputTokens,
               dailyBudget: preferred.limits.dailyBudget,
+              // el tope por NUMERO de llamadas. Es el que protege cuando la
+              // pasarela cobra una tarifa plana por peticion: contra esa, el
+              // presupuesto en dinero no ve una llamada que devuelve 0 tokens
+              dailyCallLimit: preferred.limits.dailyCalls,
             },
             apiKey,
             budget,
+            undefined,
+            (record) => this.logCallRecord(record),
           ),
         });
       }

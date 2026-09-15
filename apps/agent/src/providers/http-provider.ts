@@ -16,18 +16,28 @@ import type {
   AgenticContext,
   AgentToolName,
   ResponseTermination,
+  ProviderCallRecord,
+  ProviderCallMetrics,
+  StreamTransportEnd,
 } from '@luxy/shared';
 import {
+  CALL_ATTENDED_AFTER_MS,
   CONVERSATION_MEMORY_CLOSE,
+  PROVIDER_SILENCE_TIMEOUT_MS,
   TERMINAL_GRACE_MS,
   retryWithBackoff,
   checkBudget,
+  checkCallBudget,
+  classifyProviderCallEnding,
+  isBilledCallEnding,
   recordUsage,
   estimateCost,
   secretRegistry,
   redact,
+  utcDay,
 } from '@luxy/shared';
 import { runAgenticLoop, type LoopMessage, type LoopTurnResult } from './agentic-loop.js';
+import { isSilenceTimeout, silenceTransport } from './http-dispatcher.js';
 import {
   sseData,
   TurnAssembler,
@@ -48,10 +58,213 @@ interface RequestDiagnostics {
   streamed: boolean;
   abortedBy: ResponseTermination['abortedBy'];
   termination: ResponseTermination | null;
+  /** epoch ms en que SALIO esta peticion; origen de todos los tiempos de abajo */
+  startedAt: number;
+  /** ms hasta las cabeceras: lo que tardo el proveedor en descolgar */
+  headersMs: number | null;
+  /** ms hasta el primer byte del cuerpo */
+  firstChunkMs: number | null;
+  /**
+   * ms hasta la PRIMERA PALABRA visible.
+   *
+   * es la medida que no existia y la que decide todo: el tope que mata una
+   * llamada cuenta silencio, no duracion, asi que sin esto una llamada lenta
+   * que iba a contestar y una muda se ven exactamente igual.
+   */
+  firstTokenMs: number | null;
+  /** silencio desde el ultimo byte hasta que acabo la llamada */
+  tailSilenceMs: number | null;
+  /** el hueco mas largo entre dos trozos seguidos */
+  longestSilenceMs: number | null;
+  /** caracteres de razonamiento: gastan presupuesto sin producir respuesta */
+  reasoningChars: number;
+  /** el proveedor mando un error DENTRO del flujo, con HTTP 200 */
+  streamError: boolean;
+  /** agoto el tope de salida antes de escribir nada visible */
+  outputBudgetExhausted: boolean;
 }
 
 function newDiagnostics(): RequestDiagnostics {
-  return { httpStatus: null, streamed: false, abortedBy: null, termination: null };
+  return {
+    httpStatus: null,
+    streamed: false,
+    abortedBy: null,
+    termination: null,
+    startedAt: Date.now(),
+    headersMs: null,
+    firstChunkMs: null,
+    firstTokenMs: null,
+    tailSilenceMs: null,
+    longestSilenceMs: null,
+    reasoningChars: 0,
+    streamError: false,
+    outputBudgetExhausted: false,
+  };
+}
+
+/**
+ * deja el diagnostico como recien nacido, conservando el objeto.
+ *
+ * un reintento observa una peticion NUEVA: arrastrar los tiempos del intento
+ * anterior escribiria en el registro que la segunda llamada contesto en 200 ms
+ * cuando la que contesto fue la primera.
+ */
+function resetDiagnostics(diagnostics: RequestDiagnostics, streamed: boolean): void {
+  const limpio = newDiagnostics();
+  Object.assign(diagnostics, limpio, { streamed });
+}
+
+/**
+ * lo que se lleva contado del TURNO: intentos, cuando acabo el ultimo y lo que
+ * suman todos los que la pasarela cobra.
+ *
+ * vive fuera de la llamada porque la pregunta cara es «cuantas llamadas costo
+ * este turno», y esa no se puede contestar desde dentro de una.
+ */
+interface CallTracker {
+  attempts: number;
+  /** epoch ms en que acabo la llamada anterior; da el hueco entre reintentos */
+  endedAt: number | null;
+  billedCalls: number;
+  billedInputTokens: number;
+  billedOutputTokens: number;
+}
+
+function newCallTracker(): CallTracker {
+  return {
+    attempts: 0,
+    endedAt: null,
+    billedCalls: 0,
+    billedInputTokens: 0,
+    billedOutputTokens: 0,
+  };
+}
+
+/**
+ * lo que se lleva de UNA tanda de reintentos.
+ *
+ * vive aparte del tracker porque el tracker cuenta llamadas del TURNO entero
+ * —en el bucle de herramientas eso son decenas— y estas tres cosas son de la
+ * tanda: el aviso sale una vez, el reintento de cortesia se concede una vez, y
+ * lo que se dijo tiene que poder viajar al mensaje de fallo.
+ */
+interface RetryState {
+  /** lo que el modelo alcanzo a escribir; en el bucle de herramientas, nada */
+  parcial: { text: string };
+  /** ya se aviso de que la llamada estaba pagada */
+  avisado: boolean;
+  /** reintentos concedidos a un fallo YA cobrado en esta tanda */
+  reintentos: number;
+  /**
+   * el aviso emitido, para repetirlo en el mensaje de fallo.
+   *
+   * POR QUE: la pantalla en la que Daniel espera —Privado— no escucha los
+   * eventos del agente; solo pinta `errorMessage`. Un aviso que solo viaja como
+   * evento acaba en la lista de actividad de Inicio, que es otra pantalla, y la
+   * frase que le devuelve la decision no la lee nadie.
+   */
+  nota: string | null;
+}
+
+function newRetryState(parcial: { text: string } = { text: '' }): RetryState {
+  return { parcial, avisado: false, reintentos: 0, nota: null };
+}
+
+/**
+ * el informe de transporte de una respuesta que no se transmitio, o de una
+ * lectura que reviento antes de empezar.
+ *
+ * los tiempos van a null y no a cero: «no llego ningun byte» y «llego en 0 ms»
+ * son cosas distintas, y confundirlas es justo lo que haria invisible una
+ * llamada muda.
+ */
+function emptyTransportReport(
+  transportEnd: SseTransportReport['transportEnd'],
+  durationMs: number,
+): SseTransportReport {
+  return {
+    transportEnd,
+    chunks: 0,
+    bytes: 0,
+    durationMs,
+    firstChunkMs: null,
+    lastChunkMs: null,
+    longestSilenceMs: null,
+  };
+}
+
+/** tamaños de lo que se envio; NUNCA lo que se envio */
+interface PayloadSize {
+  promptChars: number;
+  messages: number;
+  images: number;
+  imageChars: number;
+}
+
+/**
+ * mide el cuerpo de la peticion sin mirar lo que dice.
+ *
+ * las imagenes se cuentan aparte porque crecen solas: el bloque de imagen ya
+ * ocupa el 38% del prompt de una conversacion de boveda y suma ~250 caracteres
+ * por cada imagen guardada. Si algun dia hay una segunda causa relacionada con
+ * el tamaño, va a estar aqui y no en el texto.
+ */
+export function measurePayload(
+  messages: readonly { content: string | ChatContentPart[] }[],
+): PayloadSize {
+  let promptChars = 0;
+  let images = 0;
+  let imageChars = 0;
+
+  for (const message of messages) {
+    if (typeof message.content === 'string') {
+      promptChars += message.content.length;
+      continue;
+    }
+    for (const part of message.content) {
+      if (part.type === 'text') {
+        promptChars += part.text.length;
+        continue;
+      }
+      images += 1;
+      imageChars +=
+        typeof part.image_url === 'string' ? part.image_url.length : part.image_url.url.length;
+    }
+  }
+
+  return { promptChars, messages: messages.length, images, imageChars };
+}
+
+/**
+ * el codigo del error, NUNCA su mensaje.
+ *
+ * un mensaje puede traer dentro lo que devolvio el proveedor; un codigo no.
+ * Se mira dentro de las dos envolturas —`cause` la pone fetch, `lastError` la
+ * pone `retryWithBackoff`— porque el codigo util casi siempre esta abajo:
+ * `fetch` entrega un `TypeError: fetch failed` pelado y esconde el
+ * `UND_ERR_HEADERS_TIMEOUT` debajo.
+ */
+export function errorCodeOf(error: unknown): string | null {
+  const pendientes: unknown[] = [error];
+  const vistos: object[] = [];
+  let respaldo: string | null = null;
+
+  while (pendientes.length > 0 && vistos.length < 8) {
+    const actual = pendientes.shift();
+    if (typeof actual !== 'object' || actual === null) continue;
+    if (vistos.includes(actual)) continue;
+    vistos.push(actual);
+
+    const capa = actual as { code?: unknown; name?: unknown; cause?: unknown; lastError?: unknown };
+    if (typeof capa.code === 'string' && capa.code.length > 0) return capa.code.slice(0, 64);
+    // el nombre vale como ultimo recurso: `AbortError` dice algo, `Error` no
+    if (respaldo === null && typeof capa.name === 'string' && capa.name !== 'Error') {
+      respaldo = capa.name.slice(0, 64);
+    }
+    pendientes.push(capa.cause, capa.lastError);
+  }
+
+  return respaldo;
 }
 
 /** tope de espera que se acepta de un `Retry-After`: mas alla, no compensa */
@@ -128,10 +341,26 @@ function esTimeout(error: unknown): boolean {
 }
 
 export class BudgetExceededError extends Error {
+  /** repetir no devuelve cupo: el tope es del dia entero */
+  readonly retryable = false;
+
   constructor(message: string) {
     super(message);
     this.name = 'BudgetExceededError';
   }
+}
+
+/**
+ * el fallo de presupuesto, mirando tambien dentro de la envoltura de reintentos.
+ *
+ * sin desenvolver, el mensaje que leia el usuario era «DeepSeek fallo: la
+ * operacion fallo tras 1 intento: limite diario de llamadas...», que atribuye
+ * al proveedor un freno que puso Luxy.
+ */
+function budgetErrorOf(error: unknown): BudgetExceededError | null {
+  if (error instanceof BudgetExceededError) return error;
+  const interno = (error as { lastError?: unknown } | null)?.lastError;
+  return interno instanceof BudgetExceededError ? interno : null;
 }
 
 /**
@@ -251,6 +480,15 @@ export class HttpApiProvider implements ProviderExecution {
     private readonly apiKey: string | undefined,
     private readonly budget: BudgetStore = new MemoryBudgetStore(),
     private readonly pricing: { input: number; output: number } = { input: 0, output: 0 },
+    /**
+     * donde va la linea de registro de CADA llamada.
+     *
+     * es un callback y no un logger porque `shared` no puede tocar disco y el
+     * proveedor no tiene por que saber a que archivo escribe el agente. Sin
+     * sink no se registra nada y todo sigue funcionando igual: este arreglo
+     * puede quedarse sin aplicar, pero no puede costar un turno.
+     */
+    private readonly onCallRecord?: (record: ProviderCallRecord) => void,
   ) {
     this.id = config.id as ProviderId;
     this.displayName = config.displayName;
@@ -282,6 +520,15 @@ export class HttpApiProvider implements ProviderExecution {
       return this.failure(check.reason ?? 'presupuesto diario agotado');
     }
 
+    // y el contador de LLAMADAS, que es lo unico que protege contra una tarifa
+    // plana por peticion: contra esa, el presupuesto en dinero no ve nada
+    // porque una llamada vacia suma cero tokens y cuesta lo mismo que una buena.
+    //
+    // esta es solo la comprobacion de cortesia, para no empezar un turno que no
+    // cabe. La que de verdad frena esta en `trackCall`, llamada a llamada.
+    const sinCupo = this.callBudgetReason();
+    if (sinCupo !== null) return this.failure(sinCupo);
+
     // con contexto agentic esto deja de ser una consulta y pasa a ser un bucle
     // de herramientas: el modelo pide, Luxy ejecuta en local y devuelve
     if (request.agentic !== undefined) {
@@ -309,40 +556,27 @@ export class HttpApiProvider implements ProviderExecution {
     // lo que el modelo alcanzo a escribir antes de cortarse. Se guarda aparte
     // del diagnostico a proposito: el diagnostico no lleva contenido.
     const parcial = { text: '' };
-    let modelCalls = 0;
+    // los intentos de ESTE turno. Cada uno deja su linea y cada uno se apunta
+    // en el presupuesto, salga bien o no: la pasarela los cobra todos.
+    const tracker = newCallTracker();
+    const payload = measurePayload(messages);
+    // el aviso de llamada vacia sale UNA vez por turno: repetirlo en cada
+    // vuelta convertiria una noticia en ruido
+    const estado = newRetryState(parcial);
 
     try {
       const result = await retryWithBackoff(
-        () => {
-          modelCalls += 1;
-          return this.callApi(messages, request, diagnostics, parcial);
-        },
+        () =>
+          this.trackCall(tracker, request, payload, diagnostics, () =>
+            this.callApi(messages, request, diagnostics, parcial),
+          ),
         {
           maxAttempts: 3,
           baseDelayMs: 2000,
           maxDelayMs: 20_000,
           signal: request.signal,
           // no se reintenta si la clave es invalida o la peticion es incorrecta
-          shouldRetry: (error) => {
-            if ((error as { retryable?: unknown }).retryable === false) return false;
-            // un timeout o una cancelacion NO se reintentan: esperar tres veces
-            // lo mismo solo triplica el tiempo antes de decir que fallo
-            if (error instanceof Error && error.name === 'AbortError') return false;
-            if (request.signal.aborted) return false;
-            // el modelo YA habia escrito algo cuando se corto.
-            //
-            // reintentar aqui no recupera nada: tira lo generado, vuelve a
-            // pagar el prompt y empieza de cero. Medido en una web de 23
-            // minutos, eso son tres generaciones perdidas en vez de una
-            // respuesta parcial que se puede continuar. Se conserva y se
-            // clasifica como interrumpida.
-            if (parcial.text.length > 0) return false;
-            const status = (error as { status?: number }).status;
-            // un 524/504 es un timeout del proxy: repetir la misma peticion
-            // lenta vuelve a colgarse igual, solo que tres veces
-            if (status === 524 || status === 504) return false;
-            return status === undefined || status >= 500 || status === 429;
-          },
+          shouldRetry: (error) => this.shouldRetryCall(request, error, diagnostics, estado, false),
           // si el proveedor dice cuanto esperar, se le obedece
           delayForError: (error, _attempt, calculado) => {
             const pedido = (error as { retryAfterMs?: number }).retryAfterMs;
@@ -386,7 +620,9 @@ export class HttpApiProvider implements ProviderExecution {
           this.pricing.output,
         ),
       };
-      this.budget.write(recordUsage(this.budget.read(), usage));
+      // el presupuesto YA se apunto llamada a llamada en `trackCall`. Volver a
+      // sumar aqui el intento bueno lo contaria dos veces, que es el error
+      // opuesto —y igual de malo— al que teniamos: antes solo contaba este.
 
       return {
         ok: true,
@@ -398,20 +634,30 @@ export class HttpApiProvider implements ProviderExecution {
         cancelled: false,
         errorMessage: null,
         usage,
-        callMetrics: { modelCalls, toolCalls: 0 },
+        callMetrics: this.callMetrics(tracker, 0),
         ...this.diagnosed(diagnostics),
       };
     } catch (error) {
       // un timeout de la API no es un fallo de Luxy: se dice que modelo fue y
       // se sugiere que hacer, en vez de "fallo tras 3 intentos"
-      if (!request.signal.aborted && esTimeout(error)) {
+      //
+      // el silencio va aparte del tope propio de Luxy porque son dos cosas
+      // distintas y antes se veian igual de mal: el silencio llegaba como un
+      // `TypeError: fetch failed` pelado y acababa en la rama generica, asi que
+      // el usuario leia "DeepSeek fallo: fetch failed" para el fallo mas caro
+      // que tiene el sistema.
+      const silencio = !request.signal.aborted && isSilenceTimeout(error);
+      if (!request.signal.aborted && (silencio || esTimeout(error))) {
         return {
           ...this.failure(
-            `${this.label(request)} no respondio en ${Math.round(this.requestTimeout(request) / 1000)} s. ` +
-              `El modelo "${this.modelFor(request)}" puede estar saturado o caido en tu proveedor. ` +
-              'Prueba otro modelo de la misma familia o vuelve a intentarlo mas tarde.',
+            silencio
+              ? this.silenceMessage(request, diagnostics, parcial)
+              : this.requestTimeoutMessage(request, parcial),
           ),
           timedOut: true,
+          // un turno que acaba mal es justo el que costo mas de una llamada:
+          // sin este contador, el caso caro es el unico que no se puede contar
+          callMetrics: this.callMetrics(tracker, 0),
           ...this.recovered(parcial, diagnostics),
         };
       }
@@ -425,14 +671,156 @@ export class HttpApiProvider implements ProviderExecution {
           timedOut: false,
           cancelled: true,
           errorMessage: 'la ejecucion se cancelo',
+          callMetrics: this.callMetrics(tracker, 0),
           ...this.diagnosed(diagnostics),
         };
       }
+      // el cupo diario lo puso Luxy, no el proveedor: se dice tal cual, sin la
+      // prosa de reintentos y sin culpar a la pasarela
+      const frenado = budgetErrorOf(error);
+      if (frenado !== null) {
+        return {
+          ...this.failure(frenado.message),
+          callMetrics: this.callMetrics(tracker, 0),
+          ...this.recovered(parcial, diagnostics),
+        };
+      }
+
+      // el aviso de llamada ya cobrada viaja TAMBIEN en el mensaje de fallo.
+      //
+      // POR QUE SE REPITE: Privado —la pantalla en la que Daniel espera— no
+      // escucha los eventos del agente, solo pinta `errorMessage`. Sin esto, la
+      // frase que le devuelve la decision se quedaba en la lista de actividad
+      // de Inicio y el leia «DeepSeek fallo: la operacion fallo tras 1 intento:
+      // el proveedor cerro la respuesta sin enviar texto visible», que es
+      // exactamente el mensaje de antes del arreglo.
+      const descripcion = redact(describeHttpError(error, this.label(request)));
       return {
-        ...this.failure(redact(describeHttpError(error, this.label(request)))),
+        ...this.failure(
+          estado.nota === null ? descripcion : `${descripcion}\n\n${estado.nota}`,
+        ),
+        callMetrics: this.callMetrics(tracker, 0),
         ...this.recovered(parcial, diagnostics),
       };
     }
+  }
+
+  /**
+   * el filtro de reintentos, COMPARTIDO por la consulta y el bucle de
+   * herramientas.
+   *
+   * POR QUE COMPARTIDO: la primera version del arreglo solo toco `run()`. El
+   * bucle de herramientas se quedo reintentando a ciegas una llamada ya cobrada
+   * —hasta tres por vuelta, y una vuelta agentic puede repetirse cincuenta
+   * veces— y encima anunciandolo como «conexion interrumpida», que culpa a la
+   * red de algo que el proveedor si atendio. Con la decision en un solo sitio,
+   * el aviso no puede volver a quedarse en una mitad.
+   */
+  private shouldRetryCall(
+    request: ProviderRunRequest,
+    error: unknown,
+    diagnostics: RequestDiagnostics,
+    estado: RetryState,
+    agentic: boolean,
+  ): boolean {
+    if ((error as { retryable?: unknown } | null)?.retryable === false) return false;
+    // un timeout o una cancelacion NO se reintentan: esperar tres veces lo
+    // mismo solo triplica el tiempo antes de decir que fallo
+    if (esTimeout(error)) return false;
+    if (request.signal.aborted) return false;
+    // el modelo YA habia escrito algo cuando se corto.
+    //
+    // reintentar aqui no recupera nada: tira lo generado, vuelve a pagar el
+    // prompt y empieza de cero. Medido en una web de 23 minutos, eso son tres
+    // generaciones perdidas en vez de una respuesta parcial que se puede
+    // continuar. Se conserva y se clasifica como interrumpida. En el bucle de
+    // herramientas nunca hay parcial: un turno a medias no sirve para nada.
+    if (estado.parcial.text.length > 0) return false;
+
+    const status = statusOf(error);
+    if (status !== undefined) {
+      // un 524/504 es un timeout del proxy: repetir la misma peticion lenta
+      // vuelve a colgarse igual, solo que tres veces
+      if (status === 524 || status === 504) return false;
+      return status >= 500 || status === 429 || (agentic && status === 408);
+    }
+
+    // SIN codigo de estado. Aqui estaba el agujero: se daba por reintentable
+    // todo lo que no traia codigo, y en ese saco caian cosas opuestas.
+    const verdict = classifyBilledFailure(
+      error,
+      {
+        httpStatus: diagnostics.httpStatus,
+        transportEnd: diagnostics.termination?.transportEnd ?? null,
+        elapsedMs: Date.now() - diagnostics.startedAt,
+      },
+      estado.reintentos,
+    );
+    // no se llego a conectar: no hay llamada que cobrar y el reintento de
+    // siempre sigue siendo lo correcto
+    if (verdict === 'free_retry') return true;
+
+    const reintenta = verdict === 'retry_once';
+    if (reintenta) estado.reintentos += 1;
+    if (!estado.avisado) {
+      estado.avisado = true;
+      estado.nota = this.billedCallWarning(request, error, diagnostics, reintenta);
+      request.onEvent({ type: 'warning', message: estado.nota });
+    }
+    return reintenta;
+  }
+
+  /**
+   * el mensaje de un silencio hasta el tope.
+   *
+   * son DOS casos y hasta ahora se contaban como uno: «no llego a empezar» y
+   * «hablo y se callo». En el segundo, decir «estuvo 900 s sin enviar nada» se
+   * contradice con el texto que Daniel tiene delante —`recovered()` lo
+   * conserva— y ademas le manda a reenviar el mensaje entero, que es otra
+   * llamada de pago, cuando lo que hay se puede continuar.
+   *
+   * el numero del segundo caso es el MEDIDO (`tailSilenceMs`), no el
+   * configurado: el tope solo describe el primer caso.
+   */
+  private silenceMessage(
+    request: ProviderRunRequest,
+    diagnostics: RequestDiagnostics,
+    parcial: { text: string },
+  ): string {
+    if (parcial.text.length === 0) {
+      const segundos = Math.round(this.silenceTimeout() / 1000);
+      return (
+        `${this.label(request)} estuvo ${segundos} s sin enviar nada y Luxy dio la llamada por perdida. ` +
+        'No se ha reintentado sola: si tu pasarela cobra por llamada, esa ya esta pagada. ' +
+        `El modelo "${this.modelFor(request)}" puede estar saturado; vuelve a enviar el mensaje ` +
+        'o prueba otro modelo de la misma familia.'
+      );
+    }
+    const mudo = Math.round((diagnostics.tailSilenceMs ?? this.silenceTimeout()) / 1000);
+    return (
+      `${this.label(request)} empezo a responder y se quedo ${mudo} s en silencio; ` +
+      'Luxy dio la llamada por perdida. Se conserva lo que alcanzo a escribir ' +
+      `(${parcial.text.length} caracteres): continuala desde ahi en vez de reenviar el ` +
+      'mensaje entero, que seria otra llamada de pago.'
+    );
+  }
+
+  /** el mensaje del tope propio de Luxy, que tampoco es lo mismo con parcial */
+  private requestTimeoutMessage(request: ProviderRunRequest, parcial: { text: string }): string {
+    const segundos = Math.round(this.requestTimeout(request) / 1000);
+    if (parcial.text.length === 0) {
+      return (
+        `${this.label(request)} no respondio en ${segundos} s. ` +
+        `El modelo "${this.modelFor(request)}" puede estar saturado o caido en tu proveedor. ` +
+        'Prueba otro modelo de la misma familia o vuelve a intentarlo mas tarde.'
+      );
+    }
+    return (
+      `${this.label(request)} seguia escribiendo cuando se agotaron los ${segundos} s ` +
+      'que Luxy concede a una peticion. Se conserva lo que alcanzo a escribir ' +
+      `(${parcial.text.length} caracteres): continuala desde ahi en vez de reenviar el ` +
+      'mensaje entero, que seria otra llamada de pago.'
+    );
   }
 
   /** el diagnostico sólo viaja si de verdad hubo peticion que observar */
@@ -473,6 +861,11 @@ export class HttpApiProvider implements ProviderExecution {
       message: `${this.label(request)} trabajando con herramientas`,
     });
 
+    // un bucle de herramientas son MUCHAS llamadas, y cada una con sus propios
+    // reintentos. El contador es del bucle entero para que el registro numere
+    // las llamadas como las cobra la pasarela, no como las cuenta el bucle.
+    const tracker = newCallTracker();
+
     try {
       const result = await runAgenticLoop(request.prompt, {
         executor: agentic.runner as never,
@@ -480,28 +873,42 @@ export class HttpApiProvider implements ProviderExecution {
         allowedTools: agentic.allowedTools as AgentToolName[],
         useNativeTools: agentic.useNativeTools,
         signal: request.signal,
-        callModel: (messages: LoopMessage[], tools: unknown[] | null) =>
-          retryWithBackoff(() => this.callTurn(messages, tools, request), {
-            maxAttempts: 3,
-            baseDelayMs: 2000,
-            maxDelayMs: 60_000,
-            signal: request.signal,
-            shouldRetry: (error) => isRetryableAgenticTurn(error, request.signal),
-            delayForError: (error, _attempt, calculado) => {
-              const pedido = (error as { retryAfterMs?: number }).retryAfterMs;
-              return typeof pedido === 'number' ? Math.max(pedido, calculado) : null;
+        callBudgetReason: () => this.callBudgetReason(),
+        callModel: (messages: LoopMessage[], tools: unknown[] | null) => {
+          // el diagnostico y el estado de reintentos son de ESTA vuelta: una
+          // vuelta del bucle es una tanda propia, y el reintento de cortesia se
+          // concede por tanda, no uno por trabajo entero
+          const diagnostics = newDiagnostics();
+          const estado = newRetryState();
+          return retryWithBackoff(
+            () => this.callTurn(messages, tools, request, tracker, diagnostics),
+            {
+              maxAttempts: 3,
+              baseDelayMs: 2000,
+              maxDelayMs: 60_000,
+              signal: request.signal,
+              shouldRetry: (error) =>
+                this.shouldRetryCall(request, error, diagnostics, estado, true),
+              delayForError: (error, _attempt, calculado) => {
+                const pedido = (error as { retryAfterMs?: number }).retryAfterMs;
+                return typeof pedido === 'number' ? Math.max(pedido, calculado) : null;
+              },
+              onRetry: (error, _attempt, delayMs) => {
+                const status = statusOf(error);
+                request.onEvent({
+                  type: 'phase',
+                  message:
+                    status === 429
+                      ? `limite de frecuencia del proveedor; esperando ${Math.ceil(delayMs / 1000)}s antes de reintentar`
+                      : // antes decia «conexion con el proveedor interrumpida», y eso
+                        // culpaba a la red de una llamada que el proveedor SI atendio
+                        // y cobro. El motivo de verdad lo explica el aviso aparte.
+                        `la vuelta no llego a completarse; esperando ${Math.ceil(delayMs / 1000)}s antes de reintentar`,
+                });
+              },
             },
-            onRetry: (error, _attempt, delayMs) => {
-              const status = statusOf(error);
-              request.onEvent({
-                type: 'phase',
-                message:
-                  status === 429
-                    ? `limite de frecuencia del proveedor; esperando ${Math.ceil(delayMs / 1000)}s antes de reintentar`
-                    : `conexion con el proveedor interrumpida; esperando ${Math.ceil(delayMs / 1000)}s antes de reintentar`,
-              });
-            },
-          }),
+          );
+        },
         onEvent: (event: { type: 'phase' | 'tool' | 'text' | 'warning'; message: string }) =>
           request.onEvent({ type: event.type, message: event.message }),
       });
@@ -519,7 +926,8 @@ export class HttpApiProvider implements ProviderExecution {
           this.pricing.output,
         ),
       };
-      this.budget.write(recordUsage(this.budget.read(), usage));
+      // el presupuesto ya se apunto llamada a llamada dentro de `callTurn`:
+      // sumar aqui el total del bucle lo contaria dos veces
 
       if (result.stopReason === 'cancelled') {
         return {
@@ -531,7 +939,7 @@ export class HttpApiProvider implements ProviderExecution {
           cancelled: true,
           errorMessage: 'trabajo cancelado',
           usage,
-          callMetrics: { modelCalls: result.turns, toolCalls: result.toolCallsExecuted },
+          callMetrics: this.callMetrics(tracker, result.toolCallsExecuted),
         };
       }
 
@@ -551,13 +959,250 @@ export class HttpApiProvider implements ProviderExecution {
         cancelled: false,
         errorMessage: null,
         usage,
-        callMetrics: { modelCalls: result.turns, toolCalls: result.toolCallsExecuted },
+        callMetrics: this.callMetrics(tracker, result.toolCallsExecuted),
       };
     } catch (error) {
       if (request.signal.aborted) {
-        return { ...this.failure('trabajo cancelado'), cancelled: true };
+        return {
+          ...this.failure('trabajo cancelado'),
+          cancelled: true,
+          callMetrics: this.callMetrics(tracker, 0),
+        };
       }
-      return this.failure(redact(describeHttpError(error, this.label(request))));
+      const sinCupo = budgetErrorOf(error);
+      if (sinCupo !== null) {
+        return { ...this.failure(sinCupo.message), callMetrics: this.callMetrics(tracker, 0) };
+      }
+      return {
+        ...this.failure(redact(describeHttpError(error, this.label(request)))),
+        callMetrics: this.callMetrics(tracker, 0),
+      };
+    }
+  }
+
+  /**
+   * lo que costo el turno, contado como lo cobra la pasarela.
+   *
+   * `modelCalls` son las peticiones que salieron de verdad —reintentos
+   * incluidos—, no las vueltas del bucle. `billedCalls` quita las que no
+   * llegaron a conectar, que son las unicas gratis.
+   */
+  private callMetrics(tracker: CallTracker, toolCalls: number): ProviderCallMetrics {
+    return {
+      modelCalls: tracker.attempts,
+      toolCalls,
+      billedCalls: tracker.billedCalls,
+      billedInputTokens: tracker.billedInputTokens,
+      billedOutputTokens: tracker.billedOutputTokens,
+    };
+  }
+
+  /**
+   * envuelve UNA llamada: la numera, la mide y la deja registrada pase lo que
+   * pase.
+   *
+   * el registro se cierra en las dos salidas, y no en un `finally`, porque el
+   * motivo del fallo es justo el dato que faltaba: de las tres llamadas vacias
+   * del 2026-09-14 no quedo constancia de ninguna clase.
+   */
+  private async trackCall<T>(
+    tracker: CallTracker,
+    request: ProviderRunRequest,
+    payload: PayloadSize,
+    diagnostics: RequestDiagnostics,
+    run: () => Promise<T>,
+  ): Promise<T> {
+    // EL CUPO SE MIRA AQUI, en cada llamada.
+    //
+    // antes se miraba una sola vez, en `run()`, antes de los reintentos y antes
+    // de ramificar al bucle de herramientas: un turno de tres intentos se
+    // pasaba del tope por dos, y un trabajo agentic de cincuenta vueltas por
+    // cuarenta y nueve. Va ANTES de contar el intento a proposito: una llamada
+    // que no sale no puede engordar `modelCalls`.
+    const sinCupo = this.callBudgetReason();
+    if (sinCupo !== null) throw new BudgetExceededError(sinCupo);
+
+    tracker.attempts += 1;
+    const attempt = tracker.attempts;
+    // el hueco con la llamada anterior es lo que delata un reintento de Luxy:
+    // en la factura del 2026-09-14 eran de 2, 4 y 5 segundos
+    const gapMs = tracker.endedAt === null ? null : Date.now() - tracker.endedAt;
+
+    try {
+      const value = await run();
+      this.closeCall(tracker, request, payload, diagnostics, attempt, gapMs, null);
+      return value;
+    } catch (error) {
+      // el fallo viaja envuelto en un objeto y no suelto: un `reject(null)` es
+      // raro pero posible, y ahi «no hay error» y «el error es null» no pueden
+      // significar lo mismo
+      this.closeCall(tracker, request, payload, diagnostics, attempt, gapMs, { error });
+      throw error;
+    } finally {
+      tracker.endedAt = Date.now();
+    }
+  }
+
+  /**
+   * cierra una llamada: la apunta en el presupuesto y deja su linea.
+   *
+   * NADA de lo que pasa aqui puede costar un turno. Un turno de Daniel es una
+   * llamada de pago y una conversacion real: si la contabilidad o el registro
+   * fallan, se pierden ellos, no la respuesta. De ahi el try/catch de fuera.
+   */
+  private closeCall(
+    tracker: CallTracker,
+    request: ProviderRunRequest,
+    payload: PayloadSize,
+    diagnostics: RequestDiagnostics,
+    attempt: number,
+    gapMs: number | null,
+    failure: { error: unknown } | null,
+  ): void {
+    try {
+      const fallo = failure !== null;
+      const error = failure?.error;
+      const cancelada = fallo && (request.signal.aborted || diagnostics.abortedBy === 'user');
+      const termination = diagnostics.termination;
+      const tokensIn = termination?.inputTokens ?? 0;
+      const tokensOut = termination?.outputTokens ?? 0;
+
+      const durationMs = Date.now() - diagnostics.startedAt;
+      const ending = classifyProviderCallEnding({
+        ok: !fallo,
+        cancelled: cancelada,
+        silence: fallo && isSilenceTimeout(error),
+        requestTimeout: fallo && !cancelada && diagnostics.abortedBy === 'request_timeout',
+        httpStatus: diagnostics.httpStatus,
+        // el reloj entra en la clasificacion: sin el, un socket rechazado en
+        // 5 ms y uno que la pasarela mantuvo cuatro minutos y medio antes de
+        // cortarlo son el mismo caso, y solo uno de los dos es gratis
+        elapsedMs: durationMs,
+        transportEnd: termination?.transportEnd ?? null,
+        finishReason: termination?.finishReason ?? null,
+        textChars: termination?.textLength ?? 0,
+        streamError: diagnostics.streamError,
+        outputBudgetExhausted: diagnostics.outputBudgetExhausted,
+      });
+      // el codigo importa para cobrar: un 4xx es un rechazo del borde, previo a
+      // la inferencia, y ninguna pasarela lo factura
+      const billed = isBilledCallEnding(ending, diagnostics.httpStatus);
+
+      if (billed) {
+        tracker.billedCalls += 1;
+        tracker.billedInputTokens += tokensIn;
+        tracker.billedOutputTokens += tokensOut;
+        // EL ARREGLO DEL PRESUPUESTO: se apunta AQUI, en cada llamada cobrada,
+        // y no una sola vez al final del turno con los tokens del intento que
+        // salio bien. Un turno de tres llamadas figuraba con los tokens de una.
+        this.recordBilledCall(request, tokensIn, tokensOut);
+      }
+
+      const entry = this.budget.read()[this.config.id];
+      const hoy = entry?.day === utcDay() ? entry : null;
+
+      this.emitCallRecord({
+        startedAt: new Date(diagnostics.startedAt).toISOString(),
+        provider: this.config.id,
+        model: this.modelFor(request),
+        host: this.endpointHost(),
+        attempt,
+        gapMs,
+        headersMs: diagnostics.headersMs,
+        firstChunkMs: diagnostics.firstChunkMs,
+        firstTokenMs: diagnostics.firstTokenMs,
+        longestSilenceMs: diagnostics.longestSilenceMs,
+        tailSilenceMs: diagnostics.tailSilenceMs,
+        // la duracion es la de la LLAMADA, medida por nuestro reloj: la del
+        // transporte empieza despues de las cabeceras y se deja fuera justo el
+        // tramo que mato las llamadas del 2026-09-14
+        durationMs,
+        ending,
+        billed,
+        httpStatus: diagnostics.httpStatus,
+        streamed: diagnostics.streamed,
+        transportEnd: termination?.transportEnd ?? null,
+        finishReason: termination?.finishReason ?? null,
+        abortedBy: diagnostics.abortedBy,
+        errorCode: fallo ? errorCodeOf(error) : null,
+        promptChars: payload.promptChars,
+        messages: payload.messages,
+        images: payload.images,
+        imageChars: payload.imageChars,
+        tokensIn,
+        tokensOut,
+        textChars: termination?.textLength ?? 0,
+        reasoningChars: diagnostics.reasoningChars,
+        silenceTimeoutMs: this.silenceTimeout(),
+        requestTimeoutMs: this.requestTimeout(request),
+        // se llama `outputCap` y no `maxOutputTokens` porque `redactDeep` tapa
+        // el valor de toda clave que acabe en `Token`/`Tokens`: la linea salia
+        // a disco con el unico tope contra el que se interpreta un final
+        // `output_budget` sustituido por «[REDACTADO]»
+        outputCap: this.maxTokensFor(request),
+        callsToday: hoy?.calls ?? 0,
+        spentToday: hoy?.spent ?? 0,
+      });
+    } catch {
+      /* contabilizar o registrar no puede costar la respuesta */
+    }
+  }
+
+  /**
+   * motivo por el que no cabe otra llamada de pago hoy, o null.
+   *
+   * el contador de llamadas es lo unico que protege contra una tarifa plana por
+   * peticion: el presupuesto en dinero es ciego a ella por construccion, porque
+   * una llamada que devuelve cero tokens suma cero al gasto y cuesta igual.
+   */
+  private callBudgetReason(): string | null {
+    const check = checkCallBudget(
+      this.budget.read(),
+      this.config.id,
+      this.config.dailyCallLimit ?? 0,
+    );
+    return check.allowed ? null : (check.reason ?? 'limite diario de llamadas alcanzado');
+  }
+
+  /** suma UNA llamada cobrada al presupuesto del dia */
+  private recordBilledCall(
+    request: ProviderRunRequest,
+    inputTokens: number,
+    outputTokens: number,
+  ): void {
+    this.budget.write(
+      recordUsage(this.budget.read(), {
+        provider: this.config.id,
+        model: this.modelFor(request),
+        jobId: null,
+        inputTokens,
+        outputTokens,
+        estimatedCost: estimateCost(
+          inputTokens,
+          outputTokens,
+          this.pricing.input,
+          this.pricing.output,
+        ),
+      }),
+    );
+  }
+
+  /** el host del endpoint, sin ruta, sin query y sin credenciales */
+  private endpointHost(): string | null {
+    try {
+      return new URL(this.config.baseUrl).host;
+    } catch {
+      return null;
+    }
+  }
+
+  /** entrega la linea sin dejar que un fallo del registro tumbe la llamada */
+  private emitCallRecord(record: ProviderCallRecord): void {
+    if (this.onCallRecord === undefined) return;
+    try {
+      this.onCallRecord(record);
+    } catch {
+      /* quien registra puede fallar; el turno no */
     }
   }
 
@@ -573,20 +1218,48 @@ export class HttpApiProvider implements ProviderExecution {
     messages: LoopMessage[],
     tools: unknown[] | null,
     request: ProviderRunRequest,
+    tracker: CallTracker,
+    // el diagnostico lo crea la VUELTA, no la llamada: el filtro de reintentos
+    // necesita saber si hubo cabeceras, y eso solo se ve desde fuera del intento
+    diagnostics: RequestDiagnostics,
+  ): Promise<LoopTurnResult> {
+    // una vuelta del bucle es una llamada de pago como cualquier otra: se mide
+    // y se registra igual que las de una conversacion
+    const payload = measurePayload(messages);
+    return this.trackCall(tracker, request, payload, diagnostics, () =>
+      this.dispatchTurn(messages, tools, request, diagnostics),
+    );
+  }
+
+  /** la peticion de una vuelta, ya con su diagnostico abierto */
+  private async dispatchTurn(
+    messages: LoopMessage[],
+    tools: unknown[] | null,
+    request: ProviderRunRequest,
+    diagnostics: RequestDiagnostics,
   ): Promise<LoopTurnResult> {
     const controller = new AbortController();
     // el tope es el de UNA peticion, no el del trabajo entero: con
     // request.timeoutMs una vuelta colgada bloqueaba el trabajo una hora
-    const timer = setTimeout(() => controller.abort(), this.requestTimeout(request));
-    const onAbort = (): void => controller.abort();
+    const timer = setTimeout(() => {
+      diagnostics.abortedBy ??= 'request_timeout';
+      controller.abort();
+    }, this.requestTimeout(request));
+    const onAbort = (): void => {
+      diagnostics.abortedBy ??= 'user';
+      controller.abort();
+    };
     request.signal.addEventListener('abort', onAbort, { once: true });
 
     const transmitir = this.config.supportsStreaming;
+    resetDiagnostics(diagnostics, transmitir);
 
     try {
       const response = await fetch(`${this.config.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
         method: 'POST',
         signal: controller.signal,
+        // el tope de silencio de la conexion, no el de fabrica de Node
+        ...silenceTransport(this.silenceTimeout()),
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${this.apiKey}`,
@@ -600,26 +1273,51 @@ export class HttpApiProvider implements ProviderExecution {
         }),
       });
 
+      diagnostics.headersMs = Date.now() - diagnostics.startedAt;
+      diagnostics.httpStatus = response.status;
+
       if (!response.ok) {
         const body = await response.text();
         throw httpError(response, body);
       }
 
       if (transmitir && response.body) {
-        return await this.readStreamingTurn(response.body, request, () => controller.abort());
+        return await this.readStreamingTurn(
+          response.body,
+          request,
+          () => {
+            diagnostics.abortedBy ??= 'local_finalization';
+            controller.abort();
+          },
+          diagnostics,
+        );
       }
 
       const body = (await response.json()) as {
-        choices?: { message?: { content?: unknown } }[];
+        choices?: { message?: { content?: unknown }; finish_reason?: string }[];
         usage?: { prompt_tokens?: number; completion_tokens?: number };
       };
       const message = body.choices?.[0]?.message ?? {};
+      const text = typeof message.content === 'string' ? message.content : '';
+      const inputTokens = body.usage?.prompt_tokens ?? 0;
+      const outputTokens = body.usage?.completion_tokens ?? 0;
+
+      diagnostics.streamed = false;
+      if (text.length > 0) diagnostics.firstTokenMs = Date.now() - diagnostics.startedAt;
+      diagnostics.termination = this.buildTermination(diagnostics, request, {
+        transport: emptyTransportReport('no_stream', Date.now() - diagnostics.startedAt),
+        finishReason: body.choices?.[0]?.finish_reason ?? null,
+        finalUsageReceived: body.usage !== undefined,
+        inputTokens,
+        outputTokens,
+        textLength: text.length,
+      });
 
       return {
-        text: typeof message.content === 'string' ? message.content : '',
+        text,
         toolCalls: parseNativeToolCalls(message),
-        inputTokens: body.usage?.prompt_tokens ?? 0,
-        outputTokens: body.usage?.completion_tokens ?? 0,
+        inputTokens,
+        outputTokens,
       };
     } finally {
       clearTimeout(timer);
@@ -642,6 +1340,52 @@ export class HttpApiProvider implements ProviderExecution {
   /** techo de una llamada, respetando el timeout especifico de lotes. */
   private requestTimeout(request: ProviderRunRequest): number {
     return resolveHttpRequestTimeout(request);
+  }
+
+  /**
+   * silencio que aguanta esta conexion antes de dar la llamada por muerta.
+   *
+   * NO es la duracion de la respuesta: cada byte reinicia la cuenta, asi que
+   * una generacion larga que va llegando no muere por tardar. Lo que se corta
+   * es una llamada que lleva quince minutos sin decir absolutamente nada.
+   */
+  private silenceTimeout(): number {
+    return this.config.silenceTimeoutMs ?? PROVIDER_SILENCE_TIMEOUT_MS;
+  }
+
+  /**
+   * el aviso de una llamada que se ha pagado y no ha devuelto nada.
+   *
+   * POR QUE SALE EN PANTALLA: esto era invisible. El unico reintento que se
+   * anunciaba era el de un 429, asi que Luxy reenviaba el prompt entero hasta
+   * tres veces y Daniel veia un turno lento, nunca dos llamadas de mas. No
+   * reintentar no ahorra por si solo —si Luxy no repite, repite el— pero le
+   * devuelve la decision.
+   *
+   * lleva CIFRAS y motivos: ni una palabra del prompt ni de la respuesta.
+   */
+  private billedCallWarning(
+    request: ProviderRunRequest,
+    error: unknown,
+    diagnostics: RequestDiagnostics,
+    reintenta: boolean,
+  ): string {
+    const causa = isSilenceTimeout(error)
+      ? `estuvo ${Math.round(this.silenceTimeout() / 1000)} s sin enviar nada`
+      : diagnostics.httpStatus === null
+        ? // sin cabeceras pero minutos en vuelo: esta pasarela las retiene hasta
+          // que el modelo contesta, asi que esto NO es un fallo de conexion
+          `corto la conexion a los ${Math.round((Date.now() - diagnostics.startedAt) / 1000)} s ` +
+          'sin llegar a contestar'
+        : diagnostics.termination?.transportEnd === 'read_error'
+          ? 'corto el envio a mitad, sin una sola palabra visible'
+          : 'cerro la respuesta sin enviar ni una palabra';
+    const decision = reintenta
+      ? 'Lo reintento UNA vez y ya no mas: esa llamada esta pagada, asi que el segundo ' +
+        'intento cuesta otra entera.'
+      : 'No lo reintento solo: si tu pasarela cobra por llamada, esa ya esta pagada y ' +
+        'repetirla cuesta otra entera. Vuelve a enviar el mensaje si quieres pagar otro intento.';
+    return redact(`${this.label(request)} ${causa}. ${decision}`);
   }
 
   /**
@@ -679,13 +1423,11 @@ export class HttpApiProvider implements ProviderExecution {
     outputTokens: number;
     truncated: boolean;
   }> {
-    // un reintento observa una peticion nueva: lo anterior ya no la explica
-    diagnostics.httpStatus = null;
-    diagnostics.abortedBy = null;
-    diagnostics.termination = null;
+    // un reintento observa una peticion nueva: lo anterior ya no la explica,
+    // y arrastrar sus tiempos escribiria en el registro que el segundo intento
+    // contesto rapido cuando el que contesto fue el primero
+    resetDiagnostics(diagnostics, this.config.supportsStreaming);
     parcial.text = '';
-    diagnostics.streamed = this.config.supportsStreaming;
-    const startedAt = Date.now();
 
     // timeout propio combinado con la cancelacion del trabajo
     const controller = new AbortController();
@@ -704,6 +1446,9 @@ export class HttpApiProvider implements ProviderExecution {
     try {
       const response = await fetch(`${this.config.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
         method: 'POST',
+        // el tope de silencio de la conexion. Sin esto mandaba el de fabrica de
+        // Node —300 s— y era el que mataba las llamadas que iban a contestar.
+        ...silenceTransport(this.silenceTimeout()),
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${this.apiKey}`,
@@ -721,6 +1466,10 @@ export class HttpApiProvider implements ProviderExecution {
         signal: controller.signal,
       });
 
+      // «cuanto tardo en descolgar». Con `headersTimeout` puesto, este es el
+      // tramo que mataba las llamadas: dos murieron a los 302 y 300 s sin haber
+      // llegado nunca aqui.
+      diagnostics.headersMs = Date.now() - diagnostics.startedAt;
       diagnostics.httpStatus = response.status;
 
       if (!response.ok) {
@@ -743,13 +1492,12 @@ export class HttpApiProvider implements ProviderExecution {
         const inputTokens = payload.usage?.prompt_tokens ?? 0;
         const outputTokens = payload.usage?.completion_tokens ?? 0;
         diagnostics.streamed = false;
+        // sin transmision la primera palabra llega con el cuerpo entero: el
+        // tiempo hasta las cabeceras y el tiempo hasta la primera palabra son
+        // practicamente el mismo, y decirlo asi es mas honesto que dejarlo nulo
+        if (text.length > 0) diagnostics.firstTokenMs = Date.now() - diagnostics.startedAt;
         diagnostics.termination = this.buildTermination(diagnostics, request, {
-          transport: {
-            transportEnd: 'no_stream',
-            chunks: 0,
-            bytes: 0,
-            durationMs: Date.now() - startedAt,
-          },
+          transport: emptyTransportReport('no_stream', Date.now() - diagnostics.startedAt),
           finishReason: typeof finishReason === 'string' ? finishReason : null,
           finalUsageReceived: payload.usage !== undefined,
           inputTokens,
@@ -793,8 +1541,9 @@ export class HttpApiProvider implements ProviderExecution {
     body: ReadableStream<Uint8Array>,
     request: ProviderRunRequest,
     abortTransport: () => void,
+    diagnostics?: RequestDiagnostics,
   ): Promise<LoopTurnResult> {
-    const turno = await this.consumeStream(body, request, abortTransport);
+    const turno = await this.consumeStream(body, request, abortTransport, diagnostics);
     return {
       text: turno.text,
       toolCalls: turno.toolCalls,
@@ -906,6 +1655,12 @@ export class HttpApiProvider implements ProviderExecution {
       })) {
         const nuevo = assembler.push(payload);
         if (nuevo === null) continue;
+        // LA PRIMERA PALABRA. Es la medida que faltaba, y va aqui y no en el
+        // transporte a proposito: un trozo de red puede traer solo cabeceras de
+        // evento o razonamiento, y eso no es todavia una palabra de respuesta.
+        if (diagnostics !== undefined) {
+          diagnostics.firstTokenMs ??= Date.now() - diagnostics.startedAt;
+        }
         acumulado += nuevo;
         if (acumulado.length - emitido >= 400) {
           emitido = acumulado.length;
@@ -921,13 +1676,20 @@ export class HttpApiProvider implements ProviderExecution {
       // mitad es justamente el caso que hay que poder explicar despues.
       if (diagnostics !== undefined) {
         const observadoTurno = assembler.result();
+        const transporte = observado.transport ?? emptyTransportReport('read_error', 0);
+        // los tiempos del transporte se cuentan desde que empezo la LECTURA;
+        // los del registro, desde que salio la peticion. Sumar las cabeceras es
+        // lo que hace comparables «tardo en descolgar» y «tardo en hablar».
+        const desdeLaPeticion = diagnostics.headersMs ?? 0;
+        diagnostics.firstChunkMs =
+          transporte.firstChunkMs === null ? null : desdeLaPeticion + transporte.firstChunkMs;
+        diagnostics.longestSilenceMs = transporte.longestSilenceMs;
+        diagnostics.tailSilenceMs =
+          transporte.lastChunkMs === null ? null : transporte.durationMs - transporte.lastChunkMs;
+        diagnostics.reasoningChars = assembler.reasoningLength();
+        diagnostics.streamError = observadoTurno.streamError !== null;
         diagnostics.termination = this.buildTermination(diagnostics, request, {
-          transport: observado.transport ?? {
-            transportEnd: 'read_error',
-            chunks: 0,
-            bytes: 0,
-            durationMs: 0,
-          },
+          transport: transporte,
           finishReason: observadoTurno.finishReason,
           finalUsageReceived: observadoTurno.finalUsageReceived,
           inputTokens: observadoTurno.inputTokens,
@@ -966,6 +1728,9 @@ export class HttpApiProvider implements ProviderExecution {
       // `finish_reason`; el consumo final contra el limite demuestra el mismo
       // corte. Nunca se expone el contenido del razonamiento.
       if (outputBudgetExhausted) {
+        // se marca para el registro: «agoto el presupuesto razonando» es un
+        // final distinto de «no contesto», y hasta ahora se veian igual
+        if (diagnostics !== undefined) diagnostics.outputBudgetExhausted = true;
         const consumo =
           turno.outputTokens > 0 ? ` (${turno.outputTokens} tokens de salida consumidos)` : '';
         const fase =
@@ -1038,22 +1803,54 @@ function statusOf(error: unknown): number | undefined {
   return typeof anidado === 'number' ? anidado : undefined;
 }
 
-/**
- * un turno agentic no puede dar por perdido el trabajo por un socket caido.
- *
- * las herramientas solo se ejecutan DESPUES de recibir un turno completo, asi
- * que repetir un `fetch failed` no repite una escritura ya confirmada. En
- * cambio, reintentar un abort local, un rechazo declarado permanente o los
- * timeouts 504/524 del borde solo alarga una ejecucion que no va a mejorar.
- */
-export function isRetryableAgenticTurn(error: unknown, signal: AbortSignal): boolean {
-  if (signal.aborted || esTimeout(error)) return false;
-  if ((error as { retryable?: unknown } | null)?.retryable === false) return false;
+/** lo que se sabe de una llamada fallida a la hora de decidir si se repite */
+export interface BilledFailureEvidence {
+  /** codigo HTTP; null = nunca llegaron cabeceras */
+  httpStatus: number | null;
+  /** como dejo de dar bytes el transporte; null = no hubo flujo que leer */
+  transportEnd: StreamTransportEnd | null;
+  /** ms que llevaba la peticion en vuelo cuando fallo */
+  elapsedMs: number;
+}
 
-  const status = statusOf(error);
-  if (status === undefined) return true;
-  if (status === 504 || status === 524) return false;
-  return status === 408 || status === 429 || status >= 500;
+/**
+ * que hacer con un fallo que llega SIN codigo de estado.
+ *
+ * - `free_retry`: no se llego a conectar. No hay llamada que cobrar y el
+ *   reintento de siempre sigue siendo lo correcto;
+ * - `retry_once`: el socket se cayo a mitad del envio. Ya esta pagada, pero
+ *   historicamente el intento siguiente contestaba, asi que se concede UNO y se
+ *   avisa. Es la recuperacion que el arreglo original se llevo por delante;
+ * - `give_up`: la llamada se atendio y se cobro sin devolver nada. Repetirla
+ *   sola es lo que convirtio 60 turnos en 73 llamadas entre el 4 y el 14 de
+ *   septiembre —90 ¥ de 506 que no compraron una palabra— sin que Daniel se
+ *   enterara. La decision vuelve a ser suya.
+ */
+export type BilledFailureVerdict = 'free_retry' | 'retry_once' | 'give_up';
+
+export function classifyBilledFailure(
+  error: unknown,
+  evidence: BilledFailureEvidence,
+  grantedRetries: number,
+): BilledFailureVerdict {
+  // un silencio hasta el tope NUNCA se repite: la llamada ya se atendio y se
+  // cobra, y repetir una espera de quince minutos son media hora para acabar
+  // igual. Va antes que todo lo demas porque llega sin cabeceras y sin codigo,
+  // exactamente igual que un socket rechazado.
+  if (isSilenceTimeout(error)) return 'give_up';
+
+  if (evidence.httpStatus === null) {
+    // esta pasarela retiene las cabeceras hasta que el modelo contesta, asi que
+    // «sin codigo» no significa «sin atender»: lo que las separa es el reloj.
+    return evidence.elapsedMs >= CALL_ATTENDED_AFTER_MS ? 'give_up' : 'free_retry';
+  }
+
+  // hubo cabeceras: el proveedor descolgo y la llamada esta pagada. Un corte
+  // del transporte a mitad es el unico caso en el que el reintento devolvia la
+  // respuesta de verdad; un cierre limpio sin texto es «reintentar a ciegas una
+  // respuesta vacia», que es justo lo que no se hace.
+  if (evidence.transportEnd === 'read_error' && grantedRetries === 0) return 'retry_once';
+  return 'give_up';
 }
 
 /** texto del error y el del que envuelve, para no perder el motivo original */
@@ -1112,7 +1909,8 @@ export function providerSaid(error: unknown): string | null {
         : typeof anidado === 'string'
           ? anidado
           : undefined);
-    if (typeof mensaje === 'string' && mensaje.trim().length > 0) return mensaje.trim().slice(0, 300);
+    if (typeof mensaje === 'string' && mensaje.trim().length > 0)
+      return mensaje.trim().slice(0, 300);
   } catch {
     // no era JSON: vale el texto tal cual
   }

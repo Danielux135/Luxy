@@ -122,6 +122,17 @@ export function buildHttpProvider(
     ...(existing?.softTerminalGraceMs === undefined
       ? {}
       : { softTerminalGraceMs: existing.softTerminalGraceMs }),
+    // el tope de silencio no tiene campo en el formulario todavia: si no se
+    // arrastra aqui, editar el modelo de una conexion le devolveria el valor
+    // por defecto y se perderia el ajuste sin avisar
+    ...(existing?.silenceTimeoutMs === undefined
+      ? {}
+      : { silenceTimeoutMs: existing.silenceTimeoutMs }),
+    // lo mismo con el tope de llamadas diarias: es una proteccion, y una
+    // proteccion que se apaga sola al editar otra cosa es peor que no tenerla
+    ...(existing?.dailyCallLimit === undefined
+      ? {}
+      : { dailyCallLimit: existing.dailyCallLimit }),
   });
   if (parsed.success) return { provider: parsed.data, error: null };
 

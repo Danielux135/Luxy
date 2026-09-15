@@ -92,6 +92,9 @@ async function recorrer(
     chunks: 0,
     bytes: 0,
     durationMs: 0,
+    firstChunkMs: null,
+    lastChunkMs: null,
+    longestSilenceMs: null,
   };
 
   const iterador = sseData(body, {
@@ -457,7 +460,15 @@ describe('matriz de finales de respuesta — caso 10: cancelacion manual', () =>
           // `read_error` es como llega un aborto desde `sseData`; el caso sigue
           // siendo el mismo, porque lo que se fija es que la cancelacion gane
           // pase lo que pase en el transporte.
-          reporte: { transportEnd: 'read_error', chunks: 1, bytes: 10, durationMs: 5 },
+          reporte: {
+            transportEnd: 'read_error',
+            chunks: 1,
+            bytes: 10,
+            durationMs: 5,
+            firstChunkMs: 1,
+            lastChunkMs: 1,
+            longestSilenceMs: null,
+          },
         },
         { abortedBy: 'user' },
       ),

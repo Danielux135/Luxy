@@ -42,6 +42,16 @@ export interface AgenticLoopOptions {
   signal: AbortSignal;
   /** una vuelta de conversacion con la API */
   callModel: (messages: LoopMessage[], tools: unknown[] | null) => Promise<LoopTurnResult>;
+  /**
+   * motivo por el que NO se puede hacer otra llamada de pago, o null.
+   *
+   * POR QUE ES UN CORTE LIMPIO Y NO UNA EXCEPCION: el limite diario de llamadas
+   * se comprobaba una sola vez, antes del bucle, asi que un trabajo de cincuenta
+   * vueltas podia pasarse del tope por cuarenta y nueve. Comprobarlo aqui lo
+   * frena de verdad, y hacerlo como un limite mas —no lanzando desde
+   * `callModel`— conserva el trabajo de las vueltas anteriores en vez de tirarlo.
+   */
+  callBudgetReason?: () => string | null;
   onEvent: (event: { type: 'phase' | 'tool' | 'text' | 'warning'; message: string }) => void;
 }
 
@@ -116,6 +126,9 @@ export async function runAgenticLoop(
     if (apiCalls >= limits.maxApiCalls) {
       return done('max_api_calls', `se alcanzo el limite de ${limits.maxApiCalls} llamadas a la API`);
     }
+    // el tope DIARIO de llamadas de pago, que es otro y se gasta entre trabajos
+    const sinCupo = options.callBudgetReason?.() ?? null;
+    if (sinCupo !== null) return done('limit', sinCupo);
 
     apiCalls += 1;
     turns += 1;

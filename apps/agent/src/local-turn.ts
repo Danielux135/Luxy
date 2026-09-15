@@ -82,6 +82,17 @@ export interface LocalTurnResult {
    * llamada y una respuesta.
    */
   modelCalls: number | null;
+  /**
+   * cuantas de esas llamadas cobra la pasarela, y con cuantos tokens.
+   *
+   * va aparte de `inputTokens`/`outputTokens` a proposito: esos son los del
+   * intento que produjo la respuesta —el tamaño del contexto que se conservo— y
+   * esto es lo que se pago. Un turno de tres llamadas figuraba con 7.601 tokens
+   * de entrada cuando se habian pagado 22.835.
+   */
+  billedCalls: number | null;
+  billedInputTokens: number | null;
+  billedOutputTokens: number | null;
   /** como termino de verdad; `completed` no garantiza respuesta entera */
   responseOutcome: string | null;
   /**
@@ -203,6 +214,12 @@ export async function runLocalTurn(
     outcome: result.outcome,
     responseOutcome: result.responseOutcome,
     modelCalls: result.modelCalls,
+    // lo que la pasarela cobra por este turno, que no es lo mismo que lo que
+    // devolvio. La diferencia con `modelCalls` son llamadas que no llegaron a
+    // conectar; la diferencia con `tokensIn` son llamadas que no dieron nada.
+    billedCalls: result.billedCalls,
+    billedTokensIn: result.billedInputTokens,
+    billedTokensOut: result.billedOutputTokens,
     durationMs: result.durationMs,
     // `tokensIn` y no `inputTokens` a proposito: la redaccion tapa cualquier
     // clave que acabe en Token(s), y hace bien. Son contadores, no secretos,
@@ -220,6 +237,9 @@ function toLocalResult(outcome: JobOutcome): LocalTurnResult {
     const result = outcome.result;
     return {
       modelCalls: result.callMetrics?.modelCalls ?? null,
+      billedCalls: result.callMetrics?.billedCalls ?? null,
+      billedInputTokens: result.callMetrics?.billedInputTokens ?? null,
+      billedOutputTokens: result.callMetrics?.billedOutputTokens ?? null,
       responseOutcome: result.responseOutcome ?? null,
       outcome: 'completed',
       // en una conversacion `summary` no es un resumen: es LA respuesta (D-020)
@@ -238,6 +258,9 @@ function toLocalResult(outcome: JobOutcome): LocalTurnResult {
     return {
       // un corte no llega a producir metadata: el trabajo no se completo
       modelCalls: null,
+      billedCalls: null,
+      billedInputTokens: null,
+      billedOutputTokens: null,
       responseOutcome: 'cancelled',
       outcome: 'cancelled',
       // se conserva lo que el modelo ya habia escrito: tirarlo obligaria a
@@ -252,7 +275,12 @@ function toLocalResult(outcome: JobOutcome): LocalTurnResult {
   }
 
   return {
-    modelCalls: null,
+    // un turno fallido puede haber costado tres llamadas de pago: es el caso
+    // caro, y hasta ahora era el unico del que no quedaba ni el contador
+    modelCalls: outcome.callMetrics?.modelCalls ?? null,
+    billedCalls: outcome.callMetrics?.billedCalls ?? null,
+    billedInputTokens: outcome.callMetrics?.billedInputTokens ?? null,
+    billedOutputTokens: outcome.callMetrics?.billedOutputTokens ?? null,
     responseOutcome: 'failed',
     outcome: 'failed',
     text: '',
