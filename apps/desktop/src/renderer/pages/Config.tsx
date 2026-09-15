@@ -1,5 +1,5 @@
 // Proyectos, Conexiones y Modelos.
-import { useEffect, useState, type JSX } from 'react';
+import { useEffect, useRef, useState, type JSX } from 'react';
 import {
   ALLOWED_TEST_EXECUTABLES,
   ModelRegistry,
@@ -814,6 +814,25 @@ export function ConnectionsPage({
     setProviderNote(null);
   };
 
+  // PASO DE VERDAD: el formulario esta ENCIMA de la lista, asi que al pulsar
+  // «Editar» en una conexion de las de abajo se rellenaba fuera de la vista y
+  // parecia que el boton no respondia. Con siete conexiones no se ve ninguna de
+  // las ultimas sin subir a ciegas.
+  //
+  // El desplazamiento va en un efecto y no en el manejador porque el panel no
+  // existe en el DOM hasta que React vuelve a pintar. Y el ancla es un div
+  // vacio delante del panel en vez de envolverlo: envolverlo obliga a reindentar
+  // las casi doscientas lineas del formulario, y eso enterraria este cambio.
+  const anclaFormularioProveedor = useRef<HTMLDivElement>(null);
+  const formularioProveedorAbierto = providerDraft !== null;
+
+  useEffect(() => {
+    if (!formularioProveedorAbierto) return;
+    anclaFormularioProveedor.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    // depende de QUE proveedor se edita, no del borrador entero: con el borrador
+    // como dependencia, cada tecla escrita en el formulario lo desplazaria otra vez
+  }, [formularioProveedorAbierto, editingProviderId]);
+
   const cancelarProveedor = (): void => {
     setEditingProviderId(null);
     setProviderDraft(null);
@@ -1023,6 +1042,8 @@ export function ConnectionsPage({
         APIs compatibles con chat completions. Luxy cifra la clave, añade `/chat/completions` a la
         URL base y aplica los cambios al agente sin exigir un reinicio manual.
       </p>
+
+      <div ref={anclaFormularioProveedor} aria-hidden="true" />
 
       {providerDraft !== null && (
         <Panel
