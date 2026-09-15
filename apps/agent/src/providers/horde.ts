@@ -98,6 +98,23 @@ const DEFAULT_GRACE_MS = 10 * 60_000;
  * se rinda enseguida en vez de arrastrar la espera.
  */
 const PROGRESS_GRACE_MS = 2 * 60_000;
+/**
+ * margen POR ENCIMA del techo absoluto mientras un worker la esta dibujando.
+ *
+ * PASO DE VERDAD (2026-09-15): una imagen de Daniel murio a las 14:52:46 con un
+ * worker dibujandola y 38 segundos declarados; el techo de veinte minutos vencia
+ * a las 14:52:46 exactas. Llego un segundo tarde. El `Math.min` con el techo
+ * hacia que ningun avance pudiera pasar de ahi, asi que cortaba igual en mitad
+ * del dibujado que si nadie hubiera tocado la peticion en veinte minutos.
+ *
+ * «Un worker DIBUJANDOLA» no es lo mismo que «la cola avanza»: lo primero dice
+ * que la imagen esta a segundos. Con las colas de mas de cien puestos que tiene
+ * el horde, llegar al techo justo cuando te toca no es mala suerte, es lo
+ * normal. Tres minutos: un worker que ya ha empezado tarda bastante menos, y
+ * puesto asi la espera no se puede alargar sola —el margen se mide desde el
+ * techo, no desde cada vuelta del sondeo—.
+ */
+const DRAWING_OVERTIME_MS = 3 * 60_000;
 
 /** tope del horde: mas de cinco LoRAs se rechaza, y cada uno cuesta +3 kudos */
 export const MAX_LORAS = 5;
@@ -827,6 +844,9 @@ async function pollImage(
   // diez minutos a algo que no va a salir.
   const hardDeadline =
     now() + (options.maxWaitMs ?? DEFAULT_MAX_WAIT_MS) + (options.graceMs ?? DEFAULT_GRACE_MS);
+  // el techo se estira SOLO mientras alguien la dibuja, y no un segundo mas:
+  // sigue siendo un techo, no una espera abierta
+  const drawingDeadline = hardDeadline + DRAWING_OVERTIME_MS;
   let deadline = now() + (options.maxWaitMs ?? DEFAULT_MAX_WAIT_MS);
   let lastPosition: number | null = null;
   let attempt = 0;
@@ -850,12 +870,15 @@ async function pollImage(
     // ¿hay señales de que esto llega? Un worker dibujandola cuenta, y subir
     // puestos tambien. Con cualquiera de las dos se renueva el plazo, siempre
     // por debajo del techo absoluto
+    const dibujandola = progress.processing > 0;
     const avanza =
-      progress.processing > 0 ||
+      dibujandola ||
       (lastPosition !== null && progress.queuePosition > 0 && progress.queuePosition < lastPosition);
     lastPosition = progress.queuePosition;
     if (avanza) {
-      deadline = Math.min(hardDeadline, now() + PROGRESS_GRACE_MS);
+      // el techo que aplica depende de si la estan DIBUJANDO: subir puestos en
+      // la cola no promete nada, pero un worker con la peticion en las manos si
+      deadline = Math.min(dibujandola ? drawingDeadline : hardDeadline, now() + PROGRESS_GRACE_MS);
     }
 
     if (progress.faulted) {

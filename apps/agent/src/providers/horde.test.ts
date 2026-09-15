@@ -531,6 +531,42 @@ describe('sondeo', () => {
     );
   });
 
+  it('un worker DIBUJANDOLA estira el techo: no se corta a un segundo del final', async () => {
+    // PASO DE VERDAD (2026-09-15): una imagen murio con un worker dibujandola y
+    // 38 segundos declarados, porque el techo vencia en ese instante. Aqui el
+    // techo esta agotado (graceMs 0) y aun asi tiene que esperar, porque
+    // `processing` dice que la imagen esta en las manos de alguien.
+    const { impl } = fakeFetch([
+      { status: 200, body: progress({ done: false, queue_position: 5, waiting: 1 }) },
+      { status: 200, body: progress({ done: false, queue_position: 0, processing: 1 }) },
+      { status: 200, body: progress({ done: true, finished: 1 }) },
+      {
+        status: 200,
+        body: {
+          ...progress({ done: true, finished: 1 }),
+          generations: [{ img: 'https://r2.example/tarde.webp', seed: '3', id: 'g-3' }],
+        },
+      },
+    ]);
+
+    const result = await awaitImage('pet-1', { ...lento(impl), graceMs: 0 });
+    expect(result.generations[0]?.img).toBe('https://r2.example/tarde.webp');
+  });
+
+  it('pero dibujarla tampoco es una espera abierta: el margen se acaba', async () => {
+    // el techo se estira, no desaparece. Un `processing` que se queda pegado
+    // para siempre tiene que rendirse igual, o la espera la marca el horde
+    const pegada = Array.from({ length: 40 }, () => ({
+      status: 200,
+      body: progress({ done: false, queue_position: 0, processing: 1 }),
+    }));
+    const { impl } = fakeFetch(pegada);
+
+    await expect(awaitImage('pet-1', { ...lento(impl), graceMs: 0 })).rejects.toThrow(
+      'no estuvo lista a tiempo',
+    );
+  });
+
   it('respeta la cancelacion', async () => {
     const controller = new AbortController();
     controller.abort();
