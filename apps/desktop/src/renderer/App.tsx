@@ -1,6 +1,7 @@
 // shell de Luxy Desktop: barra de estado permanente, navegacion y panel.
 import { useState, type JSX } from 'react';
 import { StatusRail } from './ui/StatusRail.js';
+import { ErrorBoundary } from './ui/ErrorBoundary.js';
 import { useAgent } from './useAgent.js';
 import { useConfig } from './useConfig.js';
 import { HomePage } from './pages/Overview.js';
@@ -62,6 +63,7 @@ export function App(): JSX.Element {
   }
 
   const trabajosActivos = status.agent?.activeJob == null ? 0 : 1;
+  const seccionLabel = SECCIONES.find((entrada) => entrada.id === seccion)?.label ?? seccion;
   const projectLabel =
     projectScope === null
       ? ''
@@ -106,68 +108,81 @@ export function App(): JSX.Element {
       </nav>
 
       <main className="main">
-        {seccion === 'inicio' && (
-          <HomePage
-            status={status}
-            activity={activity}
-            busy={busy}
-            error={error}
-            onStart={() => void start()}
-            onStop={() => void stop()}
-            onRestart={() => void restart()}
-            configured={summary.configured}
-            pending={pending}
-            onApprove={(job, action, confirmedTwice) => void approve(job, action, confirmedTwice)}
-            agentHint={hint}
-          />
-        )}
-        {seccion === 'conversaciones' && (
-          <ConversationsPage
-            key={projectScope ?? 'global'}
-            summary={summary}
-            projectScope={projectScope}
-            projectLabel={projectLabel}
-            onClearProjectScope={() => setProjectScope(null)}
-          />
-        )}
-        {seccion === 'trabajos' && (
-          <StudioPage
-            key={projectScope ?? 'global'}
-            projectScope={projectScope}
-            projectLabel={projectLabel}
-            onClearProjectScope={() => setProjectScope(null)}
-          />
-        )}
-        {seccion === 'proyectos' && (
-          <ProjectsPage summary={summary} onSave={save} onOpenProject={openProject} />
-        )}
-        {seccion === 'conexiones' && (
-          <ConnectionsPage
-            summary={summary}
-            onSave={save}
-            onSetSecret={setSecret}
-            onDeleteSecret={deleteSecret}
-          />
-        )}
-        {seccion === 'modelos' && <ModelsPage summary={summary} />}
-        {seccion === 'laboratorio' && <LaboratoryPage summary={summary} />}
-        {seccion === 'privado' && (
-          <VaultPage
-            vault={vault}
-            summary={summary}
-            providers={status.agent?.providers ?? []}
-            models={catalogo.models}
-          />
-        )}
-        {seccion === 'registros' && <LogsPage />}
-        {seccion === 'ajustes' && (
-          <SettingsPage
-            summary={summary}
-            onSave={save}
-            onDeleteSecret={deleteSecret}
-            onOpenSetup={() => setSetupAbierto(true)}
-          />
-        )}
+        {/*
+          una seccion rota se lleva por delante la seccion, no la ventana: la
+          navegacion y la barra de estado quedan fuera de la barrera y siguen
+          vivas, asi que se puede uno ir a otra parte. El `key` la reinicia al
+          cambiar de seccion, para que un fallo en Modelos no deje un panel de
+          error pegado en Inicio
+        */}
+        <ErrorBoundary
+          key={seccion}
+          what={`No se pudo pintar ${seccionLabel}`}
+          onReset={() => navigateGlobal('inicio')}
+        >
+          {seccion === 'inicio' && (
+            <HomePage
+              status={status}
+              activity={activity}
+              busy={busy}
+              error={error}
+              onStart={() => void start()}
+              onStop={() => void stop()}
+              onRestart={() => void restart()}
+              configured={summary.configured}
+              pending={pending}
+              onApprove={(job, action, confirmedTwice) => void approve(job, action, confirmedTwice)}
+              agentHint={hint}
+            />
+          )}
+          {seccion === 'conversaciones' && (
+            <ConversationsPage
+              key={projectScope ?? 'global'}
+              summary={summary}
+              projectScope={projectScope}
+              projectLabel={projectLabel}
+              onClearProjectScope={() => setProjectScope(null)}
+            />
+          )}
+          {seccion === 'trabajos' && (
+            <StudioPage
+              key={projectScope ?? 'global'}
+              projectScope={projectScope}
+              projectLabel={projectLabel}
+              onClearProjectScope={() => setProjectScope(null)}
+            />
+          )}
+          {seccion === 'proyectos' && (
+            <ProjectsPage summary={summary} onSave={save} onOpenProject={openProject} />
+          )}
+          {seccion === 'conexiones' && (
+            <ConnectionsPage
+              summary={summary}
+              onSave={save}
+              onSetSecret={setSecret}
+              onDeleteSecret={deleteSecret}
+            />
+          )}
+          {seccion === 'modelos' && <ModelsPage summary={summary} />}
+          {seccion === 'laboratorio' && <LaboratoryPage summary={summary} />}
+          {seccion === 'privado' && (
+            <VaultPage
+              vault={vault}
+              summary={summary}
+              providers={status.agent?.providers ?? []}
+              models={catalogo.models}
+            />
+          )}
+          {seccion === 'registros' && <LogsPage />}
+          {seccion === 'ajustes' && (
+            <SettingsPage
+              summary={summary}
+              onSave={save}
+              onDeleteSecret={deleteSecret}
+              onOpenSetup={() => setSetupAbierto(true)}
+            />
+          )}
+        </ErrorBoundary>
       </main>
     </div>
   );
