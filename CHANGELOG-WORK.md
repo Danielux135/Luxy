@@ -1,5 +1,42 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-09-15 — Claude — F26-LLAMADAS-VACIAS-001, los cuatro arreglos
+
+Dos agentes construyeron, tres revisores con lentes distintas y un esceptico por
+hallazgo. **Quince hallazgos confirmados, todos arreglados con prueba.**
+
+El mas importante **corrige mi propio encargo**: yo pedi que una respuesta vacia
+dejara de reintentarse, y eso quitaba de paso la recuperacion automatica que SI
+funcionaba en las diez llamadas de mas que no encajan con el tope. La regla
+buena no es «no reintentar», es **«no repetir lo que ya se ha pagado»**, y para
+eso hubo que separar cinco finales distintos: un socket rechazado al instante no
+se cobra; un 4xx del borde tampoco; un cierre limpio y vacio si; y `dropped` —la
+corto el otro lado tras minutos en vuelo— ni es gratis ni se reintenta.
+
+Lo demas de la revision, en tres familias:
+
+- **el camino agentic se habia quedado fuera** de casi todo: reintentaba a
+  ciegas una llamada cobrada, no emitia el aviso, y el limite de cupo se
+  comprobaba una sola vez por turno en vez de entre reintentos;
+- **el mensaje mentia**: afirmaba el tope configurado en vez del tiempo medido,
+  y decia «sin enviar nada» tambien cuando si habia llegado texto;
+- **la redaccion se comia una cifra**: `maxOutputTokens` salia `[REDACTADO]` en
+  todas las lineas del registro nuevo, y la prueba de privacidad miraba el
+  objeto en memoria en vez de la linea escrita en disco. Ahora la prueba usa el
+  registrador de verdad sobre un directorio temporal.
+
+Nuevos: `provider-call.ts` (compartido), `http-dispatcher.ts`, `budget-store.ts`,
+con sus pruebas. Tocados: `http-provider.ts`, `sse.ts`, `agentic-loop.ts`,
+`agent.ts`, `job-runner.ts`, `local-turn.ts`, `budget.ts`, `constants.ts`,
+`schemas.ts`, `types.ts`, `models/types.ts` y `http-provider-config.ts`.
+
+**No se añadio `undici` como dependencia.** Esta en `node_modules` solo de rebote
+(electron y wrangler, los dos de desarrollo), asi que importarlo habria
+funcionado en este ordenador y reventado en una instalacion limpia. Se construye
+una instancia de la misma clase del despachador que Node ya tiene puesto.
+
+`npm run check` exit 0: 176 archivos, 3484 pruebas, 12 saltadas.
+
 ### 2026-09-14 — Claude — F24-RECAP-001, pasos 2 a 5
 
 Cuatro agentes construyeron el nucleo, el bloque del prompt, el almacen y la

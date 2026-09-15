@@ -2,8 +2,8 @@
 
 ## F26-LLAMADAS-VACIAS-001 — el 18% de lo que paga por Lia no compra nada
 
-Estado: **investigado y APROBADO por Daniel; los cuatro arreglos, sin empezar
-— Claude, 2026-09-14.** Informe en `docs/DEEPSEEK-LLAMADAS-VACIAS.md`.
+Estado: **los cuatro arreglos hechos y comprobados — Claude, 2026-09-15.**
+Informe en `docs/DEEPSEEK-LLAMADAS-VACIAS.md`.
 
 Origen: Daniel vio turnos con `modelCalls: 2` y `3` en su panel de gasto y dijo
 «investiga con los datos que tienes».
@@ -50,6 +50,32 @@ Lo que cambio fue la velocidad del proveedor: mediana de 203 s frente a 61 s.
 - `tokensEstimados` se queda corto **~1.650 tokens siempre**. Acierta el ritmo
   de crecimiento (3% de error), asi que sirve para «cuanto añade este bloque»,
   no para «cuanto estoy mandando».
+
+**Hecho el 2026-09-15**, con quince hallazgos confirmados en la revision:
+
+- **el tope** pasa de accidente de fabrica a silencio elegido de 15 minutos,
+  configurable por conexion. Se construye un despachador propio leyendo la
+  clase del que Node ya tiene puesto, **sin añadir `undici` como dependencia**:
+  esta en `node_modules` solo de rebote y una instalacion limpia habria
+  reventado. Si la pila no se deja configurar, la peticion sale igual con el
+  tope de fabrica: este arreglo puede no aplicarse, pero nunca impide un turno;
+- distingue **silencio** de **duracion**: una respuesta larga que va llegando no
+  muere por durar, porque cada byte reinicia el contador. Con prueba;
+- **una llamada ya cobrada no se repite sola**, y se avisa en pantalla por el
+  mismo camino que el aviso de 429. Pero la revision corrigio el arreglo: no
+  reintentar NUNCA quitaba la recuperacion automatica que si servia. Ahora se
+  separan cinco finales, y `dropped` —la corto el otro lado tras minutos— ni es
+  gratis ni se reintenta;
+- **una linea de registro por llamada**, con el tiempo hasta la primera palabra,
+  que es la medida que faltaba. Las tres llamadas vacias del 2026-09-14
+  quedarian hoy como `silence`, `silence` y `dropped`, las tres cobradas;
+- **el presupuesto cuenta todos los intentos**, y hay un limite diario de
+  LLAMADAS, que es lo unico que protege de una tarifa por llamada. Se comprueba
+  tambien entre reintentos, no solo al empezar el turno.
+
+**Falta**: nadie lo ha visto correr con la boveda abierta. Y los diez desfases
+del historico que no encajan con el tope siguen sin explicacion: el registro
+nuevo es lo que la destapara.
 
 **Lo que NO se hace, y por que**: recortar el prompt. Se cobra por llamada, asi
 que el texto es gratis en dinero; el tamaño no dispara los fallos; y lo unico

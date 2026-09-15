@@ -1,5 +1,35 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-15 — F26-LLAMADAS-VACIAS-001
+
+`npm run check` exit 0.
+
+```
+Test Files  176 passed (176)
+     Tests   3484 passed | 12 skipped
+```
+
+Nuevos: `provider-call.test.ts`, `http-dispatcher.test.ts` y
+`budget-store.test.ts`. 180 pruebas entre esos tres y `providers.test.ts`.
+
+Tres que conviene destacar porque prueban lo que no se puede ver a ojo:
+
+- **el tope se mide de verdad**, contra un servidor en `127.0.0.1`. Hacia falta
+  porque el despachador se construye por un camino indirecto: si dejara de
+  funcionar, nada fallaria y se volveria en silencio a los 300 s de fabrica;
+- **una respuesta que va llegando no muere aunque dure mas que el tope**: ocho
+  trozos repartidos en 800 ms con un tope de 1.000 ms terminan bien;
+- **la linea que se ESCRIBE no lleva contenido**: la prueba usa el registrador
+  real sobre un directorio temporal y barre las claves del JSON del archivo, no
+  del objeto en memoria. La anterior se quedaba en el objeto y no habria cazado
+  una fuga en el serializador.
+
+Ninguna prueba llama a ninguna API. Lo unico que toca disco es la del
+registrador, en un temporal que borra al terminar.
+
+**Sin ejecutar con la boveda abierta.**
+
+
 ### 2026-09-14 — F24-RECAP-001, pasos 2 a 5
 
 `npm run check` exit 0.
