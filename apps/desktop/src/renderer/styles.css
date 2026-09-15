@@ -2049,6 +2049,81 @@ input[aria-invalid='true'] {
 }
 
 /*
+ * las repeticiones de un modelo en la sonda de compatibilidad.
+ *
+ * Botones pequeños y en fila porque son un selector, no acciones: lo que se
+ * hace con ellos es cambiar de intento, y con el tamaño normal tres intentos de
+ * cinco modelos ocupaban mas que las propias respuestas.
+ */
+.vault-replies {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 2px 0 0;
+}
+
+.vault-replies .btn {
+  padding: 3px 9px;
+  font-size: 11px;
+}
+
+.vault-replies .btn[data-selected='true'] {
+  color: var(--signal);
+  border-color: var(--signal);
+  background: #ffb45412;
+}
+
+/* el intento que se torció se ve sin abrirlo */
+.vault-replies .btn[data-tone='warn'] {
+  color: var(--warn);
+}
+
+/*
+ * lo que escribio un modelo en la sonda, tal y como lo habrias leido tu.
+ *
+ * Mismo tratamiento que la ficha de continuidad, y por el mismo motivo: es un
+ * texto que hay que poder LEER —de eso va toda la pantalla— y no un metadato de
+ * la interfaz. Aqui ademas van cinco seguidos, asi que el salto de linea
+ * respetado y el ancho completo son lo unico que permite compararlos de un
+ * vistazo. Se pinta y se tira: no se guarda en ningun sitio.
+ */
+.vault-reply__text {
+  align-self: stretch;
+  margin: 2px 0 0;
+  padding: 10px 12px;
+  border: 1px solid var(--rule);
+  border-left: 2px solid var(--signal);
+  border-radius: 4px;
+  background: var(--raised);
+  white-space: pre-wrap;
+  line-height: 1.55;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+/* una negativa no se lee igual que una escena: se distingue antes de leerla */
+.vault-reply__text[data-tone='warn'] {
+  border-left-color: var(--fault);
+}
+
+.vault-reply__text[data-tone='idle'] {
+  border-left-color: var(--rule);
+  color: var(--dim);
+}
+
+/* «Leer entera» vive dentro de la linea de cifras: es una nota, no una accion */
+.vault-reply__meta .btn {
+  padding: 0;
+  border: none;
+  background: none;
+  font-size: inherit;
+  letter-spacing: inherit;
+  text-transform: none;
+  color: var(--signal);
+  text-decoration: underline;
+}
+
+/*
  * los modelos de AI Horde son una docena y cada uno lleva debajo su familia y
  * su disponibilidad. En una fila que envuelve quedaban de anchos distintos y no
  * se podian comparar; en una columna ocupaban la pantalla entera.

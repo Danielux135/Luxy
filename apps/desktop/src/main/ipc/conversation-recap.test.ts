@@ -49,7 +49,12 @@ vi.mock('electron', () => ({
 }));
 
 const { registerIpcHandlers } = await import('./handlers.js');
-const { IPC_INVOKE } = await import('../../shared/ipc.js');
+const {
+  IPC_INVOKE,
+  vaultCompatibilityResultSchema,
+  VAULT_COMPATIBILITY_REPLY_CHARS,
+  VAULT_COMPATIBILITY_TRIM_MARK,
+} = await import('../../shared/ipc.js');
 const { tokenize } = await import('../vault/turn-index.js');
 type HandlerContext = Parameters<typeof registerIpcHandlers>[0];
 type RecapMutator = Parameters<HandlerContext['recaps']['apply']>[1];
@@ -208,6 +213,15 @@ interface Montaje {
   sellada?: ConversationMemory | null;
   /** lo que contesta el CLI de fondo cuando la pasada le pide una ficha */
   respuestaCli?: string;
+  /**
+   * como termina el turno, cuando no termina bien.
+   *
+   * Un proveedor caido NO siempre lanza: el agente resuelve con `failed` y sin
+   * texto, que es el caso que dejaba una fila muda en la sonda
+   */
+  finalCli?: string;
+  /** el motivo que trae ese final */
+  errorCli?: string;
   /** conversaciones fuera del trabajo de fondo */
   excluidas?: string[];
   /**
@@ -321,13 +335,13 @@ function montar(montaje: Montaje = {}): Huella {
       runLocalTurn: async (request: { prompt: string }) => {
         huella.prompts.push(request.prompt);
         return {
-          outcome: 'completed',
+          outcome: montaje.finalCli ?? 'completed',
           text: montaje.respuestaCli ?? '*se estira* buenas noches',
           executedModel: 'deepseek-chat',
           inputTokens: 10,
           outputTokens: 20,
           durationMs: 1234,
-          error: null,
+          error: montaje.errorCli ?? null,
         };
       },
     },
@@ -522,6 +536,175 @@ describe('la memoria retroactiva dentro del turno privado', () => {
 
     expect(resultado.ok).toBe(true);
     expect(promptDelTurno(huella)).toContain(RESUMEN_RECAP);
+  });
+});
+
+/**
+ * lo que devuelve la sonda cuando se le pide LEER, no contar.
+ *
+ * La sonda ya ejecutaba estos turnos y tiraba el texto, asi que enseñarlo no
+ * cuesta ni una llamada mas. Lo que si cambia es por donde pasa contenido de la
+ * boveda, y de ahi el centinela: una frase inventada aqui que tiene que salir
+ * por el IPC y no aparecer en NINGUNA linea escrita. Una fuga en este camino es
+ * el peor fallo posible de todo el proyecto.
+ */
+describe('la sonda de compatibilidad devuelve lo que escribio cada modelo', () => {
+  /** una frase que solo existe en esta prueba: si sale en un log, hay fuga */
+  const CENTINELA = 'la lampara de la mesilla seguia encendida cuando entraste descalza';
+
+  async function sondear(
+    montaje: Montaje,
+    repetitions = 1,
+  ): Promise<{
+    huella: Huella;
+    resultado: { ok: boolean; value: z.infer<typeof vaultCompatibilityResultSchema> };
+  }> {
+    const huella = montar(montaje);
+    const resultado = (await invocar(IPC_INVOKE.vaultCompatibility, {
+      conversationId: CONV,
+      projectAlias: 'luxy',
+      targets: [{ provider: 'claude', model: 'claude-sonnet', effort: null }],
+      repetitions,
+    })) as { ok: boolean; value: z.infer<typeof vaultCompatibilityResultSchema> };
+    return { huella, resultado };
+  }
+
+  it('una entrada POR REPETICION, con su numero y su veredicto', async () => {
+    // enseñar una y un contador escondia justo lo que se mide: que la respuesta
+    // de un modelo varia entre intentos
+    const { resultado } = await sondear({ respuestaCli: CENTINELA }, 3);
+
+    expect(resultado.ok).toBe(true);
+    const primero = resultado.value.results[0]!;
+    expect(primero.replies).toHaveLength(3);
+    expect(primero.replies.map((each) => each.attempt)).toEqual([1, 2, 3]);
+    for (const reply of primero.replies) {
+      expect(reply.text).toContain(CENTINELA);
+      expect(reply.kind).toBe('answered');
+      expect(reply.clipped).toBe(false);
+      expect(reply.chars).toBe(CENTINELA.length);
+    }
+    // y lo que devuelve sigue cumpliendo el contrato entero, que es lo unico
+    // que ata el handler con lo que el renderer da por cierto
+    expect(vaultCompatibilityResultSchema.safeParse(resultado.value).success).toBe(true);
+  });
+
+  it('NI UNA PALABRA de lo que escribio acaba en el registro', async () => {
+    const { huella } = await sondear({ respuestaCli: `${CENTINELA}. Y te quedaste.` }, 2);
+
+    const volcado = JSON.stringify(huella.registros);
+    expect(volcado).not.toContain(CENTINELA);
+    expect(volcado).not.toContain('descalza');
+    expect(volcado).not.toContain('mesilla');
+    // lo que si va al registro son enteros, y uno nuevo: cuantas respuestas se
+    // devuelven, para poder ver desde el log si la sonda las conserva
+    expect(huella.campos('compatibilidad comprobada')).toMatchObject({
+      modelos: 1,
+      repeticiones: 2,
+      respuestas: 2,
+    });
+  });
+
+  it('las cifras de siempre no cambian: quien no mire el texto no nota nada', async () => {
+    const { resultado } = await sondear({ respuestaCli: CENTINELA }, 2);
+
+    expect(resultado.value.results[0]).toMatchObject({
+      provider: 'claude',
+      model: 'claude-sonnet',
+      answered: 2,
+      refused: 0,
+      empty: 0,
+      memoryOk: 0,
+      error: null,
+    });
+  });
+
+  it('una negativa sigue delatandose por CLASIFICACION, nunca por un extracto', async () => {
+    // `signals` son identificadores de patron, no trozos de la respuesta. Un
+    // extracto llevaria espacios, mayusculas o puntuacion: esto lo fija
+    const negativa = `Lo siento, pero no puedo ayudarte con esta solicitud porque infringe las politicas de contenido. ${CENTINELA}`;
+    const { huella, resultado } = await sondear({ respuestaCli: negativa });
+
+    const primero = resultado.value.results[0]!;
+    expect(primero.refused).toBe(1);
+    expect(primero.signals.length).toBeGreaterThan(0);
+    for (const signal of primero.signals) {
+      expect(signal).toMatch(/^[a-z][a-z-]*$/);
+    }
+    // el texto de la negativa si viaja, porque es lo que hay que leer para
+    // saber si el modelo sirve; al registro sigue sin ir nada
+    expect(primero.replies[0]?.text).toContain('politicas de contenido');
+    expect(JSON.stringify(huella.registros)).not.toContain('politicas de contenido');
+  });
+
+  it('una respuesta desbocada se recorta, y el corte se declara NUESTRO', async () => {
+    // un corte mudo es indistinguible de un modelo que se quedo sin salida
+    const desbocada = `${CENTINELA} `.repeat(400);
+    const { resultado } = await sondear({ respuestaCli: desbocada });
+
+    const reply = resultado.value.results[0]!.replies[0]!;
+    expect(reply.clipped).toBe(true);
+    expect(reply.text.length).toBeLessThanOrEqual(VAULT_COMPATIBILITY_REPLY_CHARS);
+    expect(reply.text.endsWith(VAULT_COMPATIBILITY_TRIM_MARK)).toBe(true);
+    // y `chars` conserva lo que escribio DE VERDAD, que es parte del criterio
+    expect(reply.chars).toBe(desbocada.trim().length);
+    // `kept` es lo guardado SIN la marca, que se pega dentro del tope: la
+    // pantalla lo enseña como «Luxy guardó los primeros N» y contando la marca
+    // le apuntaba al modelo 22 caracteres que escribimos nosotros
+    expect(reply.kept).toBe(reply.text.length - VAULT_COMPATIBILITY_TRIM_MARK.length);
+    expect(reply.kept).toBeLessThan(reply.chars);
+  });
+
+  it('sin recorte, lo guardado es exactamente lo que escribio', async () => {
+    const { resultado } = await sondear({ respuestaCli: CENTINELA });
+
+    const reply = resultado.value.results[0]!.replies[0]!;
+    expect(reply.clipped).toBe(false);
+    expect(reply.kept).toBe(reply.chars);
+    expect(reply.kept).toBe(reply.text.length);
+  });
+
+  it('un turno que se rompe sin escribir nada no deja fila muda: deja el motivo', async () => {
+    // el agente NO lanza cuando el proveedor falla: resuelve con `failed` y sin
+    // texto. Sin esto quedaba una entrada vacia —una caja con borde y nada
+    // dentro, «0 caracteres»— y encima con `error: null`, asi que no habia forma
+    // de saber que habia sido un 401 y no un modelo callado
+    const { resultado } = await sondear({
+      respuestaCli: '',
+      finalCli: 'failed',
+      errorCli: 'la clave de la conexion no vale',
+    });
+
+    const primero = resultado.value.results[0]!;
+    expect(primero.replies).toHaveLength(0);
+    expect(primero.error).toContain('la clave de la conexion no vale');
+    // y las cifras no cambian: sigue contando como una respuesta vacia, que es
+    // lo que hacia antes de conservar el texto
+    expect(primero.empty).toBe(1);
+    expect(primero.answered).toBe(0);
+  });
+
+  it('un modelo que contesta en blanco SI deja entrada: es una respuesta suya', async () => {
+    // el turno termino bien y el modelo no escribio nada. Son dos averias
+    // distintas y se ven distinto: aqui hay fila, y la pantalla dice que no
+    // escribio nada en vez de callarlo
+    const { resultado } = await sondear({ respuestaCli: '' });
+
+    const primero = resultado.value.results[0]!;
+    expect(primero.replies).toHaveLength(1);
+    expect(primero.replies[0]).toMatchObject({ kind: 'empty', text: '', chars: 0, kept: 0 });
+    expect(primero.error).toBeNull();
+  });
+
+  it('el bloque de memoria NO se cuela en lo que se enseña', async () => {
+    // es contenido tecnico y ya viene apartado en el turno de verdad: leerlo
+    // aqui ensuciaria la comparacion con un JSON que nadie va a juzgar
+    const conBloque = `${CENTINELA}\n<LUXY_MEMORY>\n{"version":1,"summary":"nada"}\n</LUXY_MEMORY>`;
+    const { resultado } = await sondear({ respuestaCli: conBloque });
+
+    const reply = resultado.value.results[0]!.replies[0]!;
+    expect(reply.text).toBe(CENTINELA);
+    expect(reply.text).not.toContain('LUXY_MEMORY');
   });
 });
 

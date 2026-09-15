@@ -8,6 +8,9 @@
 // igual que la entrada de telegram en el gateway.
 import { z } from 'zod';
 import type { HordeQueueProgress } from './horde-progress.js';
+// el vocabulario de la sonda de compatibilidad: es puro y no toca electron ni
+// zod, asi que se puede nombrar desde aqui sin arrastrar nada al preload
+import { REPLY_KINDS } from './refusal.js';
 import {
   ACTIVE_RELATION_KINDS,
   LOCAL_CLI_PROVIDERS,
@@ -496,6 +499,59 @@ export const vaultCompatibilityArgsSchema = z.object({
   repetitions: z.number().int().min(1).max(5).default(1),
 });
 
+/**
+ * tope de lo que se conserva de CADA respuesta.
+ *
+ * Un turno privado ronda los 1.500 caracteres, asi que con 2.000 la respuesta
+ * normal llega ENTERA —que es el caso que hay que poder juzgar— y lo unico que
+ * se recorta es la desbocada, de la que los primeros 2.000 ya dicen como
+ * escribe. Con los topes del sondeo —12 modelos por 5 repeticiones— el peor
+ * caso son 120.000 caracteres en un viaje de IPC que ya mueve fichas de memoria
+ * enteras: el tope no esta por el transporte, esta para que un modelo que no
+ * para de escribir no convierta el panel en un muro.
+ */
+export const VAULT_COMPATIBILITY_REPLY_CHARS = 2000;
+
+/**
+ * lo que se añade cuando el recorte es NUESTRO.
+ *
+ * Misma regla que el razonamiento del describidor: un corte mudo es
+ * indistinguible de un modelo que se quedo sin salida, y son dos averias
+ * distintas. Si el corte es nuestro, se dice.
+ */
+export const VAULT_COMPATIBILITY_TRIM_MARK = ' […recortado por Luxy]';
+
+/**
+ * lo que escribio un modelo en UNA de las repeticiones.
+ *
+ * `text` es CONTENIDO DE LA BOVEDA. Viaja al renderer como cualquier turno —se
+ * enseña y se tira, no se guarda en ningun sitio— y no puede acabar en ningun
+ * registro, ni en un mensaje de error, ni en un extracto de fallo: a los logs
+ * van CIFRAS. Es el mismo camino que el `preview` de la pasada retroactiva.
+ */
+export const vaultCompatibilityReplySchema = z.object({
+  /** cual de las repeticiones, desde 1. Un intento que ni corrio no deja entrada */
+  attempt: z.number().int().min(1).max(5),
+  /** la misma clasificacion que ya alimenta los contadores de arriba */
+  kind: z.enum(REPLY_KINDS),
+  /** CONTENIDO DE LA BOVEDA, recortado a `VAULT_COMPATIBILITY_REPLY_CHARS` */
+  text: z.string().max(VAULT_COMPATIBILITY_REPLY_CHARS),
+  /** cuanto escribio de verdad, ANTES de nuestro recorte */
+  chars: z.number().int().min(0),
+  /**
+   * cuantos caracteres DEL MODELO sobreviven en `text`, sin contar la marca.
+   *
+   * Va calculado desde aqui y no se deduce en la pantalla porque la marca se
+   * pega DENTRO del tope (`trimWithMark` reserva su hueco): quien reste mal se
+   * queda con una nota que dice «guardó los primeros 2000» de un texto en el
+   * que 22 de esos caracteres los escribimos nosotros. Sin recorte es lo mismo
+   * que `chars`; el renderer no tiene que saber que existe una marca.
+   */
+  kept: z.number().int().min(0),
+  /** true si lo que se enseña lo cortamos nosotros */
+  clipped: z.boolean(),
+});
+
 export const vaultCompatibilityResultSchema = z.object({
   results: z.array(
     z.object({
@@ -509,6 +565,18 @@ export const vaultCompatibilityResultSchema = z.object({
       /** si ademas escribio bien el bloque de memoria */
       memoryOk: z.number().int().min(0),
       error: z.string().nullable(),
+      /**
+       * lo que escribio cada vez. CONTENIDO DE LA BOVEDA.
+       *
+       * Sin esto la sonda solo contestaba «¿este modelo colabora con lo mio?», y
+       * la pregunta de hoy es «¿cual escribe mejor?», que no se responde con
+       * cifras: hay que LEERLOS.
+       *
+       * Va una entrada por REPETICION y no una sola con un contador: las
+       * repeticiones existen porque la respuesta varia entre intentos, asi que
+       * enseñar una y decir «y otras dos» escondia justo lo que se mide.
+       */
+      replies: z.array(vaultCompatibilityReplySchema).max(5).default([]),
     }),
   ),
 });

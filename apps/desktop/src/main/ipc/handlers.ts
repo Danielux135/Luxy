@@ -38,6 +38,7 @@ import {
   parseDescribeResponse,
   parseRewriteResponse,
   splitReasoning,
+  trimWithMark,
   imagePromptStyleFor,
   type HordeRecipe,
   resolveAuxiliaryTarget,
@@ -86,6 +87,9 @@ import {
   vaultConversationSendArgsSchema,
   vaultCatalogSyncArgsSchema,
   vaultCompatibilityArgsSchema,
+  VAULT_COMPATIBILITY_REPLY_CHARS,
+  VAULT_COMPATIBILITY_TRIM_MARK,
+  type vaultCompatibilityReplySchema,
   vaultMemoryExcludeArgsSchema,
   vaultMemoryReadArgsSchema,
   vaultMediaAttachArgsSchema,
@@ -1267,6 +1271,15 @@ export function registerIpcHandlers(context: HandlerContext): void {
     for (const target of args.targets) {
       const tally = { answered: 0, refused: 0, empty: 0, memoryOk: 0 };
       const signals = new Set<string>();
+      /**
+       * lo que escribio cada intento. CONTENIDO DE LA BOVEDA.
+       *
+       * Sale por el IPC como cualquier turno y NO entra en ningun registro: la
+       * linea de abajo sigue llevando solo cifras. Que exista esta variable no
+       * cambia nada de lo que se guarda —aqui no se guardaba nada y se sigue sin
+       * guardar—, solo deja de tirar lo que ya habia vuelto.
+       */
+      const replies: z.infer<typeof vaultCompatibilityReplySchema>[] = [];
       let error: string | null = null;
 
       for (let attempt = 0; attempt < args.repetitions; attempt += 1) {
@@ -1288,22 +1301,78 @@ export function registerIpcHandlers(context: HandlerContext): void {
           for (const signal of verdict.signals) signals.add(signal);
           // mismo fallo que el turno: sin el estado del agente, siempre 0
           if (memoryOfTurn(run, parsed).status === 'structured') tally.memoryOk += 1;
+
+          // y se conserva EXACTAMENTE el texto que se acaba de clasificar, no
+          // una version limpia aparte. Si se enseñara una cosa y se contara
+          // otra, un veredicto raro —un modelo que razona en voz alta y suena a
+          // negativa— no se podria revisar leyendo lo que hay al lado, que es
+          // justo para lo que sirve enseñarlo. El bloque de memoria ya viene
+          // apartado por `parseConversationMemoryResponse`, igual que en el
+          // turno de verdad
+          const visible = parsed.visibleText.trim();
+          // un turno que vuelve sin texto y con un final que no es `completed`
+          // no es una respuesta en blanco del modelo: es una llamada que se
+          // rompio —401, modelo inexistente, limite— y el agente la resuelve en
+          // vez de lanzar, asi que sin esto quedaba una fila muda con «0
+          // caracteres» y `error: null`. No deja entrada, igual que el `catch`
+          if (visible.length === 0 && run.outcome !== 'completed') {
+            error = redact(run.error ?? `la llamada termino como ${run.outcome}`);
+            continue;
+          }
+
+          const text = trimWithMark(
+            visible,
+            VAULT_COMPATIBILITY_REPLY_CHARS,
+            VAULT_COMPATIBILITY_TRIM_MARK,
+          );
+          const clipped = visible.length > VAULT_COMPATIBILITY_REPLY_CHARS;
+          replies.push({
+            attempt: attempt + 1,
+            kind: verdict.kind,
+            text,
+            chars: visible.length,
+            // la marca ocupa sitio DENTRO del tope, asi que lo que queda del
+            // modelo es lo guardado menos la marca. Se resta aqui, donde se sabe
+            // cual es la marca, y no en la pantalla
+            kept: clipped ? text.length - VAULT_COMPATIBILITY_TRIM_MARK.length : text.length,
+            clipped,
+          });
         } catch (failure) {
           // un modelo caido no debe tumbar la comprobacion de los demas, y «no
           // estaba disponible» no es «se nego»: la pasarela avisa de que los
-          // modelos buenos escasean para cuentas gratuitas
+          // modelos buenos escasean para cuentas gratuitas.
+          //
+          // Este intento no deja entrada en `replies`: no hubo texto que leer, y
+          // fabricar una vacia lo haria pasar por una respuesta en blanco del
+          // modelo, que es otra cosa
           tally.empty += 1;
           error = redact(failure instanceof Error ? failure.message : String(failure));
         }
       }
 
-      results.push({ provider: target.provider, model: target.model, ...tally, signals: [...signals], error });
+      results.push({
+        provider: target.provider,
+        model: target.model,
+        ...tally,
+        signals: [...signals],
+        error,
+        replies,
+      });
     }
 
-    // ni el prompt, ni el texto, ni que conversacion: solo cuantos y como
+    // ni el prompt, ni el texto, ni que conversacion: solo cuantos y como.
+    //
+    // Sigue igual DESPUES de que la sonda devuelva las respuestas, y es la
+    // invariante que no se puede relajar: lo que se escribe aqui son enteros.
+    // `conversation-recap.test.ts` lo fija con un centinela —una frase que solo
+    // existe en la prueba— y comprueba que no aparece en ninguna linea escrita.
     context.log('compatibilidad comprobada', {
       modelos: args.targets.length,
       repeticiones: args.repetitions,
+      // cuantas respuestas se devuelven, que es una cifra y no un texto: sin
+      // ella no habria forma de ver desde el registro si la sonda esta
+      // conservando lo que vuelve o tirandolo otra vez
+      respuestas: results.reduce((total, each) => total + each.replies.length, 0),
     });
     return { results };
   });

@@ -29,11 +29,13 @@ import {
   RECAP_REFUSAL_LABELS,
   describeRecapRow,
 } from '../vault-recap-row.js';
+import { describeReply, replyAt, replyTabLabel, replyTone } from '../vault-compatibility-reply.js';
 import { auxiliaryName, backgroundAuxiliary } from '../vault-auxiliary.js';
 import type { ConfigSummary } from '../useConfig.js';
 import {
   formatAutoLockOption,
   formatLockCountdown,
+  type CompatibilityResult,
   type VaultCharacterView,
   type VaultController,
 } from '../useVault.js';
@@ -4126,7 +4128,9 @@ function CompatibilityPanel({
       <p className="field__hint">
         Ejecuta tu último mensaje contra los modelos que elijas, con las
         instrucciones y el personaje de esta conversación. No guarda nada, no
-        añade turnos y no genera imágenes: solo mira qué contesta cada uno.
+        añade turnos y no genera imágenes: te enseña lo que ha contestado cada
+        uno para que puedas compararlos, y ese texto desaparece al cerrar la
+        bóveda.
       </p>
 
       <div className="vault-list">
@@ -4171,19 +4175,98 @@ function CompatibilityPanel({
       {vault.compatibility !== null && (
         <div className="vault-media">
           {vault.compatibility.map((result) => (
-            <p key={`${result.provider}:${result.model ?? ''}`} className="field__hint">
-              <Tag tone={result.refused > 0 ? 'warn' : result.answered > 0 ? 'ok' : 'idle'}>
-                {result.model ?? result.provider}
-              </Tag>{' '}
-              {result.answered} contestó · {result.refused} se negó · {result.empty} sin respuesta
-              {result.answered > 0 && ` · memoria correcta ${result.memoryOk}/${result.answered}`}
-              {result.signals.length > 0 && ` · ${result.signals.join(', ')}`}
-              {result.error !== null && ` · ${result.error}`}
-            </p>
+            <CompatibilityResultRow
+              key={`${result.provider}:${result.model ?? ''}`}
+              result={result}
+            />
           ))}
         </div>
       )}
     </details>
+  );
+}
+
+/**
+ * lo que contesto UN modelo: las cifras de siempre y, debajo, lo que escribio.
+ *
+ * Es un componente y no un trozo del `map` porque cada fila recuerda dos cosas
+ * suyas —que repeticion se esta mirando y si esta desplegada— y eso son hooks,
+ * que dentro de un `map` no pueden vivir.
+ *
+ * El texto que pinta es CONTENIDO DE LA BOVEDA: llega por el IPC como cualquier
+ * turno, se enseña, y se va cuando se cierra la boveda. No se guarda en ningun
+ * sitio, no vuelve al proceso principal y no se registra.
+ *
+ * Lo que decide que enseñar y cuanto vive en `vault-compatibility-reply.ts`,
+ * con sus pruebas: aqui solo se pinta.
+ */
+function CompatibilityResultRow({ result }: { result: CompatibilityResult }): JSX.Element {
+  // `null` es «la primera», no «ninguna»: la fila tiene que enseñar algo desde
+  // el momento en que llega, sin obligar a pulsar nada
+  const [attempt, setAttempt] = useState<number | null>(null);
+  const [expanded, setExpanded] = useState(false);
+
+  const reply = replyAt(result.replies, attempt);
+  const look = reply === null ? null : describeReply(reply, expanded);
+
+  return (
+    <div className="vault-media__item">
+      <p className="field__hint">
+        <Tag tone={result.refused > 0 ? 'warn' : result.answered > 0 ? 'ok' : 'idle'}>
+          {result.model ?? result.provider}
+        </Tag>{' '}
+        {result.answered} contestó · {result.refused} se negó · {result.empty} sin respuesta
+        {result.answered > 0 && ` · memoria correcta ${result.memoryOk}/${result.answered}`}
+        {result.signals.length > 0 && ` · ${result.signals.join(', ')}`}
+        {result.error !== null && ` · ${result.error}`}
+      </p>
+
+      {result.replies.length > 1 && (
+        <div className="vault-replies">
+          {result.replies.map((each) => (
+            <button
+              key={each.attempt}
+              className="btn btn--quiet"
+              data-selected={reply?.attempt === each.attempt}
+              // el veredicto tiñe el boton: con tres intentos iguales en gris
+              // habria que abrirlos uno a uno para ver cual se torció
+              data-tone={replyTone(each.kind)}
+              onClick={() => {
+                setAttempt(each.attempt);
+                // cambiar de intento vuelve a plegar: dos textos largos
+                // seguidos, uno desplegado y otro no, no se comparan
+                setExpanded(false);
+              }}
+            >
+              {replyTabLabel(each)}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* sin texto no hay caja: un recuadro con borde y nada dentro se lee como
+          un fallo de pintado, y lo que pasa —que el modelo no escribio nada— lo
+          dice la nota de debajo, que si se pinta siempre */}
+      {look !== null && look.body !== '' && (
+        <p className="vault-reply__text" data-tone={look.tone}>
+          {look.body}
+        </p>
+      )}
+
+      {look !== null && (
+        <p className="vault-list__meta vault-reply__meta">
+          {look.meta}
+          {look.expandable && (
+            <>
+              {' · '}
+              <button className="btn btn--quiet" onClick={() => setExpanded(!expanded)}>
+                {look.expandLabel}
+              </button>
+            </>
+          )}
+        </p>
+      )}
+    </div>
   );
 }
 

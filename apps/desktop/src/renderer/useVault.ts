@@ -9,7 +9,7 @@
 //
 // Nada de eso se persiste en localStorage, ni en un estado global, ni se envia
 // a ningun sitio.
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   AuxiliaryChoice,
   ConversationMemoryStatus,
@@ -18,6 +18,8 @@ import type {
   RelationStatus,
 } from '@luxy/shared';
 import type { HordeQueueProgress } from '../shared/horde-progress.js';
+import { compatibilityFor, type CompatibilityRun } from './vault-compatibility-reply.js';
+import { discardDecrypted } from './vault-lock-reset.js';
 import type { RecapSweepRound } from './vault-sweep.js';
 import type {
   vaultCompatibilityResultSchema,
@@ -31,7 +33,14 @@ import type {
 } from '../shared/ipc.js';
 import type { z } from 'zod';
 
-type CompatibilityResult = z.infer<typeof vaultCompatibilityResultSchema>['results'][number];
+/**
+ * lo que contesto un modelo en la sonda, con las cifras y lo que escribio.
+ *
+ * `replies` es CONTENIDO DE LA BOVEDA: vive en el estado de la ventana, se
+ * enseña para poder comparar quien escribe mejor y se va al cerrar la boveda.
+ * No se guarda, no vuelve al proceso principal y no se registra.
+ */
+export type CompatibilityResult = z.infer<typeof vaultCompatibilityResultSchema>['results'][number];
 type MemoryEpisode = z.infer<typeof vaultMemoryListResultSchema>['episodes'][number];
 
 /**
@@ -780,7 +789,13 @@ export function useVault(): VaultController {
   const [recaps, setRecaps] = useState<RecapRow[] | null>(null);
   const [recapCoverage, setRecapCoverage] = useState<RecapCoverage | null>(null);
   const [decidingRecap, setDecidingRecap] = useState(false);
-  const [compatibility, setCompatibility] = useState<CompatibilityResult[] | null>(null);
+  // atada a la conversacion con la que se pidio, y no suelta: se genera con SU
+  // personaje y SU memoria, asi que pintarla bajo otra seria atribuir el
+  // roleplay de un hilo a otro. Quien decide si se puede pintar es
+  // `compatibilityFor`, unas lineas mas abajo
+  const [compatibility, setCompatibility] = useState<CompatibilityRun<CompatibilityResult> | null>(
+    null,
+  );
   const [checkingCompatibility, setCheckingCompatibility] = useState(false);
   const [sending, setSending] = useState(false);
   const [composer, setComposerState] = useState<VaultComposer>({
@@ -811,6 +826,32 @@ export function useVault(): VaultController {
   const [lastSync, setLastSync] = useState<VaultController['lastSync']>(null);
   const mounted = useRef(true);
 
+  /**
+   * como se vacia cada cosa descifrada.
+   *
+   * Los setters de `useState` no cambian nunca, asi que esto se construye una
+   * vez y las dos rutas que cierran la boveda —el refresco que detecta el
+   * bloqueo y el cierre de sesion— usan el mismo objeto. Quien añada un estado
+   * con contenido de la boveda a `DECRYPTED_RENDERER_STATE` y no lo ponga aqui
+   * se entera al compilar, que es el unico aviso que no se olvida.
+   */
+  const purga = useMemo(
+    () => ({
+      conversations: () => setConversations([]),
+      turns: () => setTurns([]),
+      media: () => setMedia([]),
+      probes: () => setProbes([]),
+      instructions: () => setInstructions(null),
+      openConversation: () => setOpenConversationId(null),
+      pendingAffairs: () => setPendingAffairs(null),
+      recaps: () => setRecaps(null),
+      recapCoverage: () => setRecapCoverage(null),
+      recapPreview: () => setRecapPreview(null),
+      compatibility: () => setCompatibility(null),
+    }),
+    [],
+  );
+
   const refresh = useCallback(async (): Promise<void> => {
     const result = await window.luxy.getVaultStatus();
     if (!mounted.current) return;
@@ -818,27 +859,15 @@ export function useVault(): VaultController {
       setStatus(result.value);
       // al cerrarse la boveda se descarta TODO lo descifrado que hubiera en
       // memoria del renderer. No se oculta: deja de existir aqui.
-      if (!result.value.unlocked) {
-        setConversations([]);
-        setTurns([]);
-        setMedia([]);
-        // las pruebas de vision no salen de la boveda, pero son imagenes
-        // descifradas en memoria y la regla de arriba dice TODO
-        setProbes([]);
-        setInstructions(null);
-        setOpenConversationId(null);
-        // los pendientes llevan la cita LITERAL de un turno: es contenido
-        // descifrado y se va con lo demas
-        setPendingAffairs(null);
-        // y las fichas de continuidad llevan el bloque entero y el titulo de la
-        // conversacion, que es exactamente lo mismo: contenido de la boveda
-        setRecaps(null);
-        setRecapCoverage(null);
-        setRecapPreview(null);
-      }
+      //
+      // La lista vive en `vault-lock-reset.ts` y no aqui porque este bloque y el
+      // de `logoutAccount` la tenian escrita cada uno por su cuenta y acabaron
+      // distintos: el texto de la sonda entro sin que ninguno de los dos se
+      // enterara
+      if (!result.value.unlocked) discardDecrypted(purga);
     }
     setLoading(false);
-  }, []);
+  }, [purga]);
 
   const reloadCharacters = useCallback(async (): Promise<void> => {
     const result = await window.luxy.listVaultCharacters();
@@ -952,15 +981,12 @@ export function useVault(): VaultController {
     const value = await run(() => window.luxy.logoutVaultAccount());
     if (value === null) return;
     // salir cierra también la bóveda, y lo descifrado se descarta AQUÍ y no en
-    // el próximo refresco: hasta entonces seguiría en memoria del renderer
+    // el próximo refresco: hasta entonces seguiría en memoria del renderer.
+    // Por la misma lista que el bloqueo, que es de donde le faltaban la mitad de
+    // las cosas cuando la mantenía a mano
     setStatus(value);
-    setConversations([]);
-    setTurns([]);
-    setMedia([]);
-    setProbes([]);
-    setInstructions(null);
-    setOpenConversationId(null);
-  }, [run]);
+    discardDecrypted(purga);
+  }, [run, purga]);
 
   const setMediaKey = useCallback(
     async (apiKey: string): Promise<boolean> => {
@@ -1376,6 +1402,11 @@ export function useVault(): VaultController {
         return;
       }
       setCheckingCompatibility(true);
+      // la tanda anterior se va ANTES de empezar: quince turnos seguidos tardan
+      // minutos, y dejar el texto viejo debajo de un boton que pone «Probando…»
+      // se lee como si ya hubieran contestado. Y si esta falla, el error no
+      // queda al lado de unas respuestas que no son suyas
+      setCompatibility(null);
       setError(null);
       try {
         const result = await window.luxy.checkVaultCompatibility({
@@ -1387,7 +1418,9 @@ export function useVault(): VaultController {
           setHint(result.hint);
           return;
         }
-        setCompatibility(result.value.results);
+        // sellada con la conversacion que sirvio de sonda: es lo que la ata al
+        // personaje y a la memoria con los que se genero
+        setCompatibility({ conversationId: openConversationId, results: result.value.results });
       } finally {
         if (mounted.current) setCheckingCompatibility(false);
       }
@@ -1971,7 +2004,9 @@ export function useVault(): VaultController {
     readMemoryEpisode,
     readMemoryTurns,
     excludeFromMemory,
-    compatibility,
+    // solo si es de la conversacion que hay abierta. Con la boveda cerrada ya no
+    // hay nada que filtrar, porque el estado se vacio al cerrarla
+    compatibility: compatibilityFor(compatibility, openConversationId),
     checkingCompatibility,
     checkCompatibility,
     attachMedia,

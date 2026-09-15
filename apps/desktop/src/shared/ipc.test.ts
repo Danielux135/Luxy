@@ -31,6 +31,8 @@ import {
   vaultCharacterProviderArgsSchema,
   vaultHordeCharacterSaveArgsSchema,
   vaultCompatibilityArgsSchema,
+  vaultCompatibilityResultSchema,
+  VAULT_COMPATIBILITY_REPLY_CHARS,
   vaultMediaAttachArgsSchema,
   vaultMemoryReadArgsSchema,
   vaultRecapCoverageSchema,
@@ -253,6 +255,95 @@ describe('validacion de argumentos', () => {
     expect(vaultCompatibilityArgsSchema.safeParse({ ...base, repetitions: 50 }).success).toBe(
       false,
     );
+  });
+
+  it('lo que escribio cada modelo cabe en el resultado, y con tope', () => {
+    // el texto es contenido de la boveda: viaja al renderer como cualquier
+    // turno, pero un modelo desbocado no puede mandar por aqui lo que quiera
+    const fila = {
+      provider: 'deepseek',
+      model: 'deepseek-chat',
+      answered: 1,
+      refused: 0,
+      empty: 0,
+      signals: [],
+      memoryOk: 1,
+      error: null,
+    };
+
+    // sin `replies` sigue validando: quien no mire el texto no nota el cambio
+    const viejo = vaultCompatibilityResultSchema.parse({ results: [fila] });
+    expect(viejo.results[0]?.replies).toEqual([]);
+
+    const conTexto = vaultCompatibilityResultSchema.parse({
+      results: [
+        {
+          ...fila,
+          replies: [
+            {
+              attempt: 1,
+              kind: 'answered',
+              text: 'te esperaba',
+              chars: 11,
+              kept: 11,
+              clipped: false,
+            },
+          ],
+        },
+      ],
+    });
+    expect(conTexto.results[0]?.replies[0]?.attempt).toBe(1);
+
+    const desbocada = {
+      results: [
+        {
+          ...fila,
+          replies: [
+            {
+              attempt: 1,
+              kind: 'answered',
+              text: 'x'.repeat(VAULT_COMPATIBILITY_REPLY_CHARS + 1),
+              chars: 90000,
+              kept: VAULT_COMPATIBILITY_REPLY_CHARS,
+              clipped: true,
+            },
+          ],
+        },
+      ],
+    };
+    expect(vaultCompatibilityResultSchema.safeParse(desbocada).success).toBe(false);
+
+    // y no caben mas repeticiones de las que se pueden pedir
+    const demasiadas = {
+      results: [
+        {
+          ...fila,
+          replies: Array.from({ length: 6 }, (_unused, index) => ({
+            attempt: 1,
+            kind: 'answered',
+            text: `intento ${index}`,
+            chars: 10,
+            kept: 10,
+            clipped: false,
+          })),
+        },
+      ],
+    };
+    expect(vaultCompatibilityResultSchema.safeParse(demasiadas).success).toBe(false);
+
+    // y `kept` es obligatorio, sin valor por defecto: es lo que la pantalla
+    // enseña como «Luxy guardó los primeros N», y el unico sitio donde se sabe
+    // cuanto ocupa la marca del recorte es el proceso principal. Un defecto aqui
+    // seria una cifra inventada con pinta de medida
+    const sinKept = {
+      results: [
+        {
+          ...fila,
+          replies: [{ attempt: 1, kind: 'answered', text: 'hola', chars: 4, clipped: false }],
+        },
+      ],
+    };
+    expect(vaultCompatibilityResultSchema.safeParse(sinKept).success).toBe(false);
   });
 
   it('leer un recuerdo exige un rango, no una conversacion entera', () => {
