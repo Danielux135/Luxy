@@ -116,6 +116,44 @@ describe('buildCatalogSnapshot', () => {
     expect(raro.models.find((model) => model.apiModel === 'glm-5.2')?.modelRatio).toBe(1);
     expect(raro.pricingAvailable).toBe(true);
   });
+
+  it('cuenta las filas de /v1/models que ni siquiera se pudieron leer', () => {
+    // el aviso de pantalla contaba solo lo que descartaba `buildCatalogReport`,
+    // y para entonces esto ya se habia caido en silencio. Sirviendo estas seis
+    // entradas el catalogo acababa con dos modelos y el aviso decia que faltaba
+    // UNO. Faltaban cuatro
+    const sucio = buildCatalogSnapshot({
+      connectionId: 'pasarela',
+      fetchedAt: '2026-09-15T10:00:00.000Z',
+      modelsPayload: {
+        data: [
+          { id: 'kimi-k3' },
+          { id: 'z'.repeat(150) },
+          { id: 'z'.repeat(250) },
+          { id: 42 },
+          'basura-suelta',
+          { id: 'glm-5' },
+        ],
+      },
+      pricingPayload: null,
+    });
+    expect(sucio.models.map((model) => model.apiModel)).toEqual([
+      'kimi-k3',
+      'z'.repeat(150),
+      'glm-5',
+    ]);
+    expect(sucio.unreadableModels).toBe(3);
+  });
+
+  it('un catalogo limpio no lleva el recuento', () => {
+    const limpio = buildCatalogSnapshot({
+      connectionId: 'hcnsec',
+      fetchedAt: '2026-09-15T10:00:00.000Z',
+      modelsPayload: MODELOS,
+      pricingPayload: null,
+    });
+    expect(limpio.unreadableModels).toBeUndefined();
+  });
 });
 
 describe('guessModelFamily', () => {

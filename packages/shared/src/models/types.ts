@@ -184,7 +184,27 @@ export const modelLimitsSchema = z.object({
 export type ModelLimits = z.infer<typeof modelLimitsSchema>;
 
 export const modelDefinitionSchema = z.object({
-  /** id interno estable: sobrevive a cambios de apiModel y de nombre visible */
+  /**
+   * id interna del catalogo. Su estabilidad NO es la misma en los dos casos, y
+   * la frase que habia aqui —«sobrevive a cambios de apiModel y de nombre
+   * visible»— solo era cierta en el primero:
+   *
+   * - las fichas de FABRICA la llevan escrita a mano. Esa si sobrevive a todo,
+   *   y es la que cuelga de los alias de telegram y del predeterminado de
+   *   familia: moverla rompe `/deepseek`, no un renglon de una lista;
+   * - lo que sirve una pasarela la lleva DERIVADA del nombre, asi que cambia si
+   *   cambia el nombre. Y cambia ademas por algo de fuera: cuando dos nombres
+   *   del mismo catalogo comparten slug no se lo queda ninguno —ver `libre` en
+   *   `models/catalog.ts`—, de modo que depende del CONJUNTO servido en esa
+   *   lectura. El catalogo de AI Horde son los workers vivos en ese instante:
+   *   apagar uno mueve la id de su gemelo.
+   *
+   * CONSECUENCIA, y por eso esta escrito aqui: una id derivada no se persiste
+   * nunca. Lo que se guarda en disco y lo que viaja a la pasarela es el
+   * `apiModel`. Hoy se cumple —el catalogo guardado lleva `apiModel`, y las
+   * selecciones de pantalla son estado de React—; el dia que alguien guarde una
+   * id se encontrara con una referencia que se le mueve sola.
+   */
   id: z
     .string()
     .min(1)

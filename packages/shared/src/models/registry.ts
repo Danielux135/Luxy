@@ -24,11 +24,45 @@ export class ModelRegistryError extends Error {
   }
 }
 
+/**
+ * una id o un alias que reclaman dos modelos, con `onConflict: 'skip'`.
+ *
+ * No es un error: es lo que se descarto para poder seguir. La pantalla lo
+ * cuenta en un aviso; nadie tiene que actuar sobre ello.
+ */
+export interface ModelRegistryConflict {
+  kind: 'id' | 'alias';
+  /** el modelo que se queda con la id o con el alias */
+  keptModelId: string;
+  /** el que llego despues y se descarta (o cuyo alias se ignora) */
+  droppedModelId: string;
+  /** solo en `kind: 'alias'` */
+  alias?: string;
+}
+
 export interface ModelRegistryInput {
   connections: readonly ConnectionProfile[];
   models: readonly ModelDefinition[];
   /** lo que cada conexion respondio la ultima vez que se sincronizo */
   statuses?: readonly ConnectionStatus[];
+  /**
+   * que hacer con una id repetida o un alias reclamado dos veces.
+   *
+   * POR QUE LO ELIGE QUIEN LLAMA Y NO EL REGISTRO: una id repetida significa
+   * dos cosas distintas segun de donde venga el catalogo, y desde aqui no hay
+   * forma de distinguirlas.
+   *
+   * - `throw` (por defecto) para el catalogo escrito a mano: ahi una id
+   *   repetida es un fallo NUESTRO de programacion y queremos que se oiga. Es
+   *   el caso del agente, que solo alimenta el registro con
+   *   `buildDefaultCatalog`;
+   * - `skip` para un catalogo servido por una pasarela: ahi es un dato de un
+   *   tercero que puede llamar a dos modelos igual mañana, y un dato raro no
+   *   puede costar la aplicacion. El 2026-09-15 costo la aplicacion entera:
+   *   AI Horde sirve dos nombres que solo se diferencian en las mayusculas,
+   *   esto lanzo dentro del render de `ModelsPage` y Luxy se quedo en negro.
+   */
+  onConflict?: 'throw' | 'skip';
 }
 
 export class ModelRegistry {
@@ -37,6 +71,8 @@ export class ModelRegistry {
   private readonly statuses = new Map<string, ConnectionStatus>();
   /** alias de telegram -> id de modelo */
   private readonly aliases = new Map<string, string>();
+  /** lo que se descarto por repetido; siempre vacio con `onConflict: 'throw'` */
+  readonly conflicts: readonly ModelRegistryConflict[];
 
   constructor(input: ModelRegistryInput) {
     for (const connection of input.connections) {
@@ -46,26 +82,44 @@ export class ModelRegistry {
       this.statuses.set(status.connectionId, status);
     }
 
+    const tolerate = input.onConflict === 'skip';
+    const conflicts: ModelRegistryConflict[] = [];
+
     for (const model of input.models) {
-      if (this.models.has(model.id)) {
-        throw new ModelRegistryError(
-          `hay dos modelos con la id "${model.id}"`,
-          'las ids de modelo deben ser unicas en todo el catalogo',
-        );
+      const duplicado = this.models.get(model.id);
+      if (duplicado !== undefined) {
+        if (!tolerate) {
+          throw new ModelRegistryError(
+            `hay dos modelos con la id "${model.id}"`,
+            'las ids de modelo deben ser unicas en todo el catalogo',
+          );
+        }
+        // gana el primero: el orden de llegada es el de configuracion, y
+        // reemplazarlo cambiaria lo que ya se esta mirando en pantalla
+        conflicts.push({ kind: 'id', keptModelId: duplicado.id, droppedModelId: model.id });
+        continue;
       }
       this.models.set(model.id, model);
 
       for (const alias of model.telegramAliases) {
         const taken = this.aliases.get(alias);
         if (taken !== undefined) {
-          throw new ModelRegistryError(
-            `el alias "/${alias}" lo reclaman "${taken}" y "${model.id}"`,
-            'cada alias de telegram debe apuntar a un unico modelo',
-          );
+          if (!tolerate) {
+            throw new ModelRegistryError(
+              `el alias "/${alias}" lo reclaman "${taken}" y "${model.id}"`,
+              'cada alias de telegram debe apuntar a un unico modelo',
+            );
+          }
+          // se pierde el alias, no el modelo: sigue estando en la lista y se
+          // puede elegir por su nombre
+          conflicts.push({ kind: 'alias', keptModelId: taken, droppedModelId: model.id, alias });
+          continue;
         }
         this.aliases.set(alias, model.id);
       }
     }
+
+    this.conflicts = conflicts;
   }
 
   // ---------------------------------------------------------------------------

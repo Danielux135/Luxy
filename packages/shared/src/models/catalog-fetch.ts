@@ -107,6 +107,18 @@ export interface CatalogSnapshot {
   notice: string | null;
   /** que devolvio cada ruta de precios probada */
   pricingProbes?: PricingProbe[];
+  /**
+   * cuantas filas de `/v1/models` no se pudieron leer siquiera.
+   *
+   * POR QUE SE GUARDA: el aviso de «modelos que se quedaron fuera» lo cuenta la
+   * pantalla a partir de lo que descarto `buildCatalogReport`, y para entonces
+   * `parseProviderModelEntries` ya ha tirado en silencio lo que su esquema no
+   * acepta: un `id` que no es cadena, uno de mas de 200 caracteres, una fila
+   * suelta. Sirviendo seis entradas raras el catalogo acababa con dos modelos y
+   * el aviso decia «un modelo se quedo fuera». Faltaban cuatro. Ausente en los
+   * catalogos guardados antes de esto, que es lo mismo que cero.
+   */
+  unreadableModels?: number;
 }
 
 /**
@@ -190,20 +202,37 @@ export interface ProviderModelEntry {
   declaredCapabilities: string[];
 }
 
-/** lo que declara `/v1/models`, ya parseado */
-export function parseProviderModelEntries(payload: unknown): ProviderModelEntry[] {
+/**
+ * lo que declara `/v1/models`, con la cuenta de lo que no se pudo leer.
+ *
+ * El recuento existe para que el aviso de pantalla no mienta: lo que se cae
+ * aqui no llega a `buildCatalogReport` y por tanto no aparece en su `skipped`.
+ */
+export function parseProviderModelReport(payload: unknown): {
+  entries: ProviderModelEntry[];
+  unreadable: number;
+} {
   const parsed = providerModelsResponseSchema.safeParse(payload);
-  if (!parsed.success) return [];
+  if (!parsed.success) return { entries: [], unreadable: 0 };
   const entries: ProviderModelEntry[] = [];
+  let unreadable = 0;
   for (const entry of parsed.data.data) {
     const model = providerModelEntrySchema.safeParse(entry);
-    if (!model.success) continue;
+    if (!model.success) {
+      unreadable += 1;
+      continue;
+    }
     entries.push({
       id: model.data.id,
       declaredCapabilities: parseModelCapabilities(model.data.capabilities),
     });
   }
-  return entries;
+  return { entries, unreadable };
+}
+
+/** lo que declara `/v1/models`, ya parseado */
+export function parseProviderModelEntries(payload: unknown): ProviderModelEntry[] {
+  return parseProviderModelReport(payload).entries;
 }
 
 /** identificadores de modelo que declara `/v1/models` */
@@ -234,7 +263,7 @@ export function buildCatalogSnapshot(input: {
   notice?: string | null;
   pricingProbes?: PricingProbe[];
 }): CatalogSnapshot {
-  const served = parseProviderModelEntries(input.modelsPayload);
+  const { entries: served, unreadable } = parseProviderModelReport(input.modelsPayload);
 
   const prices = new Map<string, CatalogModelPrice>();
   const pricing = gatewayPricingResponseSchema.safeParse(input.pricingPayload ?? undefined);
@@ -280,8 +309,61 @@ export function buildCatalogSnapshot(input: {
     pricingAvailable: pricing.success && prices.size > 0,
     notice: input.notice ?? null,
     ...(input.pricingProbes === undefined ? {} : { pricingProbes: input.pricingProbes }),
+    // cero no se guarda: es el caso normal y el campo es opcional
+    ...(unreadable === 0 ? {} : { unreadableModels: unreadable }),
   };
 }
+
+/**
+ * la forma de un catalogo guardado, para poder COMPROBARLA al leerlo.
+ *
+ * POR QUE VIVE AQUI Y NO EN EL CONTRATO IPC: el que habia alli estaba escrito y
+ * no se ejecutaba nunca —sus dos usos eran `z.infer`, o sea posiciones de
+ * tipo—, mientras el lector de disco hacia `JSON.parse(raw) as CatalogSnapshot`
+ * y se fiaba. Un archivo ilegible se trataba como ausente, pero uno con JSON
+ * valido y otra forma pasaba entero: `models` sin `apiModel`, o `models` que ni
+ * siquiera es una lista. Eso viajaba al renderer y tumbaba la ventana desde el
+ * arranque. Aqui esta al lado del tipo que describe, que es lo unico que impide
+ * que los dos se separen otra vez.
+ */
+export const catalogModelPriceSchema = z.object({
+  apiModel: z.string(),
+  ownedBy: z.string().nullable(),
+  billing: z.enum(BILLING_MODES),
+  modelRatio: z.number().nullable(),
+  completionRatio: z.number().nullable(),
+  perCall: z.number().nullable(),
+  groups: z.array(z.string()),
+  /** ausente en los catalogos guardados antes de que se leyeran las capacidades */
+  declaredCapabilities: z.array(z.string()).optional(),
+});
+
+export const pricingProbeSchema = z.object({
+  url: z.string(),
+  status: z.number().nullable(),
+  topLevelKeys: z.array(z.string()),
+  entryCount: z.number(),
+});
+
+export const catalogSnapshotSchema = z.object({
+  connectionId: z.string(),
+  /**
+   * un catalogo guardado antes de que existieran los dos origenes no lo lleva.
+   *
+   * Opcional y SIN valor por defecto a proposito: con un `.default('connection')`
+   * un archivo viejo de un proveedor HTTP se leeria como de `connections` y
+   * quedaria huerfano. Quien lo lee sabe cual pidio y rellena con ese.
+   */
+  source: z.enum(['connection', 'http']).optional(),
+  fetchedAt: z.string(),
+  models: z.array(catalogModelPriceSchema),
+  pricingAvailable: z.boolean(),
+  notice: z.string().nullable(),
+  /** que contesto cada ruta de precios probada */
+  pricingProbes: z.array(pricingProbeSchema).optional(),
+  /** filas de `/v1/models` que no se pudieron leer */
+  unreadableModels: z.number().int().min(0).optional(),
+});
 
 /** una linea que explica por que no hay precios, con lo que contesto cada ruta */
 export function describePricingProbes(probes: PricingProbe[]): string {

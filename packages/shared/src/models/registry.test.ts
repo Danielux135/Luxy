@@ -211,6 +211,83 @@ describe('catalogo inicial', () => {
 });
 
 // -----------------------------------------------------------------------------
+// catalogos que vienen de fuera
+//
+// POR QUE: el 2026-09-15 Luxy se quedo en negro porque un catalogo servido por
+// AI Horde traia dos ids iguales y esto lanzo dentro del render de
+// `ModelsPage`. Una id repetida en el catalogo escrito a mano SI es un fallo
+// nuestro y debe oirse; en uno servido por un tercero es un dato raro, y un
+// dato raro no puede costar la aplicacion. Lo decide quien llama.
+// -----------------------------------------------------------------------------
+describe('registro tolerante con un catalogo servido', () => {
+  const gemelo = modelDefinitionSchema.parse({
+    id: 'deepseek-v4-pro',
+    apiModel: 'otro-que-derivo-en-la-misma-id',
+    displayName: 'Gemelo',
+    family: 'deepseek',
+    connectionId: DEFAULT_CONNECTION_ID,
+    category: 'text',
+  });
+
+  it('por defecto sigue lanzando: ahi la id repetida es un fallo nuestro', () => {
+    expect(
+      () => new ModelRegistry({ connections: DEFAULT_CONNECTIONS, models: [...CATALOG, gemelo] }),
+    ).toThrow(ModelRegistryError);
+  });
+
+  it('con onConflict skip no lanza, conserva el primero y lo apunta', () => {
+    const registry = new ModelRegistry({
+      connections: DEFAULT_CONNECTIONS,
+      models: [...CATALOG, gemelo],
+      onConflict: 'skip',
+    });
+
+    expect(registry.list()).toHaveLength(CATALOG.length);
+    expect(registry.get('deepseek-v4-pro')?.apiModel).toBe('DeepSeek-V4-Pro');
+    expect(registry.conflicts).toEqual([
+      { kind: 'id', keptModelId: 'deepseek-v4-pro', droppedModelId: 'deepseek-v4-pro' },
+    ]);
+  });
+
+  it('un alias reclamado dos veces cuesta el alias, no el modelo', () => {
+    const ladron = modelDefinitionSchema.parse({
+      id: 'modelo-servido',
+      apiModel: 'modelo-servido',
+      displayName: 'Modelo servido',
+      family: 'deepseek',
+      connectionId: DEFAULT_CONNECTION_ID,
+      category: 'text',
+      telegramAliases: ['deepseek'],
+    });
+    const registry = new ModelRegistry({
+      connections: DEFAULT_CONNECTIONS,
+      models: [...CATALOG, ladron],
+      onConflict: 'skip',
+    });
+
+    expect(registry.get('modelo-servido')).not.toBeNull();
+    expect(registry.resolveAlias('deepseek')?.apiModel).toBe('DeepSeek-V4-Pro');
+    expect(registry.conflicts).toEqual([
+      {
+        kind: 'alias',
+        alias: 'deepseek',
+        keptModelId: 'deepseek-v4-pro',
+        droppedModelId: 'modelo-servido',
+      },
+    ]);
+  });
+
+  it('un catalogo sin repetidos no apunta ningun conflicto', () => {
+    const registry = new ModelRegistry({
+      connections: DEFAULT_CONNECTIONS,
+      models: CATALOG,
+      onConflict: 'skip',
+    });
+    expect(registry.conflicts).toEqual([]);
+  });
+});
+
+// -----------------------------------------------------------------------------
 // alias
 // -----------------------------------------------------------------------------
 describe('resolucion de alias', () => {
