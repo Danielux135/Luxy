@@ -1,5 +1,40 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-09-15 — Claude — quien ejecuta un modelo, y quien decide mandar una foto
+
+Dos trabajos, los dos salidos de que Daniel usara Luxy con sus conexiones
+nuevas. **Cuarenta y ocho hallazgos confirmados entre los dos.**
+
+**1. Quien ejecuta un modelo (`model-selection.ts`).** La sonda usaba la FAMILIA
+como proveedor y con los modelos de AI Horde leia «el proveedor "other" no esta
+disponible». El fallo ruidoso tapaba uno peor: **`ovh-nemo` sirve un modelo cuya
+familia adivinada es `mistral`, que aqui es otra pasarela con otra clave.**
+Resolver por familia lo mandaba a un endpoint que no lo tiene, pagando la
+llamada. Ahora cada modelo lleva de donde vino y uno servido por una conexion
+HTTP solo puede ejecutarse alli.
+
+El Laboratorio y el desplegable de Conversaciones tenian el mismo fallo y
+estaban rotos de verdad. El compositor de Privado no: ya miraba las dos vias.
+
+**2. La puerta de la imagen (`D-090`).** Dos imagenes que nadie pidio en una
+tarde. El bloque lo prohibia, pero **la prohibicion habia perdido el verbo** al
+partirse en dos con `D-086`, y la orden solo se imprimia en el camino donde no
+servia. La decision pasa al codigo, antes de llamar al modelo.
+
+**Lo que mas conviene recordar de esto:** la primera version de la puerta era
+mala y la revision lo MIDIO —36 de 90 formas de pedir una foto cerraban—. Sin
+esa medicion se habria entregado un cambio que convierte «me manda fotos que no
+pido» en «no me llegan las que pido», que es peor y mas dificil de notar.
+
+Nuevos: `vault-image-gate.ts` con su fixture y sus pruebas,
+`providers-command.test.ts`.
+
+`npm run check` exit 0: 183 archivos, 3665 pruebas, 12 saltadas.
+
+Y aparte, el techo de espera de AI Horde: una imagen murio con un worker
+dibujandola y 38 segundos declarados, porque el techo de veinte minutos vencia
+en ese instante. Ahora el techo se estira mientras alguien la dibuja.
+
 ### 2026-09-15 — Claude — la sonda con texto, y el catalogo que tumbaba Studio
 
 **Dos trabajos, los dos salidos de usar Luxy de verdad.**

@@ -2780,3 +2780,63 @@ cuatro conexiones de Daniel a AI Horde producian identificadores identicos y
 Y el `apiModel` no se toca nunca, ni se recorta: es lo que viaja a la pasarela.
 Si no cabe en el esquema sobra el modelo entero, porque un nombre recortado es
 pedir un modelo que no existe.
+
+## D-090 — la iniciativa de mandar una imagen sale del prompt y pasa al codigo
+
+Fecha: 2026-09-15. Autor: Claude. Origen: dos imagenes seguidas que Daniel no
+pidio, en la misma tarde.
+
+La primera tras «Tu descansa, Lia». El prompt que se mando al generador pedia
+«curled up in bed, eyes closed, peaceful expression»: **el modelo ilustro su
+frase**. La segunda tras «Se mi pequeña gatita entonces». Ninguna costo dinero
+—AI Horde es gratuito— pero cada una se llevo hasta 25 minutos de cola y el
+cierre de la escena.
+
+Lo raro es que el bloque lo prohibia con esas palabras: «un momento intenso,
+una promesa o **un buen final de escena** NO cuentan». La medicion explico por
+que no sirvio:
+
+- **la prohibicion habia perdido el verbo.** Hasta `42146e1` era «si no te la
+  han pedido, **no la mandes**». El arreglo de `D-086` la partio en dos, y el
+  camino que SI puede generar se quedo con una descripcion sin ninguna orden.
+  La frase con el verbo solo se imprimia en el camino que NO puede generar,
+  donde no sirve de nada;
+- lo que empuja a mandar ocupaba **2,79 veces** lo que frena;
+- la ultima frase de decision era «si dudas, **manda una**», y se imprimia
+  incluso sin ninguna imagen guardada, donde no hay ningun «cual» que elegir;
+- el bloque habia crecido **16,7 veces en trece dias** y era **tres veces mas
+  largo que todo lo que le dice quien es Lia y como comportarse junto**.
+
+Decision. **Mas texto no arregla esto**: seria el tercer golpe del pendulo —el
+bloque ya habia oscilado dos veces el mismo dia— y la instruccion que se salto
+describia su caso palabra por palabra. La decision sale del prompt:
+
+1. **una puerta en codigo, ANTES de llamar al modelo**, que decide si en este
+   turno se le OFRECE generar. Antes y no despues: vetar el bloque despues
+   significaria que Lia ya dijo «toma, mirame» y la foto no llega nunca, que es
+   la tercera forma de fallar que el propio bloque prohibe;
+2. **es TEMATICA, no gramatical**, y esa es la diferencia con `D-085`: alli
+   «hablamos» salia en cualquier turno y habia que leer la construccion; aqui no
+   se puede pedir una foto sin nombrarla. Alto alcance y baja precision a
+   proposito: no sustituye al prompt, le quita los turnos en los que el tema
+   nunca salio;
+3. **el camino de reenviar no se toca nunca**: es gratis e inmediato;
+4. y el camino cerrado, que ya existia, **recupera la frase con el verbo** y se
+   salta las instrucciones de como escribir el prompt: 5.789 -> 2.195
+   caracteres. Un solo booleano devuelve el freno y adelgaza el turno.
+
+El riesgo que esto introduce es el contrario, y es peor: que Daniel pida una
+foto y no le llegue. **La primera version lo tenia, y medido: 36 de 90 formas
+reales de pedir una foto cerraban la puerta** —incluidas «te hago una» y «te
+saco una», o sea `D-086` roto, y 16 de cada 30 formas de aceptar una que ella
+ofrecia—. De ahi la regla de trabajo: **el lexico solo se amplia cuando falla
+una frase que tenia que ABRIR, nunca al reves**, y ninguna frase del fixture se
+retoca para que pase.
+
+Cuando la puerta se equivoca, degrada bien: Lia dice que ahora no puede mandar
+una nueva, Daniel lo pide nombrandolo y al turno siguiente se abre. El fallo
+contrario —prometer una foto que no llega— no se recupera.
+
+Pendiente y dicho: el diagnostico en cifras que cruzaria cada mensaje real con
+las generaciones de la boveda. Es lo que mediria cuantas de las 21 generaciones
+reales habria cerrado la puerta, antes de fiarse de ella.

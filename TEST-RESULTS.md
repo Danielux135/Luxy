@@ -1,5 +1,29 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-15 — proveedores, puerta de la imagen y techo del horde
+
+`npm run check` exit 0.
+
+```
+Test Files  183 passed (183)
+     Tests   3665 passed | 12 skipped
+```
+
+La prueba que mas vale de todo esto es el **fixture de la puerta**: noventa
+formas reales de pedir o hacer una foto, con el estilo de Daniel —«q», «pq»,
+sin tildes, accion entre asteriscos—, cada una con lo que TIENE que pasar. La
+primera version del arreglo fallaba 36; sin el fixture habrian pasado a
+produccion. Regla del fixture: **una frase no se retoca nunca para que pase**;
+se amplia el lexico.
+
+Comprobado ademas a mano, contra el modulo compilado, con las dos frases reales
+que fallaron el 2026-09-15: las dos cierran. Y abren «te saco una foto mientras
+duermes», «mandame una», «quiero verte asi», «enseñamelo», «otra porfa» con una
+foto de por medio, y «si porfa» cuando ella la ofrece.
+
+**Sin ver en pantalla.** Nada de esto se ha ejecutado con Studio delante.
+
+
 ### 2026-09-15 — sonda con texto y contencion del catalogo
 
 `npm run check` exit 0.
