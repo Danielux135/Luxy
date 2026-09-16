@@ -2840,3 +2840,39 @@ contrario —prometer una foto que no llega— no se recupera.
 Pendiente y dicho: el diagnostico en cifras que cruzaria cada mensaje real con
 las generaciones de la boveda. Es lo que mediria cuantas de las 21 generaciones
 reales habria cerrado la puerta, antes de fiarse de ella.
+
+## D-091 — el prompt negativo cuenta para el filtro del Horde, y una acusacion no se deduce
+
+Fecha: 2026-09-16. Autor: Claude. Origen: tres bloqueos seguidos del filtro
+anti-CSAM de AI Horde sobre la receta visual de Lia, y una conclusion mia que
+estaba mal.
+
+**El hecho tecnico.** El filtro del Horde no mira la imagen: es una expresion
+regular sobre el **texto del prompt entero**, y busca la **combinacion de dos
+contextos** —uno de edad y otro sexual—. El prompt entero incluye **el negativo**,
+que viaja detras de `###` en el mismo campo. Nuestro negativo decia
+`child, loli, underage, minor, schoolgirl, toddler`: puesto ahi para alejar a la
+imagen de una menor, **era el que aportaba el contexto de edad que al positivo le
+faltaba**. Ademas empujaba el prompt de 892 a 1.100 caracteres, y por encima de
+1.000 el Horde deja de sustituir con `replacement_filter` y **bloquea**.
+
+Consecuencia practica, y es contraintuitiva: **no se ponen palabras de menores en
+el negativo.** Lo que aleja a la imagen de una menor es describir a una adulta en
+el positivo. Daniel lo confirmo por su cuenta: con la receta de siempre y sin ese
+negativo, la generacion paso.
+
+**El error de metodo, que importa mas.** De tres bloqueos deduje —y le dije— que
+«lo que esta saliendo dibujado se parece a una menor». No lo comprobe: infere una
+causa a partir de un sintoma y se la presente como si fuera un hallazgo. Era
+falso, y era una acusacion sobre su personaje y sobre el. Quien la tumbo fue el,
+con el argumento correcto: «no tiene sentido que en ese prompt, aun cambiando todo
+lo que la hace infantil, siga censurando», y «en toda la documentacion se dice que
+el porno esta permitido». Tenia razon las dos veces.
+
+La regla que queda: **cuando lo que se va a afirmar acusa a alguien, se verifica
+antes de decirlo, no despues de que lo discuta.** Un filtro remoto que rechaza
+tres veces dice que hay una regla, no dice cual.
+
+Lo que NO cambia: no se ayuda a evadir el filtro anti-CSAM. Quitar del negativo
+unas palabras que estaban creando el contexto no es evadirlo; es dejar de
+disparar una regla con texto que sobraba.

@@ -1,5 +1,28 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-16 — encuadre de la imagen y direccion de la promesa
+
+`npm run check` exit 0.
+
+```
+Test Files  183 passed (183)
+     Tests   3670 passed | 12 skipped
+```
+
+Pruebas nuevas en `vault-image-request.test.ts` (las frases de encuadre se
+traducen; «a camara» no mete una camara en la escena) y en `vault-prompt.test.ts`
+(las tres direcciones de una promesa).
+
+**Una prueba preexistente freno un cambio**, y es la parte util del dia: al
+reescribir el aviso del encuadre cambie de paso una frase sobre describir la
+escena desde donde esta el usuario, que otra prueba afirmaba literal. Se restauro
+tal cual.
+
+**Sin ver en pantalla.** Lo del encuadre solo se puede dar por bueno cuando Daniel
+pida una foto con encuadre y salga bien; hasta entonces esta implementado, no
+verificado. Lo de las promesas SI lo confirmo el en uso real el 2026-09-15.
+
+
 ### 2026-09-15 — proveedores, puerta de la imagen y techo del horde
 
 `npm run check` exit 0.

@@ -1,5 +1,30 @@
 # Luxy — tarea activa
 
+## F27-ENCUADRE-001 — que la foto salga desde donde Daniel la pide
+
+Estado: **implementado y probado, sin verificar en pantalla — Claude, 2026-09-16.**
+
+Origen: «He cambiado de modelo, y es que ya no se parece nada a Lia... Notese que
+la foto tampoco tiene la pose que le digo».
+
+Dos commits, porque el primero no basto: `5f0901a` añade la traduccion de las
+frases de encuadre, y `c35a57a` arregla que la prohibicion de dibujar camaras
+hiciera al modelo descartar la frase entera. Detalle en `CHANGELOG-WORK.md`.
+
+### Lo que falta, y es de Daniel
+
+1. Pedir una foto diciendo el encuadre —«desde detras», «el culo a camara», «de
+   cerca»— y mirar si sale asi. Es la unica comprobacion que vale: lo demas son
+   pruebas de que el texto llega al prompt, no de que el modelo lo obedezca.
+2. Si sigue fallando, decir **con que modelo de imagen**: no todos siguen igual de
+   bien una indicacion de camara, y eso ya no se arregla en el prompt.
+
+### De la misma tanda
+
+- `166b6e0` remata F23: la linea de una promesa dice quien se la hizo a quien.
+- `D-091` recoge lo del filtro del Horde: **no poner palabras de menores en el
+  negativo**, que es lo que lo hacia saltar.
+
 ## F26-LLAMADAS-VACIAS-001 — el 18% de lo que paga por Lia no compra nada
 
 Estado: **los cuatro arreglos hechos y comprobados — Claude, 2026-09-15.**

@@ -1,5 +1,46 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-09-16 — Claude — el encuadre que se pide, y la receta visual de Lia
+
+Tres arreglos pequeños en la boveda, todos salidos de que Daniel usara Luxy y
+viera el fallo en pantalla.
+
+**1. La linea de una promesa dice las DOS puntas (`166b6e0`).** `whoPromised`
+devolvia solo quien la hizo, asi que «te lo prometio» no decia a quien. Ahora
+distingue las tres formas: el a ella, ella a el, o los dos. Es el remate de F23,
+que Daniel ya habia confirmado funcionando: «me ha dicho la ultima promesa que me
+hizo».
+
+**2. El encuadre que pide el usuario llega a la imagen (`5f0901a`).** Daniel pedia
+«desde detras» o «el culo a camara» y la foto salia de frente. El bloque de
+instrucciones no traducia ninguna de esas frases, asi que el modelo las perdia al
+escribir el prompt en ingles. Se añadio la tabla de equivalencias —desde detras,
+de espaldas, mirando a camara, de cerca, cuerpo entero, desde arriba/abajo/de
+lado— con una regla por delante: **si el usuario dice el encuadre, ESO MANDA**.
+
+**3. «A camara» dice hacia donde mira, no nombra un aparato (`c35a57a`).** El
+arreglo anterior se comio a si mismo. El bloque prohibia tajantemente dibujar una
+camara, y con esa prohibicion delante el modelo **descartaba la frase entera de
+Daniel** —y con ella el encuadre que acababamos de enseñarle a traducir—. Ahora la
+prohibicion es una aclaracion: «a camara» no nombra un objeto, traduce la
+direccion y no pongas la camara.
+
+Los dos avisos del encuadre van condensados en uno: el guardian de 6.500
+caracteres del bloque de imagen freno la primera version, y se condenso en vez de
+subir el limite. El bloque ya era tres veces mas largo que todo lo que describe a
+Lia (`D-090`); ampliarlo era ir en la direccion contraria.
+
+**Y lo que conviene que conste, que no es codigo (`D-091`).** El filtro anti-CSAM
+del Horde bloqueo la receta visual tres veces. Afirme sin comprobarlo que el
+filtro miraba la imagen, y **deduje de los tres bloqueos que lo dibujado se
+parecia a una menor**. Era falso. El filtro es una regex sobre el **texto**, y
+**nuestro propio negativo** —`child, loli, underage, minor...`— era el que ponia
+el contexto de edad que hacia saltar la regla, ademas de cruzar los 1.000
+caracteres que activan el bloqueo en vez de la sustitucion. Lo tumbo Daniel
+razonando, no yo verificando; eso es lo que hay que cambiar.
+
+`npm run check` exit 0: 183 archivos, 3670 pruebas, 12 saltadas.
+
 ### 2026-09-15 — Claude — quien ejecuta un modelo, y quien decide mandar una foto
 
 Dos trabajos, los dos salidos de que Daniel usara Luxy con sus conexiones
