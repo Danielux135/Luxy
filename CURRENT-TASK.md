@@ -22,8 +22,9 @@ hiciera al modelo descartar la frase entera. Detalle en `CHANGELOG-WORK.md`.
 ### De la misma tanda
 
 - `166b6e0` remata F23: la linea de una promesa dice quien se la hizo a quien.
-- `D-091` recoge lo del filtro del Horde: **no poner palabras de menores en el
-  negativo**, que es lo que lo hacia saltar.
+- `D-091` **se reescribio entera el mismo dia**: su primera version culpaba al prompt
+  negativo y era falsa. El filtro que bloquea puntua **la imagen ya dibujada**, en el
+  worker. Queda pendiente el hueco de instrumentacion que describe al final.
 
 ## F26-LLAMADAS-VACIAS-001 — el 18% de lo que paga por Lia no compra nada
 

@@ -10,12 +10,18 @@ que **lo que pide el usuario manda**: si lo dice, es lo único que hay que
 obedecer. «A cámara» se entiende como una dirección de la mirada, no como un
 aparato que haya que dibujar.
 
-Aparte, y sin tocar código: el filtro anti-CSAM de AI Horde bloqueaba la receta
-visual de Lía. **La causa era nuestro propio prompt negativo** —`child, loli,
-underage, minor...`—, que aportaba el contexto de edad que el filtro busca y
-empujaba el texto por encima de los 1.000 caracteres a partir de los cuales el
-Horde bloquea en vez de sustituir. Está en `D-091`, con la regla que queda: **no
-se ponen palabras de menores en el negativo**.
+Aparte, y sin tocar código: se entendió por fin por qué el filtro anti-CSAM de AI
+Horde bloquea unas veces sí y otras no **la misma petición**. Hay **dos**
+comprobaciones, y la que bloquea **puntúa la imagen ya dibujada**, en el worker, no
+el texto. Por eso el mismo prompt da resultados distintos: la imagen no es la misma.
+Su propio autor documenta que da falsos positivos con estilo anime.
+
+`D-091` **se reescribió entera**: su primera versión, escrita ese mismo día, culpaba
+al prompt negativo y a un umbral de 1.000 caracteres. Las dos cosas eran falsas —el
+filtro de texto descarta el negativo antes de mirarlo, y el umbral real son 7.000—.
+Queda un hueco de instrumentación concreto y accionable: Luxy distingue `csam` de
+`censored`, que significan cosas opuestas, pero los aplana en un error genérico y
+tira el worker, así que **un bloqueo no deja rastro de cuál de los dos fue**.
 
 Las dos cosas están implementadas y probadas; **lo del encuadre no se ha visto en
 pantalla todavía** y sólo lo confirma una foto real de Daniel.

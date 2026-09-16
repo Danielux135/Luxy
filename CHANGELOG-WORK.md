@@ -31,13 +31,19 @@ subir el limite. El bloque ya era tres veces mas largo que todo lo que describe 
 Lia (`D-090`); ampliarlo era ir en la direccion contraria.
 
 **Y lo que conviene que conste, que no es codigo (`D-091`).** El filtro anti-CSAM
-del Horde bloqueo la receta visual tres veces. Afirme sin comprobarlo que el
-filtro miraba la imagen, y **deduje de los tres bloqueos que lo dibujado se
-parecia a una menor**. Era falso. El filtro es una regex sobre el **texto**, y
-**nuestro propio negativo** —`child, loli, underage, minor...`— era el que ponia
-el contexto de edad que hacia saltar la regla, ademas de cruzar los 1.000
-caracteres que activan el bloqueo en vez de la sustitucion. Lo tumbo Daniel
-razonando, no yo verificando; eso es lo que hay que cambiar.
+del Horde bloqueo la receta visual tres veces, y **se explico mal tres veces**.
+Primero: que lo dibujado se parecia a una menor —deducido de tres sintomas, falso,
+y ademas una acusacion—. Luego: que la culpa era de nuestro prompt negativo, que
+es lo que decia la primera version de `D-091`. Y por ultimo: que el umbral de
+1.000 caracteres lo activaba. **Ninguna de las tres estaba comprobada, y las tres
+eran falsas.**
+
+Lo que hizo falta para cerrarlo fue una frase de Daniel —«exactamente el mismo
+prompt, otra vez denegada»— y veinticuatro agentes leyendo el codigo publico del
+Horde. El veredicto lo dicta un clasificador que puntua **la imagen ya dibujada**,
+en el worker; por eso el mismo texto da resultados distintos. `D-091` esta
+reescrita entera con las fuentes verificadas, y `docs/IMAGENES-GRATIS.md`
+corregido: decia que el filtro «no depende del worker», y depende.
 
 `npm run check` exit 0: 183 archivos, 3670 pruebas, 12 saltadas.
 

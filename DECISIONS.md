@@ -2841,38 +2841,87 @@ Pendiente y dicho: el diagnostico en cifras que cruzaria cada mensaje real con
 las generaciones de la boveda. Es lo que mediria cuantas de las 21 generaciones
 reales habria cerrado la puerta, antes de fiarse de ella.
 
-## D-091 — el prompt negativo cuenta para el filtro del Horde, y una acusacion no se deduce
+## D-091 — el filtro del Horde puntua la IMAGEN, no el texto; y una causa no se deduce
 
-Fecha: 2026-09-16. Autor: Claude. Origen: tres bloqueos seguidos del filtro
-anti-CSAM de AI Horde sobre la receta visual de Lia, y una conclusion mia que
-estaba mal.
+Fecha: 2026-09-16. Autor: Claude. **Reescrita entera el mismo dia**: la primera version
+de esta decision afirmaba una causa falsa. Lo que sigue esta verificado contra el codigo
+publico de Haidra-Org y contra este repositorio; lo anterior no lo estaba.
 
-**El hecho tecnico.** El filtro del Horde no mira la imagen: es una expresion
-regular sobre el **texto del prompt entero**, y busca la **combinacion de dos
-contextos** —uno de edad y otro sexual—. El prompt entero incluye **el negativo**,
-que viaja detras de `###` en el mismo campo. Nuestro negativo decia
-`child, loli, underage, minor, schoolgirl, toddler`: puesto ahi para alejar a la
-imagen de una menor, **era el que aportaba el contexto de edad que al positivo le
-faltaba**. Ademas empujaba el prompt de 892 a 1.100 caracteres, y por encima de
-1.000 el Horde deja de sustituir con `replacement_filter` y **bloquea**.
+### Lo que se retiro, y por que
 
-Consecuencia practica, y es contraintuitiva: **no se ponen palabras de menores en
-el negativo.** Lo que aleja a la imagen de una menor es describir a una adulta en
-el positivo. Daniel lo confirmo por su cuenta: con la receta de siempre y sin ese
-negativo, la generacion paso.
+La version del commit `bc0a557` decia que el filtro anti-CSAM del Horde era una expresion
+regular sobre el texto del prompt entero, que **nuestro propio negativo** —`child, loli,
+underage, minor...`— aportaba el contexto de edad que lo hacia saltar, y que por encima de
+1.000 caracteres bloqueaba en vez de sustituir. **Las cuatro afirmaciones centrales eran
+falsas.** Las tumbo un analisis con veinticuatro agentes despues de que Daniel dijera lo
+unico que hacia falta: «exactamente el mismo prompt, otra vez denegada».
 
-**El error de metodo, que importa mas.** De tres bloqueos deduje —y le dije— que
-«lo que esta saliendo dibujado se parece a una menor». No lo comprobe: infere una
-causa a partir de un sintoma y se la presente como si fuera un hallazgo. Era
-falso, y era una acusacion sobre su personaje y sobre el. Quien la tumbo fue el,
-con el argumento correcto: «no tiene sentido que en ese prompt, aun cambiando todo
-lo que la hace infantil, siga censurando», y «en toda la documentacion se dice que
-el porno esta permitido». Tenia razon las dos veces.
+- **Hay dos filtros, no uno.** El que devuelve `censorship: csam` puntua la **imagen ya
+  dibujada**, en el worker (`safety_process.py:206-231`). No mira el texto al encolar.
+- **La regex del servidor descarta el negativo antes de mirarlo**
+  (`horde/detection.py:128-130`). O sea que el filtro de texto **ni siquiera lee** el campo
+  al que se culpo.
+- **La cronologia desmiente la culpa del negativo**: esas palabras no estaban en los dos
+  primeros bloqueos —el bloque las introdujo el asistente DESPUES del primero— y **si
+  estaban en una generacion que salio bien**. Ademas, en el repositorio no existe ninguna
+  lista negativa con terminos de menores: el unico commit que los mete en un archivo
+  versionado es el propio `bc0a557`, o sea esta decision.
+- **El umbral de 1.000 caracteres no existe.** El limite vivo en el codigo del Horde es
+  `len(prompt) <= 7000`, excluye el negativo, y pasarse lanza un error de longitud, no un
+  bloqueo por contenido (`horde/detection.py:294-299`). El 1.000 salia de una FAQ desfasada
+  (`FAQ.md:150-152`) y, muy probablemente, del limite del proveedor de pago
+  (`xavira.ts:346-347`). Hay prompts reales de 1.108 y 1.230 caracteres generados sin
+  incidencia el 2026-09-09.
 
-La regla que queda: **cuando lo que se va a afirmar acusa a alguien, se verifica
-antes de decirlo, no despues de que lo discuta.** Un filtro remoto que rechaza
-tres veces dice que hay una regla, no dice cual.
+### Lo que explica de verdad la inconsistencia
 
-Lo que NO cambia: no se ayuda a evadir el filtro anti-CSAM. Quitar del negativo
-unas palabras que estaban creando el contexto no es evadirlo; es dejar de
-disparar una regla con texto que sobraba.
+Si el veredicto lo dicta un clasificador que puntua **la imagen generada**, el mismo texto
+puede dar veredictos distintos sin ninguna contradiccion: la entrada del clasificador no es
+la cadena, es un mapa de pixeles que cambia con la semilla efectiva, el modelo, el sampler,
+la maquina y la version del comprobador. Una regex no puede dar dos veredictos sobre la
+misma cadena; un clasificador con umbrales, y una puntuacion cerca del umbral, si.
+
+Encaja con lo que el propio autor del filtro documenta: **da falsos positivos con estilo
+anime**. No hace falta que lo dibujado se parezca a nada para que salte.
+
+**Prediccion comprobable**, que es como habria que haber presentado esto desde el principio:
+si es cierto, un bloqueo llega DESPUES de una ronda completa de sondeos, con worker
+asignado. Si el veredicto fuera sobre el texto, llegaria en segundos, como HTTP 400 con
+`rc: CorruptPrompt`, sin pasar por la cola.
+
+### Lo que se sostiene de la version anterior
+
+- El **hecho estructural** de que el negativo viaja dentro del campo `prompt`, detras de
+  ` ### ` (`vault-image-provider.ts:292-296`, `horde.ts:570-573`). Es cierto; lo que era
+  falso es la consecuencia que se le colgo.
+- **El apartado del error de metodo, entero**, que el desenlace refuerza en vez de
+  debilitar. Aquella version ya escribio «un filtro remoto que rechaza tres veces dice que
+  hay una regla, no dice cual», y acto seguido dedujo cual. **El mismo error se repitio dos
+  veces mas el mismo dia**: se le dijo a Daniel que el bloqueo venia de los 1.000
+  caracteres, y luego que lo disparaba la combinacion de `petite` con lo explicito. Ninguna
+  de las dos estaba comprobada.
+- **No se ayuda a evadir el filtro anti-CSAM.** Esto no cambia, y ahora ademas es mas facil
+  de sostener: si el veredicto es sobre la imagen, no hay redaccion que «arreglar».
+
+### Lo que se retira como consejo practico
+
+«No se ponen palabras de menores en el negativo» **no lo sostiene el codigo**: de ese campo
+el comprobador del worker solo lee terminos que NIEGAN la adultez (`mature`, `old`, `adult`,
+`elderly`, `middle aged`), que bajan sus umbrales. Poner `child` en el negativo no hace
+saltar nada.
+
+### El hueco de instrumentacion, que es lo unico accionable
+
+Luxy **ya distingue** `csam` de `censored` (`horde.ts:686-711`) y significan cosas opuestas:
+el segundo es un worker con censura propia y su propia pista dice que se repita para que lo
+coja otro. Pero `handlers.ts:3146` **aplana los dos** en un `VaultError` generico, y
+`toResult` (`horde.ts:292-307`) tira el worker. El catch de `handlers.ts:3145-3148` es mudo.
+Resultado: **un bloqueo no deja rastro de cual de los dos fue**, y por eso hubo que
+reconstruir tres semanas de sintomas a mano.
+
+Relacionado y tambien roto: el mapa de errores por `rc` (`horde.ts:365-409`) no tiene
+entrada para un rechazo de contenido, asi que un 400 o un 403 del Horde cae en el caso por
+defecto y muestra la pista **falsa** «comprueba la clave en Conexiones».
+
+La conclusion operativa, y la unica solida: **un bloqueo suelto del Horde no es informacion
+fiable sobre lo que se dibujo.**

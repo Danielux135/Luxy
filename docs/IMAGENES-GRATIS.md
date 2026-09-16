@@ -268,12 +268,22 @@ les parece dudoso.
 
 ## Qué prohíbe la red
 
-AI Horde tiene un **filtro anti-CSAM** propio, en el servidor. No es opcional, no
-depende del worker y no depende de Luxy.
+AI Horde tiene **dos** comprobaciones anti-CSAM, y confundirlas cuesta semanas de
+diagnóstico (ver `D-091`):
 
-Si salta, la respuesta trae `censorship: csam`. Luxy **lo dice tal cual y no
-reintenta**: no es un fallo técnico y repetir la petición no lo arregla, sólo
-vuelve a llamar a la puerta del mismo filtro.
+- una **sobre el texto**, en el servidor, al encolar. Descarta el negativo antes de
+  mirarlo y sólo se ocupa del positivo;
+- otra **sobre la imagen ya dibujada**, en el worker, que es la que devuelve
+  `censorship: csam`. Ésta **sí depende del worker** que atienda la petición, y de la
+  versión del comprobador que tenga puesta.
+
+Que la segunda puntúe píxeles y no palabras tiene una consecuencia que desconcierta:
+**el mismo prompt puede pasar una vez y caer la siguiente**, porque la imagen no es la
+misma. Y su propio autor documenta que **da falsos positivos con estilo anime**.
+
+Si salta, Luxy **lo dice tal cual y no reintenta**. Ojo con no confundirlo con
+`censored`, que es otra cosa: ahí el worker aplicó su censura propia y repetir la
+petición para que la coja otro es exactamente lo indicado.
 
 El resto de las normas de contenido son las de la red y las de cada worker, no las
 de Luxy.
