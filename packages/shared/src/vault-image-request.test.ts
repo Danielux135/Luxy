@@ -1022,7 +1022,7 @@ describe('el encuadre que pide el usuario', () => {
   });
 
   it('trae la traduccion de los encuadres que se piden de verdad', () => {
-    for (const encuadre of ['from behind', 'rear view', 'close-up', 'full body', 'from below']) {
+    for (const encuadre of ['from behind', 'close-up', 'full body', 'from above/below/the side']) {
       expect(bloque).toContain(encuadre);
     }
   });
@@ -1032,5 +1032,17 @@ describe('el encuadre que pide el usuario', () => {
     // es que reabran la puerta que D-064 cerro, y por eso se comprueba aqui
     expect(bloque).toContain('Nada de camaras');
     expect(bloque).toContain('Ni siquiera en negativo');
+  });
+
+  it('distingue la camara OBJETO de «a camara», que es hacia donde mira', () => {
+    // PASO DE VERDAD (2026-09-16): «el culo mirando a camara, sigue a cuatro
+    // patas» salio de frente. La prohibicion de la camara es tan tajante que el
+    // modelo tiraba la frase entera y perdia el encuadre, que era lo unico
+    // pedido. En español «a camara» dice la direccion, no nombra un aparato.
+    expect(bloque).toContain('NO nombran un objeto');
+    expect(bloque).toContain('looking at viewer');
+    expect(bloque).toContain('facing away');
+    // y la traduccion no puede reintroducir el aparato por la puerta de atras
+    expect(bloque).toContain('no pongas la camara');
   });
 });

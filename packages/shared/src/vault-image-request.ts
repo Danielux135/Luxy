@@ -430,16 +430,17 @@ export function buildVaultImageInstruction(
     '- Nada de camaras, moviles, espejos, selfies ni el acto de fotografiar, aunque el usuario haya',
     '  dicho «mandame una foto» o aunque la foto la este haciendo el. Eso pone una camara en la',
     '  imagen. Ni siquiera en negativo: «not looking at camera» tambien la dibuja.',
-    // PASO DE VERDAD (2026-09-16): Daniel pidio la foto «desde detras» tres
-    // veces seguidas, ella lo narro bien en su respuesta —«apoyando las manos y
-    // rodillas en la cama, mirando hacia la pared»— y las tres imagenes
-    // salieron de frente. El encuadre solo traia dos ejemplos y ninguno era ese,
-    // y sobre todo: no habia UNA linea que dijera que lo que el pide manda.
-    '- Si el usuario dice desde donde quiere la foto o en que postura, ESO MANDA y va en el',
-    '  prompt: es lo unico que te ha pedido explicitamente. «desde detras» es «from behind» o',
-    '  «rear view»; «de espaldas» es «from behind, facing away»; y lo mismo con «de cerca»',
-    '  («close-up»), «de cuerpo entero» («full body»), «desde arriba» («from above»), «desde',
-    '  abajo» («from below»), «de lado» («from the side»).',
+    // PASO DE VERDAD (2026-09-16), dos veces el mismo dia. Daniel pidio la foto
+    // «desde detras» tres veces y salio de frente; luego «el culo mirando a
+    // camara» y salio de frente otra vez. Faltaban las dos mitades: que lo que
+    // el pide MANDA —solo habia dos ejemplos de encuadre y ninguno era el suyo—
+    // y que «a camara» no nombra un aparato, dice hacia donde mira, asi que la
+    // prohibicion de la linea de arriba se llevaba por delante la frase entera.
+    '- Si el usuario dice desde donde la quiere o en que postura, ESO MANDA: es lo unico que ha',
+    '  pedido. «desde detras» y «el culo a camara» son «from behind»; «de espaldas», «from behind,',
+    '  facing away»; «mirando a camara», «looking at viewer»; «de cerca», «close-up»; «de cuerpo',
+    '  entero», «full body»; «desde arriba/abajo/de lado», «from above/below/the side». «A camara»',
+    '  NO nombran un objeto: traduce la direccion y no pongas la camara.',
     '- Si no lo dice y la foto la hace el, describe la escena tal como se ve desde donde esta el.',
     '  Si estas dormida o no te das cuenta, dilo con «eyes closed», «asleep» o «looking away».',
     '- Solo lo que se ve: pose, ropa, expresion, luz, lugar. Sin dialogo, sin lo que siente, sin',
