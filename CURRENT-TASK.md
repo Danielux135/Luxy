@@ -1,5 +1,53 @@
 # Luxy — tarea activa
 
+## F28-PLAN-IMAGEN-001 — ver y corregir el prompt antes de que se genere
+
+Estado: **implementado, revisado y corregido; sin ver en pantalla — Claude,
+2026-09-16.** Decision en `D-092`.
+
+Origen: «Prepara lo de ver y corregir el prompt antes de generar».
+
+Con el interruptor del personaje en «siempre», el turno termina sin generar y deja
+el plan pendiente; Daniel lo ve, lo corrige y decide. Con «nunca», todo funciona
+exactamente como antes. Cada intento queda apuntado cifrado, **tambien los que
+fallan**, con el `rc` del Horde, la semilla y el worker.
+
+### Lo que falta, y es de Daniel
+
+1. **Abrirlo y usarlo.** Nada de esto se ha visto en pantalla. Pedir una foto,
+   mirar el texto que sale, corregirlo y generar.
+2. Comprobar que con el interruptor en «nunca» la conversacion va como siempre.
+3. Cuando el Horde vuelva a rechazar una, **mirar lo que se mando** y decir que
+   `rc` sale: `csam` (el clasificador de la imagen) o `censored` (un worker con
+   censura propia, y entonces repetir SI tiene sentido). Esa distincion es la que
+   `D-091` no pudo hacer en tres semanas.
+4. Abrir un archivo de `vault/image-attempts/` con el bloc de notas y confirmar
+   que no se entiende nada.
+
+## IDEA-KUDOS-001 — ganar kudos valorando imagenes, dentro de Studio
+
+Estado: **apuntada, sin investigar — 2026-09-16.** Pedida por Daniel a mitad de
+otra tarea: «valorar imagenes y etc da kudos al parecer, me gustaria un sitio
+donde poder valorar al menos las imagenes que genero y ganar un poco de kudos».
+
+Por que importa: cada imagen cuesta kudos y cada LoRA suma +3. Con la cuenta
+anonima la espera es larga porque la prioridad va por kudos. Si valorar da
+kudos, es la unica via gratuita de subir la prioridad sin pagar ni donar
+potencia.
+
+Lo que hay que averiguar ANTES de disenar nada, y sin darlo por sabido:
+
+1. Si el Horde sigue dando kudos por valorar, cuanto, y por que via exacta
+   (hubo una API de valoracion propia; puede estar retirada o haber cambiado).
+2. Si se pueden valorar **las imagenes propias** o solo las de la cola comun.
+   Esto decide la funcion entera: Daniel pidio «al menos las que genero».
+3. Si hace falta cuenta registrada, y si la clave anonima queda excluida.
+4. Si valorar imagenes ajenas implicaria ensenarle contenido de terceros dentro
+   de Privado, que es una boveda cifrada. Si fuera asi, va en otra pantalla.
+
+Cuidado con el precedente de `D-091`: no dar por cierto como funciona sin leer
+la fuente. Lo de arriba son preguntas, no hallazgos.
+
 ## F27-ENCUADRE-001 — que la foto salga desde donde Daniel la pide
 
 Estado: **implementado y probado, sin verificar en pantalla — Claude, 2026-09-16.**

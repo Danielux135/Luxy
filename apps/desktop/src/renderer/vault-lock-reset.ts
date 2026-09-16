@@ -48,6 +48,20 @@ export const DECRYPTED_RENDERER_STATE = [
   'recapPreview',
   /** lo que escribio cada modelo en la sonda: hasta 120.000 caracteres de roleplay */
   'compatibility',
+  /**
+   * el plan de imagen que espera decision: es el texto EXACTO que saldria hacia
+   * el proveedor —apariencia, ropa y la escena que ella escribio—, descifrado y
+   * colgado de la ventana hasta que alguien pulse. En disco vive cifrado con la
+   * subclave de su conversacion, asi que dejarlo aqui tras cerrar la boveda
+   * seria la unica copia en claro que sobrevive al candado.
+   */
+  'pendingImagePlan',
+  /**
+   * el intento que se este mirando: el mismo texto que el pendiente, solo que
+   * ya mandado. Es lo que enseñan «ver lo que se mando» y el visor de un medio,
+   * y por eso tiene que irse con el candado igual que el que espera decision.
+   */
+  'openImageAttempt',
 ] as const;
 
 export type DecryptedRendererState = (typeof DECRYPTED_RENDERER_STATE)[number];

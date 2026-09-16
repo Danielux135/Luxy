@@ -35,10 +35,15 @@ import type { ConfigSummary } from '../useConfig.js';
 import {
   formatAutoLockOption,
   formatLockCountdown,
+  imageCostOutcome,
+  imageOriginSnapshot,
+  pendingImageCard,
   type CompatibilityResult,
+  type ImageOrigin,
   type VaultCharacterView,
   type VaultController,
 } from '../useVault.js';
+import { ImagePlanPanel } from './vault/ImagePlanPanel.js';
 import { imageBlockReason } from '../../shared/vault-image-capability.js';
 import { describeQueue, type HordeQueueProgress } from '../../shared/horde-progress.js';
 import {
@@ -52,6 +57,7 @@ import {
 import {
   HORDE_ANIME_MODELS,
   HORDE_REALISTIC_MODELS,
+  IMAGE_ATTEMPT_STATE_LABELS,
   MAX_CAPTION_CHARS,
   describeConversationMemoryStatus,
   describeHordeCharacter,
@@ -60,9 +66,11 @@ import {
   mixedBaselineWarning,
   qualityPrefixWarning,
   recipeDefaultsFor,
+  splitJoinedPrompt,
   type HordeBaseline,
   type HordeLora,
   type HordeRecipe,
+  type ImageAttempt,
   type LocalCliProvider,
   type ModelDefinition,
   type ReasoningEffort,
@@ -225,6 +233,17 @@ function ConversationPanel({
   models: ModelDefinition[];
 }): JSX.Element {
   const projects = Object.keys(summary.config?.projects ?? {});
+  // qué intento se está revisando; `null` es «ninguno». El panel NO se abre solo
+  // encima de una escena en marcha: aparece la tarjeta y se mira cuando se
+  // quiera. Un modal automático a mitad de conversación es lo que hace que una
+  // función así se apague a la semana
+  const [reviewingAttempt, setReviewingAttempt] = useState<string | null>(null);
+  // la tarjeta de lo que quedó esperando, que NO depende de `lastImage`: ver
+  // `pendingImageCard`
+  const pendingCard = pendingImageCard({
+    lastImage: vault.lastImage,
+    pendingImagePlan: vault.pendingImagePlan,
+  });
   // el compositor vive en el controlador, no aquí: esta página se desmonta al
   // cambiar de pestaña y con ella se perdía el proveedor elegido y todo lo
   // escrito sin enviar
@@ -336,7 +355,36 @@ function ConversationPanel({
         />
       )}
 
-      {vault.lastImage !== null && <ImageOutcome image={vault.lastImage} />}
+      {vault.lastImage !== null && (
+        <ImageOutcome
+          vault={vault}
+          image={vault.lastImage}
+          onReview={setReviewingAttempt}
+        />
+      )}
+
+      {/* y lo que quedó esperando, venga del turno de ahora o del registro
+          cifrado. `lastImage` es estado de esta ventana y se pierde al cambiar
+          de conversación o al cerrar Studio; el plan sigue guardado. Sin esta
+          tarjeta no había forma de llegar al panel —el único botón que lo abre
+          está dentro— y el pendiente quedaba inalcanzable: ni verlo, ni
+          generarlo, ni descartarlo */}
+      {pendingCard !== null && (
+        <ImageOutcome vault={vault} image={pendingCard} onReview={setReviewingAttempt} />
+      )}
+
+      {/* y el panel SOLO cuando se ha pedido mirar ese intento en concreto. Se
+          compara el identificador y no un booleano porque el pendiente cambia
+          al cambiar de conversacion: con un booleano, abrir otro hilo habria
+          desplegado encima el plan del nuevo sin que nadie lo pidiera */}
+      {vault.pendingImagePlan !== null &&
+        vault.pendingImagePlan.attemptId === reviewingAttempt && (
+          <ImagePlanPanel
+            vault={vault}
+            attempt={vault.pendingImagePlan}
+            onClose={() => setReviewingAttempt(null)}
+          />
+        )}
 
       {vault.lastMemoryStatus !== null && vault.lastMemoryStatus !== 'structured' && (
         <Notice tone="warn">
@@ -779,6 +827,237 @@ function MediaKeyPanel({ vault }: { vault: VaultController }): JSX.Element {
 }
 
 /**
+ * qué pasó con la imagen del último turno.
+ *
+ * Cinco finales distintos y ninguno se puede pintar como otro: esperando una
+ * decisión, el bloque llegó roto, falló el proveedor, se reenvió una que ya
+ * había, o se generó. Los dos primeros son nuevos y antes eran invisibles —un
+ * pendiente no tiene error ni coste, así que caía en «te ha reenviado una que ya
+ * tenía», y un bloque cortado salía igual que un turno en el que no pidió nada—.
+ *
+ * `image.error` se pinta tal cual, así que ahí NUNCA va el texto del prompt: eso
+ * sería escribir contenido de la bóveda dentro de un mensaje de error. Lo que se
+ * mandó se lee aparte, del registro cifrado, y sólo si se pide.
+ */
+function ImageOutcome({
+  vault,
+  image,
+  onReview,
+}: {
+  vault: VaultController;
+  image: NonNullable<VaultController['lastImage']>;
+  /** abre el panel de revisión de ese intento */
+  onReview: (attemptId: string) => void;
+}): JSX.Element {
+  if (image.state === 'pending') {
+    // el plan del hilo NO se guarda en `lastImage`: se lee de `pendingImagePlan`,
+    // que sí desaparece al cerrarse la bóveda. Si el registro no llegó a abrir,
+    // no hay nada que enseñar y se dice, en vez de un botón que no hace nada
+    const pending =
+      vault.pendingImagePlan !== null && vault.pendingImagePlan.attemptId === image.attemptId
+        ? vault.pendingImagePlan
+        : null;
+    return (
+      <Notice tone="warn">
+        Te ofreció una foto y está esperando: el texto ya está compuesto y no ha
+        salido de este equipo. Nada se ha generado y nada se ha cobrado.{' '}
+        {pending === null ? (
+          'No se ha podido leer del registro; vuelve a abrir la conversación.'
+        ) : (
+          <button className="btn btn--quiet" onClick={() => onReview(pending.attemptId)}>
+            Ver lo que se va a mandar
+          </button>
+        )}
+      </Notice>
+    );
+  }
+  if (image.state === 'malformed') {
+    // hasta ahora esto no se veia: `parseVaultImageRequest` ya devolvia el
+    // motivo y no lo leia nadie, asi que una respuesta cortada a mitad del
+    // bloque era indistinguible de un turno en el que no pidio ninguna foto
+    return (
+      <Notice tone="warn">
+        {image.error ?? 'Intentó mandarte una imagen y el bloque no se pudo leer'}. La
+        respuesta de texto sí se ha guardado; pídesela otra vez y la escribirá
+        entera.
+      </Notice>
+    );
+  }
+  if (image.error !== null) {
+    return (
+      <Notice tone="fault">
+        Se pidió una imagen y no pudo generarse: {image.error}. La respuesta de
+        texto sí se ha guardado.
+        {image.attemptId !== null && (
+          <SentPlanDetails vault={vault} attemptId={image.attemptId} />
+        )}
+      </Notice>
+    );
+  }
+  // reenviar una que ya existía no cuesta créditos, y decirlo importa: es la
+  // diferencia entre pagar por una foto nueva y volver a enseñar la de antes.
+  // El reenvío NO se reconoce por el precio vacío —una generación cuyo precio
+  // calla el servidor también lo trae—, sino por `imageCostOutcome`
+  const cost = imageCostOutcome({
+    costCredits: image.costCredits,
+    costUnit: image.costUnit,
+  });
+  if (cost.kind === 'resent') {
+    return (
+      <Notice tone="ok">
+        Te ha reenviado una imagen que ya tenía, sin gastar créditos. Está abajo,
+        con el resto de archivos.
+      </Notice>
+    );
+  }
+  // los kudos NO son créditos: no se compran y no se gastan en euros. Llamarlos
+  // igual en una pantalla donde el otro proveedor cobra de verdad se lee como
+  // que la opción gratis está cobrando
+  if (cost.unit === 'kudos') {
+    return (
+      <Notice tone="ok">
+        Imagen generada y cifrada en esta conversación ·{' '}
+        {cost.amount === null
+          ? 'el servidor no dijo cuántos kudos costó'
+          : `${cost.amount} kudos, que no son dinero: sólo tu puesto en la cola`}
+        . Aparece abajo, con el resto de archivos.
+      </Notice>
+    );
+  }
+  return (
+    <Notice tone="ok">
+      Imagen generada y cifrada en esta conversación ·{' '}
+      {cost.amount === null ? 'sin precio declarado' : `${cost.amount} créditos`}
+      . Aparece abajo, con el resto de archivos.
+    </Notice>
+  );
+}
+
+/**
+ * lo que se mandó de verdad, para un intento que ya terminó.
+ *
+ * Plegado y de solo lectura: es lo que contesta «¿por qué me la censuraron?» sin
+ * volver a poner delante de los ojos el texto de una escena cada vez que se pasa
+ * por el hilo. Se lee del registro cifrado EN CADA apertura porque el hueco del
+ * controlador es uno solo —el visor de un archivo usa el mismo—, así que lo que
+ * hubiera dentro puede ser ya de otra imagen.
+ */
+function SentPlanDetails({
+  vault,
+  attemptId,
+}: {
+  vault: VaultController;
+  attemptId: string;
+}): JSX.Element {
+  const [open, setOpen] = useState(false);
+  // `null` mientras no se sabe; `true` cuando el registro contestó que ese
+  // intento ya no está. Distinguirlo del «todavía cargando» es lo que evita
+  // pintar «no está» durante el descifrado
+  const [missing, setMissing] = useState<boolean | null>(null);
+  // la función, no el controlador: es lo único estable entre renderizados, y
+  // leer el intento cambia el estado del controlador
+  const { readImageAttempt } = vault;
+  const attempt =
+    vault.openImageAttempt !== null && vault.openImageAttempt.attemptId === attemptId
+      ? vault.openImageAttempt
+      : null;
+
+  useEffect(() => {
+    // el hueco del controlador es UNO: abrir un archivo en el visor lo ocupa
+    // con otro intento. Mientras esto esté desplegado se vuelve a pedir el
+    // suyo, salvo que el registro ya haya dicho que no está —eso no cambia
+    // por preguntarlo otra vez, y preguntarlo otra vez no acabaría nunca—
+    if (!open || attempt !== null || missing === true) return;
+    let cancelled = false;
+    void readImageAttempt(attemptId).then((ok) => {
+      if (!cancelled) setMissing(!ok);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, attempt, missing, attemptId, readImageAttempt]);
+
+  return (
+    <details
+      className="vault-generate"
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+    >
+      <summary>Ver lo que se mandó</summary>
+      {attempt !== null ? (
+        <AttemptReadout attempt={attempt} />
+      ) : missing === true ? (
+        <p className="field__hint">
+          Ese intento ya no está en el registro: de cada conversación se guardan
+          sólo los últimos.
+        </p>
+      ) : (
+        <Skeleton rows={2} />
+      )}
+    </details>
+  );
+}
+
+/**
+ * un intento del registro, entero.
+ *
+ * Es historia y no se corrige. El texto va detrás de los datos a propósito: para
+ * diagnosticar, lo primero que hace falta es el motivo del servidor —`csam` no
+ * es lo mismo que `censored`: uno lo decide el propio AI Horde después de
+ * generar y el otro el worker que atendió la petición—.
+ */
+function AttemptReadout({ attempt }: { attempt: ImageAttempt }): JSX.Element {
+  const plan = attempt.plan;
+  const partido =
+    plan !== null && plan.provider === 'horde' ? splitJoinedPrompt(plan.joined) : null;
+
+  return (
+    <>
+      <Readout
+        items={[
+          { label: 'Estado', value: IMAGE_ATTEMPT_STATE_LABELS[attempt.state] },
+          {
+            label: 'Texto',
+            value: attempt.source === 'editado' ? 'escrito a mano' : 'compuesto por Luxy',
+            tone: attempt.source === 'editado' ? 'warn' : undefined,
+          },
+          { label: 'Semilla', value: attempt.seed ?? 'no llegó a saberse' },
+          { label: 'Worker', value: attempt.worker ?? '—' },
+          { label: 'Modelo', value: attempt.model ?? '—' },
+          ...(attempt.rc === null
+            ? []
+            : [{ label: 'Motivo del servidor', value: attempt.rc, tone: 'fault' as const }]),
+        ]}
+      />
+      {attempt.errorMessage !== null && (
+        <p className="field__hint">{attempt.errorMessage}</p>
+      )}
+      {attempt.warnings.map((warning) => (
+        <p key={warning.code} className="field__hint">
+          <Tag tone="warn">{warning.code}</Tag> {warning.message}
+        </p>
+      ))}
+      {partido !== null && (
+        <>
+          <p className="vault-media__prompt">{partido.positive}</p>
+          {partido.negative !== null && (
+            <p className="vault-media__prompt">Negativo: {partido.negative}</p>
+          )}
+        </>
+      )}
+      {plan !== null && plan.provider === 'xavira' && (
+        <p className="vault-media__prompt">{plan.prompt}</p>
+      )}
+      {plan === null && (
+        <p className="field__hint">
+          Este intento no llegó a componer ningún texto, así que no hay nada que
+          leer aquí.
+        </p>
+      )}
+    </>
+  );
+}
+
+/**
  * instrucciones fijas de la conversacion.
  *
  * Acompañan a cada turno sin que haya que rescribirlas, y sin depender de que
@@ -790,49 +1069,6 @@ function MediaKeyPanel({ vault }: { vault: VaultController }): JSX.Element {
  * guardadas. Vaciarlas y enviar SI las borra, que es la unica forma de volver
  * atras una vez puestas.
  */
-function ImageOutcome({
-  image,
-}: {
-  image: NonNullable<VaultController['lastImage']>;
-}): JSX.Element {
-  if (image.error !== null) {
-    return (
-      <Notice tone="fault">
-        Se pidió una imagen y no pudo generarse: {image.error}. La respuesta de
-        texto sí se ha guardado.
-      </Notice>
-    );
-  }
-  // reenviar una que ya existía no cuesta créditos, y decirlo importa: es la
-  // diferencia entre pagar por una foto nueva y volver a enseñar la de antes
-  if (image.costCredits === null) {
-    return (
-      <Notice tone="ok">
-        Te ha reenviado una imagen que ya tenía, sin gastar créditos. Está abajo,
-        con el resto de archivos.
-      </Notice>
-    );
-  }
-  // los kudos NO son créditos: no se compran y no se gastan en euros. Llamarlos
-  // igual en una pantalla donde el otro proveedor cobra de verdad se lee como
-  // que la opción gratis está cobrando
-  if (image.costUnit === 'kudos') {
-    return (
-      <Notice tone="ok">
-        Imagen generada y cifrada en esta conversación · {image.costCredits}{' '}
-        kudos, que no son dinero: sólo tu puesto en la cola. Aparece abajo, con
-        el resto de archivos.
-      </Notice>
-    );
-  }
-  return (
-    <Notice tone="ok">
-      Imagen generada y cifrada en esta conversación · {image.costCredits}{' '}
-      créditos. Aparece abajo, con el resto de archivos.
-    </Notice>
-  );
-}
-
 function InstructionsPanel({
   vault,
   draft,
@@ -1417,6 +1653,30 @@ function CharacterRow({
           <option value="xavira">Fotos: Xavira</option>
         </select>
       )}
+
+      {/* va por PERSONAJE y no por máquina: pararse a leer el texto en cada foto
+          tiene sentido con quien sale raro y estorba con quien sale bien. Nace
+          puesto, y quitarlo devuelve el comportamiento de antes en una pulsación */}
+      <label className="check">
+        <input
+          type="checkbox"
+          checked={character.imageReview === 'siempre'}
+          onChange={(event) =>
+            void vault.setCharacterImageReview(
+              character.characterId,
+              event.target.checked ? 'siempre' : 'nunca',
+            )
+          }
+        />
+        <span>
+          Revisar el prompt antes de generar
+          <small>
+            {character.imageReview === 'siempre'
+              ? 'la foto que ofrezca espera a que la mires; nada se genera ni se cobra hasta entonces'
+              : 'se genera de una vez, sin enseñarte antes lo que sale hacia el proveedor'}
+          </small>
+        </span>
+      </label>
 
       {active ? (
         <Tag tone="ok">en uso</Tag>
@@ -2982,6 +3242,89 @@ function GalleryEntry({
 }
 
 /**
+ * de donde salio este archivo, en solo lectura.
+ *
+ * Lo que se PIDIO no es lo que se VE, y verlos juntos es justo lo que explica
+ * una imagen que no salio como se esperaba. Dos cosas cambian respecto a la
+ * linea de antes:
+ *
+ * - el prompt se parte por su separador. AI Horde no tiene campo de negativo y
+ *   lo lee del propio texto, asi que en disco los dos estan pegados; leidos de
+ *   una pieza, lo que se pidio y lo que se prohibio parecian lo mismo.
+ * - si el medio trae intento, se leen del registro cifrado la SEMILLA que uso de
+ *   verdad y el worker que lo dibujo. Ninguna de las dos esta guardada con el
+ *   archivo, y sin ellas «la misma semilla me da caras distintas» no se puede ni
+ *   empezar a mirar —la receta suele no fijar semilla, asi que el servidor
+ *   sortea una en cada generacion—.
+ *
+ * Es historia: no se corrige nada de aqui.
+ */
+function MediaOrigin({
+  item,
+  vault,
+}: {
+  item: VaultController['media'][number];
+  vault: VaultController;
+}): JSX.Element | null {
+  const attemptId = item.attemptId;
+  // la FUNCION, no el controlador entero: el controlador es un objeto nuevo en
+  // cada renderizado, y leer el intento cambia su estado. Con `vault` en las
+  // dependencias, cada lectura provocaria otra lectura y el bucle no pararia
+  const { readImageAttempt } = vault;
+
+  // lo poco que se pinta aquí, copiado en cuanto se lee: el hueco del
+  // controlador es UNO y el desplegable «Ver lo que se mandó» de un fallo vuelve
+  // a pedir el suyo en cuanto se lo quitan. Ver `imageOriginSnapshot`
+  const [origin, setOrigin] = useState<ImageOrigin | null>(null);
+  const shared = vault.openImageAttempt;
+
+  useEffect(() => {
+    // solo cuando hay algo que leer: descifrar el registro para un archivo
+    // adjuntado a mano no devolveria nada
+    if (attemptId === null) return;
+    void readImageAttempt(attemptId);
+  }, [attemptId, readImageAttempt]);
+
+  useEffect(() => {
+    setOrigin((previous) => imageOriginSnapshot(previous, { attemptId, shared }));
+  }, [attemptId, shared]);
+
+  const prompt = item.prompt;
+  if ((prompt === null || prompt.length === 0) && origin === null) return null;
+  const partido = prompt === null || prompt.length === 0 ? null : splitJoinedPrompt(prompt);
+
+  return (
+    <>
+      {partido !== null && (
+        <p className="vault-media__prompt">
+          Se pidió al generarla: «{partido.positive}»
+          {/* y QUIEN la dibujo. Con varios modelos en la receta la coge el
+              que esté libre, y cada uno da otra cara: sin esto, dos imágenes
+              de la misma semilla salen distintas y no hay por dónde empezar */}
+          {item.model !== null && item.model.length > 0 && (
+            <>
+              {' · la dibujó '}
+              <strong>{item.model}</strong>
+            </>
+          )}
+        </p>
+      )}
+      {partido !== null && partido.negative !== null && (
+        <p className="vault-media__prompt">Y se pidió evitar: «{partido.negative}»</p>
+      )}
+      {origin !== null && (origin.seed !== null || origin.worker !== null) && (
+        <Readout
+          items={[
+            { label: 'Semilla', value: origin.seed ?? 'no la devolvió' },
+            { label: 'Worker', value: origin.worker ?? 'no lo devolvió' },
+          ]}
+        />
+      )}
+    </>
+  );
+}
+
+/**
  * el archivo abierto a tamaño completo, con todo lo que se puede hacer con el.
  *
  * Va sobre la pantalla y no dentro de la rejilla porque corregir un pie de foto
@@ -3114,23 +3457,7 @@ function MediaViewer({
           </Notice>
         )}
 
-        {item.prompt !== null && item.prompt.length > 0 && (
-          /* lo que se PIDIO no es lo que se VE: verlos juntos es justo lo que
-             explica una imagen que no salio como se esperaba. Es historia, y por
-             eso se enseña en pequeño y no se puede corregir */
-          <p className="vault-media__prompt">
-            Se pidió al generarla: «{item.prompt}»
-            {/* y QUIEN la dibujo. Con varios modelos en la receta la coge el
-                que esté libre, y cada uno da otra cara: sin esto, dos imágenes
-                de la misma semilla salen distintas y no hay por dónde empezar */}
-            {item.model !== null && item.model.length > 0 && (
-              <>
-                {' · la dibujó '}
-                <strong>{item.model}</strong>
-              </>
-            )}
-          </p>
-        )}
+        <MediaOrigin item={item} vault={vault} />
 
         {editing ? (
           <div className="vault-caption-edit">

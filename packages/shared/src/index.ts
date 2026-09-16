@@ -9,6 +9,8 @@ export * from './vault-prompt.js';
 export * from './vault-image-request.js';
 export * from './vault-image-gate.js';
 export * from './vault-image-provider.js';
+export * from './vault-image-plan.js';
+export * from './vault-image-plan-policy.js';
 export * from './vault-describe.js';
 export * from './temporal-reference.js';
 export * from './auxiliary-target.js';

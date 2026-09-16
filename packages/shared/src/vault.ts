@@ -229,6 +229,13 @@ export type ShareGrant = z.infer<typeof shareGrantSchema>;
  * Esta se puede ejecutar, y la ejecutan tanto el escritorio antes de enviar
  * como el gateway antes de aceptar: si un campo prohibido aparece, se rechaza
  * el registro entero en vez de guardarlo "solo esta vez".
+ *
+ * La lista casa por nombre EXACTO de clave, asi que crece cuando aparece una
+ * forma nueva de llamar al mismo contenido. El plan de imagen partio `prompt`
+ * en varios nombres —el positivo, el negativo, el texto unido que sale hacia el
+ * proveedor, la escena que escribio el modelo, lo que el recorte automatico le
+ * quito y el negativo que se anade en Xavira—, y ninguno de ellos lo habria
+ * detectado un guardian que solo conoce `prompt`.
  */
 export const FORBIDDEN_PLAINTEXT_FIELDS = [
   'prompt',
@@ -243,6 +250,13 @@ export const FORBIDDEN_PLAINTEXT_FIELDS = [
   'outputUrl',
   'characterId',
   'characterName',
+  // los nombres que usa el plan de imagen. Todos llevan texto de la boveda
+  'positive',
+  'negative',
+  'joined',
+  'scene',
+  'negativeAppend',
+  'dropped',
 ] as const;
 
 /** true si el valor tiene la forma de un sobre ya sellado */
@@ -270,6 +284,10 @@ export function findPlaintextLeaks(payload: unknown, path = ''): string[] {
     if ((FORBIDDEN_PLAINTEXT_FIELDS as readonly string[]).includes(key)) {
       // un campo prohibido con valor nulo o vacio no es una fuga: no lleva nada
       if (value === null || value === undefined || value === '') continue;
+      // y una lista vacia esta igual de vacia. Hace falta desde que la lista
+      // incluye `dropped`, que es un array: sin esto, un plan que no recorto
+      // nada se rechazaria por llevar exactamente cero palabras.
+      if (Array.isArray(value) && value.length === 0) continue;
       // ni lo es si ya viene cifrado. Lo que importa es el contenido, no como
       // se llame el campo: `title` con un sobre dentro es exactamente lo que
       // queremos que ocurra, no lo que queremos impedir.

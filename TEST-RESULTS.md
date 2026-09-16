@@ -1,5 +1,39 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-16 (tarde) — el plan de imagen, revisado antes de generar
+
+`npm run check` exit 0.
+
+```
+Test Files  189 passed (189)
+     Tests   3863 passed | 12 skipped
+```
+
+**Lo que estas pruebas NO cubren, y hay que saberlo:** en este repositorio el
+renderer no se puede montar —vitest corre en `node`, sin testing-library—, asi que
+los arreglos de la interfaz sacaron la decision a funciones puras
+(`pendingImageCard`, `windowAfterImageCommit`, `imageOriginSnapshot`,
+`imageCostOutcome`) que si estan probadas, pero **el cableado JSX no lo cubre
+ninguna prueba**. Quien borre el bloque `{pendingCard !== null && ...}` de
+`Vault.tsx` reintroduce entero el unico defecto clasificado como «rompe» **con la
+suite en verde**. Lo dejo escrito porque es el punto ciego de esta tanda.
+
+Menores conocidos y no corregidos, todos con su sitio apuntado:
+
+- el cerrojo contra la doble pulsacion impide el doble cobro, pero deja un aviso
+  rojo permanente si se pulsa dos veces: el arreglo se ve como un fallo;
+- `vault-image-plan.test.ts:29` es tautologica desde que `buildHordeRequest` pasa
+  por el plan: compara el plan consigo mismo. Vale de centinela, no de prueba;
+- `imageAttemptSchema.conversationId` admite `min(1).max(128)` mientras el almacen
+  exige un uuid estricto, porque el id es el nombre del archivo;
+- `vault-image-request.ts:149` vuelve a partir por `' ### '` a mano en vez de usar
+  `splitJoinedPrompt`, que existe justo para eso.
+
+**Sin ver en pantalla.** Los once puntos de comprobacion manual del plan siguen
+pendientes, incluido abrir un archivo de `vault/image-attempts/` con un editor
+para confirmar que no se lee nada.
+
+
 ### 2026-09-16 — encuadre de la imagen y direccion de la promesa
 
 `npm run check` exit 0.

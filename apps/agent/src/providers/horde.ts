@@ -238,7 +238,16 @@ export interface HordeProgress {
   finished: number;
   waitTimeSeconds: number;
   queuePosition: number;
-  kudos: number;
+  /**
+   * `null` cuando el estado no trajo precio, que NO es lo mismo que cero.
+   *
+   * Es el mismo criterio que `HordeSubmission.kudos`, y aqui importa mas: este
+   * es el numero que acaba en `costCredits` y en el campo `kudos` del intento
+   * cifrado, o sea el que se lee en el hilo. Un 0 inventado no se distingue de
+   * un precio real, y el resto de contadores pueden caer a 0 sin mentir
+   * —`waiting: 0` es una cola vacia— pero un coste de cero no existe.
+   */
+  kudos: number | null;
 }
 
 export interface HordeGeneration {
@@ -257,7 +266,20 @@ export interface HordeResult extends HordeProgress {
 
 export interface HordeSubmission {
   id: string;
-  kudos: number;
+  /**
+   * `null` cuando el servidor no dijo el precio, que NO es lo mismo que cero.
+   *
+   * Ninguna generacion cuesta cero kudos, asi que devolver 0 en vez del silencio
+   * seria enseñar un precio inventado justo en la pantalla que existe para
+   * saber lo que va a costar antes de pulsar.
+   */
+  kudos: number | null;
+  warnings: { code: string; message: string }[];
+}
+
+/** lo que contesta una peticion en seco: el precio y lo que el servidor objeta */
+export interface HordeEstimate {
+  kudos: number | null;
   warnings: { code: string; message: string }[];
 }
 
@@ -285,7 +307,8 @@ function toProgress(raw: z.infer<typeof progressSchema>): HordeProgress {
     finished: raw.finished ?? 0,
     waitTimeSeconds: raw.wait_time ?? 0,
     queuePosition: raw.queue_position ?? 0,
-    kudos: raw.kudos ?? 0,
+    // el silencio se conserva como silencio: ver `HordeProgress.kudos`
+    kudos: raw.kudos ?? null,
   };
 }
 
@@ -660,7 +683,7 @@ export async function submitImage(
     throw new HordeError('AI Horde acepto la peticion sin devolver su identificador');
   }
 
-  return { id: parsed.data.id ?? '', kudos: parsed.data.kudos ?? 0, warnings };
+  return { id: parsed.data.id ?? '', kudos: parsed.data.kudos ?? null, warnings };
 }
 
 /**
@@ -911,13 +934,18 @@ async function pollImage(
  *
  * `dry_run` recorre el mismo camino de validacion y devuelve el precio, pero no
  * encola trabajo para ningun worker.
+ *
+ * Devuelve TAMBIEN los avisos, que es la mitad util de una peticion en seco: el
+ * precio dice lo que cuesta y los avisos dicen por que va a tardar —«ningun
+ * worker sirve ese modelo»— o donde acaba la imagen. Quedarse solo con el numero
+ * tiraba lo segundo, que es lo unico que el dry run puede adelantar de verdad.
  */
 export async function estimateKudos(
   request: HordeImageRequest,
   options: HordeOptions,
-): Promise<number> {
+): Promise<HordeEstimate> {
   const submission = await submitImage({ ...request, dryRun: true }, options);
-  return submission.kudos;
+  return { kudos: submission.kudos, warnings: submission.warnings };
 }
 
 /**

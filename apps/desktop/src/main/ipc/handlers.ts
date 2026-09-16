@@ -32,7 +32,20 @@ import {
   CATALOG_MAX_TURNS,
   isPathInside,
   VAULT_IMAGE_NEGATIVE,
-  buildHordeRequest,
+  composeHordeImagePlan,
+  composeXaviraImagePlan,
+  imageAttemptSchema,
+  planFromEdit,
+  planToHordeRequest,
+  vaultImagePlanSchema,
+  type HordeImagePlan,
+  type ImageAttempt,
+  type ImageAttemptWarning,
+  type VaultImageAttemptState,
+  type VaultImageMalformedReason,
+  type VaultImagePlan,
+  type VaultImagePlanEdit,
+  type VaultImagePlanSource,
   DESCRIBE_MAX_OUTPUT_TOKENS,
   buildDescribePrompt,
   buildRewriteCaptionPrompt,
@@ -41,7 +54,6 @@ import {
   splitReasoning,
   trimWithMark,
   imagePromptStyleFor,
-  type HordeRecipe,
   resolveAuxiliaryTarget,
   chooseConversationMemory,
   recapCoverage,
@@ -97,6 +109,10 @@ import {
   vaultMediaListArgsSchema,
   vaultMediaReadArgsSchema,
   vaultMediaGenerateArgsSchema,
+  vaultImageAttemptsArgsSchema,
+  vaultImageCommitArgsSchema,
+  vaultImageEstimateArgsSchema,
+  vaultImagePendingArgsSchema,
   vaultMediaCaptionArgsSchema,
   vaultMediaDescribeArgsSchema,
   vaultMediaRewriteCaptionArgsSchema,
@@ -118,6 +134,7 @@ import {
   vaultHordeKeyArgsSchema,
   vaultHordeCharacterSaveArgsSchema,
   vaultCharacterProviderArgsSchema,
+  vaultCharacterImageReviewArgsSchema,
   vaultDeviceUnlockSetArgsSchema,
   vaultPasswordArgsSchema,
   vaultUnlockArgsSchema,
@@ -134,7 +151,7 @@ import {
 import type { SecretStore } from '../secure-storage.js';
 import { VaultError, type VaultService } from '../vault/vault-service.js';
 import type { VaultAccountManager } from '../vault/account-manager.js';
-import type { VaultCharacterStore } from '../vault/character-store.js';
+import type { VaultCharacter, VaultCharacterStore } from '../vault/character-store.js';
 import type { PrivateConversationStore } from '../vault/conversation-store.js';
 import type { PrivateMediaStore } from '../vault/media-store.js';
 import { syncVault } from '../vault/sync.js';
@@ -145,6 +162,7 @@ import {
   VAULT_HORDE_API_SECRET,
   VAULT_MEDIA_API_SECRET,
   connectionSecretName,
+  type VaultImageTurnState,
 } from '../../shared/ipc.js';
 import {
   XaviraError,
@@ -160,6 +178,7 @@ import {
   HordeError,
   awaitImage,
   downloadImage,
+  estimateKudos,
   findUser,
   isAnonymousKey,
   listImageModels,
@@ -191,6 +210,7 @@ import type { MemoryPreferences } from '../vault/memory-preferences.js';
 import type { CatalogStore } from '../vault/catalog-store.js';
 import type { RelationStore } from '../vault/relation-store.js';
 import type { RecapStore } from '../vault/recap-store.js';
+import type { ImageAttemptPatch, ImageAttemptStore } from '../vault/image-attempt-store.js';
 import { RelationSync, createAuxiliaryLane } from '../vault/relation-sync.js';
 import { RecapSync } from '../vault/recap-sync.js';
 import {
@@ -227,6 +247,50 @@ function imageBlockMessage(reason: ImageBlockReason, provider: 'xavira' | 'horde
       return provider === 'horde'
         ? 'falta la clave de AI Horde: se saca gratis en aihorde.net y se guarda en Privado, en «Proveedor de imagenes»'
         : 'falta la clave del proveedor de imagenes en Conexiones';
+  }
+}
+
+/**
+ * por que ya no se puede decidir sobre ese intento.
+ *
+ * Cada estado tiene su frase porque cada uno se arregla de una manera
+ * distinta, y porque un «no se puede» a secas sobre una imagen que ella ofrecio
+ * hace media hora no dice si se mando, si se tiro o si dejo de valer. El unico
+ * que no es un error del usuario es `superseded`: ahi el sistema decidio por el
+ * cuando llego un mensaje nuevo, y hay que decirlo con esas palabras.
+ */
+function settledAttemptMessage(state: VaultImageAttemptState): {
+  message: string;
+  hint: string | null;
+} {
+  switch (state) {
+    case 'superseded':
+      return {
+        message: 'esa peticion de imagen dejo de valer al mandar un mensaje nuevo',
+        hint: 'pidesela otra vez en la conversacion y decide sobre la nueva',
+      };
+    case 'discarded':
+      return { message: 'esa imagen ya se descarto', hint: null };
+    case 'sent':
+      return {
+        message: 'esa imagen ya se mando al proveedor',
+        hint: 'espera a que termine antes de volver a pulsar',
+      };
+    case 'ok':
+      return { message: 'esa imagen ya se genero', hint: null };
+    case 'failed':
+      return {
+        message: 'ese intento ya se mando y fallo',
+        hint: 'pidesela otra vez: un intento fallido no se reenvia, se compone uno nuevo',
+      };
+    case 'malformed':
+      return {
+        message: 'ese intento no llego a componer ningun texto',
+        hint: 'el bloque de imagen llego cortado o mal escrito; pidesela otra vez',
+      };
+    case 'pending':
+      // no lo alcanza nadie: es el unico estado sobre el que SI se decide
+      return { message: 'esa imagen sigue esperando decision', hint: null };
   }
 }
 
@@ -281,6 +345,14 @@ export interface HandlerContext {
    * propia, porque la sellada gana siempre.
    */
   recaps: RecapStore;
+  /**
+   * lo que se mando —o se iba a mandar— al proveedor de imagenes, cifrado.
+   *
+   * Un archivo por conversacion y bajo la subclave de ESA conversacion, porque
+   * dentro hay texto verbatim de escena: la misma sensibilidad que sus turnos,
+   * no la de un resumen derivado. Por eso se borra con ella.
+   */
+  imageAttempts: ImageAttemptStore;
   /** imagenes y videos privados, cifrados en disco */
   privateMedia: PrivateMediaStore;
   /** raiz de los artefactos generados; se abre, nunca se sirve por HTTP */
@@ -1146,8 +1218,15 @@ export function registerIpcHandlers(context: HandlerContext): void {
       await intentar(() =>
         context.relations.removeConversation(context.vault, args.conversationId),
       );
+      // y el registro de intentos de imagen, que es el unico de los cuatro con
+      // texto VERBATIM de escena dentro: el prompt tal cual salio hacia el
+      // proveedor. Sin esto sobreviviria cifrado y huerfano —no hay fila desde
+      // la que borrarlo— a la conversacion que lo produjo
+      await intentar(() =>
+        context.imageAttempts.removeConversation(context.vault, args.conversationId),
+      );
     } finally {
-      // pase lo que pase con los tres almacenes. El indice guarda los turnos ya
+      // pase lo que pase con los cuatro almacenes. El indice guarda los turnos ya
       // DESCIFRADOS: si un almacen se para en seco —el de pendientes lo hace a
       // proposito cuando su archivo no abre— y esto quedara fuera, la
       // conversacion ya no estaria en disco pero el personaje podria seguir
@@ -2097,6 +2176,9 @@ export function registerIpcHandlers(context: HandlerContext): void {
       // asi que dos imagenes de la misma semilla salian distintas sin que
       // hubiera forma de saber por que
       model: item.metadata.model,
+      // el enlace con su intento en el registro cifrado: es de donde salen la
+      // semilla que uso de verdad y el worker que la dibujo, que aqui no estan
+      attemptId: item.metadata.attemptId ?? null,
     }));
   };
 
@@ -2840,6 +2922,14 @@ export function registerIpcHandlers(context: HandlerContext): void {
     }
     const characterId = existing?.characterId ?? randomUUID();
     const characters = await context.characters.add(context.vault, {
+      // SE PARTE DE LO QUE YA ESTABA, igual que los verbos de proveedor y de
+      // revision. Reconstruir el personaje campo a campo dejaba fuera todo lo
+      // que no estuviera en esta lista, y `add()` hace `parse()`: un campo con
+      // `.default()` no se conserva, RENACE con su valor por defecto. Le pasaba
+      // a `imageReview`, que volvia a 'siempre' cada vez que se corregia la
+      // receta —en silencio, sin error y deshaciendo lo que el usuario acababa
+      // de elegir—. Los campos de abajo siguen mandando sobre este reparto.
+      ...existing,
       characterId,
       // estrenar el aspecto lo activa; corregirlo despues NO cambia de quien
       // vienen las fotos, que es una decision aparte y del usuario
@@ -2900,6 +2990,39 @@ export function registerIpcHandlers(context: HandlerContext): void {
         imageProvider: args.provider,
       });
       context.log('proveedor de imagen cambiado', { proveedor: args.provider });
+      return { characters };
+    },
+  );
+
+  /**
+   * decide si ese personaje enseña el texto de la imagen antes de generarla.
+   *
+   * Es lo unico que hace, igual que el verbo del proveedor: ni la receta, ni el
+   * nombre, ni el avatar, ni el `characterId`. Y aqui NO se exige nada del
+   * destino —a diferencia del proveedor, donde poner `horde` sin receta dejaba
+   * al personaje sin poder generar—, porque revisar un texto se puede hacer
+   * siempre: es una decision sobre cuando se para, no sobre con que se genera.
+   *
+   * Devuelve la lista entera ya actualizada para que la pantalla no tenga que
+   * volver a pedirla y quedarse un instante enseñando el valor viejo.
+   */
+  handle(
+    IPC_INVOKE.vaultCharacterImageReview,
+    vaultCharacterImageReviewArgsSchema,
+    async (args) => {
+      if (!context.vault.isUnlocked()) throw new VaultError('la boveda esta bloqueada');
+
+      const existing = (await context.characters.list(context.vault)).find(
+        (entry) => entry.characterId === args.characterId,
+      );
+      if (existing === undefined) throw new VaultError('ese personaje no esta en la boveda');
+
+      const characters = await context.characters.add(context.vault, {
+        ...existing,
+        imageReview: args.review,
+      });
+      // la decision, y nada mas: ni quien es el personaje ni que se iba a pedir
+      context.log('revision del prompt de imagen cambiada', { revision: args.review });
       return { characters };
     },
   );
@@ -3000,11 +3123,145 @@ export function registerIpcHandlers(context: HandlerContext): void {
     return Buffer.from(bytes).toString('base64');
   };
 
+  /**
+   * compone el texto exacto que va a salir hacia el proveedor.
+   *
+   * Se compone UNA vez, aqui, y lo que se enseña, lo que se apunta en el
+   * registro y lo que viaja son el mismo valor. Antes esto vivia dentro del
+   * envio y moria con la llamada: si la imagen volvia censurada o con el
+   * encuadre borrado por el recorte automatico, no habia nada que mirar.
+   *
+   * Un personaje que no esta en la boveda cae en el camino de Xavira, que es lo
+   * que hacia antes: alli el identificador puede ser suyo y la identidad vive en
+   * su servidor, asi que no hace falta receta local.
+   */
+  const composeImagePlan = (
+    character: VaultCharacter | undefined,
+    scene: string,
+  ): VaultImagePlan => {
+    if (character?.imageProvider === 'horde') {
+      const recipe = character.horde?.recipe ?? null;
+      if (recipe === null) {
+        throw new VaultError(
+          'ese personaje no tiene receta guardada',
+          'en AI Horde la apariencia vive en la receta: editalo en Privado y elige modelo y aspecto',
+        );
+      }
+      return composeHordeImagePlan({ recipe, scene, extraNegative: VAULT_IMAGE_NEGATIVE });
+    }
+    return composeXaviraImagePlan({ scene, extraNegative: VAULT_IMAGE_NEGATIVE });
+  };
+
+  /**
+   * recorta un valor del proveedor al tope que admite el registro.
+   *
+   * El nombre de un worker o de un modelo lo escribe gente de fuera y no conoce
+   * nuestros limites: uno demasiado largo haria que el apunte entero se
+   * rechazara, y se perderia justo el diagnostico que este registro existe para
+   * dar.
+   */
+  const cap = (value: string | null | undefined, max: number): string | null =>
+    value === null || value === undefined ? null : value.slice(0, max);
+
+  /**
+   * apunta un intento nuevo y devuelve su identificador.
+   *
+   * El identificador se sortea aqui y no dentro del almacen porque el envio lo
+   * necesita aunque el apunte falle: sin el, una generacion correcta no podria
+   * enlazar su medio con nada y el fallo de un archivo de disco acabaria
+   * decidiendo si se genera o no. Apuntar es contabilidad, no permiso.
+   *
+   * MENOS CUANDO EL ESTADO ES `pending`, donde es justo lo contrario: ahi el
+   * registro ES el permiso, porque `vaultImageCommit` solo puede generar sobre
+   * un intento que `loadPendingAttempt` encuentre en disco. Un alta perdida
+   * dejaria una tarjeta que promete una imagen que no se puede ni aprobar ni
+   * descartar, y ademas borraria del turno siguiente el aviso que impide que
+   * ella la de por mandada. Todavia no se ha gastado nada, asi que fallar es el
+   * lado seguro: quien llama lo cuenta como el fallo de la imagen y el turno de
+   * texto sale entero igual.
+   */
+  const startAttempt = async (input: {
+    conversationId: string;
+    characterId: string | null;
+    plan: VaultImagePlan | null;
+    state: VaultImageAttemptState;
+    /** foto o video. Lo pide el modelo y decide por que rama se genera despues */
+    kind?: 'image' | 'video';
+    source?: VaultImagePlanSource;
+    malformedReason?: VaultImageMalformedReason;
+  }): Promise<string> => {
+    const attemptId = randomUUID();
+    try {
+      const entry: ImageAttempt = imageAttemptSchema.parse({
+        attemptId,
+        conversationId: input.conversationId,
+        characterId: input.characterId,
+        createdAt: new Date().toISOString(),
+        state: input.state,
+        source: input.source ?? 'compuesto',
+        plan: input.plan,
+        planId: input.plan?.planId ?? '',
+        kind: input.kind ?? 'image',
+        malformedReason: input.malformedReason ?? null,
+      } satisfies z.input<typeof imageAttemptSchema>);
+      await context.imageAttempts.append(context.vault, input.conversationId, entry);
+    } catch {
+      // ni el motivo ni la ruta: un mensaje de `fs` lleva dentro el nombre del
+      // archivo, y el nombre del archivo es la conversacion
+      context.log('el registro de intentos de imagen no admitio el alta', {
+        attemptId,
+        estado: input.state,
+      });
+      if (input.state === 'pending') {
+        throw new VaultError(
+          'no se ha podido apuntar la imagen que quedaba por aprobar',
+          'vuelve a pedirsela; si sigue fallando, la boveda de este equipo no se deja escribir',
+        );
+      }
+      return attemptId;
+    }
+    // la poda es limpieza y no decide nada. Va en su propio `try` para que su
+    // fallo no pueda tirar un pendiente que SI quedo escrito: ahi el alta ya
+    // esta hecha y la decision se puede tomar
+    try {
+      await context.imageAttempts.prune(context.vault, input.conversationId);
+    } catch {
+      context.log('el registro de intentos de imagen no admitio la poda', { attemptId });
+    }
+    return attemptId;
+  };
+
+  /**
+   * cierra o corrige un intento ya apuntado.
+   *
+   * NUNCA lanza. Un fallo del registro no puede tirar una generacion que salio
+   * bien ni, peor todavia, sustituir el error real del proveedor por uno de
+   * disco justo cuando el usuario esta intentando entender por que no le llego
+   * la imagen.
+   */
+  const noteAttempt = async (
+    conversationId: string,
+    attemptId: string,
+    patch: ImageAttemptPatch,
+  ): Promise<void> => {
+    try {
+      await context.imageAttempts.update(context.vault, conversationId, attemptId, patch);
+    } catch {
+      context.log('el registro de intentos de imagen no admitio el cambio', {
+        attemptId,
+        estado: patch.state ?? null,
+      });
+    }
+  };
+
   const generateHordeImage = async (input: {
     conversationId: string;
-    prompt: string;
+    /** el texto exacto que sale, ya compuesto. Aqui solo se transporta */
+    plan: HordeImagePlan;
+    /** el intento que ya esta apuntado: esta funcion lo cierra, no lo crea */
+    attemptId: string;
     kind: 'image' | 'video';
-    character: { characterId: string; recipe: HordeRecipe | null };
+    characterId: string;
     /** identificador LOCAL de un medio de esta conversacion, para img2img */
     fromMediaId?: string;
   }): Promise<{
@@ -3020,13 +3277,6 @@ export function registerIpcHandlers(context: HandlerContext): void {
         'para video hace falta el proveedor de pago; este personaje solo hace imagenes',
       );
     }
-    const recipe = input.character.recipe;
-    if (recipe === null) {
-      throw new VaultError(
-        'ese personaje no tiene receta guardada',
-        'en AI Horde la apariencia vive en la receta: editalo en Privado y elige modelo y aspecto',
-      );
-    }
 
     const controller = new AbortController();
     const options = hordeOptions(controller.signal);
@@ -3034,18 +3284,23 @@ export function registerIpcHandlers(context: HandlerContext): void {
       input.fromMediaId === undefined
         ? null
         : await readSourceImage(input.conversationId, input.fromMediaId);
-    // con la clave anonima el horde ignora este campo y comparte igual; con una
-    // clave propia, que es gratis, no comparte nada
-    const request = buildHordeRequest({
-      recipe,
-      prompt: input.prompt,
-      extraNegative: VAULT_IMAGE_NEGATIVE,
-      // lo decide la receta del personaje, no una constante. Compartir da
-      // kudos, y con una cuenta nueva los kudos SON el puesto en la cola: es la
-      // unica forma de acortar la espera sin poner dinero ni una GPU
-      shared: recipe.shared,
-      sourceImage,
-    });
+    // UNA sola entrada al transporte: `request.prompt` es `plan.joined`, tal
+    // cual. No se vuelve a unir, no se vuelve a recortar y no se vuelve a mirar
+    // la receta, que es lo unico que garantiza que lo enseñado y lo enviado no
+    // puedan separarse. `shared` viaja dentro de los parametros del plan, y lo
+    // decide la receta del personaje y no una constante: compartir da kudos, y
+    // con una cuenta nueva los kudos SON el puesto en la cola
+    const request = planToHordeRequest(input.plan, { sourceImage, dryRun: false });
+
+    /**
+     * los avisos del envio, recogidos FUERA del `try`.
+     *
+     * Dentro morirían con la excepcion, y son justo lo que explica un rechazo
+     * posterior: incluyen el fabricado `AnonymousKeySharesImage`, que avisa de
+     * que con la clave anonima el horde dona la imagen aunque se pida lo
+     * contrario. Hasta ahora del envio solo se recogia el identificador.
+     */
+    let warnings: ImageAttemptWarning[] = [];
 
     // como va la cola, hacia la ventana y hacia el log.
     //
@@ -3083,6 +3338,15 @@ export function registerIpcHandlers(context: HandlerContext): void {
 
     try {
       const submission = await submitImage(request, options);
+      // el tope del registro es 20: recortar aqui vale mas que perder el apunte
+      // entero por un aviso de sobra
+      warnings = submission.warnings
+        .slice(0, 20)
+        .map((warning) => ({ code: cap(warning.code, 120) ?? '', message: cap(warning.message, 600) ?? '' }));
+      // se apuntan ANTES de esperar, que puede tardar diez minutos: si Studio se
+      // cierra a mitad, lo que ya se sabe del envio no se pierde
+      await noteAttempt(input.conversationId, input.attemptId, { warnings });
+
       const result = await awaitImage(submission.id, { ...options, onProgress });
       const [generation] = result.generations;
       if (generation === undefined) {
@@ -3108,14 +3372,32 @@ export function registerIpcHandlers(context: HandlerContext): void {
         // dos veces. Esto ya esta cifrado con la imagen, asi que guardarlo
         // entero no expone nada nuevo.
         prompt: request.prompt,
-        width: recipe.width,
-        height: recipe.height,
+        width: input.plan.params.width,
+        height: input.plan.params.height,
         durationMs: null,
-        characterId: input.character.characterId,
+        characterId: input.characterId,
         provider: 'horde',
         // el modelo que de verdad la genero, que puede no ser el primero de la
         // lista: se mandan varios justo para que lo coja el que este libre
         model: generation.model,
+        // el enlace con el registro de intentos: una REFERENCIA, no una copia.
+        // La semilla real, el worker y los avisos viven alli, que es tambien
+        // donde quedan los intentos que no llegaron a producir ningun medio
+        attemptId: input.attemptId,
+      });
+
+      // la semilla REAL y el worker, que hasta ahora solo pasaban por el log.
+      //
+      // Con `params.seed` a null la sortea el servidor, asi que esta es la
+      // unica forma de volver a sacar una imagen que salio bien
+      await noteAttempt(input.conversationId, input.attemptId, {
+        state: 'ok',
+        mediaId: cap(stored.mediaId, 128),
+        seed: cap(generation.seed, 64),
+        model: cap(generation.model, 128),
+        worker: cap(generation.workerName, 160),
+        kudos: result.kudos,
+        warnings,
       });
 
       context.log('medio privado generado', {
@@ -3129,6 +3411,11 @@ export function registerIpcHandlers(context: HandlerContext): void {
         // resultados distintos: version del fichero, backend y retoques son
         // suyos, no del horde. Ya venia en la respuesta y se tiraba
         worker: generation.workerName,
+        // dos huellas y ni una palabra de texto: con ellas se encuentra el
+        // intento en el registro cifrado, que es donde SI esta el prompt
+        attemptId: input.attemptId,
+        planId: input.plan.planId,
+        avisos: warnings.length,
       });
 
       return {
@@ -3143,6 +3430,23 @@ export function registerIpcHandlers(context: HandlerContext): void {
         costUnit: 'kudos',
       };
     } catch (error) {
+      // ANTES de aplanar el error, que es donde se perdia lo unico estable que
+      // trae: `rc`. 'csam' es el filtro de la red y no se reintenta; 'censored'
+      // es el filtro propio del worker que te toco y con otro sale. Al
+      // construir el `VaultError` los dos acaban siendo «no salio», y el usuario
+      // se queda sin saber cual de las dos cosas le paso.
+      //
+      // Y `request` es una variable local que muere aqui: si el plan no
+      // quedara apuntado, un fallo dejaria una frase y nada que mirar.
+      const rc = error instanceof HordeError ? error.rc : null;
+      await noteAttempt(input.conversationId, input.attemptId, {
+        state: 'failed',
+        rc: cap(rc, 64),
+        errorMessage: cap(redact(error instanceof Error ? error.message : String(error)), 1000),
+        warnings,
+        plan: input.plan,
+      });
+
       if (error instanceof HordeError) throw new VaultError(error.message, error.hint);
       throw error;
     }
@@ -3151,7 +3455,9 @@ export function registerIpcHandlers(context: HandlerContext): void {
   const generatePrivateMedia = async (input: {
     conversationId: string;
     characterId: string;
-    prompt: string;
+    /** lo que se va a mandar, ya compuesto y ya apuntado. Aqui no se recompone */
+    plan: VaultImagePlan;
+    attemptId: string;
     kind: 'image' | 'video';
     fromGenerationId?: string;
     /**
@@ -3172,15 +3478,22 @@ export function registerIpcHandlers(context: HandlerContext): void {
     const character = (await context.characters.list(context.vault)).find(
       (entry) => entry.characterId === input.characterId,
     );
-    // el proveedor es del PERSONAJE y no de la conversacion: dos personajes de
-    // la misma boveda pueden generarse en sitios distintos, y mezclarlos
-    // significaria mandar la receta de uno a la API del otro
-    if (character?.imageProvider === 'horde') {
+    // manda el PLAN, no el personaje.
+    //
+    // El proveedor sigue siendo del personaje —dos personajes de la misma
+    // boveda pueden generarse en sitios distintos—, pero el plan ya se compuso
+    // para uno de los dos, y entre componerlo y mandarlo puede pasar el tiempo
+    // que tarde una persona en decidir. Volver a preguntarselo al personaje
+    // ahora significaria mandar un texto compuesto con la receta local a la API
+    // del otro proveedor si el interruptor cambio en medio.
+    if (input.plan.provider === 'horde') {
       return generateHordeImage({
         ...input,
-        character: { characterId: character.characterId, recipe: character.horde?.recipe ?? null },
+        plan: input.plan,
+        characterId: character?.characterId ?? input.characterId,
       });
     }
+    const plan = input.plan;
 
     const controller = new AbortController();
     const options = mediaProviderOptions(controller.signal);
@@ -3198,19 +3511,21 @@ export function registerIpcHandlers(context: HandlerContext): void {
           ? await generateImage(
               {
                 characterId: args.characterId,
-                prompt: args.prompt,
+                prompt: plan.prompt,
                 // lo que NO debe salir. Va aqui y nunca en el prompt: el
                 // positivo no tiene el concepto de «no» y nombrar algo para
-                // negarlo lo invoca
-                negativePromptAppend: VAULT_IMAGE_NEGATIVE,
+                // negarlo lo invoca. Viaja dentro del plan para que lo que se
+                // enseña y lo que se manda sigan siendo el mismo valor tambien
+                // en este lado
+                negativePromptAppend: plan.negativeAppend,
               },
               options,
             )
           : await generateVideo(
               {
                 characterId: args.characterId,
-                prompt: args.prompt,
-                negativePromptAppend: VAULT_IMAGE_NEGATIVE,
+                prompt: plan.prompt,
+                negativePromptAppend: plan.negativeAppend,
                 ...(args.fromGenerationId === undefined
                   ? {}
                   : { fromGenerationId: args.fromGenerationId }),
@@ -3232,17 +3547,31 @@ export function registerIpcHandlers(context: HandlerContext): void {
       const stored = await context.privateMedia.add(context.vault, args.conversationId, bytes, {
         mimeType,
         displayName: null,
-        prompt: args.prompt,
+        prompt: plan.prompt,
         width: null,
         height: null,
         durationMs: null,
         characterId: args.characterId,
         provider: 'xavira',
         model: null,
+        attemptId: input.attemptId,
+      });
+
+      // el coste de aqui son CREDITOS y el campo del registro son kudos: meter
+      // uno en el otro dejaria dentro de un mes un numero que no se puede leer
+      await noteAttempt(input.conversationId, input.attemptId, {
+        state: 'ok',
+        mediaId: cap(stored.mediaId, 128),
+        warnings: [],
       });
 
       // ni el prompt, ni la conversacion, ni la URL del resultado
-      context.log('medio privado generado', { kind: args.kind, byteSize: stored.byteSize });
+      context.log('medio privado generado', {
+        kind: args.kind,
+        byteSize: stored.byteSize,
+        attemptId: input.attemptId,
+        planId: plan.planId,
+      });
 
       return {
         mediaId: stored.mediaId,
@@ -3252,6 +3581,17 @@ export function registerIpcHandlers(context: HandlerContext): void {
         costUnit: 'creditos',
       };
     } catch (error) {
+      // el mismo tratamiento que en el horde: el codigo del rechazo se apunta
+      // ANTES de aplanar el error, porque es lo unico estable que trae —su
+      // propia documentacion pide decidir por el codigo y nunca por el mensaje—
+      // y al construir el `VaultError` se pierde
+      await noteAttempt(input.conversationId, input.attemptId, {
+        state: 'failed',
+        rc: cap(error instanceof XaviraError ? error.code : null, 64),
+        errorMessage: cap(redact(error instanceof Error ? error.message : String(error)), 1000),
+        plan,
+      });
+
       if (error instanceof XaviraError) throw new VaultError(error.message, error.hint);
       throw error;
     }
@@ -3259,14 +3599,330 @@ export function registerIpcHandlers(context: HandlerContext): void {
 
   handle(IPC_INVOKE.vaultMediaGenerate, vaultMediaGenerateArgsSchema, async (args) => {
     if (!context.vault.isUnlocked()) throw new VaultError('la boveda esta bloqueada');
+    const character = (await context.characters.list(context.vault)).find(
+      (entry) => entry.characterId === args.characterId,
+    );
+    // el panel manual no revisa nada: el texto lo acaba de escribir la persona
+    // que pulsa el boton. Pero el intento se apunta igual, porque un registro
+    // con un agujero justo en el camino que mas se usa para probar cosas no
+    // sirve para diagnosticar nada
+    const plan = composeImagePlan(character, args.prompt);
+    const attemptId = await startAttempt({
+      conversationId: args.conversationId,
+      characterId: character?.characterId ?? args.characterId,
+      plan,
+      state: 'sent',
+      kind: args.kind,
+    });
     return generatePrivateMedia({
       conversationId: args.conversationId,
       characterId: args.characterId,
-      prompt: args.prompt,
+      plan,
+      attemptId,
       kind: args.kind,
       ...(args.fromGenerationId === undefined ? {} : { fromGenerationId: args.fromGenerationId }),
       ...(args.fromMediaId === undefined ? {} : { fromMediaId: args.fromMediaId }),
     });
+  });
+
+  /**
+   * cierra un intento cuando el fallo del registro SI importa.
+   *
+   * Es lo contrario de `noteAttempt`, y la diferencia es de quien paga: alli se
+   * apunta despues de haber gastado y callar es lo correcto, porque un archivo
+   * de disco no puede sustituir «te lo censuraron» por «no se pudo escribir».
+   * Aqui todavia no se ha gastado nada, y un pendiente que se queda pendiente
+   * se puede pulsar dos veces y cobrarse dos veces.
+   *
+   * El mensaje que sale es fijo a proposito: el de `fs` lleva dentro la ruta
+   * del archivo, y el nombre de ese archivo es la conversacion.
+   */
+  const settleAttempt = async (
+    conversationId: string,
+    attemptId: string,
+    patch: ImageAttemptPatch,
+  ): Promise<void> => {
+    try {
+      const updated = await context.imageAttempts.update(
+        context.vault,
+        conversationId,
+        attemptId,
+        patch,
+      );
+      if (updated === undefined) {
+        throw new VaultError('ese intento de imagen ya no esta en el registro');
+      }
+    } catch (error) {
+      if (error instanceof VaultError) throw error;
+      throw new VaultError(
+        'no se ha podido apuntar la decision sobre esa imagen',
+        'vuelve a intentarlo; si sigue fallando, la boveda de este equipo no se deja escribir',
+      );
+    }
+  };
+
+  /**
+   * el pendiente sobre el que se decide, ya comprobado.
+   *
+   * Tres cosas y ninguna es paranoia: que exista —el anillo del registro tiene
+   * tope y una tarjeta vieja puede apuntar a algo que ya no esta—, que sea de
+   * ESTA conversacion, y que siga esperando. Lo ultimo es lo que impide que una
+   * ventana abierta desde ayer mande otra vez una imagen que ya se genero, o
+   * una que un mensaje posterior dejo sin sentido.
+   */
+  const loadPendingAttempt = async (
+    conversationId: string,
+    attemptId: string,
+  ): Promise<{ attempt: ImageAttempt; plan: VaultImagePlan }> => {
+    const attempts = await context.imageAttempts.list(context.vault, conversationId);
+    const attempt = attempts.find((entry) => entry.attemptId === attemptId);
+    if (attempt === undefined) {
+      throw new VaultError(
+        'ese intento de imagen ya no esta en el registro',
+        'pidesela otra vez: el registro guarda los ultimos de cada conversacion',
+      );
+    }
+    // el archivo es por conversacion, asi que esto no deberia poder pasar; se
+    // comprueba igual porque es lo unico que ata la decision a su propio hilo
+    if (attempt.conversationId !== conversationId) {
+      throw new VaultError('ese intento de imagen es de otra conversacion');
+    }
+    if (attempt.state !== 'pending') {
+      const { message, hint } = settledAttemptMessage(attempt.state);
+      throw new VaultError(message, hint);
+    }
+    if (attempt.plan === null) {
+      throw new VaultError(
+        'ese intento no guardo el texto que se iba a mandar',
+        'pidesela otra vez: sin el texto no hay nada que aprobar',
+      );
+    }
+    return { attempt, plan: attempt.plan };
+  };
+
+  /**
+   * el texto definitivo: el compuesto, o el que escribio Daniel.
+   *
+   * La correccion llega del renderer y por tanto es entrada externa: se valida
+   * en el esquema del canal, se aplica sobre el plan que estaba GUARDADO —no
+   * sobre uno que venga de fuera— y la huella se recalcula aqui. Un `planId`
+   * que llegue del otro lado no se cree nunca: es una huella de comparacion, no
+   * una firma.
+   */
+  const planForDecision = (
+    attempt: ImageAttempt,
+    base: VaultImagePlan,
+    edit: VaultImagePlanEdit | null,
+  ): { plan: VaultImagePlan; source: VaultImagePlanSource } => {
+    if (edit === null) return { plan: base, source: attempt.source };
+
+    const edited = planFromEdit(base, edit);
+    if (edited === null) {
+      throw new VaultError(
+        'esa correccion no es del mismo proveedor que el texto que estaba esperando',
+        'vuelve a abrir el panel: el personaje cambio de proveedor de imagenes desde que se compuso',
+      );
+    }
+    return { plan: vaultImagePlanSchema.parse(edited.plan), source: edited.source };
+  };
+
+  /**
+   * la imagen que quedo esperando decision en esa conversacion.
+   *
+   * Existe para que la tarjeta reaparezca al reabrir Studio. Sin esto, cerrar
+   * la ventana equivaldria a descartar en silencio, que es justo lo que el
+   * registro cifrado existe para no hacer.
+   */
+  handle(IPC_INVOKE.vaultImagePending, vaultImagePendingArgsSchema, async (args) => {
+    if (!context.vault.isUnlocked()) throw new VaultError('la boveda esta bloqueada');
+    const attempt = await context.imageAttempts.pending(context.vault, args.conversationId);
+    return { attempt: attempt ?? null };
+  });
+
+  /** lo que se mando de verdad en esa conversacion, del mas antiguo al ultimo */
+  handle(IPC_INVOKE.vaultImageAttempts, vaultImageAttemptsArgsSchema, async (args) => {
+    if (!context.vault.isUnlocked()) throw new VaultError('la boveda esta bloqueada');
+    return { attempts: await context.imageAttempts.list(context.vault, args.conversationId) };
+  });
+
+  /**
+   * los pendientes que se estan decidiendo AHORA MISMO en este proceso.
+   *
+   * Lo que impide pagar dos veces la misma imagen era un comprobar-y-escribir
+   * con `await` en medio: `loadPendingAttempt` lee el registro y comprueba que
+   * el intento siga `pending`, y solo despues `settleAttempt` escribe 'sent'.
+   * Dos pulsaciones seguidas caben enteras en ese hueco —el autorepeat del
+   * teclado dispara clicks antes de que React repinte y apague el boton—, las
+   * dos leen 'pending' y las dos generan. `update` no compara el estado previo,
+   * asi que el cerrojo tiene que estar aqui.
+   *
+   * De memoria y sin caducidad: el registro es local y solo lo escribe este
+   * proceso. Se toma ANTES del primer `await`, que es donde cabe la segunda
+   * pulsacion, y se suelta en el `finally` pase lo que pase.
+   */
+  const decidingAttempts = new Set<string>();
+
+  /**
+   * la decision sobre el texto que iba a salir: mandarlo o tirarlo.
+   *
+   * Es el unico camino por el que se genera una imagen que el personaje pidio
+   * con la revision puesta. `discard` no llama a nadie y no cuesta nada;
+   * `generate` marca el intento como mandado ANTES de tocar al proveedor, para
+   * que el mismo pendiente no se pueda pagar dos veces.
+   */
+  handle(IPC_INVOKE.vaultImageCommit, vaultImageCommitArgsSchema, async (args) => {
+    if (!context.vault.isUnlocked()) throw new VaultError('la boveda esta bloqueada');
+
+    const lock = `${args.conversationId}:${args.attemptId}`;
+    if (decidingAttempts.has(lock)) {
+      throw new VaultError(
+        'esa imagen ya se esta decidiendo',
+        'espera a que termine: pulsar dos veces generaria dos y cobraria las dos',
+      );
+    }
+    decidingAttempts.add(lock);
+    try {
+      const { attempt, plan: base } = await loadPendingAttempt(args.conversationId, args.attemptId);
+
+      if (args.action === 'discard') {
+        await settleAttempt(args.conversationId, attempt.attemptId, { state: 'discarded' });
+        // la decision y las dos huellas; ni el texto ni de quien era
+        context.log('plan de imagen descartado', {
+          attemptId: attempt.attemptId,
+          planId: attempt.planId,
+        });
+        return {
+          attemptId: attempt.attemptId,
+          state: 'discarded' as const,
+          mediaId: null,
+          mimeType: null,
+          byteSize: null,
+          costCredits: null,
+          costUnit: null,
+        };
+      }
+
+      const { plan, source } = planForDecision(attempt, base, args.edit);
+      if (attempt.characterId === null) {
+        throw new VaultError(
+          'ese intento no guarda de quien era la imagen',
+          'elige un personaje en la conversacion y pidesela otra vez',
+        );
+      }
+
+      await settleAttempt(args.conversationId, attempt.attemptId, {
+        state: 'sent',
+        source,
+        plan,
+        planId: plan.planId,
+      });
+
+      // el texto que se aprobo se manda TAL CUAL: no se vuelve a componer, no se
+      // vuelve a recortar y no se vuelve a mirar la receta. Es la misma entrada
+      // al transporte que usa el camino automatico
+      const generated = await generatePrivateMedia({
+        conversationId: args.conversationId,
+        characterId: attempt.characterId,
+        plan,
+        attemptId: attempt.attemptId,
+        // lo que se pidio en su dia, no 'image' a secas: con la revision puesta
+        // el turno acaba aqui, y suponer la foto fija generaba otra cosa de la
+        // pedida y la cobraba igual
+        kind: attempt.kind,
+      });
+
+      // ESTA es la imagen del turno anterior a partir de ahora.
+      //
+      // Con la revision puesta el turno termino sin `mediaId`, asi que se borro
+      // de la lista; la foto llega despues, aqui. Sin volver a apuntarla, el
+      // dato cierto que sostiene «otra porfa» —en tu turno anterior le mandaste
+      // una— seria siempre falso justo con el ajuste por defecto, y la puerta
+      // quedaria a merced de las heuristicas de texto que ese dato existe para
+      // no necesitar
+      ultimaRespuestaConImagen.add(args.conversationId);
+
+      context.log('plan de imagen aprobado', {
+        attemptId: attempt.attemptId,
+        planId: plan.planId,
+        origen: source,
+      });
+
+      return {
+        attemptId: attempt.attemptId,
+        state: 'ok' as const,
+        mediaId: generated.mediaId,
+        mimeType: generated.mimeType,
+        byteSize: generated.byteSize,
+        costCredits: generated.costCredits,
+        costUnit: generated.costUnit,
+      };
+    } finally {
+      decidingAttempts.delete(lock);
+    }
+  });
+
+  /**
+   * lo que costaria ese texto, preguntado en seco.
+   *
+   * `dry_run` recorre la MISMA validacion del servidor que un envio de verdad y
+   * devuelve el precio, pero no encola trabajo para ningun worker: no se gasta
+   * un kudo y no se genera nada. Por eso el intento sigue `pending` al salir de
+   * aqui —preguntar el precio no es decidir— y por eso se pregunta por el texto
+   * corregido y no por el compuesto: lo que se estime tiene que ser lo que
+   * despues se mande.
+   *
+   * QUE NO HACE, y la pantalla tiene que decirlo: valida la FORMA —parametros
+   * fuera de rango, un modelo que no existe— y da el precio. No predice los dos
+   * rechazos que de verdad duelen: `csam` sale de `gen_metadata` DESPUES de
+   * generar, y `censored` es el filtro propio del worker que atienda la
+   * peticion. Venderlo como «validado» haria que el usuario pulsara Generar y le
+   * volviera censurada igual, justo en el caso que motivo todo esto.
+   */
+  handle(IPC_INVOKE.vaultImageEstimate, vaultImageEstimateArgsSchema, async (args) => {
+    if (!context.vault.isUnlocked()) throw new VaultError('la boveda esta bloqueada');
+
+    const { attempt, plan: base } = await loadPendingAttempt(args.conversationId, args.attemptId);
+    const { plan } = planForDecision(attempt, base, args.edit);
+
+    if (plan.provider !== 'horde') {
+      throw new VaultError(
+        'el proveedor de pago no dice lo que cuesta antes de generar',
+        'solo AI Horde admite preguntar el precio en seco; aqui el coste se sabe al terminar',
+      );
+    }
+
+    const controller = new AbortController();
+    const options = hordeOptions(controller.signal);
+
+    try {
+      // sin imagen de partida a proposito: el camino de la decision genera sin
+      // `fromMediaId`, asi que preguntar con una la haria costar otra cosa
+      const estimate = await estimateKudos(planToHordeRequest(plan, { dryRun: true }), options);
+
+      // los mismos topes que el registro: un aviso largo no puede hacer que el
+      // renderer rechace la respuesta entera y deje la pantalla sin precio
+      const warnings: ImageAttemptWarning[] = estimate.warnings.slice(0, 20).map((warning) => ({
+        code: cap(warning.code, 120) ?? '',
+        message: cap(warning.message, 600) ?? '',
+      }));
+
+      // el precio y los contadores; el texto por el que se pregunto se queda
+      // donde esta, que es el registro cifrado
+      context.log('coste de imagen preguntado en seco', {
+        attemptId: attempt.attemptId,
+        planId: plan.planId,
+        kudos: estimate.kudos,
+        avisos: warnings.length,
+      });
+
+      return { kudos: estimate.kudos, warnings };
+    } catch (error) {
+      // un dry run rechazado es informacion util —dice QUE parametro no vale—,
+      // asi que el mensaje del horde se conserva tal cual en vez de taparlo con
+      // un «no se pudo preguntar el precio»
+      if (error instanceof HordeError) throw new VaultError(error.message, error.hint);
+      throw error;
+    }
   });
 
   handle(IPC_INVOKE.vaultMediaRead, vaultMediaReadArgsSchema, async (args) => {
@@ -3480,6 +4136,35 @@ export function registerIpcHandlers(context: HandlerContext): void {
     });
     const canGenerateImage = imageCapable && imageGate.open;
 
+    // la imagen que quedo esperando una decision, si quedo alguna.
+    //
+    // Un mensaje nuevo SUSTITUYE la peticion anterior: pedirle a alguien que
+    // apruebe la foto de hace tres turnos, con la escena ya en otro sitio, es
+    // pedirle que apruebe algo que ya no quiere. Se marca `superseded` en vez de
+    // borrarla porque el registro existe justo para poder mirar despues que se
+    // pidio y que no llego a salir.
+    //
+    // Y se apunta que la habia, porque el prompt de ESTE turno tiene que
+    // decirselo: ella ya dijo que mandaba la foto y el usuario no ha visto nada.
+    //
+    // Entero dentro de un `try`: leer el registro descifra un archivo de disco y
+    // eso puede fallar. Un fallo suyo no vale un turno de pago (`D-088`).
+    let imagenEsperando = false;
+    try {
+      const esperando = await context.imageAttempts.pending(context.vault, conversationId);
+      if (esperando !== undefined) {
+        imagenEsperando = true;
+        await noteAttempt(conversationId, esperando.attemptId, { state: 'superseded' });
+        // el identificador, nunca el plan: lo que se pidio vive cifrado
+        context.log('la imagen pendiente la sustituye un mensaje nuevo', {
+          attemptId: esperando.attemptId,
+        });
+      }
+    } catch {
+      // ni el motivo ni la ruta: el nombre del archivo ES la conversacion
+      imagenEsperando = false;
+    }
+
     // de donde sale la memoria de esta conversacion.
     //
     // La SELLADA gana siempre: `chooseConversationMemory` solo mira el relleno
@@ -3630,6 +4315,9 @@ export function registerIpcHandlers(context: HandlerContext): void {
       // y si la imagen del turno anterior no llego a salir. Se consume aqui:
       // es informacion para ESTE turno, no un estado que se arrastre
       lastImageError: ultimaImagenFallida.get(conversationId) ?? null,
+      // dato cierto, no adivinanza: la que ofrecio se quedo esperando una
+      // decision y acaba de caducar con este mensaje
+      pendingImageReview: imagenEsperando,
       existingImages,
       // los modelos de anime rinden peor con prosa y los realistas peor con
       // etiquetas sueltas: lo dice la documentacion del proveedor
@@ -3723,6 +4411,9 @@ export function registerIpcHandlers(context: HandlerContext): void {
       // del horde no se distingue de uno de Xavira sin la suya
       proveedorImagen: imageProvider,
       imagenesDisponibles: existingImages.length,
+      // si arrastraba una sin decidir. Un numero que sube turno tras turno dice
+      // que la revision molesta mas de lo que ayuda, y eso solo se ve contandolo
+      imagenEsperando,
     });
 
     const result = await context.controller.runLocalTurn({
@@ -3744,6 +4435,18 @@ export function registerIpcHandlers(context: HandlerContext): void {
       costCredits: number | null;
       costUnit: "creditos" | "kudos" | null;
       error: string | null;
+      /** `done` es el camino de siempre; los otros dos antes no llegaban aqui */
+      state: VaultImageTurnState;
+      /** el intento en el registro cifrado, para poder mirarlo despues */
+      attemptId: string | null;
+      /**
+       * el texto que va a salir, entero, SOLO cuando hay algo que decidir.
+       *
+       * Viaja en memoria hasta la ventana y no se escribe por este camino. Y no
+       * se mete dentro de `error`: la pantalla pinta `error` tal cual, asi que
+       * eso seria escribir contenido de la boveda en un mensaje de error.
+       */
+      plan: VaultImagePlan | null;
     } | null = null;
 
     // se calculaba y se tiraba. Un modelo que escribe mal el bloque deja de
@@ -3791,26 +4494,91 @@ export function registerIpcHandlers(context: HandlerContext): void {
                 costCredits: null,
                 costUnit: null,
                 error: 'esa imagen no existe en esta conversacion',
+                state: 'done',
+                attemptId: null,
+                plan: null,
               }
-            : { mediaId: found.mediaId, costCredits: null, costUnit: null, error: null };
+            : {
+                mediaId: found.mediaId,
+                costCredits: null,
+                costUnit: null,
+                error: null,
+                // reenviar no genera nada: no hay intento que apuntar ni texto
+                // que revisar, se lee del disco cifrado y ya esta
+                state: 'done',
+                attemptId: null,
+                plan: null,
+              };
       } else if (
         imageRequest.request?.prompt !== undefined &&
         canGenerateImage &&
         character !== undefined
       ) {
+        // fuera del `try` para que el fallo tambien sepa a que intento pertenece:
+        // es lo que despues abre «ver lo que se mando»
+        let apunte: string | null = null;
         try {
-          const generated = await generatePrivateMedia({
-            conversationId,
-            characterId: character.characterId,
-            prompt: imageRequest.request.prompt,
-            kind: imageRequest.request.kind,
-          });
-          image = {
-            mediaId: generated.mediaId,
-            costCredits: generated.costCredits,
-            costUnit: generated.costUnit,
-            error: null,
-          };
+          // el plan se compone aqui y se apunta ANTES de mandarlo: si el envio
+          // revienta —o si Studio se cierra a mitad del sondeo—, lo que se iba
+          // a mandar ya esta en el registro en vez de morir con la llamada
+          const plan = composeImagePlan(character, imageRequest.request.prompt);
+
+          // EL TURNO TERMINA SIN GENERAR.
+          //
+          // No se pausa nada ni se mantiene abierta ninguna promesa: el texto de
+          // ella se guarda entero en su sitio de siempre, el compositor queda
+          // libre y la peticion de imagen se queda esperando en el registro. Lo
+          // contrario —esperar a una persona dentro del `ipcMain.handle`—
+          // mantendria `sendInFlight` puesto, y con el puesto el trabajo de
+          // fondo no puede leer esta conversacion: media hora de escena
+          // bloqueada por una tarjeta sin pulsar.
+          if (character.imageReview === 'siempre') {
+            apunte = await startAttempt({
+              conversationId,
+              characterId: character.characterId,
+              plan,
+              state: 'pending',
+              // lo que se pidio, no lo que se supone. El intento es lo unico
+              // que queda entre componer el plan y aprobarlo: sin esto, un
+              // video aprobado se generaria como foto fija
+              kind: imageRequest.request.kind,
+            });
+            image = {
+              mediaId: null,
+              costCredits: null,
+              costUnit: null,
+              // no es un error: no ha pasado nada malo, todavia no ha pasado
+              // nada. Ponerlo aqui haria que la pantalla lo pintara en rojo
+              error: null,
+              state: 'pending',
+              attemptId: apunte,
+              plan,
+            };
+          } else {
+            apunte = await startAttempt({
+              conversationId,
+              characterId: character.characterId,
+              plan,
+              state: 'sent',
+              kind: imageRequest.request.kind,
+            });
+            const generated = await generatePrivateMedia({
+              conversationId,
+              characterId: character.characterId,
+              plan,
+              attemptId: apunte,
+              kind: imageRequest.request.kind,
+            });
+            image = {
+              mediaId: generated.mediaId,
+              costCredits: generated.costCredits,
+              costUnit: generated.costUnit,
+              error: null,
+              state: 'done',
+              attemptId: apunte,
+              plan: null,
+            };
+          }
         } catch (error) {
           // una generacion fallida NO tira la respuesta de texto: lo escrito
           // sigue valiendo y se guarda igual, con el fallo al lado.
@@ -3826,6 +4594,11 @@ export function registerIpcHandlers(context: HandlerContext): void {
             costCredits: null,
             costUnit: null,
             error: redact(error instanceof Error ? error.message : String(error)),
+            state: 'done',
+            attemptId: apunte,
+            // el plan NO viaja con un fallo: lo que se mando se lee del registro
+            // con `attemptId`, que es donde esta cifrado
+            plan: null,
           };
         }
       } else if (imageRequest.request !== null) {
@@ -3853,13 +4626,65 @@ export function registerIpcHandlers(context: HandlerContext): void {
           error: puertaCerrada
             ? 'en este turno no se le ofrecio generar una imagen nueva: nadie habia hablado de fotos'
             : imageBlockMessage(imageBlock ?? 'sin-personaje', imageProvider),
+          state: 'done',
+          attemptId: null,
+          plan: null,
+        };
+      } else if (
+        imageRequest.status === 'truncated_block' ||
+        imageRequest.status === 'invalid'
+      ) {
+        // LA CUARTA RAMA, que hasta ahora no existia.
+        //
+        // `parseVaultImageRequest` ya distinguia estos dos casos y devolvia el
+        // motivo, pero NADIE leia ese `status`: un bloque cortado a mitad o mal
+        // escrito salia de aqui exactamente igual que un turno en el que ella no
+        // pidio ninguna imagen. Para el usuario eso es la peor version del
+        // fallo: ella dice «toma, mirame» y debajo no hay nada ni explicacion.
+        //
+        // No se genera nada —no hay texto que mandar, que es justo el problema—
+        // pero se apunta el intento: sin el, esto no se puede contar, y si le
+        // pasa a un modelo en cada tercer turno hay que cambiar de modelo, no
+        // de proveedor de imagenes.
+        const attemptId = await startAttempt({
+          conversationId,
+          characterId: character?.characterId ?? null,
+          plan: null,
+          state: 'malformed',
+          malformedReason: imageRequest.status,
+        });
+        // el motivo tecnico, para ELLA, en el turno siguiente. No es el mismo
+        // texto que ve el usuario: «ella intento mandarte una imagen» dicho
+        // dentro de su propio prompt no significa nada
+        ultimaImagenFallida.set(
+          conversationId,
+          imageRequest.status === 'truncated_block'
+            ? 'el bloque de imagen llego cortado y no se pudo leer lo que pedias'
+            : 'el bloque de imagen estaba mal escrito y no se pudo leer lo que pedias',
+        );
+        image = {
+          mediaId: null,
+          costCredits: null,
+          costUnit: null,
+          error:
+            imageRequest.status === 'truncated_block'
+              ? 'ella intento mandarte una imagen y el bloque se corto'
+              : 'ella intento mandarte una imagen y el bloque estaba mal escrito',
+          state: 'malformed',
+          attemptId,
+          plan: null,
         };
       }
 
       // si este turno llevo imagen, el siguiente sabe que el tema esta abierto.
       // Se apunta aqui y no dentro de cada rama porque las tres —reenviar,
       // generar y fallar— acaban en el mismo sitio, y lo que importa es si el
-      // usuario vio una imagen, no como llego
+      // usuario vio una imagen, no como llego.
+      //
+      // Un pendiente NO cuenta: no hubo imagen. La condicion mira `mediaId` y
+      // por eso ya era correcta, pero es la clase de linea que alguien
+      // «arreglaria» a `image !== null` sin ver que eso haria creer al turno
+      // siguiente que el usuario vio algo que sigue esperando aprobacion
       if (image !== null && image.mediaId !== null) ultimaRespuestaConImagen.add(conversationId);
       else ultimaRespuestaConImagen.delete(conversationId);
 
@@ -3919,6 +4744,11 @@ export function registerIpcHandlers(context: HandlerContext): void {
       duracionMs: result.durationMs,
       extraccionEnCurso: relationSync.busy,
       final: result.outcome,
+      // en que quedo la imagen, si pidio alguna. Una CLASIFICACION y un uuid:
+      // ni el texto del plan ni el mensaje de error, que puede traer dentro lo
+      // que el proveedor rechazo
+      imagen: image?.state ?? null,
+      imagenIntento: image?.attemptId ?? null,
     });
 
     return {

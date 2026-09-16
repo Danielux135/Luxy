@@ -55,6 +55,21 @@ describe('la purga del cierre de la boveda', () => {
     expect(DECRYPTED_RENDERER_STATE).toContain('compatibility');
   });
 
+  it('el plan de imagen que espera decision tambien, que es texto de escena', () => {
+    // el pendiente lleva el prompt ENTERO —apariencia, ropa y lo que ella
+    // escribio—, descifrado y colgado de la ventana hasta que alguien pulse.
+    // En disco esta cifrado con la subclave de su conversacion; si sobreviviera
+    // aqui al candado, seria la unica copia en claro que queda
+    expect(DECRYPTED_RENDERER_STATE).toContain('pendingImagePlan');
+  });
+
+  it('y el intento que se esta mirando, que es el mismo texto ya mandado', () => {
+    // «ver lo que se mando» y el visor de un archivo leen del registro cifrado y
+    // dejan el intento colgado de la ventana. Lleva el plan entero: es el mismo
+    // material que el pendiente, solo que con la foto ya hecha
+    expect(DECRYPTED_RENDERER_STATE).toContain('openImageAttempt');
+  });
+
   it('y lo demas que ya llevaba contenido descifrado sigue estando', () => {
     // la lista se junto de dos copias escritas a mano que habian divergido: el
     // cierre de sesion vaciaba seis cosas y el bloqueo diez

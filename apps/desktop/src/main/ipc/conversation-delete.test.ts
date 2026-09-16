@@ -1,11 +1,12 @@
 // borrar una conversacion privada: lo que tiene que pasar aunque algo falle.
 //
-// El handler toca cinco sitios —medios, archivo, catalogo, pendientes y la
-// memoria retroactiva— y termina invalidando la memoria episodica, que es la
-// unica de las seis cosas que guarda los turnos DESCIFRADOS en RAM. Los tres
-// almacenes cifrados pueden pararse en seco (el de pendientes lo hace a
-// proposito cuando su archivo no abre), asi que lo que se prueba aqui es que ese
-// fallo no deja al personaje pudiendo citar lo que Daniel acaba de borrar.
+// El handler toca seis sitios —medios, archivo, catalogo, pendientes, memoria
+// retroactiva e intentos de imagen— y termina invalidando la memoria episodica,
+// que es la unica de las siete cosas que guarda los turnos DESCIFRADOS en RAM.
+// Los cuatro almacenes cifrados pueden pararse en seco (el de pendientes lo hace
+// a proposito cuando su archivo no abre), asi que lo que se prueba aqui es que
+// ese fallo no deja al personaje pudiendo citar lo que Daniel acaba de borrar, ni
+// deja en disco el prompt verbatim de una escena que ya no existe.
 import { describe, it, expect, vi } from 'vitest';
 
 /** canales registrados por `registerIpcHandlers`, para poder invocarlos */
@@ -48,6 +49,7 @@ function registrar(
   catalogs: { removeConversation: () => Promise<void> } = {
     removeConversation: async () => undefined,
   },
+  imageAttempts: { removeConversation: () => Promise<void> } | undefined = undefined,
 ): Huella {
   const huella: Huella = { invalidated: 0, deleted: [] };
   const context = {
@@ -72,6 +74,14 @@ function registrar(
     },
     catalogs,
     relations,
+    // el registro de intentos de imagen: se apunta como los demas para poder
+    // afirmar que se llamo, con que id y en que orden
+    imageAttempts: {
+      removeConversation: async (_vault: unknown, id: string) => {
+        if (imageAttempts !== undefined) await imageAttempts.removeConversation();
+        huella.deleted.push(`intentos:${id}`);
+      },
+    },
     privateMemory: {
       invalidate: () => {
         huella.invalidated += 1;
@@ -94,7 +104,12 @@ describe('borrar una conversacion privada', () => {
     const huella = registrar({ removeConversation: async () => undefined });
 
     expect(await borrar()).toMatchObject({ ok: true });
-    expect(huella.deleted).toEqual([`medios:${CONV}`, `archivo:${CONV}`, `recap:${CONV}`]);
+    expect(huella.deleted).toEqual([
+      `medios:${CONV}`,
+      `archivo:${CONV}`,
+      `recap:${CONV}`,
+      `intentos:${CONV}`,
+    ]);
     expect(huella.invalidated).toBe(1);
   });
 
@@ -156,5 +171,57 @@ describe('borrar una conversacion privada', () => {
     expect(await borrar()).toMatchObject({ ok: false });
     expect(huella.deleted).toContain(`recap:${CONV}`);
     expect(huella.invalidated).toBe(1);
+  });
+
+  it('SE LLEVA TAMBIEN SUS INTENTOS DE IMAGEN', async () => {
+    // es el unico de los cuatro almacenes con texto VERBATIM de escena dentro:
+    // el prompt tal cual salio hacia el proveedor. Dejarlo seria conservar
+    // cifrado en disco lo mas intimo del sistema, y ademas inalcanzable, porque
+    // sin conversacion no hay fila desde la que borrarlo
+    const huella = registrar({ removeConversation: async () => undefined });
+
+    expect(await borrar()).toMatchObject({ ok: true });
+    expect(huella.deleted).toContain(`intentos:${CONV}`);
+  });
+
+  it('si el registro de intentos REVIENTA, el borrado falla pero los otros tres se limpian', async () => {
+    const huella = registrar(
+      { removeConversation: async () => undefined },
+      { removeConversation: async () => undefined },
+      {
+        removeConversation: async () => {
+          throw new Error('el registro de intentos no se puede descifrar');
+        },
+      },
+    );
+
+    // hay que enterarse: queda texto de la boveda en disco
+    expect(await borrar()).toMatchObject({ ok: false });
+    expect(huella.deleted).not.toContain(`intentos:${CONV}`);
+    // pero va el ultimo, asi que no se lleva por delante a ninguno de los otros
+    expect(huella.deleted).toContain(`medios:${CONV}`);
+    expect(huella.deleted).toContain(`archivo:${CONV}`);
+    expect(huella.deleted).toContain(`recap:${CONV}`);
+    expect(huella.invalidated).toBe(1);
+  });
+
+  it('Y SUS INTENTOS SE VAN IGUAL aunque revienten los pendientes o el catalogo', async () => {
+    // va el ultimo de los cuatro, que es justo la posicion donde un solo `try`
+    // encadenado lo habria dejado sin ejecutar nunca
+    const huella = registrar(
+      {
+        removeConversation: async () => {
+          throw new Error('el indice de pendientes no se puede descifrar');
+        },
+      },
+      {
+        removeConversation: async () => {
+          throw new Error('la boveda esta bloqueada');
+        },
+      },
+    );
+
+    expect(await borrar()).toMatchObject({ ok: false });
+    expect(huella.deleted).toContain(`intentos:${CONV}`);
   });
 });

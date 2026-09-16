@@ -76,6 +76,8 @@ const bridge: LuxyBridge = {
     ipcRenderer.invoke(IPC_INVOKE.vaultHordeCharacterSave, args),
   setVaultCharacterImageProvider: (args: unknown) =>
     ipcRenderer.invoke(IPC_INVOKE.vaultCharacterImageProvider, args),
+  setVaultCharacterImageReview: (args: unknown) =>
+    ipcRenderer.invoke(IPC_INVOKE.vaultCharacterImageReview, args),
   createVault: (password: string) => ipcRenderer.invoke(IPC_INVOKE.vaultCreate, { password }),
   unlockVault: (args: unknown) => ipcRenderer.invoke(IPC_INVOKE.vaultUnlock, args),
   lockVault: () => ipcRenderer.invoke(IPC_INVOKE.vaultLock),
@@ -115,6 +117,11 @@ const bridge: LuxyBridge = {
     ipcRenderer.invoke(IPC_INVOKE.vaultMediaList, { conversationId }),
   readVaultMedia: (args: unknown) => ipcRenderer.invoke(IPC_INVOKE.vaultMediaRead, args),
   generateVaultMedia: (args: unknown) => ipcRenderer.invoke(IPC_INVOKE.vaultMediaGenerate, args),
+  readVaultImagePending: (args: unknown) => ipcRenderer.invoke(IPC_INVOKE.vaultImagePending, args),
+  commitVaultImage: (args: unknown) => ipcRenderer.invoke(IPC_INVOKE.vaultImageCommit, args),
+  estimateVaultImage: (args: unknown) => ipcRenderer.invoke(IPC_INVOKE.vaultImageEstimate, args),
+  listVaultImageAttempts: (args: unknown) =>
+    ipcRenderer.invoke(IPC_INVOKE.vaultImageAttempts, args),
   setVaultMediaCaption: (args: unknown) => ipcRenderer.invoke(IPC_INVOKE.vaultMediaCaption, args),
   describeVaultMedia: (args: unknown) => ipcRenderer.invoke(IPC_INVOKE.vaultMediaDescribe, args),
   rewriteVaultMediaCaption: (args: unknown) =>

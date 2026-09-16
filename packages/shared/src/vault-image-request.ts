@@ -184,6 +184,25 @@ export const VAULT_IMAGE_NEGATIVE = [
 ].join(', ');
 
 /**
+ * lo que se le dice cuando la imagen que ofrecio sigue sin salir.
+ *
+ * Con la revision puesta, el turno TERMINA sin generar: el texto se compone, se
+ * apunta y espera a que una persona lo apruebe. Para ella eso es invisible —su
+ * turno guarda lo que escribio y nada mas—, asi que sin esta nota el turno
+ * siguiente se construye sobre una mentira: ella ya dijo «toma, mirame» y el
+ * usuario no ha visto ninguna foto.
+ *
+ * Es el mismo agujero que `lastError` tapa para los fallos, y por eso se dice
+ * igual de claro: no la ha visto NADIE.
+ */
+export const VAULT_IMAGE_PENDING_NOTICE = [
+  'AVISO: la imagen que ofreciste en tu turno anterior NO ha salido. Quedo esperando a que el',
+  'usuario decida si se manda, y el no la ha visto nunca.',
+  'No la des por mandada ni describas lo que se ve en ella. Si te pregunta por ella, dilo tal',
+  'cual: que todavia no le ha llegado.',
+].join('\n');
+
+/**
  * instrucciones que se añaden al prompt cuando hay ALGO que ofrecer.
  *
  * Sin personaje conocido y sin ninguna imagen guardada esto no se envia:

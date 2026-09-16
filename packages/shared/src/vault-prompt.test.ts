@@ -397,6 +397,30 @@ describe('medir el prompt por bloques', () => {
     expect(conImagen.map((b) => b.label)).toContain('imagen');
     expect(composeVaultPrompt(base).map((b) => b.label)).not.toContain('imagen');
   });
+
+  it('la imagen que quedo esperando se dice, y se dice que NADIE la ha visto', () => {
+    // con la revision puesta el turno termina sin generar y ella no tiene forma
+    // de enterarse: su turno guarda lo que escribio y nada mas. Sin esta linea,
+    // el turno siguiente se construye sobre «toma, mirame» y una foto que no
+    // existe
+    const prompt = buildVaultPrompt({ ...base, canGenerateImage: true, pendingImageReview: true });
+    expect(prompt).toContain('NO ha salido');
+    expect(prompt).toContain('no la ha visto nunca');
+    expect(buildVaultPrompt({ ...base, canGenerateImage: true })).not.toContain('NO ha salido');
+  });
+
+  it('y se dice AUNQUE la puerta se cierre en este turno', () => {
+    // va en su propio bloque justo por esto: con la puerta cerrada y sin nada
+    // guardado que reenviar, el bloque de imagen no se envia, y meterla dentro
+    // la haria desaparecer en el turno en que ella mas cree haber mandado la foto
+    const bloques = composeVaultPrompt({
+      ...base,
+      canGenerateImage: false,
+      pendingImageReview: true,
+    });
+    expect(bloques.map((b) => b.label)).toContain('imagen-pendiente');
+    expect(bloques.map((b) => b.label)).not.toContain('imagen');
+  });
 });
 
 describe('recuerdos: el principio, los otros momentos del dia y el hueco del indice', () => {

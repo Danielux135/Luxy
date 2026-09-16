@@ -10,6 +10,7 @@
 // resumen acumulativo mas los ultimos turnos.
 import {
   buildVaultImageInstruction,
+  VAULT_IMAGE_PENDING_NOTICE,
   type VaultImageOnFile,
   type VaultImagePromptStyle,
 } from './vault-image-request.js';
@@ -267,6 +268,16 @@ export interface VaultPromptInput {
    * la fallida nunca se guardo— y devolvia aquella escena.
    */
   lastImageError?: string | null;
+  /**
+   * la imagen que ofrecio en su turno anterior sigue esperando una decision.
+   *
+   * Es un dato CIERTO, no una lectura del texto: con la revision puesta el turno
+   * termina sin generar y ella no tiene forma de enterarse. Sin esta linea el
+   * turno siguiente se construye sobre una mentira —ella ya dijo que la mandaba
+   * y el usuario no ha visto nada—, que es el mismo agujero que `lastImageError`
+   * tapa para los fallos.
+   */
+  pendingImageReview?: boolean;
   /**
    * imagenes que ya existen en esta conversacion.
    *
@@ -743,6 +754,15 @@ export function composeVaultPrompt(input: VaultPromptInput): VaultPromptBlock[] 
     typeof input.lastImageError === 'string' && input.lastImageError.length > 0
       ? input.lastImageError
       : null;
+  // la imagen que quedo esperando va en su PROPIO bloque, no dentro del de
+  // imagen como el fallo anterior. El motivo es que no es informacion sobre la
+  // herramienta sino sobre lo que paso: si la puerta se cierra en este turno y
+  // no hay nada guardado que reenviar, el bloque de imagen no se envia, y
+  // meterla dentro la haria desaparecer justo en el turno en que ella mas cree
+  // haber mandado la foto.
+  if (input.pendingImageReview === true) {
+    blocks.push({ label: 'imagen-pendiente', text: VAULT_IMAGE_PENDING_NOTICE });
+  }
   if (input.canGenerateImage === true || existing.length > 0) {
     blocks.push({
       label: 'imagen',

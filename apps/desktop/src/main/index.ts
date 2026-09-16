@@ -23,6 +23,7 @@ import { MemoryPreferences, memoryPreferencesPath } from './vault/memory-prefere
 import { CatalogStore, catalogFilePath } from './vault/catalog-store.js';
 import { RelationStore, relationFilePath } from './vault/relation-store.js';
 import { RecapStore, recapFilePath } from './vault/recap-store.js';
+import { ImageAttemptStore, imageAttemptsDirectory } from './vault/image-attempt-store.js';
 import { PrivateMediaStore, mediaIndexDirectory } from './vault/media-store.js';
 import { VaultCharacterStore, charactersFilePath } from './vault/character-store.js';
 import { LocalBlobStore, mediaDirectory } from './vault/blob-store.js';
@@ -55,6 +56,7 @@ let memoryPreferences: MemoryPreferences | null = null;
 let catalogs: CatalogStore | null = null;
 let relations: RelationStore | null = null;
 let recaps: RecapStore | null = null;
+let imageAttempts: ImageAttemptStore | null = null;
 let privateMedia: PrivateMediaStore | null = null;
 let autoLockTimer: NodeJS.Timeout | null = null;
 let captureHost: CaptureHost | null = null;
@@ -342,6 +344,11 @@ async function bootstrap(): Promise<void> {
   // contexto propio: dentro estan las aprobaciones de Daniel, que son lo unico
   // que decide si una ficha retroactiva entra en un prompt
   recaps = new RecapStore(recapFilePath(luxyConfigDir()));
+  // el unico de los cuatro que NO va bajo la llave de identidad: guarda texto
+  // verbatim de escena, asi que se cifra con la subclave de cada conversacion,
+  // el mismo compartimento que sus turnos. Por eso tambien es un DIRECTORIO y no
+  // un archivo: uno por conversacion, para que el borrado se lo pueda llevar
+  imageAttempts = new ImageAttemptStore(imageAttemptsDirectory(luxyConfigDir()));
   privateMemory = new PrivateMemory(privateConversations, {
     excluded: () => memoryPreferences?.excluded() ?? new Set(),
     // el catalogo manda sobre la segmentacion por silencios cuando existe
@@ -390,6 +397,7 @@ async function bootstrap(): Promise<void> {
     catalogs,
     relations,
     recaps,
+    imageAttempts,
     privateMedia,
     logsDirectory: logsDirectory(),
     artifactsDirectory: artifactsDirectory(),

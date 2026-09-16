@@ -29,6 +29,7 @@ import {
   vaultVisionProbeResultSchema,
   vaultCharacterSummarySchema,
   vaultCharacterProviderArgsSchema,
+  vaultCharacterImageReviewArgsSchema,
   vaultHordeCharacterSaveArgsSchema,
   vaultCompatibilityArgsSchema,
   vaultCompatibilityResultSchema,
@@ -36,6 +37,8 @@ import {
   vaultMediaAttachArgsSchema,
   vaultMemoryReadArgsSchema,
   vaultRecapCoverageSchema,
+  vaultImageCommitArgsSchema,
+  vaultImageEstimateArgsSchema,
   vaultRecapSyncArgsSchema,
   vaultRecapSyncResultSchema,
   vaultRecapUpdateArgsSchema,
@@ -216,6 +219,40 @@ describe('validacion de argumentos', () => {
     expect(
       vaultCharacterProviderArgsSchema.safeParse({ characterId: 'per-1', provider: 'otro' })
         .success,
+    ).toBe(false);
+  });
+
+  it('un personaje sin el ajuste de revision se lee con el puesto', () => {
+    // el defecto es lo que hace que una boveda escrita antes de este campo siga
+    // pintando su interruptor con un valor de verdad y no con un hueco
+    const leido = vaultCharacterSummarySchema.parse({
+      characterId: '83cc7f03-5eb3-4d03-833f-56dfbe80cd7d',
+      description: '',
+      label: 'Lía',
+      avatarObjectKey: null,
+      createdAt: '2026-09-02T08:50:37.000Z',
+    });
+    expect(leido.imageReview).toBe('siempre');
+  });
+
+  it('el interruptor de revision solo admite sus dos valores, y solo eso', () => {
+    // el mismo criterio que el proveedor: un verbo que cambia una cosa no puede
+    // ser la puerta por la que se le reescribe la receta a un personaje
+    expect(
+      vaultCharacterImageReviewArgsSchema.safeParse({ characterId: 'per-1', review: 'nunca' })
+        .success,
+    ).toBe(true);
+    expect(
+      vaultCharacterImageReviewArgsSchema.safeParse({ characterId: 'per-1', review: 'a veces' })
+        .success,
+    ).toBe(false);
+    // sin `review` no hay nada que decidir: el defecto vive en el almacen, no
+    // en un argumento que llega a medias
+    expect(vaultCharacterImageReviewArgsSchema.safeParse({ characterId: 'per-1' }).success).toBe(
+      false,
+    );
+    expect(
+      vaultCharacterImageReviewArgsSchema.safeParse({ characterId: '', review: 'nunca' }).success,
     ).toBe(false);
   });
 
@@ -559,6 +596,182 @@ describe('el relleno de la memoria de lo ya hablado', () => {
         summary: 'lo que yo diga',
       }).success,
     ).toBe(false);
+  });
+});
+
+describe('la decision sobre una imagen que estaba esperando', () => {
+  const CONV = 'aaaaaaaa-1111-4111-8111-111111111111';
+  const INTENTO = 'bbbbbbbb-2222-4222-8222-222222222222';
+
+  it('generar admite mandarlo tal cual, y `edit` ausente significa eso mismo', () => {
+    const parsed = vaultImageCommitArgsSchema.parse({
+      action: 'generate',
+      conversationId: CONV,
+      attemptId: INTENTO,
+    });
+    expect(parsed).toEqual({
+      action: 'generate',
+      conversationId: CONV,
+      attemptId: INTENTO,
+      edit: null,
+    });
+  });
+
+  it('DESCARTAR NO PUEDE LLEVAR TEXTO: sin strict, el boton diria una cosa y haria otra', () => {
+    // el mismo argumento escrito en `vaultRecapUpdateArgsSchema`. Aqui un campo
+    // que se descarta en silencio se paga en kudos
+    expect(
+      vaultImageCommitArgsSchema.safeParse({
+        action: 'discard',
+        conversationId: CONV,
+        attemptId: INTENTO,
+      }).success,
+    ).toBe(true);
+    expect(
+      vaultImageCommitArgsSchema.safeParse({
+        action: 'discard',
+        conversationId: CONV,
+        attemptId: INTENTO,
+        edit: { provider: 'horde', positive: 'lo que sea', negative: '' },
+      }).success,
+    ).toBe(false);
+  });
+
+  it('un campo de mas en generar se rechaza en vez de perderse', () => {
+    expect(
+      vaultImageCommitArgsSchema.safeParse({
+        action: 'generate',
+        conversationId: CONV,
+        attemptId: INTENTO,
+        edit: null,
+        // los parametros no se editan a mano: si algun dia se editan, que se
+        // vea aqui y no en una imagen del tamaño equivocado
+        seed: '1080257389',
+      }).success,
+    ).toBe(false);
+  });
+
+  it('un campo de mas DENTRO de `edit` tampoco se pierde', () => {
+    // el `strict` de fuera no cubria el objeto anidado, que es justo el que
+    // lleva el texto que se paga. Una semilla escrita ahi es lo primero que uno
+    // intenta al verla en el panel: si se tirase en silencio, la imagen saldria
+    // con otra y nadie lo diria
+    expect(
+      vaultImageCommitArgsSchema.safeParse({
+        action: 'generate',
+        conversationId: CONV,
+        attemptId: INTENTO,
+        edit: { provider: 'horde', positive: 'from behind', negative: '', seed: '1080257389' },
+      }).success,
+    ).toBe(false);
+    expect(
+      vaultImageCommitArgsSchema.safeParse({
+        action: 'generate',
+        conversationId: CONV,
+        attemptId: INTENTO,
+        edit: { provider: 'xavira', prompt: 'from behind', negativeAppend: 'borroso' },
+      }).success,
+    ).toBe(false);
+    // y el precio se pregunta por el MISMO objeto: la regla no puede aflojarse
+    // ahi, o se estimaria una cosa y se mandaria otra
+    expect(
+      vaultImageEstimateArgsSchema.safeParse({
+        conversationId: CONV,
+        attemptId: INTENTO,
+        edit: { provider: 'horde', positive: 'from behind', negative: '', seed: '1080257389' },
+      }).success,
+    ).toBe(false);
+  });
+
+  it('el intento se nombra por su identificador, no por su posicion', () => {
+    expect(
+      vaultImageCommitArgsSchema.safeParse({
+        action: 'generate',
+        conversationId: CONV,
+        attemptId: 'el-ultimo',
+      }).success,
+    ).toBe(false);
+  });
+
+  it('el positivo tiene tope, y el tope es el del plan', () => {
+    const cabe = (positive: string): boolean =>
+      vaultImageCommitArgsSchema.safeParse({
+        action: 'generate',
+        conversationId: CONV,
+        attemptId: INTENTO,
+        edit: { provider: 'horde', positive, negative: '' },
+      }).success;
+    expect(cabe('x'.repeat(6000))).toBe(true);
+    expect(cabe('x'.repeat(6001))).toBe(false);
+  });
+
+  it('una correccion a medias no pasa: el proveedor manda sobre los campos', () => {
+    // con el proveedor de pago no hay positivo ni negativo separados, y con el
+    // horde no hay un `prompt` suelto. Mezclarlos seria mandar la mitad
+    expect(
+      vaultImageCommitArgsSchema.safeParse({
+        action: 'generate',
+        conversationId: CONV,
+        attemptId: INTENTO,
+        edit: { provider: 'horde', prompt: 'from behind' },
+      }).success,
+    ).toBe(false);
+    expect(
+      vaultImageCommitArgsSchema.safeParse({
+        action: 'generate',
+        conversationId: CONV,
+        attemptId: INTENTO,
+        edit: { provider: 'xavira', prompt: 'from behind' },
+      }).success,
+    ).toBe(true);
+  });
+
+  it('preguntar el precio pregunta por el MISMO texto que se mandaria', () => {
+    // si el presupuesto se pidiera sobre el compuesto y se mandara el corregido,
+    // el numero de la pantalla seria de otra imagen
+    const parsed = vaultImageEstimateArgsSchema.parse({
+      conversationId: CONV,
+      attemptId: INTENTO,
+      edit: { provider: 'horde', positive: 'from behind', negative: 'blurry' },
+    });
+    expect(parsed.edit).toEqual({
+      provider: 'horde',
+      positive: 'from behind',
+      negative: 'blurry',
+    });
+    expect(
+      vaultImageEstimateArgsSchema.safeParse({
+        conversationId: CONV,
+        attemptId: INTENTO,
+        dryRun: false,
+      }).success,
+    ).toBe(false);
+  });
+
+  it('un medio sellado antes del registro sale con `attemptId: null`', () => {
+    // el enlace con el intento se añadio despues, y el proceso principal lo
+    // rellena desde el sobre del medio: todo lo guardado antes no lo trae y el
+    // visor tiene que abrirse igual, solo que sin semilla ni worker
+    const parsed = ipc.vaultMediaItemSchema.parse({
+      mediaId: 'medio-1',
+      mimeType: 'image/webp',
+      displayName: null,
+      byteSize: 0,
+      hasThumbnail: false,
+      previewable: true,
+    });
+    expect(parsed.attemptId).toBeNull();
+    expect(
+      ipc.vaultMediaItemSchema.parse({
+        mediaId: 'medio-1',
+        mimeType: 'image/webp',
+        displayName: null,
+        byteSize: 0,
+        hasThumbnail: false,
+        previewable: true,
+        attemptId: INTENTO,
+      }).attemptId,
+    ).toBe(INTENTO);
   });
 });
 

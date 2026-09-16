@@ -1,5 +1,34 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-09-16 (tarde) — Claude — ver y corregir el prompt antes de generar
+
+La funcion que pidio Daniel despues de tres semanas adivinando por que le
+rechazaban imagenes: **que el texto que sale hacia el generador deje de ser
+invisible**. Decision en `D-092`.
+
+Se hizo con agentes, y el recuento honesto es este: diez disenaron, **doce
+implementaron** los trece pasos, **tres revisaron** por lentes distintas y
+encontraron 16 hallazgos —13 defectos reales: tres pares eran el mismo visto por
+dos revisores—, **cuatro los corrigieron** y **uno verifico uno a uno que las
+correcciones eran reales**, en el codigo y no en los informes.
+
+**Lo que mas conviene recordar:** el verificador encontro una **regresion
+introducida por uno de los arreglos**. Al hacer que `HordeProgress.kudos` pudiera
+ser nulo —correcto: el Horde a veces calla el precio—, una generacion de verdad
+empezo a llegar con el precio vacio, igual que un reenvio, y el hilo anunciaba «te
+ha reenviado una imagen que ya tenia, sin gastar creditos» sobre una foto recien
+generada y cobrada. Dos agentes la avisaron por escrito y ninguno la toco por
+estar fuera de su lista. **Sin la fase de verificacion habria entrado en
+produccion como parte de un arreglo.** Corregida con `imageCostOutcome`, que
+separa las dos por `costUnit` y no por el precio, con sus cinco pruebas.
+
+Nuevos: `vault-image-plan.ts`, `vault-image-plan-policy.ts`,
+`image-attempt-store.ts`, `ImagePlanPanel.tsx` y cinco archivos de pruebas.
+
+`npm run check` exit 0: 189 archivos, 3863 pruebas, 12 saltadas.
+
+**Sin ver en pantalla.** Nadie ha abierto Studio con esto dentro.
+
 ### 2026-09-16 — Claude — el encuadre que se pide, y la receta visual de Lia
 
 Tres arreglos pequeños en la boveda, todos salidos de que Daniel usara Luxy y

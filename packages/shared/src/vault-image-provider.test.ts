@@ -3,10 +3,11 @@ import { describe, expect, it } from 'vitest';
 import {
   baselineOf,
   isPonyModel,
+  mergeNegatives,
   mixedBaselineWarning,
   qualityPrefixWarning,
   stripConflictingTraits,
-  buildHordeRequest,
+  stripConflictingTraitsDetailed,
   describeHordeCharacter,
   HORDE_ANIME_MODELS,
   HORDE_REALISTIC_MODELS,
@@ -15,6 +16,9 @@ import {
   recipeDefaultsFor,
   type HordeRecipe,
 } from './vault-image-provider.js';
+// `buildHordeRequest` se mudo a `vault-image-plan.ts` al dejar de componer por
+// su cuenta: aqui se sigue probando su comportamiento, que no ha cambiado
+import { buildHordeRequest, composeHordeImagePlan } from './vault-image-plan.js';
 
 /** receta minima valida: cada prueba cambia solo lo que le importa */
 function recipe(overrides: Record<string, unknown> = {}): HordeRecipe {
@@ -173,6 +177,30 @@ describe('buildHordeRequest', () => {
         sourceImage: 'ZmFrZQ==',
       }).denoisingStrength,
     ).toBe(0.2);
+  });
+
+  it('ya no compone por su cuenta: el texto sale del plan', () => {
+    // la invariante que sostiene todo esto es que exista UNA sola funcion que
+    // construya un HordeImageRequest. Con dos, nada impide que una gane un
+    // prefijo o un negativo que la otra no tenga: el panel enseñaria un texto,
+    // el horde recibiria otro y ninguna prueba fallaria
+    const receta = recipe({ outfit: 'black dress', negative: 'blurry' });
+    const escena = 'dark hair wild across pillow';
+    const request = buildHordeRequest({
+      recipe: receta,
+      prompt: escena,
+      extraNegative: 'camera, selfie',
+      shared: receta.shared,
+      sourceImage: 'ZmFrZQ==',
+    });
+    const plan = composeHordeImagePlan({
+      recipe: receta,
+      scene: escena,
+      extraNegative: 'camera, selfie',
+    });
+    expect(request.prompt).toBe(plan.joined);
+    // y el recorte que hoy es invisible ya viene contado con el plan
+    expect(plan.dropped).toEqual(['dark hair']);
   });
 });
 
@@ -370,6 +398,146 @@ describe('la escena tampoco puede reasignarle el origen', () => {
     expect(limpia).not.toContain('japanese');
     expect(limpia).toContain('messy hair spread on pillow');
     expect(limpia).toContain('legs wrapped around partner');
+  });
+});
+
+// El recorte era INVISIBLE, y esa es la mitad del problema: se pide «pelo oscuro
+// suelto sobre la almohada», el color desaparece por un motivo bueno, y quien lo
+// pidio solo ve que su escena llego a medias. Lo que se quita tiene que poder
+// decirse, para que el panel de revision ofrezca devolverlo ANTES de generar.
+describe('stripConflictingTraitsDetailed dice lo que quito', () => {
+  const ASPECTO = 'light brown hair, blue eyes, pale skin, slim body';
+
+  it('apunta el color con el rasgo que calificaba, no la palabra suelta', () => {
+    const { text, dropped } = stripConflictingTraitsDetailed(
+      'dark hair wild across pillow',
+      ASPECTO,
+    );
+    expect(text).toBe('hair wild across pillow');
+    // «dark» a secas no se entiende un mes despues, y lo que hay que poder
+    // devolver al positivo es la frase entera
+    expect(dropped).toEqual(['dark hair']);
+  });
+
+  it('el color encadenado sale entero, no troceado', () => {
+    expect(
+      stripConflictingTraitsDetailed('long dark brown hair, arched back', ASPECTO).dropped,
+    ).toEqual(['dark brown hair']);
+  });
+
+  it('los ojos se apuntan igual que el pelo', () => {
+    expect(stripConflictingTraitsDetailed('golden eyes locked on viewer', ASPECTO).dropped).toEqual(
+      ['golden eyes'],
+    );
+  });
+
+  it('si la receta no habla del pelo, no quita nada y no apunta nada', () => {
+    const { text, dropped } = stripConflictingTraitsDetailed(
+      'dark hair wild across pillow',
+      'blue eyes',
+    );
+    expect(text).toBe('dark hair wild across pillow');
+    expect(dropped).toEqual([]);
+  });
+
+  it('un color que no califica a un rasgo no se apunta porque no se quita', () => {
+    const escena = 'tangled white sheets, warm golden bedroom light, red curtains';
+    expect(stripConflictingTraitsDetailed(escena, ASPECTO).dropped).toEqual([]);
+  });
+
+  it('el origen se apunta con la persona a la que calificaba', () => {
+    expect(
+      stripConflictingTraitsDetailed('petite japanese woman 18, naked', ASPECTO).dropped,
+    ).toEqual(['japanese woman']);
+  });
+
+  it('el origen que es ESCENARIO no se apunta, porque tampoco se quita', () => {
+    const escena = 'japanese lantern on the wall, japanese garden outside';
+    const { text, dropped } = stripConflictingTraitsDetailed(escena, ASPECTO);
+    expect(text).toBe(escena);
+    expect(dropped).toEqual([]);
+  });
+
+  it('la escena real de Daniel apunta las dos cosas', () => {
+    const escena =
+      'petite japanese woman 18, naked, legs wrapped around partner, arched back, ' +
+      'exposed neck, sweaty flushed skin, dark hair wild across pillow, ' +
+      'mouth open in pleasure, glistening eyes locked on viewer';
+    // el color primero y el origen despues: es el orden en que se recorta
+    expect(stripConflictingTraitsDetailed(escena, ASPECTO).dropped).toEqual([
+      'dark hair',
+      'japanese woman',
+    ]);
+  });
+
+  it('el mismo fragmento repetido en la escena se apunta una sola vez', () => {
+    // el panel recorre `dropped` con `key={fragment}`: repetido es una key
+    // duplicada de React —aviso en consola— y dos botones identicos, de los
+    // cuales el segundo no hace nada porque `restoreDroppedFragment` ya no
+    // vuelve a añadir lo que ya esta escrito
+    const { text, dropped } = stripConflictingTraitsDetailed(
+      'dark hair wet, dark hair over her face',
+      ASPECTO,
+    );
+    expect(dropped).toEqual(['dark hair']);
+    // y el recorte sigue quitando las DOS apariciones: deduplicar es del aviso,
+    // no del texto
+    expect(text).toBe('hair wet, hair over her face');
+  });
+
+  it('deduplica sin distinguir mayusculas y conserva como se escribio la primera', () => {
+    expect(
+      stripConflictingTraitsDetailed('Dark hair wet, dark hair over her face', ASPECTO).dropped,
+    ).toEqual(['Dark hair']);
+  });
+
+  it('el plan compuesto tampoco trae el fragmento repetido', () => {
+    const plan = composeHordeImagePlan({
+      recipe: recipe({ appearance: ASPECTO }),
+      scene: 'dark hair wet, dark hair over her face',
+      extraNegative: '',
+    });
+    expect(plan.dropped).toEqual(['dark hair']);
+    expect(new Set(plan.dropped).size).toBe(plan.dropped.length);
+  });
+
+  it('el envoltorio antiguo devuelve exactamente el texto de la version detallada', () => {
+    // esta es la prueba de que la extraccion no cambio el recorte: si los dos se
+    // separasen, las pruebas de arriba estarian midiendo otra funcion
+    const casos: [string, string][] = [
+      ['dark hair wild across pillow', ASPECTO],
+      ['long dark brown hair, arched back', ASPECTO],
+      ['golden eyes locked on viewer', ASPECTO],
+      ['tangled white sheets, warm golden bedroom light, red curtains', ASPECTO],
+      ['naked, black hair, arched back', ASPECTO],
+      ['petite japanese woman 18, naked', ASPECTO],
+      ['japanese lantern on the wall, japanese garden outside', ASPECTO],
+      ['asian young slim girl on bed', ASPECTO],
+      ['japanese woman kneeling', 'japanese woman, light brown hair, blue eyes'],
+      ['dark hair wild across pillow', 'blue eyes'],
+    ];
+    for (const [escena, aspecto] of casos) {
+      expect(stripConflictingTraits(escena, aspecto)).toBe(
+        stripConflictingTraitsDetailed(escena, aspecto).text,
+      );
+    }
+  });
+});
+
+// Se exporta desde que el plan de imagen compone el mismo texto que sale por el
+// transporte: duplicar esta fusion seria garantizar que un dia los dos caminos
+// digan cosas distintas.
+describe('mergeNegatives', () => {
+  it('funde sin repetir, y la receta va primero', () => {
+    expect(mergeNegatives('blurry, 2girls', 'BLURRY, watermark')).toBe('blurry, 2girls, watermark');
+  });
+
+  it('un negativo vacio no deja separadores sueltos', () => {
+    // importa porque un negativo de un solo espacio acabaria en un ' ### ' vacio,
+    // y el generador intentaria no dibujar «###»
+    expect(mergeNegatives('', '   ')).toBe('');
+    expect(mergeNegatives('blurry', '')).toBe('blurry');
+    expect(mergeNegatives('', 'blurry')).toBe('blurry');
   });
 });
 

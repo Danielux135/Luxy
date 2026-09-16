@@ -2925,3 +2925,57 @@ defecto y muestra la pista **falsa** «comprueba la clave en Conexiones».
 
 La conclusion operativa, y la unica solida: **un bloqueo suelto del Horde no es informacion
 fiable sobre lo que se dibujo.**
+
+## D-092 — el texto que sale hacia el generador deja de ser invisible
+
+Fecha: 2026-09-16. Autor: Claude. Origen: tres semanas de imagenes rechazadas,
+encuadres perdidos y «el mismo prompt» que no era el mismo, todas con la misma
+raiz: **el prompt de imagen lo redacta el modelo en cada turno y el usuario no lo
+ve nunca**. Sin ese texto no se puede diagnosticar nada, y `D-091` es la factura
+de intentarlo a ciegas.
+
+### La decision
+
+El turno **termina sin generar** y deja un «plan de imagen» pendiente: el texto
+exacto que saldria —positivo, negativo, parametros, semilla y los rasgos que el
+recorte automatico borro—, calculado por una funcion pura
+(`vault-image-plan.ts`) que es **la misma que consume el envio**. El usuario lo ve,
+lo corrige si quiere y pulsa Generar o Descartar.
+
+Lo que NO se hizo, y es la parte que importa del diseno: **no se pausa el turno**.
+Pausar obligaria a mantener abierta la promesa del envio, con sus tiempos muertos
+y su ventana colgada. El turno se PARTE: la respuesta se guarda entera y la imagen
+queda pendiente en un registro cifrado, asi que sobrevive a cerrar Studio.
+
+Tres reglas que salieron de la revision y conviene no deshacer:
+
+1. **UNA sola entrada al transporte.** `planToHordeRequest(plan)` es la unica
+   funcion que construye una peticion para el Horde. Antes habia dos caminos que
+   componian texto y podian divergir sin que nadie se enterara.
+2. **El intento se apunta pase lo que pase**, tambien cuando falla o lo censuran.
+   Se guarda el `rc` del Horde —que distingue `csam` de `censored`, cosas
+   opuestas—, los avisos del envio, la semilla real y el worker. Todo eso se tiraba.
+3. **En el camino `pending`, el registro es el PERMISO, no la contabilidad.** Si el
+   almacen falla al apuntar un pendiente, se lanza: lo contrario deja una tarjeta
+   prometiendo una imagen que no existe.
+
+### Donde vive, y por que ahi
+
+Los intentos van cifrados en `vault/image-attempts/<conversationId>.json`, con la
+subclave de la **conversacion**, no la de identidad: el prompt de una escena es
+texto verbatim de esa escena —contenido, no un resumen derivado como el catalogo o
+`relation.json`—, asi que pertenece al mismo compartimento que sus turnos. Y se
+borra con la conversacion, enganchado junto a los otros tres almacenes: si no, el
+texto mas intimo del sistema sobreviviria cifrado y huerfano a un borrado.
+
+### El interruptor
+
+Es **por personaje**, no global ni por conversacion, y por defecto revisa. Quien no
+lo quiera lo pone en «nunca» y el comportamiento vuelve a ser exactamente el de
+antes: sin plan, sin panel y sin turno partido.
+
+### Lo que esto NO arregla
+
+No hace que el filtro del Horde acepte nada, y no es su proposito. Lo que hace es
+que, cuando rechace, se sepa **que texto rechazo** — que es justo lo que no se
+supo en las tres semanas que documenta `D-091`.

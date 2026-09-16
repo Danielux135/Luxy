@@ -14,8 +14,10 @@ import type {
   AuxiliaryChoice,
   ConversationMemoryStatus,
   HordeRecipe,
+  ImageAttempt,
   ReasoningEffort,
   RelationStatus,
+  VaultImagePlanEdit,
 } from '@luxy/shared';
 import type { HordeQueueProgress } from '../shared/horde-progress.js';
 import { compatibilityFor, type CompatibilityRun } from './vault-compatibility-reply.js';
@@ -30,6 +32,7 @@ import type {
   vaultRelationListResultSchema,
   vaultVisionProbeResultSchema,
   vaultMemoryDiagnosticsResultSchema,
+  VaultImageTurnState,
 } from '../shared/ipc.js';
 import type { z } from 'zod';
 
@@ -119,6 +122,13 @@ export interface VaultCharacterView {
   createdAt: string;
   /** quién le hace las fotos AHORA; se cambia sin tocar nada más (`D-068`) */
   imageProvider: 'xavira' | 'horde';
+  /**
+   * si hay que enseñar el texto de la imagen antes de generarla.
+   *
+   * Con `siempre`, el turno termina dejando la petición esperando una pulsación
+   * en vez de gastar una generación a ciegas.
+   */
+  imageReview: 'siempre' | 'nunca';
   /** su identidad en Xavira, si la tiene. El identificador es el de SU API */
   xavira: { characterId: string; modelId: string } | null;
   /**
@@ -219,6 +229,14 @@ export interface PrivateMediaItem {
    * esté libre, y cada uno da una cara distinta.
    */
   model: string | null;
+  /**
+   * su intento en el registro cifrado, cuando lo generó Luxy.
+   *
+   * Con él se leen la semilla que usó de verdad y el worker que la dibujó, que
+   * no están guardados con el medio. `null` en lo adjuntado a mano y en todo lo
+   * sellado antes de que existiera el registro.
+   */
+  attemptId: string | null;
 }
 
 export interface VaultComposer {
@@ -428,6 +446,13 @@ export interface VaultController {
     characterId: string,
     provider: 'xavira' | 'horde',
   ) => Promise<boolean>;
+  /**
+   * decide si ese personaje enseña el texto de la imagen antes de generarla.
+   *
+   * No toca nada más suyo, y no depende de qué proveedor le haga las fotos:
+   * revisar un texto se puede hacer siempre.
+   */
+  setCharacterImageReview: (characterId: string, review: 'siempre' | 'nunca') => Promise<boolean>;
   create: (password: string) => Promise<boolean>;
   unlock: (method: 'password' | 'recovery' | 'device', secret?: string) => Promise<boolean>;
   lock: () => Promise<void>;
@@ -455,7 +480,79 @@ export interface VaultController {
     /** en qué se cuenta: los créditos se compran con dinero y los kudos no */
     costUnit: 'creditos' | 'kudos' | null;
     error: string | null;
+    /**
+     * en qué quedó la petición, que no es lo mismo que si hay imagen.
+     *
+     * `pending` es que el texto está compuesto y esperando a que una persona lo
+     * apruebe, y `malformed` que ella SÍ pidió una imagen y el bloque llegó
+     * cortado o mal escrito. Sin estos dos nombres, las dos cosas se pintaban
+     * igual que un turno en el que no pidió nada.
+     */
+    state: VaultImageTurnState;
+    /** el intento en el registro cifrado, para poder mirarlo después */
+    attemptId: string | null;
   } | null;
+  /**
+   * la imagen que está esperando una decisión en la conversación abierta.
+   *
+   * Lleva el PLAN entero —el texto exacto que saldría hacia el proveedor—, así
+   * que es contenido descifrado de la bóveda y por eso está declarado en
+   * `DECRYPTED_RENDERER_STATE`: al cerrarse la bóveda deja de existir aquí.
+   *
+   * Se lee del registro cifrado y no del resultado del turno: cerrar Studio con
+   * una imagen sin decidir no es decir que no, y al volver a abrir la
+   * conversación la tarjeta tiene que seguir ahí.
+   */
+  pendingImagePlan: ImageAttempt | null;
+  /**
+   * manda el plan pendiente, con la corrección escrita a mano si la hay.
+   *
+   * `edit: null` significa «tal y como lo compusiste». No se manda el plan
+   * entero: sólo el texto. El plan base lo lee el proceso principal del registro
+   * cifrado y la huella la recalcula él, así que un `planId` de esta ventana no
+   * se lo cree nadie.
+   */
+  commitImagePlan: (input: {
+    attemptId: string;
+    edit: VaultImagePlanEdit | null;
+  }) => Promise<boolean>;
+  /** dice que no: no se genera y no se cobra */
+  discardImagePlan: (attemptId: string) => Promise<boolean>;
+  /**
+   * pregunta lo que costaría sin encolar nada.
+   *
+   * Sólo AI Horde, y sólo con un botón: el endpoint tiene límites por IP y
+   * preguntar el precio en cada tecla es un uso abusivo. `null` es que la
+   * pregunta falló; el error ya está puesto.
+   */
+  estimateImagePlan: (input: {
+    attemptId: string;
+    edit: VaultImagePlanEdit | null;
+  }) => Promise<{ kudos: number | null; warnings: { code: string; message: string }[] } | null>;
+  /** se está preguntando el precio; no es lo mismo que estar generando */
+  estimatingImage: boolean;
+  /**
+   * el intento que se está mirando ahora mismo, leído del registro cifrado.
+   *
+   * Es historia: lo que se mandó de verdad, con su semilla, su worker y su
+   * motivo de fallo. Lleva el plan entero, así que es contenido descifrado y por
+   * eso entra en la purga del candado igual que `pendingImagePlan`.
+   *
+   * Hay UNO solo a propósito: se mira de uno en uno —un aviso de fallo, o la
+   * imagen abierta en el visor—, y guardarlos todos sería tener colgado de la
+   * ventana el texto de cada foto de la conversación sin que nadie lo esté
+   * leyendo.
+   */
+  openImageAttempt: ImageAttempt | null;
+  /**
+   * lee un intento del registro y lo deja en `openImageAttempt`.
+   *
+   * Se pide a mano, cada vez que se abre lo que lo enseña: leer el archivo
+   * cuesta un descifrado y no hay ninguno que valga para dos intentos. Devuelve
+   * `false` cuando ese intento ya no está —el registro es un anillo— para que
+   * quien lo pidió pueda decirlo en vez de quedarse en blanco.
+   */
+  readImageAttempt: (attemptId: string) => Promise<boolean>;
   /**
    * que le paso al bloque de memoria en el ultimo turno.
    *
@@ -762,6 +859,15 @@ export function useVault(): VaultController {
     { name: string; count: number; eta: number; jobs: number }[] | null
   >(null);
   const [lastImage, setLastImage] = useState<VaultController['lastImage']>(null);
+  // el plan lleva el texto exacto que saldria hacia el proveedor: es contenido
+  // descifrado, y por eso entra en la purga del cierre igual que los turnos
+  const [pendingImagePlan, setPendingImagePlan] = useState<ImageAttempt | null>(null);
+  // el que se esta mirando, que tambien lleva el plan entero: mismo material y
+  // por tanto misma purga. Uno solo: se mira de uno en uno
+  const [openImageAttempt, setOpenImageAttempt] = useState<ImageAttempt | null>(null);
+  // preguntar el precio no es generar: tiene su propio indicador para que el
+  // boton pueda decir «Comprobando…» sin apagar el de Generar
+  const [estimatingImage, setEstimatingImage] = useState(false);
   const [lastMemoryStatus, setLastMemoryStatus] = useState<ConversationMemoryStatus | null>(null);
   const [memoryEpisodes, setMemoryEpisodes] = useState<MemoryEpisode[] | null>(null);
   const [memoryExcluded, setMemoryExcluded] = useState<string[]>([]);
@@ -848,6 +954,8 @@ export function useVault(): VaultController {
       recapCoverage: () => setRecapCoverage(null),
       recapPreview: () => setRecapPreview(null),
       compatibility: () => setCompatibility(null),
+      pendingImagePlan: () => setPendingImagePlan(null),
+      openImageAttempt: () => setOpenImageAttempt(null),
     }),
     [],
   );
@@ -1447,6 +1555,7 @@ export function useVault(): VaultController {
         setCharacterId(null);
         setCharacterDescription(null);
         setLastImage(null);
+        setPendingImagePlan(null);
         setLastMemoryStatus(null);
         return;
       }
@@ -1473,6 +1582,13 @@ export function useVault(): VaultController {
       // sentido
       setLastImage(null);
       setLastMemoryStatus(null);
+      // la imagen que quedo esperando SI pertenece a la conversacion, y por eso
+      // se lee del registro cifrado en vez de perderse: cerrar Studio —o abrir
+      // otro hilo y volver— no es decir que no
+      const pendingResult = await window.luxy.readVaultImagePending({ conversationId });
+      if (mounted.current) {
+        setPendingImagePlan(pendingResult.ok ? pendingResult.value.attempt : null);
+      }
       const mediaResult = await window.luxy.listVaultMedia(conversationId);
       if (mounted.current && mediaResult.ok) setMedia(mediaResult.value.media);
     },
@@ -1725,7 +1841,31 @@ export function useVault(): VaultController {
         if (!result.value.userTurnKept) {
           setComposerState((previous) => ({ ...previous, message: input.message }));
         }
-        setLastImage(result.value.image);
+        const imagen = result.value.image;
+        // el PLAN no se copia a `lastImage`: es el texto que saldria hacia el
+        // proveedor, o sea contenido descifrado, y este estado no entra en la
+        // purga del candado. El panel lo lee de `pendingImagePlan`, que si entra
+        setLastImage(
+          imagen === null
+            ? null
+            : {
+                mediaId: imagen.mediaId,
+                costCredits: imagen.costCredits,
+                costUnit: imagen.costUnit,
+                error: imagen.error,
+                state: imagen.state,
+                attemptId: imagen.attemptId,
+              },
+        );
+        // se pregunta SIEMPRE, no solo cuando este turno dejo uno: un mensaje
+        // nuevo sustituye la peticion anterior, y sin esto la tarjeta de la de
+        // antes seguiria en pantalla ofreciendo generar algo que ya no vale
+        const pendingResult = await window.luxy.readVaultImagePending({
+          conversationId: result.value.conversationId,
+        });
+        if (mounted.current) {
+          setPendingImagePlan(pendingResult.ok ? pendingResult.value.attempt : null);
+        }
         // lo generado en este turno se guarda contra la conversacion: recargar
         // los medios es lo que hace que la imagen aparezca sin recargar nada
         if (result.value.image?.mediaId != null) await reloadMedia();
@@ -1807,6 +1947,186 @@ export function useVault(): VaultController {
     [openConversationId, reloadMedia],
   );
 
+  /**
+   * manda el plan que quedo esperando, con la correccion si la hubo.
+   *
+   * Reutiliza `generating` y `hordeProgress` tal cual: por dentro es la misma
+   * generacion que el panel manual, asi que por primera vez un turno de la
+   * conversacion enseña la cola del horde en vez de diez minutos en blanco.
+   *
+   * El `attemptId` llega por argumento y no se lee del estado: entre pintar la
+   * tarjeta y pulsar el boton puede haber pasado un turno entero, y mandar «el
+   * pendiente que haya ahora» seria generar uno que nadie miro.
+   */
+  const commitImagePlan = useCallback(
+    async (input: { attemptId: string; edit: VaultImagePlanEdit | null }): Promise<boolean> => {
+      if (openConversationId === null) return false;
+      setGenerating(true);
+      setError(null);
+      setHint(null);
+      // la cola de la generacion anterior no dice nada de esta
+      setHordeProgress(null);
+      try {
+        const result = await window.luxy.commitVaultImage({
+          action: 'generate',
+          conversationId: openConversationId,
+          attemptId: input.attemptId,
+          edit: input.edit,
+        });
+        if (!result.ok) {
+          setError(result.error);
+          setHint(result.hint);
+        }
+        // los DOS caminos tocan la ventana, no solo el del exito: ver
+        // `windowAfterImageCommit`. El aviso del hilo hablaba de este intento y
+        // dejarlo diciendo «esperando» —despues de generar o despues de fallar—
+        // seria mentir sobre lo que acaba de pasar
+        const after = windowAfterImageCommit({
+          attemptId: input.attemptId,
+          result: result.ok
+            ? {
+                ok: true,
+                attemptId: result.value.attemptId,
+                mediaId: result.value.mediaId,
+                costCredits: result.value.costCredits,
+                costUnit: result.value.costUnit,
+              }
+            : { ok: false, error: result.error },
+        });
+        setLastImage(after.lastImage);
+        if (after.pending === 'clear') {
+          // decidido: deja de esperar a nadie. El registro conserva el intento
+          // con lo que se mando; lo que desaparece es la tarjeta
+          setPendingImagePlan(null);
+        } else {
+          // y si fallo, manda el registro: es el unico que sabe si el intento
+          // sigue esperando. Quedarse con la copia caducada dejaba la tarjeta
+          // clavada con los tres botones encendidos sobre algo que el proceso
+          // principal ya rechaza, «Descartar» incluido
+          const pendingResult = await window.luxy.readVaultImagePending({
+            conversationId: openConversationId,
+          });
+          if (mounted.current) {
+            setPendingImagePlan(pendingResult.ok ? pendingResult.value.attempt : null);
+          }
+        }
+        if (!result.ok) return false;
+        setLastCost(
+          result.value.costCredits === null
+            ? null
+            : { amount: result.value.costCredits, unit: result.value.costUnit ?? 'creditos' },
+        );
+        await reloadMedia();
+        return true;
+      } finally {
+        if (mounted.current) {
+          setGenerating(false);
+          // terminada o fallida, la cola ya no existe
+          setHordeProgress(null);
+        }
+      }
+    },
+    [openConversationId, reloadMedia],
+  );
+
+  /** dice que no. No se genera, no se cobra y el intento queda apuntado como descartado */
+  const discardImagePlan = useCallback(
+    async (attemptId: string): Promise<boolean> => {
+      if (openConversationId === null) return false;
+      setError(null);
+      setHint(null);
+      const result = await window.luxy.commitVaultImage({
+        action: 'discard',
+        conversationId: openConversationId,
+        attemptId,
+      });
+      if (!result.ok) {
+        setError(result.error);
+        setHint(result.hint);
+        // por el mismo motivo que en `commitImagePlan`: si el registro ya no lo
+        // tiene esperando, la tarjeta se va igual. Conservar la copia caducada
+        // es lo que dejaba al usuario sin ninguna salida
+        const pendingResult = await window.luxy.readVaultImagePending({
+          conversationId: openConversationId,
+        });
+        if (mounted.current) {
+          setPendingImagePlan(pendingResult.ok ? pendingResult.value.attempt : null);
+        }
+        return false;
+      }
+      setPendingImagePlan(null);
+      // y el aviso del hilo se va con ella: no hubo imagen y ya no se espera
+      // ninguna, asi que no queda nada que contar de ese turno
+      setLastImage((previous) =>
+        previous !== null && previous.attemptId === attemptId ? null : previous,
+      );
+      return true;
+    },
+    [openConversationId],
+  );
+
+  /**
+   * pregunta el precio en seco, sin encolar nada.
+   *
+   * Se pregunta por el texto CORREGIDO, que es el que se mandaria: un precio de
+   * un texto que no va a salir no sirve de nada. Preguntar no decide: el intento
+   * sigue esperando despues.
+   */
+  const estimateImagePlan = useCallback(
+    async (input: {
+      attemptId: string;
+      edit: VaultImagePlanEdit | null;
+    }): Promise<{ kudos: number | null; warnings: { code: string; message: string }[] } | null> => {
+      if (openConversationId === null) return null;
+      setEstimatingImage(true);
+      setError(null);
+      setHint(null);
+      try {
+        const result = await window.luxy.estimateVaultImage({
+          conversationId: openConversationId,
+          attemptId: input.attemptId,
+          edit: input.edit,
+        });
+        if (!result.ok) {
+          setError(result.error);
+          setHint(result.hint);
+          return null;
+        }
+        return { kudos: result.value.kudos, warnings: result.value.warnings };
+      } finally {
+        if (mounted.current) setEstimatingImage(false);
+      }
+    },
+    [openConversationId],
+  );
+
+  /**
+   * trae del registro cifrado el intento que se quiere mirar.
+   *
+   * No pone `error` cuando no aparece: un intento que el anillo ya tiró no es
+   * una avería, es historia que caducó, y un aviso rojo arriba de la pantalla
+   * por abrir un desplegable sería ruido. Quien lo pidió recibe `false` y lo
+   * dice donde estaba mirando.
+   */
+  const readImageAttempt = useCallback(
+    async (attemptId: string): Promise<boolean> => {
+      if (openConversationId === null) return false;
+      const result = await window.luxy.listVaultImageAttempts({
+        conversationId: openConversationId,
+      });
+      if (!mounted.current) return false;
+      if (!result.ok) {
+        setError(result.error);
+        setHint(result.hint);
+        return false;
+      }
+      const found = result.value.attempts.find((entry) => entry.attemptId === attemptId) ?? null;
+      setOpenImageAttempt(found);
+      return found !== null;
+    },
+    [openConversationId],
+  );
+
   const createCharacter = useCallback(
     async (input: {
       modelId: 'realistic-sharp-v1' | 'anime-pure-v1';
@@ -1864,6 +2184,24 @@ export function useVault(): VaultController {
         setHint(result.hint);
         return false;
       }
+      setCharacters(result.value.characters);
+      return true;
+    },
+    [],
+  );
+
+  const setCharacterImageReview = useCallback(
+    async (characterId: string, review: 'siempre' | 'nunca'): Promise<boolean> => {
+      setError(null);
+      setHint(null);
+      const result = await window.luxy.setVaultCharacterImageReview({ characterId, review });
+      if (!result.ok) {
+        setError(result.error);
+        setHint(result.hint);
+        return false;
+      }
+      // vuelve la lista entera ya aplicada: sin esto el interruptor se quedaría
+      // enseñando el valor viejo hasta la siguiente recarga
       setCharacters(result.value.characters);
       return true;
     },
@@ -1935,6 +2273,7 @@ export function useVault(): VaultController {
     loadHordeModels,
     saveHordeCharacter,
     setCharacterImageProvider,
+    setCharacterImageReview,
     setMediaCaption,
     describeMedia,
     describingMedia,
@@ -1966,6 +2305,13 @@ export function useVault(): VaultController {
     readCharacterInstructions,
     readCharacterAvatar,
     lastImage,
+    pendingImagePlan,
+    commitImagePlan,
+    discardImagePlan,
+    estimateImagePlan,
+    estimatingImage,
+    openImageAttempt,
+    readImageAttempt,
     sending,
     openConversation,
     send,
@@ -2039,4 +2385,154 @@ export function formatLockCountdown(lockingInMs: number | null): string | null {
   if (minutes >= 1) return `se cerrará sola en ${minutes} min`;
   const seconds = Math.max(0, Math.floor(lockingInMs / 1000));
   return `se cerrará sola en ${seconds} s`;
+}
+
+/**
+ * la tarjeta del pendiente que hay que pintar ADEMAS de la del ultimo turno.
+ *
+ * `lastImage` es estado de ESTA ventana: cambiar de conversacion o cerrar Studio
+ * lo borra. El pendiente no —vive en el registro cifrado y se relee al abrir la
+ * conversacion—, asi que mientras la tarjeta salio solo de `lastImage` un plan
+ * guardado quedaba inalcanzable: no se podia ni ver, ni generar, ni descartar,
+ * porque el unico boton que abre el panel esta dentro de esa tarjeta.
+ *
+ * Devuelve `null` cuando no hay pendiente o cuando la tarjeta de `lastImage` ya
+ * es la de ESE intento: pintarlas las dos seria el mismo aviso repetido.
+ */
+export function pendingImageCard(input: {
+  lastImage: VaultController['lastImage'];
+  pendingImagePlan: ImageAttempt | null;
+}): NonNullable<VaultController['lastImage']> | null {
+  const pending = input.pendingImagePlan;
+  if (pending === null) return null;
+  const last = input.lastImage;
+  if (last !== null && last.state === 'pending' && last.attemptId === pending.attemptId) {
+    return null;
+  }
+  return {
+    mediaId: null,
+    costCredits: null,
+    costUnit: null,
+    error: null,
+    state: 'pending',
+    attemptId: pending.attemptId,
+  };
+}
+
+/** que decir sobre lo que costo una imagen que ya termino */
+export type ImageCostOutcome =
+  | { kind: 'resent' }
+  | { kind: 'generated'; unit: 'creditos' | 'kudos'; amount: number | null };
+
+/**
+ * distingue una imagen REENVIADA de una generada cuyo precio no se sabe.
+ *
+ * Las dos llegan con `costCredits: null` y hasta ahora el hilo miraba solo ese
+ * campo, asi que una generacion de verdad se anunciaba como «te ha reenviado una
+ * que ya tenia, sin gastar creditos»: mentia dos veces sobre una imagen que si
+ * se genero y si se cobro.
+ *
+ * Lo que las separa es `costUnit`: el reenvio pone los DOS campos a null porque
+ * no hay ninguna moneda de por medio, y una generacion siempre dice en que
+ * moneda, aunque el servidor se calle el numero. Y se calla a menudo: AI Horde
+ * devuelve el estado sin `kudos` cuando le apetece, que es justo lo que destapo
+ * este fallo.
+ */
+export function imageCostOutcome(input: {
+  costCredits: number | null;
+  costUnit: 'creditos' | 'kudos' | null;
+}): ImageCostOutcome {
+  if (input.costCredits === null && input.costUnit === null) return { kind: 'resent' };
+  return {
+    kind: 'generated',
+    unit: input.costUnit ?? 'creditos',
+    amount: input.costCredits,
+  };
+}
+
+/**
+ * como queda la ventana despues de aprobar un pendiente.
+ *
+ * Es pura porque es justo la parte que fallaba: el camino de FALLO no tocaba
+ * nada. El proceso principal dejaba el intento en `sent` y despues en `failed`,
+ * pero la copia de la ventana seguia diciendo `pending`, asi que el aviso del
+ * hilo seguia diciendo «esta esperando» y los tres botones del panel seguian
+ * encendidos sobre un intento que el proceso principal ya rechaza —«Descartar»
+ * incluido—: el usuario se quedaba sin ninguna salida.
+ *
+ * En el fallo pide `reload` y no `clear` porque desde aqui NO se sabe en que
+ * quedo: puede haberse mandado y haber fallado el proveedor —ya no hay nada que
+ * decidir— o no haber llegado a salir, y entonces sigue esperando y se tiene que
+ * poder decidir. Quien lo sabe es el registro.
+ */
+export function windowAfterImageCommit(input: {
+  attemptId: string;
+  result:
+    | {
+        ok: true;
+        attemptId: string;
+        mediaId: string | null;
+        costCredits: number | null;
+        costUnit: 'creditos' | 'kudos' | null;
+      }
+    | { ok: false; error: string };
+}): {
+  /** lo que queda en `lastImage`, a partir de lo que hubiera */
+  lastImage: (previous: VaultController['lastImage']) => VaultController['lastImage'];
+  /** que hacer con la copia del pendiente */
+  pending: 'clear' | 'reload';
+} {
+  const { result } = input;
+  return {
+    pending: result.ok ? 'clear' : 'reload',
+    lastImage: (previous) => {
+      // el aviso del hilo hablaba de ESTE intento: el de otro turno no se toca
+      if (previous === null || previous.attemptId !== input.attemptId) return previous;
+      if (result.ok) {
+        return {
+          mediaId: result.mediaId,
+          costCredits: result.costCredits,
+          costUnit: result.costUnit,
+          error: null,
+          state: 'done',
+          attemptId: result.attemptId,
+        };
+      }
+      // `done` no es «salio bien»: es «este turno ya no espera a nadie». Con
+      // `error` puesto, el hilo lo pinta como el fallo que fue
+      return { ...previous, state: 'done', error: result.error };
+    },
+  };
+}
+
+/** la semilla y el worker de un intento, copiados donde se estan enseñando */
+export type ImageOrigin = { attemptId: string; seed: string | null; worker: string | null };
+
+/**
+ * lo que el visor sigue enseñando de un intento despues de leerlo.
+ *
+ * El hueco `openImageAttempt` del controlador es UNO y lo comparten dos sitios:
+ * el desplegable «Ver lo que se mando» de un fallo y el origen del archivo
+ * abierto en el visor. El desplegable vuelve a pedir el suyo en cuanto se lo
+ * quitan, asi que leyendo del hueco el visor perdia la fila «Semilla / Worker» y
+ * no volvia a tenerla mientras el desplegable siguiera abierto. Reintentar
+ * tambien desde el visor no arregla nada: los dos se lo quitarian el uno al otro
+ * sin parar.
+ *
+ * Se copian estos DOS campos y no el intento entero a proposito: son un numero y
+ * el nombre de una maquina. El texto de la escena no se copia a ningun sitio.
+ */
+export function imageOriginSnapshot(
+  previous: ImageOrigin | null,
+  input: { attemptId: string | null; shared: ImageAttempt | null },
+): ImageOrigin | null {
+  const { attemptId, shared } = input;
+  // un archivo adjuntado a mano no tiene intento y no hay nada que enseñar
+  if (attemptId === null) return null;
+  if (shared !== null && shared.attemptId === attemptId) {
+    return { attemptId, seed: shared.seed, worker: shared.worker };
+  }
+  // lo copiado vale mientras sea de ESTE archivo: que el hueco pase a tener otro
+  // intento no borra lo que ya se leyo, y abrir otro archivo si
+  return previous !== null && previous.attemptId === attemptId ? previous : null;
 }

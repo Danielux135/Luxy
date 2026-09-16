@@ -19,6 +19,10 @@ import {
   RECAP_SOURCES,
   RELATION_PARTIES,
   RELATION_STATUSES,
+  VAULT_IMAGE_ATTEMPT_STATES,
+  imageAttemptSchema,
+  imageAttemptWarningSchema,
+  vaultImagePlanEditSchema,
   type agentEventSchema,
   agentHostStatusSchema,
   catalogSnapshotSchema,
@@ -36,6 +40,7 @@ import {
   studioJobResponseSchema,
   studioJobsResponseSchema,
   studioOptionsResponseSchema,
+  vaultImagePlanSchema,
 } from '@luxy/shared';
 
 // las constantes de canal y de nombre de secreto viven en channels.ts porque
@@ -394,6 +399,18 @@ export const vaultConversationReadResultSchema = z.object({
   model: z.string().nullable(),
 });
 
+/**
+ * en que quedo la peticion de imagen de un turno.
+ *
+ * Tres y no mas: `done` cubre los tres finales de siempre —se genero, se
+ * reenvio o fallo—, que la pantalla ya distingue con `mediaId` y `error`.
+ * Añadir un estado por cada uno de esos tres seria renombrar lo que ya
+ * funciona; los que hacian falta son los dos que antes no tenian forma de
+ * llegar hasta aqui.
+ */
+export const VAULT_IMAGE_TURN_STATES = ['done', 'pending', 'malformed'] as const;
+export type VaultImageTurnState = (typeof VAULT_IMAGE_TURN_STATES)[number];
+
 export const vaultConversationSendResultSchema = z.object({
   conversationId: z.string(),
   outcome: z.enum(['completed', 'failed', 'cancelled']),
@@ -451,6 +468,33 @@ export const vaultConversationSendResultSchema = z.object({
        */
       costUnit: z.enum(['creditos', 'kudos']).nullable().default(null),
       error: z.string().nullable(),
+      /**
+       * en que quedo la peticion, que no es lo mismo que si hay imagen.
+       *
+       * `done` es el camino de siempre —se mando, se reenvio o fallo— y se
+       * distingue con `mediaId` y `error`, como hasta ahora. Los otros dos son
+       * estados que antes no existian y que sin nombre propio se leian como un
+       * turno sin imagen: `pending` es que el texto esta compuesto y esperando
+       * a que una persona lo apruebe, y `malformed` es que ella SI pidio una
+       * imagen y el bloque llego cortado o mal escrito —hoy invisible, porque
+       * nadie miraba el `status` del parser—.
+       */
+      state: z.enum(VAULT_IMAGE_TURN_STATES).default('done'),
+      /**
+       * el intento en el registro cifrado, para poder mirarlo despues.
+       *
+       * Es un uuid y nada mas: el texto del plan no viaja en el error ni en el
+       * log, se lee del registro con este identificador.
+       */
+      attemptId: z.string().nullable().default(null),
+      /**
+       * lo que se va a mandar, entero, para el panel de revision.
+       *
+       * Solo viaja en memoria main -> renderer y solo cuando hay algo que
+       * decidir. No se escribe en ningun sitio por este camino: en disco vive
+       * cifrado dentro del intento.
+       */
+      plan: vaultImagePlanSchema.nullable().default(null),
     })
     .nullable(),
   error: z.string().nullable(),
@@ -1090,6 +1134,15 @@ export const vaultMediaItemSchema = z.object({
    * caras distintas» no se podía ni empezar a diagnosticar.
    */
   model: z.string().nullable().default(null),
+  /**
+   * el intento del registro cifrado que la genero, si lo hubo.
+   *
+   * Es una referencia, no una copia: la semilla de verdad, el worker y los
+   * avisos viven alli. Sin esto, «la misma semilla me da caras distintas» no se
+   * puede ni empezar a mirar, porque el sobre del medio no guarda la semilla.
+   * `null` en todo lo sellado antes del registro y en lo que se adjunto a mano.
+   */
+  attemptId: z.string().nullable().default(null),
 });
 
 export const vaultMediaListResultSchema = z.object({
@@ -1512,6 +1565,111 @@ export const vaultMediaGenerateResultSchema = z.object({
   costUnit: z.enum(['creditos', 'kudos']).nullable().default(null),
 });
 
+// -----------------------------------------------------------------------------
+// la decision sobre una imagen que quedo esperando
+// -----------------------------------------------------------------------------
+
+/**
+ * el pendiente de una conversacion.
+ *
+ * Se pregunta al abrir la conversacion, no al enviar: el intento vive cifrado
+ * en disco, asi que cerrar Studio con una imagen sin decidir no es decir que
+ * no, y sin este verbo la tarjeta no volveria a aparecer nunca.
+ */
+export const vaultImagePendingArgsSchema = z.object({
+  conversationId: conversationIdSchema,
+});
+
+export const vaultImagePendingResultSchema = z.object({
+  /** `null` cuando no hay nada esperando, que es lo normal */
+  attempt: imageAttemptSchema.nullable(),
+});
+
+/** el registro de esa conversacion, tal y como esta guardado */
+export const vaultImageAttemptsArgsSchema = z.object({
+  conversationId: conversationIdSchema,
+});
+
+export const vaultImageAttemptsResultSchema = z.object({
+  /** del mas antiguo al mas reciente, que es como se apuntaron */
+  attempts: z.array(imageAttemptSchema),
+});
+
+/**
+ * la decision de Daniel sobre el texto que iba a salir.
+ *
+ * Union discriminada y ESTRICTA en las dos ramas, por el mismo motivo escrito
+ * en `vaultRecapUpdateArgsSchema`: sin `strict` un campo de mas se descarta en
+ * silencio, y entonces el boton dice una cosa y hace otra. Aqui eso se paga en
+ * kudos y en una imagen que no es la que se pidio.
+ *
+ * ESO INCLUYE EL OBJETO ANIDADO, que es el que lleva el texto que se paga: las
+ * dos ramas de `vaultImagePlanEditSchema` son estrictas tambien, y esta atado
+ * con una prueba aqui («un campo de mas DENTRO de `edit`...»). Sin ella, un
+ * `seed` colado en la correccion —lo primero que uno intenta al ver la semilla
+ * en el panel— se tiraba en silencio y la imagen salia con otra.
+ *
+ * `edit` a `null` significa «mandalo tal y como lo compusiste». No se acepta un
+ * plan entero desde el renderer: solo el TEXTO corregido. El plan base se lee
+ * del registro cifrado y la huella se recalcula en el main, asi que un `planId`
+ * que llegue de fuera no lo cree nadie.
+ */
+export const vaultImageCommitArgsSchema = z.discriminatedUnion('action', [
+  z
+    .object({
+      action: z.literal('generate'),
+      conversationId: conversationIdSchema,
+      attemptId: z.string().uuid(),
+      edit: vaultImagePlanEditSchema.nullable().default(null),
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal('discard'),
+      conversationId: conversationIdSchema,
+      attemptId: z.string().uuid(),
+    })
+    .strict(),
+]);
+
+/**
+ * en que quedo la decision.
+ *
+ * Un solo objeto para las dos ramas, con los campos del medio a `null` cuando
+ * no hubo medio: `discard` no genera y no cobra, y la pantalla necesita poder
+ * pintar las dos respuestas con el mismo codigo.
+ */
+export const vaultImageCommitResultSchema = z.object({
+  attemptId: z.string(),
+  state: z.enum(VAULT_IMAGE_ATTEMPT_STATES),
+  mediaId: z.string().nullable().default(null),
+  mimeType: z.string().nullable().default(null),
+  byteSize: z.number().int().min(0).nullable().default(null),
+  costCredits: z.number().nullable().default(null),
+  costUnit: z.enum(['creditos', 'kudos']).nullable().default(null),
+});
+
+/**
+ * cuanto costaria, preguntado en seco.
+ *
+ * Mismos argumentos que `generate` porque se pregunta por el MISMO texto: lo
+ * que se estime tiene que ser lo que despues se mande, incluida la correccion
+ * escrita a mano. El handler es del paso 10.
+ */
+export const vaultImageEstimateArgsSchema = z
+  .object({
+    conversationId: conversationIdSchema,
+    attemptId: z.string().uuid(),
+    edit: vaultImagePlanEditSchema.nullable().default(null),
+  })
+  .strict();
+
+export const vaultImageEstimateResultSchema = z.object({
+  /** `null` si el servidor no devolvio precio; nunca un numero inventado */
+  kudos: z.number().nullable(),
+  warnings: z.array(imageAttemptWarningSchema),
+});
+
 /**
  * un personaje guardado en la bóveda.
  *
@@ -1540,6 +1698,15 @@ export const vaultCharacterSummarySchema = z.object({
    * agarran a `characterId`, que no cambia nunca (`D-068`).
    */
   imageProvider: z.enum(['xavira', 'horde']).default('xavira'),
+  /**
+   * si hay que enseñar el texto de la imagen antes de generarla.
+   *
+   * Viaja al renderer porque el interruptor vive en su ficha y tiene que poder
+   * pintar el estado real. El valor por defecto está aquí por lo mismo que en
+   * `imageProvider`: una bóveda escrita antes de este campo sigue leyendo su
+   * propia lista sin que la pantalla tenga que adivinar nada.
+   */
+  imageReview: z.enum(['siempre', 'nunca']).default('siempre'),
   /** su identidad en Xavira, si la tiene. El identificador es el de SU API */
   xavira: z
     .object({ characterId: z.string(), modelId: z.string() })
@@ -1566,6 +1733,18 @@ export const vaultCharacterSummarySchema = z.object({
 export const vaultCharacterProviderArgsSchema = z.object({
   characterId: z.string().min(1).max(128),
   provider: z.enum(['xavira', 'horde']),
+});
+
+/**
+ * decide si ese personaje enseña el texto de la imagen antes de generarla.
+ *
+ * Va por su propio verbo, como el proveedor, y no dentro de un «guardar
+ * personaje» genérico: un canal que sólo puede cambiar una cosa no puede
+ * reescribirle por accidente la receta, el nombre ni el avatar.
+ */
+export const vaultCharacterImageReviewArgsSchema = z.object({
+  characterId: z.string().min(1).max(128),
+  review: z.enum(['siempre', 'nunca']),
 });
 
 export const vaultCharacterListResultSchema = z.object({
@@ -1998,6 +2177,10 @@ export interface LuxyBridge {
   setVaultCharacterImageProvider(
     args: z.infer<typeof vaultCharacterProviderArgsSchema>,
   ): Promise<IpcResult<z.infer<typeof vaultCharacterListResultSchema>>>;
+  /** decide si ese personaje enseña el texto de la imagen antes de generarla */
+  setVaultCharacterImageReview(
+    args: z.infer<typeof vaultCharacterImageReviewArgsSchema>,
+  ): Promise<IpcResult<z.infer<typeof vaultCharacterListResultSchema>>>;
   createVault(password: string): Promise<IpcResult<z.infer<typeof vaultCreateResultSchema>>>;
   unlockVault(
     args: z.infer<typeof vaultUnlockArgsSchema>,
@@ -2072,6 +2255,22 @@ export interface LuxyBridge {
   generateVaultMedia(
     args: z.infer<typeof vaultMediaGenerateArgsSchema>,
   ): Promise<IpcResult<z.infer<typeof vaultMediaGenerateResultSchema>>>;
+  /** la imagen que quedo esperando decision en esa conversacion, si quedo alguna */
+  readVaultImagePending(
+    args: z.infer<typeof vaultImagePendingArgsSchema>,
+  ): Promise<IpcResult<z.infer<typeof vaultImagePendingResultSchema>>>;
+  /** manda el pendiente —con el texto que sea— o lo tira. `discard` no cuesta nada */
+  commitVaultImage(
+    args: z.input<typeof vaultImageCommitArgsSchema>,
+  ): Promise<IpcResult<z.infer<typeof vaultImageCommitResultSchema>>>;
+  /** cuanto costaria, sin encolar nada. Solo AI Horde sabe contestarlo */
+  estimateVaultImage(
+    args: z.input<typeof vaultImageEstimateArgsSchema>,
+  ): Promise<IpcResult<z.infer<typeof vaultImageEstimateResultSchema>>>;
+  /** lo que se mando de verdad en esa conversacion, para mirarlo despues */
+  listVaultImageAttempts(
+    args: z.infer<typeof vaultImageAttemptsArgsSchema>,
+  ): Promise<IpcResult<z.infer<typeof vaultImageAttemptsResultSchema>>>;
   /** corrige a mano el pie de foto; devuelve la lista ya actualizada */
   setVaultMediaCaption(
     args: z.infer<typeof vaultMediaCaptionArgsSchema>,

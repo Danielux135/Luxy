@@ -1,7 +1,24 @@
 # Luxy — estado canónico del proyecto
 
-Última actualización: **2026-09-16 — el encuadre que pide Daniel llega a la
-imagen, y el negativo de la receta visual dejó de hacer saltar el filtro**
+Última actualización: **2026-09-16 — el texto que sale hacia el generador de
+imágenes deja de ser invisible**
+
+Cuando el personaje pide una imagen, el turno **termina sin generarla** y deja un
+plan pendiente: el texto exacto que saldría —positivo, negativo, parámetros,
+semilla y los rasgos que el recorte automático borró—. Daniel lo ve, lo corrige si
+quiere y decide generar o descartar. El turno no se pausa: se parte, así que la
+respuesta se guarda entera y el plan sobrevive a cerrar Studio.
+
+Cada intento queda apuntado cifrado por conversación, **también los que fallan o
+censuran**, con el código del Horde —que distingue `csam` de `censored`, dos cosas
+opuestas que hasta ahora se aplanaban en un error genérico—, la semilla real y el
+worker. Es el hueco de instrumentación que `D-091` dejó señalado.
+
+El interruptor es **por personaje**; en «nunca» todo se comporta exactamente como
+antes. Decisión en `D-092`. **Sin ver en pantalla**: nadie lo ha abierto todavía.
+
+Lo anterior — **el encuadre que pide Daniel llega a la imagen, y por qué el filtro
+del Horde bloquea unas veces sí y otras no**:
 
 Cuando en la bóveda se pide una foto diciendo **desde dónde** —«desde detrás»,
 «el culo a cámara», «de cerca», «de cuerpo entero»—, esa indicación se traduce y

@@ -119,6 +119,21 @@ export const IPC_INVOKE = {
   vaultHordeCharacterSave: 'luxy:vault:horde:character-save',
   /** cambia quien le hace las fotos a un personaje, sin tocar nada mas */
   vaultCharacterImageProvider: 'luxy:vault:character:image-provider',
+  /** decide si ese personaje enseña el texto de la imagen antes de generarla */
+  vaultCharacterImageReview: 'luxy:vault:character:image-review',
+  /**
+   * el intento de imagen que quedo esperando decision en esa conversacion.
+   *
+   * Existe para que la tarjeta reaparezca al reabrir Studio: el pendiente vive
+   * cifrado en disco, asi que cerrar la ventana no es decir que no.
+   */
+  vaultImagePending: 'luxy:vault:image:pending',
+  /** la decision sobre ese pendiente: mandarlo —con el texto que sea— o tirarlo */
+  vaultImageCommit: 'luxy:vault:image:commit',
+  /** cuanto costaria, preguntado en seco: valida la forma y no encola nada */
+  vaultImageEstimate: 'luxy:vault:image:estimate',
+  /** lo que se mando de verdad, para poder mirarlo despues de que falle */
+  vaultImageAttempts: 'luxy:vault:image:attempts',
   vaultSync: 'luxy:vault:sync',
 } as const;
 

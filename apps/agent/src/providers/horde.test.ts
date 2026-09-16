@@ -593,6 +593,35 @@ describe('sondeo', () => {
     expect(calls[0]?.url).toBe(`${HORDE_BASE_URL}/v2/generate/check/pet-1`);
   });
 
+  it('un estado SIN precio no se lee como cero kudos', async () => {
+    // `kudos` es `nullish` en la respuesta, y este numero no se queda en la
+    // pantalla de la cola: es el que acaba en `costCredits` y en el campo
+    // `kudos` del intento cifrado. Un 0 inventado ahi no se distingue de un
+    // precio real. Los demas contadores si pueden caer a cero sin mentir
+    const sinPrecio = progress({ done: true, finished: 1 });
+    delete sinPrecio.kudos;
+
+    const { impl } = fakeFetch([{ status: 200, body: sinPrecio }]);
+    const current = await checkImage('pet-1', options(impl));
+    expect(current.kudos).toBeNull();
+    expect(current.waiting).toBe(0);
+
+    // y por el camino que de verdad se apunta: el resultado completo
+    const completo = fakeFetch([
+      {
+        status: 200,
+        body: {
+          ...sinPrecio,
+          generations: [
+            { img: 'https://r2.example/a.webp', seed: '1', id: 'g-1', model: 'Deliberate' },
+          ],
+        },
+      },
+    ]);
+    const result = await readImageStatus('pet-1', options(completo.impl));
+    expect(result.kudos).toBeNull();
+  });
+
   it('escapa el identificador en la ruta', async () => {
     const { impl, calls } = fakeFetch([{ status: 200, body: progress({ done: false }) }]);
     await checkImage('a/b', options(impl));
@@ -772,12 +801,38 @@ describe('coste', () => {
     // el horde no tiene id que devolver. Fabricar uno aqui daba por verificado
     // un contrato que el servidor no produce
     const { impl, calls } = fakeFetch([{ status: 202, body: { kudos: 34 } }]);
-    const kudos = await estimateKudos(request(), options(impl));
+    const estimate = await estimateKudos(request(), options(impl));
 
-    expect(kudos).toBe(34);
+    expect(estimate.kudos).toBe(34);
     expect((calls[0]?.body as Record<string, unknown>).dry_run).toBe(true);
     // una sola llamada: dry_run devuelve el precio sin encolar trabajo
     expect(calls).toHaveLength(1);
+  });
+
+  it('los avisos del dry run vuelven con el precio', async () => {
+    // es la mitad util de preguntar en seco: «ningun worker sirve ese modelo»
+    // se sabe ANTES de encolar, y hasta ahora se tiraba junto con el resto
+    const { impl } = fakeFetch([
+      {
+        status: 202,
+        body: {
+          kudos: 34,
+          warnings: [{ code: 'NoAvailableWorker', message: 'nadie tiene ese modelo' }],
+        },
+      },
+    ]);
+    const estimate = await estimateKudos(request(), options(impl));
+
+    expect(estimate.warnings[0]?.code).toBe('NoAvailableWorker');
+  });
+
+  it('sin precio en la respuesta devuelve null, no cero', async () => {
+    // cero kudos no existe como precio: enseñarlo seria inventarse un numero
+    // en la unica pantalla que sirve para decidir si se pulsa o no
+    const { impl } = fakeFetch([{ status: 202, body: {} }]);
+    const estimate = await estimateKudos(request(), options(impl));
+
+    expect(estimate.kudos).toBeNull();
   });
 
   it('sin dry_run el campo no viaja', async () => {

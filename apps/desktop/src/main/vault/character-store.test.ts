@@ -238,6 +238,66 @@ describe('personajes guardados', () => {
     expect(despues[0]?.horde?.recipe.appearance).toBe('green eyes');
     expect(despues[0]?.label).toBe('Lia');
   });
+
+  // -------------------------------------------------------------------------
+  // revisar el texto antes de generar
+  //
+  // Es un ajuste del PERSONAJE, como el proveedor: lo que se revisa sale de su
+  // receta. Lo que se protege aqui es que nazca puesto —quien no lo sepa no
+  // paga una generacion a ciegas— y que cambiarlo no arrastre nada mas.
+  // -------------------------------------------------------------------------
+
+  it('un personaje guardado antes de este ajuste se lee con la revision puesta', async () => {
+    // el ayudante de estas pruebas no lo escribe: es exactamente la forma que
+    // tiene en disco una boveda anterior a este campo
+    await store.add(vault, character('per-1'));
+    expect((await store.list(vault))[0]?.imageReview).toBe('siempre');
+  });
+
+  it('cambiar el interruptor no toca ni el proveedor ni la receta ni el avatar', async () => {
+    const objectKey = await store.saveAvatar(vault, new Uint8Array([9, 9, 9, 9]));
+    await store.add(vault, {
+      ...character('per-1', 'Lia'),
+      imageProvider: 'horde',
+      horde: { recipe: { models: ['Prefect Pony'], appearance: 'green eyes', seed: '1080257389' } },
+      avatarObjectKey: objectKey,
+    });
+    const [antes] = await store.list(vault);
+
+    const despues = await store.add(vault, { ...antes!, imageReview: 'nunca' });
+
+    expect(despues[0]?.imageReview).toBe('nunca');
+    expect(despues[0]?.imageProvider).toBe('horde');
+    expect(despues[0]?.horde?.recipe.appearance).toBe('green eyes');
+    // sin la semilla la cara cambia en cada imagen: perderla aqui seria perder
+    // al personaje por tocar un interruptor que no tiene nada que ver
+    expect(despues[0]?.horde?.recipe.seed).toBe('1080257389');
+    expect(despues[0]?.xavira?.modelId).toBe('anime-pure-v1');
+    expect(despues[0]?.avatarObjectKey).toBe(objectKey);
+    expect(despues[0]?.label).toBe('Lia');
+  });
+
+  it('el valor sobrevive a guardar otro personaje distinto', async () => {
+    // `add` reescribe la lista ENTERA, asi que tocar a uno es reescribir a
+    // todos: es justo donde un campo nuevo se pierde sin dar ningun error
+    await store.add(vault, character('per-1'));
+    const [antes] = await store.list(vault);
+    await store.add(vault, { ...antes!, imageReview: 'nunca' });
+
+    await store.add(vault, character('per-2'));
+
+    const guardados = await store.list(vault);
+    expect(guardados.find((c) => c.characterId === 'per-1')?.imageReview).toBe('nunca');
+    // y el que llega nuevo nace con la revision puesta
+    expect(guardados.find((c) => c.characterId === 'per-2')?.imageReview).toBe('siempre');
+  });
+
+  it('el ajuste sobrevive a cerrar y volver a abrir la boveda', async () => {
+    await store.add(vault, { ...character('per-1'), imageReview: 'nunca' });
+    vault.lock();
+    await vault.unlock(PASSWORD);
+    expect((await store.list(vault))[0]?.imageReview).toBe('nunca');
+  });
 });
 
 describe('personajes escritos antes de D-068', () => {
@@ -296,6 +356,21 @@ describe('personajes escritos antes de D-068', () => {
     });
     expect(leido.imageProvider).toBe('xavira');
     expect(leido.xavira?.characterId).toBe('per-1');
+  });
+
+  it('ninguno de ellos trae el ajuste de revision, y se lee puesto', () => {
+    // la lectura es lo unico que decide: el archivo no se reescribe al leer, y
+    // un `undefined` aqui dejaria el interruptor de la pantalla sin estado
+    const leido = storedCharacterSchema.parse({
+      characterId: 'per-1',
+      provider: 'horde',
+      recipe: { models: ['Prefect Pony'], appearance: 'green eyes' },
+      description: '',
+      label: 'Lia',
+      avatarObjectKey: null,
+      createdAt: '2026-09-04T10:00:00.000Z',
+    });
+    expect(leido.imageReview).toBe('siempre');
   });
 
   it('uno ya escrito en la forma nueva no se vuelve a traducir', () => {

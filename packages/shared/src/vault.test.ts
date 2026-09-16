@@ -3,6 +3,7 @@ import {
   generateMasterKey,
   generateRecipientKeyPair,
   generateRecoveryKey,
+  openText,
   sealForRecipient,
   sealText,
   wrapMasterKey,
@@ -28,6 +29,7 @@ import {
   telegramBridgeSchema,
   vaultPublicKeySchema,
 } from './vault.js';
+import { VAULT_PAYLOAD_VERSION, vaultMediaPayloadSchema } from './vault-payloads.js';
 
 /** Argon2 con el minimo aceptado: aqui se valida forma, no coste */
 const FAST = { t: 1, m: 8 * 1024, p: 1 } as const;
@@ -196,6 +198,63 @@ describe('medio privado', () => {
   });
 });
 
+describe('sobre de un medio', () => {
+  /** los metadatos tal y como se escribian ANTES de que existiera `attemptId` */
+  const sobreAntiguo = (): Record<string, unknown> => ({
+    v: VAULT_PAYLOAD_VERSION,
+    mimeType: 'image/webp',
+    displayName: null,
+    prompt: 'lo que se pidio al generarla',
+    caption: null,
+    width: 1024,
+    height: 1536,
+    durationMs: null,
+    characterId: null,
+    provider: 'horde',
+    model: 'un modelo',
+    createdAt: now(),
+  });
+
+  it('un medio sellado antes de attemptId se sigue abriendo, con el campo a null', async () => {
+    const key = randomBytes(KEY_BYTES);
+    // se sella el JSON tal y como estaba escrito entonces, sin el campo nuevo:
+    // esta es la prueba de que anadirlo no deja ilegible nada de lo guardado
+    const sobre = await sealText(key, 'vault.media', JSON.stringify(sobreAntiguo()));
+    const abierto = vaultMediaPayloadSchema.parse(
+      JSON.parse(await openText(key, 'vault.media', sobre)),
+    );
+    expect(abierto.attemptId).toBeNull();
+    // y lo que ya estaba dentro sigue estando
+    expect(abierto.prompt).toBe('lo que se pidio al generarla');
+    expect(abierto.model).toBe('un modelo');
+  });
+
+  it('el enlace con el intento sobrevive al sellado', async () => {
+    const key = randomBytes(KEY_BYTES);
+    const attemptId = uuid();
+    const sobre = await sealText(
+      key,
+      'vault.media',
+      JSON.stringify({ ...sobreAntiguo(), attemptId }),
+    );
+    const abierto = vaultMediaPayloadSchema.parse(
+      JSON.parse(await openText(key, 'vault.media', sobre)),
+    );
+    expect(abierto.attemptId).toBe(attemptId);
+  });
+
+  it('el enlace es una referencia corta, no otro sitio donde meter texto', () => {
+    const largo = { ...sobreAntiguo(), attemptId: 'x'.repeat(65) };
+    expect(vaultMediaPayloadSchema.safeParse(largo).success).toBe(false);
+  });
+
+  it('anadir el campo no sube la version del sobre', () => {
+    // no hay maquinaria de migracion de cargas cifradas: subir `v` dejaria sin
+    // abrir todo lo ya sellado. Un campo nullable con `default` no la necesita
+    expect(VAULT_PAYLOAD_VERSION).toBe(1);
+  });
+});
+
 describe('puente de Telegram', () => {
   it('viene apagado por defecto', () => {
     const bridge = telegramBridgeSchema.parse({});
@@ -277,6 +336,43 @@ describe('deteccion de contenido en claro', () => {
 
   it('un campo prohibido vacio o nulo no cuenta como fuga', () => {
     expect(findPlaintextLeaks({ prompt: null, title: '', memory: undefined })).toEqual([]);
+  });
+
+  it('encuentra los nombres que usa el plan de imagen', () => {
+    // el guardian casa por nombre exacto: antes de esto, partir `prompt` en
+    // positivo y negativo bastaba para que un plan entero saliera en claro
+    expect(findPlaintextLeaks({ positive: 'texto' })).toEqual(['positive']);
+    const plan = {
+      image: {
+        positive: 'la apariencia y la ropa',
+        negative: 'lo que no se quiere',
+        joined: 'positivo ### negativo',
+        scene: 'lo que escribio el modelo',
+        negativeAppend: 'el negativo de Xavira',
+        dropped: ['un rasgo recortado'],
+      },
+    };
+    expect(findPlaintextLeaks(plan).sort()).toEqual([
+      'image.dropped',
+      'image.joined',
+      'image.negative',
+      'image.negativeAppend',
+      'image.positive',
+      'image.scene',
+    ]);
+  });
+
+  it('una lista de recortes vacia no cuenta como fuga', () => {
+    // no llevar ninguna palabra no puede ser motivo para rechazar un registro
+    expect(findPlaintextLeaks({ dropped: [] })).toEqual([]);
+  });
+
+  it('los campos del plan de imagen ya sellados no son una fuga', async () => {
+    const key = randomBytes(KEY_BYTES);
+    const positivo = await sealText(key, 'vault.conversation', 'la apariencia y la ropa');
+    const negativo = await sealText(key, 'vault.conversation', 'lo que no se quiere');
+    // misma regla que `title` o `memory`: importa el contenido, no el nombre
+    expect(findPlaintextLeaks({ positive: positivo, negative: negativo })).toEqual([]);
   });
 
   it('assertNoPlaintextLeak nombra los campos ofensivos', () => {

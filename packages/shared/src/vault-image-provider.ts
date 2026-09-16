@@ -255,76 +255,24 @@ export function recipeDefaultsFor(
   return { width: 1024, height: 1024, steps: 30, cfgScale: 7, clipSkip: 2 };
 }
 
+// `buildHordeRequest` VIVIA AQUI y ahora esta en `vault-image-plan.ts`, donde
+// compone el plan y lo transporta con `planToHordeRequest`.
+//
+// No se quedo aqui porque este archivo tendria que importar de `vault-image-plan.ts`
+// —que ya importa de este para recortar rasgos y fundir negativos— y eso es un
+// ciclo en tiempo de ejecucion entre dos modulos del mismo paquete. Se sostiene
+// mientras nadie llame a nada durante la evaluacion del modulo, y esa es
+// exactamente la clase de garantia que se rompe sin que ninguna prueba lo note.
+// Quien lo importe desde `@luxy/shared` no ve la diferencia.
+
 /**
- * arma la peticion final con la receta y la escena que escribe el modelo.
+ * une los dos negativos sin repetir: repetir un termino no lo refuerza, solo gasta tokens.
  *
- * Es PURA y no valida nada de red: lo que devuelve es exactamente lo que el
- * adaptador tiene que transportar.
+ * Se exporta porque el plan de imagen (`vault-image-plan.ts`) compone el mismo
+ * texto que acaba saliendo por el transporte, y duplicar esta fusion seria
+ * garantizar que un dia los dos caminos digan cosas distintas.
  */
-export function buildHordeRequest(input: {
-  recipe: HordeRecipe;
-  prompt: string;
-  extraNegative: string;
-  shared: boolean;
-  /**
-   * imagen de partida en base64 PURO, sin prefijo `data:`.
-   *
-   * Cuando la hay, `denoisingStrength` de la receta pasa a mandar y el horde
-   * cobra un 30 % mas de kudos. Sin ella, ninguno de los dos campos viaja.
-   */
-  sourceImage?: string | null;
-  dryRun?: boolean;
-}): HordeImageRequest {
-  const { recipe } = input;
-  // la identidad va PRIMERO: los primeros tokens pesan mas, y si la escena se
-  // adelanta, el aspecto fijo se diluye y la cara deja de repetirse.
-  //
-  // Y ademas se le quita a la escena el color de pelo y de ojos, porque ir
-  // primero NO basta: comprobado con un prompt real, «light brown hair» delante
-  // y «dark hair» detras produjo una morena. Pedirselo al modelo tampoco basta;
-  // se le pidio y lo siguio haciendo.
-  const escena = stripConflictingTraits(input.prompt, recipe.appearance);
-  const positive = [recipe.appearance, recipe.outfit, escena]
-    .map((part) => part.trim())
-    .filter((part) => part.length > 0)
-    .join(', ');
-
-  const negative = mergeNegatives(recipe.negative, input.extraNegative);
-  // AI Horde NO tiene campo de negativo: lo lee del propio prompt, detras de
-  // ' ### '. Sin negativo no se pone el separador, porque un ' ### ' vacio al
-  // final se interpreta como un negativo literal
-  const prompt = negative.length === 0 ? positive : `${positive} ### ${negative}`;
-
-  return {
-    prompt,
-    models: [...recipe.models],
-    width: recipe.width,
-    height: recipe.height,
-    steps: recipe.steps,
-    cfgScale: recipe.cfgScale,
-    samplerName: recipe.samplerName,
-    scheduler: recipe.scheduler,
-    clipSkip: recipe.clipSkip,
-    seed: recipe.seed,
-    loras: recipe.loras.map((lora) => ({ ...lora })),
-    hiresFix: recipe.hiresFix,
-    postProcessing: [...recipe.postProcessing],
-    // no significa «genera porno»: le dice al horde que no mande el trabajo a
-    // los workers que censuran, que son los que devuelven una imagen negra sin
-    // avisar cuando el prompt les parece dudoso
-    nsfw: true,
-    shared: input.shared,
-    sourceImage: input.sourceImage ?? null,
-    // solo `img2img`: es el unico de los cuatro que sirve para lo que se usa
-    // esto, y los otros tres exigen modelos que estos personajes no usan
-    sourceProcessing: 'img2img',
-    denoisingStrength: recipe.denoisingStrength,
-    dryRun: input.dryRun,
-  };
-}
-
-/** une los dos negativos sin repetir: repetir un termino no lo refuerza, solo gasta tokens */
-function mergeNegatives(recipeNegative: string, extraNegative: string): string {
+export function mergeNegatives(recipeNegative: string, extraNegative: string): string {
   const seen = new Set<string>();
   const terms: string[] = [];
   for (const source of [recipeNegative, extraNegative]) {
@@ -474,6 +422,29 @@ const TRAIT_ORIGINS = [
 ];
 
 /**
+ * las palabras que convierten un origen en una PERSONA y no en un escenario.
+ *
+ * Vive en una constante y no dentro del patron porque el recorte tiene que
+ * poder DECIR a quien calificaba lo que quito: «japanese woman», no «japanese».
+ */
+const TRAIT_PERSON_WORDS = 'woman|women|girl|lady|man|men|boy|female|male';
+
+/** la escena ya limpia, y lo que se le quito por el camino */
+export interface StrippedScene {
+  text: string;
+  /**
+   * los fragmentos eliminados, tal y como se leian: «dark hair», «japanese woman».
+   *
+   * Existe porque el recorte es invisible: se pide «pelo oscuro suelto sobre la
+   * almohada», el color desaparece por un motivo bueno y nadie lo cuenta. Con
+   * esta lista, el panel de revision puede ofrecer devolver cada fragmento al
+   * positivo ANTES de generar, en vez de dejar al usuario adivinando por que su
+   * escena llego a medias.
+   */
+  dropped: string[];
+}
+
+/**
  * quita de la ESCENA el color de pelo y de ojos cuando la receta ya lo dice.
  *
  * POR QUE EN CODIGO Y NO EN EL PROMPT, que es lo que se intento primero: se le
@@ -493,16 +464,22 @@ const TRAIT_ORIGINS = [
  * Y solo cuando la receta habla de eso: si el aspecto fijo no dice nada del
  * pelo, lo que diga la escena es la unica fuente que hay y se respeta.
  */
-export function stripConflictingTraits(scene: string, appearance: string): string {
+export function stripConflictingTraitsDetailed(scene: string, appearance: string): StrippedScene {
   const fijo = appearance.toLowerCase();
   const partes = TRAIT_COLORS.map((color) => color.replace(/ /g, '\\s+')).join('|');
+  const dropped: string[] = [];
   let salida = scene;
   for (const rasgo of ['hair', 'eyes'] as const) {
     if (!fijo.includes(rasgo)) continue;
     // el color puede venir con varias palabras («light brown hair») y a veces
     // encadenado («long dark messy hair»): se repite el grupo hasta el rasgo
     const patron = new RegExp(`\\b(?:(?:${partes})\\s+)+(?=\\w*\\s*${rasgo}\\b)`, 'gi');
-    salida = salida.replace(patron, '');
+    salida = salida.replace(patron, (match: string) => {
+      // se apunta con el rasgo detras porque «dark» a secas no se entiende un
+      // mes despues, y lo que el usuario tiene que poder devolver es la frase
+      dropped.push(`${match.trim()} ${rasgo}`);
+      return '';
+    });
   }
 
   // la NACIONALIDAD es el otro camino por el que la escena redefine la cara, y
@@ -517,17 +494,61 @@ export function stripConflictingTraits(scene: string, appearance: string): strin
   for (const origen of TRAIT_ORIGINS) {
     if (fijo.includes(origen)) continue;
     const patron = new RegExp(
-      `\\b${origen}\\s+(?=(?:\\w+\\s+){0,2}?(?:woman|women|girl|lady|man|men|boy|female|male)\\b)`,
+      `\\b${origen}\\s+(?=(?:\\w+\\s+){0,2}?(?:${TRAIT_PERSON_WORDS})\\b)`,
       'gi',
     );
-    salida = salida.replace(patron, '');
+    salida = salida.replace(patron, (match: string, offset: number, entero: string) => {
+      // el patron solo consume el origen: a quien calificaba viene detras, y
+      // sin esa palabra el aviso diria «japanese» sin decir japanese QUE
+      const persona = new RegExp(`^(?:\\w+\\s+){0,2}?(?:${TRAIT_PERSON_WORDS})\\b`, 'i').exec(
+        entero.slice(offset + match.length),
+      );
+      dropped.push(persona === null ? match.trim() : `${match.trim()} ${persona[0].trim()}`);
+      return '';
+    });
   }
   // la limpieza puede dejar comas huerfanas o dobles espacios
-  return salida
+  const text = salida
     .replace(/\s{2,}/g, ' ')
     .replace(/,\s*,/g, ',')
     .replace(/^\s*,\s*/, '')
     .trim();
+  return { text, dropped: dedupeFragments(dropped) };
+}
+
+/**
+ * un fragmento repetido se apunta UNA vez.
+ *
+ * Una escena puede nombrar el mismo rasgo dos veces —«dark hair wet, dark hair
+ * over her face»— y el recorte los quita los dos, asi que sin esto `dropped`
+ * traeria 'dark hair' duplicado. Eso le da al panel dos botones identicos con
+ * la misma `key` de React —aviso en consola— y el segundo no hace nada, porque
+ * `restoreDroppedFragment` ya no añade lo que ya esta escrito.
+ *
+ * Se compara sin distinguir mayusculas, como lo hace esa restauracion, y se
+ * conserva el PRIMERO: es el que la escena escribio, y el orden de esta lista
+ * es el orden en que se recorto.
+ */
+function dedupeFragments(fragments: readonly string[]): string[] {
+  const vistos = new Set<string>();
+  const unicos: string[] = [];
+  for (const fragment of fragments) {
+    const clave = fragment.toLowerCase();
+    if (vistos.has(clave)) continue;
+    vistos.add(clave);
+    unicos.push(fragment);
+  }
+  return unicos;
+}
+
+/**
+ * la escena limpia y nada mas, que es lo que necesita casi todo el mundo.
+ *
+ * Se conserva con esta firma porque es la que consumen el resto de llamadores y
+ * sus pruebas: la version detallada nacio despues, para el panel de revision.
+ */
+export function stripConflictingTraits(scene: string, appearance: string): string {
+  return stripConflictingTraitsDetailed(scene, appearance).text;
 }
 
 /**

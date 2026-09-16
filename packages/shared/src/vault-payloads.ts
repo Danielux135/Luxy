@@ -130,17 +130,43 @@ export const vaultMediaPayloadSchema = z.object({
   characterId: z.string().max(128).nullable().default(null),
   provider: z.string().max(64).nullable().default(null),
   model: z.string().max(128).nullable().default(null),
+  /**
+   * enlace con el intento que produjo este medio, en el registro local.
+   *
+   * Es una referencia, no una copia: la semilla real, el worker que atendio la
+   * peticion, los avisos del envio y el plan entero viven en el almacen de
+   * intentos de la conversacion, que es donde tambien quedan los que NO
+   * produjeron ningun medio —los censurados, los fallidos y los descartados—.
+   * Duplicar aqui esos campos obligaria a mantener dos verdades sobre la misma
+   * generacion, y la de este sobre solo existiria cuando la imagen llego.
+   *
+   * Es el unico campo nuevo del sobre por eso mismo: sin el, un medio guardado
+   * no tiene ninguna forma de senalar a su propia historia.
+   *
+   * `default(null)` conserva lo ya escrito en disco, igual que `caption`: un
+   * medio sellado antes de este campo se abre con `attemptId: null` en vez de
+   * fallar al validarse. Un Studio antiguo que resellara el sobre al corregir
+   * el pie de foto perderia el enlace, nunca el dato: el registro de intentos
+   * sigue siendo la autoridad.
+   */
+  attemptId: z.string().max(64).nullable().default(null),
   createdAt: z.string().datetime(),
 });
 /**
- * `caption` es opcional en el TIPO aunque el esquema lo rellene siempre.
+ * `caption` y `attemptId` son opcionales en el TIPO aunque el esquema los
+ * rellene siempre.
  *
  * Quien sella construye estos metadatos a mano, campo a campo, y casi ninguna
- * alta tiene pie de foto: exigir `caption: null` en cada una solo conseguiria
- * que se rellene por costumbre. Al abrir un medio el campo esta siempre, porque
- * el `default(null)` lo pone; el tipo solo es mas permisivo de lo necesario en
- * ese sentido, nunca al reves. Es el mismo trato que `instructions` en un turno.
+ * alta tiene pie de foto ni viene de una generacion: exigir `caption: null` y
+ * `attemptId: null` en cada una solo conseguiria que se rellenen por costumbre.
+ * Al abrir un medio los campos estan siempre, porque el `default(null)` los
+ * pone; el tipo solo es mas permisivo de lo necesario en ese sentido, nunca al
+ * reves. Es el mismo trato que `instructions` en un turno.
  */
-export type VaultMediaPayload = Omit<z.infer<typeof vaultMediaPayloadSchema>, 'caption'> & {
+export type VaultMediaPayload = Omit<
+  z.infer<typeof vaultMediaPayloadSchema>,
+  'caption' | 'attemptId'
+> & {
   caption?: string | null;
+  attemptId?: string | null;
 };

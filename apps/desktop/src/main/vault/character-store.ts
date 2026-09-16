@@ -71,6 +71,27 @@ export const vaultCharacterSchema = z.object({
   characterId: z.string().min(1).max(128),
   /** quien da las fotos AHORA. Se cambia sin tocar nada mas del personaje */
   imageProvider: z.enum(['xavira', 'horde']).default('xavira'),
+  /**
+   * si hay que ENSEÑAR el texto antes de generar, o mandarlo de una vez.
+   *
+   * Es del personaje y no de la maquina porque lo que se revisa depende de el:
+   * en AI Horde el texto se compone a partir de SU receta —y un rasgo mal
+   * recortado devuelve a otra persona—, mientras que en Xavira la identidad
+   * vive en el servidor del proveedor y aqui apenas hay nada que corregir.
+   *
+   * Nace en 'siempre' porque lo que se pidio fue ver el texto ANTES de pagar
+   * una generacion; 'nunca' devuelve el comportamiento anterior en una sola
+   * pulsacion. Dos valores y no tres: un tercero solo aplazaria la decision.
+   *
+   * CUIDADO, y esta escrito porque no da ningun error: `add()` reescribe la
+   * lista ENTERA (`list()` -> `parse()` -> `write()`), asi que un Studio
+   * anterior a este campo lo borraria en silencio al tocar cualquier otro
+   * personaje. Es la misma trampa que `setCaption` con el sobre de un medio.
+   * No se pierde nada que no se pueda volver a poner —el campo renace con su
+   * valor por defecto y el registro de intentos no depende de el—, pero pasa
+   * sin aviso.
+   */
+  imageReview: z.enum(['siempre', 'nunca']).default('siempre'),
   xavira: xaviraIdentitySchema.nullable().default(null),
   horde: hordeIdentitySchema.nullable().default(null),
   /** quien es, en texto, para el modelo que escribe */
