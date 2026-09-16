@@ -1009,3 +1009,28 @@ describe('sin nada guardado no se le ofrece elegir', () => {
     expect(vacio.length).toBeLessThan(conLista.length - 600);
   });
 });
+
+describe('el encuadre que pide el usuario', () => {
+  // PASO DE VERDAD (2026-09-16): Daniel pidio la foto «desde detras» tres veces,
+  // ella lo narro bien en su respuesta y las tres imagenes salieron de frente.
+  // El encuadre traia dos ejemplos —«from above» y «from the side»— y ninguna
+  // linea decia que lo que el pide mande sobre lo que ella elija.
+  const bloque = buildVaultImageInstruction([], 'prose');
+
+  it('dice que lo que pide el usuario manda', () => {
+    expect(bloque).toContain('ESO MANDA');
+  });
+
+  it('trae la traduccion de los encuadres que se piden de verdad', () => {
+    for (const encuadre of ['from behind', 'rear view', 'close-up', 'full body', 'from below']) {
+      expect(bloque).toContain(encuadre);
+    }
+  });
+
+  it('sigue prohibiendo la camara pese a hablar de encuadres', () => {
+    // «rear view» y «close-up» son terminos de camara: el riesgo de añadirlos
+    // es que reabran la puerta que D-064 cerro, y por eso se comprueba aqui
+    expect(bloque).toContain('Nada de camaras');
+    expect(bloque).toContain('Ni siquiera en negativo');
+  });
+});

@@ -430,9 +430,18 @@ export function buildVaultImageInstruction(
     '- Nada de camaras, moviles, espejos, selfies ni el acto de fotografiar, aunque el usuario haya',
     '  dicho «mandame una foto» o aunque la foto la este haciendo el. Eso pone una camara en la',
     '  imagen. Ni siquiera en negativo: «not looking at camera» tambien la dibuja.',
-    '- Si la foto la hace el, describe la escena tal como se ve desde donde esta el («from',
-    '  above», «from the side»). Si estas dormida o no te das cuenta, dilo con «eyes closed»,',
-    '  «asleep» o «looking away».',
+    // PASO DE VERDAD (2026-09-16): Daniel pidio la foto «desde detras» tres
+    // veces seguidas, ella lo narro bien en su respuesta —«apoyando las manos y
+    // rodillas en la cama, mirando hacia la pared»— y las tres imagenes
+    // salieron de frente. El encuadre solo traia dos ejemplos y ninguno era ese,
+    // y sobre todo: no habia UNA linea que dijera que lo que el pide manda.
+    '- Si el usuario dice desde donde quiere la foto o en que postura, ESO MANDA y va en el',
+    '  prompt: es lo unico que te ha pedido explicitamente. «desde detras» es «from behind» o',
+    '  «rear view»; «de espaldas» es «from behind, facing away»; y lo mismo con «de cerca»',
+    '  («close-up»), «de cuerpo entero» («full body»), «desde arriba» («from above»), «desde',
+    '  abajo» («from below»), «de lado» («from the side»).',
+    '- Si no lo dice y la foto la hace el, describe la escena tal como se ve desde donde esta el.',
+    '  Si estas dormida o no te das cuenta, dilo con «eyes closed», «asleep» o «looking away».',
     '- Solo lo que se ve: pose, ropa, expresion, luz, lugar. Sin dialogo, sin lo que siente, sin',
     '  contar lo que pasa antes o despues. No copies el mensaje del usuario.',
     // ESTO FALTABA Y ARRUINABA CADA IMAGEN. El aspecto fijo del personaje va
