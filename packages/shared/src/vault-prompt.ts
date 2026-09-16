@@ -377,9 +377,24 @@ function daysAgoLabel(days: number): string {
   return `hace ${days} dias`;
 }
 
+/**
+ * quien se lo prometio a quien, con las DOS puntas.
+ *
+ * PASO DE VERDAD (2026-09-16): con «Se lo prometiste tu», GLM 4.5 Air empezo
+ * bien —«me acuerdo de una que hice yo»— y acabo reclamandosela a Daniel:
+ * «todavia no los he recibido». Se lo invirtio a mitad de respuesta.
+ *
+ * El motivo no es que la linea dijera nada falso, es que «tu» cambia de dueño
+ * segun donde se lea: en este bloque «tu» es ELLA, porque el prompt la tutea a
+ * ella, pero en la escena «tu» es EL. Un modelo grande no se despista; uno
+ * ligero, con veinte lineas alrededor diciendole «tu» al personaje, si.
+ *
+ * Nombrar el destinatario cierra esa puerta sin necesitar el nombre de nadie:
+ * «se lo prometiste tu A EL» no admite la lectura de que la deuda sea de el.
+ */
 function whoPromised(by: RelationParty): string {
-  if (by === 'user') return 'Te lo prometio el';
-  if (by === 'character') return 'Se lo prometiste tu';
+  if (by === 'user') return 'Te lo prometio el a ti';
+  if (by === 'character') return 'Se lo prometiste tu a el';
   return 'Lo quedasteis los dos';
 }
 

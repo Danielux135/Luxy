@@ -675,7 +675,7 @@ describe('asuntos pendientes: lo que ella puede sacar sola', () => {
     const prompt = conPendientes([linea]);
     expect(prompt).toContain('ASUNTOS PENDIENTES ENTRE VOSOTROS (DATOS)');
     expect(prompt).toContain(
-      '- Te lo prometio el · 2026-09-04, hace 7 dias · «mañana te traigo dos cafés y una tarta de chocolate a la cama» · no lo has sacado nunca · el no ha vuelto a nombrarlo',
+      '- Te lo prometio el a ti · 2026-09-04, hace 7 dias · «mañana te traigo dos cafés y una tarta de chocolate a la cama» · no lo has sacado nunca · el no ha vuelto a nombrarlo',
     );
   });
 
@@ -716,9 +716,23 @@ describe('asuntos pendientes: lo que ella puede sacar sola', () => {
       { ...linea, by: 'character' as const, day: '2026-09-09', daysAgo: 1 },
       { ...linea, by: 'both' as const, day: '2026-09-10', daysAgo: 0 },
     ]);
-    expect(prompt).toContain('Te lo prometio el · 2026-09-04, hace 7 dias');
-    expect(prompt).toContain('Se lo prometiste tu · 2026-09-09, ayer');
+    expect(prompt).toContain('Te lo prometio el a ti · 2026-09-04, hace 7 dias');
+    expect(prompt).toContain('Se lo prometiste tu a el · 2026-09-09, ayer');
     expect(prompt).toContain('Lo quedasteis los dos · 2026-09-10, hoy');
+  });
+
+  it('dice las DOS puntas de la promesa, no solo quien la hizo', () => {
+    // PASO DE VERDAD (2026-09-16): con «Se lo prometiste tu» a secas, GLM 4.5
+    // Air empezo bien y acabo reclamandosela a Daniel. En este bloque «tu» es
+    // ella; en la escena «tu» es el, y a mitad de respuesta se le cambio el
+    // dueño. Nombrar al destinatario cierra esa lectura.
+    const suya = conPendientes([{ ...linea, by: 'character' as const }]);
+    expect(suya).toContain('Se lo prometiste tu a el');
+    expect(suya).not.toContain('Se lo prometiste tu ·');
+
+    const deEl = conPendientes([{ ...linea, by: 'user' as const }]);
+    expect(deEl).toContain('Te lo prometio el a ti');
+    expect(deEl).not.toContain('Te lo prometio el ·');
   });
 
   it('cuenta las veces que ella lo saco y si el lo ha nombrado', () => {
