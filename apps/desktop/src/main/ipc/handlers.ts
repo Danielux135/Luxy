@@ -19,6 +19,7 @@ import {
   imageTransportProblem,
   profilePhotoLine,
   parseVaultImageRequest,
+  imageTurnOpensGate,
   redact,
   type ConversationMemoryStatus,
   storedAgentConfigSchema,
@@ -2061,6 +2062,23 @@ export function registerIpcHandlers(context: HandlerContext): void {
    */
   const ultimaImagenFallida = new Map<string, string>();
 
+  /**
+   * las conversaciones en las que el turno anterior de ella LLEVO una imagen.
+   *
+   * Es lo que hace que «otra porfa» funcione. El turno que queda guardado de
+   * ella es solo el texto visible —`parseVaultImageRequest` recorta el bloque
+   * antes de guardarlo—, asi que un pie de foto («Toma, para ti 🙈») no nombra
+   * ninguna imagen y la puerta no tenia forma de saber que el tema estaba
+   * abierto. Sin esto, pedir otra justo despues de recibir una cerraba la
+   * puerta, y con la puerta cerrada la unica salida que le queda al modelo es
+   * reenviar la que acaba de mandar: el paso de verdad del 2026-09-14.
+   *
+   * Vive en memoria y no en la boveda, por lo mismo que `ultimaImagenFallida`:
+   * es informacion de un turno para el siguiente y perderla al reiniciar no
+   * rompe nada —el turno se queda como estaba hoy, decidiendo el prompt—.
+   */
+  const ultimaRespuestaConImagen = new Set<string>();
+
   /** la lista tal y como la ve el renderer; la usan el listado y las correcciones */
   const listMediaForRenderer = async (conversationId: string) => {
     const items = await context.privateMedia.list(context.vault, conversationId);
@@ -3390,7 +3408,11 @@ export function registerIpcHandlers(context: HandlerContext): void {
       characterInVault: character !== undefined,
       hasApiKey: context.secretStore.get(providerSecret) !== undefined,
     });
-    const canGenerateImage = imageBlock === null;
+    // CAPACIDAD, no oportunidad: dice si en esta maquina y con este personaje
+    // se PODRIA generar. Si en este turno TOCA lo decide la puerta, mas abajo,
+    // y son dos cosas distintas a proposito: mezclar «no puedo» con «hoy no
+    // toca» es el error que este modulo existe para no repetir
+    const imageCapable = imageBlock === null;
 
     await store.appendTurn(context.vault, conversationId, {
       role: 'user',
@@ -3413,6 +3435,50 @@ export function registerIpcHandlers(context: HandlerContext): void {
     // con el limite de contexto del modelo.
     const history = await store.read(context.vault, conversationId);
     const sealedMemory = await store.latestMemory(context.vault, conversationId);
+
+    // LA PUERTA: si en este turno se le OFRECE generar una imagen nueva.
+    //
+    // Va aqui, antes de componer el prompt y antes de llamar al modelo, y esa es
+    // la parte que no se puede mover. Vetar el bloque despues de que el modelo
+    // lo escriba seria peor que el fallo: Lia ya habria dicho «toma, mirame» y
+    // la foto no llegaria nunca, que es la promesa rota que el propio bloque
+    // prohibe. Si no se le ofrece generar, no promete generar.
+    //
+    // El 2026-09-15 genero dos imagenes que nadie habia pedido —un cierre de
+    // escena con ternura a las 14:11 y una escena de caricias despues—, cada una
+    // con hasta 25 minutos de cola en AI Horde. Ninguno de los dos mensajes
+    // nombraba una foto.
+    //
+    // No toca el camino de REENVIAR: con la puerta cerrada el bloque sigue
+    // viajando si hay imagenes guardadas, ofreciendo `mediaId`. Reenviar es
+    // gratis e inmediato, asi que cerrarlo no ahorraria nada.
+    const lastAssistantText =
+      [...history].reverse().find((turn) => turn.role === 'assistant')?.text ?? null;
+    // el turno anterior DEL USUARIO, que no es el de ahora: el mensaje de este
+    // turno ya se ha añadido al historial unas lineas mas arriba, asi que hay
+    // que saltarselo y coger el de antes
+    const userTurns = history.filter((turn) => turn.role === 'user');
+    const previousUserText =
+      userTurns.length >= 2 ? (userTurns[userTurns.length - 2]?.text ?? null) : null;
+    const imageGate = imageTurnOpensGate({
+      message: args.message,
+      // hace falta para entender «si, porfa»: el asentimiento no nombra el
+      // asunto, lo nombro ella en su turno anterior
+      previousAssistantText: lastAssistantText,
+      // y esto para entender «sigo esperando eh». Cuando la puerta cierra por
+      // error, o cuando ella esquiva la peticion en personaje, su turno no
+      // nombra ninguna foto —«Ahora no, tontorron... quedate aqui conmigo»— y
+      // el tema parece cerrado aunque el acabe de pedirla. Sin mirar tambien lo
+      // que escribio EL, el bucle se cierra sobre si mismo
+      previousUserText,
+      // dato cierto: si en el turno anterior ella mando una imagen, el tema
+      // esta abierto aunque su pie de foto no nombre nada
+      previousTurnSentImage: ultimaRespuestaConImagen.has(conversationId),
+      // dato cierto, no adivinanza: si la del turno anterior no llego a salir,
+      // la puerta se abre diga lo que diga el mensaje
+      lastImageFailed: ultimaImagenFallida.get(conversationId) !== undefined,
+    });
+    const canGenerateImage = imageCapable && imageGate.open;
 
     // de donde sale la memoria de esta conversacion.
     //
@@ -3600,6 +3666,14 @@ export function registerIpcHandlers(context: HandlerContext): void {
       // ficha que vivio la conversacion de un indice que solo sabe los titulos
       memoriaOrigen: memoriaElegida.memory === null ? 'ninguna' : memoriaElegida.source,
       memoriaHuecos: memoriaElegida.gaps,
+      // si en este turno se le ofrecio generar, y por que. Es una CLASIFICACION
+      // —una de cuatro— y no contenido: ni el mensaje ni una palabra suya.
+      //
+      // Sin el motivo, «cerrada» no se puede diagnosticar: un `sin-motivo` en un
+      // turno que si pedia una foto es un agujero del lexico y se arregla
+      // ampliandolo, y no hay otra forma de enterarse
+      imagenPuerta: canGenerateImage ? 'abierta' : 'cerrada',
+      imagenPuertaMotivo: imageGate.reason,
       // por que NO salio ninguna promesa, que es la pregunta que se hace
       // siempre. «Cero ofrecidas» no dice nada; «cuatro abiertas, tres en
       // reposo y una bloqueada por desfase» se arregla en sitios distintos.
@@ -3636,6 +3710,11 @@ export function registerIpcHandlers(context: HandlerContext): void {
       // tarde: un personaje fijado que la boveda no conoce
       personajeEnBoveda: character !== undefined,
       puedeGenerar: canGenerateImage,
+      // capacidad y oportunidad, separadas. `puedeGenerar` en falso con
+      // `motivoBloqueo` vacio es la puerta, no una configuracion rota: sin esta
+      // pareja se irian a mirar la clave del proveedor sin motivo
+      capazDeGenerar: imageCapable,
+      puertaAbierta: imageGate.open,
       // el MOTIVO, no solo el booleano: los tres se arreglan en sitios
       // distintos —el identificador, la lista de personajes, o la clave— y
       // saber cual era habria ahorrado dos diagnosticos equivocados
@@ -3750,15 +3829,39 @@ export function registerIpcHandlers(context: HandlerContext): void {
           };
         }
       } else if (imageRequest.request !== null) {
+        // escribio un bloque de generar en un turno en el que NO se le ofrecio
+        // generar. Es un motivo distinto de los tres de capacidad —aqui la clave
+        // esta, el personaje esta— y hay que contarlo: es el numero que dice si
+        // la puerta se esta peleando con el modelo. Si sube, o el lexico cierra
+        // turnos legitimos o el bloque cerrado no se esta entendiendo
+        const puertaCerrada = imageCapable && !imageGate.open;
+        if (puertaCerrada) {
+          context.log('imagen pedida con la puerta cerrada', {
+            motivoPuerta: imageGate.reason,
+            imagenesDisponibles: existingImages.length,
+          });
+        }
         image = {
           mediaId: null,
           costCredits: null,
           costUnit: null,
           // tres motivos distintos con tres arreglos distintos: mezclarlos
-          // mandaba a mirar la clave cuando el problema era el identificador
-          error: imageBlockMessage(imageBlock ?? 'sin-personaje', imageProvider),
+          // mandaba a mirar la clave cuando el problema era el identificador.
+          // Y el cuarto no es un fallo de configuracion: decir «elige un
+          // personaje» cuando el personaje esta elegido manda a arreglar algo
+          // que no esta roto
+          error: puertaCerrada
+            ? 'en este turno no se le ofrecio generar una imagen nueva: nadie habia hablado de fotos'
+            : imageBlockMessage(imageBlock ?? 'sin-personaje', imageProvider),
         };
       }
+
+      // si este turno llevo imagen, el siguiente sabe que el tema esta abierto.
+      // Se apunta aqui y no dentro de cada rama porque las tres —reenviar,
+      // generar y fallar— acaban en el mismo sitio, y lo que importa es si el
+      // usuario vio una imagen, no como llego
+      if (image !== null && image.mediaId !== null) ultimaRespuestaConImagen.add(conversationId);
+      else ultimaRespuestaConImagen.delete(conversationId);
 
       await store.appendTurn(
         context.vault,

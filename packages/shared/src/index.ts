@@ -7,6 +7,7 @@ export * from './vault-auth.js';
 export * from './vault-payloads.js';
 export * from './vault-prompt.js';
 export * from './vault-image-request.js';
+export * from './vault-image-gate.js';
 export * from './vault-image-provider.js';
 export * from './vault-describe.js';
 export * from './temporal-reference.js';

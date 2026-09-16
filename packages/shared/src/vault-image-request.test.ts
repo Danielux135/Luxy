@@ -196,6 +196,28 @@ describe('la herramienta solo se ofrece cuando existe', () => {
     expect(sinGenerar).toContain('si no te la han pedido, no la mandes');
   });
 
+  it('el camino que SI puede generar tambien lleva el verbo, que era el agujero', () => {
+    // `D-086` partio la frase en dos caminos y la orden se quedo solo en el que
+    // NO puede generar, donde no sirve de nada: el que si puede generar decia
+    // «NO cuentan» —un adjetivo— y en ningun sitio «no la mandes». El
+    // 2026-09-15 el modelo genero dos imagenes que nadie habia pedido, en un
+    // cierre de escena y en una escena de caricias
+    const instruction = buildVaultImageInstruction();
+    expect(instruction).toContain('no la mandes');
+    // y nombrando los dos casos, que es lo que impide reabrir `D-086`: la foto
+    // que hace el dentro de la escena se sigue generando
+    expect(instruction).toContain('no la ha hecho el en este mensaje');
+  });
+
+  it('«si dudas de cual mandar» solo sale cuando hay entre cuales elegir', () => {
+    // salia en los cuatro caminos, incluido el de cero imagenes guardadas,
+    // donde no hay ningun «cual»: es un error de alcance, no un cambio de
+    // politica
+    expect(buildVaultImageInstruction()).not.toContain('elegir mal es mejor');
+    const conLista = [{ mediaId: 'med-1', description: 'junto a la ventana' }];
+    expect(buildVaultImageInstruction(conLista)).toContain('elegir mal es mejor');
+  });
+
   it('el prompt del generador se pide en ingles', () => {
     // su documentacion es explicita: en otro idioma el generador ignora la
     // escena. La instruccion estaba escrita en español y no lo decia
@@ -319,7 +341,75 @@ describe('una peticion directa manda sobre el personaje', () => {
   });
 
   it('ante la duda manda una, en vez de no mandar nada', () => {
-    expect(buildVaultImageInstruction()).toContain('elegir mal es mejor que no mandar nada');
+    const conLista = [{ mediaId: 'med-1', description: 'junto a la ventana' }];
+    expect(buildVaultImageInstruction(conLista)).toContain(
+      'elegir mal es mejor que no mandar nada',
+    );
+    // pero «cual» son SIEMPRE las de la lista. Sin acotar, en el camino cerrado
+    // se lee como «manda una cualquiera», y junto a la orden de no esquivar
+    // empuja a reenviar una vieja cuando lo que piden es nueva
+    expect(buildVaultImageInstruction(conLista)).toContain('cual de la lista mandar');
+  });
+});
+
+// el camino cerrado es el que la puerta convierte en el de la mayoria de los
+// turnos, asi que lo que dice deja de ser un caso de averia y pasa a leerse a
+// diario. Antes coincidian dentro un limite dicho en voz baja —«dilo con
+// naturalidad»— y una orden en el tono mas fuerte del bloque
+describe('lo que dice el bloque cuando no se puede generar', () => {
+  const conLista = [
+    { mediaId: 'med-1', description: 'junto a la ventana' },
+    { mediaId: 'med-2', description: 'sentada en la cama' },
+  ];
+  const cerrado = buildVaultImageInstruction(conLista, 'prose', false);
+
+  it('la orden de no esquivar sigue entera: ese hueco no se reabre', () => {
+    expect(cerrado).toContain('ES UNA ORDEN');
+    expect(cerrado).toContain('NO la esquives');
+  });
+
+  it('pero con su excepcion dicha en el mismo tono, no en voz baja', () => {
+    // sin esto, ante «mandame una nueva» la orden ganaba al limite y la unica
+    // salida disponible era reenviar una vieja como si fuera la nueva: el daño
+    // exacto del 2026-09-14
+    expect(cerrado).toContain('NO existe todavia, dilo: no mandes otra en su lugar');
+    // y esa excepcion es del camino cerrado: donde si se puede generar, lo que
+    // no existe se genera
+    expect(buildVaultImageInstruction(conLista, 'prose', true)).not.toContain(
+      'no mandes otra en su lugar',
+    );
+  });
+
+  it('manda NOMBRAR la foto al negarse, y no solo decirlo con naturalidad', () => {
+    // de esto depende que insistir funcione: el turno siguiente la puerta mira
+    // si el tema sigue abierto, y «Ahora mismo no puedo, amor» no nombra nada
+    expect(cerrado).toContain('dilo nombrando la foto');
+    expect(cerrado).toContain('ahora no puedo mandarte una nueva');
+  });
+
+  it('y concuerda: es una imagen, no «uno»', () => {
+    expect(cerrado).not.toContain('Si te piden uno');
+    expect(cerrado).toContain('Si te piden una que no esta en');
+  });
+});
+
+// una prueba de TAMAÑO, que es lo que impide que el bloque vuelva a crecer 16
+// veces en trece dias sin que nadie lo note: paso de 398 a 6.656 caracteres, y
+// llego a ocupar el 33% del prompt de un turno real
+describe('lo que ocupa el bloque', () => {
+  const cuatro = [
+    { mediaId: 'med-1', description: 'de pie junto a la ventana, camisa blanca' },
+    { mediaId: 'med-2', description: 'sentada en la cama, luz calida' },
+    { mediaId: 'med-3', description: 'en la cocina, de espaldas' },
+    { mediaId: 'med-4', description: 'durmiendo, ojos cerrados' },
+  ];
+
+  it('pudiendo generar no pasa de 6.500 caracteres', () => {
+    expect(buildVaultImageInstruction(cuatro, 'prose', true).length).toBeLessThan(6500);
+  });
+
+  it('sin poder generar baja de 3.000: se salta la seccion COMO entera', () => {
+    expect(buildVaultImageInstruction(cuatro, 'prose', false).length).toBeLessThan(3000);
   });
 });
 

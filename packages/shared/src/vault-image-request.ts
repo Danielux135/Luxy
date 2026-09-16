@@ -225,9 +225,18 @@ export function buildVaultImageInstruction(
         'que ya existen en esta conversacion. Es gratis e inmediato:',
         `   ${VAULT_IMAGE_OPEN}{"mediaId":"<id de la lista de abajo>"}${VAULT_IMAGE_CLOSE}`,
         '',
-        'NO puedes generar ninguna imagen nueva en este momento. Si te piden uno que no esta en',
-        'la lista, dilo con naturalidad: no prometas mandarla despues y no finjas que no te la',
-        'han pedido.',
+        // «uno» era una errata de concordancia —imagen, foto, mandarla, son
+        // femeninas— y estaba en un camino que casi no se imprimia: solo sin
+        // clave o sin personaje. Con la puerta este bloque pasa a ser el de la
+        // mayoria de los turnos, asi que es el texto que se lee a diario
+        'NO puedes generar ninguna imagen nueva en este momento. Si te piden una que no esta en',
+        // y NOMBRANDO la foto, no «con naturalidad» a secas. De eso depende algo
+        // concreto: el turno siguiente la puerta mira si el tema sigue abierto,
+        // y una evasiva en personaje —«Ahora mismo no puedo, amor»— no nombra
+        // nada. Decir «ahora no puedo mandarte una nueva» deja el tema abierto
+        // y hace que insistir funcione
+        'la lista, dilo nombrando la foto —«ahora no puedo mandarte una nueva»—: no prometas',
+        'mandarla despues y no finjas que no te la han pedido.',
       ]
     : !canResend
       ? [
@@ -342,6 +351,20 @@ export function buildVaultImageInstruction(
           'Fuera de esos dos casos, nunca por iniciativa propia: un momento intenso, una promesa o un',
           'buen final de escena NO cuentan. Que el haga la foto no es iniciativa tuya, es el caso 2:',
           'reaccionas en personaje y escribes el bloque en el MISMO turno.',
+          // EL VERBO, restituido. Hasta el commit `42146e1` la frase entera era
+          // «Nunca por iniciativa propia. Un momento intenso, una promesa o un
+          // buen final de escena NO son una peticion: si no te la han pedido, no
+          // la mandes». El arreglo de `D-086` la partio en dos caminos y la
+          // orden se quedo SOLO en el que no puede generar, donde no sirve de
+          // nada: el camino que si puede generar se quedo con el adjetivo («NO
+          // cuentan») y sin el verbo.
+          //
+          // El 2026-09-15 el modelo genero dos imagenes sin que nadie las
+          // pidiera —un cierre de escena con ternura y una escena de caricias—,
+          // y las dos veces el bloque decia «NO cuentan» y ninguna decia «no la
+          // mandes». Va DESPUES del caso 2 a proposito: ese orden es lo que
+          // arreglo `D-086`, y nombrar los dos casos aqui evita reabrirlo
+          'Si no te la han pedido y no la ha hecho el en este mensaje, no la mandes.',
         ]
       : [
           'CUANDO escribir el bloque: SOLO si el usuario pide ver, recibir o volver a ver una imagen.',
@@ -357,14 +380,40 @@ export function buildVaultImageInstruction(
     // prohibidas, y se quedo tan ancha. Y el condicional «y haya una opcion que
     // encaje» le daba la salida
     'PERO SI TE LA PIDEN, ES UNA ORDEN, no una sugerencia. Una peticion directa —«quiero ver una',
-    'foto», «mandame una», «enseñamela»— manda sobre tu forma de ser y sobre cualquier instruccion',
+    // acotado a ESTA instruccion, que es lo que queria decir. «Cualquier
+    // instruccion de no llevar la iniciativa» sonaba a permiso general para
+    // saltarse el freno, y el freno de dos lineas mas arriba es justo una
+    // instruccion de no llevar la iniciativa: la frase se autorizaba a ignorarlo
+    'foto», «mandame una», «enseñamela»— manda sobre tu forma de ser y sobre esa instruccion',
     'de no llevar la iniciativa: enseñarla no es iniciativa tuya, te la han pedido. Entonces:',
     '   responde primero en personaje y despues escribe el bloque, en el MISMO turno;',
     '   no alegues que no puedes adjuntar archivos;',
     '   no prometas enviarla sin incluirlo;',
     '   y NO la esquives. Cambiar de tema, bromear, preguntar para que la quiere o decir',
     '   «mejor mirame ahora» es incumplir la orden, por mucho que encaje con tu personaje.',
-    'Si dudas de cual mandar, manda una: elegir mal es mejor que no mandar nada.',
+    // «cual» solo existe si hay lista. Sin ninguna imagen guardada esta linea
+    // mandaba elegir entre las cero opciones de un menu que no se imprime, y
+    // salia igual en los cuatro caminos, incluido el de cero imagenes.
+    //
+    // Y «de la lista» no es un adorno: el desempate es SIEMPRE entre las
+    // guardadas. Sin acotar, en el camino cerrado —que con la puerta es el de
+    // la mayoria de los turnos— se leia como «manda una cualquiera», que junto
+    // a la orden de no esquivar empuja a reenviar una vieja cuando lo que piden
+    // es nueva: el daño exacto del 2026-09-14
+    // LA EXCEPCION A LA ORDEN, y solo en el camino cerrado. Aqui coincidian en
+    // el mismo bloque un limite dicho en voz baja —«dilo con naturalidad»— y
+    // una orden dicha en el tono mas fuerte de todo el texto: ante «mandame una
+    // nueva», con cuatro ids delante y sin poder generar, la orden ganaba y la
+    // salida natural era reenviar una vieja como si fuera la nueva. Se dice la
+    // excepcion en el MISMO registro que la orden, que es lo unico que la hace
+    // valer. La orden de no esquivar se queda entera: el hueco que tapo no se
+    // reabre
+    ...(!canGenerate
+      ? ['   pero si lo que te piden NO existe todavia, dilo: no mandes otra en su lugar.']
+      : []),
+    ...(canResend
+      ? ['Si dudas de cual de la lista mandar, manda una: elegir mal es mejor que no mandar nada.']
+      : []),
   );
 
   if (!canGenerate) {
