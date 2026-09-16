@@ -97,11 +97,16 @@ export type ModelCapability = (typeof MODEL_CAPABILITIES)[number];
 /**
  * familias con las que un modelo puede registrarse.
  *
- * Es una lista CERRADA a proposito: el identificador de proveedor ES la familia
- * con la que el agente lo ejecuta, y aceptar cualquier cadena convertiria una
+ * Es una lista CERRADA a proposito: una conexion agregadora registra un
+ * proveedor POR FAMILIA, asi que aceptar cualquier cadena convertiria una
  * errata en la configuracion en un proveedor que no existe. El precio es que
  * una conexion nueva no se agrupa sola: hay que añadirla aqui y ponerle
  * etiqueta, y TypeScript obliga a lo segundo.
+ *
+ * OJO con la lectura de mas: que una familia sea un proveedor no significa que
+ * un proveedor sea una familia. `groq`, `ovh-nemo` y `horde-cydonia` no estan
+ * aqui y no pueden estarlo, y sus modelos se ejecutan igual. Quien decide quien
+ * ejecuta un modelo es `providerCandidatesForModel`, no esta lista.
  */
 export const MODEL_FAMILIES = [
   'deepseek',
@@ -121,6 +126,23 @@ export const MODEL_FAMILIES = [
   'router',
 ] as const;
 export type ModelFamily = (typeof MODEL_FAMILIES)[number];
+
+/**
+ * de que CLASE de origen salio un modelo, que es lo que decide si su familia
+ * sirve para elegir quien lo ejecuta.
+ *
+ * `connection` es una pasarela agregadora: el agente le da de alta un proveedor
+ * por familia, asi que la familia SI es un ejecutor valido. `http` es una
+ * entrada de `providers.http`: se registra con su propio identificador y con
+ * ninguno mas, y su familia es una ADIVINANZA sacada del nombre del modelo.
+ *
+ * PASO DE VERDAD: con `ovh-nemo` apagado, `Mistral-Nemo-Instruct-2407` caia a su
+ * familia adivinada `mistral` —que en esta maquina es OTRA pasarela con otra
+ * clave— y la pantalla daba luz verde a ejecutarlo alli. La llamada se paga
+ * igual y devuelve `unrecognized_model`.
+ */
+export const MODEL_ORIGINS = ['connection', 'http'] as const;
+export type ModelOrigin = (typeof MODEL_ORIGINS)[number];
 
 /** herramientas del ejecutor local. la shell arbitraria no esta y no es un olvido */
 export const AGENT_TOOL_NAMES = [
@@ -221,6 +243,15 @@ export const modelDefinitionSchema = z.object({
   displayName: z.string().min(1).max(64),
   family: z.enum(MODEL_FAMILIES),
   connectionId: z.string().min(1).max(32),
+  /**
+   * que clase de origen es `connectionId`. Ver `MODEL_ORIGINS`.
+   *
+   * El valor por defecto es `connection` porque es el unico que puede aparecer
+   * sin que nadie lo escriba: el catalogo de fabrica sale de una conexion, y un
+   * catalogo servido por `providers.http` siempre pasa por `buildServedModel`,
+   * que lo pone explicitamente.
+   */
+  origin: z.enum(MODEL_ORIGINS).default('connection'),
   category: z.enum(MODEL_CATEGORIES),
   capabilities: z.array(z.enum(MODEL_CAPABILITIES)).max(24).default([]),
   /** comandos de telegram, siempre en minusculas y con guion bajo, sin la barra */

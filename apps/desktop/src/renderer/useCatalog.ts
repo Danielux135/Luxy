@@ -24,11 +24,18 @@ export interface CatalogOrigin {
   /** lo que se lee en el selector */
   displayName: string;
   /**
-   * familia con la que se registran TODOS sus modelos, si la impone el origen.
+   * familia con la que se AGRUPAN sus modelos, si la impone el origen.
    *
    * Una conexión agregadora sirve muchas familias y hay que adivinarlas por el
-   * nombre. Un proveedor HTTP no: el agente lo registra bajo su identificador,
-   * y el identificador de proveedor ES la familia con la que se ejecuta.
+   * nombre. Un proveedor HTTP no, así que se le pasa su propio identificador y
+   * se agrupa todo junto.
+   *
+   * OJO: esto agrupa, no decide quién ejecuta. `buildServedModel` sólo acepta
+   * el valor si además es una familia REAL (`MODEL_FAMILIES`), así que para
+   * `horde-cydonia`, `groq` y `ovh-nemo` se descarta y la familia se adivina
+   * del nombre: `Cydonia-24B` acaba en `other` y el de OVH en `mistral`, que
+   * aquí es otra pasarela. Quién ejecuta lo dice `providerCandidatesForModel`
+   * mirando `origin`, y ésa fue la mitad del fallo del 2026-09-15.
    */
   family: string | null;
 }
@@ -101,9 +108,13 @@ function useCatalogVersion(): number {
 /**
  * el catálogo de TODOS los orígenes configurados, junto.
  *
- * Junto y no uno elegido: quien lo consume filtra por familia, así que tener
- * todos los modelos en la misma lista es lo correcto. Un modelo de una familia
- * que no es la del proveedor activo no se ofrece igualmente.
+ * Junto y no uno elegido: quien lo consume filtra por PROVEEDOR con
+ * `modelsForProvider`, así que tener todos los modelos en la misma lista es lo
+ * correcto. Uno que ejecuta otro proveedor no se ofrece igualmente.
+ *
+ * Y lleva los orígenes apagados a propósito: sus modelos siguen en el catálogo
+ * del disco y se marcan «sin proveedor» en pantalla, que explica más que
+ * desaparecer sin decir nada.
  */
 export function useDetectedCatalog(summary: ConfigSummary): {
   models: ModelDefinition[];

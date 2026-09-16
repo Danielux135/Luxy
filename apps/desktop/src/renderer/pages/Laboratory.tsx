@@ -6,6 +6,7 @@ import {
   buildModelEvaluationPrompt,
   getModelEvaluationFixture,
   modelDeclaresEvaluationCapabilities,
+  type ModelDefinition,
   type ModelEvaluationDefinition,
   type StoredModelEvaluationResult,
   type StudioJob,
@@ -32,9 +33,28 @@ import {
   evaluationExecutionBlockReason,
   evaluationProvider,
 } from '../evaluation-run-policy.js';
+import { executionChoices, providerForModel } from '../../shared/model-selection.js';
 import { Empty, Field, Notice, Panel, Readout, Tag, type Tone } from '../ui/primitives.js';
 import type { ConfigSummary } from '../useConfig.js';
 import { useDetectedCatalog } from '../useCatalog.js';
+
+/**
+ * lo que se lee en el desplegable de modelo.
+ *
+ * Lleva QUIEN lo ejecutaria porque el nombre ya no basta: las cuatro conexiones
+ * de Daniel a AI Horde sirven los mismos veintisiete nombres y el `displayName`
+ * de un modelo servido ES su `apiModel`, asi que las opciones eran identicas.
+ * Y no es cosmetico: cada conexion lleva su clave, su tope de tokens y su
+ * limite de llamadas, o sea que ahi se decide quien paga la prueba.
+ */
+function evaluationOptionLabel(model: ModelDefinition, providers: readonly string[]): string {
+  const quien = providerForModel(model, providers) ?? 'sin proveedor';
+  const nombre =
+    model.displayName === model.apiModel
+      ? model.apiModel
+      : `${model.displayName} · ${model.apiModel}`;
+  return `${nombre} · ${quien}`;
+}
 
 const CATEGORY_LABELS: Record<ModelEvaluationDefinition['category'], string> = {
   speed: 'Rapidez',
@@ -315,35 +335,44 @@ export function LaboratoryPage({ summary }: { summary: ConfigSummary }): JSX.Ele
     EXECUTABLE_MODEL_EVALUATIONS.find((item) => item.id === evaluationId) ??
     EXECUTABLE_MODEL_EVALUATIONS[0]!;
   const { models } = useDetectedCatalog(summary);
-  // por apiModel y no por id: el catalogo junto conserva una ficha por ORIGEN
-  // —cuatro conexiones al mismo AI Horde dan cuatro copias de cada modelo— y
-  // aqui el origen da igual, porque la prueba se ejecuta por FAMILIA. Sin esto
-  // el desplegable enseñaba cuatro opciones identicas entre las que no habia
-  // forma de elegir
-  const vistosPorNombre = new Set<string>();
-  const compatibleModels = models.filter((model) => {
-    if (!modelDeclaresEvaluationCapabilities(model, evaluation)) return false;
-    if (vistosPorNombre.has(model.apiModel)) return false;
-    vistosPorNombre.add(model.apiModel);
-    return true;
-  });
+  const preview = buildModelEvaluationPrompt(evaluation.id)!;
+  // la maquina se resuelve ANTES de la lista, y no es orden estetico: quien
+  // ejecuta cada ficha depende de lo que ESA maquina tenga en marcha, y el
+  // filtro de abajo lo necesita
+  const machine = machines.find((item) => item.id === machineId) ?? null;
+  // una opcion por EJECUCION y no por nombre. Esto deduplicaba por `apiModel`
+  // quedandose con la primera ficha, con un comentario que decia «aqui el
+  // origen da igual, porque la prueba se ejecuta por FAMILIA»: con la regla
+  // nueva el origen ES el ejecutor, asi que eso elegia en silencio cual de las
+  // cuatro conexiones de Daniel a AI Horde pagaba la prueba, y bloqueaba el
+  // modelo entero si la que caia primera estaba sin clave
+  const compatibleModels = executionChoices(
+    models.filter((model) => modelDeclaresEvaluationCapabilities(model, evaluation)),
+    machine?.providers ?? [],
+  );
   const selectedModel =
     compatibleModels.find((model) => model.id === modelId) ?? compatibleModels[0] ?? null;
   const selectedSecondModel =
     compatibleModels.find(
       (model) => model.id === secondModelId && model.id !== selectedModel?.id,
     ) ??
-    compatibleModels.find((model) => model.id !== selectedModel?.id) ??
+    // un segundo modelo con el mismo `apiModel` lo rechaza la comparacion, y
+    // ahora el desplegable puede tener el mismo nombre por dos conexiones: se
+    // busca uno que de verdad sirva como segundo
+    compatibleModels.find(
+      (model) => model.id !== selectedModel?.id && model.apiModel !== selectedModel?.apiModel,
+    ) ??
     null;
-  const preview = buildModelEvaluationPrompt(evaluation.id)!;
-  const machine = machines.find((item) => item.id === machineId) ?? null;
-  const provider = evaluationProvider(selectedModel);
+  // quien lo ejecuta depende de la maquina elegida: sin ella no hay respuesta
+  const provider = evaluationProvider(selectedModel, machine?.providers ?? []);
   const evidence = aggregateModelEvaluationEvidence(history);
   const recommendation = assessModelEvaluationRecommendation({
     evaluation,
     entries: history,
     jobs: studioJobs,
-    allowedModels: compatibleModels.map((model) => model.apiModel),
+    // el mismo nombre servido por dos conexiones es una opcion cada uno, pero
+    // aqui se compara contra el modelo de un trabajo: repetido no añade nada
+    allowedModels: [...new Set(compatibleModels.map((model) => model.apiModel))],
     projectAlias,
   });
 
@@ -419,7 +448,7 @@ export function LaboratoryPage({ summary }: { summary: ConfigSummary }): JSX.Ele
       : evaluationExecutionBlockReason(executionPolicy);
 
   const execute = async (): Promise<void> => {
-    const secondProvider = evaluationProvider(selectedSecondModel);
+    const secondProvider = evaluationProvider(selectedSecondModel, machine?.providers ?? []);
     if (
       blockReason !== null ||
       selectedModel === null ||
@@ -567,7 +596,7 @@ export function LaboratoryPage({ summary }: { summary: ConfigSummary }): JSX.Ele
               ) : (
                 compatibleModels.map((model) => (
                   <option key={model.id} value={model.id}>
-                    {model.displayName} · {model.apiModel}
+                    {evaluationOptionLabel(model, machine?.providers ?? [])}
                   </option>
                 ))
               )}
@@ -587,7 +616,7 @@ export function LaboratoryPage({ summary }: { summary: ConfigSummary }): JSX.Ele
                   .filter((model) => model.id !== selectedModel?.id)
                   .map((model) => (
                     <option key={model.id} value={model.id}>
-                      {model.displayName} · {model.apiModel}
+                      {evaluationOptionLabel(model, machine?.providers ?? [])}
                     </option>
                   ))}
               </select>

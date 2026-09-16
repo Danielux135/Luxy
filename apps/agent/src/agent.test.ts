@@ -1039,4 +1039,48 @@ describe('resolveJobModel con el catalogo', () => {
     const job = { ...trabajo('deepseek'), metadata: { model: 'DeepSeek-V4-Flash' } };
     expect(resolveJobModel(job, conConexion('PENDIENTE_X', false))).toBe('DeepSeek-V4-Flash');
   });
+
+  it('con un providers.http que se llama como una familia no elige ninguno', () => {
+    // NO es un caso raro: el asistente de Conexiones trae un preajuste con
+    // `id: 'deepseek'` apuntando a api.deepseek.com, asi que basta un clic y la
+    // clave oficial para tenerlo al lado de la conexion agregadora.
+    //
+    // Los dos contestan y desde aqui no se puede saber cual es el ejecutor:
+    // `initializeProviders` da de alta la entrada HTTP solo si ademas tiene
+    // clave guardada, y la clave vive en el almacen cifrado. Devolver el
+    // predeterminado de la conexion mandaba `DeepSeek-V4-Pro` a
+    // api.deepseek.com, que sirve `deepseek-chat`: modelo inexistente y llamada
+    // pagada.
+    //
+    // `undefined` deja que decida el proveedor YA registrado, que acierta en
+    // los dos casos porque cada uno lleva su propio modelo configurado.
+    const config = conConexion('deepseek-chat', true);
+    expect(resolveJobModel(trabajo('deepseek'), config)).toBeUndefined();
+
+    // y los que NO chocan siguen resolviendo igual
+    expect(resolveJobModel(trabajo('kimi'), config)).toBe('kimi-k3');
+  });
+
+  it('un providers.http con nombre propio sigue dando su modelo', () => {
+    // `ovh-nemo` no es ninguna familia, asi que no hay choque: nadie mas puede
+    // reclamar ese identificador y su modelo es la respuesta correcta
+    const config = agentConfigSchema.parse({
+      machineName: 'maquina',
+      gatewayUrl: 'https://gateway.example',
+      machineToken: 'token-de-maquina-suficientemente-largo',
+      providers: {
+        http: [
+          {
+            id: 'ovh-nemo',
+            displayName: 'OVH Nemo',
+            baseUrl: 'https://api.example/v1',
+            model: 'Mistral-Nemo-Instruct-2407',
+            apiKeyEnv: 'OVH_API_KEY',
+            enabled: true,
+          },
+        ],
+      },
+    });
+    expect(resolveJobModel(trabajo('ovh-nemo'), config)).toBe('Mistral-Nemo-Instruct-2407');
+  });
 });

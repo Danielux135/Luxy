@@ -47,12 +47,18 @@ export const TERMINAL_JOB_STATUSES = ['completed', 'failed', 'cancelled', 'inter
 // Mobile comparten la misma cola sin inventar identificadores de chat.
 export const JOB_ORIGINS = ['telegram', 'studio', 'mobile'] as const;
 
-// proveedores conocidos por luxy
-// un "proveedor" es una FAMILIA de modelos, no un modelo concreto.
+// proveedores conocidos por luxy: las FAMILIAS que una conexion agregadora
+// registra sola. NO son todos los proveedores que puede tener una maquina.
+//
+// Es la mitad de la lista, y creerla entera costo el fallo del 2026-09-15: cada
+// entrada de `providers.http` se registra con SU identificador —`groq`,
+// `ovh-nemo`, `horde-cydonia`— y ninguno de esos esta aqui ni puede estarlo.
+// Lo que una maquina ofrece de verdad lo calcula `machineProviders`
+// (`machines.ts`), y quien ejecuta un modelo concreto lo decide
+// `providerCandidatesForModel` (`apps/desktop/src/shared/model-selection.ts`).
 //
 // el modelo exacto vive en el catalogo (packages/shared/src/models) y, cuando
-// el usuario lo fija, en jobs.model. Esta lista decide que maquina puede
-// ejecutar cada familia y forma el enum del contrato con el gateway.
+// el usuario lo fija, en jobs.model.
 export const PROVIDER_IDS = [
   'claude',
   'codex',

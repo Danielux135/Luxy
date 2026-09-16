@@ -44,8 +44,10 @@ import { describeQueue, type HordeQueueProgress } from '../../shared/horde-progr
 import {
   NATIVE_MODEL_SUGGESTIONS,
   effortsFor,
+  missingProviderReason,
   modelForProvider,
   modelsForProvider,
+  providerForModel,
 } from '../../shared/model-selection.js';
 import {
   HORDE_ANIME_MODELS,
@@ -54,6 +56,7 @@ import {
   describeConversationMemoryStatus,
   describeHordeCharacter,
   hordeRecipeSchema,
+  isConversationalModel,
   mixedBaselineWarning,
   qualityPrefixWarning,
   recipeDefaultsFor,
@@ -162,7 +165,12 @@ export function VaultPage({
 }: {
   vault: VaultController;
   summary: ConfigSummary;
-  /** catalogo real de la conexion; se filtra por familia = proveedor */
+  /**
+   * catalogo real de TODOS los origenes configurados, junto.
+   *
+   * Quien lo consume filtra por proveedor con `modelsForProvider`, que no es lo
+   * mismo que filtrar por familia: ver `providerCandidatesForModel`.
+   */
   models: ModelDefinition[];
   /**
    * proveedores que el agente tiene EN MARCHA, tal y como los anuncia.
@@ -227,16 +235,19 @@ function ConversationPanel({
   // pero una elección suya se conserva aunque la lista cambie de orden
   const project = composer.project ?? projects[0] ?? '';
   const provider = composer.provider ?? providers[0] ?? 'claude';
-  // el id de proveedor ES la familia del modelo: asi los registra el agente
-  const familyModels = modelsForProvider(models, provider) as ModelDefinition[];
+  // los que ejecuta ESTE proveedor, que no es «los de su familia»: ver
+  // `providerCandidatesForModel`. Se le pasa la lista de proveedores en marcha
+  // para que un modelo con un ejecutor mas exacto no se cuele aqui —el selector
+  // de `mistral` ofrecia uno que solo sirve `ovh-nemo`—
+  const providerModels = modelsForProvider(models, provider, providers) as ModelDefinition[];
   // cadena vacia = «el de la conexion». Es lo que hacia siempre, y ahora es una
   // eleccion visible en vez de la unica posibilidad.
   //
-  // Y se comprueba que pertenezca a ESTA familia: el modelo se recuerda por
+  // Y se comprueba que lo ejecute ESTE proveedor: el modelo se recuerda por
   // conversacion y viaja al cambiar de proveedor, asi que uno guardado puede no
   // existir para el proveedor actual. Mandarlo gasta la llamada y devuelve
   // `unrecognized_model`
-  const model = modelForProvider(models, provider, composer.model) ?? '';
+  const model = modelForProvider(models, provider, composer.model, providers) ?? '';
 
   // que esfuerzos tiene sentido ofrecer AQUI. Vacio = este proveedor no
   // entiende de esfuerzos, y entonces no se pinta nada: un selector que no
@@ -372,7 +383,13 @@ function ConversationPanel({
         project={project}
       />
 
-      <CompatibilityPanel vault={vault} models={models} effort={effort} project={project} />
+      <CompatibilityPanel
+        vault={vault}
+        models={models}
+        providers={providers}
+        effort={effort}
+        project={project}
+      />
 
       {vault.error !== null && <Notice tone="fault">{vault.error}</Notice>}
 
@@ -408,7 +425,7 @@ function ConversationPanel({
                 ))}
               </select>
             </Field>
-            {familyModels.length > 0 ? (
+            {providerModels.length > 0 ? (
               <Field
                 label="Modelo"
                 hint="Sin elegir usa el de la conexión, que suele ser el mayor de la familia."
@@ -418,7 +435,7 @@ function ConversationPanel({
                   onChange={(event) => vault.setComposer({ model: event.target.value })}
                 >
                   <option value="">por defecto de la conexión</option>
-                  {familyModels.map((definition) => (
+                  {providerModels.map((definition) => (
                     <option key={definition.id} value={definition.apiModel}>
                       {definition.displayName}
                       {/* marcado aquí y no en un aviso aparte: describir una
@@ -2562,10 +2579,11 @@ function VisionBench({
   const setModel = (value: string): void =>
     vault.setComposer({ visionModel: value.length === 0 ? null : value });
   const elegido = provider ?? conversationProvider;
-  const familyModels = modelsForProvider(models, elegido) as ModelDefinition[];
-  // un modelo de otra familia no existe para este proveedor: mandarlo gasta la
+  const providerModels = modelsForProvider(models, elegido, providers) as ModelDefinition[];
+  // un modelo que ejecuta OTRO proveedor no existe para este: mandarlo gasta la
   // llamada y devuelve `unrecognized_model`
-  const modelo = modelForProvider(models, elegido, model.length === 0 ? null : model) ?? '';
+  const modelo =
+    modelForProvider(models, elegido, model.length === 0 ? null : model, providers) ?? '';
 
   // misma regla que en la conversacion: la lista depende del modelo, y un
   // esfuerzo que deje de estar soportado se suelta en vez de viajar y fallar
@@ -2606,14 +2624,14 @@ function VisionBench({
             ))}
           </select>
         </Field>
-        {familyModels.length > 0 ? (
+        {providerModels.length > 0 ? (
           <Field
             label="Modelo"
             hint="Los marcados «ve imágenes» son los que la conexión declara con vista."
           >
             <select value={modelo} onChange={(event) => setModel(event.target.value)}>
               <option value="">por defecto de la conexión</option>
-              {familyModels.map((definition) => (
+              {providerModels.map((definition) => (
                 <option key={definition.id} value={definition.apiModel}>
                   {definition.displayName}
                   {definition.capabilities.includes('image_input') ? ' · ve imágenes' : ''}
@@ -4091,10 +4109,13 @@ function CompatibilityPanel({
   effort,
   vault,
   models,
+  providers,
   project,
 }: {
   vault: VaultController;
   models: ModelDefinition[];
+  /** los que el agente tiene EN MARCHA: deciden quien puede ejecutar cada modelo */
+  providers: string[];
   /** el mismo para todos los candidatos: es la comparacion, no una variable */
   effort: ReasoningEffort | null;
   project: string;
@@ -4102,8 +4123,54 @@ function CompatibilityPanel({
   const [selected, setSelected] = useState<string[]>([]);
   const [repetitions, setRepetitions] = useState(1);
 
-  const usable = models.filter((model) => model.enabled);
+  // `enabled` no basta y la sonda era la unica de las tres pantallas que se
+  // conformaba con el: de los catorce modelos que sirve Groq, siete no son de
+  // chat —dos whisper, dos orpheus y tres clasificadores— y llegaban aqui con
+  // la casilla activa. Marcar tres de esos son tres turnos gastados para leer
+  // «0 contesto · 0 se nego · 1 sin respuesta», que es el sintoma del que salio
+  // toda esta investigacion
+  const conversables = models.filter((model) => model.enabled && isConversationalModel(model));
+  // quien ejecutaria cada uno, resuelto ANTES de gastar el turno.
+  //
+  // Antes esto mandaba `model.family` como proveedor, que es cierto solo para
+  // los modelos de una conexion agregadora. Un modelo de AI Horde sale con
+  // familia `other` —no es un fallo: de verdad no es de ninguna familia
+  // conocida— y la sonda pedia ejecutar contra un proveedor llamado «other»,
+  // que no existe en ninguna maquina.
+  const ejecutor = (model: ModelDefinition): string | null => providerForModel(model, providers);
+  // los que no se pueden probar, al final. La lista ya sale agrupada por origen
+  // —es el orden del catalogo— asi que esto es lo unico que falta para que lo
+  // marcable quede junto y no repartido entre ciento y pico fichas
+  const usable = [
+    ...conversables.filter((model) => ejecutor(model) !== null),
+    ...conversables.filter((model) => ejecutor(model) === null),
+  ];
   if (usable.length === 0 || vault.openConversationId === null) return null;
+
+  const sinProveedor = usable.filter((model) => ejecutor(model) === null);
+  // una frase por ORIGEN, no por modelo: las veintisiete de una misma conexion
+  // de Horde dicen todas lo mismo y llenarian la pantalla.
+  //
+  // Y con el agente parado no se dice ninguna: ahi NADA tiene proveedor, asi que
+  // serian tantos avisos como origenes para explicar una sola cosa. La explica
+  // el aviso de abajo, que se pinta AQUI DENTRO y no solo fuera del desplegable:
+  // con el catalogo de Daniel la lista mide dos pantallas, y la unica razon de
+  // que todo este en gris quedaba a pantalla y media de scroll
+  const motivos =
+    providers.length === 0
+      ? []
+      : [
+          ...new Set(
+            sinProveedor.map((model) => missingProviderReason(model, providers, 'group') ?? ''),
+          ),
+        ].filter((motivo) => motivo.length > 0);
+  // los que de verdad van a viajar. El boton cuenta ESTOS y no las marcas: una
+  // marca sobre un modelo sin proveedor no es un candidato, y anunciar «probar 3»
+  // para acabar ejecutando 2 es mentir sobre lo que se va a gastar
+  const marcados = usable.filter((model) => selected.includes(model.id) && ejecutor(model) !== null);
+  // y si NINGUNO se puede probar, decirlo: «el resto de la lista sí» era falso
+  // con todas las conexiones apagadas, y ademas se repetia una vez por origen
+  const marcables = usable.length - sinProveedor.length;
 
   const toggle = (id: string): void => {
     setSelected((previous) =>
@@ -4117,7 +4184,12 @@ function CompatibilityPanel({
       // el mismo esfuerzo para todos, y a proposito: se estan comparando
       // modelos, asi que dejar que cada uno corra al suyo por defecto mezclaria
       // dos variables y el resultado no diria nada de ninguna de las dos
-      .map((model) => ({ provider: model.family, model: model.apiModel, effort }));
+      .flatMap((model) => {
+        const provider = ejecutor(model);
+        // uno sin proveedor no viaja: su casilla ya esta desactivada, y esto es
+        // el cinturon por si la lista de proveedores cambia con la marca puesta
+        return provider === null ? [] : [{ provider, model: model.apiModel, effort }];
+      });
     void vault.checkCompatibility({ projectAlias: project, targets, repetitions });
   };
 
@@ -4133,19 +4205,47 @@ function CompatibilityPanel({
         bóveda.
       </p>
 
+      {providers.length === 0 && (
+        <Notice tone="warn">
+          El agente todavía no anuncia ningún proveedor, así que no se puede
+          probar ninguno de estos modelos. Arráncalo desde Inicio; si ya está en
+          marcha, comprueba que la conexión tenga clave guardada.
+        </Notice>
+      )}
+
+      {motivos.length > 0 && (
+        <Notice tone="warn">
+          {motivos.join(' ')}{' '}
+          {marcables > 0
+            ? 'Los modelos marcados «sin proveedor» no se pueden probar desde aquí; el resto de la lista sí.'
+            : 'Ninguno de los modelos de la lista se puede probar desde aquí ahora mismo.'}
+        </Notice>
+      )}
+
       <div className="vault-list">
-        {usable.map((model) => (
-          <label key={model.id} className="row">
-            <input
-              type="checkbox"
-              checked={selected.includes(model.id)}
-              onChange={() => toggle(model.id)}
-            />
-            <span>
-              {model.displayName} <Tag tone="idle">{model.family}</Tag>
-            </span>
-          </label>
-        ))}
+        {usable.map((model) => {
+          // la etiqueta dice QUIEN lo ejecutaria, no de que familia es: la
+          // familia no basta para saberlo y era justo la confusion del fallo
+          const provider = ejecutor(model);
+          return (
+            <label key={model.id} className="row">
+              <input
+                type="checkbox"
+                disabled={provider === null}
+                checked={provider !== null && selected.includes(model.id)}
+                onChange={() => toggle(model.id)}
+              />
+              <span>
+                {model.displayName}{' '}
+                {provider === null ? (
+                  <Tag tone="warn">sin proveedor</Tag>
+                ) : (
+                  <Tag tone="idle">{provider}</Tag>
+                )}
+              </span>
+            </label>
+          );
+        })}
       </div>
 
       <Field
@@ -4166,10 +4266,10 @@ function CompatibilityPanel({
 
       <button
         className="btn"
-        disabled={selected.length === 0 || vault.checkingCompatibility}
+        disabled={marcados.length === 0 || vault.checkingCompatibility}
         onClick={run}
       >
-        {vault.checkingCompatibility ? 'Probando…' : `Probar ${selected.length} modelo(s)`}
+        {vault.checkingCompatibility ? 'Probando…' : `Probar ${marcados.length} modelo(s)`}
       </button>
 
       {vault.compatibility !== null && (
@@ -4215,6 +4315,11 @@ function CompatibilityResultRow({ result }: { result: CompatibilityResult }): JS
         <Tag tone={result.refused > 0 ? 'warn' : result.answered > 0 ? 'ok' : 'idle'}>
           {result.model ?? result.provider}
         </Tag>{' '}
+        {/* y QUIEN lo ejecuto, siempre: las cuatro conexiones de AI Horde
+            sirven los mismos nombres, asi que dos filas del mismo `apiModel`
+            con cifras distintas no se distinguian en nada. Cada una lleva su
+            clave y sus topes, o sea que no es un detalle cosmetico */}
+        {result.model !== null && <Tag tone="idle">{result.provider}</Tag>}{' '}
         {result.answered} contestó · {result.refused} se negó · {result.empty} sin respuesta
         {result.answered > 0 && ` · memoria correcta ${result.memoryOk}/${result.answered}`}
         {result.signals.length > 0 && ` · ${result.signals.join(', ')}`}

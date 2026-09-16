@@ -1021,7 +1021,50 @@ const httpProviderListSchema = z
     }
   });
 
-export const agentConfigSchema = z.object({
+/**
+ * un identificador no puede ser de dos sitios a la vez.
+ *
+ * POR QUE SE RECHAZA EN VEZ DE ARREGLARSE SOLO: el agente registra primero las
+ * entradas de `providers.http` y despues las familias derivadas de cada
+ * conexion, sin pisar lo ya registrado. Con una conexion llamada igual que una
+ * entrada HTTP, los modelos de la conexion se resuelven a ese identificador y
+ * viajan al endpoint de la otra con su clave: `unrecognized_model`, y la
+ * llamada se paga. No hay ninguna señal en pantalla, porque para la regla de
+ * `providerCandidatesForModel` ese proveedor SI existe.
+ *
+ * Y una conexion que se llame como una familia (`deepseek`, `qwen`...) tiene el
+ * mismo problema por el otro lado. El catalogo ya se defiende de esto —por eso
+ * `catalogOriginKey` incluye el origen—, pero la ejecucion no puede: lo que
+ * viaja al gateway es un identificador pelado.
+ *
+ * Lo que SI se permite a proposito es una entrada HTTP llamada como una
+ * familia: es la unica forma de decir «para `deepseek` usa esta pasarela mia y
+ * no la agregadora», y el agente ya le da precedencia.
+ */
+function rechazaIdentificadoresCruzados(
+  config: { connections: { id: string }[]; providers: { http: { id: string }[] } },
+  context: z.RefinementCtx,
+): void {
+  const http = new Set(config.providers.http.map((provider) => provider.id));
+  config.connections.forEach((connection, index) => {
+    if (http.has(connection.id)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['connections', index, 'id'],
+        message: `"${connection.id}" ya lo usa un proveedor HTTP: renombra uno de los dos`,
+      });
+    }
+    if ((PROVIDER_IDS as readonly string[]).includes(connection.id)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['connections', index, 'id'],
+        message: `"${connection.id}" es el nombre de una familia: renombra la conexion`,
+      });
+    }
+  });
+}
+
+const agentConfigObject = z.object({
   machineName: machineNameSchema,
   gatewayUrl: z.string().url(),
   // el token que necesita el agente en ejecucion. en el archivo de disco es
@@ -1063,6 +1106,10 @@ export const agentConfigSchema = z.object({
     .default({ enabled: false, host: '127.0.0.1', port: 4319 }),
 });
 
+export const agentConfigSchema = agentConfigObject.superRefine(
+  rechazaIdentificadoresCruzados,
+);
+
 export type AgentConfig = z.infer<typeof agentConfigSchema>;
 
 /**
@@ -1075,9 +1122,13 @@ export type AgentConfig = z.infer<typeof agentConfigSchema>;
  *
  * config.json NO debe contener ninguna otra clave, nunca.
  */
-export const storedAgentConfigSchema = agentConfigSchema.extend({
-  machineToken: z.string().min(16).optional(),
-});
+export const storedAgentConfigSchema = agentConfigObject
+  .extend({
+    machineToken: z.string().min(16).optional(),
+  })
+  // la misma comprobacion cruzada: el archivo del disco es donde se escribe a
+  // mano, asi que es el primer sitio donde el choque tiene que doler
+  .superRefine(rechazaIdentificadoresCruzados);
 
 export type StoredAgentConfig = z.infer<typeof storedAgentConfigSchema>;
 

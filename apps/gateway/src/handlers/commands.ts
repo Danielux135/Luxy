@@ -16,6 +16,7 @@ import {
   STATUS_LABELS,
   splitAsCodeBlocks,
   machineSupportsProvider,
+  machineProviders,
   MAX_PROMPT_LENGTH,
   categoryOfApiModel,
   splitBatchPrompt,
@@ -323,12 +324,14 @@ async function renderProviders(context: CommandContext): Promise<string> {
 
   const lines = ['Proveedores por maquina', ''];
   for (const machine of machines) {
-    const available = (['claude', 'codex', 'deepseek', 'glm', 'qwen'] as ProviderId[]).filter(
-      (provider) => machineSupportsProvider(machine, provider),
-    );
-    lines.push(
-      `${machine.name}: ${available.map(providerLabel).join(', ') || 'ninguno'}`,
-    );
+    // la lista sale de la maquina, no de cinco valores escritos a mano.
+    //
+    // PASO DE VERDAD: aqui ponia `['claude','codex','deepseek','glm','qwen']` y
+    // la maquina de Daniel anunciaba dieciseis. `/providers` no nombraba ni
+    // `mistral`, ni `groq`, ni las cuatro conexiones de AI Horde, que es justo
+    // la categoria nueva: proveedores con nombre propio de conexion.
+    const available = machineProviders(machine);
+    lines.push(`${machine.name}: ${available.map(providerLabel).join(', ') || 'ninguno'}`);
   }
   lines.push('', 'Claude y Codex usan la sesion local de cada ordenador.');
   return lines.join('\n');

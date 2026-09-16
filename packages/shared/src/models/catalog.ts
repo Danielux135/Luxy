@@ -493,8 +493,14 @@ export function buildCatalogReport(
    *
    * Una conexion agregadora sirve muchas familias y hay que adivinarlas por el
    * nombre. Un proveedor HTTP no: el agente lo registra bajo SU identificador,
-   * y el identificador de proveedor ES la familia. Adivinar ahi es lo que hacia
-   * que los modelos de Mistral cayeran en «otros» y su selector saliera vacio.
+   * asi que se le pasa ese identificador y se agrupa todo junto. Adivinar ahi
+   * es lo que hacia que los modelos de Mistral cayeran en «otros» y su selector
+   * saliera vacio.
+   *
+   * Y solo se aplica si ademas es una familia REAL (ver `buildServedModel`):
+   * `horde-cydonia` no lo es, asi que sus modelos se quedan con la familia
+   * adivinada. Por eso pasarlo NO significa «este es su ejecutor»; para eso
+   * esta `origin`, que se deriva de que este argumento venga o no.
    */
   familyOverride?: string,
 ): CatalogBuildReport {
@@ -782,6 +788,10 @@ function buildServedModel(input: {
         : apiModel.slice(0, DISPLAY_NAME_MAX - NAME_TRIM_MARK.length) + NAME_TRIM_MARK,
     family,
     connectionId,
+    // el `familyOverride` solo lo pasa quien construye el catalogo de una
+    // entrada de `providers.http`: es la unica señal que distingue los dos
+    // origenes, y sin ella la familia adivinada se usaba como ejecutor
+    origin: familyOverride === undefined ? 'connection' : 'http',
     category,
     capabilities:
       // lo que la pasarela declara se añade a la lectura del nombre: sin

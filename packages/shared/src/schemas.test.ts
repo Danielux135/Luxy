@@ -68,6 +68,50 @@ describe('proveedores HTTP configurables', () => {
     ).toBe(true);
   });
 
+  it('rechaza que una conexion se llame como un proveedor HTTP o como una familia', () => {
+    // POR QUE SE PARA AQUI: el agente registra primero las entradas de
+    // `providers.http` y despues las familias de cada conexion, sin pisar lo ya
+    // registrado. Con los dos llamandose igual, los modelos de la conexion
+    // resuelven a ese identificador y viajan al endpoint de la OTRA con su
+    // clave: `unrecognized_model`, la llamada pagada y ni un aviso en pantalla,
+    // porque para la regla de proveedor ese nombre SI existe.
+    const conexion = {
+      id: 'mi-api-privada',
+      displayName: 'Pasarela agregadora',
+      baseUrl: 'https://api.example/v1',
+      protocol: 'openai' as const,
+    };
+    expect(
+      storedAgentConfigSchema.safeParse({
+        machineName: 'portatil',
+        gatewayUrl: 'https://gateway.example',
+        connections: [conexion],
+        providers: { http: [provider] },
+      }).success,
+    ).toBe(false);
+
+    // y tampoco puede llamarse como una familia: ahi el choque es con el
+    // proveedor que la propia conexion deriva
+    expect(
+      storedAgentConfigSchema.safeParse({
+        machineName: 'portatil',
+        gatewayUrl: 'https://gateway.example',
+        connections: [{ ...conexion, id: 'deepseek' }],
+      }).success,
+    ).toBe(false);
+
+    // lo que SI se permite, y a proposito: una entrada HTTP llamada como una
+    // familia es la unica forma de decir «para deepseek usa esta pasarela mia»
+    expect(
+      storedAgentConfigSchema.safeParse({
+        machineName: 'portatil',
+        gatewayUrl: 'https://gateway.example',
+        connections: [{ ...conexion, id: 'hcnsec' }],
+        providers: { http: [{ ...provider, id: 'deepseek' }] },
+      }).success,
+    ).toBe(true);
+  });
+
   it('bloquea HTTP remoto, credenciales en URL y APIs prohibidas', () => {
     const parseUrl = (baseUrl: string): boolean =>
       storedAgentConfigSchema.safeParse({

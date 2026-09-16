@@ -45,9 +45,13 @@ describe('catalogOriginsOf', () => {
   });
 
   it('un proveedor HTTP impone su familia; una conexion no', () => {
-    // el agente registra un proveedor HTTP bajo SU identificador, y el
-    // identificador de proveedor ES la familia. Una conexion sirve muchas
-    // familias y hay que adivinarlas por el nombre del modelo
+    // un proveedor HTTP agrupa todos sus modelos bajo SU identificador; una
+    // conexion sirve muchas familias y hay que adivinarlas por el nombre.
+    //
+    // Es para AGRUPAR, no para elegir ejecutor: `buildServedModel` solo acepta
+    // el valor si ademas es una familia real, asi que `horde-cydonia` se
+    // descarta y cae en `other`. Quien ejecuta lo dice
+    // `providerCandidatesForModel` mirando el `origin`
     const origins = catalogOriginsOf(
       config({
         connections: [{ id: 'pasarela', displayName: 'P', baseUrl: 'https://gw.example.com/v1' }],

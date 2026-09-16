@@ -3,12 +3,11 @@
 // usa el mismo token de maquina que el agente. El renderer nunca lo ve: las
 // llamadas salen del proceso principal de Electron.
 import {
-  PROVIDER_IDS,
-  configurableProviderIdSchema,
   MODEL_EVALUATIONS,
   buildModelEvaluationPrompt,
   isMachineOnline,
   machineHasProject,
+  machineProviders,
   machineSupportsProvider,
   studioConversationUpdateRequestSchema,
   studioJobActionRequestSchema,
@@ -16,7 +15,7 @@ import {
   studioJobFeedbackRequestSchema,
   studioJobListQuerySchema,
 } from '@luxy/shared';
-import type { Job, Machine, ProviderId, StudioJob, StudioJobCreateRequest } from '@luxy/shared';
+import type { Job, StudioJob, StudioJobCreateRequest } from '@luxy/shared';
 import { errorResponse, json, readBody, withMachineAuth } from './api.js';
 
 function toStudioJob(job: Job): StudioJob {
@@ -39,19 +38,6 @@ function toStudioJob(job: Job): StudioJob {
     metadata: job.metadata,
     createdAt: job.createdAt,
   };
-}
-
-function providersOf(machine: Machine): ProviderId[] {
-  const configured = machine.capabilities.httpProviders.flatMap((provider) => {
-    const parsed = configurableProviderIdSchema.safeParse(provider);
-    return parsed.success ? [parsed.data] : [];
-  });
-  return [
-    ...new Set([
-      ...PROVIDER_IDS.filter((provider) => machineSupportsProvider(machine, provider)),
-      ...configured,
-    ]),
-  ];
 }
 
 function evaluationContractError(body: StudioJobCreateRequest): string | null {
@@ -121,7 +107,7 @@ export const handleStudioOptions = withMachineAuth(async (_request, deps) => {
       id: machine.id,
       name: machine.name,
       projects: machine.projects,
-      providers: providersOf(machine),
+      providers: machineProviders(machine),
       online: isMachineOnline(machine, new Date(), deps.config.MACHINE_OFFLINE_SECONDS),
       enabled: machine.enabled,
     })),

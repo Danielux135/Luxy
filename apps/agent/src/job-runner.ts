@@ -146,8 +146,9 @@ export type JobOutcome =
  * modelo concreto con el que ejecutar el trabajo.
  *
  * prioridad: lo que decidio el router (metadata.model) y, si no hay nada, el
- * modelo por defecto configurado para esa familia. Devolver undefined deja que
- * el proveedor use el suyo.
+ * modelo por defecto de quien vaya a ejecutarlo. Devolver undefined deja que el
+ * proveedor use el suyo, que es la respuesta buena cuando desde aqui no se
+ * puede saber cual de los dos registros se quedo con ese identificador.
  */
 export function resolveJobModel(job: ClaimedJob, config: AgentConfig): string | undefined {
   if (typeof job.model === 'string' && job.model.length > 0) return job.model;
@@ -161,17 +162,35 @@ export function resolveJobModel(job: ClaimedJob, config: AgentConfig): string | 
   if (job.provider === 'claude') return config.providers.claude.model;
   if (job.provider === 'codex') return config.providers.codex.model;
 
-  // predeterminado de la familia segun el CATALOGO, que es la fuente de verdad
-  const familyDefault = resolveFamilyDefault(job.provider, config);
-  if (familyDefault !== undefined) return familyDefault;
-
-  // ultimo recurso: la configuracion heredada providers.http. Solo si esta
-  // habilitada y no es un valor de ejemplo; si no, se pedia a la API un modelo
-  // llamado literalmente "PENDIENTE_MODELO_DEEPSEEK" y fallaba tras reintentar.
+  // la entrada de `providers.http` que se llama como este proveedor. Solo si
+  // esta habilitada y no es un valor de ejemplo; si no, se pedia a la API un
+  // modelo llamado literalmente "PENDIENTE_MODELO_DEEPSEEK" y fallaba tras
+  // reintentar.
   const http = config.providers.http.find(
     (entry) => entry.id === job.provider && entry.enabled && !/^PENDIENTE/i.test(entry.model),
   );
-  return http?.model;
+  // predeterminado de la familia segun el CATALOGO de las conexiones
+  const familyDefault = resolveFamilyDefault(job.provider, config);
+
+  // CHOQUE DE NOMBRES: los dos han contestado, y desde aqui no se puede saber
+  // cual de los dos es el ejecutor registrado.
+  //
+  // Nada impide que una entrada de `providers.http` se llame `deepseek`: el
+  // asistente de Conexiones trae ese preajuste hecho. `initializeProviders` da
+  // de alta la entrada HTTP SOLO si ademas tiene clave guardada, y si no la
+  // tiene el id se lo queda el proveedor derivado de la conexion. La clave vive
+  // en el almacen cifrado y `AgentConfig` no la ve, asi que elegir aqui es
+  // adivinar: con la entrada HTTP en marcha, devolver el predeterminado de la
+  // conexion manda `DeepSeek-V4-Pro` a `api.deepseek.com`, que no lo sirve, y
+  // la llamada se paga igual.
+  //
+  // `undefined` no es rendirse: es la respuesta correcta. El proveedor ya
+  // registrado usa SU modelo —`HttpApiProvider` cae en `config.model`, que para
+  // la entrada HTTP es el suyo y para el derivado de la conexion es justo el
+  // predeterminado de la familia—, asi que acierta en los dos casos.
+  if (http !== undefined && familyDefault !== undefined) return undefined;
+
+  return familyDefault ?? http?.model;
 }
 
 /** apiModel predeterminado de una familia, segun el catalogo de las conexiones */

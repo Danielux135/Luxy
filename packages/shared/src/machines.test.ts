@@ -4,6 +4,7 @@ import {
   selectMachine,
   isMachineOnline,
   machineSupportsProvider,
+  machineProviders,
   machineHasProject,
   isLeaseExpired,
   canReassignJob,
@@ -88,6 +89,58 @@ describe('machineSupportsProvider y machineHasProject', () => {
   it('detecta si un alias esta configurado', () => {
     expect(machineHasProject(maquina(), 'errorlux')).toBe(true);
     expect(machineHasProject(maquina(), 'inexistente')).toBe(false);
+  });
+});
+
+// PASO DE VERDAD: `/providers` de Telegram filtraba sobre la lista literal
+// `['claude','codex','deepseek','glm','qwen']` y contestaba «casa: Claude,
+// Codex, DeepSeek, GLM, Qwen» de una maquina que anunciaba dieciseis. No
+// nombraba `mistral`, ni `groq`, ni ninguna de las cuatro conexiones de AI
+// Horde, que es justo la categoria que destapo el fallo: proveedores con nombre
+// propio de conexion. Y es la pantalla que se consulta para saber que pedir.
+describe('machineProviders', () => {
+  it('suma las familias detectadas y los proveedores con nombre propio', () => {
+    const conTodo = maquina({
+      capabilities: capacidades({
+        httpProviders: ['deepseek', 'mistral', 'groq', 'horde-cydonia', 'ovh-nemo'],
+      }),
+    });
+    const lista = machineProviders(conTodo);
+    expect(lista).toContain('claude');
+    expect(lista).toContain('codex');
+    expect(lista).toContain('deepseek');
+    // los que la lista escrita a mano se dejaba fuera
+    expect(lista).toContain('mistral');
+    expect(lista).toContain('groq');
+    expect(lista).toContain('horde-cydonia');
+    expect(lista).toContain('ovh-nemo');
+    // y no inventa familias que la maquina no anuncia
+    expect(lista).not.toContain('glm');
+  });
+
+  it('no repite un identificador que es familia y esta anunciado', () => {
+    const lista = machineProviders(
+      maquina({ capabilities: capacidades({ httpProviders: ['deepseek'] }) }),
+    );
+    expect(lista.filter((id) => id === 'deepseek')).toHaveLength(1);
+  });
+
+  it('descarta lo que no tiene forma de identificador', () => {
+    // llega del agente por la red: una entrada rara no puede convertirse en un
+    // proveedor que luego nadie sabe ejecutar
+    const lista = machineProviders(
+      maquina({ capabilities: capacidades({ httpProviders: ['../salida', 'groq'] }) }),
+    );
+    expect(lista).toContain('groq');
+    expect(lista).not.toContain('../salida');
+  });
+
+  it('sin CLI locales ni conexiones no ofrece nada', () => {
+    const ausente = { available: false, version: null, path: null };
+    const pelada = maquina({
+      capabilities: capacidades({ claude: ausente, codex: ausente, httpProviders: [] }),
+    });
+    expect(machineProviders(pelada)).toEqual([]);
   });
 });
 

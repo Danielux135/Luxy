@@ -6,7 +6,7 @@ import {
   buildCatalogReport,
   buildDefaultCatalog,
   connectionProfileSchema,
-  guessModelFamily,
+  guessDisplayGroup,
   type CatalogSnapshot,
   type CatalogSource,
   type ConnectionProfile,
@@ -1380,7 +1380,7 @@ function CatalogoReal({
 
   const porFamiliaReal = new Map<string, CatalogSnapshot['models']>();
   for (const model of snapshot?.models ?? []) {
-    const familia = guessModelFamily(model.apiModel);
+    const familia = guessDisplayGroup(model.apiModel);
     porFamiliaReal.set(familia, [...(porFamiliaReal.get(familia) ?? []), model]);
   }
 

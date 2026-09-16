@@ -10,7 +10,7 @@ import {
   buildCatalogSnapshot,
   describeModelBilling,
   describePricingProbes,
-  guessModelFamily,
+  guessDisplayGroup,
   parseProviderModels,
 } from './catalog-fetch.js';
 
@@ -156,17 +156,17 @@ describe('buildCatalogSnapshot', () => {
   });
 });
 
-describe('guessModelFamily', () => {
+describe('guessDisplayGroup', () => {
   it('agrupa por nombre, solo para pintar', () => {
-    expect(guessModelFamily('deepseek-chat')).toBe('deepseek');
-    expect(guessModelFamily('Kimi-K2.6')).toBe('kimi');
-    expect(guessModelFamily('moonshot-v1-128k')).toBe('kimi');
-    expect(guessModelFamily('glm-5.2')).toBe('glm');
-    expect(guessModelFamily('qwen-max')).toBe('qwen');
-    expect(guessModelFamily('kat-coder-pro-v2.5')).toBe('kat');
-    expect(guessModelFamily('claude-sonnet-4')).toBe('claude');
-    expect(guessModelFamily('gpt-4o')).toBe('openai');
-    expect(guessModelFamily('algo-raro')).toBe('otros');
+    expect(guessDisplayGroup('deepseek-chat')).toBe('deepseek');
+    expect(guessDisplayGroup('Kimi-K2.6')).toBe('kimi');
+    expect(guessDisplayGroup('moonshot-v1-128k')).toBe('kimi');
+    expect(guessDisplayGroup('glm-5.2')).toBe('glm');
+    expect(guessDisplayGroup('qwen-max')).toBe('qwen');
+    expect(guessDisplayGroup('kat-coder-pro-v2.5')).toBe('kat');
+    expect(guessDisplayGroup('claude-sonnet-4')).toBe('claude');
+    expect(guessDisplayGroup('gpt-4o')).toBe('openai');
+    expect(guessDisplayGroup('algo-raro')).toBe('otros');
   });
 });
 
@@ -218,13 +218,13 @@ describe('familias de los 19 modelos actuales', () => {
   it('agrupa los que la primera lectura dejo en "otros"', () => {
     // los 22 de la lectura del 2026-08-07: 14 caian en "otros" porque step,
     // minimax y sensenova no estaban contemplados
-    expect(guessModelFamily('step-3.7-flash')).toBe('step');
-    expect(guessModelFamily('step-explore')).toBe('step');
-    expect(guessModelFamily('stepaudio-2.5-tts')).toBe('step-media');
-    expect(guessModelFamily('step-image-edit-2')).toBe('step-media');
-    expect(guessModelFamily('MiniMax-M3')).toBe('minimax');
-    expect(guessModelFamily('sensenova-u1.5-lite')).toBe('sensenova');
-    expect(guessModelFamily('auto')).toBe('router');
+    expect(guessDisplayGroup('step-3.7-flash')).toBe('step');
+    expect(guessDisplayGroup('step-explore')).toBe('step');
+    expect(guessDisplayGroup('stepaudio-2.5-tts')).toBe('step-media');
+    expect(guessDisplayGroup('step-image-edit-2')).toBe('step-media');
+    expect(guessDisplayGroup('MiniMax-M3')).toBe('minimax');
+    expect(guessDisplayGroup('sensenova-u1.5-lite')).toBe('sensenova');
+    expect(guessDisplayGroup('auto')).toBe('router');
   });
 
   it('ningun modelo real acaba en "otros"', () => {
@@ -251,14 +251,15 @@ describe('familias de los 19 modelos actuales', () => {
     ];
     expect(REALES).toHaveLength(19);
     for (const modelo of REALES) {
-      expect(guessModelFamily(modelo)).not.toBe('otros');
+      expect(guessDisplayGroup(modelo)).not.toBe('otros');
     }
   });
 });
 
 describe('familia de Mistral', () => {
-  // sin esto sus modelos caian en «otros», y como el id de proveedor ES la
-  // familia, el selector de modelo de Privado salia vacio con Mistral elegido
+  // sin esto sus modelos caian en «otros», y el selector de modelo de Privado
+  // salia vacio con Mistral elegido: `mistral` SI es una de nuestras familias,
+  // asi que ahi familia e identificador coinciden y la confusion no se notaba
   it('reconoce los nombres reales, no solo los que dicen «mistral»', () => {
     for (const modelo of [
       'mistral-large-latest',
@@ -270,12 +271,12 @@ describe('familia de Mistral', () => {
       'codestral-latest',
       'devstral-small-latest',
     ]) {
-      expect(guessModelFamily(modelo)).toBe('mistral');
+      expect(guessDisplayGroup(modelo)).toBe('mistral');
     }
   });
 
   it('no se traga modelos de otra familia', () => {
-    expect(guessModelFamily('DeepSeek-V4-Pro')).toBe('deepseek');
-    expect(guessModelFamily('kimi-k3')).toBe('kimi');
+    expect(guessDisplayGroup('DeepSeek-V4-Pro')).toBe('deepseek');
+    expect(guessDisplayGroup('kimi-k3')).toBe('kimi');
   });
 });

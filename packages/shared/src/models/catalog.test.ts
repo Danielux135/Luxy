@@ -1,15 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildCatalogForConnection,
+  buildDefaultCatalog,
   isAudioModel,
   isClassifierModel,
   isConversationalModel,
 } from './catalog.js';
 
 describe('catalogo de un origen que impone su familia', () => {
-  // un proveedor HTTP se registra bajo SU identificador, y el identificador de
-  // proveedor ES la familia con la que el agente lo ejecuta. Adivinarla por el
-  // nombre del modelo dejaba a Mistral en «other» y su selector vacio
+  // un proveedor HTTP se registra bajo SU identificador, asi que se le pasa ese
+  // identificador y todos sus modelos se agrupan juntos. Adivinar la familia
+  // por el nombre dejaba a Mistral en «other» y su selector vacio.
+  //
+  // Agrupa, no decide ejecutor: eso lo hace `origin`, porque el identificador
+  // solo se acepta como familia si ademas es una de las nuestras
   it('pone la familia impuesta en todos sus modelos', () => {
     const modelos = buildCatalogForConnection(
       'mistral',
@@ -52,6 +56,34 @@ describe('catalogo de un origen que impone su familia', () => {
     const modelos = buildCatalogForConnection('mistral', ['kimi-k3'], 'mistral');
     expect(modelos[0]?.connectionId).toBe('mistral');
     expect(modelos[0]?.telegramAliases).toEqual([]);
+  });
+
+  it('cada modelo recuerda de que CLASE de origen salio', () => {
+    // POR QUE HACE FALTA: la familia de un `providers.http` es una adivinanza
+    // sacada del nombre, y usarla como ejecutor manda la llamada a otra
+    // pasarela. `Mistral-Nemo-Instruct-2407` servido por `ovh-nemo` cae en la
+    // familia `mistral`, que en la maquina de Daniel es OTRA conexion con otra
+    // clave: con `ovh-nemo` apagado, la pantalla daba luz verde a ejecutarlo
+    // alli. `origin` es lo unico que distingue los dos casos, porque el
+    // `connectionId` tiene la misma pinta en los dos.
+    const deConexion = buildCatalogForConnection('hcnsec', ['modelo-nuevo-x']);
+    expect(deConexion[0]?.origin).toBe('connection');
+
+    const deProveedorHttp = buildCatalogForConnection(
+      'ovh-nemo',
+      ['Mistral-Nemo-Instruct-2407'],
+      'ovh-nemo',
+    );
+    expect(deProveedorHttp[0]?.origin).toBe('http');
+    // y la familia sigue siendo la adivinada, que es justo por lo que no se
+    // puede usar para elegir ejecutor
+    expect(deProveedorHttp[0]?.family).toBe('mistral');
+  });
+
+  it('el catalogo de fabrica es de una conexion', () => {
+    expect(buildDefaultCatalog('hcnsec').every((modelo) => modelo.origin === 'connection')).toBe(
+      true,
+    );
   });
 });
 

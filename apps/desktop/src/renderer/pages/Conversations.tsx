@@ -31,6 +31,7 @@ import {
   type LocalJobStream,
 } from '../conversation.js';
 import { useConversations } from '../useConversations.js';
+import { modelsForProvider } from '../../shared/model-selection.js';
 import { useDetectedCatalog } from '../useCatalog.js';
 import { preferredMachineForProject } from '../project-context.js';
 import { ProjectScopeBar } from '../ui/ProjectScopeBar.js';
@@ -65,6 +66,8 @@ function modelSuggestions(
   provider: ProviderId | '',
   summary: ConfigSummary,
   detectedModels: readonly ModelDefinition[],
+  /** los que la maquina elegida tiene en marcha; decide quien ejecuta cada uno */
+  registered: readonly string[],
 ): string[] {
   if (provider === '') return [];
   if (provider === 'claude') return [summary.config?.providers.claude.model ?? 'opus'];
@@ -73,15 +76,11 @@ function modelSuggestions(
     return configured === undefined ? [] : [configured];
   }
 
-  const models = detectedModels
-    .filter(
-      (model) =>
-        model.family === provider &&
-        model.category === 'text' &&
-        model.capabilities.includes('text'),
-    )
-    .map((model) => model.apiModel);
-  return [...new Set(models)];
+  // la MISMA regla que usa Privado, y por la misma razon: emparejar solo por
+  // familia deja sin sugerencias a todo proveedor registrado con nombre propio
+  // —`mistral`, `groq`, `ovh-nemo`, `horde-*`—, porque sus modelos no forman
+  // ninguna de nuestras familias. El desplegable salia vacio sin decir por que.
+  return modelsForProvider(detectedModels, provider, registered).map((model) => model.apiModel);
 }
 
 function useMachineSelection(
@@ -718,7 +717,7 @@ export function ConversationsPage({
                         spellCheck={false}
                       />
                       <datalist id="conversation-model-a">
-                        {modelSuggestions(providerA, summary, detectedModels).map((model) => (
+                        {modelSuggestions(providerA, summary, detectedModels, providers).map((model) => (
                           <option key={model} value={model} />
                         ))}
                       </datalist>
@@ -748,7 +747,7 @@ export function ConversationsPage({
                           spellCheck={false}
                         />
                         <datalist id="conversation-model-b">
-                          {modelSuggestions(providerB, summary, detectedModels).map((model) => (
+                          {modelSuggestions(providerB, summary, detectedModels, providers).map((model) => (
                             <option key={model} value={model} />
                           ))}
                         </datalist>

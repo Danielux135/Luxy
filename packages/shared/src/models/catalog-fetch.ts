@@ -379,17 +379,15 @@ export function describePricingProbes(probes: PricingProbe[]): string {
 }
 
 /**
- * familia a la que pertenece un identificador de modelo.
- *
- * es una heuristica sobre el nombre y se usa solo para agrupar en pantalla.
- * NO decide con que proveedor se ejecuta: eso lo sigue diciendo el catalogo.
- */
-/**
  * como se llaman de verdad los modelos de Mistral.
  *
  * Se comparte con `buildCatalogForConnection` para que agrupar en pantalla y
- * decidir la familia operativa no puedan discrepar: si un sitio dice «mistral»
- * y el otro «otros», el selector de Privado se queda vacio sin explicar nada.
+ * decidir la familia operativa no discrepen EN ESTOS NOMBRES: si un sitio dice
+ * «mistral» y el otro «otros», el selector de Privado se queda vacio sin
+ * explicar nada.
+ *
+ * Es lo unico que comparten. El resto de la cascada esta escrita dos veces y
+ * responde distinto a proposito: ver `guessDisplayGroup`.
  */
 export const MISTRAL_NAMES = [
   'mistral',
@@ -400,7 +398,25 @@ export const MISTRAL_NAMES = [
   'devstral',
 ] as const;
 
-export function guessModelFamily(apiModel: string): string {
+/**
+ * el grupo con el que se AGRUPA un modelo en el panel de catalogo real.
+ *
+ * NO es la familia operativa y no puede usarse para nada que se ejecute: es una
+ * heuristica de pantalla y devuelve valores que el sistema no acepta como
+ * familia (`claude`, `openai`, `gemini`, `otros`, `step-media`), ninguno en
+ * `MODEL_FAMILIES`. La familia de verdad la fija `buildServedModel`, y quien
+ * ejecuta un modelo lo decide `providerCandidatesForModel`.
+ *
+ * POR QUE NO SE UNIFICAN, que es lo que uno intenta al ver las dos cascadas:
+ * aqui agrupar por MARCA informa —`claude`, `openai` y `gemini` son tres grupos
+ * utiles en una lista de precios— y alli hundirlos todos en `other` es lo
+ * correcto, porque no son familias ejecutables. Son dos preguntas distintas con
+ * la misma pinta. El nombre lleva «grupo» y no «familia» precisamente para que
+ * el parecido no invite a usar esta donde hace falta la otra: se llamaba
+ * `guessModelFamily`, y su aviso estaba en un bloque de comentario huerfano que
+ * el editor ni siquiera enseñaba al pasar el raton.
+ */
+export function guessDisplayGroup(apiModel: string): string {
   const name = apiModel.toLowerCase();
   if (name.includes('deepseek')) return 'deepseek';
   if (name.includes('kimi') || name.includes('moonshot')) return 'kimi';

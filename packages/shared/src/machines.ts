@@ -1,5 +1,6 @@
 // seleccion de la maquina que debe ejecutar un trabajo
-import { DEFAULT_MACHINE_OFFLINE_SECONDS } from './constants.js';
+import { DEFAULT_MACHINE_OFFLINE_SECONDS, PROVIDER_IDS } from './constants.js';
+import { configurableProviderIdSchema } from './schemas.js';
 import type { Machine, ProviderId } from './types.js';
 
 /** una maquina esta online si envio un heartbeat dentro de la ventana configurada */
@@ -25,6 +26,34 @@ export function machineSupportsProvider(machine: Machine, provider: ProviderId):
     default:
       return machine.capabilities.httpProviders.includes(provider);
   }
+}
+
+/**
+ * todos los proveedores que una maquina ofrece de verdad.
+ *
+ * POR QUE NO VALE `PROVIDER_IDS`: esa lista son las FAMILIAS, o sea la mitad.
+ * Cada entrada de `providers.http` se registra con su propio identificador
+ * —`groq`, `ovh-nemo`, `horde-cydonia`— y ninguno esta ni puede estar ahi.
+ *
+ * PASO DE VERDAD: `/providers` de Telegram filtraba sobre una lista de cinco
+ * escrita a mano y contestaba «casa: Claude, Codex, DeepSeek, GLM, Qwen» de una
+ * maquina que anunciaba dieciseis. Es la pantalla que se consulta para saber
+ * que se puede pedir.
+ *
+ * `httpProviders` es lo que el agente ANUNCIA tras la deteccion, no lo que hay
+ * escrito en su `config.json`: una conexion sin clave no aparece.
+ */
+export function machineProviders(machine: Machine): ProviderId[] {
+  const configurados = machine.capabilities.httpProviders.flatMap((provider) => {
+    const parsed = configurableProviderIdSchema.safeParse(provider);
+    return parsed.success ? [parsed.data] : [];
+  });
+  return [
+    ...new Set([
+      ...PROVIDER_IDS.filter((provider) => machineSupportsProvider(machine, provider)),
+      ...configurados,
+    ]),
+  ];
 }
 
 /** comprueba si una maquina tiene configurado un alias de proyecto */
