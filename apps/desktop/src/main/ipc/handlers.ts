@@ -946,8 +946,8 @@ export function registerIpcHandlers(context: HandlerContext): void {
       account: context.accounts.status(),
       mediaProviderConfigured: context.secretStore.get(VAULT_MEDIA_API_SECRET) !== undefined,
       hordeConfigured: hordeKey !== undefined,
-      // el hecho, no la clave: la pantalla necesita poder avisar de que con la
-      // anonima el horde comparte lo que genera
+      // el hecho, no la clave: la pantalla necesita poder avisar de lo que se
+      // sabe de la anonima, que es que su documentacion dice que comparte
       hordeAnonymous: hordeKey !== undefined && isAnonymousKey(hordeKey),
     };
   };
@@ -1009,8 +1009,9 @@ export function registerIpcHandlers(context: HandlerContext): void {
    *
    * Mismo criterio que la anterior: el nombre del secreto lo pone esta linea y
    * no viaja por el IPC. Se registra ademas si la clave guardada es la anonima,
-   * porque eso cambia lo que le pasa al contenido —el horde lo comparte— y es
-   * el tipo de cosa que nadie deberia descubrir despues.
+   * porque eso cambia lo que le pasa al contenido —su documentacion dice que
+   * el horde lo comparte— y es el tipo de cosa que nadie deberia descubrir
+   * despues.
    */
   handle(IPC_INVOKE.vaultHordeKeySet, vaultHordeKeyArgsSchema, async (args) => {
     context.secretStore.set(VAULT_HORDE_API_SECRET, args.apiKey.trim());
@@ -1044,6 +1045,19 @@ export function registerIpcHandlers(context: HandlerContext): void {
         kudos: user.kudos,
         concurrency: user.concurrency,
         anonymous: isAnonymousKey(options.apiKey),
+        // el desglose viaja entero, y el silencio con el: esta MISMA respuesta
+        // ya lo traia y se tiraba al parsear, asi que la pantalla solo podia
+        // enseñar un total. Un total que no se mueve no dice por donde no entra
+        // nada; las ocho casillas si. `null` cuando el horde no lo mando
+        kudosDetails: user.kudosDetails,
+        // el tipo de cuenta viene declarado en esta MISMA respuesta y tambien
+        // se tiraba al parsear. Sin el, lo unico que quedaba para saber si es
+        // una cuenta de OAuth o de usuario suelto era mirar el numero del saldo
+        // y deducirlo, que es adivinar. `service` viaja al lado pero NO dice
+        // con que servicio se registro: su swagger lo define como cuenta de
+        // servicio de un proxy
+        pseudonymous: user.pseudonymous,
+        service: user.service,
       };
     } catch (error) {
       if (error instanceof HordeError) throw new VaultError(error.message, error.hint);
@@ -2749,16 +2763,18 @@ export function registerIpcHandlers(context: HandlerContext): void {
    *
    * Va aparte y no hereda de la anterior: son dos cuentas distintas y la
    * cabecera tambien lo es (`apikey`, no `Authorization`). La clave anonima
-   * FUNCIONA, pero no se pone sola: con ella el horde fuerza `shared`, o sea que
-   * dona las imagenes a un conjunto de datos publico, y eso en una boveda
-   * privada tiene que ser una decision escrita, no un valor por defecto.
+   * FUNCIONA, pero no se pone sola: su documentacion dice que con ella el horde
+   * fuerza `shared` y dona las imagenes a un conjunto de datos publico, y el
+   * codigo desplegado descarta esa peticion. Las dos fuentes no coinciden, y en
+   * una boveda privada eso tiene que ser una decision escrita, no un valor por
+   * defecto.
    */
   const hordeOptions = (signal: AbortSignal): { baseUrl: string; apiKey: string; signal: AbortSignal } => {
     const apiKey = context.secretStore.get(VAULT_HORDE_API_SECRET);
     if (apiKey === undefined) {
       throw new VaultError(
         'no hay clave de AI Horde guardada en este equipo',
-        `sacala gratis en aihorde.net —no pide tarjeta— y guardala en Privado. La clave anonima ${ANONYMOUS_API_KEY} tambien vale, pero comparte lo que generes`,
+        `sacala gratis en aihorde.net —no pide tarjeta— y guardala en Privado. La clave anonima ${ANONYMOUS_API_KEY} tambien vale, pero su documentacion dice que comparte lo que generes`,
       );
     }
     return { baseUrl: HORDE_BASE_URL, apiKey, signal };
@@ -3288,8 +3304,11 @@ export function registerIpcHandlers(context: HandlerContext): void {
     // cual. No se vuelve a unir, no se vuelve a recortar y no se vuelve a mirar
     // la receta, que es lo unico que garantiza que lo enseñado y lo enviado no
     // puedan separarse. `shared` viaja dentro de los parametros del plan, y lo
-    // decide la receta del personaje y no una constante: compartir da kudos, y
-    // con una cuenta nueva los kudos SON el puesto en la cola
+    // decide la receta del personaje y no una constante.
+    //
+    // Lo que se manda es una PETICION, no un hecho: el horde decide por su
+    // cuenta y contesta lo que hizo en el estado del trabajo. Por eso lo que se
+    // apunta al terminar es su respuesta (`sharedByServer`) y no esta linea
     const request = planToHordeRequest(input.plan, { sourceImage, dryRun: false });
 
     /**
@@ -3397,6 +3416,14 @@ export function registerIpcHandlers(context: HandlerContext): void {
         model: cap(generation.model, 128),
         worker: cap(generation.workerName, 160),
         kudos: result.kudos,
+        // LO QUE EL SERVIDOR HIZO con la imagen, al lado de lo que se le pidio.
+        //
+        // Lo pedido ya estaba guardado en `plan.params.shared`; esto es lo que
+        // contesta el horde en el estado del trabajo, y puede no coincidir
+        // porque la decision es suya. El campo ya se leia en el adaptador y no
+        // llegaba a ningun sitio: sin el, «se compartio» era una suposicion a
+        // partir de la casilla, no una observacion
+        sharedByServer: result.shared,
         warnings,
       });
 
@@ -3416,6 +3443,11 @@ export function registerIpcHandlers(context: HandlerContext): void {
         attemptId: input.attemptId,
         planId: input.plan.planId,
         avisos: warnings.length,
+        // se pidio / se hizo, los dos al lado. Son dos booleanos y ni una
+        // palabra del contenido, y son la unica forma de ver en el log que el
+        // servidor no hace siempre lo que se le pide
+        compartidaPedida: input.plan.params.shared,
+        compartidaSegunElServidor: result.shared,
       });
 
       return {

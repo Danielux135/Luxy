@@ -595,6 +595,19 @@ export const imageAttemptSchema = z.object({
   worker: z.string().max(160).nullable().default(null),
   kudos: z.number().nullable().default(null),
   /**
+   * si el servidor COMPARTIO la imagen, no si se pidio compartirla.
+   *
+   * Lo que se PIDIO ya esta guardado, y no se toca: vive en
+   * `plan.params.shared`. Esto es la otra mitad, la que faltaba: lo que el
+   * proveedor contesta en el estado del trabajo, que puede no coincidir con lo
+   * pedido porque la decision es suya. Con los dos al lado, cada imagen dice
+   * que se pidio y que paso, en vez de dejarlo a la suposicion.
+   *
+   * `null` es «no se sabe» —el proveedor no lo dijo, o el intento no llego a
+   * terminar—, y no se lee como un no.
+   */
+  sharedByServer: z.boolean().nullable().default(null),
+  /**
    * el codigo del rechazo, tal cual lo devuelve el servidor.
    *
    * Es la diferencia entre 'csam' y 'censored', que hoy se aplana al convertir

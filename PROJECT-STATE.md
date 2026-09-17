@@ -1,7 +1,43 @@
 # Luxy — estado canónico del proyecto
 
-Última actualización: **2026-09-16 — el texto que sale hacia el generador de
-imágenes deja de ser invisible**
+Última actualización: **2026-09-17 — la casilla de compartir dejaba de prometer
+kudos que no existen**
+
+La pantalla Privado ofrecía «donar sus imágenes a AI Horde **a cambio de
+kudos**». Eso era falso, y la promesa no venía de ninguna fuente del Horde: la
+escribió Luxy a partir de una frase de una conversación. Verificado contra el
+código público del servidor y contra el servidor en vivo: **AI Horde descarta la
+petición de compartir desde julio de 2023** en todos los modelos menos uno de
+Stability retirado —se pidió compartir y contestó «compartida: no»—, **compartir
+nunca fue un ingreso** sino un descuento de 2 kudos sobre esa misma imagen, hoy
+también apagado, y **25 no es un saldo sino un suelo**: se cobra cada imagen y
+después se perdona lo que hundiría la cuenta por debajo del mínimo de su clase,
+clase que **declara el servidor** en `pseudonymous` y que Studio ya lee en vez de
+deducirla del número del saldo.
+
+La casilla se queda —el mecanismo puede volver y quitar una opción es perder
+función— pero su texto ya sólo dice lo verificado. Además, lo que el servidor
+responde sobre el compartido se guarda en el intento cifrado
+(`sharedByServer`), y el botón «Ver mis kudos» enseña el **desglose por
+conceptos** que la misma llamada ya devolvía y se tiraba, con una regla que
+gobierna toda la pantalla: **un cero afirma y un silencio no**.
+
+La regla que queda, en `D-093`: **un texto de la pantalla que afirme cómo
+funciona un servicio ajeno necesita fuente, igual que el código.** Es el patrón
+de `D-091` un escalón más arriba, porque esto vivía en la interfaz. Seis puntos
+de incertidumbre quedan declarados ahí; el mayor es que **nadie ha mirado la
+cuenta de Daniel**. `IDEA-KUDOS-001` se cierra: valorar imágenes exige tenerlas
+compartidas y el servidor deja el compartido apagado salvo en ese modelo de
+Stability.
+
+Y lo más instructivo del episodio, también en `D-093`: **el propio trabajo de
+corrección plantó siete afirmaciones nuevas del mismo tipo**, deducciones escritas
+como hechos, y las cazó la fase de revisión, no sus autores. Entre ellas una que
+el informe declaraba expresamente no verificada. El criterio se aplicó al código
+que se corregía y no al que se escribía.
+
+Lo anterior — **el texto que sale hacia el generador de imágenes deja de ser
+invisible**:
 
 Cuando el personaje pide una imagen, el turno **termina sin generarla** y deja un
 plan pendiente: el texto exacto que saldría —positivo, negativo, parámetros,

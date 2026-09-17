@@ -213,11 +213,63 @@ const submissionSchema = z.object({
     .nullish(),
 });
 
+/**
+ * el desglose de kudos por concepto que ya devuelve `/v2/find_user`.
+ *
+ * Las ocho casillas van opcionales y nullables a proposito: el horde decide
+ * cuales manda y perder la cuenta entera porque falte una seria tirar lo que si
+ * vino. Lo que no llega se conserva como `null`, no como 0: un cero inventado
+ * se lee como «por ahi no ha entrado nada nunca», que es exactamente el tipo de
+ * afirmacion sin respaldo que este trabajo existe para no repetir.
+ */
+const kudosDetailsSchema = z.object({
+  accumulated: z.number().nullish(),
+  gifted: z.number().nullish(),
+  donated: z.number().nullish(),
+  admin: z.number().nullish(),
+  received: z.number().nullish(),
+  recurring: z.number().nullish(),
+  awarded: z.number().nullish(),
+  styled: z.number().nullish(),
+});
+
 const userSchema = z.object({
   username: z.string().max(256),
   id: z.number(),
   kudos: z.number(),
   concurrency: z.number().nullish(),
+  /**
+   * el desglose es INFORMATIVO; el total es el dato por el que se pregunta.
+   *
+   * Por eso va opcional y ademas con `.catch(null)`: el horde puede dejar de
+   * mandarlo, o mandarlo con otra forma, y ninguna de las dos cosas puede
+   * dejar sin saldo a quien pulso el boton. Es el mismo criterio que los
+   * contadores de `progressSchema`, y por el mismo motivo. Lo que no se
+   * entiende se declara desconocido, no se adivina.
+   */
+  kudos_details: kudosDetailsSchema.nullish().catch(null),
+  /**
+   * el tipo de cuenta lo dice el horde, no el numero del saldo.
+   *
+   * El swagger vivo de aihorde.net define este campo, literal, como «If true,
+   * this user has not registered using an oauth service»: distingue el registro
+   * con usuario suelto del registro por un servicio OAuth. Deducirlo del saldo
+   * —25 es OAuth, 14 es usuario y contrasena— es una inferencia; esto es el
+   * dato. Va `nullish()` como el resto porque el horde decide que manda, y lo
+   * que no llega se queda en `null`, que se lee «no se sabe». Un valor por
+   * defecto aqui afirmaria un tipo de cuenta que nadie ha comprobado.
+   */
+  pseudonymous: z.boolean().nullish(),
+  /**
+   * CUIDADO: `service` NO dice con QUE servicio se registro la cuenta.
+   *
+   * El mismo swagger lo define como «This is a service account used by a horde
+   * proxy». Es un booleano sobre cuentas de proxy, no el nombre de Google,
+   * Discord o GitHub. No se ha encontrado ningun campo de `/v2/find_user` que
+   * devuelva el proveedor concreto de OAuth, asi que nombrarlo sigue sin tener
+   * respaldo y no debe escribirse en pantalla.
+   */
+  service: z.boolean().nullish(),
 });
 
 const modelSchema = z.object({
@@ -262,6 +314,15 @@ export interface HordeGeneration {
 
 export interface HordeResult extends HordeProgress {
   generations: HordeGeneration[];
+  /**
+   * lo que el servidor dice que HIZO con la imagen, no lo que se le pidio.
+   *
+   * El horde acepta `shared` en la peticion y despues decide por su cuenta, asi
+   * que este campo y el de la peticion pueden no coincidir. `null` cuando el
+   * estado no lo trajo, que no es lo mismo que «no la compartio»: sin dato no
+   * se afirma ninguna de las dos cosas.
+   */
+  shared: boolean | null;
 }
 
 export interface HordeSubmission {
@@ -283,11 +344,51 @@ export interface HordeEstimate {
   warnings: { code: string; message: string }[];
 }
 
+/**
+ * el desglose, casilla a casilla, con el silencio conservado.
+ *
+ * `null` significa «el horde no mando esa casilla», nunca «vale cero». La
+ * diferencia importa: `awarded: 0` prueba que jamas ha entrado un kudos por
+ * valorar imagenes, y `awarded: null` no prueba nada.
+ */
+export interface HordeKudosDetails {
+  /** el neto de lo generado y cobrado, apuntado en crudo y sin sujetar al suelo */
+  accumulated: number | null;
+  /** los que esta cuenta ha regalado a otra */
+  gifted: number | null;
+  /** los que esta cuenta ha donado a cuentas de bien publico */
+  donated: number | null;
+  /** concedidos a mano por la administracion del horde */
+  admin: number | null;
+  /** los que le han regalado desde otra cuenta */
+  received: number | null;
+  /** los periodicos: mecenazgo, suscripcion o concesion mensual */
+  recurring: number | null;
+  /** premios del propio horde, por ejemplo por valorar imagenes */
+  awarded: number | null;
+  /** lo cobrado porque otros usen un estilo publicado por esta cuenta */
+  styled: number | null;
+}
+
 export interface HordeUser {
   username: string;
   id: number;
   kudos: number;
   concurrency: number;
+  /** `null` cuando esta respuesta no trajo desglose; el total sigue valiendo */
+  kudosDetails: HordeKudosDetails | null;
+  /**
+   * `true` = registro sin OAuth (usuario suelto); `false` = registro por OAuth.
+   *
+   * `null` cuando la respuesta no lo trajo, que NO es «false»: es no saberlo.
+   */
+  pseudonymous: boolean | null;
+  /**
+   * cuenta de servicio de un proxy del horde, segun la define su swagger.
+   *
+   * No identifica al proveedor de OAuth. `null` cuando no vino.
+   */
+  service: boolean | null;
 }
 
 export interface HordeModel {
@@ -312,9 +413,27 @@ function toProgress(raw: z.infer<typeof progressSchema>): HordeProgress {
   };
 }
 
+function toKudosDetails(
+  raw: z.infer<typeof kudosDetailsSchema> | null | undefined,
+): HordeKudosDetails | null {
+  if (raw === null || raw === undefined) return null;
+  return {
+    accumulated: raw.accumulated ?? null,
+    gifted: raw.gifted ?? null,
+    donated: raw.donated ?? null,
+    admin: raw.admin ?? null,
+    received: raw.received ?? null,
+    recurring: raw.recurring ?? null,
+    awarded: raw.awarded ?? null,
+    styled: raw.styled ?? null,
+  };
+}
+
 function toResult(raw: z.infer<typeof statusSchema>): HordeResult {
   return {
     ...toProgress(raw),
+    // el silencio se conserva como silencio: ver `HordeResult.shared`
+    shared: raw.shared ?? null,
     generations: (raw.generations ?? []).map((generation) => ({
       img: generation.img,
       seed: generation.seed ?? '',
@@ -999,7 +1118,13 @@ export async function downloadImage(
   };
 }
 
-/** lee la cuenta detras de la clave; sirve para enseñar el saldo de kudos */
+/**
+ * lee la cuenta detras de la clave; sirve para enseñar el saldo de kudos.
+ *
+ * Devuelve TAMBIEN el desglose por conceptos, que esta misma respuesta ya traia
+ * y se tiraba al parsear. Es la unica forma de contestar «¿ha entrado alguna vez
+ * un kudos, y por donde?» sin deducirlo de un total que no se mueve.
+ */
 export async function findUser(options: HordeOptions): Promise<HordeUser> {
   const body = await call(options, '/v2/find_user', { method: 'GET' });
   const parsed = userSchema.safeParse(body);
@@ -1009,6 +1134,11 @@ export async function findUser(options: HordeOptions): Promise<HordeUser> {
     id: parsed.data.id,
     kudos: parsed.data.kudos,
     concurrency: parsed.data.concurrency ?? 0,
+    kudosDetails: toKudosDetails(parsed.data.kudos_details),
+    // el silencio se conserva como silencio, igual que en el desglose: sin dato
+    // no hay tipo de cuenta, y ponerle uno seria volver a adivinarlo
+    pseudonymous: parsed.data.pseudonymous ?? null,
+    service: parsed.data.service ?? null,
   };
 }
 

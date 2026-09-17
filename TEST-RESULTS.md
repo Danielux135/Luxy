@@ -1,5 +1,103 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-17 (tarde) — la revision del arreglo, y el tipo de cuenta que se lee
+
+Suite completa, ejecutada de verdad en esta pasada:
+
+```
+node_modules\.bin\vitest.cmd run
+Test Files  190 passed (190)
+     Tests   3900 passed | 12 skipped (3912)
+```
+
+Y antes, los dos archivos que cubren lo que se toco:
+
+```
+node_modules\.bin\vitest.cmd run packages/shared/src/docs.test.ts apps/desktop/src/renderer/vault-kudos-breakdown.test.ts
+apps/desktop/src/renderer/vault-kudos-breakdown.test.ts  14 tests
+packages/shared/src/docs.test.ts                         64 tests
+Test Files  2 passed (2) — Tests 78 passed (78)
+```
+
+**Dos numeros de la entrada de abajo quedaron desfasados y se corrigen aqui**, no
+alli: el total era 3889 y ahora son 3900, y `vault-kudos-breakdown.test.ts` tenia
+10 pruebas y ahora tiene 14. Las cuatro de ese archivo son de la reescritura de
+los textos —fijan que el minimo solo se afirma cuando el servidor declara el tipo
+de cuenta (`pseudonymous`), que con el tipo sin declarar se describe lo observado
+en vez de afirmar, y que la suma parcial no se llama «total»—; de donde salen las
+otras siete del total no se ha comprobado archivo por archivo, y no se afirma.
+
+**Lo que esta pasada cambio, y lo que la prueba de ello:** el tipo de cuenta se
+**lee** en vez de deducirse del saldo. `docs.test.ts` no comprueba ese contenido
+—comprueba que la documentacion no cite scripts que no existen, que no lleve rutas
+absolutas de ningun ordenador y que no haya secretos—, asi que de las correcciones
+de texto **lo unico que una prueba sostiene** es lo que vive en
+`vault-kudos-breakdown.ts`. Las de `Vault.tsx` y las de los `.md`, no: se
+revisaron leyendo.
+
+**Lo que NO se ha ejecutado en esta pasada:** `npm run lint`, `npm run typecheck`
+y `npm run build`. No se ha tocado una linea de codigo —solo `.md`—, asi que se
+apoya en el `npm run check` exit 0 de la entrada de abajo. Si alguien encadena un
+cambio de codigo encima, ese pase completo hay que repetirlo.
+
+**Sin ver en pantalla**, igual que la entrada de abajo. Nadie ha abierto Studio.
+
+### 2026-09-17 — el desglose de kudos y la casilla que prometia lo que no hay
+
+`npm run lint` exit 0, `npm run typecheck` exit 0, `npm test` exit 0 y el build
+completo sin errores.
+
+```
+Test Files  190 passed (190)
+     Tests   3889 passed | 12 skipped
+```
+
+Los seis archivos afectados, ejecutados aparte antes del pase completo:
+
+```
+apps/desktop/src/renderer/ui/glossary.test.ts            4 tests
+apps/desktop/src/renderer/vault-kudos-breakdown.test.ts  10 tests
+packages/shared/src/vault-image-plan.test.ts             27 tests
+apps/desktop/src/shared/ipc.test.ts                      77 tests
+apps/agent/src/providers/horde.test.ts                   66 tests
+apps/desktop/src/main/ipc/image-attempt-flow.test.ts     36 tests
+Test Files  6 passed (6) — Tests 220 passed (220)
+```
+
+**Lo que estas pruebas SI cubren y no es obvio:** que un silencio del servidor no
+se convierte en un cero. `vault-kudos-breakdown.test.ts` fija que una casilla
+ausente (`null`) no se pinta, no se suma y no dispara la frase de «por aqui no ha
+entrado nada» —que ese dia decia «nunca ha entrado un kudos», y se estrecho unas
+horas despues: ver la entrada de arriba—, y que esa frase solo sale cuando
+**todas** las casillas contadas valen
+cero, no cuando la suma da cero. Es la afirmacion mas delicada de la tanda,
+porque decir «ninguno» sin base es repetir el fallo que se estaba corrigiendo.
+Tambien esta fijado que si el Horde deja de mandar el desglose, el **total sigue
+saliendo** (`.catch(null)` en el esquema).
+
+**Lo que NO cubre ninguna prueba, y hay que saberlo:**
+
+- **el texto de la casilla**, que es el cambio principal. Vive en el JSX de
+  `Vault.tsx` y aqui el renderer no se puede montar —vitest corre en `node`—, asi
+  que quien lo reescriba puede volver a prometer kudos **con la suite en verde**.
+  Es el mismo punto ciego que ya se apunto el 2026-09-16, ahora sobre una frase
+  que es justamente lo que se acaba de corregir;
+- **que el Horde descarte compartir**. Eso se comprobo contra su codigo y con dos
+  llamadas en vivo —una generacion con `shared: true` que volvio «compartida: no»
+  y dos presupuestos identicos al mismo precio—, no con una prueba: las pruebas de
+  este repositorio no tocan la red, y esa regla no se rompe para esto. Lo que si
+  esta probado es que `sharedByServer` viaja desde la respuesta hasta el intento
+  cifrado;
+- **la cuenta de Daniel.** Nadie ha usado su clave. Que su suelo sea 25 sale de
+  `get_min_kudos()` mas el numero que el ve en pantalla; **de que clase es su
+  cuenta lo dira el campo `pseudonymous`** cuando pulse el boton, no una deduccion
+  desde el saldo.
+
+**Sin ver en pantalla.** Nadie ha abierto Studio con esto dentro. La comprobacion
+que falta es de Daniel y es una sola: pulsar «Ver mis kudos» en Privado y mirar el
+desglose nuevo. Los seis puntos de incertidumbre declarada estan en `D-093`.
+
+
 ### 2026-09-16 (tarde) — el plan de imagen, revisado antes de generar
 
 `npm run check` exit 0.

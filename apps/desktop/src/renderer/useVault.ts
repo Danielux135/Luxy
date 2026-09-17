@@ -25,6 +25,7 @@ import { discardDecrypted } from './vault-lock-reset.js';
 import type { RecapSweepRound } from './vault-sweep.js';
 import type {
   vaultCompatibilityResultSchema,
+  vaultHordeAccountResultSchema,
   vaultMemoryListResultSchema,
   vaultRecapListResultSchema,
   vaultRecapSyncResultSchema,
@@ -45,6 +46,16 @@ import type { z } from 'zod';
  */
 export type CompatibilityResult = z.infer<typeof vaultCompatibilityResultSchema>['results'][number];
 type MemoryEpisode = z.infer<typeof vaultMemoryListResultSchema>['episodes'][number];
+
+/**
+ * la cuenta del horde, tal y como llega del proceso principal.
+ *
+ * Se DERIVA del esquema del IPC en vez de repetirla a mano: con el desglose son
+ * nueve campos, y una forma escrita dos veces se separa a la segunda semana.
+ * `kudosDetails` es nullable a proposito —el horde puede no mandarlo— y cada
+ * casilla suya tambien: ahi `null` es «no lo dijo», nunca «cero».
+ */
+export type HordeAccountView = z.infer<typeof vaultHordeAccountResultSchema>;
 
 /**
  * una promesa o un plan que quedo pendiente entre los dos.
@@ -160,7 +171,7 @@ export interface VaultStatusView {
   mediaProviderConfigured: boolean;
   /** hay clave guardada de AI Horde, el proveedor gratuito */
   hordeConfigured: boolean;
-  /** esa clave es la anónima: funciona, pero comparte lo que genera */
+  /** esa clave es la anónima: funciona, y su documentación dice que comparte */
   hordeAnonymous: boolean;
 }
 
@@ -338,7 +349,7 @@ export interface VaultController {
   setHordeKey: (apiKey: string) => Promise<boolean>;
   deleteHordeKey: () => Promise<void>;
   /** kudos y prioridad de la cuenta del horde; null si no se ha consultado */
-  hordeAccount: { username: string; kudos: number; concurrency: number; anonymous: boolean } | null;
+  hordeAccount: HordeAccountView | null;
   readHordeAccount: () => Promise<void>;
   /** modelos con workers AHORA MISMO; null hasta que se piden */
   hordeModels: { name: string; count: number; eta: number; jobs: number }[] | null;
@@ -848,12 +859,7 @@ export function useVault(): VaultController {
   const [probingVision, setProbingVision] = useState(false);
   // lo ultimo que devolvio el banco de pruebas; no se guarda en ningun sitio
   const [probes, setProbes] = useState<StoredProbe[]>([]);
-  const [hordeAccount, setHordeAccount] = useState<{
-    username: string;
-    kudos: number;
-    concurrency: number;
-    anonymous: boolean;
-  } | null>(null);
+  const [hordeAccount, setHordeAccount] = useState<HordeAccountView | null>(null);
   // null significa «todavía no se ha preguntado»; [] significa «no hay ninguno»
   const [hordeModels, setHordeModels] = useState<
     { name: string; count: number; eta: number; jobs: number }[] | null
@@ -1122,7 +1128,7 @@ export function useVault(): VaultController {
       setHordeAccount(null);
       setHint(
         value.hordeAnonymous
-          ? 'Clave anónima guardada. Funciona, pero la red te atiende la última y comparte lo que generes: una clave propia de aihorde.net es gratis y no comparte nada.'
+          ? 'Clave anónima guardada. Funciona, pero la red te atiende la última. Sobre compartir, la documentación del horde dice que con ella se dona lo que generes y el código desplegado descarta esa petición: una clave propia de aihorde.net es gratis y no tiene esa duda.'
           : 'Clave de AI Horde guardada. Ya puedes crear un personaje gratuito.',
       );
       return true;

@@ -46,7 +46,19 @@ vi.mock('electron', () => ({
 /** lo que el proveedor simulado va a hacer en la proxima llamada */
 const horde = vi.hoisted(() => ({
   /** la peticion tal y como llego al transporte: es la prueba de la invariante */
-  lastRequest: null as { prompt: string; models: string[]; seed: string | null } | null,
+  lastRequest: null as {
+    prompt: string;
+    models: string[];
+    seed: string | null;
+    shared: boolean;
+  } | null,
+  /**
+   * lo que el SERVIDOR contesta que hizo con la imagen.
+   *
+   * Es un valor propio y no un eco de la peticion: el horde decide por su
+   * cuenta, asi que la prueba tiene que poder separarlos. `null` = no lo dijo.
+   */
+  shared: null as boolean | null,
   submitWarnings: [] as { code: string; message: string }[],
   /** si no es null, `submitImage` lanza esto */
   submitError: null as Error | null,
@@ -84,7 +96,12 @@ vi.mock('@luxy/agent/dist/providers/horde.js', () => {
     isAnonymousKey: (key: string) => key === '0000000000',
     findUser: async () => ({ username: 'nadie', id: 1, kudos: 0, concurrency: 1 }),
     listImageModels: async () => [],
-    submitImage: async (request: { prompt: string; models: string[]; seed: string | null }) => {
+    submitImage: async (request: {
+      prompt: string;
+      models: string[];
+      seed: string | null;
+      shared: boolean;
+    }) => {
       horde.lastRequest = request;
       if (horde.submitError !== null) throw horde.submitError;
       return { id: 'trabajo-1', kudos: 1, warnings: horde.submitWarnings };
@@ -107,6 +124,7 @@ vi.mock('@luxy/agent/dist/providers/horde.js', () => {
         waitTimeSeconds: 0,
         queuePosition: 0,
         kudos: horde.kudos,
+        shared: horde.shared,
         generations: [
           {
             img: 'https://ejemplo/invalida.webp',
@@ -303,6 +321,7 @@ beforeEach(() => {
   horde.estimateError = null;
   horde.awaitCalls = 0;
   horde.downloadCalls = 0;
+  horde.shared = null;
 });
 
 describe('el envio consume el plan y apunta el intento', () => {
@@ -338,6 +357,36 @@ describe('el envio consume el plan y apunta el intento', () => {
     expect(intento.kudos).toBe(12.5);
     expect(intento.planId).toBe(PLAN.planId);
     expect(intento.plan?.provider).toBe('horde');
+  });
+
+  it('SE APUNTA LO QUE EL SERVIDOR HIZO con la imagen, no lo que se le pidio', async () => {
+    // el servidor contesta lo contrario de lo pedido. Es el caso que prueba la
+    // procedencia: si el valor guardado saliera de la casilla, este seria false
+    horde.shared = true;
+    const huella = registrar();
+
+    expect(await generar()).toMatchObject({ ok: true });
+
+    const intento = huella.attempts[0] as ImageAttempt;
+    const plan = intento.plan;
+    if (plan === null || plan.provider !== 'horde') {
+      throw new Error('el intento tendria que conservar su plan del horde');
+    }
+    // lo PEDIDO sigue donde estaba, y no se toca
+    expect(horde.lastRequest?.shared).toBe(false);
+    expect(plan.params.shared).toBe(false);
+    // lo HECHO, con su propio nombre y traido del estado del trabajo
+    expect(intento.sharedByServer).toBe(true);
+  });
+
+  it('si el servidor no dice si compartio, queda en null y no en un no', async () => {
+    horde.shared = null;
+    const huella = registrar();
+
+    expect(await generar()).toMatchObject({ ok: true });
+
+    // sin dato no se afirma nada: `false` seria decir que NO la compartio
+    expect((huella.attempts[0] as ImageAttempt).sharedByServer).toBeNull();
   });
 
   it('el medio guardado lleva el `attemptId` de su intento', async () => {

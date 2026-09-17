@@ -29,6 +29,7 @@ import {
   RECAP_REFUSAL_LABELS,
   describeRecapRow,
 } from '../vault-recap-row.js';
+import { describeKudosBreakdown } from '../vault-kudos-breakdown.js';
 import { describeReply, replyAt, replyTabLabel, replyTone } from '../vault-compatibility-reply.js';
 import { auxiliaryName, backgroundAuxiliary } from '../vault-auxiliary.js';
 import type { ConfigSummary } from '../useConfig.js';
@@ -646,6 +647,13 @@ function HordeKeyPanel({ vault }: { vault: VaultController }): JSX.Element {
   const configured = vault.status.hordeConfigured;
   const anonymous = vault.status.hordeAnonymous;
   const account = vault.hordeAccount;
+  // el reparto de ese total se decide fuera del JSX y con pruebas: aqui dentro
+  // era una cadena de ternarios que solo se podia comprobar abriendo Luxy, y lo
+  // que decide es justo lo delicado —un cero afirma, un silencio no—
+  const kudos = useMemo(
+    () => (account === null ? null : describeKudosBreakdown(account)),
+    [account],
+  );
 
   return (
     <Panel
@@ -724,21 +732,31 @@ function HordeKeyPanel({ vault }: { vault: VaultController }): JSX.Element {
       {anonymous && (
         <Notice tone="warn">
           Estás usando la clave anónima <code>0000000000</code>. Funciona, pero
-          el horde obliga a <strong>compartir</strong> con ella: todo lo que
-          generes se dona a un conjunto de datos público. En una bóveda privada
-          eso es lo contrario de lo que se espera. Una clave propia de aihorde.net
-          es gratis, tarda un minuto y no comparte nada.
+          la red te atiende la última. Y sobre compartir, las dos fuentes no
+          dicen lo mismo: la <strong>documentación</strong> del horde dice que
+          con ella se dona todo lo que generes a un conjunto de datos público,
+          mientras que el <strong>código desplegado</strong> descarta esa
+          petición. Con una clave propia de aihorde.net —gratis, un minuto— no
+          hay esa duda.
         </Notice>
       )}
 
-      {account !== null && (
-        <Readout
-          items={[
-            { label: 'Usuario', value: account.username },
-            { label: 'Kudos', value: String(account.kudos) },
-            { label: 'Peticiones a la vez', value: String(account.concurrency) },
-          ]}
-        />
+      {account !== null && kudos !== null && (
+        <>
+          <Readout
+            items={[
+              { label: 'Usuario', value: account.username },
+              { label: 'Kudos', value: String(account.kudos) },
+              { label: 'Peticiones a la vez', value: String(account.concurrency) },
+              ...kudos.rows,
+            ]}
+          />
+          {/* las tres frases solo salen cuando hay algo comprobado que decir:
+              el desglose puede no venir, y entonces se queda el total de antes */}
+          {kudos.floor !== null && <p className="field__hint">{kudos.floor}</p>}
+          {kudos.income !== null && <p className="field__hint">{kudos.income}</p>}
+          {kudos.spending !== null && <p className="field__hint">{kudos.spending}</p>}
+        </>
       )}
 
       {/* el resto lo cuenta el «?»: repetir aqui la entrada entera del
@@ -2065,11 +2083,16 @@ function HordeCharacterForm({
         </span>
       </div>
 
-      {/* estaba fijado a «no compartir» en el código y no se podía tocar.
-          Compartir da kudos, y con una cuenta nueva los kudos SON el puesto en
-          la cola: es la única forma de acortar la espera sin poner dinero ni una
-          GPU. Va por personaje y no por máquina porque uno puede ser anodino y
-          otro no */}
+      {/* la casilla decía «a cambio de kudos» y eso era FALSO. Comprobado
+          contra su código: (1) desde julio de 2023 el Horde descarta la
+          petición de compartir en todos los modelos menos uno de Stability,
+          que sigue siendo la única excepción de ese `else` y que Luxy no
+          comprueba al generar; (2) compartir nunca fue un ingreso, era un
+          descuento de 2 kudos sobre esa misma imagen, y también está apagado.
+          La casilla se queda porque el mecanismo puede volver y quitar una
+          opción es perder función, pero su texto sólo dice lo que se ha
+          verificado. Va por personaje y no por máquina porque uno puede ser
+          anodino y otro no */}
       <label className="check">
         <input
           type="checkbox"
@@ -2077,14 +2100,16 @@ function HordeCharacterForm({
           disabled={saving}
           onChange={(event) => setShared(event.target.checked)}
         />
-        Donar sus imágenes a AI Horde a cambio de kudos
+        Donar sus imágenes a AI Horde (hoy el servidor casi siempre lo ignora)
       </label>
       <p className="field__hint">
-        Lo que genere este personaje pasa al conjunto de datos público de AI
-        Horde: cualquiera puede verlo y se usa para entrenar. A cambio ganas
-        kudos, que son tu puesto en la cola. <strong>No se puede deshacer</strong>{' '}
-        para lo ya compartido, así que piénsalo por personaje. Los demás siguen
-        sin compartir nada.
+        <strong>Marcarla casi nunca hace nada</strong>: AI Horde descarta esta
+        petición en todos los modelos menos uno de Stability
+        (<code>SDXL_beta::stability.ai#6901</code>), esté marcada o no. Tampoco
+        da kudos, y nunca los dio: era un descuento de 2 kudos sobre esa misma
+        imagen, y ese descuento también está apagado. Si volviera a funcionar,
+        lo que se cedería sería la imagen <strong>y el texto completo de lo que
+        se pidió</strong>, y no se ha encontrado forma de retirarlo después.
       </p>
 
       <details className="vault-generate">

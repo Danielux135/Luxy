@@ -30,36 +30,122 @@ La clave se cifra en la bóveda (`secrets.enc`) como cualquier otro secreto. No 
 escribe en `config.json`, no vuelve a mostrarse y no aparece en los logs.
 
 Una vez guardada, Luxy puede consultar tu cuenta (`/v2/find_user`) y enseñarte
-usuario, kudos y cuántas peticiones simultáneas te permite la red.
+usuario, kudos, cuántas peticiones simultáneas te permite la red y —desde el
+2026-09-17— el **desglose de los kudos por conceptos** que esa misma llamada ya
+devolvía y la pantalla tiraba.
 
 ## La clave anónima `0000000000`
 
-Diez ceros. Funciona sin registrarse y genera imágenes de verdad. Tiene dos
-consecuencias, y las dos son malas para una bóveda privada:
+Diez ceros. Funciona sin registrarse y genera imágenes de verdad. Lo que de
+verdad cuesta es la cola: **la red te atiende la última**, porque el puesto va
+por kudos y esa clave tiene el suelo más bajo de todos (−50). Registrarse es
+gratis y sube ese suelo.
 
-- **La red te atiende la última.** Prioridad casi nula en la cola.
-- **Comparte lo que generas.** Con la clave anónima el servidor **ignora**
-  `shared: false` y fuerza `shared: true`, es decir, **dona tus imágenes a un
-  conjunto de datos público**. Luxy pide siempre `shared: false`; con esa clave
-  el horde no lo respeta.
+**Lo que esta sección decía, y era falso.** Hasta el 2026-09-17 aquí ponía que
+con la clave anónima el servidor **ignora** `shared: false` y **fuerza**
+`shared: true`, donando lo generado. Eso lo dice la documentación oficial de AI
+Horde —«For anonymous users, this is always True»—, pero **no es lo que hace el
+código desplegado**: en `initiate_waiting_prompt` la última línea de la cadena es
+`else: shared = False`, y pisa también el forzado del anónimo en todos los modelos
+menos uno de Stability retirado (`SDXL_beta::stability.ai#6901`), que es la única
+rama que deja `shared` en cierto. Está así desde el 2023-07-08, y la versión del
+repositorio (`HORDE_VERSION = "5.1.11"`) coincide con la que responde
+`aihorde.net`. Ver «Compartir» más abajo y `D-093`.
 
-Por eso Luxy avisa en cuanto detecta que la clave guardada es la anónima
-(`hordeAnonymous`), antes de generar nada. Registrarse es gratis y quita las dos
-consecuencias. Usar la anónima en una bóveda privada es exactamente lo contrario
-de lo que se espera de una bóveda.
+Luxy **sigue avisando** de que la clave anónima comparte lo que generas
+(`hordeAnonymous`, y el aviso `AnonymousKeySharesImage` que fabrica el adaptador
+cuando se pide `shared: false` con esa clave). Ese aviso se apoya en la
+documentación oficial, no en el código, así que hoy sobra. Se ha dejado donde
+está a propósito: quitar un aviso de privacidad pide su propia decisión y su
+propia prueba, y no se ha hecho ninguna de las dos. **Lo anotado, no arreglado.**
 
 ## Kudos
 
 Los kudos **no son dinero**. No se compran, no se venden, no caducan y no
-desbloquean funciones.
+desbloquean funciones. Lo único que hacen es decidir **en qué puesto de la cola
+entra tu petición**. Con 0 kudos se genera igual: se espera más.
 
-Lo único que hacen es decidir **en qué puesto de la cola entra tu petición**. Con
-0 kudos se genera igual: se espera más. Registrarse ya te da algunos, y prestar tu
-propia GPU es la forma de tener más — pero no hace falta para usar el sistema.
+### 25 no es un saldo, es un suelo
 
-Lo que sí consume más kudos por imagen: más píxeles, más pasos, `hiresFix`,
-post-procesado y cada LoRA (+3 kudos). Mandar **varios modelos a la vez no cuesta
-kudos extra**.
+El servidor cobra cada imagen y **después** sube la cuenta al mínimo de su clase:
+−50 con la clave anónima, 14 si te registraste con usuario y contraseña, 25 si te
+registraste con un servicio externo (`get_min_kudos()`, y
+`ensure_kudos_positive()` que lo aplica). Por eso un saldo puede quedarse clavado
+en 25 semanas enteras: no es que no se cobre, es que **lo que hundiría la cuenta
+por debajo del suelo se perdona**. El cargo crudo sí queda apuntado, en la
+casilla `accumulated` del desglose, que no se recorta al suelo. Un `accumulated`
+muy negativo junto a un saldo de 25 es exactamente eso, y no un error. Ojo con el
+nombre de esa casilla: su contrato la define como «accumulated **or used**», así
+que ahí cae también lo que paga prestar la GPU. **No es solo gasto**, y por eso
+un número negativo dice que se ha gastado más de lo que ha entrado, no cuánto se
+ha gastado.
+
+**Cuál de las tres clases es la tuya lo dice el servidor, no el número.**
+`/v2/find_user` devuelve `pseudonymous`, definido en su contrato como «If true,
+this user has not registered using an oauth service», y Studio ya lo lee: con
+`true` enseña el suelo de 14 y con `false` el de 25. Si el Horde no manda ese
+campo, la pantalla **no dice de qué clase eres** y se limita a describir lo que se
+ve. **Con qué servicio externo** te registraste no lo dice ningún campo de esa
+respuesta, así que este documento tampoco lo nombra: `service` suena a eso pero es
+otra cosa —«This is a service account used by a horde proxy»—.
+
+Estar en el suelo no es neutro. Los kudos **disponibles** se calculan restando el
+suelo, o sea 0: no se pueden transferir, y los workers configurados con
+`require_upfront_kudos` rechazan el trabajo. Además Luxy manda
+`allow_downgrade: true`, que le dice al servidor que **degrade pasos y resolución
+en vez de fallar** cuando la petición exigiría kudos por adelantado. Con la
+cuenta en el suelo se puede estar recibiendo una imagen peor sin ningún error que
+lo diga, y Luxy hoy no registra si esa degradación ocurrió.
+
+### Qué NO da kudos
+
+- **Compartir lo que generas.** Nunca fue un ingreso: la propia API lo describe
+  como un **descuento de 2 kudos** sobre esa misma petición, y ese descuento está
+  apagado —el código calcula la rebaja y a continuación la pisa con
+  `horde_tax = 1  # FIXME: hlky meltdown disabled sharing`—. Ver «Compartir».
+- **Registrarse.** No regala nada: fija el suelo.
+- **Esperar.** No hay regeneración pasiva por tiempo para una cuenta corriente:
+  los kudos mensuales solo los reciben moderadores, mecenas y suscriptores.
+
+### Qué sí da kudos
+
+Según la FAQ oficial del proyecto y su código:
+
+- **prestar la GPU**, que es la vía principal: 50 kudos cada 10 minutos por estar
+  encendido, +2 por cada modelo cargado y +30 si aceptas LoRAs, más lo que pague
+  cada trabajo que atiendas. **El neto de una cuenta nueva es muy distinto del
+  titular**: mientras no seas «de confianza», el 100 % del premio por estar
+  encendido y la mitad de lo generado se quedan retenidos en depósito
+  (`evaluating_kudos`), que no es saldo gastable ni da puesto en la cola. Se
+  liberan al ascender —mínimo 7 días de cuenta y superar un umbral—, y ese umbral
+  lo fija una variable del servidor que no es observable desde fuera: si estuviera
+  sin poner, el depósito **no se liberaría solo**. Y montar un worker publica tu
+  cuenta en la lista pública y mete prompts de desconocidos en tu máquina;
+- **pedir una transferencia en el Discord oficial.** Lo recomienda su propia FAQ
+  («People tend to give plenty to new users»). Es lo único gratis, inmediato y
+  sin hardware;
+- **publicar un estilo** que otros usen (casilla `styled` del desglose). Cuánto
+  paga y con qué condiciones, sin comprobar;
+- **valorar imágenes** (cae en la casilla `awarded`, que recoge además lo que
+  concede el endpoint `AwardKudos`), con una puerta prácticamente cerrada hoy: el
+  endpoint exige que la petición valorada esté **compartida**, y el servidor deja
+  `shared` en falso en todos los modelos menos uno de Stability retirado. Además
+  está topado: nunca devuelve más de lo que costó esa generación. Ver
+  `IDEA-KUDOS-001` en `CURRENT-TASK.md`.
+
+### Qué consume kudos
+
+Más píxeles, más pasos, `hiresFix` y post-procesado. Verificados en el código del
+servidor: img2img ×1,3, multiplicadores por post-procesado, ×1,2 si no se aceptan
+workers lentos y ×1,1 con lista negra de workers; más un impuesto quemado de 1
+kudos por petición —que se cobra aunque la canceles o falle— y 1 por job.
+
+Mandar **varios modelos a la vez no cuesta kudos extra**.
+
+El **+3 kudos por LoRA** que se repite en este documento **no se ha comprobado
+contra el código del servidor**: no aparece entre los recargos de
+`calculate_extra_kudos_burn`. Se deja escrito porque es lo que se venía diciendo,
+marcado como lo que es: sin verificar.
 
 ## Crear un personaje: la receta
 
@@ -106,7 +192,9 @@ Lo que hay que saber antes:
 
 - **Tiene que estar publicado en CivitAI.** El worker lo descarga de allí. **No
   se puede subir un LoRA propio al horde**: no existe endpoint de subida.
-- **Cuesta +3 kudos por LoRA**, además del coste de la imagen. El máximo son 5.
+- **Cuesta +3 kudos por LoRA**, además del coste de la imagen —cifra heredada,
+  **sin comprobar** contra el código del servidor: ver «Qué consume kudos»—. El
+  máximo son 5.
 - **Sólo 9 de los 18 workers de hoy aceptan LoRAs**, así que pedir uno **reduce
   a la mitad** quién puede atenderte. Se nota en la espera.
 - Con la casilla **«es un id de versión»** marcada, el valor tiene que ser el id
@@ -231,7 +319,7 @@ escribes, cópialo de `/v2/status/models`.
 | --------------------- | ------------------------------------------------------------------------ |
 | Tamaño                | lados **múltiplos de 64**, entre 512 y 1536 en la receta                 |
 | Modelos por receta    | 1 a 4                                                                    |
-| LoRAs                 | **máximo 5** (cada uno +3 kudos)                                         |
+| LoRAs                 | **máximo 5** (+3 kudos cada uno, cifra sin comprobar)                    |
 | Post-procesado        | máximo 2                                                                 |
 | `steps`               | 1 a 60                                                                   |
 | `cfgScale`            | 0 a 30, **como mucho dos decimales**                                     |
@@ -258,8 +346,47 @@ Son dos cosas distintas y confundirlas es el error caro.
 En la práctica: **nada de datos reales en el prompt.** Ni nombres de personas
 reales, ni direcciones, ni nada que no darías a un desconocido.
 
-Luxy pide siempre `shared: false` para no donar la imagen a ningún conjunto de
-datos. Con la clave anónima el horde lo ignora (ver arriba).
+### Compartir
+
+**Ya no es cierto que «Luxy pida siempre `shared: false`».** Desde el 2026-09-09
+(commit `d2ec593`) hay una casilla **por personaje** en la pantalla Privado, y lo
+que se pide es lo que diga esa casilla. Por defecto está apagada.
+
+Lo que pasa de verdad con ella, verificado el 2026-09-17 contra el código público
+de Haidra-Org y contra el servidor en vivo:
+
+- **el servidor descarta la petición.** En `initiate_waiting_prompt` la cadena
+  termina en `else: shared = False`, que pisa todo lo anterior —incluido el
+  forzado del anónimo— salvo con un modelo beta de Stability retirado hace años.
+  La línea entró el 2023-07-08. Comprobado además pidiendo una generación con la
+  casilla marcada: **el Horde devolvió «compartida: no»**;
+- **el destino del archivo depende de ese interruptor.** Con `shared` en falso,
+  la imagen va al almacén transitorio de siempre; el almacén compartido y la
+  subida del texto del prompt solo ocurren por la rama que no se activa;
+- **compartir nunca fue un ingreso de kudos**, era un descuento de 2 sobre esa
+  misma petición, y también está apagado. Comprobado pidiendo dos presupuestos
+  idénticos, con y sin compartir: **el mismo precio, 8 kudos**.
+
+Consecuencia práctica: **con cualquier modelo que no sea ese beta de Stability**,
+marcar la casilla hoy no cede nada y tampoco da nada. Luxy deja elegir modelo y no
+comprueba cuál es al generar, así que la excepción se dice en vez de callarse. La
+casilla sigue en la pantalla porque el mecanismo puede volver, pero su texto ya
+solo dice lo verificado, y ahora el intento cifrado de cada imagen guarda **las
+dos cosas**: lo que se pidió y lo que el servidor dijo que hizo
+(`sharedByServer`).
+
+Si el mecanismo volviera, lo que se cedería es la imagen **y el texto completo de
+lo que se pidió** —la rama compartida sube las dos cosas—, y **no se ha encontrado
+forma de retirarlo después**. Se dice así, y no «no hay forma de retirarlo»: es
+una ausencia, no se buscó a fondo, y una ausencia no se demuestra leyendo un
+archivo suelto.
+
+Tres cosas que **no** se han comprobado, y conviene que consten: la prueba en vivo
+se hizo con la **clave anónima**, no con una cuenta registrada —el código no
+distingue en esa línea, y el anónimo es el caso más favorable a compartir, pero
+en rigor no se repitió—; no se puede descartar desde fuera que algún otro proceso
+del servidor lea el almacén normal; y nadie ha pedido una generación con el modelo
+de Stability que sí activa el compartido, así que esa rama está leída, no vista.
 
 Luxy también pide `nsfw: true` en las peticiones de la bóveda. **No significa
 «genera porno»**: le dice al horde que no mande el trabajo a los workers que
@@ -309,4 +436,9 @@ un único modelo.
 
 **Te avisa de que la clave es anónima**
 Es la clave `0000000000`. Regístrate en <https://aihorde.net> y guarda la tuya:
-es gratis, no pide tarjeta y deja de compartir lo que generas.
+es gratis, no pide tarjeta y sube el suelo de kudos, que es lo que decide tu
+puesto en la cola. El aviso dice además que esa clave comparte lo que generas;
+eso es lo que dice la documentación oficial del Horde, pero en **su código
+desplegado el forzado del anónimo queda pisado** por la misma línea que descarta
+el compartido en todos los modelos menos uno de Stability (ver «La clave
+anónima»).

@@ -1121,6 +1121,114 @@ describe('banco de pruebas de vision', () => {
  * para que un esquema NUEVO entre solo. Una lista habria que acordarse de
  * actualizarla, que es el problema que esto viene a resolver.
  */
+describe('la cuenta de AI Horde que llega a la pantalla', () => {
+  const cuenta = {
+    username: 'daniel#123',
+    kudos: 25,
+    concurrency: 3,
+    anonymous: false,
+    pseudonymous: false,
+    service: false,
+  };
+
+  it('el desglose viaja con las ocho casillas, no solo el total', () => {
+    // el total es un numero clavado que no explica nada; las ocho casillas
+    // dicen por donde ha entrado y por donde no ha entrado nunca
+    const parsed = ipc.vaultHordeAccountResultSchema.parse({
+      ...cuenta,
+      kudosDetails: {
+        accumulated: -812.5,
+        gifted: 0,
+        donated: 0,
+        admin: 0,
+        received: 0,
+        recurring: 0,
+        awarded: 0,
+        styled: 0,
+      },
+    });
+
+    expect(Object.keys(ipc.vaultHordeKudosDetailsSchema.shape)).toEqual([
+      'accumulated',
+      'gifted',
+      'donated',
+      'admin',
+      'received',
+      'recurring',
+      'awarded',
+      'styled',
+    ]);
+    expect(parsed.kudosDetails?.accumulated).toBe(-812.5);
+  });
+
+  it('sin desglose la pantalla sigue teniendo el total', () => {
+    // es el caso de un servidor que deja de mandarlo: se pierde el detalle, no
+    // el dato por el que se pulso el boton
+    const parsed = ipc.vaultHordeAccountResultSchema.parse({ ...cuenta, kudosDetails: null });
+    expect(parsed.kudos).toBe(25);
+    expect(parsed.kudosDetails).toBeNull();
+  });
+
+  it('una casilla puede ser null, y eso NO es un cero', () => {
+    // la diferencia es que un 0 afirma «por ahi no ha entrado nada» y el null
+    // no afirma nada. El contrato tiene que poder distinguirlas
+    const parsed = ipc.vaultHordeAccountResultSchema.parse({
+      ...cuenta,
+      kudosDetails: {
+        accumulated: -812.5,
+        gifted: null,
+        donated: null,
+        admin: null,
+        received: null,
+        recurring: null,
+        awarded: 0,
+        styled: null,
+      },
+    });
+    expect(parsed.kudosDetails?.awarded).toBe(0);
+    expect(parsed.kudosDetails?.styled).toBeNull();
+  });
+
+  it('el desglose no es opcional en el contrato: se manda o se declara ausente', () => {
+    // omitirlo dejaria a la pantalla sin saber si es que no vino o si es que
+    // nadie se acordo de pasarlo. `null` lo dice; la ausencia no
+    const sinDesglose: Record<string, unknown> = { ...cuenta };
+    expect(ipc.vaultHordeAccountResultSchema.safeParse(sinDesglose).success).toBe(false);
+  });
+
+  it('el tipo de cuenta llega declarado, no deducido del saldo', () => {
+    // con 25 kudos se venia diciendo «cuenta de Google, Discord o GitHub»
+    // mirando solo el numero. El horde lo declara en esta misma respuesta
+    const parsed = ipc.vaultHordeAccountResultSchema.parse({
+      ...cuenta,
+      kudosDetails: null,
+      pseudonymous: true,
+    });
+    expect(parsed.pseudonymous).toBe(true);
+    expect(parsed.service).toBe(false);
+  });
+
+  it('sin tipo de cuenta el contrato dice null, y null NO es false', () => {
+    // false afirma «se registro por OAuth»; null no afirma nada. Confundirlos
+    // es exactamente volver a adivinar el tipo de cuenta
+    const parsed = ipc.vaultHordeAccountResultSchema.parse({
+      ...cuenta,
+      kudosDetails: null,
+      pseudonymous: null,
+      service: null,
+    });
+    expect(parsed.pseudonymous).toBeNull();
+    expect(parsed.service).toBeNull();
+  });
+
+  it('el tipo de cuenta tampoco es opcional: se manda o se declara ausente', () => {
+    // mismo motivo que el desglose: omitirlo no se distingue de un olvido
+    const sinTipo: Record<string, unknown> = { ...cuenta, kudosDetails: null };
+    delete sinTipo['pseudonymous'];
+    expect(ipc.vaultHordeAccountResultSchema.safeParse(sinTipo).success).toBe(false);
+  });
+});
+
 describe('donde se elige un modelo, se elige el esfuerzo', () => {
   /** los esquemas de argumentos que dejan elegir proveedor Y modelo */
   function esquemasConModelo(): [string, z.ZodRawShape][] {

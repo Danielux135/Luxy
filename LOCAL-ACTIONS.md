@@ -237,13 +237,23 @@ qué contrato se envía; no que AI Horde responda lo que su documentación dice.
 Qué hacer, en este orden:
 
 1. **Sacar la clave**, gratis, en https://aihorde.net. No pide tarjeta.
-   Registrarse da algunos kudos de partida, que es lo que decide tu puesto en la
-   cola. La clave anónima `0000000000` también vale, pero con ella la red te
-   atiende la última y **dona lo que generes** a un conjunto de datos público:
-   úsala sólo para una prueba de un minuto, nunca para lo que quieras guardar.
+   Registrarse **no regala kudos**: fija un suelo por debajo del cual el saldo no
+   cae —25 si te registras con un servicio externo, 14 con usuario y contraseña—,
+   y los kudos son lo que decide tu puesto en la cola. Cuál de las dos clases es la
+   tuya lo declara el propio servidor en `pseudonymous`, y desde el 2026-09-17
+   Studio lo lee en vez de adivinarlo por el saldo. La clave anónima `0000000000`
+   también vale, pero con ella la red te atiende la última, porque su suelo es el
+   más bajo de todos. Lo que aquí ponía —que esa clave **dona lo que generes**— es
+   lo que dice la documentación oficial del Horde y **no lo que hace su código
+   desplegado**, que deja el compartido apagado en todos los modelos menos uno de
+   Stability retirado: ver `D-093` y `docs/IMAGENES-GRATIS.md`.
 2. **Guardarla** en Studio → Privado → «Gratis: AI Horde». Pulsa «Ver mis kudos»
    para confirmar que la clave vale: si responde con tu nombre de usuario, está
-   bien.
+   bien. Desde el 2026-09-17 ese botón enseña además **por dónde ha entrado cada
+   kudos**; si las cinco casillas de entrada salen a cero, queda demostrado sobre
+   tu cuenta que **por esas cinco** no ha entrado nada. No es lo mismo que «nunca
+   ha entrado un kudos»: lo que paga prestar la GPU cae en `accumulated`, que
+   mezcla lo entrado y lo gastado.
 3. **Crear un personaje.** En «Generar imagen o vídeo» → «Personaje de AI
    Horde». Elige estilo, marca **dos o tres modelos** —suma sus workers y no
    cuesta más— y escribe el aspecto **en inglés**. Pulsa «Ver disponibilidad»

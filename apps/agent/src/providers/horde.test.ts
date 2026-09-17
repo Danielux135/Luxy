@@ -884,6 +884,58 @@ describe('descarga', () => {
   });
 });
 
+/**
+ * lo que el servidor HIZO con la imagen, que no tiene por que ser lo que se le
+ * pidio. El campo venia en la respuesta y se tiraba al convertirla.
+ */
+describe('compartir: lo pedido contra lo hecho', () => {
+  const terminado = (extra: Record<string, unknown>) => ({
+    status: 200,
+    body: {
+      ...progress({ done: true, finished: 1 }),
+      generations: [
+        { img: 'https://r2.example/a.webp', seed: '1', id: 'g-1', model: 'Deliberate' },
+      ],
+      ...extra,
+    },
+  });
+
+  it('se pidio compartir y el servidor dice que NO: gana el servidor', async () => {
+    const { impl, calls } = fakeFetch([
+      { status: 202, body: { id: 'pet-1', kudos: 8 } },
+      terminado({ shared: false }),
+    ]);
+
+    await submitImage(request({ shared: true }), options(impl));
+    // lo PEDIDO, tal y como salio en el cuerpo
+    expect((calls[0]?.body as Record<string, unknown>).shared).toBe(true);
+
+    const result = await readImageStatus('pet-1', options(impl));
+    // y lo HECHO, tal y como contesta el servidor. Suponerlo a partir de la
+    // casilla era exactamente el error
+    expect(result.shared).toBe(false);
+  });
+
+  it('un shared true del servidor tambien llega tal cual', async () => {
+    const { impl } = fakeFetch([terminado({ shared: true })]);
+    const result = await readImageStatus('pet-1', options(impl));
+    expect(result.shared).toBe(true);
+  });
+
+  it('si el servidor no lo dice queda en null, que no es un no', async () => {
+    const { impl } = fakeFetch([terminado({})]);
+    const result = await readImageStatus('pet-1', options(impl));
+    // sin dato no se afirma ninguna de las dos cosas
+    expect(result.shared).toBeNull();
+  });
+
+  it('la cancelacion tambien trae lo que el servidor hizo', async () => {
+    const { impl } = fakeFetch([terminado({ shared: false })]);
+    const result = await cancelImage('pet-1', options(impl));
+    expect(result.shared).toBe(false);
+  });
+});
+
 describe('cuenta y catalogo', () => {
   it('lee el saldo de kudos', async () => {
     const { impl, calls } = fakeFetch([
@@ -895,6 +947,190 @@ describe('cuenta y catalogo', () => {
     expect(user.concurrency).toBe(3);
     expect(calls[0]?.url).toBe(`${HORDE_BASE_URL}/v2/find_user`);
     expect(calls[0]?.apikey).toBe(KEY);
+  });
+
+  it('el desglose de la MISMA respuesta llega entero, casilla a casilla', async () => {
+    // ocho conceptos que esta llamada ya devolvia y el parser tiraba. Un total
+    // no dice por donde no entra nada; `awarded: 0` con `accumulated` muy
+    // negativo si
+    const { impl } = fakeFetch([
+      {
+        status: 200,
+        body: {
+          username: 'daniel#123',
+          id: 42,
+          kudos: 25,
+          concurrency: 3,
+          kudos_details: {
+            accumulated: -812.5,
+            gifted: 0,
+            donated: 0,
+            admin: 0,
+            received: 0,
+            recurring: 0,
+            awarded: 0,
+            styled: 0,
+          },
+        },
+      },
+    ]);
+
+    const user = await findUser(options(impl));
+
+    expect(user.kudosDetails).toEqual({
+      accumulated: -812.5,
+      gifted: 0,
+      donated: 0,
+      admin: 0,
+      received: 0,
+      recurring: 0,
+      awarded: 0,
+      styled: 0,
+    });
+  });
+
+  it('sin desglose la cuenta se sigue leyendo: el total no depende de el', async () => {
+    // el horde puede dejar de mandarlo, y quedarse sin saldo por eso seria
+    // cambiar un dato que si esta por otro que no
+    const { impl } = fakeFetch([
+      { status: 200, body: { username: 'daniel#123', id: 42, kudos: 25, concurrency: 3 } },
+    ]);
+
+    const user = await findUser(options(impl));
+
+    expect(user.kudos).toBe(25);
+    expect(user.kudosDetails).toBeNull();
+  });
+
+  it('una casilla que no viene se conserva como null, NUNCA como cero', async () => {
+    // la diferencia es una afirmacion: `awarded: 0` dice «nunca ha entrado un
+    // kudos por valorar imagenes» y `awarded: null` no dice nada. Inventar el
+    // cero es justo el fallo que esta pantalla corrige
+    const { impl } = fakeFetch([
+      {
+        status: 200,
+        body: {
+          username: 'daniel#123',
+          id: 42,
+          kudos: 25,
+          concurrency: 3,
+          kudos_details: { accumulated: -812.5, awarded: 0, styled: null },
+        },
+      },
+    ]);
+
+    const user = await findUser(options(impl));
+
+    expect(user.kudosDetails?.accumulated).toBe(-812.5);
+    expect(user.kudosDetails?.awarded).toBe(0);
+    // mandada explicitamente a null y ausente por completo son lo mismo: silencio
+    expect(user.kudosDetails?.styled).toBeNull();
+    expect(user.kudosDetails?.received).toBeNull();
+  });
+
+  it('el tipo de cuenta lo DECLARA el horde, no lo deduce el saldo', async () => {
+    // hasta ahora el tipo de cuenta se adivinaba por el numero: 25 «es OAuth»,
+    // 14 «es usuario y contrasena». El swagger define `pseudonymous` como «If
+    // true, this user has not registered using an oauth service», asi que el
+    // dato viene en esta MISMA respuesta y no hay que inferir nada
+    const { impl } = fakeFetch([
+      {
+        status: 200,
+        body: {
+          username: 'daniel#123',
+          id: 42,
+          kudos: 25,
+          concurrency: 3,
+          pseudonymous: false,
+          service: false,
+        },
+      },
+    ]);
+
+    const user = await findUser(options(impl));
+
+    expect(user.pseudonymous).toBe(false);
+    expect(user.service).toBe(false);
+  });
+
+  it('una cuenta sin OAuth se lee tal cual la manda el horde', async () => {
+    const { impl } = fakeFetch([
+      {
+        status: 200,
+        body: {
+          username: 'daniel#123',
+          id: 42,
+          kudos: 14,
+          concurrency: 1,
+          pseudonymous: true,
+          service: false,
+        },
+      },
+    ]);
+
+    const user = await findUser(options(impl));
+
+    expect(user.pseudonymous).toBe(true);
+  });
+
+  it('si el horde no manda el tipo de cuenta, queda en null y NUNCA en false', async () => {
+    // `false` afirmaria «se registro por OAuth»; `null` no afirma nada. Un
+    // valor por defecto aqui seria reponer la adivinanza que este cambio quita
+    const { impl } = fakeFetch([
+      { status: 200, body: { username: 'daniel#123', id: 42, kudos: 25, concurrency: 3 } },
+    ]);
+
+    const user = await findUser(options(impl));
+
+    expect(user.pseudonymous).toBeNull();
+    expect(user.service).toBeNull();
+  });
+
+  it('`service` es un booleano de cuenta de proxy, no el proveedor de OAuth', async () => {
+    // su swagger lo define como «This is a service account used by a horde
+    // proxy». No dice Google, Discord ni GitHub, y el tipo lo refleja
+    const { impl } = fakeFetch([
+      {
+        status: 200,
+        body: {
+          username: 'proxy#1',
+          id: 7,
+          kudos: 25,
+          concurrency: 3,
+          pseudonymous: false,
+          service: true,
+        },
+      },
+    ]);
+
+    const user = await findUser(options(impl));
+
+    expect(user.service).toBe(true);
+    expect(typeof user.service).toBe('boolean');
+  });
+
+  it('un desglose con otra forma no se lleva por delante el saldo', async () => {
+    // el total es el dato por el que se pulsa el boton y el desglose es el
+    // extra: si el desglose deja de entenderse se declara desconocido, pero el
+    // saldo sigue saliendo. Perder los dos por culpa de uno seria cambiar un
+    // dato que si esta por otro que no
+    const { impl } = fakeFetch([
+      {
+        status: 200,
+        body: {
+          username: 'daniel#123',
+          id: 42,
+          kudos: 25,
+          concurrency: 3,
+          kudos_details: { accumulated: 'muchos' },
+        },
+      },
+    ]);
+
+    const user = await findUser(options(impl));
+
+    expect(user.kudos).toBe(25);
+    expect(user.kudosDetails).toBeNull();
   });
 
   it('el catalogo se parsea y no exige clave', async () => {

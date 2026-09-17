@@ -55,7 +55,7 @@ export const GLOSSARY = {
     termino: 'Kudos',
     queEs:
       'Los puntos de AI Horde. NO son dinero: no se compran, no se venden y no caducan. Lo único que hacen es decidir en qué puesto de la cola entra tu petición.',
-    ojo: 'Con cero kudos se genera igual, sólo que esperando más. Registrarse gratis ya da algunos.',
+    ojo: 'Con cero kudos se genera igual, sólo que esperando más. Registrarse no los regala: lo que da es un suelo —25 con cuenta de Google, Discord o GitHub— por debajo del cual el saldo no cae, aunque se siga cobrando cada imagen.',
   },
 
   claveAnonima: {

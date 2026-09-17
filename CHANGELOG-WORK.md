@@ -1,5 +1,146 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-09-17 (tarde) — Claude — el arreglo repitio el fallo que arreglaba
+
+Continuacion directa de la entrada de abajo, y lo mas instructivo de todo el
+episodio. **El trabajo que quito una promesa sin fuente planto, en el mismo pase,
+siete afirmaciones nuevas del mismo tipo**: deducciones escritas como hechos. No
+las vieron sus autores —los mismos que acababan de redactar la regla—, las cazo
+una a una la **fase de revision**. Ampliado en `D-093`, en su apartado nuevo.
+
+**Las siete, en corto.** (1) El suelo se deducia del numero del saldo: la pantalla
+leia 25 y concluia «cuenta de OAuth», y de ahi salia nombrar «Google, Discord o
+GitHub», que ningun campo de la respuesta dice. (2) `accumulated` etiquetado
+«Contador de gasto», cuando su contrato lo define como «accumulated **or used**» y
+ahi cae tambien lo que paga prestar la GPU. (3) «Nunca ha entrado un kudos…», ni
+«nunca» ni sobre las casillas que decia: el texto hablaba de cuatro y el codigo
+sumaba cinco. (4) La suma de las casillas presentes presentada como total. (5)
+Cinco etiquetas que interpretaban su casilla en vez de describirla, `donated`
+«a cuentas educativas» incluida, cuando el contrato dice «public goods accounts
+like education» y la educacion es un ejemplo. (6) «a un sitio del que no hay forma
+de retirar nada» —**la peor: el propio informe la declaraba expresamente no
+verificada**, «es una ausencia, y las ausencias no se prueban leyendo un archivo
+suelto», y aun asi acabo en pantalla como un hecho—. (7) «AI Horde descarta esta
+peticion», sin la excepcion del modelo de Stability que el mismo hallazgo tenia
+escrita. Mas una contradiccion: tres sitios contaban tres versiones distintas de lo
+que pasa con la clave anonima.
+
+**La leccion no es «hay que verificar».** Eso ya estaba escrito, y lo habian
+escrito ellos mismos horas antes. Es que **el criterio se aplico al codigo que se
+corregia y no al que se escribia**, y que hizo falta un revisor con ese encargo
+explicito para verlo. Ninguna prueba lo habria cogido: todas estaban en verde.
+
+**El arreglo de fondo: el tipo de cuenta se LEE.** `/v2/find_user` ya traia
+`pseudonymous` —«If true, this user has not registered using an oauth service»— y
+se tiraba. Ahora viaja hasta el renderer por el mismo camino que `kudos_details`, y
+el minimo solo se afirma cuando el tipo viene declarado: `true` → 14, `false` → 25.
+Con `null` no se afirma minimo; se describe lo observado y se dice que no esta
+comprobado. Ningun valor por defecto en toda la cadena: lo que no llega se queda en
+`null`, que se lee «no se sabe», y no en `false`, que afirmaria un tipo de cuenta
+que nadie ha mirado. Los dos campos se comprobaron contra el swagger vivo **antes**
+de escribir codigo, y el segundo no era lo que se suponia: `service` es «This is a
+service account used by a horde proxy», no el proveedor de OAuth. Viaja igual, con
+esa cita escrita en los tres archivos para que no se vuelva a usar para nombrar a
+nadie.
+
+**Los `.md` llevaban las mismas afirmaciones, y se corrigen aqui.**
+`docs/IMAGENES-GRATIS.md` decia «25 si entraste con Google, Discord o GitHub» —lo
+que dice el servidor es la clase, no el servicio—, «el servidor no comparte
+ninguna» y «su codigo desplegado no comparte nada» —le falta la excepcion del
+modelo de Stability, y Luxy deja elegir modelo y no comprueba cual es al
+generar—, y describia `accumulated` como si fuera solo gasto. `LOCAL-ACTIONS.md` y
+`CURRENT-TASK.md` repetian lo de las cinco casillas a cero como «nunca ha entrado
+un kudos». Corregidos los cinco sitios; lo que no se ha comprobado va dicho como
+tal, con el ejemplo del compartido: **nadie ha pedido una generacion con el modelo
+de Stability que si lo activa**, asi que esa rama esta leida, no vista.
+
+Ni una linea de codigo en esta pasada: solo `.md`. `vitest run` completo exit 0,
+190 archivos, **3900 pruebas** y 12 saltadas —once mas que en la entrada de abajo,
+que quedo desfasada—. Detalle en `TEST-RESULTS.md`. **Sin ver en pantalla.**
+
+### 2026-09-17 — Claude — la casilla de compartir prometia kudos que no existen
+
+Daniel pregunto por que su saldo de AI Horde lleva semanas clavado en 25 si lleva
+meses compartiendo sus imagenes «a cambio de kudos». La respuesta, verificada
+contra el codigo publico de Haidra-Org y contra el servidor en vivo, es que **no
+estaba comprando nada, no estaba vendiendo nada, y la promesa la habia escrito
+Luxy**. Decision completa en `D-093`; el catalogo de vias reales de kudos, en
+`docs/IMAGENES-GRATIS.md`.
+
+**Los tres hechos.** (1) El servidor **descarta** la peticion de compartir desde
+julio de 2023: una linea `else: shared = False` al final de la cadena pisa todo lo
+anterior, incluido el forzado del anonimo, y la version del codigo leido coincide
+con la que responde `aihorde.net`. Comprobado en vivo: se pidio compartir y el
+Horde contesto «compartida: no». (2) Compartir **nunca fue un ingreso**: era un
+descuento de 2 kudos sobre esa misma peticion, y tambien esta apagado —comprobado
+pidiendo dos presupuestos identicos, mismo precio, 8 kudos—. (3) **25 es un
+suelo**, no un saldo: el Horde cobra cada imagen y despues sube la cuenta al minimo
+de su clase.
+
+**De donde venia la promesa.** De una frase de Daniel en una conversacion, que el
+codigo convirtio en premisa tecnica: el comentario de la prueba lo deja por
+escrito. Las pruebas de ese bloque solo comprobaban que el valor **viaja**;
+ninguna que produjera kudos. Es el patron de `D-091` un escalon mas arriba: alli
+vivia en un documento, aqui vivia en la pantalla pidiendo ceder contenido intimo.
+
+Se hizo en tres frentes.
+
+**1. Lo que el servidor dijo que hizo deja de tirarse.** `horde.ts` ya leia el
+campo `shared` de la respuesta y `toResult()` lo descartaba; ahora `HordeResult`
+lo lleva —con `null` para «el estado no lo trajo», que **no** es «no la
+compartio»— y llega hasta el intento cifrado como `sharedByServer`
+(`imageAttemptSchema`, con `.default(null)` para que los intentos ya escritos se
+sigan leyendo). El registro apunta las dos cosas al lado, `compartidaPedida` y
+`compartidaSegunElServidor`, dos booleanos y ni una palabra del contenido.
+
+**2. El desglose de kudos, que era la misma llamada de siempre.** `/v2/find_user`
+devuelve `kudos_details` con ocho casillas y la pantalla se quedaba solo con el
+total. Ahora `kudosDetailsSchema` lo valida —`.catch(null)` deliberado: si el Horde
+cambia esa forma, **el total sigue saliendo**— y viaja entero por el IPC hasta el
+renderer, cuyo tipo pasa a derivarse del esquema en vez de estar escrito a mano.
+
+**3. La pantalla, que es lo que de verdad mentia.** La etiqueta pasa de «Donar sus
+imagenes a AI Horde a cambio de kudos» a «Donar sus imagenes a AI Horde (hoy el
+servidor lo ignora)» —el parentesis va en la etiqueta a proposito: es lo unico que
+se lee sin bajar la vista—, y la ayuda dice las tres cosas verificadas. Se retira
+«A cambio ganas kudos, que son tu puesto en la cola». **La casilla se queda**: el
+mecanismo puede volver y quitar una opcion es perder funcion.
+
+El desglose se pinta desde `vault-kudos-breakdown.ts`, modulo **puro y con
+pruebas**, no dentro del JSX. La regla que lo gobierna entero: **un cero afirma y
+un silencio no**. `awarded: 0` significa «jamas ha entrado un kudos por valorar
+imagenes»; `awarded: null` no significa nada, asi que lo ausente no se pinta, no
+se suma y no deja hueco. Y «ninguno» solo se dice si **todas** las casillas
+contadas valen cero, no si la suma da cero: dos vias que se compensan afirmarian
+en falso. La linea del suelo solo habla de los tres numeros conocidos —25, 14,
+-50—; fuera de esos no se afirma nada, porque un saldo quieto puede estarlo por
+otro motivo.
+
+De paso, una contradiccion a dos dedos de distancia: el glosario decia
+«registrarse gratis ya da algunos [kudos]», que es la misma falsedad de clase.
+Corregido a lo verificado.
+
+**Documentacion.** `docs/IMAGENES-GRATIS.md` afirmaba «Luxy pide siempre
+`shared: false`» —falso desde el 2026-09-09, cuando entro la casilla— y que con la
+clave anonima el servidor fuerza el compartido —eso lo dice la documentacion
+oficial del Horde, pero **no su codigo desplegado**—. Reescritos el apartado de la
+clave anonima, el de Kudos entero y el de privacidad, con sus fuentes y con lo que
+no esta comprobado marcado como tal. El «+3 kudos por LoRA» queda etiquetado como
+cifra heredada **sin verificar**: no aparece entre los recargos del servidor.
+`IDEA-KUDOS-001` se **cierra** en `CURRENT-TASK.md`: valorar imagenes exige
+tenerlas compartidas y el servidor no comparte ninguna; ademas el servicio de
+valoraciones respondia 503 y la pagina de ArtBot que enlaza la FAQ, 404.
+
+**Lo que NO se ha hecho, y conviene que conste:** nadie ha usado la clave de
+Daniel, asi que su cuenta sigue sin medirse; la prueba en vivo se hizo con la
+clave anonima; y el aviso `AnonymousKeySharesImage` sigue diciendo que esa clave
+comparte aunque se pida lo contrario. Ese aviso **queda anotado, no arreglado**:
+retirar un aviso de privacidad pide su propia comprobacion. Los seis puntos de
+incertidumbre estan enumerados en `D-093`.
+
+`npm run check` exit 0: 190 archivos, 3889 pruebas, 12 saltadas. **Sin ver en
+pantalla.**
+
 ### 2026-09-16 (tarde) — Claude — ver y corregir el prompt antes de generar
 
 La funcion que pidio Daniel despues de tres semanas adivinando por que le

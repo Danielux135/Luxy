@@ -26,27 +26,74 @@ fallan**, con el `rc` del Horde, la semilla y el worker.
 
 ## IDEA-KUDOS-001 — ganar kudos valorando imagenes, dentro de Studio
 
-Estado: **apuntada, sin investigar — 2026-09-16.** Pedida por Daniel a mitad de
-otra tarea: «valorar imagenes y etc da kudos al parecer, me gustaria un sitio
-donde poder valorar al menos las imagenes que genero y ganar un poco de kudos».
+Estado: **CERRADA, no se hace — Claude, 2026-09-17.** Investigada contra el
+codigo publico del Horde y contra el servidor en vivo. Decision de la tanda en
+`D-093`.
 
-Por que importa: cada imagen cuesta kudos y cada LoRA suma +3. Con la cuenta
-anonima la espera es larga porque la prioridad va por kudos. Si valorar da
-kudos, es la unica via gratuita de subir la prioridad sin pagar ni donar
-potencia.
+Pedida por Daniel a mitad de otra tarea: «valorar imagenes y etc da kudos al
+parecer, me gustaria un sitio donde poder valorar al menos las imagenes que
+genero y ganar un poco de kudos».
 
-Lo que hay que averiguar ANTES de disenar nada, y sin darlo por sabido:
+### Por que se cierra
 
-1. Si el Horde sigue dando kudos por valorar, cuanto, y por que via exacta
-   (hubo una API de valoracion propia; puede estar retirada o haber cambiado).
-2. Si se pueden valorar **las imagenes propias** o solo las de la cola comun.
-   Esto decide la funcion entera: Daniel pidio «al menos las que genero».
-3. Si hace falta cuenta registrada, y si la clave anonima queda excluida.
-4. Si valorar imagenes ajenas implicaria ensenarle contenido de terceros dentro
-   de Privado, que es una boveda cifrada. Si fuera asi, va en otra pantalla.
+**Valorar exige tener las imagenes compartidas, y el servidor deja el compartido
+apagado en todos los modelos menos uno.** El endpoint de valoracion estetica
+empieza rechazando lo que no sea publico: `if not wp.shared: raise
+InvalidAestheticAttempt("You can only aesthetically rate requests you have opted
+to share publicly")`. Y `shared` acaba en falso porque `initiate_waiting_prompt`
+termina en `else: shared = False`, una linea de julio de 2023 que pisa hasta el
+forzado del anonimo; la unica rama que lo deja en cierto pide el modelo
+`SDXL_beta::stability.ai#6901`, un beta de Stability retirado. Son dos cerrojos
+independientes sobre la misma puerta, y el primero depende del segundo.
 
-Cuidado con el precedente de `D-091`: no dar por cierto como funciona sin leer
-la fuente. Lo de arriba son preguntas, no hallazgos.
+Lo demas que se encontro, por si vuelve a plantearse:
+
+- **esta topado por diseño**: «You can never gain more kudos than you spent for
+  this generation» (`if self.kudos >= wp.consumed_kudos: self.kudos =
+  wp.consumed_kudos - 1`). Aunque funcionara, nunca seria una fuente neta: es un
+  reembolso parcial de lo que ya pagaste;
+- **el servicio de valoraciones no respondia**: el Horde calcula los 5 kudos por
+  valoracion —15 en el caso «la mejor»— y **reenvia a un servicio externo cuyo
+  codigo no es publico**, que el dia de la comprobacion devolvia **503**; y la
+  pagina que la FAQ oficial enlaza para valorar, la de ArtBot, devolvia **404**.
+  No se puede distinguir una caida real de un bloqueo al agente que lo consulto:
+  eso queda sin verificar;
+- **las imagenes propias** nunca llegaron a ser la pregunta: sin compartir, ni
+  las propias ni las ajenas.
+
+### Lo que SI da kudos, que era la pregunta de fondo
+
+Verificado en el codigo del Horde y en su FAQ; el detalle esta en
+`docs/IMAGENES-GRATIS.md`:
+
+1. **Prestar la GPU.** 50 kudos cada 10 minutos por estar encendido, +2 por
+   modelo cargado y +30 si aceptas LoRAs, mas lo que pague cada trabajo. **El neto
+   de una cuenta nueva no es ese**: mientras no sea «de confianza», el 100% del
+   premio por estar encendido y la mitad de lo generado quedan **retenidos en
+   deposito**, que no es saldo gastable ni da puesto en la cola. Se liberan al
+   ascender —minimo 7 dias de cuenta y superar un umbral— y ese umbral lo fija una
+   variable del servidor que no se ve desde fuera: si estuviera sin poner, **no se
+   liberaria solo**. Ademas publica la cuenta en la lista publica de workers y mete
+   prompts de desconocidos en la maquina.
+2. **Pedir una transferencia en el Discord oficial.** Lo recomienda su propia
+   FAQ: «People tend to give plenty to new users». Es lo unico gratis, inmediato y
+   sin hardware. Con la cuenta en el suelo el no puede transferir los suyos, pero
+   si recibir.
+
+Y lo que **no** da kudos, que es lo que se creia: compartir las imagenes. Nunca
+fue un ingreso —era un descuento de 2 sobre esa misma peticion— y ademas esta
+apagado. Ver `D-093`.
+
+### Lo que queda por hacer, y es de Daniel
+
+Pulsar **«Ver mis kudos»** en Privado y mirar el desglose nuevo. Si las cinco
+casillas de entrada —`awarded`, `received`, `styled`, `recurring` y `admin`—
+salen a cero, queda demostrado sobre su cuenta —y no por deduccion— que **por
+esas cinco** no ha entrado nada. Lo que paga prestar la GPU no se veria ahi: cae
+en `accumulated`, que es «accumulated **or used**» y mezcla lo entrado con lo
+gastado. Y el desglose dira ademas de que clase es la cuenta, porque el servidor
+lo declara en `pseudonymous`. **Nadie ha usado su clave**: todo lo de arriba es
+codigo leido, no su cuenta medida.
 
 ## F27-ENCUADRE-001 — que la foto salga desde donde Daniel la pide
 

@@ -1798,6 +1798,24 @@ export const vaultHordeKeyArgsSchema = z.object({
 });
 
 /**
+ * el desglose por conceptos que la misma respuesta ya traía.
+ *
+ * Cada casilla es `number | null`, y `null` significa «el servidor no la mandó»,
+ * nunca «vale cero». La pantalla tiene que poder distinguirlo: un 0 es una
+ * afirmación —por ahí no ha entrado nada— y la ausencia no afirma nada.
+ */
+export const vaultHordeKudosDetailsSchema = z.object({
+  accumulated: z.number().nullable(),
+  gifted: z.number().nullable(),
+  donated: z.number().nullable(),
+  admin: z.number().nullable(),
+  received: z.number().nullable(),
+  recurring: z.number().nullable(),
+  awarded: z.number().nullable(),
+  styled: z.number().nullable(),
+});
+
+/**
  * la cuenta del horde, para poder enseñar la prioridad real.
  *
  * Los kudos no son dinero y no se compran: deciden en qué posición de la cola
@@ -1811,6 +1829,26 @@ export const vaultHordeAccountResultSchema = z.object({
   concurrency: z.number().int(),
   /** es la clave anónima: funciona, pero comparte lo que genera */
   anonymous: z.boolean(),
+  /**
+   * en qué se reparte ese total. `null` cuando esta respuesta no lo trajo: la
+   * pantalla sigue funcionando solo con el total, que es lo que enseñaba antes.
+   */
+  kudosDetails: vaultHordeKudosDetailsSchema.nullable(),
+  /**
+   * tipo de cuenta tal y como lo declara el horde, no deducido del saldo.
+   *
+   * `true` = registrada sin OAuth (usuario suelto); `false` = registrada por
+   * OAuth. `null` cuando la respuesta no lo trajo, y ese `null` significa «no
+   * se sabe»: quien lo pinte tiene que decirlo así, no elegir una de las dos.
+   */
+  pseudonymous: z.boolean().nullable(),
+  /**
+   * cuenta de servicio usada por un proxy del horde, según su propio swagger.
+   *
+   * NO es el proveedor de OAuth: no dice Google, Discord ni GitHub, y en
+   * `/v2/find_user` no se ha encontrado ningún campo que lo diga.
+   */
+  service: z.boolean().nullable(),
 });
 
 /** un modelo servido AHORA, con cuántos workers lo tienen cargado */

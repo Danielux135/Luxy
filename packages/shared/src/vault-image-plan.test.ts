@@ -384,6 +384,49 @@ describe('imageAttemptSchema', () => {
     expect(parsed.warnings).toEqual([]);
     expect(parsed.malformedReason).toBeNull();
     expect(parsed.characterId).toBeNull();
+    // lo que el servidor hizo todavia no se sabe: nadie ha contestado
+    expect(parsed.sharedByServer).toBeNull();
+  });
+
+  it('separa lo que se PIDIO de lo que el servidor HIZO con la imagen', () => {
+    const plan = composeHordeImagePlan({
+      recipe: recipe({ shared: true }),
+      scene: 'standing',
+      extraNegative: '',
+    });
+    const parsed = imageAttemptSchema.parse({
+      attemptId: '0b4d5a2e-2f3a-4c5b-8d6e-7f8091a2b3c4',
+      conversationId: 'conv-1',
+      createdAt: '2026-09-16T10:00:00.000Z',
+      state: 'ok',
+      plan,
+      planId: plan.planId,
+      sharedByServer: false,
+    });
+
+    // se pidio compartir...
+    const guardado = parsed.plan;
+    if (guardado === null || guardado.provider !== 'horde') {
+      throw new Error('el intento tendria que conservar su plan del horde');
+    }
+    expect(guardado.params.shared).toBe(true);
+    // ...y el servidor contesto que no. Los dos quedan apuntados, cada uno con
+    // su nombre: hasta ahora solo estaba el primero y se leia como si fuera el
+    // segundo
+    expect(parsed.sharedByServer).toBe(false);
+  });
+
+  it('un intento escrito antes de este campo se sigue leyendo', () => {
+    // los registros que ya estan en disco no traen `sharedByServer`, y eso no
+    // es un no: es que nadie lo apunto
+    const parsed = imageAttemptSchema.parse({
+      attemptId: '0b4d5a2e-2f3a-4c5b-8d6e-7f8091a2b3c4',
+      conversationId: 'conv-1',
+      createdAt: '2026-09-16T10:00:00.000Z',
+      state: 'ok',
+      planId: '0000000000000000',
+    });
+    expect(parsed.sharedByServer).toBeNull();
   });
 
   it('guarda el rc y los avisos del envio, que hoy se pierden', () => {
