@@ -490,6 +490,12 @@ export function buildVaultImageInstruction(
     '- El encuadre NO es la postura: «from behind» dice desde donde se mira, no como esta el',
     '  cuerpo. Nombra la postura —«on all fours», «lying face down», «kneeling», «sitting»—: la',
     '  que no escribas la inventa el generador.',
+    // Y «from behind» TAMPOCO basta para la orientacion, comprobado el 2026-09-17 con la
+    // postura ya puesta: salio a cuatro patas pero de lado. El generador la cumple girando el
+    // cuerpo —la camara sigue estando detras— porque la etiqueta no dice que parte va hacia el
+    // objetivo. Las que si lo dicen son «ass to camera» y «back to camera»
+    '- «from behind» tampoco basta: di QUE parte va hacia el objetivo —«ass to camera»,',
+    '  «back to camera»— y donde queda la cara —«face down», «looking back»—.',
     // y se pierde de forma INTERMITENTE, no siempre: con «sigue en la misma postura» y con «te
     // hago otra foto» conservo la postura y perdio «from behind» y «ass to camera»; con
     // «quedate como estas» las conservo las dos. Por eso se repiten, en vez de confiar en que

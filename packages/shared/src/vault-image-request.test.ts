@@ -1088,6 +1088,32 @@ describe('la postura del cuerpo, que el encuadre no dice', () => {
   });
 });
 
+// COMPROBADO EN PANTALLA el 2026-09-17, y es una prueba limpia porque la postura
+// SI llego en el mismo prompt: con «on all fours, from behind, bed, warm light,
+// looking back» salio a cuatro patas pero DE LADO. El generador cumple «from
+// behind» girando el cuerpo —la camara sigue estando detras— porque esa etiqueta
+// no dice que parte va hacia el objetivo. Los cuatro prompts que si salieron de
+// espaldas llevaban «ass to camera».
+describe('la orientacion, que «from behind» tampoco dice', () => {
+  const texto = buildVaultImageInstruction();
+
+  it('manda decir QUE parte va hacia el objetivo', () => {
+    expect(texto).toContain('«from behind» tampoco basta');
+    expect(texto).toContain('ass to camera');
+    expect(texto).toContain('back to camera');
+  });
+
+  it('y donde queda la cara, que es la otra mitad del encuadre', () => {
+    expect(texto).toContain('face down');
+    expect(texto).toContain('looking back');
+  });
+
+  it('no se envia por el camino que no puede generar', () => {
+    const cerrado = buildVaultImageInstruction([], 'prose', false);
+    expect(cerrado).not.toContain('«from behind» tampoco basta');
+  });
+});
+
 // OBSERVADO el mismo dia, y es INTERMITENTE, no sistematico: con «sigue en la
 // misma postura» y con «te hago otra foto» conservo la postura y perdio «from
 // behind» y «ass to camera»; con «quedate como estas» conservo las dos.

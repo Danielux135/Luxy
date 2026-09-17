@@ -227,10 +227,14 @@ function PlanBody({
 
       {plan.provider === 'horde' && plan.dropped.length > 0 && (
         <>
+          {/* el ejemplo del pelo sólo valía cuando se recortaban colores. Desde que el
+              recorte cubre también complexión y rubor, explicar un rubor quitado con «salió
+              una morena» no tiene ningún sentido para quien lo lee */}
           <p className="field__hint">
-            El recorte automático le quitó esto a la escena para que no contradijese la apariencia
-            fija —con «light brown hair» delante y «dark hair» detrás salió una morena—. Si lo
-            pedías a propósito, devuélvelo:
+            El recorte automático le quitó esto a la escena porque la apariencia fija ya lo dice.
+            Repetirlo con otras palabras le resta peso al resto, y si las dos versiones no
+            coinciden, el generador recibe dos descripciones de la misma persona. Si lo pedías a
+            propósito, devuélvelo:
           </p>
           <div className="row">
             {plan.dropped.map((fragment) => (
