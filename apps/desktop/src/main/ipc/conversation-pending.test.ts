@@ -7,7 +7,11 @@
 // cosas que no pueden fallar nunca: que un fallo de la seleccion no cuesta el
 // turno y que ni una palabra de la boveda acaba en el log.
 import { describe, it, expect, vi } from 'vitest';
-import { RELATION_EXTRACTOR_VERSION, type RelationNote } from '@luxy/shared';
+import {
+  RELATION_EXTRACTOR_VERSION,
+  type ConversationMemory,
+  type RelationNote,
+} from '@luxy/shared';
 
 /** canales registrados por `registerIpcHandlers`, para poder invocarlos */
 const canales = vi.hoisted(
@@ -59,7 +63,7 @@ interface TurnoFalso {
 }
 
 /** la linea temporal que ya tenia la memoria episodica cuando empieza el turno */
-function lineaTemporal(citaOrigen: string): TurnoFalso[] {
+function lineaTemporal(citaOrigen: string, suyaAhora: string): TurnoFalso[] {
   return [
     {
       conversationId: CONV_VIEJA,
@@ -75,8 +79,9 @@ function lineaTemporal(citaOrigen: string): TurnoFalso[] {
       text: '*se rie* mas te vale',
       createdAt: new Date(AHORA - 7 * DIA_MS + 60_000).toISOString(),
     },
-    // la de ahora no habla de la promesa: si lo hiciera estaria «en escena» y la
-    // seleccion la callaria, que es justo lo contrario de lo que se mide aqui
+    // por defecto la de ahora no habla de la promesa: si lo hiciera estaria «en
+    // escena» y la seleccion la callaria, que es justo lo contrario de lo que se
+    // mide aqui. Una prueba la cambia a proposito, para medir ese caso
     {
       conversationId: CONV_AHORA,
       sequence: 0,
@@ -88,7 +93,7 @@ function lineaTemporal(citaOrigen: string): TurnoFalso[] {
       conversationId: CONV_AHORA,
       sequence: 1,
       role: 'assistant',
-      text: 'buenos dias a ti',
+      text: suyaAhora,
       createdAt: new Date(AHORA - 2 * 60 * 60 * 1000 + 60_000).toISOString(),
     },
   ];
@@ -133,6 +138,10 @@ interface Montaje {
   readFalla?: Error;
   /** el texto de origen tal y como esta HOY en la boveda */
   citaOrigen?: string;
+  /** la memoria acumulativa sellada de la conversacion */
+  memoria?: ConversationMemory;
+  /** la ultima respuesta suya, la que viaja como historial reciente */
+  suyaAhora?: string;
   /** lo que contesta el modelo de pago */
   respuesta?: string;
   /** la llamada de pago no llega a escribir nada */
@@ -147,7 +156,7 @@ function montar(montaje: Montaje = {}): Huella {
   };
 
   const citaOrigen = montaje.citaOrigen ?? TURNO_ORIGEN;
-  const linea = lineaTemporal(citaOrigen);
+  const linea = lineaTemporal(citaOrigen, montaje.suyaAhora ?? 'buenos dias a ti');
   // los turnos de la conversacion de ahora, que el turno va a hacer crecer
   const turnos: TurnoFalso[] = linea.filter((turno) => turno.conversationId === CONV_AHORA);
 
@@ -174,7 +183,7 @@ function montar(montaje: Montaje = {}): Huella {
         });
       },
       removeLastTurn: () => turnos.pop(),
-      latestMemory: async () => null,
+      latestMemory: async () => montaje.memoria ?? null,
       latestInstructions: async () => null,
       latestCharacterId: async () => LIA,
       latestCharacterDescription: async () => 'Lia, veinticuatro años',
@@ -417,5 +426,132 @@ describe('lo pendiente dentro del turno privado', () => {
 
     expect((await enviar('¿que tal has dormido?')).ok).toBe(true);
     expect(JSON.stringify(huella.registros)).not.toContain('TARTA_SENTINEL');
+  });
+});
+
+// lo que se le enseña dosificado es una cosa; lo que vuelve solo, otra. Estas
+// miden lo segundo, que es lo que no se podia ver desde fuera.
+describe('a que conversacion pertenece un prompt y que vuelve solo en el', () => {
+  it('el registro dice de que conversacion es el prompt', async () => {
+    const huella = montar({ notes: [apuntada({ quote: CAFES })] });
+
+    expect((await enviar('¿que tal has dormido?')).ok).toBe(true);
+    // sin esta cifra no se puede saber a que conversacion pertenece una linea,
+    // que es exactamente lo que impidio datar el sintoma
+    expect(huella.campos('prompt privado compuesto')).toMatchObject({
+      conversacion: CONV_AHORA,
+    });
+  });
+
+  it('cuenta la promesa que vuelve sola por la memoria acumulativa', async () => {
+    const huella = montar({
+      notes: [apuntada({ quote: CAFES })],
+      memoria: {
+        version: 1,
+        summary: 'van despertandose',
+        facts: [],
+        decisions: [],
+        plan: ['llevarle dos cafés y una tarta de chocolate a la cama'],
+        openQuestions: ['¿a que hora se levanta?'],
+        lessons: [],
+      },
+    });
+
+    expect((await enviar('¿que tal has dormido?')).ok).toBe(true);
+    expect(huella.campos('prompt privado compuesto')).toMatchObject({
+      // dos entradas miradas —una de `plan` y otra de `openQuestions`— y solo
+      // una repite la promesa: la otra no cuenta
+      ecoMemoria: { entradas: 2, enNotas: 1 },
+      ecoHistorial: { respuestas: 1, enNotas: 0 },
+    });
+  });
+
+  it('cuenta la promesa que vuelve sola dentro de su ultima respuesta', async () => {
+    const huella = montar({
+      notes: [apuntada({ quote: CAFES })],
+      suyaAhora: 'te debo dos cafés y una tarta de chocolate a la cama, no se me olvida',
+    });
+
+    expect((await enviar('¿que tal has dormido?')).ok).toBe(true);
+    expect(huella.campos('prompt privado compuesto')).toMatchObject({
+      // la dosificacion la calla porque ella ya la tiene delante...
+      pendientes: { abiertas: 1, ofrecidas: 0, enEscena: 1 },
+      // ...y aun asi la promesa viaja entera en el prompt, otra vez. Ese es el
+      // canal que «ofrecidas: 0» no deja ver
+      ecoHistorial: { respuestas: 1, enNotas: 1 },
+      ecoMemoria: { entradas: 0, enNotas: 0 },
+    });
+  });
+
+  it('sin nada apuntado las dos cifras son cero, no un fallo', async () => {
+    const huella = montar({ notes: [] });
+
+    expect((await enviar('buenos dias')).ok).toBe(true);
+    expect(huella.campos('prompt privado compuesto')).toMatchObject({
+      ecoMemoria: { entradas: 0, enNotas: 0 },
+      ecoHistorial: { respuestas: 1, enNotas: 0 },
+    });
+  });
+
+  it('si no se pudo leer lo apuntado las dos van en nulo, no en cero', async () => {
+    // un cero diria «no vuelve nada», que es una afirmacion; aqui no se sabe
+    const huella = montar({
+      notes: [apuntada({ quote: CAFES })],
+      readFalla: new Error('no se pudo abrir el sobre'),
+    });
+
+    expect((await enviar('¿que tal has dormido?')).ok).toBe(true);
+    expect(huella.campos('prompt privado compuesto')).toMatchObject({
+      ecoMemoria: null,
+      ecoHistorial: null,
+    });
+  });
+
+  it('las cifras de eco no arrastran ni una palabra de lo que midieron', async () => {
+    const cita = 'manana te traigo dos cafes y una TARTA_SENTINEL de chocolate a la cama';
+    const huella = montar({
+      notes: [apuntada({ quote: cita })],
+      citaOrigen: `*la abraza* ${cita}, te lo juro`,
+      memoria: {
+        version: 1,
+        summary: 'sigue debiendole el desayuno PLAN_SENTINEL',
+        facts: [],
+        decisions: [],
+        plan: ['llevarle dos cafes y una TARTA_SENTINEL de chocolate a la cama'],
+        openQuestions: ['¿PREGUNTA_SENTINEL a que hora se levanta?'],
+        lessons: [],
+      },
+      suyaAhora: 'te debo la TARTA_SENTINEL de chocolate y los dos cafes, HISTORIAL_SENTINEL',
+    });
+
+    expect((await enviar('¿que tal has dormido?')).ok).toBe(true);
+
+    // sin esto la comprobacion pasaria tambien con todo apagado, que es justo lo
+    // que no prueba nada: los centinelas TIENEN que estar en el prompt
+    const prompt = huella.prompts[0] ?? '';
+    expect(prompt).toContain('PLAN_SENTINEL');
+    expect(prompt).toContain('PREGUNTA_SENTINEL');
+    expect(prompt).toContain('HISTORIAL_SENTINEL');
+    // ...y las dos cifras tienen que haber contado de verdad
+    expect(huella.campos('prompt privado compuesto')).toMatchObject({
+      ecoMemoria: { entradas: 2, enNotas: 1 },
+      ecoHistorial: { respuestas: 1, enNotas: 1 },
+    });
+
+    // esto es lo que de verdad importa: se midio texto descifrado y al registro
+    // solo salieron enteros
+    const escrito = JSON.stringify(huella.registros);
+    for (const centinela of [
+      'TARTA_SENTINEL',
+      'PLAN_SENTINEL',
+      'PREGUNTA_SENTINEL',
+      'HISTORIAL_SENTINEL',
+      'chocolate',
+      'cafes',
+      'cama',
+      'dormido',
+    ]) {
+      expect(escrito).not.toContain(centinela);
+    }
   });
 });

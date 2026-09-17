@@ -12,6 +12,21 @@ export interface HttpProviderDraft {
   supportsStreaming: boolean;
   maxOutputTokens: string;
   dailyBudget: string;
+  /**
+   * parametros de muestreo, como CADENA y con la cadena vacia como «sin poner».
+   *
+   * son cadenas y no `number | null` porque vienen de un `<input>`: mientras se
+   * escribe «1.» o «-» el valor no es un numero todavia, y convertirlo a
+   * numero en cada pulsacion borraria lo que el usuario esta tecleando. La
+   * conversion se hace una sola vez, en `buildHttpProvider`.
+   *
+   * vacio significa NO MANDAR el parametro, que es distinto de mandar su valor
+   * neutro: hay servidores que devuelven 400 ante un parametro desconocido.
+   */
+  temperature: string;
+  frequencyPenalty: string;
+  presencePenalty: string;
+  repetitionPenalty: string;
 }
 
 export interface HttpProviderBuildResult {
@@ -83,7 +98,48 @@ export function emptyHttpProviderDraft(): HttpProviderDraft {
     supportsStreaming: true,
     maxOutputTokens: '8192',
     dailyBudget: '0',
+    // vacios A PROPOSITO: una conexion nueva tiene que mandar el mismo cuerpo
+    // que mandaba Luxy antes de que estos campos existieran
+    temperature: '',
+    frequencyPenalty: '',
+    presencePenalty: '',
+    repetitionPenalty: '',
   };
+}
+
+/** un numero opcional que viene de un `<input>`: vacio significa «sin poner» */
+function draftNumber(value: string): number | undefined {
+  // LA COMA, que es lo que sale de un teclado espanol. El campo es de texto
+  // justamente por esto: con `type="number"` el navegador devuelve la cadena
+  // VACIA ante cualquier cosa que no sea un decimal con punto, asi que «1,5» se
+  // guardaba como «sin poner», sin un solo aviso, y quien lo escribio creia
+  // estar midiendo con temperatura 1,5
+  const trimmed = value.trim().replace(',', '.');
+  if (trimmed.length === 0) return undefined;
+  const parsed = Number(trimmed);
+  // NaN llega aqui con «1.» o «-» a medio escribir. Se devuelve para que lo
+  // rechace Zod con su mensaje, en vez de descartarlo en silencio: descartarlo
+  // guardaria la conexion sin el parametro y el usuario creeria que se aplico
+  return Number.isNaN(parsed) ? Number.NaN : parsed;
+}
+
+/** vuelca un numero opcional al borrador sin inventarse un valor por defecto */
+function numberToDraft(value: number | undefined): string {
+  return value === undefined ? '' : String(value);
+}
+
+/**
+ * clave de muestreo para el objeto que valida Zod, o nada si el campo va vacio.
+ *
+ * la clave se omite entera en vez de ponerla a `undefined` para que el objeto
+ * guardado no arrastre claves muertas hasta `config.json`.
+ */
+function sampling(
+  key: 'temperature' | 'frequencyPenalty' | 'presencePenalty' | 'repetitionPenalty',
+  value: string,
+): Record<string, number> {
+  const parsed = draftNumber(value);
+  return parsed === undefined ? {} : { [key]: parsed };
 }
 
 export function httpProviderToDraft(provider: HttpProviderConfig): HttpProviderDraft {
@@ -96,6 +152,10 @@ export function httpProviderToDraft(provider: HttpProviderConfig): HttpProviderD
     supportsStreaming: provider.supportsStreaming,
     maxOutputTokens: String(provider.maxOutputTokens),
     dailyBudget: String(provider.dailyBudget),
+    temperature: numberToDraft(provider.temperature),
+    frequencyPenalty: numberToDraft(provider.frequencyPenalty),
+    presencePenalty: numberToDraft(provider.presencePenalty),
+    repetitionPenalty: numberToDraft(provider.repetitionPenalty),
   };
 }
 
@@ -119,6 +179,13 @@ export function buildHttpProvider(
     supportsStreaming: draft.supportsStreaming,
     maxOutputTokens: Number(draft.maxOutputTokens),
     dailyBudget: Number(draft.dailyBudget),
+    // los cuatro de muestreo se OMITEN si el campo esta vacio. Omitir no es lo
+    // mismo que mandar el valor neutro: una conexion sin configurar tiene que
+    // seguir mandando el mismo cuerpo de siempre
+    ...sampling('temperature', draft.temperature),
+    ...sampling('frequencyPenalty', draft.frequencyPenalty),
+    ...sampling('presencePenalty', draft.presencePenalty),
+    ...sampling('repetitionPenalty', draft.repetitionPenalty),
     ...(existing?.softTerminalGraceMs === undefined
       ? {}
       : { softTerminalGraceMs: existing.softTerminalGraceMs }),

@@ -1000,6 +1000,49 @@ export const httpProviderConfigSchema = z.object({
    * todo el mundo.
    */
   imageUrlFormat: z.enum(['object', 'string']).default('object'),
+  /**
+   * temperatura del muestreo. SIN valor por defecto.
+   *
+   * rango 0..2: es el que documenta OpenAI para `temperature` en
+   * `/chat/completions`, y es el que replican las pasarelas compatibles. 0 no
+   * es determinismo garantizado, solo el extremo mas conservador.
+   *
+   * POR QUE OPCIONAL Y SIN DEFECTO: ver la nota comun mas abajo, en
+   * `repetitionPenalty`.
+   */
+  temperature: z.number().min(0).max(2).optional(),
+  /**
+   * penalizacion por FRECUENCIA. SIN valor por defecto.
+   *
+   * rango -2..2, el documentado por OpenAI. Es ADITIVA y proporcional a las
+   * veces que ya salio ese token. En negativo premia repetir.
+   */
+  frequencyPenalty: z.number().min(-2).max(2).optional(),
+  /**
+   * penalizacion por PRESENCIA. SIN valor por defecto.
+   *
+   * mismo rango -2..2 de OpenAI, pero no es el mismo parametro: se aplica una
+   * sola vez en cuanto el token ha aparecido, sin mirar cuantas.
+   */
+  presencePenalty: z.number().min(-2).max(2).optional(),
+  /**
+   * penalizacion por repeticion. SIN valor por defecto.
+   *
+   * NO ES DE OPENAI: viene de Hugging Face y lo implementan vLLM, TGI,
+   * llama.cpp y OpenRouter, entre otros. Por eso su rango no se parece a los
+   * dos anteriores: es MULTIPLICATIVA sobre el logit, el neutro es 1 y el
+   * valor tiene que ser estrictamente mayor que 0 —vLLM y TGI lo rechazan si
+   * no—. Por encima de 1 desanima repetir; por debajo, lo fomenta. El techo de
+   * 2 no es del protocolo: es el limite superior de lo que puede escribirse
+   * sin que el texto se vuelva incoherente.
+   *
+   * POR QUE LOS CUATRO SON OPCIONALES Y NINGUNO TIENE DEFECTO: hay servidores
+   * que devuelven 400 ante un parametro que no conocen, asi que una conexion
+   * que no los configure tiene que seguir mandando el mismo cuerpo de siempre,
+   * campo por campo. Y existen para poder MEDIR con y sin: un valor «razonable»
+   * de fabrica dejaria sin nada contra lo que comparar.
+   */
+  repetitionPenalty: z.number().gt(0).max(2).optional(),
 });
 
 const httpProviderListSchema = z

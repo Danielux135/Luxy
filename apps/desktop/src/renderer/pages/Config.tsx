@@ -1205,6 +1205,84 @@ export function ConnectionsPage({
               />
             </Field>
           </div>
+          {/*
+            los cuatro van juntos y con el aviso delante porque el riesgo de
+            este bloque no es escribir un numero malo: es creerse lo que hacen.
+            El texto dice sobre QUE actuan y que degradan la prosa, y no promete
+            ningun resultado, porque no se ha medido ninguno.
+          */}
+          <Notice tone="idle">
+            Parámetros de muestreo, todos opcionales. Vacío significa que Luxy{' '}
+            <strong>no los envía</strong>: el cuerpo de la petición sale igual que si estos campos
+            no existieran, que es lo que conviene cuando la pasarela rechaza lo que no conoce. Las
+            penalizaciones actúan sobre <strong>tokens</strong> que ya han salido, no sobre temas ni
+            sobre ideas: no impiden volver a lo mismo con otras palabras. Valores altos degradan la
+            prosa, porque el modelo empieza a esquivar palabras corrientes. Cada servidor decide
+            cuáles admite: puede ignorarlos o contestar con un error.
+          </Notice>
+          <div className="row">
+            {/* de TEXTO y no `number`, los cuatro: un campo numérico de HTML
+                devuelve la cadena vacía ante cualquier cosa que no sea un
+                decimal con punto, así que «1,5» —lo que sale de un teclado
+                español— se guardaba como «sin poner» y sin ningún aviso. En
+                texto se ve lo escrito, la coma se acepta y los rangos los
+                valida Zod, que además explica qué pasa */}
+            <Field label="Temperatura" hint="Vacío = no se envía. De 0 a 2.">
+              <input
+                type="text"
+                inputMode="decimal"
+                placeholder="sin enviar"
+                value={providerDraft.temperature}
+                onChange={(event) =>
+                  setProviderDraft({ ...providerDraft, temperature: event.target.value })
+                }
+              />
+            </Field>
+            <Field
+              label="Penalización por frecuencia"
+              hint="Vacío = no se envía. De -2 a 2. Crece con las veces que ya salió ese token."
+            >
+              <input
+                type="text"
+                inputMode="decimal"
+                placeholder="sin enviar"
+                value={providerDraft.frequencyPenalty}
+                onChange={(event) =>
+                  setProviderDraft({ ...providerDraft, frequencyPenalty: event.target.value })
+                }
+              />
+            </Field>
+          </div>
+          <div className="row">
+            <Field
+              label="Penalización por presencia"
+              hint="Vacío = no se envía. De -2 a 2. Se aplica una vez, en cuanto el token apareció."
+            >
+              <input
+                type="text"
+                inputMode="decimal"
+                placeholder="sin enviar"
+                value={providerDraft.presencePenalty}
+                onChange={(event) =>
+                  setProviderDraft({ ...providerDraft, presencePenalty: event.target.value })
+                }
+              />
+            </Field>
+            <Field
+              label="Penalización por repetición"
+              hint="Vacío = no se envía. Mayor que 0, neutro en 1. No es de OpenAI: sólo la admiten algunos servidores."
+            >
+              <input
+                type="text"
+                inputMode="decimal"
+                placeholder="sin enviar"
+                value={providerDraft.repetitionPenalty}
+                onChange={(event) =>
+                  setProviderDraft({ ...providerDraft, repetitionPenalty: event.target.value })
+                }
+              />
+            </Field>
+          </div>
           <div className="http-provider-options">
             <label className="check">
               <input

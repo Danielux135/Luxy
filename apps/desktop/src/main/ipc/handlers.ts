@@ -63,6 +63,7 @@ import {
   type ChosenMemory,
   type RecapCoverage,
   type RecapTurnRef,
+  type RelationNote,
 } from '@luxy/shared';
 import { detectEnvironment } from '@luxy/agent/dist/detect.js';
 import { GatewayClient } from '@luxy/agent/dist/gateway-client.js';
@@ -223,6 +224,7 @@ import { buildRecall } from '../vault/recall.js';
 import { diagnoseMemory, type DiagnosticMessage } from '../vault/memory-diagnostics.js';
 import { diagnoseRelations } from '../vault/relation-diagnostics.js';
 import {
+  isLiveNote,
   selectPendingForTurn,
   type PendingSelection,
 } from '../vault/relation-selection.js';
@@ -4388,12 +4390,26 @@ export function registerIpcHandlers(context: HandlerContext): void {
     // ninguna vale un turno de pago perdido. Sin pendientes el prompt queda
     // exactamente como estaba, que es el lado seguro.
     let pendientes: PendingSelection | null = null;
+    // lo apuntado y su alcance, guardados para MEDIR despues. Se quedan aqui
+    // porque solo existen si el almacen se dejo abrir, y la medida no puede
+    // volver a leerlo: seria descifrar el mismo archivo dos veces por turno.
+    let notasYAlcance: {
+      notes: readonly RelationNote[];
+      conversations: ReadonlySet<string>;
+    } | null = null;
     try {
       const apuntado = await context.relations.read(context.vault);
       // primero la linea temporal, que es la que construye el indice si aun no
       // esta: `conversationsFor` y `turnAt` leen lo ya construido y sin esto
       // devolverian el conjunto vacio y `null`, es decir, ningun pendiente
       const linea = await context.privateMemory.timeline(context.vault, characterId);
+      // el alcance es del PERSONAJE: un hilo sin personaje no hereda las
+      // promesas de nadie (`D-062`), igual que no hereda sus recuerdos.
+      //
+      // Se lee UNA vez y se usa en los dos sitios —la seleccion y la medida—
+      // porque dos conjuntos distintos harian incomparables sus cifras
+      const conversaciones = context.privateMemory.conversationsFor(characterId);
+      notasYAlcance = { notes: apuntado.notes, conversations: conversaciones };
       pendientes = selectPendingForTurn({
         notes: apuntado.notes,
         cursors: apuntado.cursors,
@@ -4403,9 +4419,7 @@ export function registerIpcHandlers(context: HandlerContext): void {
         // en otra pantalla
         failed: relationSync.failedConversations,
         timeline: linea,
-        // el alcance es del PERSONAJE: un hilo sin personaje no hereda las
-        // promesas de nadie (`D-062`), igual que no hereda sus recuerdos
-        conversations: context.privateMemory.conversationsFor(characterId),
+        conversations: conversaciones,
         turnAt: (ref) => context.privateMemory.turnAt(ref.conversationId, ref.sequence),
         current: {
           conversationId,
@@ -4422,6 +4436,57 @@ export function registerIpcHandlers(context: HandlerContext): void {
       // no valido, y ese dato es una cita de la boveda: contarlo aqui seria
       // sacar al log justo lo que este archivo nunca escribe
       pendientes = null;
+    }
+
+    // cuanto de lo que YA viaja en el prompt repite una promesa viva.
+    //
+    // La dosificacion decide que promesa sale hoy, pero solo manda sobre SU
+    // bloque. Una promesa copiada en la memoria acumulativa —que la escribe el
+    // modelo y se le devuelve entera cada turno con la orden de conservarla— o
+    // dicha dentro de una de sus ultimas respuestas vuelve LITERAL en todos los
+    // turnos sin pasar por ninguna espera. Son los dos canales que la
+    // dosificacion no ve, y sin medirlos un «ofrecidas: 0» se lee como que en
+    // ese turno no se le recordo nada, que es justo lo contrario.
+    //
+    // Mismo `matchesNote` y mismas notas vivas que la seleccion: si no, estas
+    // cifras y `abiertas` no se podrian comparar.
+    //
+    // FUERA del `try` de arriba a proposito: esto es medida, y un fallo suyo no
+    // puede quitarle al prompt un bloque que ya estaba calculado.
+    let ecoMemoria: { entradas: number; enNotas: number } | null = null;
+    let ecoHistorial: { respuestas: number; enNotas: number } | null = null;
+    const medibles = notasYAlcance;
+    if (medibles !== null) {
+      try {
+        const raicesVivas = medibles.notes
+          .filter((note) => isLiveNote(note, medibles.conversations))
+          .map((note) => quoteStems(note.quote));
+        const enAlgunaNota = (texto: string): boolean =>
+          raicesVivas.some((raices) => matchesNote(texto, raices));
+        // `plan` y `openQuestions` son donde el modelo apunta lo que queda por
+        // hacer: es ahi donde una promesa deja de ser un turno y pasa a ser
+        // texto fijo del prompt
+        const entradas = [
+          ...(memoriaElegida.memory?.plan ?? []),
+          ...(memoriaElegida.memory?.openQuestions ?? []),
+        ];
+        // las suyas que viajan como historial reciente. El mensaje nuevo no
+        // cuenta: es del usuario y va aparte
+        const respuestas = history.slice(0, -1).filter((turn) => turn.role === 'assistant');
+        ecoMemoria = {
+          entradas: entradas.length,
+          enNotas: entradas.filter((entrada) => enAlgunaNota(entrada)).length,
+        };
+        ecoHistorial = {
+          respuestas: respuestas.length,
+          enNotas: respuestas.filter((turn) => enAlgunaNota(turn.text)).length,
+        };
+      } catch {
+        // el motivo NO se registra, por lo mismo que arriba: un error de
+        // validacion trae dentro la cita que no valido
+        ecoMemoria = null;
+        ecoHistorial = null;
+      }
     }
 
     const bloques = composeVaultPrompt({
@@ -4466,6 +4531,16 @@ export function registerIpcHandlers(context: HandlerContext): void {
     const prompt = bloques.map((bloque) => bloque.text).join('\n\n');
     const medidas = measureVaultPrompt(bloques);
     context.log('prompt privado compuesto', {
+      // a que conversacion pertenece este prompt. Sin esto no se puede datar una
+      // linea del registro, que es lo que impidio cerrar el diagnostico de por
+      // que el personaje repetia la misma promesa.
+      //
+      // Va el uuid ENTERO y no una huella: es el mismo nombre que el archivo ya
+      // tiene en la boveda, asi que no dice nada que un listado del directorio
+      // no diga, y es la unica forma de cruzar el registro con una conversacion
+      // que se pueda abrir en Studio. Un hash obligaria a calcularlo a mano cada
+      // vez y no se podria juntar con nada. Identificador, jamas contenido
+      conversacion: conversationId,
       caracteres: prompt.length,
       tokensEstimados: estimateTokens(prompt),
       // de mayor a menor: lo primero de la lista es lo que hay que mirar
@@ -4516,6 +4591,11 @@ export function registerIpcHandlers(context: HandlerContext): void {
       // y si no salio ninguna porque la seleccion se cayo. Sin distinguirlo,
       // un almacen ilegible se lee igual que «hoy no tocaba»
       pendientesError: pendientes === null,
+      // los DOS canales por los que una promesa vuelve al prompt sin pasar por
+      // la dosificacion: cuantas entradas hay y cuantas de ellas hablan de una
+      // promesa viva. Enteros y nada mas; `null` si no se pudo leer lo apuntado
+      ecoMemoria,
+      ecoHistorial,
     });
 
     // dicho ya, se olvida: si no, el personaje seguiria disculpandose por una

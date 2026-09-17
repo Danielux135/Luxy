@@ -1268,6 +1268,9 @@ export class HttpApiProvider implements ProviderExecution {
           model: this.modelFor(request),
           messages,
           max_tokens: this.maxTokensFor(request),
+          // vacio salvo que la conexion los tenga puestos: sin configurar, el
+          // cuerpo sale identico al de antes de que existiera este campo
+          ...this.samplingParameters(),
           ...(tools === null ? {} : { tools, tool_choice: 'auto' }),
           ...(transmitir ? { stream: true, stream_options: { include_usage: true } } : {}),
         }),
@@ -1412,6 +1415,36 @@ export class HttpApiProvider implements ProviderExecution {
       : this.config.model;
   }
 
+  /**
+   * parametros de muestreo de esta conexion, y SOLO los que tenga puestos.
+   *
+   * POR QUE DEVUELVE UN OBJETO VACIO CUANDO NO HAY NINGUNO, en vez de mandar
+   * valores neutros: hay pasarelas que contestan 400 ante un parametro que no
+   * reconocen, asi que una conexion sin configurar tiene que seguir mandando
+   * el cuerpo de siempre, byte por byte. Extendido con `...`, un objeto vacio
+   * no añade ni una clave. Hay una prueba que lo fija.
+   *
+   * DONDE VA `repetition_penalty`: en la RAIZ del cuerpo, igual que los otros
+   * tres, aunque no sea de OpenAI. Los servidores que lo implementan —vLLM,
+   * TGI, llama.cpp, OpenRouter— lo leen de la raiz. `extra_body` NO es un
+   * campo del protocolo: es una comodidad del SDK de Python de OpenAI, que
+   * vuelca su contenido en la raiz antes de enviar, asi que anidarlo aqui
+   * produciria un cuerpo que no lee ningun servidor. Y este proveedor no tiene
+   * hoy ningun mecanismo de extras donde colgarlo.
+   *
+   * Los nombres de los otros tres son los del contrato de OpenAI, en
+   * snake_case, no los del esquema.
+   */
+  private samplingParameters(): Record<string, number> {
+    const { temperature, frequencyPenalty, presencePenalty, repetitionPenalty } = this.config;
+    return {
+      ...(temperature === undefined ? {} : { temperature }),
+      ...(frequencyPenalty === undefined ? {} : { frequency_penalty: frequencyPenalty }),
+      ...(presencePenalty === undefined ? {} : { presence_penalty: presencePenalty }),
+      ...(repetitionPenalty === undefined ? {} : { repetition_penalty: repetitionPenalty }),
+    };
+  }
+
   private async callApi(
     messages: ChatMessage[],
     request: ProviderRunRequest,
@@ -1459,6 +1492,9 @@ export class HttpApiProvider implements ProviderExecution {
           model: this.modelFor(request),
           messages,
           max_tokens: this.maxTokensFor(request),
+          // vacio salvo que la conexion los tenga puestos: sin configurar, el
+          // cuerpo sale identico al de antes de que existiera este campo
+          ...this.samplingParameters(),
           stream: this.config.supportsStreaming,
           // algunos proveedores solo devuelven usage si se pide explicitamente
           ...(this.config.supportsStreaming ? { stream_options: { include_usage: true } } : {}),

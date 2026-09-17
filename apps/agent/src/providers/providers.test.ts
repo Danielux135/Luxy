@@ -2571,3 +2571,182 @@ describe('HttpApiProvider: una linea de registro por llamada', () => {
     expect(result.finalText).toBe('Hola');
   }, 15_000);
 });
+
+// POR QUE EXISTEN ESTAS PRUEBAS: los parametros de muestreo se añadieron para
+// poder MEDIR con y sin, no para dejarlos puestos. Si una conexion que no los
+// configura empezara a mandar valores «neutros», pasarian dos cosas: ya no
+// habria un «sin» contra el que comparar, y las pasarelas que devuelven 400
+// ante un parametro que no conocen dejarian de responder sin que nadie hubiera
+// tocado su configuracion. La primera prueba fija el cuerpo ENTERO por eso.
+describe('HttpApiProvider: parametros de muestreo', () => {
+  const base = { ...EXAMPLE_HTTP_PROVIDERS[0]!, enabled: true, supportsStreaming: false };
+
+  /** captura el cuerpo enviado; no hay red, la respuesta es fija */
+  function espiar(): { body: () => Record<string, unknown> | null } {
+    let sent: Record<string, unknown> | null = null;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (_url, init) => {
+      sent = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      return new Response(
+        JSON.stringify({
+          choices: [{ message: { content: 'listo' }, finish_reason: 'stop' }],
+          usage: { prompt_tokens: 4, completion_tokens: 2 },
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    });
+    return { body: () => sent };
+  }
+
+  const peticion = (overrides: Record<string, unknown> = {}) => ({
+    prompt: 'hola',
+    workingDirectory: 'C:/wt',
+    timeoutMs: 1000,
+    signal: new AbortController().signal,
+    onEvent: () => undefined,
+    ...overrides,
+  });
+
+  it('sin configurar, el cuerpo sale identico al de siempre', async () => {
+    const espia = espiar();
+    const provider = new HttpApiProvider(base, 'una-clave');
+
+    expect((await provider.run(peticion())).ok).toBe(true);
+    // no se comprueban solo los cuatro nombres: se fija el cuerpo COMPLETO, que
+    // es la unica forma de cazar una clave nueva colada sin querer
+    expect(Object.keys(espia.body() ?? {}).sort()).toEqual([
+      'max_tokens',
+      'messages',
+      'model',
+      'stream',
+    ]);
+  });
+
+  it('sin configurar tampoco añade nada por el camino con herramientas', async () => {
+    // son DOS sitios distintos que componen el cuerpo, y el del bucle de
+    // herramientas es el que no se ve en una conversacion normal
+    const espia = espiar();
+    const provider = new HttpApiProvider(base, 'una-clave');
+
+    const result = await provider.run({
+      ...peticion({ readOnly: false }),
+      agentic: {
+        runner: { execute: vi.fn(async () => ({ ok: true, content: 'ok' })) },
+        allowedTools: ['write_file'],
+        limits: modelLimitsSchema.parse({}),
+        useNativeTools: true,
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(Object.keys(espia.body() ?? {}).sort()).toEqual([
+      'max_tokens',
+      'messages',
+      'model',
+      'tool_choice',
+      'tools',
+    ]);
+  });
+
+  it('manda solo los puestos, y con los nombres del contrato', async () => {
+    const espia = espiar();
+    const provider = new HttpApiProvider({ ...base, frequencyPenalty: 0.3 }, 'una-clave');
+
+    expect((await provider.run(peticion())).ok).toBe(true);
+    const body = espia.body() ?? {};
+    // snake_case, no el nombre del esquema
+    expect(body['frequency_penalty']).toBe(0.3);
+    expect(body['frequencyPenalty']).toBeUndefined();
+    expect('temperature' in body).toBe(false);
+    expect('presence_penalty' in body).toBe(false);
+    expect('repetition_penalty' in body).toBe(false);
+  });
+
+  it('manda los cuatro cuando estan los cuatro', async () => {
+    const espia = espiar();
+    const provider = new HttpApiProvider(
+      {
+        ...base,
+        temperature: 0.8,
+        frequencyPenalty: 0.2,
+        presencePenalty: -0.1,
+        // no es de OpenAI y va igualmente en la RAIZ: es de ahi de donde lo
+        // leen vLLM, TGI, llama.cpp y OpenRouter
+        repetitionPenalty: 1.05,
+      },
+      'una-clave',
+    );
+
+    expect((await provider.run(peticion())).ok).toBe(true);
+    expect(espia.body()).toMatchObject({
+      temperature: 0.8,
+      frequency_penalty: 0.2,
+      presence_penalty: -0.1,
+      repetition_penalty: 1.05,
+    });
+    expect(espia.body()?.['extra_body']).toBeUndefined();
+  });
+
+  it('un cero SI se manda: cero no es lo mismo que vacio', async () => {
+    // con `!temperature` o `temperature > 0` este caso se perderia en silencio,
+    // y temperatura 0 es precisamente uno de los extremos que se quiere medir
+    const espia = espiar();
+    const provider = new HttpApiProvider(
+      { ...base, temperature: 0, frequencyPenalty: 0 },
+      'una-clave',
+    );
+
+    expect((await provider.run(peticion())).ok).toBe(true);
+    expect(espia.body()?.['temperature']).toBe(0);
+    expect(espia.body()?.['frequency_penalty']).toBe(0);
+  });
+});
+
+// los cuatro rangos son DISTINTOS, y confundirlos manda a la pasarela un valor
+// que rechaza. Cada uno se fija en sus dos extremos y en lo que hay justo fuera.
+describe('rangos de los parametros de muestreo', () => {
+  const base = {
+    id: 'kimi',
+    displayName: 'Kimi',
+    baseUrl: 'https://ejemplo.test/v1',
+    model: 'Kimi-K2.6',
+    apiKeyEnv: 'connection:x',
+  };
+
+  const acepta = (extra: Record<string, number>): boolean =>
+    httpProviderConfigSchema.safeParse({ ...base, ...extra }).success;
+
+  it('una conexion antigua no tiene ninguno, y eso es lo correcto', () => {
+    const parsed = httpProviderConfigSchema.parse(base);
+    expect(parsed.temperature).toBeUndefined();
+    expect(parsed.frequencyPenalty).toBeUndefined();
+    expect(parsed.presencePenalty).toBeUndefined();
+    expect(parsed.repetitionPenalty).toBeUndefined();
+  });
+
+  it('temperatura: 0..2, el rango que documenta OpenAI', () => {
+    expect(acepta({ temperature: 0 })).toBe(true);
+    expect(acepta({ temperature: 2 })).toBe(true);
+    expect(acepta({ temperature: -0.1 })).toBe(false);
+    expect(acepta({ temperature: 2.1 })).toBe(false);
+  });
+
+  it('frecuencia y presencia: -2..2, y el negativo es valido', () => {
+    for (const key of ['frequencyPenalty', 'presencePenalty'] as const) {
+      expect(acepta({ [key]: -2 })).toBe(true);
+      expect(acepta({ [key]: 2 })).toBe(true);
+      expect(acepta({ [key]: -2.1 })).toBe(false);
+      expect(acepta({ [key]: 2.1 })).toBe(false);
+    }
+  });
+
+  it('repeticion: mayor que 0, no desde 0, porque es multiplicativa', () => {
+    // vLLM y TGI rechazan el 0: dividir por el neutro no tiene sentido ahi
+    expect(acepta({ repetitionPenalty: 0 })).toBe(false);
+    expect(acepta({ repetitionPenalty: 0.01 })).toBe(true);
+    expect(acepta({ repetitionPenalty: 1 })).toBe(true);
+    expect(acepta({ repetitionPenalty: 2 })).toBe(true);
+    expect(acepta({ repetitionPenalty: 2.1 })).toBe(false);
+    // y su rango NO es el de las otras dos penalizaciones
+    expect(acepta({ repetitionPenalty: -1 })).toBe(false);
+  });
+});

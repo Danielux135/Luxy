@@ -249,6 +249,25 @@ interface Candidate {
 }
 
 /**
+ * si una nota entra en el alcance de la dosificacion de este turno.
+ *
+ * Vive aqui, y no copiada en el handler, porque el registro cuenta cuantas de
+ * ESTAS MISMAS promesas vuelven solas por la memoria acumulativa o por el
+ * historial. En cuanto las dos listas dejen de ser la misma, esa cifra y
+ * `open` hablarian de conjuntos distintos y el diagnostico mentiria sin avisar.
+ *
+ * El alcance es del PERSONAJE, no de la boveda: un hilo sin personaje no hereda
+ * las promesas de nadie (`D-062`).
+ */
+export function isLiveNote(note: RelationNote, conversations: ReadonlySet<string>): boolean {
+  return (
+    note.status === 'open' &&
+    activeKinds.includes(note.kind) &&
+    conversations.has(note.origin.conversationId)
+  );
+}
+
+/**
  * elige los pendientes de este turno.
  *
  * Los filtros van en el orden del diseño y cada descarte se cuenta: sin eso, «no
@@ -300,11 +319,7 @@ export function selectPendingForTurn(input: PendingSelectionInput): PendingSelec
   const candidates: Candidate[] = [];
 
   for (const note of input.notes) {
-    if (note.status !== 'open') continue;
-    if (!activeKinds.includes(note.kind)) continue;
-    // el alcance es del PERSONAJE, no de la boveda: un hilo sin personaje no
-    // hereda las promesas de nadie (`D-062`)
-    if (!input.conversations.has(note.origin.conversationId)) continue;
+    if (!isLiveNote(note, input.conversations)) continue;
     counters.open += 1;
 
     const origin = input.turnAt(note.origin);

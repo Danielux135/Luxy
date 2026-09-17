@@ -206,6 +206,23 @@ export interface HttpProviderConfig {
    * forma estandar de objeto.
    */
   imageUrlFormat?: 'object' | 'string';
+  /**
+   * parametros de muestreo. Los CUATRO son opcionales y NINGUNO tiene valor
+   * por defecto, a proposito.
+   *
+   * POR QUE NO HAY DEFECTO: (a) hay pasarelas que devuelven 400 ante un
+   * parametro que no conocen, asi que una conexion sin configurar tiene que
+   * seguir mandando exactamente el mismo cuerpo que mandaba antes de que estos
+   * campos existieran; (b) existen para poder MEDIR con y sin, y un valor «de
+   * fabrica» dejaria sin nada contra lo que comparar.
+   *
+   * Los rangos NO son iguales entre ellos; cada uno esta acotado en
+   * `httpProviderConfigSchema`, con la fuente de la que sale.
+   */
+  temperature?: number;
+  frequencyPenalty?: number;
+  presencePenalty?: number;
+  repetitionPenalty?: number;
 }
 
 /**
