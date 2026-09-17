@@ -25,6 +25,25 @@ import { z } from 'zod';
 import { computeBackoffDelay, defaultSleep, redact } from '@luxy/shared';
 import type { HordeImageRequest, HordeLora } from '@luxy/shared';
 
+/**
+ * quien dibujo la imagen, con que modelo y con que semilla.
+ *
+ * Es lo que el horde contesta en el estado del trabajo. Va aparte del resultado
+ * porque tiene que poder viajar TAMBIEN dentro de un error: un bloqueo llega
+ * con la generacion ya hecha y con estos tres datos dentro, y hasta ahora se
+ * tiraban al lanzar. Sin ellos no se distingue un filtro que juzga el texto al
+ * encolar de uno que juzga la imagen ya dibujada.
+ *
+ * Cada campo es `null` cuando el servidor no lo dijo. Nunca se rellena con un
+ * valor de la peticion: lo pedido y lo hecho son cosas distintas.
+ */
+export interface HordeAttribution {
+  workerName: string | null;
+  workerId: string | null;
+  model: string | null;
+  seed: string | null;
+}
+
 export class HordeError extends Error {
   constructor(
     message: string,
@@ -37,6 +56,16 @@ export class HordeError extends Error {
      * versiones del horde, el codigo de retorno no.
      */
     readonly rc: string | null = null,
+    /**
+     * lo que se supiera de la generacion en el momento de fallar.
+     *
+     * `null` cuando al fallar no se sabia nada de ninguna generacion —un envio
+     * rechazado, una cola que vence, la red—. NO dice que la peticion no llegara
+     * a manos de ningun worker: una cola que vence pudo tener a uno dibujando,
+     * y el sondeo lo habria visto en `processing`. Quien apunta el intento es
+     * quien decide como se lee ese silencio; aqui solo consta que no hubo dato.
+     */
+    readonly attribution: HordeAttribution | null = null,
   ) {
     super(message);
     this.name = 'HordeError';
@@ -308,6 +337,14 @@ export interface HordeGeneration {
   id: string;
   model: string;
   workerName: string | null;
+  /**
+   * el identificador del voluntario, que hasta ahora se descartaba al convertir
+   * la respuesta.
+   *
+   * El nombre lo elige el y lo puede cambiar; esto no. Es lo unico con lo que se
+   * puede decir «otra vez el mismo worker» dos semanas despues.
+   */
+  workerId: string | null;
   censored: boolean;
   metadata: { type: string; value: string; ref: string | null }[];
 }
@@ -440,6 +477,7 @@ function toResult(raw: z.infer<typeof statusSchema>): HordeResult {
       id: generation.id ?? '',
       model: generation.model ?? '',
       workerName: generation.worker_name ?? null,
+      workerId: generation.worker_id ?? null,
       censored: generation.censored ?? false,
       metadata: (generation.gen_metadata ?? []).map((entry) => ({
         type: entry.type,
@@ -820,10 +858,33 @@ export async function checkImage(id: string, options: HordeOptions): Promise<Hor
 }
 
 /**
+ * lo que se sabe de una generacion, en la forma que puede viajar en un error.
+ *
+ * El transporte escribe `''` donde el horde callo, porque `HordeGeneration` no
+ * usa nulos en esos dos campos; aqui esa cadena vacia vuelve a ser `null`. Es la
+ * diferencia entre «no lo dijo» y «dijo una cadena vacia», y en el rastro de un
+ * bloqueo esa diferencia es justo lo que se lee.
+ */
+function attributionOf(generation: HordeGeneration): HordeAttribution {
+  return {
+    workerName: generation.workerName,
+    workerId: generation.workerId,
+    model: generation.model === '' ? null : generation.model,
+    seed: generation.seed === '' ? null : generation.seed,
+  };
+}
+
+/**
  * el filtro anti-CSAM de la red no es un fallo tecnico y no se reintenta.
  *
  * El horde lo marca en `gen_metadata` y devuelve la peticion como terminada, asi
  * que sin esta comprobacion pasaria por una generacion normal.
+ *
+ * LOS DOS ERRORES SE LLEVAN LA ATRIBUCION de la generacion que los provoco.
+ * Aqui la peticion ya paso por la cola y por un worker —el bloqueo llega con la
+ * imagen hecha—, asi que el worker, el modelo y la semilla existen y estan en la
+ * respuesta. Tirarlos hacia que un rechazo de la red se leyera en pantalla igual
+ * que un rechazo previo al encolado, que es el diagnostico contrario.
  */
 function assertNotCensored(result: HordeResult): void {
   for (const generation of result.generations) {
@@ -836,6 +897,7 @@ function assertNotCensored(result: HordeResult): void {
         null,
         'no es un fallo tecnico y no se reintenta: cambia el prompt',
         'csam',
+        attributionOf(generation),
       );
     }
     // el filtro PROPIO de un worker no deja metadato: solo marca `censored` y
@@ -848,6 +910,10 @@ function assertNotCensored(result: HordeResult): void {
         null,
         'ese worker aplica su propio filtro aunque se le pida lo contrario; vuelve a intentarlo para que la coja otro, o marca otros modelos',
         'censored',
+        // aqui el nombre del worker no es un detalle: es literalmente el que
+        // hay que evitar, y el consejo de «vuelve a intentarlo» no se puede
+        // comprobar sin saber si la siguiente la cogio otro
+        attributionOf(generation),
       );
     }
   }
@@ -1041,6 +1107,15 @@ async function pollImage(
     if (progress.done) return await readImageStatus(id, options);
   }
 
+  // SIN ATRIBUCION, y no es un olvido: el sondeo va por `check`, que solo
+  // devuelve contadores —`processing` dice que alguien la esta dibujando, pero
+  // no quien ni con que—. El nombre del worker, el modelo y la semilla los
+  // trae `status`, y a `status` solo se llama cuando la peticion termina. Aqui
+  // no termino, asi que no hay nada ultimo conocido que guardar.
+  //
+  // Lo que se apunta es «NO SE SABE», no «no lo hubo»: una cola que vence pudo
+  // tener perfectamente a un worker dibujando —`processing > 0` lo dice— y
+  // afirmar lo contrario es el error que costo dos revisiones desmontar.
   throw new HordeError(
     'la imagen no estuvo lista a tiempo',
     null,

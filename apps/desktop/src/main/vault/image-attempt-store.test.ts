@@ -249,6 +249,40 @@ describe('registro de intentos de imagen', () => {
     expect((await store.pending(vault, CONV_A))?.attemptId).toBe(viejoPendiente.attemptId);
   });
 
+  it('una racha de imagenes buenas no se lleva por delante los fallos', async () => {
+    // el caso real: una tarde de pruebas gasta el anillo en unas horas y, al
+    // podar por antiguedad, lo que sale por la ventana es justo el bloqueo que
+    // se iba a mirar. Un `ok` tiene su imagen guardada aparte; un `failed` solo
+    // existe aqui
+    const bloqueo = await store.append(vault, CONV_A, attempt({ state: 'failed', rc: 'csam' }));
+    const censura = await store.append(vault, CONV_A, attempt({ state: 'failed', rc: 'censored' }));
+    for (let index = 0; index < 12; index += 1) {
+      await store.append(vault, CONV_A, attempt({ state: 'ok' }));
+    }
+
+    await store.prune(vault, CONV_A, 5);
+
+    const leido = await store.list(vault, CONV_A);
+    const ids = leido.map((entry) => entry.attemptId);
+    expect(ids).toContain(bloqueo.attemptId);
+    expect(ids).toContain(censura.attemptId);
+    // y los correctos si se podan a su cupo
+    expect(leido.filter((entry) => entry.state === 'ok')).toHaveLength(5);
+  });
+
+  it('el cupo de diagnostico tambien tiene tope', async () => {
+    const primero = await store.append(vault, CONV_A, attempt({ state: 'failed' }));
+    await store.append(vault, CONV_A, attempt({ state: 'failed' }));
+    const penultimo = await store.append(vault, CONV_A, attempt({ state: 'malformed' }));
+    const ultimo = await store.append(vault, CONV_A, attempt({ state: 'sent' }));
+
+    await store.prune(vault, CONV_A, 5, 2);
+
+    const ids = (await store.list(vault, CONV_A)).map((entry) => entry.attemptId);
+    expect(ids).toEqual([penultimo.attemptId, ultimo.attemptId]);
+    expect(ids).not.toContain(primero.attemptId);
+  });
+
   it('prune no toca nada cuando aun caben', async () => {
     await store.append(vault, CONV_A, attempt({ state: 'ok' }));
     await store.append(vault, CONV_A, attempt({ state: 'ok' }));

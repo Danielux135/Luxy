@@ -1,5 +1,207 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-17 (madrugada) — los once defectos de la revision, y cifras medidas
+
+Todo lo que sigue se ha **ejecutado en esta pasada**. Ninguna cifra viene de otra
+entrada ni de un recuerdo.
+
+Suite completa, despues de los cambios de codigo de los tres agentes de esta
+pasada y **antes** de editar los `.md` (hay una segunda pasada de `docs.test.ts`
+al final, apuntada mas abajo):
+
+```
+node_modules\.bin\vitest.cmd run
+ Test Files  190 passed (190)
+      Tests  3965 passed | 12 skipped (3977)
+   Start at  12:54:07
+   Duration  118.14s (transform 20.41s, setup 0ms, collect 77.35s, tests 549.90s, environment 68ms, prepare 43.91s)
+```
+
+Ese bloque esta copiado de la salida, con el formato que imprime vitest. **La
+duracion no es una propiedad de la suite**: `tests 549.90s` es la suma de los
+archivos, que corren en paralelo, y el reloj de pared depende de la maquina y de
+lo que este corriendo a la vez. La revision de esta noche cronometro **376 s** en
+su propia ejecucion; 118 s es lo que dio la mia. Las dos pueden ser ciertas, y
+por eso una duracion suelta no prueba nada: se apunta para que se vea el orden de
+magnitud, no para compararla con nada.
+
+**El total sube de 3947 a 3965**: 18 pruebas nuevas de esta pasada. Los seis
+archivos que cubren lo tocado, ejecutados aparte:
+
+```
+node_modules\.bin\vitest.cmd run packages/shared/src/vault-image-request.test.ts packages/shared/src/vault-image-provider.test.ts packages/shared/src/vault-image-plan.test.ts apps/agent/src/providers/horde.test.ts apps/desktop/src/main/ipc/image-attempt-flow.test.ts apps/desktop/src/main/vault/image-attempt-store.test.ts
+
+packages/shared/src/vault-image-plan.test.ts           31 tests
+packages/shared/src/vault-image-provider.test.ts       96 tests
+packages/shared/src/vault-image-request.test.ts       120 tests
+apps/agent/src/providers/horde.test.ts                 75 tests
+apps/desktop/src/main/ipc/image-attempt-flow.test.ts   41 tests
+apps/desktop/src/main/vault/image-attempt-store.test.ts 17 tests
+Test Files  6 passed (6) — Tests 380 passed (380)
+```
+
+Comparado con la entrada de abajo, que media cinco archivos y 347 pruebas: el
+recorte de rasgos sube `vault-image-provider.test.ts` de 84 a **96**, el rastro
+sube `image-attempt-flow.test.ts` de 38 a **41**, el bullet del prompt sube
+`vault-image-request.test.ts` de 119 a **120**, y entra
+`image-attempt-store.test.ts` (**17**), que antes no se miraba porque el anillo no
+se habia tocado. `vault-image-plan.test.ts` y `horde.test.ts` no se mueven.
+
+La matriz, ejecutada por quien escribe esto:
+
+```
+npm run lint       exit 0
+npm run typecheck  exit 0
+npm run build      exit 0
+```
+
+**El guardian de tamaño, medido en los DOS estilos y contra el estado anterior.**
+Metodo, porque es lo que hace la cifra auditable: se escribio un archivo de prueba
+temporal en `packages/shared/src/` que imprime `.length` con el mismo caso del
+guardian —cuatro imagenes en lista—, y **ademas** se volco el
+`vault-image-request.ts` de `HEAD` (`a5116bd`) a un archivo hermano para medir el
+«antes» con la misma funcion y el mismo caso. Su unica dependencia,
+`vault-describe.ts`, no se ha tocado en esta rama (`git diff HEAD --stat` vacio),
+asi que la comparacion es valida. Los dos archivos temporales **se borraron**: no
+queda nada de esto en el repositorio.
+
+```
+                       HEAD (a5116bd)   worktree    limite
+prose, con generacion        6207          6296       6500
+tags,  con generacion        6211          6300       6500
+prose, sin generacion        2195          2090       3000
+```
+
+De ahi salen tres cosas, todas medidas:
+
+- el «margen 101» de la entrada de abajo era del estilo **`prose`**. En `tags`
+  aquel bloque media 6.403 y el margen era **97**. Cuatro caracteres de
+  diferencia, pero el que primero rompe el limite es siempre `tags`;
+- ahora el peor de los dos es `tags` con 6.300, o sea **margen 200**, y la prueba
+  del guardian comprueba los dos estilos, no solo uno;
+- el «antes eran 6.207 y 2.195» que la entrada de abajo dio por bueno **es
+  correcto**, y ahora esta comprobado en vez de afirmado. Se le añade lo que
+  faltaba: son cifras de `prose`.
+
+**Lo que esta pasada NO ha comprobado, y sigue sin comprobar:**
+
+- **nadie ha abierto Studio.** El `npm run build` exit 0 de arriba reconstruye los
+  seis paquetes, asi que el `dist` esta al dia; eso no es lo mismo que haber visto
+  la pantalla. Las tres frases del rastro —«no se apunto», «no lo hubo», «no lo
+  dijo»— y el anillo de diagnostico **no se han visto funcionando**;
+- **las correcciones de los `.md` no las sostiene ninguna prueba de contenido.**
+  `docs.test.ts` comprueba que la documentacion no cite scripts inexistentes, no
+  lleve rutas absolutas y no filtre secretos; no lee lo que una frase afirma. Que
+  las afirmaciones retiradas eran falsas se comprobo **leyendo el codigo y
+  ejecutando la medida**, archivo por archivo, y esa evidencia esta arriba;
+- **`D-091` sigue apoyada en una observacion unica.** Un bloqueo, un reloj. Lo que
+  esta pasada ha cambiado es que ya no se presenta como si tuviera dos patas
+  igual de firmes.
+
+Segunda pasada de `docs.test.ts` **despues** de escribir todos los `.md` de esta
+entrada:
+
+```
+node_modules\.bin\vitest.cmd run packages/shared/src/docs.test.ts
+ packages/shared/src/docs.test.ts (64 tests) 118ms
+ Test Files  1 passed (1) — Tests 64 passed (64)
+```
+
+### 2026-09-17 (noche) — siete arreglos de una tarde de imagenes
+
+Los cinco archivos que cubren lo que se toco, primero:
+
+```
+node_modules\.bin\vitest.cmd run packages/shared/src/vault-image-request.test.ts packages/shared/src/vault-image-provider.test.ts packages/shared/src/vault-image-plan.test.ts apps/agent/src/providers/horde.test.ts apps/desktop/src/main/ipc/image-attempt-flow.test.ts
+
+packages/shared/src/vault-image-provider.test.ts      84 tests
+packages/shared/src/vault-image-plan.test.ts          31 tests
+packages/shared/src/vault-image-request.test.ts      119 tests
+apps/agent/src/providers/horde.test.ts                75 tests
+apps/desktop/src/main/ipc/image-attempt-flow.test.ts  38 tests
+Test Files  5 passed (5) — Tests 347 passed (347)
+```
+
+Y la suite completa, ejecutada de verdad en esta pasada y **despues** de escribir
+los `.md`, asi que `docs.test.ts` corrio contra el texto final:
+
+```
+node_modules\.bin\vitest.cmd run
+Test Files  190 passed (190)
+     Tests   3947 passed | 12 skipped (3959)
+```
+
+**Aqui habia una linea «Duration 140.00s» y era inventada**, retirada el
+2026-09-17 (madrugada): ese formato no es el que imprime vitest, nadie cronometro
+esa pasada y la cifra no sale de ninguna salida real. La duracion medida de
+verdad esta en la entrada de arriba, y ademas no es una propiedad de la suite:
+depende de la maquina y de lo que este corriendo a la vez.
+
+La matriz, los tres exit 0:
+
+```
+npm run lint       exit 0
+npm run typecheck  exit 0   (tsc -b tsconfig.build.json + los seis tsconfig.tests.json)
+npm run build      exit 0
+```
+
+**El total sube de 3900 a 3947**, 47 pruebas mas que la entrada de abajo. De esas,
+**14 son las cuatro `describe` nuevas** del bloque de instrucciones —una por
+arreglo—, y el resto se reparte entre complexion y rubor en
+`vault-image-provider.test.ts` y el rastro del fallo en `vault-image-plan.test.ts`,
+`horde.test.ts` e `image-attempt-flow.test.ts`. El reparto exacto de esas 33 no se
+ha contado archivo por archivo y no se afirma.
+
+**El guardian de tamaño, medido y no supuesto.** Se escribio un archivo de prueba
+temporal que imprime las dos longitudes con el mismo caso que usa el guardian
+—cuatro imagenes en lista, `prose`—, se ejecuto y **se borro**; no queda en el
+repositorio. Lo que dio:
+
+```
+con generacion: 6399   (limite 6500, margen 101)   ← estilo `prose` SOLO
+sin generacion: 2090   (limite 3000)
+```
+
+**Las dos cifras de arriba son del estilo `prose` y no se dijo.** El bloque se
+compone en dos estilos y `tags` ocupa cuatro caracteres mas: en esa pasada media
+6.403, o sea **margen 97**, no 101. Medido y corregido en la entrada de arriba,
+donde ademas la prueba pasa a vigilar los dos estilos.
+
+Antes eran 6.207 y 2.195 (`prose`). **Esa comparacion se dio por buena sin
+comprobarla** y se ha comprobado despues, el 2026-09-17 (madrugada): ver la
+entrada de arriba, donde se mide el archivo de `HEAD` y el del worktree con la
+misma funcion. Lo que si se sostiene: el bloque sigue por debajo del limite
+**porque se condenso lo ya escrito**, no porque se subiera el guardian. El
+guardian no cambio de valor.
+
+**Lo que estas pruebas SI sostienen:** que las cuatro reglas nuevas aparecen en el
+texto que se manda; que no aparecen por el camino que no puede generar; que el
+desempate de `D-086` sigue mirando determinantes y no verbos; que el apartado nuevo
+no sale cuando no hay nada guardado; que complexion y rubor solo recortan cuando la
+apariencia fija trae el mismo patron, y que «blush pink lingerie», «rosy dawn
+light» y «red curtains» se quedan enteros; y que los cinco campos del rastro viajan
+del transporte al intento cifrado y a la pantalla, tambien cuando falla.
+
+**Lo que NO sostienen, y conviene que quede escrito:**
+
+- **ninguna prueba puede fijar que el generador obedezca una postura.** Fijan que
+  la instruccion llega al prompt. Que la imagen salga como se pide lo confirma
+  Daniel en pantalla o no lo confirma nadie;
+- **la evidencia de la tarde no es una prueba automatica.** Las cuatro variantes
+  con la misma semilla y el mismo modelo son cuatro generaciones, un personaje y un
+  modelo, y «salio bien» es su juicio mirando la pantalla;
+- **el bloqueo que confirma `D-091` se ha observado una vez.** Un bloqueo, un
+  reloj. Coincide ademas con lo que dice el codigo del transporte, pero eso son dos
+  vias, no veinte casos;
+- **el encuadre heredado es intermitente y no esta aislado.** No hay prueba de la
+  causa porque no se conoce la causa: lo que hay es una instruccion para que se
+  repita el encuadre;
+- **nada se ha visto en Studio**, que no es lo mismo que «no se reconstruyo».
+  Esta linea decia las dos cosas y la primera mitad se contradecia con el
+  `npm run build` exit 0 de tres parrafos mas arriba, que reconstruye los seis
+  paquetes. Lo cierto es solo la segunda: **nadie ha abierto la aplicacion**, asi
+  que ninguna de estas correcciones se ha visto funcionando en pantalla.
+
 ### 2026-09-17 (tarde) — la revision del arreglo, y el tipo de cuenta que se lee
 
 Suite completa, ejecutada de verdad en esta pasada:

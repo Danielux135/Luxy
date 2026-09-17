@@ -270,11 +270,11 @@ export function buildVaultImageInstruction(
           // DE LAS DOS, y las dos copias no decian lo mismo: aqui el criterio era
           // «y ya hay alguna que encaje» —semantico— y alli «y solo entonces»
           // sobre una lista cerrada de cuatro frases. Una sola copia, la de abajo
-          'a) REENVIAR una que ya existe en esta conversacion. Es gratis e inmediato:',
+          'a) REENVIAR una que ya existe aqui. Es gratis e inmediato:',
           `   ${VAULT_IMAGE_OPEN}{"mediaId":"<id de la lista de abajo>"}${VAULT_IMAGE_CLOSE}`,
           '',
-          'b) GENERAR una nueva. Cuesta creditos y tarda, asi que solo cuando pidan algo que aun',
-          '   no existe, o cuando el haga una foto (ver CUANDO, caso 2):',
+          'b) GENERAR una nueva. Cuesta creditos: solo para lo que aun no existe,',
+          '   o cuando el haga una foto (ver CUANDO, caso 2):',
           `   ${VAULT_IMAGE_OPEN}{"prompt":"<descripcion en INGLES>","kind":"image"}${VAULT_IMAGE_CLOSE}`,
           '',
           // PASO DE VERDAD: pidio «dame otra foto» y le reenvio la que acababa de
@@ -297,11 +297,34 @@ export function buildVaultImageInstruction(
           // castellano de la foto que se acaba de hacer en este mismo mensaje, y
           // esa hay que generarla (`D-086`).
           'CUAL DE LAS DOS, que es donde mas se falla:',
+          // «enseñame algo distinto» volvio aqui: se perdio al condensar la lista y era el
+          // unico ejemplo en que la peticion de algo NUEVO no lleva la palabra «otra»
           '- «otra», «otra mas», «una nueva», «hazme una», «enseñame algo distinto» piden GENERAR:',
           '  quieren una foto que todavia no existe, y reenviar una vieja es no hacer caso.',
           '- «la de antes», «esa otra vez», «la ultima», «vuelve a mandarmela», «tu foto de perfil»',
           '  piden REENVIAR: nombran una que YA existe. Buscala en la lista de abajo y manda su id.',
           '  Solo si ninguna encaja, generala.',
+          // PASO DE VERDAD (2026-09-16): «Mira y describeme la ultima foto... Te voy a hacer
+          // una ultima foto, quedate igual», y REENVIO la anterior en vez de generar. El
+          // mensaje empieza por «la ultima», que esta ahi arriba entre los determinantes que
+          // mandan reenviar.
+          //
+          // El arreglo NO puede ser una lista de verbos («describe», «mira» frente a «manda»,
+          // «enseñamela»), que es lo que se escribio primero, por tres motivos que se suman:
+          // este apartado decide por DETERMINANTES a proposito (`D-086`) y un bullet de verbos
+          // lo contradice; en un apartado titulado CUAL DE LAS DOS no resolvia a ninguna de
+          // las dos vias, asi que «enseñame otra» disparaba ese bullet y el de «otra» a la vez
+          // sin desempatar; y dejar escrito que «que te parece» no pide la foto es regalarle
+          // la excusa que las secciones «ES UNA ORDEN» y «si dudas, manda una» existen para
+          // cerrar. Lo que de verdad faltaba es mas corto: un determinante dentro de un
+          // comentario no es una peticion, y un turno puede comentar la vieja Y pedir una
+          // nueva, en cuyo caso manda la nueva.
+          //
+          // Va pegado al bullet del reenvio y empieza por «pero» porque es su acotacion: no
+          // introduce un tercer criterio, dice cuando el determinante que acaba de nombrarse
+          // no llega a ser una peticion
+          '- Pero nombrarla no es pedirla: si solo la comenta, te basta con su linea de la lista',
+          '  y no mandas ninguna. Si ademas te pide o hace una foto nueva, GENERA la nueva.',
           // el «NUNCA» de antes era incondicional y se comia la familia de
           // frases en que repetir la misma imagen es justo lo que se pide —«no
           // me ha llegado», «no me carga, ponla otra vez»—, que ademas esta dos
@@ -361,10 +384,10 @@ export function buildVaultImageInstruction(
           'CUANDO escribir el bloque, en DOS casos y solo en esos:',
           '1. el usuario pide ver, recibir o volver a ver una imagen;',
           '2. el usuario HACE UNA FOTO en este turno, dentro de la escena, y sales tu en ella («te',
-          '   saco una foto», «levanto el movil y disparo»). No la pide, pero tiene que existir:',
-          '   GENERALA. Si salis los dos, o os la hace otra persona, generala solo contigo, en plano',
-          '   cercano y sin el. Si solo se fotografia a si mismo, o solo lo dice o lo recuerda («ayer',
-          '   te hice una», «voy a hacerte una»), no. Lo que decide es CUANDO se hace la foto, no el',
+          '   saco una foto»). No la pide, pero tiene que existir: GENERALA.',
+          '   Si salis los dos, o os la hace otra persona, generala solo contigo, en plano cercano',
+          '   y sin el. Si solo se fotografia a si mismo, o solo lo dice o lo recuerda («ayer te',
+          '   hice una», «voy a hacerte una»), no. Lo que decide es CUANDO se hace la foto, no el',
           '   tiempo verbal: la de antes de este mensaje («la ultima», «esa») es del caso 1; la que',
           '   hace aqui es del 2, aunque escriba «ya te he hecho una».',
           'Fuera de esos dos casos, nunca por iniciativa propia: un momento intenso, una promesa o un',
@@ -398,18 +421,17 @@ export function buildVaultImageInstruction(
     // quieres una foto si me tienes aqui?», que no es ninguna de las dos
     // prohibidas, y se quedo tan ancha. Y el condicional «y haya una opcion que
     // encaje» le daba la salida
-    'PERO SI TE LA PIDEN, ES UNA ORDEN, no una sugerencia. Una peticion directa —«quiero ver una',
+    'PERO SI TE LA PIDEN, ES UNA ORDEN. Una peticion directa —«quiero ver una foto»,',
     // acotado a ESTA instruccion, que es lo que queria decir. «Cualquier
     // instruccion de no llevar la iniciativa» sonaba a permiso general para
     // saltarse el freno, y el freno de dos lineas mas arriba es justo una
     // instruccion de no llevar la iniciativa: la frase se autorizaba a ignorarlo
-    'foto», «mandame una», «enseñamela»— manda sobre tu forma de ser y sobre esa instruccion',
-    'de no llevar la iniciativa: enseñarla no es iniciativa tuya, te la han pedido. Entonces:',
+    '«mandame una», «enseñamela»— manda sobre tu forma de ser y sobre esa instruccion de',
+    'no llevar la iniciativa: te la han pedido. Entonces:',
     '   responde primero en personaje y despues escribe el bloque, en el MISMO turno;',
-    '   no alegues que no puedes adjuntar archivos;',
-    '   no prometas enviarla sin incluirlo;',
+    '   no alegues que no puedes adjuntar archivos; no prometas enviarla sin incluirlo;',
     '   y NO la esquives. Cambiar de tema, bromear, preguntar para que la quiere o decir',
-    '   «mejor mirame ahora» es incumplir la orden, por mucho que encaje con tu personaje.',
+    '   «mejor mirame ahora» es incumplir la orden, aunque encaje con tu personaje.',
     // «cual» solo existe si hay lista. Sin ninguna imagen guardada esta linea
     // mandaba elegir entre las cero opciones de un menu que no se imprime, y
     // salia igual en los cuatro caminos, incluido el de cero imagenes.
@@ -441,29 +463,48 @@ export function buildVaultImageInstruction(
 
   lines.push(
     '',
-    'COMO escribir `prompt`, que es lo que recibe el generador de imagenes:',
-    '- EN INGLES, siempre. En cualquier otro idioma el generador ignora la escena y devuelve otra',
-    '  cosa. Escribe la respuesta en el idioma de la conversacion y solo este campo en ingles.',
-    '- Solo aparece EL PERSONAJE, a solas. Nunca describas al usuario, sus manos, su cuerpo ni a',
-    '  ninguna otra persona: si mencionas a alguien mas, sale en la imagen.',
-    '- Nada de camaras, moviles, espejos, selfies ni el acto de fotografiar, aunque el usuario haya',
-    '  dicho «mandame una foto» o aunque la foto la este haciendo el. Eso pone una camara en la',
-    '  imagen. Ni siquiera en negativo: «not looking at camera» tambien la dibuja.',
+    'COMO escribir `prompt`, que es lo que recibe el generador:',
+    '- EN INGLES, siempre: en otro idioma el generador ignora la escena. La respuesta va en el',
+    '  idioma de la conversacion y solo este campo en ingles.',
+    '- Solo aparece EL PERSONAJE, a solas: nunca el usuario, sus manos ni su cuerpo, porque',
+    '  si mencionas a alguien mas, sale en la imagen.',
+    '- Nada de camaras, moviles, espejos, selfies ni el acto de fotografiar, aunque haya dicho',
+    '  «mandame una foto» o aunque la foto la este haciendo el: sale una camara.',
+    '  Ni siquiera en negativo: «not looking at camera» tambien la dibuja.',
     // PASO DE VERDAD (2026-09-16), dos veces el mismo dia. Daniel pidio la foto
     // «desde detras» tres veces y salio de frente; luego «el culo mirando a
     // camara» y salio de frente otra vez. Faltaban las dos mitades: que lo que
     // el pide MANDA —solo habia dos ejemplos de encuadre y ninguno era el suyo—
     // y que «a camara» no nombra un aparato, dice hacia donde mira, asi que la
     // prohibicion de la linea de arriba se llevaba por delante la frase entera.
-    '- Si el usuario dice desde donde la quiere o en que postura, ESO MANDA: es lo unico que ha',
-    '  pedido. «desde detras» y «el culo a camara» son «from behind»; «de espaldas», «from behind,',
+    '- Si el usuario dice desde donde la quiere o en que postura, ESO MANDA: es lo que ha',
+    '  pedido. «desde detras» y «el culo a camara», «from behind»; «de espaldas», «from behind,',
     '  facing away»; «mirando a camara», «looking at viewer»; «de cerca», «close-up»; «de cuerpo',
     '  entero», «full body»; «desde arriba/abajo/de lado», «from above/below/the side». «A camara»',
     '  NO nombran un objeto: traduce la direccion y no pongas la camara.',
+    // PASO DE VERDAD (2026-09-16), cuatro pruebas con la misma semilla y el mismo modelo. El
+    // prompt que fallo decia «from behind, ass to camera, nude, blushing, on bed, soft
+    // lighting, looking away»: dice desde donde se mira y NO como esta el cuerpo, y salio
+    // tumbada de lado. Los tres que funcionaron llevaban ademas «on all fours, arched back,
+    // face down». El encuadre no implica ninguna postura: la que no se escribe se inventa
+    '- El encuadre NO es la postura: «from behind» dice desde donde se mira, no como esta el',
+    '  cuerpo. Nombra la postura —«on all fours», «lying face down», «kneeling», «sitting»—: la',
+    '  que no escribas la inventa el generador.',
+    // y se pierde de forma INTERMITENTE, no siempre: con «sigue en la misma postura» y con «te
+    // hago otra foto» conservo la postura y perdio «from behind» y «ass to camera»; con
+    // «quedate como estas» las conservo las dos. Por eso se repiten, en vez de confiar en que
+    // el turno anterior siga puesto
+    '- «sigue igual», «no te muevas», «quedate como estas»: repite el encuadre Y la postura de',
+    '  la foto anterior; el encuadre es el que se pierde.',
     '- Si no lo dice y la foto la hace el, describe la escena tal como se ve desde donde esta el.',
-    '  Si estas dormida o no te das cuenta, dilo con «eyes closed», «asleep» o «looking away».',
+    '  Dormida o sin enterarte: «eyes closed», «asleep», «looking away».',
+    // «solo lo que se ve» ya estaba, y no bastaba: el modelo escribio «warm atmosphere»,
+    // «intimate setting» y «full view» en tres prompts distintos, porque una atmosfera calida
+    // le suena a algo que se ve. Con esto no hay nada que razonar: van nombradas una por una,
+    // que es lo unico que funciona con este tipo de fallo
     '- Solo lo que se ve: pose, ropa, expresion, luz, lugar. Sin dialogo, sin lo que siente, sin',
-    '  contar lo que pasa antes o despues. No copies el mensaje del usuario.',
+    '  contar lo que pasa antes o despues, y sin relleno: «warm atmosphere», «intimate setting»',
+    '  o «full view» no se dibujan. No copies el mensaje del usuario.',
     // ESTO FALTABA Y ARRUINABA CADA IMAGEN. El aspecto fijo del personaje va
     // DELANTE de esto, puesto por su receta. Si la escena vuelve a decir de que
     // color es el pelo, los dos textos compiten dentro del mismo prompt y gana
@@ -475,11 +516,11 @@ export function buildVaultImageInstruction(
     // hacia con buena intencion —esta describiendo a su personaje— y por eso
     // hay que decirselo, no basta con no pedirselo.
     '- NO describas COMO ES ella: ni el pelo, ni los ojos, ni la piel, ni el pecho, ni la edad,',
-    '  ni de donde es. Todo eso ya va escrito delante, y repetirlo lo estropea: si tu version no',
-    '  coincide palabra por palabra, el generador recibe dos descripciones distintas de la misma',
-    '  persona y dibuja a otra. Aunque lo sepas y aunque encaje, no lo pongas.',
-    '- Lo tuyo es lo que CAMBIA de una foto a otra: donde esta, en que postura, que ropa lleva o',
-    '  no lleva, que cara pone, como es la luz y que hay alrededor.',
+    '  ni de donde es. Ya va escrito delante: si tu version no coincide palabra por palabra, el',
+    '  generador recibe dos descripciones distintas de la misma persona y dibuja a otra.',
+    '  Aunque lo sepas y aunque encaje, no lo pongas.',
+    '- Lo tuyo es lo que CAMBIA de una foto a otra: sitio, postura, ropa —o su falta—, cara, luz',
+    '  y lo que hay alrededor.',
     style === 'tags'
       ? '- Etiquetas cortas separadas por comas, sin frases: "sitting on a bed, blue dress, blushing,'
       : '- Frases cortas separadas por comas: "sitting on the edge of the bed, wearing a blue dress,',
@@ -490,16 +531,15 @@ export function buildVaultImageInstruction(
     // los que menos. Paso de verdad: una escena de trece pedia «de espaldas,
     // mirando sobre el hombro, camisa caida hasta la cintura, vaqueros
     // bajados», y volvio una foto de frente, vestida y sentada.
-    '- OCHO elementos como mucho, y mejor seis. No es una lista de todo lo que pasa: es lo que',
-    '  hay que ver. Cada cosa que añades le quita fuerza a las demas.',
-    '- El PRIMERO es el que mas pesa, asi que empieza por lo que no puede faltar. Si lo que',
-    '  importa es que esta de espaldas, «from behind» va primero, no al final.',
-    '- Los estados de ropa se dicen con la etiqueta corta que existe —«open shirt», «off',
-    '  shoulder», «undressing»— y no describiendolos: «la camisa se le cae del todo por los',
-    '  hombros y se queda en la cintura» no lo entiende, «off shoulder» si.',
+    '- OCHO elementos como mucho, y mejor seis: no es todo lo que pasa, es lo que hay que ver,',
+    '  y cada cosa que añades le quita fuerza a las demas.',
+    '- El PRIMERO es el que mas pesa: si lo importante es que esta de espaldas, «from behind»',
+    '  va primero.',
+    '- Los estados de ropa van con la etiqueta corta que existe —«open shirt», «off shoulder»,',
+    '  «undressing»—: «la camisa se le cae hasta la cintura» no lo entiende, «off shoulder» si.',
     '',
-    'El bloque va al final de tu respuesta, antes del bloque de memoria. No puedes adjuntar',
-    'archivos de ninguna otra forma.',
+    'El bloque va al final de tu respuesta, antes del bloque de memoria: no hay otra forma de',
+    'adjuntar nada.',
   );
 
   return lines.concat(availableLines(available)).join('\n');
@@ -521,7 +561,7 @@ function availableLines(available: VaultImageOnFile[]): string[] {
     // «durmiendo» casaba con una sola linea. Con dos fotos parecidas volvia a
     // ser una moneda al aire. Decirlo solo vale si es cierto, y por eso la
     // ordena `PrivateMediaStore.list` antes de llegar aqui
-    'IMAGENES QUE YA EXISTEN AQUI, de la mas antigua a la mas reciente (su id sirve para reenviarlas):',
+    'IMAGENES QUE YA EXISTEN AQUI, de la mas antigua a la mas reciente (su id las reenvia):',
     ...available.map((image) => {
       const description =
         image.description.trim().length === 0 ? 'sin descripcion' : image.description.trim();
@@ -533,12 +573,12 @@ function availableLines(available: VaultImageOnFile[]): string[] {
     // dio por vistas. Inventar detalle suena mas convincente que decir que no
     // se puede ver, y por eso es peor
     'Esa linea es TODO lo que sabes de cada imagen: NO las ves. Puedes comentarlas y darlas por',
-    'ciertas, pero no añadas ningun detalle visual que no este escrito ahi —colores, formas,',
-    'gestos, ropa, que hay al fondo—. Si te falta algo para responder, preguntalo; no lo supongas.',
+    'ciertas, pero no añadas ningun detalle visual que no este escrito ahi —colores, gestos,',
+    'ropa, fondo—. Si te falta algo para responder, preguntalo; no lo supongas.',
     // sin esto el arreglo dura un turno: el detalle inventado entra en la
     // memoria acumulativa, vuelve marcado como hecho y desde ahi genera mas
-    'Esta lista MANDA sobre la memoria. Si recuerdas un detalle de una imagen que no aparece en su',
-    'linea, no lo des por visto: pudo inventarlo un turno anterior. La memoria recuerda lo que se',
+    'Esta lista MANDA sobre la memoria: si recuerdas un detalle que no aparece en su linea,',
+    'no lo des por visto —pudo inventarlo un turno anterior—. La memoria recuerda lo que se',
     'dijo, no lo que se vio.',
   ];
 }

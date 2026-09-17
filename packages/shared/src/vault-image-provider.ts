@@ -429,6 +429,202 @@ const TRAIT_ORIGINS = [
  */
 const TRAIT_PERSON_WORDS = 'woman|women|girl|lady|man|men|boy|female|male';
 
+/**
+ * la COMPLEXION, tercer camino por el que la escena redefine el cuerpo.
+ *
+ * Visto en prompts reales: la receta fijaba «slim body, slender, small frame» y
+ * la escena colaba «small body». Dos tallas en el mismo prompt, y cual gana no
+ * lo decide nadie.
+ *
+ * Lista cerrada y en ingles, por el mismo motivo que la de colores: el prompt
+ * del generador siempre va en ingles, y una expresion abierta se comeria media
+ * escena.
+ */
+const TRAIT_BUILD_WORDS = [
+  'slim',
+  'slender',
+  'skinny',
+  'thin',
+  'lean',
+  'petite',
+  'small',
+  'tiny',
+  'little',
+  'athletic',
+  'toned',
+  'fit',
+  'muscular',
+  'curvy',
+  'curvaceous',
+  'voluptuous',
+  'thick',
+  'chubby',
+  'plump',
+  'stocky',
+  'heavy',
+  'big',
+  'large',
+  'huge',
+  'delicate',
+  'frail',
+  'wiry',
+];
+
+/**
+ * los sustantivos que nombran el cuerpo ENTERO, y solo esos.
+ *
+ * Aqui esta el cuidado que hay que tener con este recorte: «small breasts» o
+ * «wide hips» NO se tocan aunque la receta diga «slim body», porque el aspecto
+ * fijo habla de la complexion general y no de esa parte. Quitarlo seria borrar
+ * escena de verdad, que es justo lo que este modulo no puede hacer.
+ */
+const TRAIT_BUILD_NOUNS = ['body', 'frame', 'figure', 'build', 'physique', 'torso', 'silhouette'];
+
+/**
+ * el RUBOR, cuarto camino: la receta decia «blush, pink cheeks» y la escena
+ * repetia «blushing» por su cuenta.
+ *
+ * Aqui los calificativos incluyen colores —«red face», «pink cheeks»— porque el
+ * rubor es un color puesto sobre la cara. Por eso mismo NUNCA se quitan solos:
+ * hace falta que califiquen a una de las partes de `TRAIT_BLUSH_TARGETS`, igual
+ * que un origen necesita una persona detras. «blush pink lingerie» y «rosy dawn
+ * light» son escena y se quedan.
+ */
+const TRAIT_BLUSH_WORDS = [
+  'blushing',
+  'blushed',
+  'blush',
+  'flushed',
+  'flushing',
+  'rosy',
+  'reddened',
+  'red',
+  'pink',
+  'crimson',
+  'ruddy',
+  'scarlet',
+];
+
+/** lo que el rubor colorea; sin una de estas palabras, «blush» puede ser un color de ropa */
+const TRAIT_BLUSH_TARGETS = 'cheeks|cheek|face|skin|complexion|nose|ears';
+
+/**
+ * y de esas, las unicas que un COLOR a secas ya solo puede estar ruborizando.
+ *
+ * La piel, la cara y la nariz tambien son superficie de iluminacion y de clima:
+ * «soft red light on skin» es la luz que pidio el usuario y «red nose from the
+ * cold» es el invierno, y con un color delante no se distinguen del rubor. Sobre
+ * ellas se exige una palabra de `TRAIT_BLUSH_PLAIN`, que ya no tiene otra
+ * lectura; «flushed skin» se sigue quitando. Las mejillas se quedan aqui porque
+ * un color sobre ellas es rubor y no hay segunda lectura.
+ *
+ * El daño era peor en el estilo `tags` —«red light on skin, bedroom»—, que es
+ * justo el que el bloque obliga a escribir, sin posesivos que separen.
+ */
+const TRAIT_BLUSH_COLORABLE = 'cheeks|cheek';
+
+/**
+ * las formas que no pueden calificar a un objeto: solo se ruboriza alguien.
+ *
+ * Son las unicas que se quitan SUELTAS, sin exigir una parte de la cara detras,
+ * porque el caso observado —«blushing» a secas, entre comas— no la trae.
+ */
+const TRAIT_BLUSH_VERBS = ['blushing', 'blushes'];
+
+/**
+ * lo que ya solo puede significar rubor, sea en la receta o en la escena.
+ *
+ * Es mas estrecha que `TRAIT_BLUSH_WORDS` porque una receta dice «red hair» sin
+ * hablar de rubor, y eso no puede abrir la puerta. Por el mismo motivo es la
+ * lista que se exige sobre la piel, la cara y la nariz, donde un color puede ser
+ * la luz o el frio.
+ */
+const TRAIT_BLUSH_PLAIN = [
+  'blush',
+  'blushing',
+  'blushes',
+  'blushed',
+  'flushed',
+  'flushing',
+  'rosy',
+  'reddened',
+];
+
+/**
+ * los sustantivos que, solos y sin nada que los califique, ya no dicen nada.
+ *
+ * En la complexion y en el rubor el rasgo suele ser el elemento ENTERO, asi que
+ * el recorte deja un huerfano: «flushed cheeks, breathing hard» se quedaba en
+ * «cheeks, breathing hard» y «toned figure, standing» en «figure, standing».
+ * Acumulado es peor —«pink cheeks, flushed skin, blushing, on bed» dejaba dos
+ * etiquetas muertas de tres— y cada una gasta uno de los OCHO huecos que el
+ * bloque de instrucciones presupuesta para la escena.
+ *
+ * Se sacan del texto, no de `dropped`: lo quitado se sigue pudiendo devolver.
+ */
+const TRAIT_BARE_NOUNS = new Set<string>([
+  'hair',
+  'eyes',
+  ...TRAIT_BUILD_NOUNS,
+  // se parte la misma alternancia para no mantener la lista en dos sitios
+  ...TRAIT_BLUSH_TARGETS.split('|'),
+]);
+
+/** un termino de varias palabras se escribe con espacio y se compara con espacios flexibles */
+function traitAlternation(words: readonly string[]): string {
+  return words.map((word) => word.replace(/ /g, '\\s+')).join('|');
+}
+
+/**
+ * los calificativos encadenados —«long dark messy hair», «small toned body»—
+ * hasta el rasgo que describen, que queda FUERA del patron: se quita el
+ * calificativo y la frase de la escena se conserva entera.
+ *
+ * `gap` dice si entre el calificativo y el rasgo cabe otra palabra. En el pelo
+ * y los ojos cabe —«dark messy hair»—, porque nada de un dormitorio se llama
+ * asi. En la COMPLEXION no: sus sustantivos tambien son muebles, y con hueco
+ * «huge bed frame» perdia el «huge», «small window frame» el «small» y «large
+ * picture frame» el «large». Son muebles de dormitorio, o sea el decorado exacto
+ * de estas escenas.
+ */
+function qualifierPattern(
+  words: readonly string[],
+  noun: string,
+  flags: string,
+  gap: boolean,
+): RegExp {
+  const hueco = gap ? '\\w*\\s*' : '';
+  return new RegExp(`\\b(?:(?:${traitAlternation(words)})\\s+)+(?=${hueco}${noun}\\b)`, flags);
+}
+
+/**
+ * un calificativo de rubor, y solo si a dos palabras vista hay algo que ruborizar.
+ *
+ * Son dos puertas y no una, porque no todo lo que el rubor colorea sirve para
+ * reconocerlo: un COLOR a secas solo vale sobre las mejillas, y sobre lo demas
+ * hace falta una palabra que ya solo signifique rubor.
+ */
+function blushPattern(flags: string): RegExp {
+  const cerca = '(?:\\w+\\s+){0,2}?';
+  const color = `(?:${traitAlternation(TRAIT_BLUSH_WORDS)})\\s+(?=${cerca}(?:${TRAIT_BLUSH_COLORABLE})\\b)`;
+  const propio = `(?:${traitAlternation(TRAIT_BLUSH_PLAIN)})\\s+(?=${cerca}(?:${TRAIT_BLUSH_TARGETS})\\b)`;
+  return new RegExp(`\\b(?:${color}|${propio})`, flags);
+}
+
+/** true cuando el aspecto fijo YA fija la complexion; si no, la escena es la unica fuente */
+function describesBuild(appearance: string): boolean {
+  return TRAIT_BUILD_NOUNS.some((noun) =>
+    qualifierPattern(TRAIT_BUILD_WORDS, noun, 'i', false).test(appearance),
+  );
+}
+
+/** true cuando el aspecto fijo YA fija el rubor, por palabra propia o por «pink cheeks» */
+function describesBlush(appearance: string): boolean {
+  if (new RegExp(`\\b(?:${TRAIT_BLUSH_PLAIN.join('|')})\\b`, 'i').test(appearance)) return true;
+  // «pink cheeks» no trae ninguna palabra de rubor: lo que lo delata es a quien califica
+  return blushPattern('i').test(appearance);
+}
+
 /** la escena ya limpia, y lo que se le quito por el camino */
 export interface StrippedScene {
   text: string;
@@ -463,17 +659,26 @@ export interface StrippedScene {
  *
  * Y solo cuando la receta habla de eso: si el aspecto fijo no dice nada del
  * pelo, lo que diga la escena es la unica fuente que hay y se respeta.
+ *
+ * Son cuatro familias, en el orden en que se descubrieron y en el que se
+ * recortan: color de pelo y ojos, origen, complexion y rubor. Todas comparten
+ * las dos reglas de arriba —solo si la receta ya lo dice, y solo el rasgo, no
+ * la frase— y todo lo quitado sale en `dropped`, nunca en silencio.
+ *
+ * Con una excepcion al «solo el rasgo»: si lo que queda del elemento es el
+ * sustantivo pelado —«flushed cheeks» -> «cheeks»— se va entero, porque una
+ * etiqueta asi ya no dice nada y gasta uno de los ocho huecos que el bloque de
+ * instrucciones presupuesta para la escena.
  */
 export function stripConflictingTraitsDetailed(scene: string, appearance: string): StrippedScene {
   const fijo = appearance.toLowerCase();
-  const partes = TRAIT_COLORS.map((color) => color.replace(/ /g, '\\s+')).join('|');
   const dropped: string[] = [];
   let salida = scene;
   for (const rasgo of ['hair', 'eyes'] as const) {
     if (!fijo.includes(rasgo)) continue;
     // el color puede venir con varias palabras («light brown hair») y a veces
     // encadenado («long dark messy hair»): se repite el grupo hasta el rasgo
-    const patron = new RegExp(`\\b(?:(?:${partes})\\s+)+(?=\\w*\\s*${rasgo}\\b)`, 'gi');
+    const patron = qualifierPattern(TRAIT_COLORS, rasgo, 'gi', true);
     salida = salida.replace(patron, (match: string) => {
       // se apunta con el rasgo detras porque «dark» a secas no se entiende un
       // mes despues, y lo que el usuario tiene que poder devolver es la frase
@@ -499,19 +704,93 @@ export function stripConflictingTraitsDetailed(scene: string, appearance: string
     );
     salida = salida.replace(patron, (match: string, offset: number, entero: string) => {
       // el patron solo consume el origen: a quien calificaba viene detras, y
-      // sin esa palabra el aviso diria «japanese» sin decir japanese QUE
-      const persona = new RegExp(`^(?:\\w+\\s+){0,2}?(?:${TRAIT_PERSON_WORDS})\\b`, 'i').exec(
+      // sin esa palabra el aviso diria «japanese» sin decir japanese QUE.
+      //
+      // Se apunta el origen y la PERSONA, nunca los adjetivos que hay en medio:
+      // esos se quedan escritos, y meterlos en `dropped` haria que devolverlo
+      // los duplicase —«young slim girl on bed, asian young slim girl»—.
+      const persona = new RegExp(`^(?:\\w+\\s+){0,2}?(${TRAIT_PERSON_WORDS})\\b`, 'i').exec(
         entero.slice(offset + match.length),
       );
-      dropped.push(persona === null ? match.trim() : `${match.trim()} ${persona[0].trim()}`);
+      const quien = persona?.[1];
+      dropped.push(quien === undefined ? match.trim() : `${match.trim()} ${quien}`);
       return '';
     });
   }
-  // la limpieza puede dejar comas huerfanas o dobles espacios
+
+  // TERCER camino: la COMPLEXION. La receta fija «slim body, slender, small
+  // frame» y la escena escribe «small body»; el generador recibe dos tallas y
+  // elige una. Se quita solo el calificativo —«small body pressed against him»
+  // sigue siendo «body pressed against him»— y solo delante de un sustantivo
+  // que nombre el cuerpo entero: el pecho, las caderas o las piernas son escena
+  // y el aspecto fijo no los ha declarado.
+  if (describesBuild(fijo)) {
+    for (const noun of TRAIT_BUILD_NOUNS) {
+      const patron = qualifierPattern(TRAIT_BUILD_WORDS, noun, 'gi', false);
+      salida = salida.replace(patron, (match: string) => {
+        // igual que con el color: «small» a secas no se entiende un mes despues
+        dropped.push(`${match.trim()} ${noun}`);
+        return '';
+      });
+    }
+  }
+
+  // CUARTO camino: el RUBOR. La receta decia «blush, pink cheeks» y la escena
+  // repetia «blushing». Se quita con el mismo cuidado que el origen: un color
+  // sobre la cara es rubor, el mismo color sobre otra cosa es escena, asi que
+  // «blush pink lingerie» y «rosy dawn light» se quedan donde estan.
+  if (describesBlush(fijo)) {
+    salida = salida.replace(blushPattern('gi'), (match: string, offset: number, entero: string) => {
+      // el patron solo consume el calificativo: lo que ruborizaba viene detras.
+      //
+      // Se apunta el calificativo y ESA palabra, no lo que hubiera en medio, que
+      // sigue escrito: apuntar «red glow on skin» cuando solo se quito «red»
+      // hacia que devolverlo dejase «glow on skin, night, red glow on skin».
+      const objetivo = new RegExp(`^(?:\\w+\\s+){0,2}?(${TRAIT_BLUSH_TARGETS})\\b`, 'i').exec(
+        entero.slice(offset + match.length),
+      );
+      const parte = objetivo?.[1];
+      dropped.push(parte === undefined ? match.trim() : `${match.trim()} ${parte}`);
+      return '';
+    });
+    // y las formas que no pueden calificar a un objeto van solas: «naked,
+    // blushing, on bed» no trae ninguna parte de la cara detras. Con su adverbio
+    // detras si lo trae, porque «blushing furiously» es una sola cosa y dejar el
+    // «furiously» suelto convierte la etiqueta en ruido
+    const sueltos = new RegExp(`\\b(?:${TRAIT_BLUSH_VERBS.join('|')})(?:\\s+\\w+ly)?\\b`, 'gi');
+    salida = salida.replace(sueltos, (match: string) => {
+      dropped.push(match.trim());
+      return '';
+    });
+  }
+
+  // los sustantivos que se quedaron solos se van enteros. Solo donde el recorte
+  // ha TOCADO: un «cheeks» que la escena escribio sin calificar es suyo y se
+  // respeta. El recorte nunca se lleva una coma, asi que los dos textos tienen
+  // los mismos elementos y se comparan uno a uno.
+  const originales = scene.split(',');
+  const elementos = salida.split(',');
+  if (originales.length === elementos.length) {
+    salida = elementos
+      .map((elemento, indice) =>
+        elemento !== originales[indice] && TRAIT_BARE_NOUNS.has(elemento.trim().toLowerCase())
+          ? ''
+          : elemento,
+      )
+      .join(',');
+  }
+
+  // la limpieza puede dejar comas huerfanas o dobles espacios. La coma FINAL
+  // aparece desde que hay recortes que se llevan el termino entero: «on bed,
+  // blushing» se queda en «on bed,» y esa coma llega al prompt. El espacio ANTES
+  // de la coma tambien: «she blushes, looking away» se quedaba en «she ,». Y las
+  // comas seguidas pueden ser mas de dos desde que mueren elementos enteros
   const text = salida
     .replace(/\s{2,}/g, ' ')
-    .replace(/,\s*,/g, ',')
+    .replace(/\s+,/g, ',')
+    .replace(/,(?:\s*,)+/g, ',')
     .replace(/^\s*,\s*/, '')
+    .replace(/,\s*$/, '')
     .trim();
   return { text, dropped: dedupeFragments(dropped) };
 }

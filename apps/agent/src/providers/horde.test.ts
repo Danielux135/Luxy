@@ -717,6 +717,136 @@ describe('censura de la red', () => {
   });
 });
 
+describe('el rastro que se lleva un rechazo', () => {
+  it('UN BLOQUEO SE LLEVA EL WORKER, EL MODELO Y LA SEMILLA', async () => {
+    // es lo que hoy impide cerrar un diagnostico: el panel enseñaba «Worker —,
+    // Modelo —, Semilla no llego a saberse» y eso se leia como que el filtro
+    // habia juzgado el TEXTO antes de encolar. No era eso: el bloqueo llega con
+    // la imagen ya generada y estos tres datos venian dentro de la respuesta
+    const { impl } = fakeFetch([
+      {
+        status: 200,
+        body: {
+          ...progress({ done: true, finished: 1 }),
+          generations: [
+            {
+              img: 'https://r2.example/a.webp',
+              seed: '1080257389',
+              id: 'g-1',
+              model: 'WAI-NSFW-illustrious-SDXL',
+              worker_id: 'w-9',
+              worker_name: 'una-gpu-cualquiera',
+              censored: true,
+              gen_metadata: [{ type: 'censorship', value: 'csam' }],
+            },
+          ],
+        },
+      },
+    ]);
+
+    const error = await rejection(readImageStatus('pet-1', options(impl)));
+    expect(error.rc).toBe('csam');
+    expect(error.attribution).toEqual({
+      workerName: 'una-gpu-cualquiera',
+      workerId: 'w-9',
+      model: 'WAI-NSFW-illustrious-SDXL',
+      seed: '1080257389',
+    });
+  });
+
+  it('el filtro propio del worker tambien dice quien fue', async () => {
+    // aqui el nombre no es un detalle: es el worker al que hay que evitar, y sin
+    // el no se puede comprobar que la siguiente la cogio otro
+    const { impl } = fakeFetch([
+      {
+        status: 200,
+        body: {
+          ...progress({ done: true, finished: 1 }),
+          generations: [
+            {
+              img: 'https://r2.example/negra.webp',
+              seed: '7',
+              id: 'g-1',
+              model: 'Deliberate',
+              worker_name: 'el-que-filtra',
+              censored: true,
+            },
+          ],
+        },
+      },
+    ]);
+
+    const error = await rejection(readImageStatus('pet-1', options(impl)));
+    expect(error.rc).toBe('censored');
+    expect(error.attribution?.workerName).toBe('el-que-filtra');
+    // el horde no siempre manda el identificador; ahi se queda en null y no se
+    // rellena con el nombre
+    expect(error.attribution?.workerId).toBeNull();
+  });
+
+  it('lo que el servidor no dijo se queda en null, no en cadena vacia', async () => {
+    const { impl } = fakeFetch([
+      {
+        status: 200,
+        body: {
+          ...progress({ done: true, finished: 1 }),
+          generations: [
+            {
+              img: 'https://r2.example/a.webp',
+              id: 'g-1',
+              censored: true,
+              gen_metadata: [{ type: 'censorship', value: 'csam' }],
+            },
+          ],
+        },
+      },
+    ]);
+
+    const error = await rejection(readImageStatus('pet-1', options(impl)));
+    expect(error.attribution).toEqual({
+      workerName: null,
+      workerId: null,
+      model: null,
+      seed: null,
+    });
+  });
+
+  it('un fallo anterior a la generacion no se inventa ninguna atribucion', async () => {
+    // 401 al enviar: la peticion no llego a manos de ningun worker, asi que no
+    // hay nada que apuntar y el `null` significa exactamente eso
+    const { impl } = fakeFetch([{ status: 401, body: { message: 'clave invalida', rc: 'InvalidAPIKey' } }]);
+    const error = await rejection(submitImage(request(), options(impl)));
+    expect(error.rc).toBe('InvalidAPIKey');
+    expect(error.attribution).toBeNull();
+  });
+
+  it('el identificador del worker sobrevive a la conversion del resultado', async () => {
+    // `toResult` lo tiraba: el nombre lo cambia el voluntario cuando quiere y
+    // este no, asi que es lo unico con lo que se puede decir «otra vez el mismo»
+    const { impl } = fakeFetch([
+      {
+        status: 200,
+        body: {
+          ...progress({ done: true, finished: 1 }),
+          generations: [
+            {
+              img: 'https://r2.example/a.webp',
+              seed: '1',
+              id: 'g-1',
+              model: 'Deliberate',
+              worker_id: 'w-42',
+              worker_name: 'un voluntario',
+            },
+          ],
+        },
+      },
+    ]);
+
+    const result = await readImageStatus('pet-1', options(impl));
+    expect(result.generations[0]?.workerId).toBe('w-42');
+  });
+});
+
 describe('cancelacion en el horde', () => {
   it('borra la peticion y devuelve lo que hubiera', async () => {
     const { impl, calls } = fakeFetch([

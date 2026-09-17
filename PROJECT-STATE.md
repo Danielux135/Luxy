@@ -1,7 +1,78 @@
 # Luxy — estado canónico del proyecto
 
-Última actualización: **2026-09-17 — la casilla de compartir dejaba de prometer
-kudos que no existen**
+Última actualización: **2026-09-17 (madrugada) — la revisión de los siete
+arreglos: once defectos cerrados, y la documentación que afirmaba de más**
+
+Daniel pasó la tarde generando imágenes de su personaje y comparando prompts. De
+ahí salieron siete arreglos, todos de casos vistos en pantalla. Esa tanda pasó
+`npm run check` y **aun así tenía once defectos**, la mayoría verificados
+ejecutando el código; se cierran en la madrugada siguiente. Lo corregido en el
+código: el rastro de un intento ya no dice «no lo hubo» de una imagen que existe;
+el registro de intentos deja de tirar los fallos, que son lo único
+irrecuperable; cinco arreglos en el recorte de rasgos, que se llevaba muebles
+(«small **window frame**») y luz («red **nose** from the cold»); y el bullet que
+decidía por verbos, rehecho, con una regla que se había perdido al condensar,
+devuelta.
+
+**Lo que hay que llevarse de la revisión, porque es la tercera vez en dos días:**
+nueve de los once eran **documentación afirmando de más**. Una duración de la
+suite **inventada** y presentada como salida de vitest; una comparación de
+tamaños heredada de otra entrada sin comprobarla; citas de código por número de
+línea que ya no apuntaban a lo que decían; y dos deducciones escritas como
+hechos. Ninguna cifra que no se haya medido en la pasada que la escribe, y
+ninguna afirmación sin decir de dónde sale.
+
+**`D-091` sigue confirmada, pero por UNA vía.** Aquella decisión dejó escrita una
+predicción falsable: si el filtro puntúa la imagen y no el texto, un bloqueo llega
+**después** de una ronda completa de sondeos, con worker asignado. Un bloqueo real
+tardó la cola entera y sólo después devolvió `csam`, y eso es observable en
+pantalla. Lo que **no** es evidencia instrumentada, y se presentaba como si lo
+fuera, es que esa misma tarde cuatro prompts más explícitos pasaran y uno menos
+explícito fuera bloqueado: es memoria de lo que Daniel vio, sin prompts, sin
+semillas y sin `rc` guardados en ninguna parte. Encaja con la hipótesis; no la
+confirma. El matiz de método se mantiene entero: esa hipótesis **no salió de
+deducir una causa mirando síntomas** —de ésas hubo tres el mismo día y las tres
+eran falsas— sino de **leer el código del servicio**.
+
+**Lo que cambia en el producto**, en tres bloques:
+
+1. **El prompt de imagen gana cuatro reglas.** La mayor: **el encuadre no es la
+   postura**. «Desde detrás» dice desde dónde se mira, no cómo está el cuerpo, y
+   lo que no se escribe se lo inventa el generador. Lo demostró una prueba
+   controlada de Daniel —misma semilla, mismo modelo, cuatro variantes moviendo
+   una cosa cada vez— que descartó pesos, negativo anti-retrato y etiquetas de
+   cara: `D-094`. Las otras tres: que «quédate como estás» repita también el
+   encuadre, que no se escriba relleno decorativo que no se dibuja, y que
+   «descríbeme esta foto» comente la que ya existe en vez de mandar otra —esa
+   última se rehízo en la revisión: **nombrar una foto no es pedirla**, y el
+   criterio sigue siendo el determinante, no el verbo—. Todo **sin subir el
+   guardián de tamaño**: medido, el bloque cabe en **6.296** (`prose`) y **6.300**
+   (`tags`) de 6.500 porque se condensó lo ya escrito. Al condensar sí se
+   perdieron dos textos: uno está devuelto y el otro consta como perdido en
+   `CHANGELOG-WORK.md`.
+2. **El recorte automático de rasgos pasa de dos familias a cuatro**: a color de
+   pelo/ojos y origen se le añaden **complexión** y **rubor**, con las mismas dos
+   reglas —sólo se quita lo que la apariencia fija ya dice, y se quita el rasgo, no
+   la frase— y todo lo quitado sigue saliendo en la lista de descartados.
+3. **Un fallo de imagen deja el rastro entero**: worker, id del worker, modelo y
+   semilla se guardan también cuando falla, y un campo nuevo separa **tres**
+   silencios, no dos: «no lo dijo» (el proveedor generó y no publica el dato), «no
+   lo hubo» (rechazo anterior a la cola) y «no se apuntó» (no se sabe). Quién
+   decide cuál es de quien apunta el intento. Además, un fallo ya no lo empuja
+   fuera del registro una racha de imágenes buenas: son dos cupos, 50 para lo que
+   tiene copia en otro sitio y 200 para lo que sólo existe ahí. Es el hueco de
+   instrumentación que `D-091` señaló, y **queda cerrado**.
+
+**Probado, no visto.** Suite completa en verde —3.965 pruebas y 12 saltadas en 190
+archivos—, `lint`, `typecheck` y `build` los tres exit 0, y 380 pruebas en los seis
+archivos que cubren lo tocado; todo medido en la pasada que lo escribe, con las
+salidas literales en `TEST-RESULTS.md`. Ninguna prueba puede fijar que el generador
+obedezca una postura: eso lo confirma Daniel en pantalla, y son seis comprobaciones
+pendientes en `F29-POSTURA-001`. La tarde de Daniel son cuatro generaciones, un
+personaje y un modelo, y el bloqueo con reloj se ha observado **una vez**. El build
+reconstruye el `dist`; **nadie ha abierto Studio**, que no es lo mismo.
+
+Lo anterior — **la casilla de compartir dejaba de prometer kudos que no existen**:
 
 La pantalla Privado ofrecía «donar sus imágenes a AI Horde **a cambio de
 kudos**». Eso era falso, y la promesa no venía de ninguna fuente del Horde: la

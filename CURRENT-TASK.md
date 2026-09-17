@@ -1,5 +1,97 @@
 # Luxy — tarea activa
 
+## F29-POSTURA-001 — siete arreglos de una tarde de imagenes
+
+Estado: **implementado, revisado, corregido y probado; sin ver en pantalla —
+Claude, 2026-09-17 (madrugada).** Decision nueva en `D-094`; `D-091` queda
+confirmada **por una sola via** —el reloj del bloqueo— y su hueco de
+instrumentacion, cerrado.
+
+**Segunda vuelta: once defectos.** La tanda paso `npm run check` y aun asi una
+revision encontro once, la mayoria verificados ejecutando el codigo. Cerrados en
+la madrugada del 2026-09-17 por tres agentes de codigo y una pasada de
+documentacion: el helper `trace()` ya no decide por su cuenta que significa un
+rastro vacio (`absent` queda para lo unico que se puede afirmar); `prune` pasa a
+contar dos cupos y deja de tirar lo irrecuperable; cinco arreglos en el recorte de
+rasgos; el bullet de verbos se rehace y vuelve «enseñame algo distinto»; y el
+guardian de tamaño pasa a medir los dos estilos. El detalle, en
+`CHANGELOG-WORK.md`.
+
+**Lo que esa revision deja como leccion, y es lo que hay que llevarse:** nueve de
+los once defectos —los otros dos eran de codigo— eran documentacion afirmando de
+mas: una cifra inventada, una
+comparacion heredada sin comprobar, citas de linea que ya no apuntaban a nada y
+dos deducciones escritas como hechos—. Es la tercera vez en dos dias. Ninguna
+cifra que no se haya medido en la pasada que la escribe, y ninguna afirmacion sin
+decir de donde sale.
+
+Origen: Daniel pasa la tarde generando imagenes de su personaje y comparando
+prompts. Los siete arreglos salen de casos vistos en pantalla, no de ideas.
+
+Tres bloques:
+
+1. **Cuatro reglas nuevas en el bloque de instrucciones**
+   (`vault-image-request.ts`): la postura del cuerpo, que el encuadre no dice; el
+   encuadre heredado en «quedate como estas»; el relleno decorativo nombrado con
+   ejemplos; y que «describe», «mira» o «que te parece» comentan una foto que ya
+   existe en vez de mandar otra. Sin subir el guardian de tamaño: el bloque cabe
+   en **6.296** (`prose`) y **6.300** (`tags`) de 6.500 porque se condenso lo que
+   ya estaba escrito. **Al condensar si se perdieron dos textos**: «enseñame algo
+   distinto», devuelto en la segunda vuelta, y «levanto el movil y disparo», que
+   sigue fuera. El bullet de verbos del punto cuatro se rehizo entero, porque
+   contradecia el criterio de determinantes de `D-086`.
+2. **El recorte automatico pasa de dos familias a cuatro**
+   (`vault-image-provider.ts`): a color de pelo/ojos y origen se le añaden
+   **complexion** y **rubor**, con las dos reglas de siempre —solo se quita lo que
+   la apariencia fija ya dice, y se quita el rasgo, no la frase— y todo lo quitado
+   sale en `dropped`.
+3. **Un fallo de imagen deja rastro entero** (`horde.ts`, `vault-image-plan.ts`,
+   `handlers.ts`, `Vault.tsx`, `image-attempt-store.ts`): worker, id del worker,
+   modelo y semilla, y un campo que dice si el hueco es «no lo dijo», «no lo
+   hubo» o «no se apunto» —tres lecturas, y la decide quien apunta el intento, no
+   el helper—. Ademas, el apunte de un fallo ya no lo empuja fuera del registro
+   una racha de imagenes buenas: son dos cupos, 50 y 200.
+
+### Lo que falta, y es de Daniel
+
+Todo lo de aqui es de pantalla: las pruebas fijan que el texto llega al prompt,
+**nunca que el generador obedezca**.
+
+1. **La postura.** Pedir una foto nombrando solo el encuadre —«desde detras»— y
+   mirar en el panel de `D-092` si el texto que sale trae ademas una postura
+   (`on all fours`, `lying face down`, `kneeling`, `sitting`). Si la trae, la
+   instruccion funciona; si ademas la imagen sale asi, funciona el modelo.
+2. **El encuadre heredado.** Decir «quedate como estas» tras una foto y ver si se
+   conserva el encuadre. **Anotar la frase exacta** que se uso: el fallo es
+   intermitente y no se ha aislado cual lo conserva.
+3. **Nombrar una foto no es pedirla.** Comentar una ya enviada («describe esta»,
+   «que te parece esa») y comprobar que **no** genera otra ni la reenvia. Y un
+   mensaje que comente una y ademas pida otra: ahi si tiene que generar la nueva.
+   Dos frases concretas que la revision uso como caso limite y conviene probar tal
+   cual: «enseñame otra» —no nombra ninguna existente, asi que **genera**— y «¿que
+   te parece si me mandas una?» —pide, asi que **manda**—.
+4. **El rastro del bloqueo.** Cuando el Horde vuelva a rechazar una, abrir la
+   tarjeta del intento: ahora salen worker, id, modelo y semilla, y donde falta
+   algo se lee «no lo dijo», «no lo hubo» o «no se apuntó» en vez de un guion. Eso
+   cierra el punto 3 de `F28-PLAN-IMAGEN-001`.
+5. **El recorte nuevo.** Mirar la lista de rasgos descartados de un par de
+   generaciones y confirmar que complexion y rubor solo se llevan lo que la
+   apariencia fija ya decia. Si alguna vez se lleva algo de la escena, decir la
+   frase entera: la lista de terminos es cerrada y se corrige.
+6. **El registro de intentos, cuando haya un bloqueo viejo.** Con los dos cupos,
+   un fallo de hace dias tiene que seguir estando aunque en medio haya habido
+   muchas imagenes buenas. Es lo unico del anillo que se ve desde la pantalla.
+
+### Pendiente de codigo, pequeño y anotado
+
+- En `apps/agent/src/providers/horde.ts`, el comentario del `throw` por
+  vencimiento —el de «la imagen no estuvo lista a tiempo»— todavia termina
+  diciendo «la peticion no llego a producir generacion». Esa frase se retiro del
+  resto del archivo por no ser comprobable (`processing > 0` dice lo contrario) y
+  ahi se quedo. Es un comentario, no comportamiento: no cambia lo que hace el
+  codigo, pero contradice la documentacion de `HordeError.attribution` unas lineas
+  mas arriba. La pasada que lo vio solo tenia permiso para editar `.md`.
+
 ## F28-PLAN-IMAGEN-001 — ver y corregir el prompt antes de que se genere
 
 Estado: **implementado, revisado y corregido; sin ver en pantalla — Claude,
@@ -120,6 +212,10 @@ hiciera al modelo descartar la frase entera. Detalle en `CHANGELOG-WORK.md`.
 - `D-091` **se reescribio entera el mismo dia**: su primera version culpaba al prompt
   negativo y era falsa. El filtro que bloquea puntua **la imagen ya dibujada**, en el
   worker. Queda pendiente el hueco de instrumentacion que describe al final.
+- **Continua en `F29-POSTURA-001`** (2026-09-17): las pruebas controladas de
+  Daniel descartaron pesos, negativo anti-retrato y etiquetas de cara; lo que le
+  faltaba al prompt que fallaba era **la postura del cuerpo** (`D-094`). Y el
+  hueco de instrumentacion de `D-091` queda cerrado.
 
 ## F26-LLAMADAS-VACIAS-001 — el 18% de lo que paga por Lia no compra nada
 

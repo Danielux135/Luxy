@@ -404,8 +404,13 @@ describe('lo que ocupa el bloque', () => {
     { mediaId: 'med-4', description: 'durmiendo, ojos cerrados' },
   ];
 
-  it('pudiendo generar no pasa de 6.500 caracteres', () => {
+  it('pudiendo generar no pasa de 6.500 caracteres, en los DOS estilos', () => {
     expect(buildVaultImageInstruction(cuatro, 'prose', true).length).toBeLessThan(6500);
+    // `tags` no se media, y es el que mas ocupa de los dos: sus dos lineas de
+    // formato son mas largas que las de `prose`. El margen que enseñaba esta
+    // prueba era por tanto cuatro caracteres mayor que el real, y el estilo que
+    // primero rompera el limite era justo el que nadie vigilaba
+    expect(buildVaultImageInstruction(cuatro, 'tags', true).length).toBeLessThan(6500);
   });
 
   it('sin poder generar baja de 3.000: se salta la seccion COMO entera', () => {
@@ -580,7 +585,10 @@ describe('«otra foto» significa una nueva', () => {
 
   it('lista las formas de pedir una nueva', () => {
     expect(instruccion).toContain('piden GENERAR');
-    for (const forma of ['«otra»', '«una nueva»', '«hazme una»']) {
+    // «enseñame algo distinto» se perdio al condensar la lista y es el unico
+    // ejemplo que pide algo NUEVO sin decir «otra»: sin el, lo mas parecido que
+    // leia el modelo era «enseñamela», que nombra una que ya existe
+    for (const forma of ['«otra»', '«una nueva»', '«hazme una»', '«enseñame algo distinto»']) {
       expect(instruccion).toContain(forma);
     }
   });
@@ -1046,3 +1054,165 @@ describe('el encuadre que pide el usuario', () => {
     expect(bloque).toContain('no pongas la camara');
   });
 });
+
+// PASO DE VERDAD (2026-09-16), cuatro pruebas controladas con la misma semilla y
+// el mismo modelo. El prompt que fallo decia «from behind, ass to camera, nude,
+// blushing, on bed, soft lighting, looking away»: dice desde donde se mira y NO
+// como esta el cuerpo, y salio tumbada de lado. Los que funcionaron llevaban
+// ademas «on all fours, arched back, face down». El encuadre no implica postura.
+describe('la postura del cuerpo, que el encuadre no dice', () => {
+  const texto = buildVaultImageInstruction();
+
+  it('dice que encuadre y postura son dos cosas y hacen falta las dos', () => {
+    expect(texto).toContain('El encuadre NO es la postura');
+    expect(texto).toContain('dice desde donde se mira, no como esta el');
+  });
+
+  it('manda NOMBRARLA, con las etiquetas que el generador entiende', () => {
+    expect(texto).toContain('Nombra la postura');
+    for (const postura of ['on all fours', 'lying face down', 'kneeling', 'sitting']) {
+      expect(texto).toContain(postura);
+    }
+  });
+
+  it('explica el mecanismo: la que no se escribe se la inventa el', () => {
+    // una regla sin motivo se salta; sabiendo que el hueco lo rellena el
+    // generador, no. Es el mismo criterio que el tope de OCHO elementos
+    expect(texto).toContain('la inventa el generador');
+  });
+
+  it('no se envia por el camino que no puede generar', () => {
+    // alli no hay `prompt` que escribir: la seccion COMO entera se salta
+    const cerrado = buildVaultImageInstruction([], 'prose', false);
+    expect(cerrado).not.toContain('El encuadre NO es la postura');
+  });
+});
+
+// OBSERVADO el mismo dia, y es INTERMITENTE, no sistematico: con «sigue en la
+// misma postura» y con «te hago otra foto» conservo la postura y perdio «from
+// behind» y «ass to camera»; con «quedate como estas» conservo las dos.
+describe('«quedate como estas» tiene que repetir tambien el encuadre', () => {
+  const texto = buildVaultImageInstruction();
+
+  it('nombra las formas de pedir que no se mueva', () => {
+    for (const forma of ['«sigue igual»', '«no te muevas»', '«quedate como estas»']) {
+      expect(texto).toContain(forma);
+    }
+  });
+
+  it('manda repetir las dos cosas, no solo la postura', () => {
+    expect(texto).toContain('repite el encuadre Y la postura');
+    // y dice cual es la que se pierde, que es lo que hace que se repita
+    expect(texto).toContain('el encuadre es el que se pierde');
+  });
+});
+
+// OBSERVADO tres veces: el modelo escribio «warm atmosphere», «intimate setting»
+// y «full view». No describen nada que se pueda dibujar y le roban atencion a lo
+// que si. «Solo lo que se ve» ya estaba y no bastaba: una atmosfera calida suena
+// a que se ve, asi que hay que nombrarlas.
+describe('el relleno decorativo va nombrado con ejemplos', () => {
+  const texto = buildVaultImageInstruction();
+
+  it('nombra los tres que escribio de verdad', () => {
+    for (const relleno of ['«warm atmosphere»', '«intimate setting»', '«full view»']) {
+      expect(texto).toContain(relleno);
+    }
+    expect(texto).toContain('no se dibujan');
+  });
+
+  it('cuelga de «solo lo que se ve», que es la regla que amplia', () => {
+    expect(texto).toContain('Solo lo que se ve');
+    expect(texto).toContain('No copies el mensaje del usuario');
+  });
+});
+
+// PASO DE VERDAD (2026-09-16): «Mira y describeme la ultima foto... Te voy a
+// hacer una ultima foto, quedate igual», y REENVIO la anterior en vez de
+// generar. El mensaje empieza por «la ultima», que figura entre los
+// determinantes que mandan reenviar.
+describe('describir una foto no es reenviarla', () => {
+  const guardadas = [{ mediaId: 'med-1', description: 'sentada en la cama' }];
+  const texto = buildVaultImageInstruction(guardadas);
+
+  it('comentar una que existe no manda reenviarla', () => {
+    // sin esta salida, reenviarla es la unica forma que se le ocurre de hablar
+    // de ella, y ahi es donde se gasta el turno
+    expect(texto).toContain('Pero nombrarla no es pedirla');
+    expect(texto).toContain('te basta con su linea de la lista');
+    expect(texto).toContain('no mandas ninguna');
+  });
+
+  it('si ademas pide o hace una nueva, la nueva es la que gana', () => {
+    // el caso exacto del fallo: «describeme la ultima foto y te hago otra»
+    expect(texto).toContain('Si ademas te pide o hace una foto nueva, GENERA la nueva');
+  });
+
+  it('acota el bullet del reenvio, no añade un tercer criterio', () => {
+    // el determinante sigue decidiendo: lo unico que dice es cuando el que
+    // acaba de nombrarse no llega a ser una peticion
+    const bullets = bulletsUnder(texto, 'CUAL DE LAS DOS');
+    const reenvio = bullets.findIndex((bullet) => bullet.includes('piden REENVIAR'));
+    expect(reenvio).toBeGreaterThanOrEqual(0);
+    expect(bullets[reenvio + 1]).toContain('Pero nombrarla no es pedirla');
+  });
+
+  it('cada bullet del apartado resuelve a una de las dos vias', () => {
+    // por eso el bullet de verbos («describe», «mira» frente a «manda»,
+    // «enseñamela») no valia: en un apartado titulado CUAL DE LAS DOS no decia
+    // ni REENVIAR ni GENERAR, asi que «enseñame otra» lo disparaba a la vez que
+    // el bullet de «otra» y no desempataba nada
+    const bullets = bulletsUnder(texto, 'CUAL DE LAS DOS');
+    expect(bullets.length).toBeGreaterThan(2);
+    for (const bullet of bullets) {
+      expect(bullet).toMatch(/genera|reenvi/i);
+    }
+  });
+
+  it('no deja escrita una excusa para no mandarla', () => {
+    // «que te parece» como forma de NO mandar la foto es justo el modo de fallo
+    // que cierran «ES UNA ORDEN» y «si dudas, manda una»
+    expect(texto).not.toContain('NO piden que la mandes');
+    expect(texto).not.toContain('«que te parece»');
+  });
+
+  it('el desempate sigue mirando determinantes y no verbos (`D-086`)', () => {
+    // no se deshace el arreglo anterior: «te he hecho» es tambien lo que se dice
+    // en castellano de la foto que se acaba de hacer en este mismo mensaje
+    expect(texto).toContain('«la de antes»');
+    expect(texto).toContain('piden REENVIAR: nombran una que YA existe');
+    expect(texto).not.toContain('«la que te he hecho»');
+  });
+
+  it('sin nada guardado no se envia: no hay dos vias entre las que elegir', () => {
+    expect(buildVaultImageInstruction()).not.toContain('nombrarla no es pedirla');
+  });
+});
+
+/**
+ * los bullets de un apartado del bloque, cada uno con sus lineas de continuacion.
+ *
+ * Se lee del texto generado y no de una copia escrita a mano: asi un bullet
+ * nuevo entra solo en la comprobacion, que es de lo que se trata.
+ */
+function bulletsUnder(text: string, heading: string): string[] {
+  const lines = text.split('\n');
+  const start = lines.findIndex((line) => line.startsWith(heading));
+  if (start < 0) return [];
+  const bullets: string[] = [];
+  for (const line of lines.slice(start + 1)) {
+    if (line.startsWith('- ')) {
+      bullets.push(line.slice(2));
+      continue;
+    }
+    const last = bullets[bullets.length - 1];
+    // una linea sangrada continua el bullet anterior; cualquier otra cosa
+    // —una linea en blanco, el titulo siguiente— cierra el apartado
+    if (line.startsWith('  ') && last !== undefined) {
+      bullets[bullets.length - 1] = `${last} ${line.trim()}`;
+      continue;
+    }
+    break;
+  }
+  return bullets;
+}

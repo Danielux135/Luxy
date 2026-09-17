@@ -1006,13 +1006,36 @@ function SentPlanDetails({
       ) : missing === true ? (
         <p className="field__hint">
           Ese intento ya no está en el registro: de cada conversación se guardan
-          sólo los últimos.
+          los últimos, y los fallos muchos más que los que salieron bien.
         </p>
       ) : (
         <Skeleton rows={2} />
       )}
     </details>
   );
+}
+
+/**
+ * qué se enseña donde no hay dato, que no siempre significa lo mismo.
+ *
+ * Tres huecos distintos y hasta ahora un solo guion para los tres:
+ *
+ * - no se sabe (`attribution` a `null`): o el intento se escribió antes de que
+ *   esto se apuntara, o falló con la petición ya encolada y nadie contestó.
+ *   Decir «no lo hubo» sería inventárselo;
+ * - no hubo generación (`absent`): la petición se rechazó antes de encolarse,
+ *   y eso es un dato de diagnóstico, no un vacío;
+ * - el proveedor no dijo ese campo (`reported`). Incluye al proveedor de pago,
+ *   que genera con algún modelo y alguna semilla pero no publica ninguno de
+ *   los dos: el silencio es suyo, y la imagen existe.
+ *
+ * Viene de un bloqueo real: el panel enseñó «Worker —, Modelo —, Semilla no
+ * llegó a saberse» y se leyó como que el filtro había juzgado el TEXTO antes de
+ * encolar. No decía eso; lo que pasaba es que al fallar no se apuntaba nada.
+ */
+function missingTrace(attempt: ImageAttempt): string {
+  if (attempt.attribution === null) return 'no se apuntó';
+  return attempt.attribution === 'absent' ? 'no lo hubo' : 'no lo dijo';
 }
 
 /**
@@ -1038,9 +1061,15 @@ function AttemptReadout({ attempt }: { attempt: ImageAttempt }): JSX.Element {
             value: attempt.source === 'editado' ? 'escrito a mano' : 'compuesto por Luxy',
             tone: attempt.source === 'editado' ? 'warn' : undefined,
           },
-          { label: 'Semilla', value: attempt.seed ?? 'no llegó a saberse' },
-          { label: 'Worker', value: attempt.worker ?? '—' },
-          { label: 'Modelo', value: attempt.model ?? '—' },
+          { label: 'Semilla', value: attempt.seed ?? missingTrace(attempt) },
+          { label: 'Worker', value: attempt.worker ?? missingTrace(attempt) },
+          { label: 'Modelo', value: attempt.model ?? missingTrace(attempt) },
+          // sólo cuando lo hay: el nombre lo cambia el voluntario cuando
+          // quiere y el identificador no, así que es lo único con lo que se
+          // puede decir «otra vez el mismo» dos semanas después
+          ...(attempt.workerId === null
+            ? []
+            : [{ label: 'Id del worker', value: attempt.workerId }]),
           ...(attempt.rc === null
             ? []
             : [{ label: 'Motivo del servidor', value: attempt.rc, tone: 'fault' as const }]),

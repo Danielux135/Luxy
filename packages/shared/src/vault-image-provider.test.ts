@@ -331,8 +331,10 @@ describe('la escena no puede contradecir el color de pelo ni de ojos', () => {
   });
 
   it('no deja comas huerfanas ni dobles espacios', () => {
+    // el elemento se queda en «hair» pelado, que ya no dice nada y gasta uno de
+    // los ocho huecos que el bloque presupuesta: se va entero
     expect(stripConflictingTraits('naked, black hair, arched back', ASPECTO)).toBe(
-      'naked, hair, arched back',
+      'naked, arched back',
     );
   });
 
@@ -388,6 +390,14 @@ describe('la escena tampoco puede reasignarle el origen', () => {
     expect(stripConflictingTraits('asian young slim girl on bed', ASPECTO)).toBe(
       'young slim girl on bed',
     );
+  });
+
+  it('apunta el origen y la persona, no los adjetivos que se quedan escritos', () => {
+    // devolver el fragmento lo añade al final: con «asian young slim girl», el
+    // positivo acabaria con «young slim girl» dos veces
+    expect(
+      stripConflictingTraitsDetailed('asian young slim girl on bed', ASPECTO).dropped,
+    ).toEqual(['asian girl']);
   });
 
   it('la escena real de Daniel, ya sin color y sin origen', () => {
@@ -515,12 +525,267 @@ describe('stripConflictingTraitsDetailed dice lo que quito', () => {
       ['asian young slim girl on bed', ASPECTO],
       ['japanese woman kneeling', 'japanese woman, light brown hair, blue eyes'],
       ['dark hair wild across pillow', 'blue eyes'],
+      ['small body pressed against him', 'slim body, slender, small frame'],
+      ['small breasts, wide hips', 'slim body, slender, small frame'],
+      ['naked, blushing, on bed', 'blush, pink cheeks'],
+      ['blush pink lingerie on the chair', 'blush, pink cheeks'],
     ];
     for (const [escena, aspecto] of casos) {
       expect(stripConflictingTraits(escena, aspecto)).toBe(
         stripConflictingTraitsDetailed(escena, aspecto).text,
       );
     }
+  });
+});
+
+// TERCERA VUELTA del mismo fallo, vista generando de verdad: el bloque de
+// instrucciones PROHIBE al modelo describir como es ella, y aun asi se colaba
+// «small body» con la receta diciendo «slim body, slender, small frame». Dos
+// tallas en el mismo prompt, y el generador elige una sin preguntar.
+describe('la escena tampoco puede cambiarle la complexion', () => {
+  const ASPECTO = 'light brown hair, blue eyes, pale skin, slim body, slender, small frame';
+
+  it('quita el calificativo y CONSERVA la frase', () => {
+    expect(stripConflictingTraits('small body pressed against him', ASPECTO)).toBe(
+      'body pressed against him',
+    );
+  });
+
+  it('tambien encadenado', () => {
+    expect(stripConflictingTraits('tiny toned body on the bed', ASPECTO)).toBe('body on the bed');
+  });
+
+  it('alcanza a los otros nombres del mismo rasgo', () => {
+    expect(stripConflictingTraits('slender figure against the window', ASPECTO)).toBe(
+      'figure against the window',
+    );
+  });
+
+  it('si la receta no habla de complexion, la escena manda', () => {
+    expect(stripConflictingTraits('small body pressed against him', 'blue eyes')).toBe(
+      'small body pressed against him',
+    );
+  });
+
+  it('las partes que el aspecto fijo NO declara se quedan, que es el riesgo del arreglo', () => {
+    // «slim body» habla del cuerpo entero, no del pecho ni de las caderas:
+    // quitarlo aqui seria borrar escena de verdad
+    const escena = 'small breasts, wide hips, thighs pressed together';
+    expect(stripConflictingTraits(escena, ASPECTO)).toBe(escena);
+  });
+
+  it('un calificativo que no califica al cuerpo NO se toca', () => {
+    const escena = 'thin sheets, small lamp, big window, heavy curtains';
+    expect(stripConflictingTraits(escena, ASPECTO)).toBe(escena);
+  });
+
+  it('los muebles que se llaman «frame» conservan su adjetivo', () => {
+    // el somier, el marco de la ventana y el del cuadro son decorado de
+    // dormitorio, que es justo donde pasan estas escenas: con una palabra de
+    // hueco entre el adjetivo y el sustantivo, los tres perdian el suyo
+    expect(stripConflictingTraits('huge bed frame, lying on it', ASPECTO)).toBe(
+      'huge bed frame, lying on it',
+    );
+    expect(stripConflictingTraits('small window frame, morning light', ASPECTO)).toBe(
+      'small window frame, morning light',
+    );
+    expect(stripConflictingTraits('large picture frame behind her', ASPECTO)).toBe(
+      'large picture frame behind her',
+    );
+  });
+
+  it('y el «small frame» de la receta, que es el caso real, se sigue quitando', () => {
+    const { text, dropped } = stripConflictingTraitsDetailed(
+      'small frame pressed against him',
+      ASPECTO,
+    );
+    expect(text).toBe('frame pressed against him');
+    expect(dropped).toEqual(['small frame']);
+  });
+
+  it('el sustantivo que se queda solo se va entero', () => {
+    const { text, dropped } = stripConflictingTraitsDetailed('toned figure, standing', ASPECTO);
+    expect(text).toBe('standing');
+    // lo quitado se sigue pudiendo devolver: el huerfano sale del texto, no del aviso
+    expect(dropped).toEqual(['toned figure']);
+  });
+
+  it('lo quitado se apunta con el sustantivo que calificaba', () => {
+    const { text, dropped } = stripConflictingTraitsDetailed('small body on the bed', ASPECTO);
+    expect(text).toBe('body on the bed');
+    // «small» a secas no se entiende un mes despues, igual que con el color
+    expect(dropped).toEqual(['small body']);
+  });
+
+  it('no apunta nada cuando no quita nada', () => {
+    expect(stripConflictingTraitsDetailed('small breasts, thin sheets', ASPECTO).dropped).toEqual(
+      [],
+    );
+  });
+
+  it('el recorte llega de verdad al prompt que se manda', () => {
+    const peticion = buildHordeRequest({
+      recipe: recipe({ appearance: ASPECTO, outfit: '' }),
+      prompt: 'small body pressed against him',
+      extraNegative: '',
+      shared: false,
+    });
+    expect(peticion.prompt).toContain('slim body');
+    expect(peticion.prompt).not.toContain('small body');
+  });
+});
+
+// CUARTA VUELTA: la receta decia «blush, pink cheeks» y la escena repetia
+// «blushing». El riesgo aqui no es quitar de menos sino de mas, porque los
+// mismos colores visten la escena: «blush pink lingerie» no es su cara.
+describe('la escena tampoco puede repetirle el rubor', () => {
+  const ASPECTO = 'light brown hair, blue eyes, blush, pink cheeks';
+
+  it('quita el rubor suelto y deja la escena limpia', () => {
+    expect(stripConflictingTraits('naked, blushing, on bed', ASPECTO)).toBe('naked, on bed');
+  });
+
+  it('quita el elemento entero cuando el rasgo ERA el elemento', () => {
+    // «cheeks» solo no describe nada y el aspecto fijo ya dice como son
+    expect(stripConflictingTraits('flushed cheeks, mouth open', ASPECTO)).toBe('mouth open');
+  });
+
+  it('alcanza aunque haya una palabra por medio', () => {
+    expect(stripConflictingTraits('sweaty flushed skin, arched back', ASPECTO)).toBe(
+      'sweaty skin, arched back',
+    );
+  });
+
+  it('el mismo color sobre otra cosa se queda, que es el riesgo del arreglo', () => {
+    const escena = 'blush pink lingerie on the chair, rosy dawn light, red curtains';
+    expect(stripConflictingTraits(escena, ASPECTO)).toBe(escena);
+  });
+
+  it('si la receta no habla de rubor, la escena manda', () => {
+    const sinRubor = 'light brown hair, blue eyes, pale skin';
+    expect(stripConflictingTraits('naked, blushing, on bed', sinRubor)).toBe(
+      'naked, blushing, on bed',
+    );
+  });
+
+  it('«pink cheeks» abre la puerta aunque la receta no diga «blush»', () => {
+    // el aspecto fijo puede describir el rubor sin nombrarlo
+    expect(stripConflictingTraits('blushing, looking away', 'light brown hair, pink cheeks')).toBe(
+      'looking away',
+    );
+  });
+
+  it('la escena que repite el rubor tal cual lo dice la receta', () => {
+    const { text, dropped } = stripConflictingTraitsDetailed('pink cheeks, looking away', ASPECTO);
+    expect(text).toBe('looking away');
+    expect(dropped).toEqual(['pink cheeks']);
+  });
+
+  it('no deja la coma final que antes llegaba al prompt', () => {
+    // el recorte del rubor se lleva el termino entero, y hasta ahora eso dejaba
+    // «on bed,» tal cual en el positivo
+    expect(stripConflictingTraits('legs open, on bed, blushing', ASPECTO)).toBe(
+      'legs open, on bed',
+    );
+  });
+
+  it('lo quitado se apunta con lo que ruborizaba', () => {
+    expect(stripConflictingTraitsDetailed('sweaty flushed skin', ASPECTO).dropped).toEqual([
+      'flushed skin',
+    ]);
+  });
+
+  it('no apunta nada cuando no quita nada', () => {
+    const escena = 'blush pink lingerie on the chair, rosy dawn light';
+    expect(stripConflictingTraitsDetailed(escena, ASPECTO).dropped).toEqual([]);
+  });
+
+  it('un color sobre la piel o la nariz es la LUZ o el frio, y se queda', () => {
+    // la piel, la cara y la nariz tambien son superficie de iluminacion y de
+    // clima: con un color delante no se distinguen del rubor, y quitarlo se
+    // llevaba por delante la luz que pidio el usuario
+    expect(stripConflictingTraits('red nose from the cold, scarf, snow', ASPECTO)).toBe(
+      'red nose from the cold, scarf, snow',
+    );
+    expect(stripConflictingTraits('soft red light on skin, bedroom', ASPECTO)).toBe(
+      'soft red light on skin, bedroom',
+    );
+  });
+
+  it('pero una palabra que ya solo significa rubor si las alcanza', () => {
+    expect(stripConflictingTraits('flushed skin, arched back', ASPECTO)).toBe('arched back');
+  });
+
+  it('el adverbio se va con el verbo', () => {
+    const { text, dropped } = stripConflictingTraitsDetailed(
+      'blushing furiously, hands over face',
+      ASPECTO,
+    );
+    // dejar «furiously» suelto convierte la etiqueta en ruido
+    expect(text).toBe('hands over face');
+    expect(dropped).toEqual(['blushing furiously']);
+  });
+
+  it('no deja el espacio que quedaba delante de la coma', () => {
+    expect(stripConflictingTraits('she blushes, looking away', ASPECTO)).toBe('she, looking away');
+  });
+
+  it('acumulado no deja dos etiquetas muertas de tres', () => {
+    expect(stripConflictingTraits('pink cheeks, flushed skin, blushing, on bed', ASPECTO)).toBe(
+      'on bed',
+    );
+  });
+
+  it('un sustantivo que la escena ya escribio solo NO se toca', () => {
+    // el huerfano se quita donde el recorte ha tocado; ahi no ha tocado nada
+    expect(stripConflictingTraits('cheeks, lips parted', ASPECTO)).toBe('cheeks, lips parted');
+  });
+
+  it('apunta lo que quito, no lo que sigue escrito', () => {
+    // devolver un fragmento lo añade al final: si el fragmento arrastrase las
+    // palabras que se quedaron, el positivo las tendria dos veces
+    const { text, dropped } = stripConflictingTraitsDetailed('flushed warm skin, night', ASPECTO);
+    expect(text).toBe('warm skin, night');
+    expect(dropped).toEqual(['flushed skin']);
+  });
+
+  it('y lo que no quita no lo apunta: «red glow on skin»', () => {
+    const { text, dropped } = stripConflictingTraitsDetailed('red glow on skin, night', ASPECTO);
+    expect(text).toBe('red glow on skin, night');
+    expect(dropped).toEqual([]);
+  });
+
+  it('el rubor repetido se apunta una sola vez', () => {
+    const { text, dropped } = stripConflictingTraitsDetailed(
+      'blushing hard, lips parted, blushing again',
+      ASPECTO,
+    );
+    expect(dropped).toEqual(['blushing']);
+    expect(text).toBe('hard, lips parted, again');
+  });
+});
+
+// Las cuatro familias en la misma escena, que es como llegan de verdad.
+describe('las cuatro familias se recortan juntas y por orden', () => {
+  const ASPECTO = 'light brown hair, blue eyes, pale skin, slim body, blush';
+
+  it('color, origen, complexion y rubor, y la escena sobrevive entera', () => {
+    const escena = 'petite japanese woman 18, small body, blushing, dark hair wild across pillow';
+    const { text, dropped } = stripConflictingTraitsDetailed(escena, ASPECTO);
+    // «body» se queda solo y se va entero; «hair wild across pillow» no, porque
+    // lo que sigue detras es escena
+    expect(text).toBe('petite woman 18, hair wild across pillow');
+    // el orden es el orden en que se recorta, y es el que ve el panel
+    expect(dropped).toEqual(['dark hair', 'japanese woman', 'small body', 'blushing']);
+  });
+
+  it('el plan compuesto arrastra los cuatro avisos', () => {
+    const plan = composeHordeImagePlan({
+      recipe: recipe({ appearance: ASPECTO }),
+      scene: 'petite japanese woman 18, small body, blushing, dark hair wild across pillow',
+      extraNegative: '',
+    });
+    expect(plan.dropped).toEqual(['dark hair', 'japanese woman', 'small body', 'blushing']);
   });
 });
 

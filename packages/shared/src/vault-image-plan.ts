@@ -539,6 +539,34 @@ export type VaultImageAttemptState = (typeof VAULT_IMAGE_ATTEMPT_STATES)[number]
 export const VAULT_IMAGE_MALFORMED_REASONS = ['truncated_block', 'invalid'] as const;
 export type VaultImageMalformedReason = (typeof VAULT_IMAGE_MALFORMED_REASONS)[number];
 
+/**
+ * si el proveedor llego a decir QUIEN genero la imagen, con que modelo y con
+ * que semilla.
+ *
+ * Existe para separar dos silencios que se escribian igual —`worker: null`— y
+ * que significan cosas contrarias:
+ *
+ * - `reported`: el silencio es del proveedor y esta apuntado como tal. Un campo
+ *   a `null` aqui es un campo que el proveedor no contesto —porque no lo dijo o
+ *   porque no publica esos datos nunca—, no un hueco del registro.
+ * - `absent`: se miro y no habia nada que apuntar PORQUE no hubo generacion. Se
+ *   reserva a lo que se puede afirmar: un rechazo anterior a que la peticion
+ *   llegue siquiera a encolarse.
+ *
+ * Y `null`, que es el valor por defecto, es el tercero: NO SE SABE. Cubre los
+ * intentos escritos antes de que esto se apuntara y tambien los fallos en los
+ * que la peticion ya estaba en manos del proveedor y nadie contesto —una espera
+ * que vence pudo tener a un worker dibujando—. La pantalla dice «no se apunto»,
+ * que es lo unico cierto; «no lo hubo» seria inventarselo.
+ *
+ * Nace de un caso real: un bloqueo con `rc: csam` enseño «Worker —, Modelo —,
+ * Semilla no llego a saberse», y eso se leyo como que el filtro habia juzgado el
+ * TEXTO antes de encolar. No decia eso: el dato estaba en la respuesta y no se
+ * guardaba. Esa diferencia decide donde mirar el proximo bloqueo.
+ */
+export const VAULT_IMAGE_ATTRIBUTIONS = ['reported', 'absent'] as const;
+export type VaultImageAttribution = (typeof VAULT_IMAGE_ATTRIBUTIONS)[number];
+
 /** un aviso del proveedor, tal y como lo devuelve el envio */
 export const imageAttemptWarningSchema = z.object({
   code: z.string().max(120),
@@ -593,7 +621,24 @@ export const imageAttemptSchema = z.object({
   seed: z.string().max(64).nullable().default(null),
   model: z.string().max(128).nullable().default(null),
   worker: z.string().max(160).nullable().default(null),
+  /**
+   * el identificador del worker, al lado de su nombre.
+   *
+   * El nombre lo escribe el voluntario y lo puede cambiar; el identificador no.
+   * Sin el, «este worker ya me censuro otra vez» no se puede comprobar: dos
+   * nombres iguales pueden ser dos maquinas y uno cambiado, la misma.
+   */
+  workerId: z.string().max(128).nullable().default(null),
   kudos: z.number().nullable().default(null),
+  /**
+   * si los tres campos de arriba estan a `null` porque no los hubo o porque
+   * nadie los apunto. Ver `VAULT_IMAGE_ATTRIBUTIONS`.
+   *
+   * `.default(null)` para que los intentos ya escritos se sigan leyendo, y para
+   * que ese `null` signifique exactamente «no se supo», nunca un valor
+   * inventado.
+   */
+  attribution: z.enum(VAULT_IMAGE_ATTRIBUTIONS).nullable().default(null),
   /**
    * si el servidor COMPARTIO la imagen, no si se pidio compartirla.
    *

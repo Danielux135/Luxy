@@ -2847,6 +2847,9 @@ Fecha: 2026-09-16. Autor: Claude. **Reescrita entera el mismo dia**: la primera 
 de esta decision afirmaba una causa falsa. Lo que sigue esta verificado contra el codigo
 publico de Haidra-Org y contra este repositorio; lo anterior no lo estaba.
 
+**Confirmada el 2026-09-17** por la via que ella misma dejo escrita: ver «La
+prediccion se cumplio» mas abajo.
+
 ### Lo que se retiro, y por que
 
 La version del commit `bc0a557` decia que el filtro anti-CSAM del Horde era una expresion
@@ -2889,6 +2892,46 @@ si es cierto, un bloqueo llega DESPUES de una ronda completa de sondeos, con wor
 asignado. Si el veredicto fuera sobre el texto, llegaria en segundos, como HTTP 400 con
 `rc: CorruptPrompt`, sin pasar por la cola.
 
+### La prediccion se cumplio — 2026-09-17
+
+**Comprobado, una vez.** Daniel paso la tarde generando y uno de los intentos
+volvio bloqueado. No llego en segundos: **tardo la cola entera** —ronda completa
+de sondeos, con worker asignado— y solo despues devolvio `csam`. Era exactamente
+la forma que esta decision escribio como falsable el dia anterior. Si el veredicto
+fuera sobre el texto, habria llegado al encolar, como HTTP 400 con
+`rc: CorruptPrompt`, sin pasar por la cola. No paso eso.
+
+Lo confirma ademas el codigo del propio transporte, ahora que se lee con cuidado:
+cuando `assertNotCensored` levanta el bloqueo, **la generacion completa ya esta
+dentro del estado** —worker, id del worker, modelo y semilla—, asi que hubo imagen
+antes que veredicto. Es el mismo hecho por dos vias independientes: el reloj y la
+forma de la respuesta.
+
+**Lo que encaja, con la etiqueta que le corresponde.** En esa misma tarde,
+**cuatro peticiones mas explicitas pasaron y una menos explicita fue bloqueada**.
+Esto **no es evidencia instrumentada**: es lo que Daniel recuerda de lo que vio en
+pantalla generando. No hay en el repositorio los prompts, ni las semillas, ni los
+`rc` de esas cinco peticiones —precisamente porque el hueco de instrumentacion que
+cierra esta decision estaba abierto—, asi que no se puede repasar ni reproducir.
+Se deja escrito porque encaja con la hipotesis: con un filtro de texto seria una
+contradiccion que obliga a inventar una regla —y eso es justo lo que se invento
+tres veces—, y con un clasificador que puntua pixeles no hay nada que explicar.
+Pero **encajar no es confirmar**: lo que confirma la prediccion es el reloj del
+bloqueo, y eso es una via, no dos. La version del 2026-09-17 de esta decision lo
+presentaba como segunda pata de la confirmacion; corregido en la madrugada
+siguiente. Lo que si es observable en pantalla, y por eso se sostiene, es que el
+bloqueo llego **con worker asignado y despues de la cola**.
+
+**El matiz que importa para el metodo, y es el motivo de escribir esto aqui.** La
+hipotesis que acaba de confirmarse **no salio de mirar sintomas y deducir una
+causa**. De esas hubo tres el mismo dia —el negativo, los 1.000 caracteres, la
+combinacion de `petite` con lo explicito— y **las tres eran falsas**. Salio de
+**leer el codigo del servicio**: `safety_process.py`, `detection.py`, la version
+desplegada. La diferencia no es de suerte ni de cuidado: es que una deduccion
+sobre un tercero produce una historia verosimil y una lectura de su codigo produce
+una prediccion que se puede tumbar. Las tres deducciones no dejaron nada
+comprobable; esta dejo una frase con reloj, y el reloj la confirmo.
+
 ### Lo que se sostiene de la version anterior
 
 - El **hecho estructural** de que el negativo viaja dentro del campo `prompt`, detras de
@@ -2912,16 +2955,51 @@ saltar nada.
 
 ### El hueco de instrumentacion, que es lo unico accionable
 
-Luxy **ya distingue** `csam` de `censored` (`horde.ts:686-711`) y significan cosas opuestas:
-el segundo es un worker con censura propia y su propia pista dice que se repita para que lo
-coja otro. Pero `handlers.ts:3146` **aplana los dos** en un `VaultError` generico, y
-`toResult` (`horde.ts:292-307`) tira el worker. El catch de `handlers.ts:3145-3148` es mudo.
-Resultado: **un bloqueo no deja rastro de cual de los dos fue**, y por eso hubo que
-reconstruir tres semanas de sintomas a mano.
+Luxy **ya distingue** `csam` de `censored` (`assertNotCensored`, en `horde.ts`) y significan
+cosas opuestas: el segundo es un worker con censura propia y su propia pista dice que se
+repita para que lo coja otro. Pero el `catch` de la generacion en `handlers.ts` **aplana los
+dos** en un `VaultError` generico, y `toResult` (`horde.ts`) tiraba el worker. Resultado:
+**un bloqueo no deja rastro de cual de los dos fue**, y por eso hubo que reconstruir tres
+semanas de sintomas a mano.
 
-Relacionado y tambien roto: el mapa de errores por `rc` (`horde.ts:365-409`) no tiene
-entrada para un rechazo de contenido, asi que un 400 o un 403 del Horde cae en el caso por
-defecto y muestra la pista **falsa** «comprueba la clave en Conexiones».
+Relacionado y tambien roto: el mapa de errores por `rc` —`describeError`, en `horde.ts`— no
+tiene entrada para un rechazo de contenido, asi que un 400 o un 403 del Horde cae en el caso
+por defecto, y de ahi la pista sale de `hintForStatus`. Con **403** (y con 401) esa pista es
+«comprueba la clave en Conexiones», que ante un rechazo de contenido es **falsa**; con 400
+no hay pista ninguna.
+
+> **Las citas de este apartado eran por numero de linea y todas se habian quedado atras**
+> —`horde.ts:686-711` cae hoy en `assertSourceImage`, `horde.ts:365-409` en unas interfaces,
+> `horde.ts:292-307` en el esquema de usuario y `handlers.ts:3146` en otra cosa—, porque los
+> dos archivos han crecido desde que se escribieron. Sustituidas por nombres de funcion el
+> 2026-09-17 (madrugada), que es lo que no se mueve al crecer un archivo. En la misma
+> revision se comprobo leyendo el codigo que la pista falsa la da el **403**, no el 400: la
+> version anterior metia los dos en el mismo saco.
+
+**El hueco se cierra el 2026-09-17.** `HordeError` gana un quinto campo,
+`attribution` —worker, id del worker, modelo y semilla—, que `assertNotCensored`
+rellena en sus **dos** errores, el `csam` de la red y el `censored` del worker; el
+intento cifrado guarda esos cuatro datos tambien cuando falla, y un campo
+`attribution` (`reported` / `absent` / `null`) separa tres silencios que antes se
+escribian igual: el proveedor contesto y el hueco es suyo, se miro y no habia
+nada, o nadie lo apunto. La pantalla dice las tres cosas con palabras —«no lo
+dijo», «no lo hubo», «no se apuntó»— en vez de un guion.
+
+**El camino del vencimiento escribe `null`**, es decir «no se apunto»: el sondeo va
+por `check`, que solo devuelve contadores, y el worker y la semilla los trae
+`status`, al que solo se llama cuando la peticion termina. No hay «ultimo
+conocido» que guardar. Lo que **no** se puede decir es que esa ausencia signifique
+que no hubo generacion: el propio sondeo mira `processing`, y un valor mayor que
+cero dice que un worker la tenia en las manos, asi que una cola que vence pudo
+tener imagen detras. Quien decide como se lee un rastro vacio es quien apunta el
+intento, y por eso el helper que lo escribe exige que se le diga.
+
+> Escrito el 2026-09-17 de madrugada, corrigiendo dos frases de la version de la
+> noche anterior: decia que ese camino se quedaba «a proposito **sin
+> atribucion**» —escribia `absent`, que es una atribucion y significa otra cosa— y
+> remataba con «la peticion no llego a producir generacion», que no se puede
+> saber y que el `processing` del propio sondeo desmiente. El codigo se arreglo en
+> la misma pasada; esto solo pone al dia lo que la decision afirma.
 
 La conclusion operativa, y la unica solida: **un bloqueo suelto del Horde no es informacion
 fiable sobre lo que se dibujo.**
@@ -3184,3 +3262,74 @@ sigue diciendo que la clave anonima comparte aunque se pida lo contrario. Hoy es
 solo lo sostiene la documentacion oficial, no el codigo desplegado. **Queda
 anotado, no arreglado**: retirar un aviso de privacidad pide su propia
 comprobacion.
+
+## D-094 — el encuadre dice desde donde se mira; la postura, como esta el cuerpo
+
+Fecha: 2026-09-17. Autor: Claude. Origen: Daniel pasa la tarde generando imagenes
+de su personaje y comparando prompts. De ahi salen siete arreglos, y de uno de
+ellos sale esta decision, porque **la evidencia con la que se sostiene es de otra
+clase** que la de las tres semanas anteriores.
+
+### La prueba controlada, que es lo que hace que esto valga
+
+Daniel fijo **la misma semilla y el mismo modelo** y genero cuatro variantes,
+moviendo una cosa cada vez:
+
+1. con pesos —numeros entre parentesis— y sin ellos;
+2. con el negativo anti-retrato y sin el;
+3. con las etiquetas de cara y sin ellas.
+
+**Las cuatro salieron bien.** Eso no «sugiere»: descarta las tres sospechas de
+golpe, y las descarta sin necesidad de entender por que fallaba la otra. Es lo
+contrario del metodo que documenta `D-091`, donde tres causas se dedujeron mirando
+sintomas y las tres eran falsas.
+
+### Lo que quedo en pie
+
+Comparando el prompt que fallaba con los cuatro que funcionaron, la diferencia que
+sobrevivio es una sola: **al que fallaba le faltaba la postura del cuerpo**. Decia
+desde donde se mira —«from behind»— y no decia como esta ella. El generador no
+deja huecos: lo que no se escribe se lo inventa, y se lo invento; salio tumbada de
+lado, con el encuadre correcto.
+
+De ahi la regla, que es la decision propiamente dicha:
+
+> **el encuadre y la postura son dos campos, no uno.** «from behind», «close-up» o
+> «from above» dicen donde esta la camara. «on all fours», «lying face down»,
+> «kneeling», «sitting» dicen donde esta el cuerpo. Un prompt que solo trae el
+> primero deja el segundo al azar del modelo.
+
+Vive donde tiene que vivir: **un bullet en el bloque de instrucciones**, en la
+seccion COMO y justo detras del bullet del encuadre, porque quien redacta el
+prompt de cada turno es el modelo y es a el a quien hay que decirselo. No es codigo
+que componga texto, y por eso no se puede garantizar: se puede garantizar que la
+instruccion llega.
+
+### Lo que esto NO prueba, y conviene no leerlo de mas
+
+- **Cuatro generaciones son cuatro generaciones.** Un personaje, un modelo, una
+  tarde, y «salio bien» es el juicio de Daniel mirando la pantalla, no una medida.
+  Lo que las cuatro sostienen con solidez es lo **negativo** —pesos, negativo
+  anti-retrato y etiquetas de cara no eran la causa—, que es justo lo que una
+  prueba controlada sostiene mejor.
+- **No prueba que nombrar la postura arregle nada.** Prueba que su ausencia estaba
+  en el unico caso que fallo. Que el modelo obedezca la postura cuando se la
+  nombren es otra afirmacion, y esa **no esta comprobada**: las pruebas del
+  repositorio fijan que la frase llega al prompt, nunca que el generador la siga.
+  Lo comprueba Daniel en pantalla o no lo comprueba nadie.
+- **El encuadre heredado es un caso aparte y mas debil todavia.** «Sigue igual»,
+  «no te muevas», «quedate como estas»: a veces la foto siguiente conserva el
+  encuadre y a veces lo pierde. Se ha visto **intermitente, no sistematico**, y no
+  se ha aislado que frase lo conserva. Por eso el arreglo es una instruccion —que
+  repita encuadre **y** postura, porque el que se pierde es el encuadre— y no una
+  causa escrita como hecho.
+
+### Por que se escribe como decision y no como entrada de registro
+
+Porque lo que hay que conservar no es el bullet: es **la forma de la evidencia**.
+Un prompt de imagen tiene media docena de variables acopladas y un modelo que
+responde distinto a cada semilla; en ese terreno, mirar un fallo y nombrar un
+culpable produce historias verosimiles y falsas —tres el mismo dia, `D-091`—,
+mientras que fijar la semilla y mover una cosa cada vez produce descartes firmes
+con cuatro generaciones. **Cuando vuelva a fallar una foto, lo primero no es
+opinar: es fijar la semilla y variar una cosa.**

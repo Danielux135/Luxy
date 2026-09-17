@@ -42,6 +42,7 @@ import {
   type ImageAttempt,
   type ImageAttemptWarning,
   type VaultImageAttemptState,
+  type VaultImageAttribution,
   type VaultImageMalformedReason,
   type VaultImagePlan,
   type VaultImagePlanEdit,
@@ -3180,6 +3181,53 @@ export function registerIpcHandlers(context: HandlerContext): void {
     value === null || value === undefined ? null : value.slice(0, max);
 
   /**
+   * el rastro del proveedor —worker, modelo y semilla—, listo para el registro.
+   *
+   * Lo componen los dos caminos, el que sale bien y el que falla, y por eso vive
+   * en un solo sitio: cuando cada uno escribia lo suyo, el del fallo no escribia
+   * nada. Un bloqueo con `rc: csam` enseñaba «Worker —, Modelo —, Semilla no
+   * llego a saberse», que parecia decir que el rechazo habia sido sobre el texto
+   * antes de encolar. No lo era: el dato venia en la respuesta y no se apuntaba.
+   *
+   * `attribution` es lo que arregla esa lectura. `reported` cuando el proveedor
+   * dijo algo, `absent` cuando se miro y no habia nada —el fallo ocurrio antes
+   * de que ningun worker tocara la peticion—, y `null` cuando no se sabe cual de
+   * las dos cosas paso. Ningun campo se rellena con lo que se PIDIO: lo pedido
+   * ya vive en el plan.
+   *
+   * QUE SIGNIFICA UN RASTRO VACIO NO LO DECIDE ESTA FUNCION, y por eso `silence`
+   * es obligatorio. Un rastro vacio tiene tres lecturas distintas y solo quien
+   * llama sabe cual es la suya: un proveedor que genero pero no publica nada
+   * (`reported`: «no lo dijo»), un envio rechazado antes de entrar en la cola
+   * (`absent`: «no lo hubo») y una espera que vence sin respuesta, donde la
+   * peticion pudo estar en manos de un worker (`null`: «no se apunto»).
+   * Escribirlo todo como `absent` hacia que una imagen que existe dijera en
+   * pantalla que ningun modelo la habia dibujado.
+   */
+  const trace = (
+    detail: {
+      workerName?: string | null;
+      workerId?: string | null;
+      model?: string | null;
+      seed?: string | null;
+    } | null,
+    silence: VaultImageAttribution | null,
+  ): Pick<ImageAttemptPatch, 'seed' | 'model' | 'worker' | 'workerId' | 'attribution'> => {
+    // el transporte del horde escribe `''` donde el servidor callo: vacio y
+    // ausente son lo mismo aqui, y guardar `''` seria fingir que contesto
+    const take = (value: string | null | undefined, max: number): string | null => {
+      const capped = cap(value, max);
+      return capped === null || capped === '' ? null : capped;
+    };
+    const seed = take(detail?.seed, 64);
+    const model = take(detail?.model, 128);
+    const worker = take(detail?.workerName, 160);
+    const workerId = take(detail?.workerId, 128);
+    const known = seed !== null || model !== null || worker !== null || workerId !== null;
+    return { seed, model, worker, workerId, attribution: known ? 'reported' : silence };
+  };
+
+  /**
    * apunta un intento nuevo y devuelve su identificador.
    *
    * El identificador se sortea aqui y no dentro del almacen porque el envio lo
@@ -3321,6 +3369,16 @@ export function registerIpcHandlers(context: HandlerContext): void {
      */
     let warnings: ImageAttemptWarning[] = [];
 
+    /**
+     * si la peticion llego a entrar en la cola.
+     *
+     * Separa los dos silencios del camino que falla: mientras es `false`, nada
+     * salio de aqui y «no lo hubo» es verdad; en cuanto es `true` la peticion
+     * esta en manos del horde y lo unico honesto ante un fallo sin datos es
+     * decir que no se apunto.
+     */
+    let submitted = false;
+
     // como va la cola, hacia la ventana y hacia el log.
     //
     // El sondeo da unas ochenta vueltas en diez minutos y hasta ahora se tiraban
@@ -3357,6 +3415,7 @@ export function registerIpcHandlers(context: HandlerContext): void {
 
     try {
       const submission = await submitImage(request, options);
+      submitted = true;
       // el tope del registro es 20: recortar aqui vale mas que perder el apunte
       // entero por un aviso de sobra
       warnings = submission.warnings
@@ -3412,9 +3471,9 @@ export function registerIpcHandlers(context: HandlerContext): void {
       await noteAttempt(input.conversationId, input.attemptId, {
         state: 'ok',
         mediaId: cap(stored.mediaId, 128),
-        seed: cap(generation.seed, 64),
-        model: cap(generation.model, 128),
-        worker: cap(generation.workerName, 160),
+        // aqui hubo generacion: si algun campo viene vacio es que el horde no lo
+        // contesto, no que no hubiera worker
+        ...trace(generation, 'reported'),
         kudos: result.kudos,
         // LO QUE EL SERVIDOR HIZO con la imagen, al lado de lo que se le pidio.
         //
@@ -3438,6 +3497,8 @@ export function registerIpcHandlers(context: HandlerContext): void {
         // resultados distintos: version del fichero, backend y retoques son
         // suyos, no del horde. Ya venia en la respuesta y se tiraba
         worker: generation.workerName,
+        // el nombre lo cambia el voluntario cuando quiere; esto no
+        workerId: generation.workerId,
         // dos huellas y ni una palabra de texto: con ellas se encuentra el
         // intento en el registro cifrado, que es donde SI esta el prompt
         attemptId: input.attemptId,
@@ -3471,9 +3532,26 @@ export function registerIpcHandlers(context: HandlerContext): void {
       // Y `request` es una variable local que muere aqui: si el plan no
       // quedara apuntado, un fallo dejaria una frase y nada que mirar.
       const rc = error instanceof HordeError ? error.rc : null;
+      // Y EL RASTRO, que es lo que hacia imposible cerrar un diagnostico.
+      //
+      // Un bloqueo de la red llega con la imagen ya generada: el worker, el
+      // modelo y la semilla vienen dentro de la respuesta y viajan en el error.
+      // Apuntarlos aqui es lo unico que separa «el filtro juzgo el texto al
+      // encolar» de «el filtro juzgo la imagen ya dibujada», que son dos sitios
+      // distintos donde mirar.
+      //
+      // Cuando el error no trae nada, lo que se escribe depende de si la
+      // peticion llego a encolarse. Antes del envio no la tuvo nadie y `absent`
+      // es cierto. Despues NO SE PUEDE SABER: el sondeo pudo ver `processing`
+      // por encima de cero —un worker dibujando— y aun asi vencer el plazo, asi
+      // que ahi va `null` y la pantalla dice «no se apunto». Escribir `absent`
+      // en ese caso era afirmar que no hubo generacion, que es justo lo que el
+      // vencimiento no permite concluir.
+      const attribution = error instanceof HordeError ? error.attribution : null;
       await noteAttempt(input.conversationId, input.attemptId, {
         state: 'failed',
         rc: cap(rc, 64),
+        ...trace(attribution, submitted ? null : 'absent'),
         errorMessage: cap(redact(error instanceof Error ? error.message : String(error)), 1000),
         warnings,
         plan: input.plan,
@@ -3537,8 +3615,15 @@ export function registerIpcHandlers(context: HandlerContext): void {
       characterId: character?.xavira?.characterId ?? input.characterId,
     };
 
+    // la misma bandera que el horde, y por el mismo motivo: este `try` envuelve
+    // TAMBIEN el arranque, asi que atrapa rechazos que ocurren antes de que se
+    // genere nada —sin creditos, clave invalida, la red caida—. Decir
+    // «reported» ahi afirmaria que el proveedor genero la imagen y se callo
+    // quien la hizo, cuando lo que hizo fue negarse a empezar
+    let started = false;
+
     try {
-      const started =
+      const startedGeneration =
         args.kind === 'image'
           ? await generateImage(
               {
@@ -3565,9 +3650,13 @@ export function registerIpcHandlers(context: HandlerContext): void {
               options,
             );
 
+      // a partir de aqui el proveedor SI ha empezado a generar, asi que un
+      // rastro vacio es suyo y no del registro
+      started = true;
+
       // sondeo, nunca callback: un callback exigiria una URL publica y el
       // contenido pasaria por el gateway (D-042)
-      const finished = await awaitGeneration(started, options);
+      const finished = await awaitGeneration(startedGeneration, options);
       if (finished.outputUrl === null) {
         throw new VaultError('el proveedor no devolvio ningun resultado');
       }
@@ -3594,6 +3683,12 @@ export function registerIpcHandlers(context: HandlerContext): void {
       await noteAttempt(input.conversationId, input.attemptId, {
         state: 'ok',
         mediaId: cap(stored.mediaId, 128),
+        // este proveedor no PUBLICA quien la genero, con que modelo ni con que
+        // semilla: no es una red de voluntarios. Pero generarla la genero, y con
+        // algun modelo y alguna semilla, asi que el silencio es suyo y no del
+        // registro: `reported` con los campos a null, que la pantalla lee como
+        // «no lo dijo». Con `absent` una imagen que existe decia «no lo hubo»
+        ...trace(null, 'reported'),
         warnings: [],
       });
 
@@ -3620,6 +3715,12 @@ export function registerIpcHandlers(context: HandlerContext): void {
       await noteAttempt(input.conversationId, input.attemptId, {
         state: 'failed',
         rc: cap(error instanceof XaviraError ? error.code : null, 64),
+        // Xavira no publica nunca el rastro, asi que cuando SI llego a generar
+        // el silencio es suyo (`reported`). Pero si fallo antes de empezar —sin
+        // creditos, clave invalida— no hubo ninguna generacion de la que callar,
+        // y decirlo seria la misma mentira que este arreglo vino a quitar, con
+        // el signo cambiado: `absent` es lo unico que se puede afirmar ahi
+        ...trace(null, started ? 'reported' : 'absent'),
         errorMessage: cap(redact(error instanceof Error ? error.message : String(error)), 1000),
         plan,
       });

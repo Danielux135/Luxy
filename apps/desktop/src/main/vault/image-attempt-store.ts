@@ -34,14 +34,57 @@ import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileS
 import { join } from 'node:path';
 import { z } from 'zod';
 import { openText, sealText, wipe, type SealedEnvelope } from '@luxy/vault-crypto';
-import { imageAttemptSchema, type ImageAttempt } from '@luxy/shared';
+import { imageAttemptSchema, type ImageAttempt, type VaultImageAttemptState } from '@luxy/shared';
 import { VaultError, type VaultService } from './vault-service.js';
 
 /** id de conversacion: uuid, y nada mas. evita cualquier travesia de rutas */
 const CONVERSATION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-/** cuantos intentos se conservan por conversacion cuando se poda */
+/**
+ * cuantos intentos CON COPIA EN OTRO SITIO se conservan por conversacion.
+ *
+ * Un intento `ok` tiene su imagen guardada aparte, y el medio lleva dentro el
+ * prompt que se mando y el `attemptId` que los enlaza: podar el apunte no borra
+ * la unica copia de nada. `discarded` y `superseded` no llegaron a generar y no
+ * hay nada que diagnosticar en ellos.
+ */
 export const IMAGE_ATTEMPT_RING = 50;
+
+/**
+ * cuantos intentos SIN COPIA EN NINGUN SITIO se conservan, que son muchos mas.
+ *
+ * LO OBSERVADO, el 2026-09-17: el usuario fue a mirar un intento que el filtro
+ * habia bloqueado y Studio le contesto «ese intento ya no esta en el registro:
+ * de cada conversacion se guardan solo los ultimos». Que la causa fuera agotar
+ * los 50 en una tarde de pruebas es la explicacion mas probable, pero no se
+ * midio: nadie conto los intentos de ese archivo.
+ *
+ * Lo que si se sigue del diseño, y es el motivo del cupo aparte: al podar por
+ * antiguedad sale por la ventana justo lo irrecuperable. Un fallo o un bloqueo
+ * solo existe aqui —no hay imagen que lo guarde— y es ademas lo que se va a
+ * mirar.
+ *
+ * 200 porque los fallos son una fraccion de los intentos: cubren varios dias de
+ * pruebas como aquella, no unas horas. Y hay tope porque el archivo entero se
+ * vuelve a sellar y a escribir en cada apunte; sin limite, una conversacion
+ * vieja pagaria esa escritura en cada imagen que se pide.
+ */
+export const IMAGE_ATTEMPT_DIAGNOSTIC_RING = 200;
+
+/**
+ * los estados cuyo apunte es la unica copia que queda de ellos.
+ *
+ * `failed` incluye los bloqueos —`rc` 'csam' o 'censored'—, que es lo que mas se
+ * consulta. `malformed` guarda el bloque que el modelo escribio mal, que no esta
+ * en ningun otro sitio porque el turno no lo enseña. Y `sent` es una peticion
+ * que salio y nunca se cerro —Studio cerrado a mitad—: sin su apunte no queda
+ * rastro de que llegase a mandarse.
+ */
+const DIAGNOSTIC_STATES: ReadonlySet<VaultImageAttemptState> = new Set([
+  'failed',
+  'malformed',
+  'sent',
+]);
 
 /**
  * el contexto de la subclave: la conversacion, pero en compartimento propio.
@@ -262,9 +305,16 @@ export class ImageAttemptStore {
   }
 
   /**
-   * anillo por conversacion: se conservan los `max` ultimos.
+   * anillo por conversacion, con DOS CUPOS que se cuentan por separado.
    *
-   * Los `pending` NO se podan aunque caigan fuera de la ventana: son la peticion
+   * Podar solo por antiguedad tiraba antes lo que menos se podia tirar: los
+   * intentos que salieron bien tienen su imagen guardada aparte, y los que
+   * fallaron no tienen copia en ningun sitio. Cincuenta apuntes se gastan en una
+   * tarde de pruebas, casi todos correctos, y el fallo que se iba a mirar salia
+   * de la ventana empujado por ellos. Con cupos separados, una racha de imagenes
+   * buenas ya no borra el bloqueo de hace dos dias.
+   *
+   * Los `pending` NO se podan aunque caigan fuera de su ventana: son la peticion
    * que todavia espera una decision, y perderla dejaria una tarjeta en la
    * pantalla apuntando a un intento que ya no existe.
    */
@@ -272,10 +322,25 @@ export class ImageAttemptStore {
     vault: VaultService,
     conversationId: string,
     max: number = IMAGE_ATTEMPT_RING,
+    diagnosticMax: number = IMAGE_ATTEMPT_DIAGNOSTIC_RING,
   ): Promise<void> {
     await this.apply(vault, conversationId, (current) => {
-      if (current.length <= max) return [...current];
-      const kept = new Set(current.slice(current.length - max));
+      // se guardan REFERENCIAS: cada elemento que sale de `list` es un objeto
+      // propio, asi que dos intentos iguales campo a campo no se confunden
+      const kept = new Set<ImageAttempt>();
+      const keepLast = (pool: readonly ImageAttempt[], limit: number): void => {
+        for (const attempt of pool.slice(Math.max(0, pool.length - limit))) kept.add(attempt);
+      };
+      keepLast(
+        current.filter((attempt) => DIAGNOSTIC_STATES.has(attempt.state)),
+        diagnosticMax,
+      );
+      keepLast(
+        current.filter((attempt) => !DIAGNOSTIC_STATES.has(attempt.state)),
+        max,
+      );
+      // el orden original se conserva: la poda decide QUE se queda, nunca en que
+      // orden, y la pantalla lee el ultimo pendiente de esta lista
       return current.filter((attempt) => kept.has(attempt) || attempt.state === 'pending');
     });
   }

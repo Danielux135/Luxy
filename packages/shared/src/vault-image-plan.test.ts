@@ -457,3 +457,56 @@ describe('imageAttemptSchema', () => {
     expect(imageAttemptSchema.safeParse({ ...base, attemptId: 'no-es-uuid' }).success).toBe(false);
   });
 });
+
+describe('el rastro del proveedor en un intento', () => {
+  const base = {
+    attemptId: '0b4d5a2e-2f3a-4c5b-8d6e-7f8091a2b3c4',
+    conversationId: 'conv-1',
+    createdAt: '2026-09-16T10:00:00.000Z',
+    state: 'failed' as const,
+    planId: '0000000000000000',
+  };
+
+  it('un intento escrito antes de esto se sigue leyendo, y no afirma nada', () => {
+    // es la razon de que los campos sean nullable con `.default(null)`: los
+    // registros que ya estan en disco no traen ninguno de los cuatro
+    const parsed = imageAttemptSchema.parse(base);
+    expect(parsed.workerId).toBeNull();
+    expect(parsed.attribution).toBeNull();
+    expect(parsed.worker).toBeNull();
+    expect(parsed.model).toBeNull();
+    expect(parsed.seed).toBeNull();
+  });
+
+  it('un bloqueo con el worker conocido lo guarda y lo marca como contestado', () => {
+    // el caso real: `rc: csam` llega DESPUES de generar, con worker, modelo y
+    // semilla dentro de la respuesta. Si no se apuntan, el panel se lee como si
+    // el rechazo hubiera sido sobre el texto antes de encolar
+    const parsed = imageAttemptSchema.parse({
+      ...base,
+      rc: 'csam',
+      seed: '1080257389',
+      model: 'WAI-NSFW-illustrious-SDXL',
+      worker: 'una-gpu-cualquiera',
+      workerId: 'w-9',
+      attribution: 'reported',
+    });
+    expect(parsed.attribution).toBe('reported');
+    expect(parsed.worker).toBe('una-gpu-cualquiera');
+    expect(parsed.workerId).toBe('w-9');
+    expect(parsed.seed).toBe('1080257389');
+  });
+
+  it('«se miro y no habia» se puede escribir, y no es lo mismo que «no se apunto»', () => {
+    const parsed = imageAttemptSchema.parse({ ...base, attribution: 'absent' });
+    expect(parsed.attribution).toBe('absent');
+    // los tres campos siguen a null, pero ahora ese null tiene significado
+    expect(parsed.worker).toBeNull();
+    expect(parsed.attribution).not.toBe(imageAttemptSchema.parse(base).attribution);
+  });
+
+  it('no admite un valor inventado de atribucion', () => {
+    expect(imageAttemptSchema.safeParse({ ...base, attribution: 'quiza' }).success).toBe(false);
+    expect(imageAttemptSchema.safeParse({ ...base, attribution: 'absent' }).success).toBe(true);
+  });
+});

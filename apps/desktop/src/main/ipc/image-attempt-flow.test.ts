@@ -70,10 +70,13 @@ const horde = vi.hoisted(() => ({
   /** si no es null, `estimateKudos` lanza esto */
   estimateError: null as Error | null,
   awaitCalls: 0,
+  /** si no es null, `awaitImage` lanza esto: el fallo DESPUES de encolar */
+  awaitError: null as Error | null,
   downloadCalls: 0,
   seed: '1080257389',
   model: 'WAI-NSFW-illustrious-SDXL',
   workerName: 'una-gpu-cualquiera',
+  workerId: 'w-9',
   kudos: 12.5,
 }));
 
@@ -84,6 +87,18 @@ vi.mock('@luxy/agent/dist/providers/horde.js', () => {
       readonly status: number | null = null,
       readonly hint: string | null = null,
       readonly rc: string | null = null,
+      /**
+       * lo que se supiera de la generacion al fallar.
+       *
+       * Un bloqueo de la red llega DESPUES de generar: el worker, el modelo y
+       * la semilla vienen dentro. `null` es un fallo anterior a todo eso.
+       */
+      readonly attribution: {
+        workerName: string | null;
+        workerId: string | null;
+        model: string | null;
+        seed: string | null;
+      } | null = null,
     ) {
       super(message);
       this.name = 'HordeError';
@@ -114,6 +129,7 @@ vi.mock('@luxy/agent/dist/providers/horde.js', () => {
     },
     awaitImage: async () => {
       horde.awaitCalls += 1;
+      if (horde.awaitError !== null) throw horde.awaitError;
       return {
         done: true,
         faulted: false,
@@ -132,6 +148,7 @@ vi.mock('@luxy/agent/dist/providers/horde.js', () => {
             id: 'gen-1',
             model: horde.model,
             workerName: horde.workerName,
+            workerId: horde.workerId,
             censored: false,
             metadata: [],
           },
@@ -151,7 +168,12 @@ vi.mock('@luxy/agent/dist/providers/horde.js', () => {
  * Es el unico que hace video, asi que solo aqui se puede ver si el `kind` de la
  * peticion sobrevive hasta el envio o se pierde por el camino.
  */
-const xavira = vi.hoisted(() => ({ imageCalls: 0, videoCalls: 0 }));
+const xavira = vi.hoisted(() => ({
+  imageCalls: 0,
+  videoCalls: 0,
+  /** si no es null, `generateImage` lanza esto */
+  imageError: null as Error | null,
+}));
 
 vi.mock('@luxy/agent/dist/providers/xavira.js', () => ({
   XaviraError: class XaviraError extends Error {},
@@ -160,6 +182,7 @@ vi.mock('@luxy/agent/dist/providers/xavira.js', () => ({
   downloadOutput: async () => ({ bytes: new Uint8Array([7, 7, 7]), mimeType: 'video/webm' }),
   generateImage: async () => {
     xavira.imageCalls += 1;
+    if (xavira.imageError !== null) throw xavira.imageError;
     return {};
   },
   generateVideo: async () => {
@@ -311,6 +334,7 @@ async function generar(): Promise<{ ok: boolean; error?: string; hint?: string |
 beforeEach(() => {
   xavira.imageCalls = 0;
   xavira.videoCalls = 0;
+  xavira.imageError = null;
   horde.lastRequest = null;
   horde.submitWarnings = [];
   horde.submitError = null;
@@ -320,6 +344,7 @@ beforeEach(() => {
   horde.estimateWarnings = [];
   horde.estimateError = null;
   horde.awaitCalls = 0;
+  horde.awaitError = null;
   horde.downloadCalls = 0;
   horde.shared = null;
 });
@@ -354,6 +379,9 @@ describe('el envio consume el plan y apunta el intento', () => {
     expect(intento.seed).toBe('1080257389');
     expect(intento.model).toBe('WAI-NSFW-illustrious-SDXL');
     expect(intento.worker).toBe('una-gpu-cualquiera');
+    expect(intento.workerId).toBe('w-9');
+    // el servidor contesto, asi que un hueco aqui seria suyo y no del registro
+    expect(intento.attribution).toBe('reported');
     expect(intento.kudos).toBe(12.5);
     expect(intento.planId).toBe(PLAN.planId);
     expect(intento.plan?.provider).toBe('horde');
@@ -479,6 +507,83 @@ describe('el envio consume el plan y apunta el intento', () => {
     const intento = huella.attempts[0] as ImageAttempt;
     expect(intento.state).toBe('failed');
     expect(intento.rc).toBeNull();
+  });
+
+  it('UN BLOQUEO APUNTA EL WORKER, EL MODELO Y LA SEMILLA, que hoy se pierden', async () => {
+    // el caso real: el panel enseño «Worker —, Modelo —, Semilla no llego a
+    // saberse» y eso parecia decir que el rechazo habia sido sobre el TEXTO,
+    // antes de encolar. No decia eso: el bloqueo llega con la imagen ya
+    // generada y el dato venia dentro; lo que faltaba era apuntarlo
+    const { HordeError } = (await import('@luxy/agent/dist/providers/horde.js')) as unknown as {
+      HordeError: new (
+        m: string,
+        s: number | null,
+        h: string | null,
+        rc: string | null,
+        attribution: {
+          workerName: string | null;
+          workerId: string | null;
+          model: string | null;
+          seed: string | null;
+        } | null,
+      ) => Error;
+    };
+    horde.submitError = new HordeError(
+      'el filtro anti-CSAM de AI Horde bloqueo esta imagen',
+      null,
+      'no es un fallo tecnico y no se reintenta: cambia el prompt',
+      'csam',
+      {
+        workerName: 'una-gpu-cualquiera',
+        workerId: 'w-9',
+        model: 'WAI-NSFW-illustrious-SDXL',
+        seed: '1080257389',
+      },
+    );
+    const huella = registrar();
+
+    expect(await generar()).toMatchObject({ ok: false });
+    const intento = huella.attempts[0] as ImageAttempt;
+    expect(intento.state).toBe('failed');
+    expect(intento.rc).toBe('csam');
+    expect(intento.worker).toBe('una-gpu-cualquiera');
+    expect(intento.workerId).toBe('w-9');
+    expect(intento.model).toBe('WAI-NSFW-illustrious-SDXL');
+    expect(intento.seed).toBe('1080257389');
+    // y la marca que distingue este hueco del de un intento antiguo
+    expect(intento.attribution).toBe('reported');
+  });
+
+  it('un fallo anterior a la generacion apunta «se miro y no habia», no un vacio', async () => {
+    // la diferencia con el de arriba es justo la que decide donde mirar: aqui la
+    // peticion no llego a manos de ningun worker
+    horde.submitError = new Error('se corto la red');
+    const huella = registrar();
+
+    expect(await generar()).toMatchObject({ ok: false });
+    const intento = huella.attempts[0] as ImageAttempt;
+    expect(intento.attribution).toBe('absent');
+    expect(intento.worker).toBeNull();
+    expect(intento.model).toBeNull();
+    expect(intento.seed).toBeNull();
+    expect(intento.workerId).toBeNull();
+  });
+
+  it('UNA ESPERA QUE VENCE NO PUEDE DECIR «no lo hubo»: la peticion ya estaba encolada', async () => {
+    // la peticion salio y el sondeo pudo ver `processing` por encima de cero, o
+    // sea un worker dibujando. Que al final no llegara nada no permite afirmar
+    // que no hubo generacion, y `absent` es exactamente esa afirmacion: fue la
+    // que llevo a diagnosticar mal un bloqueo leyendo «no hubo worker» donde lo
+    // que pasaba era que no se apunto
+    horde.awaitError = new Error('la imagen no estuvo lista a tiempo');
+    const huella = registrar();
+
+    expect(await generar()).toMatchObject({ ok: false });
+    const intento = huella.attempts[0] as ImageAttempt;
+    expect(intento.state).toBe('failed');
+    expect(intento.attribution).toBeNull();
+    expect(intento.worker).toBeNull();
+    expect(intento.seed).toBeNull();
   });
 
   it('SI EL REGISTRO REVIENTA AL DAR DE ALTA, la generacion sale igual', async () => {
@@ -781,6 +886,50 @@ describe('los verbos de la decision', () => {
 
     expect(xavira.imageCalls).toBe(1);
     expect(xavira.videoCalls).toBe(0);
+  });
+
+  it('UNA IMAGEN QUE EXISTE NO DICE «no lo hubo» del modelo que la dibujo', async () => {
+    // el caso real: se genera con el proveedor de pago, sale bien, se abre el
+    // intento y la pantalla decia «Semilla: no lo hubo / Worker: no lo hubo /
+    // Modelo: no lo hubo» sobre una imagen que esta ahi. Este proveedor genera
+    // con algun modelo y alguna semilla; lo que no hace es publicarlos, asi que
+    // el silencio es suyo —«no lo dijo»— y no un hueco del registro
+    const huella = registrar();
+    sembrar(huella, 'pending', PLAN_XAVIRA);
+
+    expect(await invocar(IPC_INVOKE.vaultImageCommit, {
+      action: 'generate',
+      conversationId: CONV,
+      attemptId: PENDIENTE,
+      edit: null,
+    })).toMatchObject({ ok: true });
+
+    const intento = huella.attempts[0] as ImageAttempt;
+    expect(intento.state).toBe('ok');
+    expect(intento.attribution).toBe('reported');
+    expect(intento.seed).toBeNull();
+    expect(intento.model).toBeNull();
+    expect(intento.worker).toBeNull();
+  });
+
+  // un rechazo ANTES de generar no es «no lo dijo»: no hay ninguna generacion
+  // de cuyo rastro callarse. Es el caso de quedarse sin creditos o de una clave
+  // invalida, y decir `reported` ahi afirma que el proveedor dibujo la imagen
+  it('pero un rechazo antes de empezar dice «no lo hubo», no «no lo dijo»', async () => {
+    xavira.imageError = new Error('el proveedor no acepto la peticion');
+    const huella = registrar();
+    sembrar(huella, 'pending', PLAN_XAVIRA);
+
+    expect(await invocar(IPC_INVOKE.vaultImageCommit, {
+      action: 'generate',
+      conversationId: CONV,
+      attemptId: PENDIENTE,
+      edit: null,
+    })).toMatchObject({ ok: false });
+
+    const intento = huella.attempts[0] as ImageAttempt;
+    expect(intento.state).toBe('failed');
+    expect(intento.attribution).toBe('absent');
   });
 
   it('DOS PULSACIONES SEGUIDAS GENERAN UNA SOLA VEZ', async () => {
