@@ -44,11 +44,22 @@ describe('desambiguar «desde detras»', () => {
     expect(salida.text).toBe(escena);
   });
 
-  it('no toca una escena que ya dice «back to camera», «facing away» o «face down»', () => {
-    for (const ya of ['back to camera', 'facing away', 'lying face down', 'back turned']) {
+  it('no toca una escena que ya dice «back to camera», «facing away» o «back turned»', () => {
+    for (const ya of ['back to camera', 'facing away', 'back turned']) {
       const escena = `from behind, ${ya}, on bed`;
       expect(disambiguateOrientation(escena)).toEqual({ text: escena, added: [] });
     }
+  });
+
+  // CASO REAL, 2026-09-18: el modelo por fin escribio `face down` —una de las
+  // etiquetas que el bloque de instrucciones le pide— y el desambiguador se
+  // callo, porque `face down` estaba en la lista de «ya lo dice». No lo dice:
+  // boca abajo se puede estar de lado. Es el mismo motivo por el que
+  // `looking back` nunca estuvo ahi
+  it('«face down» no cuenta como orientacion: dice donde queda la cara', () => {
+    const salida = disambiguateOrientation('from behind, on all fours, face down, nude, on bed');
+    expect(salida.added).toEqual([ORIENTATION_TAGS.rear]);
+    expect(salida.text).toContain('ass to camera');
   });
 
   it('una escena sin «desde detras» no se toca, ni con la postura puesta', () => {

@@ -173,6 +173,14 @@ const VIEWER_FACING_PHRASES: readonly (readonly string[])[] = [
  * forman en vez de escribirse a mano: en prosa aparecen todas las combinaciones
  * —`ass towards the viewer`, `back towards viewer`, `buttocks to the viewer`— y
  * una lista escrita a mano siempre va por detras de la siguiente variante.
+ *
+ * `face down` SALIO de aqui, y es el mismo caso que `looking back`: dicen donde
+ * queda la CARA, no que parte va hacia el objetivo, y boca abajo se puede estar
+ * perfectamente de lado. Estuvo dentro una sola version y bastó para que un
+ * prompt real se quedara sin desambiguar —«from behind, on all fours, face
+ * down, ...»— justo cuando el modelo por fin escribia la etiqueta que el bloque
+ * de instrucciones le pide. El liston para entrar aqui es responder a «que
+ * parte va hacia la camara», y ninguna de las dos lo hace.
  */
 const ORIENTATION_STATED_PHRASES: readonly (readonly string[])[] = [
   ...rearFacingCombinations(),
@@ -188,8 +196,6 @@ const ORIENTATION_STATED_PHRASES: readonly (readonly string[])[] = [
     'facing away',
     'faces away',
     'turned away',
-    'face down',
-    'facedown',
   ].map(toWords),
 ];
 
