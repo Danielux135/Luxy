@@ -152,6 +152,30 @@ export function restoreDroppedFragment(positive: string, fragment: string): stri
   return base.length === 0 ? limpio : `${base}, ${limpio}`;
 }
 
+/**
+ * quita del positivo un fragmento que el codigo habia añadido.
+ *
+ * El gemelo de `restoreDroppedFragment`, y hace falta por lo mismo: un cambio
+ * automatico que no se puede deshacer no es una ayuda, es una imposicion. Lo
+ * unico que escribe hoy en `added` es la desambiguacion de «desde detras», y a
+ * veces la persona la querra fuera —porque va a reescribir la escena entera, o
+ * porque le interesa justo el encuadre ambiguo—.
+ *
+ * Se quita el ELEMENTO entero, no la subcadena: el fragmento llego como una
+ * etiqueta separada por comas y ahi sigue. Lo demas conserva su espaciado tal
+ * cual, que es lo que evita que quitar una etiqueta reescriba el texto que la
+ * persona tenia a medio corregir.
+ */
+export function removeAddedFragment(positive: string, fragment: string): string {
+  const objetivo = fragment.trim().toLowerCase();
+  if (objetivo.length === 0) return positive;
+  const partes = positive.split(',');
+  const quedan = partes.filter((part) => part.trim().toLowerCase() !== objetivo);
+  // no casaba nada: se devuelve el original sin tocarle ni los espacios
+  if (quedan.length === partes.length) return positive;
+  return quedan.join(',').trim();
+}
+
 /** ya esta escrito ahi, sin distinguir mayusculas y como palabras enteras */
 function containsFragment(positive: string, fragment: string): boolean {
   const partes = positive

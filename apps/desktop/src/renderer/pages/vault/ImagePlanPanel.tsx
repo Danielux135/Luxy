@@ -19,6 +19,7 @@ import {
   imagePlanEditFrom,
   imagePlanEstimateBlockReason,
   planFromEdit,
+  removeAddedFragment,
   restoreDroppedFragment,
   type HordeImagePlan,
   type ImageAttempt,
@@ -251,6 +252,40 @@ function PlanBody({
                 }}
               >
                 + {fragment}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+
+      {plan.provider === 'horde' && plan.added.length > 0 && (
+        <>
+          {/* el gemelo del bloque de arriba: aquel cuenta lo que se quitó, y sin éste lo
+              añadido sería el único cambio automático que no se ve. Que la escena diga
+              «from behind» no basta para que salga: no se añade nada si además dice que
+              mira a cámara, si ya dice qué parte va hacia el objetivo, ni si esas palabras
+              eran la luz, un objeto detrás del cual está o alguien que la sujeta. Lo decide
+              `disambiguateOrientation`, que es donde está escrito el criterio */}
+          <p className="field__hint">
+            Pediste la foto desde detrás, y eso solo dice dónde está la cámara: el generador lo
+            cumple girando el cuerpo y la imagen sale de frente o de tres cuartos. Luxy ha añadido
+            esto para decir qué parte va hacia el objetivo. Si no era eso lo que querías, quítalo:
+          </p>
+          <div className="row">
+            {plan.added.map((fragment) => (
+              <button
+                key={fragment}
+                className="btn btn--quiet"
+                disabled={busy || edit.provider !== 'horde'}
+                onClick={() => {
+                  if (edit.provider !== 'horde') return;
+                  onEdit({
+                    ...edit,
+                    positive: removeAddedFragment(edit.positive, fragment),
+                  });
+                }}
+              >
+                − {fragment}
               </button>
             ))}
           </div>

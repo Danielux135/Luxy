@@ -1,5 +1,120 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-09-17 (tarde, tercera vuelta) — Claude — F29-POSTURA-002 — verificar los cuatro cierres, y dos enumeraciones de menos
+
+- Objetivo: comprobar **ejecutando la función**, no leyéndola, que los cuatro
+  defectos del informe están de verdad cerrados; y arreglar lo que quedara.
+- Lo medido: las cinco frases de la luz y del objeto, las dos del artículo, los
+  cuatro cruces que faltaban y «1girl, rear view, kneeling, indoors» se pasaron
+  por `disambiguateOrientation` desde una prueba temporal —borrada después—.
+  Diecisiete casos, todos como debían: las que no piden encuadre no ganan nada,
+  `kneeling` da `back to camera` y «from behind, on all fours» sigue dando
+  `ass to camera`. La salida literal, en `TEST-RESULTS.md`.
+- Lo que quedaba mal, y se corrige aquí: **dos enumeraciones incompletas**.
+  (a) el comentario del cartel nuevo en `ImagePlanPanel.tsx` nombraba tres de las
+  cuatro puertas —se dejaba fuera «alguien que la sujeta» y «ya dice qué parte va
+  hacia el objetivo»—, justo la puerta que más escenas salva; (b) el comentario de
+  `computePlanId` seguía diciendo que no mide «`scene`, `dropped` ni una huella
+  anterior» sin nombrar `added`, que es un campo nuevo del mismo cambio. Es otra
+  vez documentación enumerando de menos, que es la hermana del defecto de la
+  madrugada.
+- Lo comprobado del panel, que era el cuarto defecto del informe: el bloque de lo
+  añadido es, carácter a carácter, el gemelo del de lo recortado salvo el
+  identificador, el signo del botón y los dos textos —se comparó con `cat -A`—.
+  `removeAddedFragment` quita el **elemento** entero y deja el resto con su
+  espaciado; si la persona lo borra todo, `imagePlanBlockReason` ya explica que el
+  positivo vacío no se puede mandar, así que el botón nuevo no abre ningún hueco.
+  `computePlanId` no mide `added`, así que quitarlo no cambia la huella por sí
+  solo: la cambia el texto, que es lo correcto.
+- Archivos: `apps/desktop/src/renderer/pages/vault/ImagePlanPanel.tsx` (sólo el
+  comentario), `packages/shared/src/vault-image-plan.ts` (sólo el comentario),
+  `CURRENT-TASK.md`, `TEST-RESULTS.md` y `CHANGELOG-WORK.md`. Ninguna línea de
+  lógica cambia en esta vuelta.
+- Pruebas reales ejecutadas: `npm run lint`, `npm run typecheck` y
+  `npm run build` correctos, sin salida de error. `npm test` → 191 archivos,
+  **4.020 pasadas, 12 omitidas, 0 fallos** (167,57 s). Focalizada previa:
+  `vault-image-orientation.test.ts` → **21 pasadas**.
+- Lo que sigue sin comprobar: que el generador obedezca la etiqueta —eso lo dice
+  la pantalla de Daniel—, y que las dos puertas nuevas no dejen fuera una escena
+  que sí pedía espaldas. «backlit from behind, on all fours» no gana etiqueta a
+  propósito; si un prompt real lo desmiente, es ahí donde hay que mirar.
+- Siguiente paso exacto: sin cambios respecto a la entrada de abajo. Daniel pide
+  una foto de espaldas y mira el panel antes de generar.
+
+### 2026-09-17 (tarde, segunda vuelta) — Claude — F29-POSTURA-002 — los cuatro defectos de la revision
+
+- Origen: una revision tumbo el desambiguador de la entrada de abajo con casos
+  **medidos ejecutando la funcion**, no con opiniones. Cuatro defectos, todos
+  cerrados aqui, cada uno con su prueba y la frase exacta que fallaba.
+- **1. La luz.** `from behind` es como se escribe la iluminacion en ingles y el
+  bloque de instrucciones pide la luz en cada escena: «1girl, backlit from behind,
+  facing the camera, warm rim light» ganaba `back to camera` **junto a** el
+  `facing the camera` que ya estaba. Dos arreglos: (a) el disparador se mira con
+  lo que tiene al lado —luz delante, preposicion con objeto detras, alguien
+  sujetando—, parando en la coma, porque «warm light from behind» y «warm light,
+  from behind» no dicen lo mismo; (b) puerta nueva: si la escena ya dice que mira
+  a camara no se toca nada. Esa sola puerta salva cuatro de las cinco medidas.
+- **2. Los articulos.** «from behind, her back to the camera, standing» salia con
+  la orden dos veces. La comparacion pasa a saltarse `the`/`a`/`an` a los dos
+  lados, y las frases de «X hacia el objetivo» se generan cruzando nombre ×
+  to/toward/towards × camera/viewer en vez de escribirse a mano.
+- **3. Las posturas ambiguas.** `kneeling`, `on her knees`, `on his knees`,
+  `leaning over` y `leaning forward` fuera de la lista: no cumplian el liston que
+  dejo fuera a `arched back`. Medido: «1girl, rear view, kneeling, indoors» daba
+  `ass to camera` en una escena que no lo implica; ahora da `back to camera`.
+- **4. El cartel del panel.** Su comentario afirmaba que aparece «con “from
+  behind” en la escena y en ningun otro caso», que no era cierto ni antes ni
+  ahora; y el texto decia «la imagen sale de frente» donde lo medido fue «de
+  frente o de tres cuartos». Reescritos los dos. El resto del bloque es
+  identico a su gemelo de lo recortado; se comprobo con un diff de los dos.
+- **La decision corregida:** `D-095` afirmaba que la funcion falla «hacia el lado
+  barato… nunca hacia inventar contenido que la escena no implica». El caso de
+  `kneeling` lo desmiente: se escribio sin medirlo. Reescrito con lo que es cierto
+  —falla en las dos direcciones—, con la constancia de que la version anterior lo
+  afirmaba sin haberlo medido y con los cuatro casos apuntados.
+- Archivos: `packages/shared/src/vault-image-orientation.ts`,
+  `vault-image-orientation.test.ts`, `DECISIONS.md`, `CHANGELOG-WORK.md` y
+  `apps/desktop/src/renderer/pages/vault/ImagePlanPanel.tsx` (solo comentario y
+  texto en pantalla).
+- Pruebas reales ejecutadas: `npm test` → 191 archivos, **4.020 pasadas, 12
+  omitidas, 0 fallos** (117,49 s). Focalizada: `vault-image-orientation.test.ts`
+  → **21 pasadas**, con una prueba por caso medido y la frase exacta dentro.
+  `npm run lint`, `npm run typecheck` y `npm run build` correctos, sin salida de
+  error.
+- Lo que sigue sin comprobar: que el generador obedezca `ass to camera`, igual
+  que ayer. Y lo nuevo: que las dos puertas nuevas no dejen fuera una escena que
+  si pedia espaldas —solo se sabra mirando prompts reales—.
+- Siguiente paso exacto: el de la entrada de abajo, sin cambios. Daniel pide una
+  foto de espaldas y mira el panel antes de generar.
+
+### 2026-09-17 (tarde) — Claude — F29-POSTURA-002 — la orientacion pasa del prompt al codigo
+
+- Objetivo: que «desde detras» salga de espaldas aunque el modelo escriba solo
+  `from behind`, que es lo que hace y lo que se midio tres veces.
+- Decision: `D-095`. El bloque de instrucciones **no se toca**; el codigo lo
+  respalda. Mismo patron que `D-090` y que el recorte de rasgos.
+- Lo hecho: `disambiguateOrientation`, funcion pura nueva en
+  `packages/shared/src/vault-image-orientation.ts`, aplicada en
+  `composeHordeImagePlan`. Campo `added` en `hordeImagePlanSchema`, gemelo de
+  `dropped`, con `.default([])` para que lo guardado antes se siga leyendo.
+  `removeAddedFragment` en la politica y su bloque en `ImagePlanPanel.tsx`, con
+  el mismo patron que el cartel de lo recortado.
+- Archivos: `packages/shared/src/vault-image-orientation.ts` (nuevo),
+  `vault-image-orientation.test.ts` (nuevo), `vault-image-plan.ts`,
+  `vault-image-plan.test.ts`, `vault-image-plan-policy.ts`,
+  `vault-image-plan-policy.test.ts`, `index.ts` y
+  `apps/desktop/src/renderer/pages/vault/ImagePlanPanel.tsx`.
+- Pruebas reales ejecutadas: `npm test` → 191 archivos, **4.013 pasadas, 12
+  omitidas, 0 fallos** (100,66 s). Focalizadas sobre lo tocado: 175 pasadas en
+  cuatro archivos. `npm run lint`, `npm run typecheck` y `npm run build`
+  correctos, sin salida de error.
+- Lo que NO esta comprobado: que el generador obedezca `ass to camera`. Las
+  pruebas fijan que la etiqueta llega al prompt; que la imagen salga de espaldas
+  lo dice la pantalla de Daniel o no lo dice nadie.
+- Siguiente paso exacto: Daniel pide una foto de espaldas, mira el panel antes de
+  generar —tiene que aparecer el cartel de lo añadido— y compara el resultado con
+  las tres que salieron de frente.
+
 ### 2026-09-17 (madrugada) — Claude — once defectos de la revision, y la documentacion que afirmaba de mas
 
 La tanda de la entrada de abajo paso `npm run check` y aun asi tenia **once

@@ -3333,3 +3333,153 @@ culpable produce historias verosimiles y falsas —tres el mismo dia, `D-091`—
 mientras que fijar la semilla y mover una cosa cada vez produce descartes firmes
 con cuatro generaciones. **Cuando vuelva a fallar una foto, lo primero no es
 opinar: es fijar la semilla y variar una cosa.**
+
+## D-095 — la orientacion de «desde detras» la pone el codigo cuando el modelo no la escribe
+
+Fecha: 2026-09-17. Autor: Claude. Origen: el bullet de `D-094` se cumplio y no
+bastaba, y el bullet que se le añadio despues no se cumplio.
+
+### Lo medido, tres veces con la misma conclusion
+
+Daniel pide la foto de espaldas. El modelo escribe `from behind` y la imagen sale
+de frente o de tres cuartos. **El generador no desobedece**: `from behind` dice
+DONDE ESTA LA CAMARA, no QUE PARTE del cuerpo va hacia el objetivo, y se cumple
+igual girando a la persona —la camara sigue detras—. Los cuatro prompts que si
+salieron de espaldas llevaban `ass to camera`.
+
+El 2026-09-17 a las 16:45 se añadio al bloque de instrucciones la regla que lo
+explica con esas mismas palabras: «`from behind` tampoco basta: di QUE parte va
+hacia el objetivo». **El modelo no la aplica**: tres prompts posteriores siguieron
+saliendo con `from behind` a secas. La regla esta en el texto y no cambia nada.
+
+### Decision
+
+Es el patron de `D-090` y el del recorte de rasgos, y se responde igual: **cuando
+una instruccion se comprueba incumplida, la decision pasa del prompt al codigo.**
+El bloque **no se toca** —la regla se queda donde esta—: el codigo no la
+sustituye, la respalda para los turnos en los que el modelo no la siga.
+
+Lo que se añade es `disambiguateOrientation`, funcion PURA en
+`packages/shared/src/vault-image-orientation.ts`, aplicada en
+`composeHordeImagePlan` —donde se compone el plan, no en el transporte— para que
+el panel lo enseñe antes de gastar nada en generar.
+
+### El matiz que define el alcance, y que es la mitad de la decision
+
+**No añade un encuadre que nadie pidio: DESAMBIGUA el que ya se pidio.** De ahi
+las tres puertas, en este orden:
+
+1. sin «desde detras» en la escena —`from behind`, `from the back`, `rear view`,
+   `back view`, `from the rear`, `rear angle`— el codigo no tiene nada que decir.
+   **Y tenerlo escrito tampoco basta**: esas mismas palabras son la luz («backlit
+   from behind»), una preposicion con objeto («from behind the curtain»), contacto
+   («he kisses her neck from behind») o un sitio («from a back room»), y en todas
+   la camara puede estar de frente. Lo que las separa no es el vocabulario sino la
+   FORMA: en ninguna de ellas el disparador va suelto, y cuando de verdad pide el
+   encuadre si —«from behind, on all fours, …»—. Asi que la puerta exige que sea un
+   **elemento entero**, entre separadores, y nada mas;
+2. si la escena YA dice que mira al objetivo —`looking at viewer`, `facing the
+   camera`, `front view`, `eye contact`, `smiles at the camera`…— no se toca nada,
+   diga lo que diga el resto: añadir la etiqueta ahi es mandar dos ordenes
+   opuestas en el mismo prompt;
+3. si la escena YA dice que parte va al objetivo —`ass to camera`, `back to
+   camera`, `facing away`, `face down`, `back turned`, `ass focus`…— tampoco:
+   repetirlo le restaria peso al resto. El articulo no cuenta: `back to the
+   camera` es lo mismo que `back to camera`, y se normaliza al comparar en vez de
+   alargar la lista con cada variante;
+4. y solo entonces elige, **segun la postura que la propia escena declara**: con
+   una que deja el trasero hacia atras —`on all fours`, `bent over`, `hands and
+   knees`, `ass up`, `crawling`— la lectura correcta es `ass to camera`; de pie,
+   sentada, tumbada o arrodillada, es `back to camera`.
+
+`looking back` **no** cuenta como orientacion, y es deliberado: dice donde queda
+la cara, no hacia donde va el cuerpo, y el prompt que fallo tres veces lo llevaba.
+`arched back` se quedo fuera de las posturas por lo contrario: tambien se escribe
+de pie y boca arriba, y ahi la etiqueta sexual seria inventada. **La regla de
+trabajo es la misma que la de la puerta de `D-090`: la lista de posturas solo se
+amplia cuando falla una escena real que tenia que dar `ass to camera`, nunca al
+reves.** Cuando ninguna casa gana la neutra, que nunca sobra. Por ese mismo liston
+salieron despues `kneeling`, `on her knees`, `on his knees`, `leaning over` y
+`leaning forward`, que la primera version tenia dentro sin cumplirlo.
+
+La etiqueta va **pegada al disparador**, no al final: el orden pesa —el propio
+bloque lo dice— y asi queda con la forma exacta de los prompts que funcionaron.
+
+### Se ve en el panel, y se puede quitar
+
+`added` es el gemelo exacto de `dropped`, y existe por lo mismo: **un cambio
+automatico que no se ve es un cambio que no se puede discutir.** El panel enseña
+lo añadido con su explicacion y un boton que lo quita —`removeAddedFragment`,
+gemelo de `restoreDroppedFragment`—. Solo para el horde: en el proveedor de pago
+la identidad la guarda su servidor y este arreglo no le corresponde.
+
+### Lo que esto NO prueba
+
+- que la etiqueta llegue al prompt esta comprobado por las pruebas; **que el
+  generador la obedezca, no**. Lo comprueba Daniel en pantalla o no lo comprueba
+  nadie. Lo que sostiene la eleccion del lexico son los cuatro prompts que
+  salieron de espaldas, y cuatro generaciones son cuatro generaciones (`D-094`);
+- la clasificacion es lexica y por tanto tosca, y **falla en las dos
+  direcciones**: una escena en prosa rara puede caer en la neutra teniendo el
+  trasero hacia atras, y una postura escrita con las palabras de la lista puede
+  ganar `ass to camera` sin que la escena lo pida. Lo unico que sostiene el
+  segundo lado es el liston de la lista de posturas —dentro solo lo que no admite
+  otra lectura— y que lo añadido se ve en el panel y se quita de un clic.
+
+### La correccion del 2026-09-17, y la frase que afirmaba de mas
+
+La version anterior de este bullet decia que la funcion falla «hacia el lado
+barato… **nunca** hacia inventar contenido que la escena no implica». **Se escribio
+sin medirlo y era falsa.** Una revision la desmintio ejecutando la funcion:
+«1girl, rear view, kneeling, indoors» salia con `ass to camera`, una etiqueta
+sexual en una escena que no la implica, porque `kneeling`, `on her knees`, `on his
+knees`, `leaning over` y `leaning forward` estaban en la lista de posturas sin
+cumplir el liston que el propio modulo se habia puesto con `arched back`. Es otra
+vez el defecto que la revision de la madrugada dejo como leccion —documentacion
+afirmando de mas—, y esta vez en la decision escrita el mismo dia.
+
+La misma revision midio otros tres fallos, todos ejecutando la funcion:
+
+- **`from behind` es la forma normal de escribir la LUZ** —y el bloque de
+  instrucciones pide la luz en cada escena, asi que no era un caso raro—. En
+  «1girl, backlit from behind, facing the camera, warm rim light» el codigo añadia
+  `back to camera` al lado del `facing the camera` que ya estaba: dos ordenes
+  opuestas. Igual con «light from behind, smiling at viewer», «she peeks from
+  behind the curtain…», «he holds her from behind…» y «from the back of the
+  room…»;
+- **el articulo rompia la puerta 3**: «from behind, her back to the camera,
+  standing» salia con «back to camera, her back to the camera», la misma orden
+  dos veces;
+- **el cartel del panel afirmaba** que solo aparece «con “from behind” en la
+  escena y en ningun otro caso», que no era cierto ni antes —hay seis formas de
+  pedirlo— ni ahora —tenerlo escrito ya no basta—.
+
+Lo que se cambio entonces: dos comprobaciones del contexto del disparador con
+listas de palabras (luz, verbos de sujetar, objetos), la puerta nueva de «ya mira
+a camara», la normalizacion de articulos al comparar, las cinco posturas fuera, y
+el comentario del panel reescrito.
+
+### La segunda revision, y por que las listas se fueron enteras
+
+Aquellas listas no aguantaron la siguiente medicion, y el dato es contundente: un
+verificador escribio **35 frases de dormitorio en ingles sin mirar el codigo, y 22
+ganaron un encuadre que nadie habia pedido**. Se escapaban `candlelight`,
+`firelight`, `neon`; la luz nombrada a mas de tres palabras («the glow of the
+fireplace from behind»); los verbos de contacto que faltaban (`kisses`, `presses`,
+`spoons`); y «from a back room», porque la normalizacion de articulos se aplicaba
+tambien DENTRO del disparador.
+
+Era vocabulario cerrado contra lenguaje abierto, y esa carrera se pierde siempre.
+La regla que la sustituye no es de vocabulario sino **de forma**: el disparador
+tiene que ser un elemento entero entre separadores. Con eso caen las cuatro clases
+de una vez y sobran las tres listas, que se borraron —85 lineas—.
+
+El precio, declarado: **en prosa corrida no actua**, ni siquiera cuando la frase
+pide el encuadre de verdad («seen from behind» suelto). Es `D-085` otra vez,
+precision antes que alcance, y aqui la asimetria es clara: pasarse cuesta una
+generacion con dos ordenes opuestas, y quedarse corto deja las cosas como ya
+estaban.
+
+Cada caso medido tiene su prueba con la frase exacta en
+`vault-image-orientation.test.ts`, incluidas las diez que NO se pueden tocar.
+

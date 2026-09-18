@@ -1,5 +1,64 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-17 (tarde, tercera vuelta) — F29-POSTURA-002 verificado ejecutando la función
+
+Todo lo que sigue se ha **ejecutado en esta pasada**, en el worktree real y con
+los cambios ya dentro. Ninguna cifra viene de otra entrada ni de un recuerdo.
+
+Las frases del informe de revisión se volvieron a medir **llamando a
+`disambiguateOrientation`** desde una prueba temporal —borrada después—, no
+leyendo el código. Diecisiete casos; esto es lo que imprimió, recortado a los que
+el informe nombraba:
+
+```
+"1girl, backlit from behind, facing the camera, warm rim light" => []
+"light from behind, smiling at viewer"                          => []
+"she peeks from behind the curtain, looking at viewer"          => []
+"he holds her from behind, her face toward the camera"          => []
+"from the back of the room, she smiles at the camera"           => []
+"from behind, her back to the camera, standing"                 => []
+"from behind, ass to the camera, on all fours"                  => []
+"from behind, ass towards the viewer, on all fours"             => []
+"from behind, back towards viewer, standing"                    => []
+"from behind, buttocks to the viewer, on all fours"             => []
+"from behind, she turns her back to the camera, standing"       => []
+"1girl, rear view, kneeling, indoors"           => ["back to camera"]
+"from behind, on all fours, looking back, nude"  => ["ass to camera"]
+```
+
+Los dos últimos son los que **sí** tienen que cambiar: `kneeling` cae en la
+neutra —era el defecto medido— y la escena que falló tres veces en pantalla sigue
+ganando la sexual, que es lo que el módulo existe para poner.
+
+Focalizada sobre el módulo, antes de la matriz:
+
+```
+node_modules\.bin\vitest.cmd run packages/shared/src/vault-image-orientation.test.ts
+ Test Files  1 passed (1)
+      Tests  21 passed (21)
+```
+
+Matriz completa, después de corregir las dos enumeraciones incompletas:
+
+```
+npm run lint       exit 0, sin ninguna salida
+npm run typecheck  exit 0, los dos pasos (build y typecheck:tests)
+npm run build      exit 0
+npm test
+ Test Files  191 passed (191)
+      Tests  4020 passed | 12 skipped (4032)
+   Start at  08:12:24
+   Duration  167.57s
+```
+
+**La duración no es una propiedad de la suite**: es reloj de pared de esta
+máquina con lo que estuviera corriendo a la vez, y no se puede comparar con la de
+otra entrada.
+
+Lo que estas cifras **no** dicen: nada sobre la imagen. Que la etiqueta llega al
+prompt lo fijan las pruebas; que el generador la obedezca no lo comprueba ninguna
+de ellas.
+
 ### 2026-09-17 (madrugada) — los once defectos de la revision, y cifras medidas
 
 Todo lo que sigue se ha **ejecutado en esta pasada**. Ninguna cifra viene de otra

@@ -1,5 +1,42 @@
 # Luxy — tarea activa
 
+## F29-POSTURA-002 — «desde detras» lo desambigua el codigo
+
+Estado: **implementado, revisado dos veces y probado; sin ver en pantalla —
+Claude, 2026-09-17 (tarde).** Decision en `D-095`, ya corregida.
+
+Qué hay: `disambiguateOrientation`, función pura en
+`packages/shared/src/vault-image-orientation.ts`, aplicada en
+`composeHordeImagePlan` **después** del recorte de rasgos. Lo añadido viaja en
+`added` —gemelo exacto de `dropped`— y el panel lo enseña con un botón que lo
+quita antes de gastar nada en generar.
+
+**Segunda vuelta: cuatro defectos, todos medidos ejecutando la función.** La luz
+—«1girl, backlit from behind, facing the camera…» ganaba un `back to camera` al
+lado del `facing the camera` que ya estaba—, el artículo —«her back to the
+camera» salía con la misma orden dos veces—, cinco posturas ambiguas que daban
+una etiqueta sexual en escenas que no la implican —`kneeling` y compañía— y el
+cartel del panel afirmando de más. Cerrados con una prueba por frase exacta.
+
+**Tercera vuelta, de verificación:** los cuatro cierres se volvieron a medir
+llamando a la función con las frases del informe; las diecisiete salen como
+debían. Sólo quedaban dos enumeraciones incompletas —el comentario del cartel
+nuevo del panel, que nombraba tres de las cuatro puertas, y el de
+`computePlanId`, que no nombraba `added`—, corregidas. El detalle y las cifras,
+en `CHANGELOG-WORK.md` y `TEST-RESULTS.md`.
+
+**Lo que sigue sin comprobar:** que el generador obedezca `ass to camera`. Las
+pruebas fijan que la etiqueta llega al prompt; que la imagen salga de espaldas lo
+dice la pantalla de Daniel o no lo dice nadie. Y lo nuevo de esta tanda: que las
+dos puertas nuevas no dejen fuera una escena que **sí** pedía espaldas. La luz
+gana siempre que va pegada al disparador sin coma en medio, así que «backlit from
+behind, on all fours» no gana etiqueta; es deliberado y sólo lo desmiente un
+prompt real.
+
+**Siguiente paso exacto:** Daniel pide una foto de espaldas, mira el panel antes
+de generar —tiene que aparecer el cartel de lo añadido— y compara el resultado
+con las tres que salieron de frente.
+
 ## F29-POSTURA-001 — siete arreglos de una tarde de imagenes
 
 Estado: **implementado, revisado, corregido y probado; sin ver en pantalla —

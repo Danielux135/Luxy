@@ -20,6 +20,7 @@
 // ningun proveedor y no mira el reloj.
 import { z } from 'zod';
 
+import { disambiguateOrientation } from './vault-image-orientation.js';
 import {
   mergeNegatives,
   stripConflictingTraitsDetailed,
@@ -143,6 +144,18 @@ export const hordeImagePlanSchema = z.object({
    * No es decorativo: es la respuesta a «pedi un encuadre y no llego».
    */
   dropped: z.array(z.string().max(200)).max(50),
+  /**
+   * lo que el codigo le AÑADIO a la escena, para poder quitarlo.
+   *
+   * El gemelo de `dropped`, y por el mismo motivo: un cambio automatico que no
+   * se ve es un cambio que no se puede discutir. Hoy solo lo escribe la
+   * desambiguacion de «desde detras».
+   *
+   * `.default([])` para que los intentos guardados antes de que este campo
+   * existiera se sigan leyendo, y para que ese vacio signifique lo que de
+   * verdad paso entonces: no se añadio nada.
+   */
+  added: z.array(z.string().max(200)).max(10).default([]),
   /** la escena TAL Y COMO se pidio, antes del recorte */
   scene: z.string().max(MAX_SCENE),
   planId: planIdSchema,
@@ -252,6 +265,17 @@ export function splitJoinedPrompt(joined: string): { positive: string; negative:
  *
  * Lo que se quito viaja en `dropped` en vez de perderse, que es la diferencia
  * entre un recorte que se puede discutir y uno que solo se sufre.
+ *
+ * Y despues del recorte, la desambiguacion de «desde detras»: `from behind` a
+ * secas sale de frente porque dice donde esta la camara y no que parte va al
+ * objetivo. Va AQUI, donde se compone el plan, y no en el transporte, para que
+ * el panel lo enseñe —y lo pueda quitar— antes de gastar nada en generar. Lo
+ * añadido viaja en `added`, que es el gemelo exacto de `dropped`.
+ *
+ * El orden entre los dos importa: primero se recorta y luego se desambigua, no
+ * al reves. El recorte puede llevarse por delante la palabra que decidia la
+ * postura, y entonces la orientacion se elegiria mirando un texto que ya no es
+ * el que va a salir.
  */
 export function composeHordeImagePlan(input: {
   recipe: HordeRecipe;
@@ -260,7 +284,8 @@ export function composeHordeImagePlan(input: {
 }): HordeImagePlan {
   const { recipe } = input;
   const escena = stripConflictingTraitsDetailed(input.scene, recipe.appearance);
-  const positive = [recipe.appearance, recipe.outfit, escena.text]
+  const orientada = disambiguateOrientation(escena.text);
+  const positive = [recipe.appearance, recipe.outfit, orientada.text]
     .map((part) => part.trim())
     .filter((part) => part.length > 0)
     .join(', ');
@@ -288,6 +313,7 @@ export function composeHordeImagePlan(input: {
       shared: recipe.shared,
     },
     dropped: escena.dropped,
+    added: orientada.added,
     scene: input.scene,
   });
 }
@@ -449,8 +475,8 @@ function sealPlan<T extends VaultImagePlanDraft>(draft: T): T & { planId: string
 /**
  * la huella de lo que de verdad se va a enviar.
  *
- * Mide SOLO el texto y los parametros, nunca `scene`, `dropped` ni una huella
- * anterior: dos planes que manden exactamente lo mismo tienen que coincidir
+ * Mide SOLO el texto y los parametros, nunca `scene`, `dropped`, `added` ni una
+ * huella anterior: dos planes que manden exactamente lo mismo tienen que coincidir
  * aunque uno venga compuesto y el otro corregido a mano.
  *
  * Es FNV-1a de 64 bits escrito aqui, y no un hash criptografico, por dos
