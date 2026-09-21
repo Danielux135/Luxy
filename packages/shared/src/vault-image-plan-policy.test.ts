@@ -6,7 +6,6 @@ import {
   imagePlanEditFrom,
   imagePlanEstimateBlockReason,
   isImagePlanEditValid,
-  removeAddedFragment,
   restoreDroppedFragment,
 } from './vault-image-plan-policy.js';
 import {
@@ -281,42 +280,6 @@ describe('devolver al positivo lo que el recorte quito', () => {
 
   it('un fragmento en blanco no cambia nada', () => {
     expect(restoreDroppedFragment('white shirt', '  ')).toBe('white shirt');
-  });
-});
-
-describe('quitar del positivo lo que el codigo habia añadido', () => {
-  it('quita el elemento entero y deja lo demas con su espaciado', () => {
-    expect(
-      removeAddedFragment('light brown hair, from behind, ass to camera, on bed', 'ass to camera'),
-    ).toBe('light brown hair, from behind, on bed');
-  });
-
-  it('pulsarlo dos veces no rompe nada: la segunda no encuentra nada que quitar', () => {
-    const una = removeAddedFragment('from behind, back to camera, standing', 'back to camera');
-    expect(una).toBe('from behind, standing');
-    expect(removeAddedFragment(una, 'back to camera')).toBe(una);
-  });
-
-  it('no distingue mayusculas ni espacios de sobra', () => {
-    expect(removeAddedFragment('from behind,  Ass To Camera , on bed', 'ass to camera')).toBe(
-      'from behind, on bed',
-    );
-  });
-
-  it('no lo quita cuando solo aparece DENTRO de otro trozo', () => {
-    // 'ass to camera' no esta suelto ahi: forma parte de una frase que la
-    // persona escribio, y borrarla a trozos seria destruir su correccion
-    const escrito = 'she turns her ass to camera slowly, on bed';
-    expect(removeAddedFragment(escrito, 'ass to camera')).toBe(escrito);
-  });
-
-  it('si era lo primero o lo unico, no deja comas colgando', () => {
-    expect(removeAddedFragment('back to camera, standing', 'back to camera')).toBe('standing');
-    expect(removeAddedFragment('back to camera', 'back to camera')).toBe('');
-  });
-
-  it('un fragmento en blanco no cambia nada', () => {
-    expect(removeAddedFragment('from behind, standing', '   ')).toBe('from behind, standing');
   });
 });
 

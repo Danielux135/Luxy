@@ -468,20 +468,46 @@ export function buildVaultImageInstruction(
     '  idioma de la conversacion y solo este campo en ingles.',
     '- Solo aparece EL PERSONAJE, a solas: nunca el usuario, sus manos ni su cuerpo, porque',
     '  si mencionas a alguien mas, sale en la imagen.',
-    '- Nada de camaras, moviles, espejos, selfies ni el acto de fotografiar, aunque haya dicho',
-    '  «mandame una foto» o aunque la foto la este haciendo el: sale una camara.',
-    '  Ni siquiera en negativo: «not looking at camera» tambien la dibuja.',
+    // condensado el 2026-09-18 para dejar sitio a la regla del angulo, sin perder ninguno de
+    // los dos casos que le costaron una imagen: que se la pidan asi y que la foto la haga el
+    '- Nada de camaras, moviles, espejos, selfies ni el acto de fotografiar, aunque te la pidan',
+    '  asi o la haga el: sale una camara. Ni siquiera en negativo: «not looking at camera»',
+    '  tambien la dibuja.',
     // PASO DE VERDAD (2026-09-16), dos veces el mismo dia. Daniel pidio la foto
     // «desde detras» tres veces y salio de frente; luego «el culo mirando a
     // camara» y salio de frente otra vez. Faltaban las dos mitades: que lo que
     // el pide MANDA —solo habia dos ejemplos de encuadre y ninguno era el suyo—
     // y que «a camara» no nombra un aparato, dice hacia donde mira, asi que la
     // prohibicion de la linea de arriba se llevaba por delante la frase entera.
+    //
+    // La tabla se queda, pero SIN el par «desde detras»/«el culo a camara» -> «from behind»:
+    // las doce generaciones del 2026-09-18 lo descartaron (ver el bullet siguiente). Del
+    // resto no se sabe —«close-up» estaba en un prompt que funciono, pero nunca se probo
+    // sola—, y lo que no esta demostrado falso no se tira.
     '- Si el usuario dice desde donde la quiere o en que postura, ESO MANDA: es lo que ha',
-    '  pedido. «desde detras» y «el culo a camara», «from behind»; «de espaldas», «from behind,',
-    '  facing away»; «mirando a camara», «looking at viewer»; «de cerca», «close-up»; «de cuerpo',
-    '  entero», «full body»; «desde arriba/abajo/de lado», «from above/below/the side». «A camara»',
-    '  NO nombran un objeto: traduce la direccion y no pongas la camara.',
+    '  pedido. «de espaldas», «from behind, facing away»; «mirando a camara», «looking at viewer»;',
+    '  «de cerca», «close-up»; «de cuerpo entero», «full body»; «desde arriba/abajo/de lado»,',
+    '  «from above/below/the side». «A camara» NO nombran un objeto: traduce la direccion',
+    '  y no pongas la camara.',
+    // LA REGLA QUE SI FUNCIONA, y ocupa el sitio de la que mandaba nombrar la camara («di QUE
+    // parte va hacia el objetivo —ass to camera, back to camera—», 2026-09-17).
+    //
+    // DOCE generaciones reales del 2026-09-18, misma semilla (1080257389) y mismo modelo
+    // (WAI-ANI-NSFW-PONYXL), pidiendo la misma foto de espaldas. No la consiguieron NUNCA, ni
+    // solas ni juntas ni con pesos: `from behind`, `ass to camera`, `back to camera`,
+    // `top-down bottom-up`, `presenting`, `rear view`. Tampoco cambio nada el orden de las
+    // etiquetas ni el prompt negativo. Lo unico que la consiguio, aislado hasta quedarse solo,
+    // fue nombrar una parte del cuerpo que en esa postura SOLO es visible desde detras: no es
+    // una etiqueta de encuadre, es una restriccion anatomica, y el modelo no tiene otra forma
+    // de dibujarla que poner la camara ahi.
+    //
+    // De ahi la regla general: este modelo obedece lo que PUEDE DIBUJAR, no las instrucciones
+    // sobre donde va la camara. Y por eso el texto no nombra ninguna etiqueta concreta: se
+    // enseña el principio y es la escena la que decide que se ve. Luxy no impone contenido.
+    '- La etiqueta de encuadre sola no mueve la camara: nombra ADEMAS algo que SOLO se vea desde',
+    '  ese angulo y la colocara ahi para poder dibujarlo. Desde arriba, la coronilla; desde abajo,',
+    '  las plantas de los pies; de cerca, un detalle que a dos metros no se veria.',
+    '  Lo que hay ahi lo decide la escena.',
     // PASO DE VERDAD (2026-09-16), cuatro pruebas con la misma semilla y el mismo modelo. El
     // prompt que fallo decia «from behind, ass to camera, nude, blushing, on bed, soft
     // lighting, looking away»: dice desde donde se mira y NO como esta el cuerpo, y salio
@@ -490,12 +516,12 @@ export function buildVaultImageInstruction(
     '- El encuadre NO es la postura: «from behind» dice desde donde se mira, no como esta el',
     '  cuerpo. Nombra la postura —«on all fours», «lying face down», «kneeling», «sitting»—: la',
     '  que no escribas la inventa el generador.',
-    // Y «from behind» TAMPOCO basta para la orientacion, comprobado el 2026-09-17 con la
-    // postura ya puesta: salio a cuatro patas pero de lado. El generador la cumple girando el
-    // cuerpo —la camara sigue estando detras— porque la etiqueta no dice que parte va hacia el
-    // objetivo. Las que si lo dicen son «ass to camera» y «back to camera»
-    '- «from behind» tampoco basta: di QUE parte va hacia el objetivo —«ass to camera»,',
-    '  «back to camera»— y donde queda la cara —«face down», «looking back»—.',
+    // AQUI ESTABA el bullet de «di QUE parte va hacia el objetivo —ass to camera, back to
+    // camera—» (2026-09-17). Lo tiraron las doce generaciones citadas mas arriba: esas dos
+    // etiquetas no giraron la escena ninguna vez, asi que el bullet solo enseñaba a escribir
+    // ruido. No se reintroduce: su hueco lo ocupa la regla de nombrar lo que solo se ve desde
+    // ese angulo
+    //
     // y se pierde de forma INTERMITENTE, no siempre: con «sigue en la misma postura» y con «te
     // hago otra foto» conservo la postura y perdio «from behind» y «ass to camera»; con
     // «quedate como estas» las conservo las dos. Por eso se repiten, en vez de confiar en que
@@ -539,8 +565,11 @@ export function buildVaultImageInstruction(
     // bajados», y volvio una foto de frente, vestida y sentada.
     '- OCHO elementos como mucho, y mejor seis: no es todo lo que pasa, es lo que hay que ver,',
     '  y cada cosa que añades le quita fuerza a las demas.',
-    '- El PRIMERO es el que mas pesa: si lo importante es que esta de espaldas, «from behind»',
-    '  va primero.',
+    // el ejemplo era «si lo importante es que esta de espaldas, from behind va primero», y se
+    // quita porque las doce generaciones del 2026-09-18 lo dejaron sin pie: ahi «from behind»
+    // no giro la escena en ninguna posicion, y mover el orden tampoco cambio nada. La regla
+    // del peso no esta demostrada falsa y se queda; el ejemplo si lo estaba
+    '- El PRIMERO es el que mas pesa: pon delante lo que no puede faltar.',
     '- Los estados de ropa van con la etiqueta corta que existe —«open shirt», «off shoulder»,',
     '  «undressing»—: «la camisa se le cae hasta la cintura» no lo entiende, «off shoulder» si.',
     '',

@@ -1,5 +1,153 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-09-18 — Claude — F29-POSTURA-005 — la decision retirada y la nueva, completas
+
+- Objetivo: cerrar lo que `F29-POSTURA-003` y `-004` dejaron a medias en la
+  documentación. **Sólo archivos `.md`; ni una línea de código.**
+- Archivos: `DECISIONS.md`, `PROJECT-STATE.md`, `CURRENT-TASK.md`,
+  `CHANGELOG-WORK.md` y `TEST-RESULTS.md`. Nada más.
+- `D-095`, cabecera: al aviso de revocada se le añade un segundo párrafo con
+  **qué clase de error fue**. Se escribió el 2026-09-17 y se retiró el
+  2026-09-18; en ese día dieron tiempo 471 líneas de módulo y 251 de prueba
+  —medidas con `git show HEAD:packages/shared/src/vault-image-orientation.ts` y
+  su `.test.ts`, no heredadas del informe—. El error, nombrado: **razonar cómo
+  debería comportarse el generador en vez de medirlo**. Su premisa era impecable
+  como razonamiento y falsa como hecho, y lo que la sostenía eran cuatro
+  generaciones en las que `ass to camera` iba junto a todo lo demás; nunca una
+  prueba que moviera esa sola etiqueta.
+- `D-096`, tres secciones nuevas y una tabla:
+  - **«Las seis hipótesis que se cayeron»**, una por una: los pesos, el prompt
+    negativo, las etiquetas faciales de la receta, el orden de las etiquetas, el
+    vocabulario —seis maneras de pedir lo mismo, las seis fallando: el problema
+    no era la palabra equivocada sino que ninguna palabra de esa clase sirve— y
+    `looking back`, que `D-095` ya había dejado fuera por decir dónde queda la
+    cara y no hacia dónde va el cuerpo. Van escritas porque la conclusión cabe en
+    una línea y se copia, mientras que lo que evita repetir las doce generaciones
+    es la lista de lo que **no** era;
+  - **«El método, que es lo que por fin funcionó»**: seis hipótesis por el camino
+    de **añadir** variables al prompt que fallaba no dieron nada —un prompt que
+    falla no señala cuál de sus partes sobra—; tres pruebas por el de
+    **quitarlas** del que funcionaba aislaron la causa. La frase que queda:
+    cuando un prompt falla y otro funciona, se adelgaza el que funciona, no se
+    engorda el que falla. Es la parte de la decisión que no depende del
+    generador;
+  - **«Hasta dónde llega esto»**: doce generaciones, una semilla (`1080257389`) y
+    un modelo (WAI-ANI-NSFW-PONYXL). No está comprobado que otro modelo se
+    comporte igual ni que otra semilla dé lo mismo. Si Daniel cambia de modelo,
+    la decisión no se hereda: se vuelve a medir. Con el matiz que la separa de
+    `D-095`: el bloque de instrucciones lleva el **principio**, no la etiqueta
+    que lo demostró, así que un cambio de modelo rehace un bullet y no un módulo;
+  - el párrafo en prosa que enumeraba las combinaciones pasa a **tabla** de cinco
+    filas. La tercera —`presenting` sola, de frente— es la que descarta el atajo
+    fácil: no vale con nombrar cualquier cosa sugerente.
+- `PROJECT-STATE.md`: se había quedado en la tanda del 2026-09-17. Ahora encabeza
+  con ésta —la regla, el método, el alcance declarado y los dos pasos de
+  producto—, y la anterior baja a «Lo anterior», que es el molde que ya usaba el
+  archivo.
+- Lo que **no** se ha hecho, y conviene que conste: no se ha tocado código, no se
+  ha commiteado nada y no se ha abierto Studio.
+- Resultado: `npm test` ejecutado en esta pasada, **190 archivos, 3.996 pruebas
+  pasadas, 12 saltadas, exit 0**. Salida literal en `TEST-RESULTS.md`. La suite
+  es la misma que dejó `F29-POSTURA-004`: se vuelve a correr para poder decirlo
+  habiéndolo visto, no porque un `.md` la mueva.
+
+### 2026-09-18 — Claude — F29-POSTURA-004 — el bloque aprende la regla del angulo
+
+- Objetivo: aplicar `D-096` al único sitio que quedó fuera de `F29-POSTURA-003`,
+  el bloque de instrucciones de `packages/shared/src/vault-image-request.ts`.
+  Seguía mandándole al modelo escribir «ass to camera» / «back to camera», que es
+  justo lo que las doce generaciones —semilla `1080257389`, modelo
+  WAI-ANI-NSFW-PONYXL— descartaron.
+- Archivos: `packages/shared/src/vault-image-request.ts` y su
+  `vault-image-request.test.ts`. Nada más; el resto del monorepo no se toca.
+- Quitado del bloque: el bullet del 2026-09-17 («di QUE parte va hacia el
+  objetivo —«ass to camera», «back to camera»— y donde queda la cara»); el par
+  de la tabla de equivalencias que traducía «desde detrás» y «el culo a cámara»
+  por `from behind` a secas; y el ejemplo del bullet del orden, que era ese mismo
+  `from behind` («si lo importante es que está de espaldas, from behind va
+  primero»). En los tres sitios queda un comentario con la evidencia, para que
+  nadie los reintroduzca.
+- Conservado a propósito: el resto de la tabla —`close-up`, `full body`,
+  `from above/below/the side`, `looking at viewer`, `from behind, facing away`—.
+  `close-up` estaba en un prompt que **sí** funcionó pero nunca se probó aislada:
+  no saber no es lo mismo que saber que falla. Marcado como no sabido en el
+  comentario y en una prueba, no borrado.
+- Puesto en su lugar, y es el motivo de la tanda: «La etiqueta de encuadre sola
+  no mueve la cámara: nombra ADEMÁS algo que SOLO se vea desde ese ángulo y la
+  colocará ahí para poder dibujarlo. Desde arriba, la coronilla; desde abajo, las
+  plantas de los pies; de cerca, un detalle que a dos metros no se vería. Lo que
+  hay ahí lo decide la escena.» El mecanismo va dicho —el generador obedece lo
+  que puede dibujar— porque una regla sin motivo se salta; es el mismo criterio
+  que el tope de OCHO elementos.
+- **La línea que no se cruza:** el bullet no nombra ninguna etiqueta explícita
+  concreta. Enseña el principio y deja que la escena decida qué se ve; si la
+  escena es explícita saldrá una cosa y si es con ropa otra. Hay una prueba sobre
+  la última frase, que es la que lo sostiene.
+- El guardián de 6.500 caracteres: se entró con 44 de margen y se sale con 22
+  —prosa 6.474, etiquetas 6.478—, medido ejecutando `buildVaultImageInstruction`
+  con las mismas cuatro imágenes que usa la prueba. **El límite no se subió.** Lo
+  pagaron el bullet borrado (156 caracteres), el par de la tabla, el ejemplo del
+  orden y una condensación de la prohibición de cámaras: «aunque haya dicho
+  «mandame una foto» o aunque la foto la este haciendo el» pasa a «aunque te la
+  pidan asi o la haga el», que conserva los dos casos que costaron una imagen.
+  Esa condensación movió una prueba: la que fijaba la frase larga ahora fija las
+  dos mitades de la corta, con el motivo escrito al lado.
+- Pruebas: se rehace el `describe` «la orientacion, que «from behind» tampoco
+  dice» —cuyas asserts fijaban `ass to camera` y `back to camera`— como «el
+  angulo se consigue nombrando lo que solo se ve desde ahi», con seis casos: el
+  principio, el mecanismo, los ejemplos por ángulo, que la escena decide, que las
+  cuatro etiquetas de cámara **ya no aparecen** (`toContain` negado) y que el
+  bullet no viaja por el camino que no puede generar. Dos casos nuevos más: que
+  la tabla ya no traduce «desde detrás» y que el bullet del orden ya no se apoya
+  en `from behind`.
+- Resultado: `vault-image-request.test.ts` 128 pasan; `npm run lint`,
+  `npm run typecheck`, `npm test` (3.996 pasan, 12 saltadas) y `npm run build`,
+  en verde. Cifras en `TEST-RESULTS.md`.
+- Sin commitear: el worktree queda con los cambios y sin `git commit` ni
+  `git push`, que no se pidieron.
+
+### 2026-09-18 — Claude — F29-POSTURA-003 — fuera el desambiguador de orientacion
+
+- Objetivo: quitar `disambiguateOrientation` y todo lo que lo rodeaba. Doce
+  generaciones reales de Daniel —semilla `1080257389`, modelo
+  WAI-ANI-NSFW-PONYXL— demostraron que las dos etiquetas que ponía
+  —`ass to camera`, `back to camera`— no mueven la cámara: ni solas, ni junto a
+  `from behind`, `top-down bottom-up`, `presenting` o `rear view`, ni con pesos,
+  ni cambiando el orden, ni tocando el negativo. Lo que sí lo consigue es
+  `pussy`, aislada hasta quedarse sola, porque no es una etiqueta de encuadre
+  sino una restricción anatómica. Decisión nueva: `D-096`, que revoca `D-095`.
+- Archivos: `packages/shared/src/vault-image-orientation.ts` y
+  `vault-image-orientation.test.ts` **borrados** (471 + 251 líneas);
+  `packages/shared/src/index.ts` (export fuera);
+  `packages/shared/src/vault-image-plan.ts` (import, campo `added` del esquema,
+  la llamada en `composeHordeImagePlan` y dos comentarios que lo nombraban);
+  `packages/shared/src/vault-image-plan-policy.ts` (`removeAddedFragment` fuera);
+  `apps/desktop/src/renderer/pages/vault/ImagePlanPanel.tsx` (el bloque del
+  cartel y su import); y las pruebas de los dos módulos.
+- **El campo `added` se borra, no se deja tolerado**, y esto es lo que lo
+  permite: `hordeImagePlanSchema` es un `z.object` normal —no `.strict()`—, así
+  que un intento ya guardado que lo lleve se sigue leyendo y Zod se limita a
+  ignorar la clave; y `computePlanId` nunca lo midió, así que ningún plan viejo
+  cambia de huella ni pasa a contar como «editado» por perderlo. Lo que aquella
+  etiqueta dejó escrito sigue dentro de `positive`, donde se puede ver y borrar
+  a mano. La prueba que fijaba «un plan guardado antes de que `added` existiera
+  se sigue leyendo» **no se tiró: se dio la vuelta** —ahora fija que un plan
+  guardado CON `added` se sigue leyendo y conserva su huella—, que era el mismo
+  riesgo mirado desde el otro lado.
+- El recorte (`dropped`) **no se ha tocado**: ése sí funciona y se ha visto
+  trabajar en pantalla. `restoreDroppedFragment` y sus pruebas siguen enteros.
+- Por qué no bastaba con dejarlo puesto: además de la etiqueta inútil en cada
+  prompt, el panel enseñaba un cartel explicando que Luxy había resuelto el
+  encuadre. Un aviso que afirma cerrado un problema abierto cuesta más que el
+  silencio — es `D-093` aplicada a su propio cartel.
+- Lo que queda pendiente y no estaba en el alcance: el bloque de instrucciones de
+  `vault-image-request.ts` sigue pidiéndole al modelo que escriba «ass to camera»
+  o «back to camera» (líneas 497-498), con su prueba en
+  `vault-image-request.test.ts:1102-1103`. Ahora enseña algo que sabemos que no
+  funciona.
+- Comprobado: `npm run lint`, `npm run typecheck`, `npm test` y `npm run build`,
+  los cuatro en verde. Cifras en `TEST-RESULTS.md`.
+
 ### 2026-09-17 (tarde, tercera vuelta) — Claude — F29-POSTURA-002 — verificar los cuatro cierres, y dos enumeraciones de menos
 
 - Objetivo: comprobar **ejecutando la función**, no leyéndola, que los cuatro

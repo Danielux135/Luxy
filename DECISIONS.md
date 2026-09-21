@@ -3339,6 +3339,23 @@ opinar: es fijar la semilla y variar una cosa.**
 Fecha: 2026-09-17. Autor: Claude. Origen: el bullet de `D-094` se cumplio y no
 bastaba, y el bullet que se le añadio despues no se cumplio.
 
+> **REVOCADA el 2026-09-18 por `D-096`.** Doce generaciones con la misma semilla
+> demostraron que `ass to camera` y `back to camera` no mueven la camara: todo lo
+> que esta decision construyo para ponerlas se ha borrado. Lo de abajo se
+> conserva porque el metodo —medir frase a frase, cambiar la regla de vocabulario
+> a forma— sigue siendo bueno; lo que fallo es que se midio el texto y nunca la
+> imagen.
+>
+> **Se escribio el 2026-09-17 y se retiro el 2026-09-18.** En ese dia dio tiempo
+> a 471 lineas de modulo, 251 de prueba y esta decision entera; medido sobre
+> `git show HEAD` de los dos archivos borrados. El error no es nuevo, y es el
+> mismo que esta documentacion lleva cuatro veces en tres dias corrigiendo:
+> **razonar como deberia comportarse el generador en vez de medirlo.** La premisa
+> —«`from behind` es ambiguo, hay que decir QUE parte va hacia el objetivo»— es
+> impecable como razonamiento y falsa como hecho: `ass to camera` no hace nada.
+> Lo que la sostenia eran cuatro generaciones en las que esa etiqueta aparecia
+> junto a todo lo demas; nunca una prueba que moviera esa sola.
+
 ### Lo medido, tres veces con la misma conclusion
 
 Daniel pide la foto de espaldas. El modelo escribe `from behind` y la imagen sale
@@ -3483,3 +3500,169 @@ estaban.
 Cada caso medido tiene su prueba con la frase exacta en
 `vault-image-orientation.test.ts`, incluidas las diez que NO se pueden tocar.
 
+
+## D-096 — el modelo obedece lo que puede dibujar, no donde se pone la camara
+
+Fecha: 2026-09-18. Autor: Claude. Origen: doce generaciones reales de Daniel con
+la semilla `1080257389` y el modelo WAI-ANI-NSFW-PONYXL. **Revoca `D-095`.**
+
+### Lo medido
+
+Se pedia la foto de espaldas, a cuatro patas. **Ninguna de estas etiquetas lo
+consiguio por si sola**, ni con pesos: `from behind`, `ass to camera`,
+`back to camera`, `top-down bottom-up`, `presenting`, `rear view`. Tampoco
+cambio nada el orden de las etiquetas, ni el prompt negativo, ni quitar las
+etiquetas faciales de la receta.
+
+Dicho con precision, porque la tabla de abajo lo matiza: los prompts que SI
+salieron de espaldas llevaban varias de ellas a la vez, pero llevaban ademas
+`pussy`, y al aislarla resulto ser la unica que hacia falta. Lo que esta
+medido es que ninguna de las seis, sola, mueve la camara, y que `pussy`, sola,
+la mueve.
+
+Lo consiguio `pussy`, aislada hasta quedarse sola. Lo que quedo anotado de las
+doce, combinacion a combinacion:
+
+| Etiquetas de la prueba               | Como salio  |
+| ------------------------------------ | ----------- |
+| las cinco de refuerzo juntas         | de espaldas |
+| ninguna                              | de frente   |
+| solo `presenting`                    | de frente   |
+| `spread legs` + `pussy` + `close-up` | de espaldas |
+| **solo `pussy`**                     | de espaldas |
+
+La fila de abajo es la que decide, y la tercera es la que descarta el atajo
+facil: `presenting` sola no basta, asi que no vale con nombrar cualquier cosa
+sugerente. `arched back` quedo descartada por no estar en un prompt que si
+funciono.
+
+### Las seis hipotesis que se cayeron, que valen tanto como la conclusion
+
+Antes de dar con `pussy` se probaron seis explicaciones de por que la camara no
+obedecia. Ninguna la movio. Quedan escritas para que nadie vuelva a pagarlas:
+
+1. **los pesos.** Subirle el peso a la etiqueta de encuadre no la hace obedecer;
+2. **el prompt negativo.** Cambiarlo no cambio el encuadre;
+3. **las etiquetas faciales de la receta.** Se quitaron por si competian con el
+   encuadre: la imagen siguio saliendo igual;
+4. **el orden de las etiquetas.** Poner la de encuadre delante —que es lo que el
+   propio bloque de instrucciones enseña— no cambio nada;
+5. **el vocabulario.** Seis maneras de pedir lo mismo —`from behind`,
+   `ass to camera`, `back to camera`, `top-down bottom-up`, `presenting`,
+   `rear view`— y las seis fallaron, solas y juntas. El problema no era que la
+   palabra fuese la equivocada: es que **ninguna palabra de esa clase sirve**, y
+   eso es exactamente lo que `D-095` no podia ver mientras buscase la palabra
+   buena;
+6. **`looking back`.** `D-095` ya lo habia dejado fuera de su clasificacion por
+   decir donde queda la cara y no hacia donde va el cuerpo. Las doce
+   generaciones no lo midieron: `looking back` nunca se probo aislado, asi que
+   de el solo se sabe que estaba en prompts que fallaron, no que fuera la causa.
+
+Esas seis son el valor real de la tanda. La conclusion cabe en una linea y se
+copia; el coste de llegar a ella son doce generaciones, y lo que evita repetirlas
+es la lista de lo que **no** era.
+
+### Por que, y la regla que sale de ahi
+
+`pussy` no es una etiqueta de encuadre: es una **restriccion anatomica**. En esa
+postura el genital solo se ve desde detras y desde abajo, asi que el modelo no
+tiene otra forma de dibujarlo y la camara se coloca sola. No se le dice donde va
+la camara — se le dice QUE TIENE QUE VERSE.
+
+**La regla general: este modelo obedece lo que puede dibujar, no las
+instrucciones sobre donde poner la camara. Para conseguir un angulo, se nombra
+algo que solo se vea desde ese angulo.**
+
+### El metodo, que es lo que por fin funciono
+
+Las seis hipotesis de arriba comparten un camino: **añadir variables al prompt
+que fallaba.** Seis intentos por ahi y ninguno dijo nada, y no es mala suerte —es
+que un prompt que falla no señala cual de sus partes sobra—. Cada variante
+añadia una variable mas a una receta que ya tenia muchas, y el resultado seguia
+sin moverse.
+
+Lo que aislo la causa fue el camino contrario: **quitar variables del prompt que
+funcionaba.** Se partio de la receta que si salia de espaldas —`spread legs`,
+`pussy`, `close-up`— y se fue adelgazando hasta quedarse con una sola etiqueta.
+Tres pruebas por ese camino frente a seis por el primero, y solo el segundo dio
+una respuesta.
+
+**Cuando un prompt falla y otro funciona, se adelgaza el que funciona, no se
+engorda el que falla.** Esa frase es la parte de esta decision que no depende del
+generador: un exito del que se quitan piezas una a una acaba diciendo cual era la
+que contaba, y un fallo al que se le añaden no dice nada nunca.
+
+### Que se quita, y por que no basta con dejarlo ahi
+
+`D-095` construyo un desambiguador —`vault-image-orientation.ts`, cuatro puertas,
+33 pruebas— cuyo unico producto era añadir `ass to camera` o `back to camera`.
+Las doce generaciones dicen que esas dos etiquetas no hacen nada. El modulo se
+va entero, con su llamada en `composeHordeImagePlan`, su export, el campo
+`added` del plan, `removeAddedFragment` y el cartel del panel.
+
+Dejarlo puesto era **peor que no hacer nada**, y ese es el motivo de fondo: no
+solo metia una etiqueta inutil en el prompt, sino que el panel le enseñaba a
+Daniel un cartel explicandole que Luxy le habia resuelto el encuadre. Un aviso
+que afirma resuelto un problema que sigue ahi cuesta mas que el silencio: es
+`D-093` —la interfaz no promete lo que no esta verificado— aplicada a su propio
+cartel.
+
+### Lo que sobrevive de `D-095`, y no es poco
+
+Tres cosas, y conviene no volver a aprenderlas:
+
+1. **una instruccion en el prompt que se comprueba incumplida se lleva al
+   codigo.** Sigue siendo cierto; lo que fallo aqui es que la instruccion que se
+   llevo al codigo tampoco servia en el generador.
+2. **medir antes de escribir la regla.** `D-095` se midio de verdad —35 frases
+   de dormitorio, 22 falsos positivos, listas borradas— pero siempre sobre el
+   TEXTO del prompt, nunca sobre la imagen que salia. Se verifico que la etiqueta
+   llegara; no que sirviera. `CURRENT-TASK.md` lo decia con todas las letras en
+   «lo que sigue sin comprobar», y ahi estaba la respuesta.
+3. **el recorte (`dropped`) no se toca.** Ese si funciona y Daniel lo ha visto
+   trabajar en pantalla. `added` cae; su gemelo se queda.
+
+### Lo que quedaba pendiente, cerrado el mismo dia (`F29-POSTURA-004`)
+
+El bloque de instrucciones de `vault-image-request.ts` seguia pidiendole al
+modelo que escribiera «ass to camera» o «back to camera». Ya no: ese bullet se
+fue, y en su hueco esta la regla de arriba —nombrar lo que solo se ve desde ese
+angulo, que el generador coloca la camara al dibujarlo—.
+
+Tres matices de como se aplico, porque marcan el limite de la decision:
+
+- **el bloque no nombra ninguna etiqueta explicita concreta.** Enseña el
+  principio y deja que la escena decida que se ve. La regla sale de `pussy`, pero
+  escribirla ahi convertiria a Luxy en quien impone el contenido, y no lo es.
+- **solo se tira lo demostrado falso.** De la tabla de equivalencias cayo el par
+  «desde detras»/«el culo a camara» -> `from behind`. `close-up`, `full body`,
+  `from above/below/the side` y `looking at viewer` se quedan: aparecen en
+  prompts que funcionaron y **nunca se probaron aisladas**. No saber no es saber
+  que falla; queda marcado como no sabido, en el comentario y en una prueba.
+- **el guardian de 6.500 no se subio.** El texto nuevo lo pagaron el bullet
+  borrado, el par de la tabla, el ejemplo del bullet del orden —que era ese mismo
+  `from behind`— y una condensacion de la prohibicion de camaras. Margen final:
+  22 caracteres.
+
+### Hasta donde llega esto, que es menos de lo que parece
+
+Doce generaciones, **una semilla** (`1080257389`) y **un modelo**
+(WAI-ANI-NSFW-PONYXL). Eso es lo medido, y escribirlo aqui es la mitad del
+trabajo de no repetir el fallo de `D-095`:
+
+- **no esta comprobado que otro modelo se comporte igual.** La regla puede ser de
+  esta familia de checkpoints, de los entrenados con etiquetas sueltas, o solo de
+  este. Nadie lo ha probado fuera de el, y el codigo del generador no se lee
+  desde aqui;
+- **no esta comprobado que otra semilla de lo mismo.** Fijar la semilla es lo que
+  hizo comparables las doce, y es tambien lo que impide saber cuanto de lo visto
+  es de la semilla. Doce generaciones son doce generaciones, como cuatro eran
+  cuatro en `D-094`;
+- **el bloque de instrucciones, sin embargo, no lleva nada de esto dentro.** Lo
+  que se escribio en `vault-image-request.ts` es el principio —nombra algo que
+  solo se vea desde ese angulo—, no la etiqueta que lo demostro. Si el modelo
+  cambia y el principio deja de valer, lo que hay que rehacer es un bullet, no
+  un modulo. Esa es la diferencia con `D-095`, y es deliberada.
+
+Si Daniel cambia de modelo de imagen, **esta decision no se hereda: se vuelve a
+medir**, y por el camino de arriba —adelgazando lo que funcione—.

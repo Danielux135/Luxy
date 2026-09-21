@@ -1,7 +1,72 @@
 # Luxy — estado canónico del proyecto
 
-Última actualización: **2026-09-17 (madrugada) — la revisión de los siete
-arreglos: once defectos cerrados, y la documentación que afirmaba de más**
+Última actualización: **2026-09-18 — doce generaciones tumban el desambiguador
+de orientación, y dejan una regla mejor en su sitio**
+
+Daniel repitió la misma petición doce veces con la semilla `1080257389` y el
+modelo WAI-ANI-NSFW-PONYXL, moviendo una cosa cada vez. El resultado no admite
+lectura amable: **ninguna etiqueta de cámara movió la cámara.** Fallaron las seis
+—`from behind`, `ass to camera`, `back to camera`, `top-down bottom-up`,
+`presenting`, `rear view`—, solas y juntas, y tampoco cambió nada subirles el
+peso, tocar el prompt negativo, quitar las etiquetas faciales ni cambiar el
+orden. Lo que sí funcionó fue nombrar una parte del cuerpo que en esa postura
+**sólo se puede dibujar desde detrás**. La tabla entera, fila a fila, está en
+`D-096`.
+
+**La regla que sale de ahí, y es lo que había que aprender:** este modelo obedece
+lo que puede **dibujar**, no las instrucciones sobre dónde poner la cámara. Para
+conseguir un ángulo se nombra algo que sólo se vea desde ese ángulo, y la cámara
+se coloca sola porque no hay otra forma de dibujarlo.
+
+**El método vale tanto como la regla**, porque no depende del generador: seis
+hipótesis por el camino de **añadir** variables al prompt que fallaba no dieron
+nada; tres pruebas por el de **quitarlas** del que funcionaba aislaron la causa.
+Cuando un prompt falla y otro funciona, se adelgaza el que funciona.
+
+**Lo que cambia en el producto**, en dos pasos del mismo día:
+
+1. **El desambiguador de orientación se va entero** (`F29-POSTURA-003`). Con él,
+   el módulo `vault-image-orientation.ts` —471 líneas— y su prueba —251—, su
+   llamada al componer el plan, su export, el campo `added` del plan, la función
+   que lo quitaba y el cartel del panel que lo anunciaba. Ese cartel es el motivo
+   de fondo: no sólo metía una etiqueta inútil en cada prompt, sino que le decía
+   a Daniel que Luxy le había resuelto el encuadre. Un aviso que da por cerrado
+   un problema abierto cuesta más que el silencio. **El recorte (`dropped`) no se
+   toca**: ése funciona y se le ha visto trabajar.
+2. **El bloque de instrucciones aprende la regla** (`F29-POSTURA-004`). Donde
+   pedía escribir «ass to camera» ahora enseña el principio: la etiqueta de
+   encuadre sola no mueve la cámara, hay que nombrar además algo que sólo se vea
+   desde ahí. **No nombra ninguna etiqueta explícita concreta** —la última frase
+   devuelve la decisión a la escena, y hay una prueba sobre esa frase—: la regla
+   salió de una etiqueta explícita, pero escribirla en el bloque convertiría a
+   Luxy en quien impone el contenido. De la tabla de equivalencias sólo cayó el
+   par demostrado falso; `close-up` y compañía se quedan, marcados como **no
+   sabidos** porque nunca se probaron aisladas. El guardián de 6.500 caracteres
+   **no se subió**: se entró con 44 de margen y se sale con 22.
+
+**`D-095` se retira un día después de escribirse**, y su error es el que esta
+documentación lleva cuatro veces en tres días corrigiendo: **razonar cómo debería
+comportarse el generador en vez de medirlo.** Su premisa era impecable como
+razonamiento y falsa como hecho. Lo que se midió entonces fue el texto del
+prompt —que la etiqueta llegara—, nunca la imagen. `CURRENT-TASK.md` lo decía con
+todas las letras en «lo que sigue sin comprobar», y ahí estaba la respuesta.
+
+**El alcance, declarado:** doce generaciones, **una semilla y un modelo**. No está
+comprobado que otro modelo se comporte igual, ni otra semilla. Si Daniel cambia
+de modelo de imagen, `D-096` no se hereda: se vuelve a medir.
+
+**Probado, no visto.** Suite completa en verde en esta pasada —**190 archivos,
+3.996 pruebas pasadas y 12 saltadas, exit 0**—, medida ejecutando `npm run check`
+en este worktree y no heredada de ninguna entrada anterior. Aqui no va la duracion
+a proposito: la que figuraba era la de una corrida distinta de la que cerro el
+trabajo, y un numero copiado de otra ejecucion es exactamente lo que esta
+documentacion lleva la semana corrigiendo. Las doce
+generaciones son de la pantalla de Daniel, no de una prueba: **ninguna prueba
+puede fijar que el generador obedezca**, y ésa sigue siendo la única comprobación
+que vale. Nadie ha abierto Studio con estos cambios.
+
+Lo anterior — **la revisión de los siete arreglos: once defectos cerrados, y
+la documentación que afirmaba de más** (2026-09-17, madrugada):
 
 Daniel pasó la tarde generando imágenes de su personaje y comparando prompts. De
 ahí salieron siete arreglos, todos de casos vistos en pantalla. Esa tanda pasó

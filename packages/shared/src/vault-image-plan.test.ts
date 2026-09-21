@@ -78,61 +78,31 @@ describe('composeHordeImagePlan', () => {
     expect(plan.positive).toContain('hair wild across pillow');
   });
 
-  it('desambigua «desde detras» y lo apunta en el campo que lee el panel', () => {
-    // el prompt exacto que salio de frente tres veces. Lo añadido tiene que
-    // llegar a `added`: sin eso, el panel enseñaria una etiqueta que la persona
-    // no escribio y no habria forma de saber de donde salio ni de quitarla
-    const plan = composeHordeImagePlan({
-      recipe: recipe(),
-      scene: 'from behind, on all fours, looking back, nude, soft light, on bed',
-      extraNegative: '',
-    });
-    expect(plan.added).toEqual(['ass to camera']);
-    expect(plan.positive).toContain('from behind, ass to camera, on all fours');
-    expect(plan.joined).toContain('ass to camera');
-    // la escena se guarda como se pidio: lo añadido no la reescribe
-    expect(plan.scene).toBe('from behind, on all fours, looking back, nude, soft light, on bed');
+  it('la escena llega entera: pedir la foto desde detras ya no añade nada', () => {
+    // el prompt que se midio doce veces con la misma semilla. Aqui vivia la
+    // desambiguacion que le pegaba «ass to camera»; se quito porque ninguna de
+    // las dos etiquetas de encuadre movio la camara, y esta prueba es la que
+    // avisaria si alguien volviera a meter una
+    const escena = 'from behind, on all fours, looking back, nude, soft light, on bed';
+    const plan = composeHordeImagePlan({ recipe: recipe(), scene: escena, extraNegative: '' });
+    expect(plan.positive).toContain(escena);
+    expect(plan.scene).toBe(escena);
     expect(vaultImagePlanSchema.safeParse(plan).success).toBe(true);
   });
 
-  it('de pie pone la forma neutra, y sin «desde detras» no pone nada', () => {
-    const dePie = composeHordeImagePlan({
-      recipe: recipe(),
-      scene: 'from behind, standing by the window',
-      extraNegative: '',
-    });
-    expect(dePie.added).toEqual(['back to camera']);
-
-    const sinEncuadre = composeHordeImagePlan({
-      recipe: recipe(),
-      scene: 'on all fours, looking at viewer, on bed',
-      extraNegative: '',
-    });
-    expect(sinEncuadre.added).toEqual([]);
-  });
-
-  it('una correccion escrita a mano no gana la orientacion por su cuenta', () => {
-    // lo escrito a mano se manda tal cual, como con el recorte de rasgos: es la
-    // unica forma de que «quita eso y pon esto» signifique algo
-    const base = composeHordeImagePlan({
-      recipe: recipe(),
-      scene: 'standing by the window',
-      extraNegative: '',
-    });
-    const editado = planFromEdit(base, {
-      provider: 'horde',
-      positive: 'from behind, standing by the window',
-      negative: '',
-    });
-    expect(editado?.plan.provider).toBe('horde');
-    expect(editado?.plan).toMatchObject({ positive: 'from behind, standing by the window' });
-  });
-
-  it('un plan guardado antes de que `added` existiera se sigue leyendo', () => {
+  it('un plan guardado con el viejo `added` se sigue leyendo, y con su misma huella', () => {
+    // hay intentos en la boveda escritos cuando el campo existia. El esquema no
+    // es `.strict()`, asi que Zod ignora la clave en vez de rechazar el plan; y
+    // como `computePlanId` nunca la midio, el plan viejo conserva su huella y no
+    // pasa a contar como «editado» por haberla perdido
     const plan = composeHordeImagePlan({ recipe: recipe(), scene: 'standing', extraNegative: '' });
-    const { added: _sinEse, ...antiguo } = plan;
-    const leido = vaultImagePlanSchema.parse(antiguo);
-    expect(leido.provider === 'horde' ? leido.added : null).toEqual([]);
+    const guardado = { ...plan, added: ['ass to camera'] };
+    const leido = vaultImagePlanSchema.parse(guardado);
+    expect('added' in leido).toBe(false);
+    expect(leido.provider).toBe('horde');
+    if (leido.provider !== 'horde') return;
+    const { planId: _huella, ...sinSellar } = leido;
+    expect(computePlanId(sinSellar)).toBe(plan.planId);
   });
 
   it('pasa la receta entera a los parametros, sin perder la semilla', () => {
@@ -221,7 +191,6 @@ describe('computePlanId', () => {
       planId: plan.planId,
       scene: plan.scene,
       dropped: plan.dropped,
-      added: plan.added,
       joined: plan.joined,
       negative: plan.negative,
       positive: plan.positive,

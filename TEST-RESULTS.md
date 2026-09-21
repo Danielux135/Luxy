@@ -1,5 +1,140 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-18 — F29-POSTURA-005 — la tanda de documentación, comprobada igual
+
+Pasada de **sólo `.md`**: no se tocó una línea de código. Aun así se ejecuta la
+suite, porque decir «no debería moverse» no es lo mismo que haberlo mirado. Todo
+lo de abajo se midió en esta pasada; **ninguna cifra viene de otra entrada**.
+
+Lo primero, el único archivo de pruebas que mira documentación: comprueba que
+los archivos de contexto obligatorios existen, que los comandos citados en ellos
+existen de verdad en el `package.json`, que `CLAUDE.md` y `AGENTS.md` no se
+contradicen y que no hay secretos ni rutas personales versionados.
+
+```
+node_modules\.bin\vitest.cmd run packages/shared/src/docs.test.ts
+ Test Files  1 passed (1)
+      Tests  64 passed (64)
+   Duration  703ms
+```
+
+**Y lo que ese archivo NO cubre, que hay que decirlo:** ninguna prueba del
+repositorio lee `DECISIONS.md`, `PROJECT-STATE.md`, `CURRENT-TASK.md`,
+`CHANGELOG-WORK.md` ni `TEST-RESULTS.md`, que son los cinco que cambió esta
+tanda. Lo que se ha comprobado de ellos es lo que se puede comprobar sin una
+prueba: que siguen en UTF-8 con finales CRLF (`file`), que los títulos de sección
+de `D-096` quedan en orden y separados por línea en blanco, y que **cada ancla de
+inserción aparecía exactamente una vez** antes de escribir: los scripts que
+hicieron los cambios abortan si no, y ninguno abortó.
+
+La suite entera, ejecutada **después** de escribir los cinco archivos:
+
+```
+npm test
+ Test Files  190 passed (190)
+      Tests  3996 passed | 12 skipped (4008)
+   Start at  17:55:50
+   Duration  138.08s
+[exited with code 0]
+```
+
+La misma suite se había ejecutado **antes** de tocar nada, para tener la línea
+base: `190 passed`, `3996 passed | 12 skipped`, `139.61s`, exit 0. Las dos
+ejecuciones dan lo mismo, que es justo lo que tenía que pasar: un `.md` no mueve
+la suite, y ahora está comprobado en vez de supuesto.
+
+Lo medido aparte, con `git show HEAD` sobre los dos archivos que borró
+`F29-POSTURA-003`, porque la cabecera nueva de `D-095` cita esas cifras:
+
+```
+git show HEAD:packages/shared/src/vault-image-orientation.ts      | grep -c ''  -> 471
+git show HEAD:packages/shared/src/vault-image-orientation.test.ts | grep -c ''  -> 251
+```
+
+**Lo que sigue sin comprobarse aquí, y no lo comprueba ninguna suite:** que el
+generador obedezca. Las doce generaciones que sostienen `D-096` son de la
+pantalla de Daniel; este archivo sólo puede decir que el texto llega donde tiene
+que llegar. No se ejecutó `npm run lint`, `npm run typecheck` ni `npm run build`
+en esta pasada: no hay código nuevo que compilar, y decir que se ejecutaron
+sería exactamente el defecto que esta tanda documenta.
+
+### 2026-09-18 — F29-POSTURA-004 — el bloque con la regla del angulo, en verde
+
+Ejecutado en esta pasada, en el worktree real y con el bloque ya cambiado.
+Ninguna cifra viene de otra entrada.
+
+Focalizada sobre el único archivo de pruebas afectado:
+
+```
+node_modules\.bin\vitest.cmd run packages/shared/src/vault-image-request.test.ts
+ Test Files  1 passed (1)
+      Tests  128 passed (128)
+```
+
+La matriz entera, que es lo que descarta que el cambio del bloque haya roto algo
+que lo lee desde otro paquete:
+
+```
+npm run lint       eslint, sin salida
+npm run typecheck  tsc -b tsconfig.build.json + los seis tsconfig.tests.json, sin salida
+npm test           Test Files  190 passed (190)
+                        Tests  3996 passed | 12 skipped (4008)
+                     Duration  136.53s
+npm run build      tsc -b en todos los paquetes, sin errores
+```
+
+El guardián de tamaño, medido aparte llamando a `buildVaultImageInstruction` con
+las mismas cuatro imágenes que usa su prueba, porque la prueba sólo dice «menos
+de 6.500» y el margen es el dato que importa:
+
+```
+prose  6474   (antes del cambio: 6452)
+tags   6478   (antes del cambio: 6456)
+```
+
+Margen restante 22 caracteres sobre el tope de 6.500, que **no se ha subido**.
+
+Lo que **no** está comprobado y no se puede comprobar aquí: que el generador
+obedezca la regla nueva. Las pruebas fijan que el texto llega al bloque y que las
+etiquetas descartadas ya no aparecen; que el modelo escriba prompts mejores y que
+la imagen salga en el ángulo pedido lo dice la pantalla de Daniel o no lo dice
+nadie.
+
+### 2026-09-18 — F29-POSTURA-003 — todo lo que tocaba el desambiguador, en verde
+
+Ejecutado en esta pasada, en el worktree real y con el módulo ya borrado.
+Ninguna cifra viene de otra entrada.
+
+Focalizada sobre los tres archivos afectados —el plan, su política y el bloque de
+instrucciones que menciona las etiquetas—:
+
+```
+node_modules\.bin\vitest.cmd run packages/shared/src/vault-image-plan.test.ts packages/shared/src/vault-image-plan-policy.test.ts packages/shared/src/vault-image-request.test.ts
+ Test Files  3 passed (3)
+      Tests  180 passed (180)
+```
+
+La matriz entera, que es lo que descarta que el borrado se haya llevado por
+delante algo de otro sitio:
+
+```
+npm run lint        -> sin salida (limpio)
+npm run typecheck   -> limpio (build + typecheck:tests)
+npm test            -> Test Files  190 passed (190)
+                       Tests  3991 passed | 12 skipped (4003)
+                       Duration 165.31s
+npm run build       -> completo, sin errores
+```
+
+Los 12 saltados son los de siempre, no tienen que ver con este cambio.
+
+**Lo que estas pruebas NO dicen**, y conviene dejarlo escrito porque es
+exactamente el agujero por el que se coló `D-095`: fijan que la escena llega
+entera al prompt y que un plan viejo con `added` se sigue leyendo. **No dicen
+nada sobre la imagen que sale.** Lo que sí está medido sobre imágenes son las
+doce generaciones de Daniel recogidas en `D-096`, y eso es lo que sostiene el
+borrado.
+
 ### 2026-09-17 (tarde, tercera vuelta) — F29-POSTURA-002 verificado ejecutando la función
 
 Todo lo que sigue se ha **ejecutado en esta pasada**, en el worktree real y con

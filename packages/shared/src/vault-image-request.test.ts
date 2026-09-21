@@ -413,6 +413,40 @@ describe('lo que ocupa el bloque', () => {
     expect(buildVaultImageInstruction(cuatro, 'tags', true).length).toBeLessThan(6500);
   });
 
+  // ESTE GUARDIAN MEDIA MENOS DE LO QUE DECIA, y conviene saber que mide.
+  //
+  // `buildVaultImageInstruction` recibe DOS cosas mas que el caso de arriba no
+  // le pasa: el error de la generacion anterior y la lista entera de imagenes
+  // guardadas. Medido: con el aviso del fallo el bloque sube a 6.887 —403
+  // caracteres, y a quien le bloquean imagenes a menudo le viaja casi siempre—,
+  // y con cuarenta imagenes en la lista pasa de 14.700.
+  //
+  // Lo segundo NO es una fuga: la lista crece con el uso a proposito y ya tiene
+  // su propio tope por linea (`MAX_IMAGE_LINE_CHARS`). Lo primero SI es texto
+  // nuestro, y por tanto tiene que estar vigilado igual que el resto.
+  it('el aviso del fallo anterior tambien esta vigilado', () => {
+    const error = 'el filtro anti-CSAM de AI Horde bloqueo esta imagen';
+    // el tope es el de arriba mas lo que ocupa el aviso: si crece, que se vea
+    expect(buildVaultImageInstruction(cuatro, 'tags', true, error).length).toBeLessThan(7000);
+  });
+
+  it('lo que crece con la lista de imagenes es la lista, no el bloque', () => {
+    // la diferencia entre cuatro imagenes y cuarenta tiene que ser SOLO las
+    // lineas de la lista. Si algun dia el bloque fijo creciera con el numero de
+    // imagenes, esto lo caza
+    const muchas = Array.from({ length: 40 }, (_unused, at) => ({
+      mediaId: `med-${at}`,
+      description: 'x'.repeat(MAX_IMAGE_LINE_CHARS),
+    }));
+    const conCuatro = buildVaultImageInstruction(cuatro, 'tags', true).length;
+    const conCuarenta = buildVaultImageInstruction(muchas, 'tags', true).length;
+    // 200 del tope de la descripcion mas el identificador y el formato de la
+    // linea: medido, 229 por imagen. El margen deja sitio a un identificador
+    // mas largo sin dejar de cazar que el bloque FIJO crezca con la lista
+    const lineasDeMas = 36 * (MAX_IMAGE_LINE_CHARS + 40);
+    expect(conCuarenta - conCuatro).toBeLessThan(lineasDeMas);
+  });
+
   it('sin poder generar baja de 3.000: se salta la seccion COMO entera', () => {
     expect(buildVaultImageInstruction(cuatro, 'prose', false).length).toBeLessThan(3000);
   });
@@ -643,6 +677,14 @@ describe('la escena tiene que ser corta para que se cumpla', () => {
     expect(instruccion).toContain('El PRIMERO es el que mas pesa');
   });
 
+  // el ejemplo era «si lo importante es que esta de espaldas, from behind va
+  // primero», y las doce generaciones del 2026-09-18 lo dejaron sin pie: alli
+  // «from behind» no giro la escena en ninguna posicion, y mover el orden
+  // tampoco cambio nada. La regla del peso no esta demostrada falsa y se queda
+  it('sin apoyarla en «from behind», que es el ejemplo que se cayo', () => {
+    expect(instruccion).not.toContain('es que esta de espaldas');
+  });
+
   it('manda usar la etiqueta corta de ropa en vez de describirla', () => {
     expect(instruccion).toContain('off');
     expect(instruccion).toContain('open shirt');
@@ -786,7 +828,11 @@ describe('una foto que hace EL dentro de la escena', () => {
     // «not looking at camera» mete la palabra en el prompt, y el generador no
     // entiende el «not»: dibuja lo que se nombra
     const instruction = buildVaultImageInstruction();
-    expect(instruction).toContain('o aunque la foto la este haciendo el');
+    // el 2026-09-18 la frase se acorto —«aunque te la pidan asi o la haga el»—
+    // para dejar sitio a la regla del angulo dentro del tope de 6.500. Los dos
+    // casos que le costaron una imagen siguen nombrados, que es lo que fija esto
+    expect(instruction).toContain('aunque te la pidan');
+    expect(instruction).toContain('o la haga el');
     expect(instruction).toContain('Ni siquiera en negativo');
     expect(instruction).toContain('tal como se ve desde donde esta el');
     expect(instruction).not.toContain('lo que ve su camara');
@@ -1035,6 +1081,17 @@ describe('el encuadre que pide el usuario', () => {
     }
   });
 
+  // las doce generaciones del 2026-09-18 tiraron un solo par de la tabla: el que
+  // traducia «desde detras» y «el culo a camara» por «from behind» a secas. Del
+  // resto no se sabe —«close-up» estaba en un prompt que si funciono, pero nunca
+  // se probo aislada—, y no saber no es lo mismo que saber que falla: se quedan
+  it('menos «desde detras», que es el unico par demostrado inutil', () => {
+    expect(bloque).not.toContain('«desde detras»');
+    expect(bloque).not.toContain('«el culo a camara»');
+    // «from behind» solo sobrevive acompañado, no como traduccion suelta
+    expect(bloque).toContain('«from behind, facing away»');
+  });
+
   it('sigue prohibiendo la camara pese a hablar de encuadres', () => {
     // «rear view» y «close-up» son terminos de camara: el riesgo de añadirlos
     // es que reabran la puerta que D-064 cerro, y por eso se comprueba aqui
@@ -1088,29 +1145,60 @@ describe('la postura del cuerpo, que el encuadre no dice', () => {
   });
 });
 
-// COMPROBADO EN PANTALLA el 2026-09-17, y es una prueba limpia porque la postura
-// SI llego en el mismo prompt: con «on all fours, from behind, bed, warm light,
-// looking back» salio a cuatro patas pero DE LADO. El generador cumple «from
-// behind» girando el cuerpo —la camara sigue estando detras— porque esa etiqueta
-// no dice que parte va hacia el objetivo. Los cuatro prompts que si salieron de
-// espaldas llevaban «ass to camera».
-describe('la orientacion, que «from behind» tampoco dice', () => {
+// DOCE generaciones reales del 2026-09-18, misma semilla (1080257389) y mismo
+// modelo (WAI-ANI-NSFW-PONYXL), pidiendo siempre la misma foto de espaldas. NO
+// lo consiguieron, ni solas ni juntas ni con pesos: `from behind`, `ass to
+// camera`, `back to camera`, `top-down bottom-up`, `presenting`, `rear view`.
+// Tampoco cambio nada el orden de las etiquetas ni el prompt negativo. Lo unico
+// que lo consiguio, aislado hasta quedarse solo, fue nombrar una parte del
+// cuerpo que en esa postura SOLO es visible desde detras: no es una etiqueta de
+// encuadre, es una restriccion anatomica, y el modelo no tiene otra forma de
+// dibujarla que poner la camara ahi.
+//
+// Esta prueba fija lo que sale de ahi, que es lo contrario de lo que decia el
+// bloque hasta el 2026-09-17: el modelo obedece lo que PUEDE DIBUJAR, no las
+// instrucciones sobre donde va la camara.
+describe('el angulo se consigue nombrando lo que solo se ve desde ahi', () => {
   const texto = buildVaultImageInstruction();
 
-  it('manda decir QUE parte va hacia el objetivo', () => {
-    expect(texto).toContain('«from behind» tampoco basta');
-    expect(texto).toContain('ass to camera');
-    expect(texto).toContain('back to camera');
+  it('enseña el principio, no otra etiqueta de encuadre', () => {
+    expect(texto).toContain('La etiqueta de encuadre sola no mueve la camara');
+    expect(texto).toContain('nombra ADEMAS algo que SOLO se vea desde');
   });
 
-  it('y donde queda la cara, que es la otra mitad del encuadre', () => {
-    expect(texto).toContain('face down');
-    expect(texto).toContain('looking back');
+  it('explica el mecanismo, que es lo que hace que la regla se cumpla', () => {
+    // una regla sin motivo se salta; sabiendo que la camara la coloca el para
+    // poder dibujar lo que se le nombra, no. Mismo criterio que el tope de OCHO
+    expect(texto).toContain('la colocara ahi para poder dibujarlo');
+  });
+
+  it('trae un ejemplo por angulo, todos sacados de lo que se veria', () => {
+    for (const ejemplo of ['la coronilla', 'las plantas de los pies', 'a dos metros no se veria']) {
+      expect(texto).toContain(ejemplo);
+    }
+  });
+
+  // LA LINEA QUE NO SE CRUZA: el bloque enseña el principio y es la escena la
+  // que decide que se ve. Si nombrase una etiqueta explicita concreta, Luxy
+  // estaria imponiendo contenido en vez de describir el que ya hay
+  it('deja que sea la escena quien decida que se ve', () => {
+    expect(texto).toContain('Lo que hay ahi lo decide la escena');
+  });
+
+  it('ya no manda nombrar la camara, que es lo que las doce descartaron', () => {
+    for (const ruido of [
+      'ass to camera',
+      'back to camera',
+      'rear view',
+      'QUE parte va hacia el objetivo',
+    ]) {
+      expect(texto).not.toContain(ruido);
+    }
   });
 
   it('no se envia por el camino que no puede generar', () => {
     const cerrado = buildVaultImageInstruction([], 'prose', false);
-    expect(cerrado).not.toContain('«from behind» tampoco basta');
+    expect(cerrado).not.toContain('La etiqueta de encuadre sola');
   });
 });
 

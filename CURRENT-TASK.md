@@ -1,9 +1,124 @@
 # Luxy — tarea activa
 
-## F29-POSTURA-002 — «desde detras» lo desambigua el codigo
+## F29-POSTURA-005 — la decision retirada y la nueva, completas
 
-Estado: **implementado, revisado dos veces y probado; sin ver en pantalla —
-Claude, 2026-09-17 (tarde).** Decision en `D-095`, ya corregida.
+Estado: **hecho — Claude, 2026-09-18.** Pasada de sólo documentación: **ni una
+línea de código.** Cierra los tres huecos que `F29-POSTURA-003` y `-004` dejaron
+en la memoria escrita, que era donde tenían que quedar.
+
+Qué faltaba, y por qué importaba:
+
+1. **`D-095` decía que estaba revocada, pero no qué clase de error fue.** Ahora su
+   cabecera deja constancia de que se escribió el 2026-09-17 y se retiró el
+   2026-09-18 —471 líneas de módulo y 251 de prueba en ese día, medidas sobre
+   `git show HEAD` de los dos archivos borrados—, y nombra el error: **razonar
+   cómo debería comportarse el generador en vez de medirlo.** Su premisa
+   —«`from behind` es ambiguo, hay que decir QUE parte va hacia el objetivo»— es
+   impecable como razonamiento y falsa como hecho.
+2. **`D-096` tenía la conclusión pero no lo que costó llegar a ella.** Gana las
+   seis hipótesis que se cayeron, una por una —pesos, prompt negativo, etiquetas
+   faciales, orden, vocabulario y `looking back`—, la tabla de las doce
+   generaciones convertida en tabla de verdad, y el **método**, que es lo que de
+   verdad se lleva uno de aquí: las hipótesis que **añadían** variables al prompt
+   que fallaba no dijeron nada; las que **quitaban** del que funcionaba aislaron
+   la causa en tres pasos. Cuando un prompt falla y otro funciona, se adelgaza el
+   que funciona. (Las cuentas de una y otra tanda no suman las doce generaciones:
+   cuatro se perdieron en bloqueos del filtro y una en un despiste, y eso también
+   es parte de lo que cuesta medir aquí.)
+3. **`D-096` no declaraba su alcance.** Sección nueva al final: doce
+   generaciones, **una semilla y un modelo**. No está comprobado que otro modelo
+   se comporte igual, ni otra semilla. Si Daniel cambia de modelo, la decisión no
+   se hereda: se vuelve a medir. Lo único que sí es portable es el método.
+
+Y `PROJECT-STATE.md`, que se había quedado en la tanda del 2026-09-17, pasa a
+contar ésta: la regla, el método, el alcance y los dos pasos de producto.
+
+Las cifras de esta pasada son de esta pasada: `npm test` ejecutado aquí, **190
+archivos, 3.996 pruebas pasadas y 12 saltadas, exit 0**. Están en
+`TEST-RESULTS.md` con su salida literal. No se tocó código, así que la suite es
+la misma que dejó `F29-POSTURA-004`: se vuelve a correr para poder decirlo
+habiéndolo visto, no para afirmar que este cambio la mueve.
+
+**Siguiente paso exacto:** el de `F29-POSTURA-004`, que sigue abierto y es de
+Daniel —pedir una foto en un ángulo concreto y mirar si el prompt nombra algo
+visible sólo desde ahí en vez de una etiqueta de cámara—. De esta pasada no sale
+nada que comprobar en pantalla: es documentación.
+
+## F29-POSTURA-004 — el bloque aprende la regla del angulo
+
+Estado: **hecho y probado — Claude, 2026-09-18.** Aplica `D-096` al único sitio
+que había quedado fuera: el bloque de instrucciones de
+`packages/shared/src/vault-image-request.ts`.
+
+Qué se quitó: el bullet del 2026-09-17 que mandaba «di QUE parte va hacia el
+objetivo —«ass to camera», «back to camera»— y donde queda la cara». Las doce
+generaciones lo dejaron sin pie, así que lo único que hacía era enseñarle al
+modelo a escribir ruido. También se cayó, de la tabla de equivalencias, el par
+que traducía «desde detrás» y «el culo a cámara» por `from behind` a secas; y el
+ejemplo del bullet del orden, que era ese mismo `from behind`.
+
+Qué se dejó: el resto de la tabla —`close-up`, `full body`,
+`from above/below/the side`, `looking at viewer`—. `close-up` aparecía en un
+prompt que **sí** funcionó, pero nunca se probó aislada: no saber no es lo mismo
+que saber que falla, y lo que no está demostrado falso no se tira. Queda marcado
+en el comentario y en una prueba.
+
+Qué se puso, en el hueco que dejó el bullet borrado: «La etiqueta de encuadre
+sola no mueve la cámara: nombra ADEMÁS algo que SOLO se vea desde ese ángulo y la
+colocará ahí para poder dibujarlo», con un ejemplo por ángulo —la coronilla, las
+plantas de los pies, un detalle que a dos metros no se vería—. **Ninguna etiqueta
+explícita concreta**: se enseña el principio y es la escena la que decide qué se
+ve. La última frase del bullet lo dice y hay una prueba que la fija; si un día
+alguien mete ahí una etiqueta, Luxy estaría imponiendo contenido.
+
+El guardián de 6.500: se entró con 44 caracteres de margen y se sale con 22
+(prosa 6.474, etiquetas 6.478). El límite **no se ha tocado**. Lo que pagó el
+texto nuevo: el bullet borrado (156), el par de la tabla, el ejemplo del orden y
+una condensación de la prohibición de cámaras —«aunque te la pidan así o la haga
+él», que conserva los dos casos que costaron una imagen y tiene su prueba—.
+
+**Siguiente paso exacto:** Daniel pide una foto en un ángulo concreto y mira si
+el prompt que compone el modelo nombra algo visible sólo desde ahí en vez de una
+etiqueta de cámara. Que la imagen salga bien lo dice su pantalla o no lo dice
+nadie: aquí sólo está probado lo que llega al bloque.
+
+## F29-POSTURA-003 — el desambiguador de orientacion se va entero
+
+Estado: **hecho y probado — Claude, 2026-09-18.** Decision en `D-096`, que
+**revoca `D-095`**.
+
+Qué pasó: doce generaciones reales de Daniel, con la semilla `1080257389` y el
+modelo WAI-ANI-NSFW-PONYXL, demostraron que ninguna de las dos etiquetas que
+ponía el desambiguador —`ass to camera`, `back to camera`— mueve la cámara. Ni
+solas, ni juntas, ni con pesos. Lo que sí lo consigue es `pussy`, y el motivo es
+la regla que hay que recordar: **este modelo obedece lo que puede dibujar, no las
+instrucciones sobre dónde poner la cámara.** `pussy` en esa postura solo se ve
+desde detrás, así que la cámara se coloca sola.
+
+Qué se quitó: el módulo `vault-image-orientation.ts` y sus 33 pruebas, su llamada
+en `composeHordeImagePlan`, su export en `index.ts`, el campo `added` del plan,
+`removeAddedFragment` y el cartel del panel que lo explicaba. El recorte
+(`dropped`) **no se ha tocado**: ése funciona y se ha visto trabajar.
+
+Por qué no bastaba con dejarlo puesto: además de meter una etiqueta inútil en
+todos los prompts, el panel le enseñaba a Daniel un cartel diciéndole que Luxy le
+había resuelto el encuadre. Eso es peor que no hacer nada, porque hace creer que
+el problema está cerrado.
+
+Compatibilidad de lo ya guardado: `hordeImagePlanSchema` es un `z.object`
+normal, no `.strict()`, así que un intento de la bóveda que lleve `added` se
+sigue leyendo —Zod ignora la clave—; y `computePlanId` nunca midió ese campo, así
+que ningún plan viejo cambia de huella ni pasa a contar como «editado». Por eso
+el campo se borra en vez de quedarse tolerado. Hay una prueba que lo fija.
+
+**Siguiente paso exacto:** hecho en `F29-POSTURA-004` — el bloque de
+instrucciones de `vault-image-request.ts` ya no pide «ass to camera» ni «back to
+camera».
+
+## F29-POSTURA-002 — «desde detras» lo desambigua el codigo — REVOCADA
+
+Estado: **borrada del código el 2026-09-18 (F29-POSTURA-003, `D-096`).** Se
+conserva la entrada porque explica qué se midió y qué no. Decisión en `D-095`.
 
 Qué hay: `disambiguateOrientation`, función pura en
 `packages/shared/src/vault-image-orientation.ts`, aplicada en
