@@ -4,6 +4,10 @@
 > tiene varios «siguiente paso exacto» abiertos a la vez, con dueños distintos.
 > El orden que manda es éste:
 >
+> 0. **`SEG-BOVEDA-001`: la bóveda no se cierra sola.** Va delante de todo lo
+>    demás porque es seguridad y porque está **sin arreglar**: el contador lo
+>    reinicia la propia pantalla. Causa medida, arreglo descrito y no
+>    implementado. Bloque justo debajo.
 > 1. **`LA-045` es el bloqueo duro y va antes que nada.** Hasta que la pasada
 >    sobre las conversaciones del personaje no termine **en una sola sesión**, la
 >    guarda de
@@ -20,6 +24,79 @@
 >
 > `KIMI-K3-EXPERIMENT-001`, al final del archivo, está **abandonado**, no en
 > curso. No lo retomes sin que Daniel lo pida.
+
+## SEG-BOVEDA-001 — la bóveda no se cierra por inactividad (2026-09-23)
+
+**Estado: causa medida, NADA arreglado.** Es lo primero de la lista.
+
+Daniel se fue hora y media y la bóveda siguió abierta. Su ajuste son **15
+minutos**, leídos en `%APPDATA%\Luxy\vault.json`; el valor por defecto del código
+son 5 (`key-file.ts:26`).
+
+**La causa, medida en su equipo con el equipo desatendido:** la propia pantalla de
+la bóveda se relee sola cada uno o dos minutos —112 archivos leídos en un minuto—
+y **toda lectura reinicia el contador**, porque `touch()` vive dentro de
+`subkeyFor()` y `subkeyFor` es la única puerta a cualquier contenido. Lo disparan
+dos efectos que dependen de la identidad del controlador, que cambia en cada
+render: la **foto del personaje** y el visor de imagen.
+
+**Siguiente paso exacto, y es de Daniel:** abrir Privado con la bóveda abierta,
+mirar la cuenta atrás de «Bloqueo automático» dos minutos sin tocar nada. Si
+vuelve a saltar a 15:00, confirmado. **Si en su lista no se ve ninguna foto de
+personaje, la explicación principal no vale** y hay que buscar un tercer camino.
+
+**El arreglo bueno no es el parche.** Lo de fondo es separar «hay alguien delante»
+de «se usó la llave»: sacar `touch()` de `subkeyFor` y marcarlo en el borde donde
+hay intención real. Mientras siga ahí, cualquier lector periódico que se añada
+desactiva el cierre en silencio. El parche —estabilizar el objeto de `useVault`
+con `useMemo` y quitar `vault` de las dependencias de los dos efectos— corta el
+bucle de hoy y no cierra la puerta de mañana.
+
+**La prueba que impedía cazarlo hay que reescribirla**, no sólo añadir otra:
+`vault-service.test.ts:227` («usar la boveda cuenta como actividad») **exige** que
+`subkeyFor` aplace el cierre. Y ningún `.test.ts` importa `main/index.ts`, así que
+el `setInterval` real no está cubierto por nada.
+
+**Tres agujeros más de la misma familia, ninguno arreglado:** cerrar la ventana
+con la X no cierra la bóveda (se esconde en la bandeja); **Win+L tampoco**
+(`powerMonitor` no aparece en todo el proceso principal); y `vaultUnlock` /
+`vaultLock` no escriben ni una línea de log, así que no hay forense posible.
+
+## F32-OLVIDAR-001 — borrar la memoria que una conversación se escribe sola (2026-09-23)
+
+**Estado: construido, cuatro rondas, `npm run check` en verde (4.107 pruebas).
+NO visto en pantalla.**
+
+Daniel lo pidió porque una conversación de **prueba** —sólo pedir fotos para
+comprobar cambios de código— estaba siendo recordada. Se construyó ver la memoria
+propia y borrarla, con confirmación que dice qué se destruye y qué no.
+
+El detalle está en `CHANGELOG-WORK.md` de esta misma fecha y en `D-099`, `D-100` y
+`D-101`. Lo que hace falta aquí es lo que queda:
+
+**Siguiente paso exacto, de Daniel:** reconstruir, abrir Studio y usar el botón
+sobre esa conversación de prueba. La revisión final siguió su caso concreto
+—excluida del trabajo de fondo, sellada, sin ficha— paso a paso y no encuentra
+nada que le haga perder algo. Lo que **no** está visto: que el aviso rojo se lea,
+que los tres botones de la confirmación quepan, y que el acuse salga donde se
+espera. El acuse **no sale verde**: `.notice[data-tone=ok]` no existe en
+`styles.css`.
+
+**Tres defectos conocidos y abiertos**, ninguno alcanza al caso de Daniel pero sí
+a otras conversaciones:
+
+1. `forgetCostsApproval` (`vault-recap-row.ts:247`) se apaga con
+   `!cardRevivesOnForget` sobre una premisa falsa: eso no significa «la ficha cubre
+   hasta el final». El razonamiento de `:166-171` y `D-101 §2` hay que corregirlo,
+   no sólo ampliar la condición.
+2. No cubre la conversación cuya única entrada es el `supersededMarker`.
+3. **El recuadro rojo de esa sección no se apaga** cuando la operación siguiente
+   sale bien: sus cuatro verbos no pasan por `run()`, que es lo único que limpia.
+
+**Y dos menores que también quedan:** la guarda `sendInFlight` cubre el envío pero
+no una pasada de relleno en vuelo (`recap-sync.ts:1275-1288`); y el acuse puede
+quedarse mintiendo si la fila desaparece por otro motivo (borrar la conversación
+entera).
 
 ## F31-REPETICION-001 — medir la repetición antes de tocarla
 
@@ -1036,7 +1113,7 @@ la boveda, donde la imagen solo existe descifrada en memoria.
 
 1. **Probar Codex en el banco de vision.** Es lo unico que confirma que el
    `-i` funciona de verdad contra su CLI: ninguna prueba lanza un proceso.
-2. Si falla, mirar `%LOCALAPPDATA%Luxylogsluxy.log`: los argumentos
+2. Si falla, mirar `%LOCALAPPDATA%\Luxy\logs\luxy.log`: los argumentos
    construidos salen ahi.
 
 ### De la tanda anterior, ya verificado por el

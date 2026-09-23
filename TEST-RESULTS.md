@@ -1,5 +1,41 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-23 — borrar la memoria propia — cuatro pasadas de `npm run check`
+
+**Todas las cifras se midieron en esta sesión.** `npm run check` son cuatro pasos
+—lint, typecheck (incluido `typecheck:tests`), test y build— y se ejecutó entero
+después de cada ronda de arreglos, no sólo al final.
+
+| Ronda | Archivos | Pruebas en verde | Resultado |
+| --- | --- | --- | --- |
+| 1 — ver y borrar | 193 | 4.069 | los cuatro pasos OK |
+| 2 — integridad | 193 | 4.086 | los cuatro pasos OK |
+| 3 — verdad en pantalla | 193 | 4.086 | los cuatro pasos OK |
+| 4 — los tres últimos | 194 | **4.107** | los cuatro pasos OK |
+
+12 pruebas omitidas en todas las pasadas, 0 fallidas. Duración del paso de
+pruebas entre 186 y 292 s. Lo más lento: `apps/agent/src/runtime/host.test.ts`
+(24 pruebas, 97,6 s) y `packages/vault-crypto/src/account.test.ts` (16, 47,1 s).
+
+**Lo que estas cifras NO prueban, y conviene tenerlo delante:** las cuatro pasadas
+estaban en verde **también cuando había 13 defectos abiertos**, incluidos tres de
+pérdida de datos. El verde salió de las pruebas; los defectos, de cinco revisores
+adversariales leyendo el código. Una cosa no sustituye a la otra.
+
+**Comprobación de cada arreglo:** cada prueba nueva se ejecutó contra el código
+**anterior** para verificar que falla. Sin eso, una prueba nueva en verde no
+demuestra que el arreglo haga algo.
+
+**Regresión, comprobada en el diff y no de memoria:** en todo el diff de pruebas
+hay **dos** líneas borradas —un `import` reordenado y un `montaje.sellada ?? null`
+que pasa a variable mutable para que el borrado se note en la lectura siguiente,
+que afirma **más**, no menos—. Los quince archivos siguen en CRLF de punta a punta
+(el aviso «LF will be replaced by CRLF» de git es de la normalización del índice,
+no del worktree: `grep -c` da 100 % de líneas con CR).
+
+**Lo NO ejecutado, y es lo de siempre:** nadie ha abierto Studio ni ha
+desbloqueado la bóveda. Cero comprobaciones de pantalla.
+
 ### 2026-09-21 — F30-REPARTO-001 — el interruptor del reparto, y lo que cuesta encenderlo
 
 Pasada de **sólo `.md`**: el código venía de la tanda anterior de esta misma

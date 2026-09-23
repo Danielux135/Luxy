@@ -1,5 +1,120 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-09-23 — Claude — borrar la memoria que una conversación se escribe a sí misma
+
+- Estado anterior: una conversación con memoria propia no ofrecía **ninguna**
+  acción. Ni verla ni borrarla. Daniel lo reportó porque una conversación de
+  **prueba** —donde sólo pidió fotos para comprobar cambios de código— estaba
+  siendo recordada por el personaje y ensuciaba los turnos siguientes.
+- Objetivo: poder ver esa memoria y poder borrarla, sin tocar los mensajes.
+
+**Por qué no había botón, que no es lo que parecía.** «Borrarlo» colgaba de que
+existiera la **ficha retroactiva**, no de que existiera memoria. Una conversación
+que se selló sin haber pasado por la pasada de relleno no tiene ficha, así que
+perdía todos sus botones. `canRead` se derivó en su día de «¿hay ficha?» y nunca
+de «¿hay algo que leer?», y era la única línea de `describeRecapRow` sin
+comentario. No fue una decisión: fue un hueco.
+
+**Lo que sí estaba pensado y no se ha tocado:** que una memoria propia no se
+pueda aprobar ni rehacer. Los dos llevan su comentario del por qué desde antes.
+
+**Dónde vive esa memoria, que es lo que hacía delicado el borrado.** No en un
+archivo aparte: **dentro de cada registro de la conversación**, en su propio
+sobre `sealedMemory` con su subclave. Y `latestMemory` la busca hacia atrás hasta
+dar con la primera, así que quitarla del último turno no la quita: **destapa la
+anterior**. Por eso `clearMemory` recorre todos los registros, trabaja sobre las
+líneas crudas —una línea ilegible se copia tal cual en vez de descartarse, que es
+lo que habría borrado turnos de verdad— y reserializa desde el JSON original para
+no tirar campos de una versión posterior. No descifra el texto del turno.
+
+**Cuatro rondas, y las tres últimas salieron de revisión adversarial.** La
+primera construyó; cinco revisores con lentes distintas encontraron **13
+defectos**. Lo que cazaron, y que `npm run check` en verde no cazaba:
+
+- un **envío en vuelo resucitaba lo borrado**: el turno había leído la memoria al
+  empezar y la volvía a sellar al acabar, con el acuse verde ya dado;
+- los dos pasos iban en el **orden irrecuperable**: si fallaba el segundo, la
+  conversación quedaba sin memoria y con la marca puesta, o sea atrapada — la
+  pasada de relleno salta las marcadas para siempre;
+- **faltaba `fsync`** al reescribir el archivo entero de la conversación. Lo que
+  había en juego eran los mensajes, no una ficha. Se arregló también
+  `removeLastTurn`, que corre por el mismo camino en cada envío fallido;
+- **una conversación excluida del trabajo de fondo no producía fila**, así que su
+  memoria no se podía borrar desde ningún sitio. Era el caso literal de Daniel;
+- y el más sutil, encontrado por dos revisores por separado: al desaparecer la
+  sellada, **una ficha retroactiva de la misma conversación puede resucitar** y
+  volver al prompt. El diálogo prometía lo contrario. Borrar no limpiaba: cambiaba
+  un texto por otro.
+
+**Lo que se decidió y no se construyó**, con su decisión escrita: `D-099`, el
+borrado **no se propaga** entre equipos —propagarlo exige un verbo que modifique
+un registro ya subido, y toda la sincronización se apoya en que un turno es
+inmutable—; a cambio, el diálogo y el acuse lo dicen. `D-100`, el aviso y la
+salida «Sí, borra las dos» para la ficha que resucita. `D-101`, la aprobación
+perdida: no se conserva (sería meter en un prompt algo que Daniel no ha leído)
+sino que **se registra y se avisa**.
+
+**Lo verificado:** `npm run check` entero, cuatro veces, la última con **4.107
+pruebas en verde** y 194 archivos. Cada arreglo con prueba que **falla contra el
+código anterior**. Privacidad: el registro del borrado escribe
+`{ accion: olvidar-propia, turnos: N }` y nada más —ni el identificador ni una
+palabra de lo borrado—, con una prueba que lo afirma serializando todos los
+registros.
+
+**Lo que NO está verificado, y hay que decirlo:** nadie ha abierto Studio. Todo
+sale de leer código y ejecutar pruebas. Que el aviso rojo se lea bien, que los
+tres botones de la confirmación quepan y que el acuse salga donde se espera, **no
+está visto en pantalla**. Y el acuse **no sale verde**: `.notice[data-tone=ok]`
+no existe en `styles.css`.
+
+**Lo que queda abierto**, de la última revisión y ninguno alcanza al caso de
+Daniel: `forgetCostsApproval` se apaga sobre una premisa falsa; no cubre la
+conversación cuya única entrada es el `supersededMarker`; y el recuadro de error
+de esa sección **no se apaga** cuando la operación siguiente sale bien, porque
+sus cuatro verbos no pasan por `run()`.
+
+### 2026-09-23 — Claude — la bóveda no se cierra sola: el contador lo reinicia la propia pantalla
+
+- Estado anterior: Daniel dejó la bóveda abierta hora y media y no se cerró. Su
+  ajuste son 15 minutos.
+- Objetivo: saber por qué. **Sólo lectura: no se tocó una línea de código.**
+
+**Medido en su equipo, no deducido.** Con el equipo desatendido, **112 archivos
+de la bóveda leídos en el último minuto**; dos muestras separadas 98 s confirman
+que se releen cada uno o dos minutos. Contraprueba que descarta un antivirus o un
+indexador: en la **misma carpeta**, `config.json` y `secrets.enc` llevan clavados
+sin moverse mientras `vault/` sigue avanzando.
+
+**La cadena, cada eslabón leído.** `touch()` es lo único que reinicia el
+contador, y lo llama `subkeyFor()` **sin ninguna condición**, antes incluso de
+derivar la clave. `subkeyFor` es la única puerta a cualquier contenido de la
+bóveda —**23 puntos de llamada**—, así que **leer es actividad** y no existe forma
+de leer sin reiniciar. Arriba: `useVault()` devuelve un objeto literal nuevo en
+cada render, un latido de 5 s fuerza ese render, y dos efectos dependen de esa
+identidad y descifran contenido: la **foto del personaje** y el visor de imagen.
+
+**El defecto de fondo, y es el que importa:** `touch()` está enganchado al **uso
+de la llave**, no a que haya una persona delante. Mientras siga así, cualquier
+lector periódico que se añada mañana desactiva el cierre automático en silencio.
+
+**Explica el histórico:** 16 cierres por inactividad en 12 días, y todos cuando
+Studio **no** estaba en la pantalla de la bóveda. El del 21 tardó 8 h 20 min.
+
+**Tres agujeros más, ninguno preguntado:** cerrar la ventana con la X **no**
+cierra la bóveda (se esconde en la bandeja); **Win+L tampoco** (`powerMonitor` no
+aparece ni una vez en todo el proceso principal); y `vaultUnlock`/`vaultLock` no
+escriben **ni una línea de log**, así que no hay forma forense de saber cuándo
+estuvo abierta.
+
+**Y la prueba que impedía cazarlo:** `vault-service.test.ts:227` se llama «usar la
+boveda cuenta como actividad» y **exige** que `subkeyFor` aplace el cierre. Con
+esa prueba en verde, ninguna regresión de esta familia puede fallar nunca. Además
+ningún `.test.ts` importa `main/index.ts`: el `setInterval` real no lo cubre nada.
+
+**Pendiente de confirmar por Daniel en pantalla:** que la cuenta atrás vuelva a
+saltar a 15:00. Si en su lista no hay ninguna foto de personaje visible, la
+explicación principal no vale para su caso.
+
 ### 2026-09-23 — Claude — sincronización documental: un commit sin registrar y cuatro afirmaciones falsas
 
 - Estado anterior: 21.259 líneas repartidas en los siete archivos de

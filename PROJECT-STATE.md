@@ -1,7 +1,27 @@
 # Luxy — estado canónico del proyecto
 
-Última actualización: **2026-09-21 — una escena con los dos se puede dibujar
-entera, y hacen falta tres piezas a la vez**
+Última actualización: **2026-09-23 — se puede borrar la memoria que una
+conversación se escribe sola, y la bóveda no se cierra por inactividad**
+
+> **Lo primero, porque es seguridad y está SIN ARREGLAR.** La bóveda no se cierra
+> sola. El ajuste de Daniel son 15 minutos y estuvo hora y media abierta. La causa
+> está **medida** en su equipo: la propia pantalla se relee cada uno o dos minutos
+> y toda lectura reinicia el contador, porque `touch()` vive dentro de
+> `subkeyFor()`. Además, cerrar la ventana con la X y bloquear Windows con Win+L
+> **tampoco** la cierran. Nada de esto se ha tocado: el bloque `SEG-BOVEDA-001` de
+> `CURRENT-TASK.md` tiene la cadena entera y el arreglo descrito.
+
+> **Lo segundo: `F32-OLVIDAR-001`.** Una conversación con memoria propia ya se
+> puede leer y borrar. Antes no ofrecía **ninguna** acción, y no por decisión: el
+> botón colgaba de que existiera la ficha retroactiva y no de que existiera
+> memoria. Cuatro rondas, 13 defectos cazados por revisión adversarial con
+> `npm run check` en verde todo el rato, y `npm run check` final con **4.107
+> pruebas**. **Nadie lo ha visto en pantalla** y quedan tres defectos conocidos que
+> no alcanzan al caso de Daniel. Detalle en `CURRENT-TASK.md` y `CHANGELOG-WORK.md`
+> de esa fecha, y en `D-099`, `D-100` y `D-101`.
+
+> Lo de abajo, hasta el próximo encabezado, es del **2026-09-21** y sigue siendo
+> cierto: una escena con los dos se puede dibujar entera.
 
 Daniel pidió poder ilustrar las escenas en las que salen los dos. Hasta hoy esas
 escenas se dibujaban recortadas —sólo el personaje, en plano cercano— y no por
