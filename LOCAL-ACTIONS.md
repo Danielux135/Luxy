@@ -1,6 +1,106 @@
 # Luxy — acciones locales de Daniel
 
-## LA-045 — encender lo pendiente: la pasada sobre las 17 conversaciones
+> **Nota de identificadores, 2026-09-23.** Este archivo tiene cinco números
+> duplicados con contenidos distintos: **LA-022, LA-023, LA-030, LA-031 y
+> LA-032** aparecen dos veces cada uno (verificado con
+> `grep -o '^## LA-[0-9]*' LOCAL-ACTIONS.md | sort | uniq -d`). Como el resto de
+> la documentación cita las LA por su número, **cualquier referencia cruzada a
+> esos cinco es ambigua** y hay que leer las dos. Renumerarlos tocaría citas en
+> varios documentos y no se ha hecho hoy. Los números nuevos se toman de LA-049.
+
+## LA-048 — comprobaciones de pantalla pendientes: F28, F29-POSTURA-001 y F30
+
+Estado: **`pending` — anotada el 2026-09-23.** Es un índice, no una acción nueva.
+
+Las comprobaciones de pantalla de las últimas tres tandas estaban escritas **sólo
+dentro de `CURRENT-TASK.md`**, repartidas en secciones «Lo que falta, y es de
+Daniel» de bloques distintos. `AI-WORK-PROTOCOL.md` dice que las acciones de
+Daniel van aquí, así que el archivo que él abriría para saber qué le toca era
+justo el que no se lo decía. El detalle sigue en cada bloque; esto sólo dice que
+existen.
+
+- **F30-REPARTO-001** — reconstruir (`npm run build`, ha cambiado
+  `packages/shared`), encender «Dibujar las escenas en las que salís los dos»,
+  comprobar que un personaje guardado antes aparece **apagado**, mirar el panel
+  antes de generar, y generar.
+- **F29-POSTURA-001** — sus comprobaciones, en su bloque.
+- **F28-PLAN-IMAGEN-001** — ver y corregir el prompt antes de generar. Nunca se
+  ha visto en pantalla.
+
+**Orden:** esto va DESPUÉS de `LA-045`, que es el bloqueo duro. Ninguna de las
+tres es urgente; lo urgente era que estuvieran escritas donde se buscan.
+
+## LA-047 — Bynara: router configurado en Conexiones, con su límite medido
+
+Estado: **`informativa` — configurada en la máquina de Daniel, medida el
+2026-09-23.**
+
+Hay una conexión HTTP a **Bynara** (router de modelos, contrato
+`chat completions`, sin código nuevo) dada de alta en Conexiones de Studio en el
+ordenador de Daniel. **No aparecía en ningún archivo del repositorio**
+—`grep -ri bynara` excluyendo `node_modules` y `.git`: cero resultados—, así que
+se anota antes de que se pierda.
+
+Lo medido el 2026-09-23 con llamadas reales:
+
+- **plan gratuito, crédito 0.** La cuota es de **100.000.000 de tokens diarios**
+  y se renueva a las **00:00 UTC**;
+- **esa cuota NO cubre los modelos de pago**: devuelven **402**. El 402 es
+  esperado, no una avería del `HttpApiProvider`. No lo depures como un fallo;
+- de los gratuitos: `nex-n2.5-pro` tardó **70,7 s** en devolver 160 tokens;
+  `nemotron-3.5-lightning-free`, **88,2 s**, gastando 1.304 tokens para 502
+  caracteres —razona largo antes de escribir—; `union-alpha` devuelve **404**:
+  ya no existe.
+
+**Conclusión: quedan por medir contra lo que se usa hoy, y no están descartados.**
+
+La primera versión de esta nota decía «no sirven para conversar» comparándolos con
+«unos 12 s de DeepSeek». **Esa cifra era falsa y se ha retirado**: salía de la
+captura del panel del propio router —otra plataforma sirviendo DeepSeek—, no de
+una medición de la conexión que usa Daniel. Lo medido de verdad está en
+`docs/DEEPSEEK-LLAMADAS-VACIAS.md:60,62`: **203 s de mediana** el día del
+incidente, 61 s los días anteriores, y un histórico de 29 a 135 s.
+
+Con esa línea base, 70-88 s **no es siete veces más lento: es comparable o mejor**.
+Lo que queda pendiente no es descartarlos, es medirlos con un turno real de la
+bóveda —prompt largo, historial— y ver si el español aguanta.
+
+## LA-046 — PixAI: solicitud de acceso a la API oficial, cursada y esperando
+
+Estado: **`esperando respuesta` — cursada por Daniel, anotada el 2026-09-23.** No
+hay fecha comprometida y no hay nada que hacer mientras tanto.
+
+**Por qué esto tiene que estar escrito:** `docs/PROVEEDORES-INVESTIGACION.md`
+lista PixAI entre los descartados en imagen por moderación obligatoria
+(«Sensitive content created using realistic models is not allowed», con revisión
+de IA y cierre de cuenta), y ese documento se cierra diciendo que los descartados
+lo están «justo para que no se reabran». Sin esta entrada, si llega una respuesta
+afirmativa el siguiente agente la trata como vía cerrada y la tira.
+
+**Qué implicaría el sí, para que nadie lo subestime.** PixAI sería un **tercer**
+proveedor de imágenes, y eso **no es una conexión HTTP de Studio: es código**.
+Pero NO por donde decía la primera versión de esta nota: `ProviderExecution` lo
+implementan sólo los proveedores de TEXTO (`claude.ts`, `codex.ts`,
+`http-provider.ts`). Los de imagen son la unión `VAULT_IMAGE_PROVIDERS` de
+`packages/shared/src/vault-image-provider.ts:21`, servida por `xavira.ts` y
+`horde.ts`, que no implementan esa interfaz. Un tercero toca esa unión, el esquema
+de receta e identidad, el IPC, el almacén y la pantalla — más trabajo, no menos.
+Y obliga a releer
+`D-064`, que hoy está escrita para dos proveedores: el de pago guarda la
+identidad del personaje en su servidor y AI Horde la reconstruye como receta
+local cifrada. **La pregunta que decide el tamaño del trabajo es exactamente
+ésa:** si la API de PixAI permite fijar la identidad del personaje en su
+servidor, o si hay que llevarla en el prompt en cada llamada. Dónde cae en ese
+eje no está decidido.
+
+## LA-045 — encender lo pendiente: la pasada sobre las conversaciones
+
+> **Cuántas son, exactamente: no está claro.** Este bloque dice «las 18» dos veces
+> y `CURRENT-TASK.md` decía «las 17» en cuatro sitios. Ninguna de las dos cifras
+> se ha medido contra la bóveda abierta, así que se ha quitado el número de donde
+> no hacía falta. Lo que importa no cambia: **la pasada tiene que llegar al final
+> de TODAS en una sola sesión**, sean las que sean. El número real se ve en Studio
+> al lanzarla.
 
 Estado: **`abierta` — 2026-09-14.** Nada de `F23-PENDIENTES-001` hace efecto
 hasta que se hagan estos pasos, y **el orden importa**: los tres primeros son
@@ -89,7 +189,10 @@ darla por comprometida. Rotarla y borrar la anterior.
 
 ## LA-043 — probar de verdad si un modelo ve una foto
 
-Estado: `pending` — abierta el 2026-09-04.
+Estado: `pending` — abierta el 2026-09-04. **Sin Mistral, desde el
+2026-09-23:** `LA-044` lo descartó y esta LA lo nombra en tres sitios. La
+pregunta de fondo —si un modelo ve una foto— sigue siendo buena; quítale las
+instrucciones de Mistral y ejecútala contra otro proveedor.
 
 Ya hay sitio para hacerlo sin tocar nada tuyo: **Privado → «Probar la vista de
 un modelo»**, debajo de la conversación. No guarda nada y no necesita
@@ -116,7 +219,8 @@ Qué significa cada resultado:
 
 ## LA-042 — cuál de los 46 modelos de Mistral es el que toca
 
-Estado: `pending` — abierta el 2026-09-04.
+Estado: **`cerrada sin hacer` — 2026-09-23, por `LA-044`** (decisión de
+Daniel: no se usa Mistral). Se conserva por trazabilidad; no la ejecutes.
 
 Ya está resuelto en código, pero hace falta un paso tuyo porque **el catálogo
 que tienes guardado se descargó antes del cambio y no lleva capacidades**.
@@ -174,7 +278,10 @@ equipo: poner `pwsh` como terminal por defecto de Windows o de la aplicación.
 
 ## LA-040 — usar Mistral: leer su catálogo y elegir un modelo con vista
 
-Estado: `pending` — abierta el 2026-09-04.
+Estado: **`cerrada sin hacer` — 2026-09-23, por `LA-044`** (decisión de
+Daniel: no se usa Mistral). Se conserva por trazabilidad; no la ejecutes.
+`CURRENT-TASK.md` cerraba `BUG-CATALOGO-ORIGEN-001` remitiendo aquí: esa
+prueba hay que hacerla contra otra conexión con catálogo propio.
 
 La clave de Mistral ya está guardada. Falta comprobar que Luxy le sabe
 preguntar, que es lo único que no se puede probar sin red.

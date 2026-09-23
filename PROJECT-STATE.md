@@ -1165,6 +1165,23 @@ Linux y aquí no existen: en esta máquina un fallo es una regresión.
 
 ## 10. Próximo objetivo
 
+> **Desincronización conocida, 2026-09-23.** Las secciones **4, 8, 9 y 10** de
+> este archivo son un checkpoint de agosto —rama `feat/luxy-desktop`,
+> «migraciones 0001 a 0005», porcentajes de avance, `UX-001` como próximo
+> objetivo— y **contradicen la cabecera de este mismo archivo**, que va por F30
+> del 2026-09-21. No las leas como estado actual.
+>
+> **El estado real vive en `CURRENT-TASK.md`**, cuya cabecera dice qué tarea
+> manda. `MASTER-PLAN.md` tiene el mismo problema: su fecha máxima es
+> 2026-09-02 y su última tabla acaba en F9.29, sin una sola fila de F16 a F31
+> —AI Horde, prompt de imagen, memoria acumulativa, promesas, recap, reparto,
+> repetición—, que es todo lo construido desde entonces.
+>
+> Sincronizar §4-§10 y `MASTER-PLAN.md` queda **pendiente y declarado**. El §1
+> de este archivo exige detener la edición y actualizar la documentación cuando
+> el worktree la contradiga; eso no se hizo durante tres semanas, y esta nota
+> es el primer paso de hacerlo, no una excusa para saltárselo otra vez.
+
 ### UX-001 — trazabilidad del detalle de trabajos (2026-08-20)
 
 Implementado, verificado y commiteado en el worktree aislado

@@ -198,4 +198,33 @@ Y la fila más incómoda de la tabla es la última: **el proveedor menos verific
 
 **Lo que no he verificado y no debes dar por bueno:** no he probado contenido explícito en ningún sitio; lo que he medido es el español, la latencia, el formato y que el personaje aguante. No sé si OVH filtra en la ruta de inferencia. No sé si el Qwen local escribe español. Y ocho llamadas al Horde en una tarde no son una semana de uso: la red depende de voluntarios y si `Amalgamate` apaga su ordenador, Cydonia desaparece hasta que vuelva.
 
-Los ficheros de trabajo con las mediciones están en `C:\Users\oscar\AppData\Local\Temp\claude\C--Users-oscar-Desktop-Daniel-Luxy\2e98ca23-956f-4422-915d-25da37ddd89e\scratchpad\` (`horde_test5.mjs`, `horde_var.mjs`, `ovh_test.mjs`, `local_calc.mjs`, `an_or.mjs`). **No he tocado nada del repositorio.**
+Los ficheros de trabajo con las mediciones están en `C:\Users\oscar\AppData\Local\Temp\claude\C--Users-oscar-Desktop-Daniel-Luxy\2e98ca23-956f-4422-915d-25da37ddd89e\scratchpad\` (`horde_test5.mjs`, `horde_var.mjs`, `ovh_test.mjs`, `local_calc.mjs`, `an_or.mjs`). **No he tocado nada del repositorio.**
+
+---
+
+# Apendice, 2026-09-23 — Bynara: router, diez modelos gratuitos, saldo 0
+
+**No paso por el metodo de esta ronda.** No esta comparado contra los otros
+candidatos con la misma escena ni con el mismo numero de llamadas: se configuro y
+se uso en la maquina de Daniel, y lo de abajo es lo que se midio ahi. Se anota
+aqui para que no quede huerfano, con esa salvedad delante. Detalle y estado en
+`LA-047` de `LOCAL-ACTIONS.md`.
+
+- **Que es:** un router de modelos que habla el contrato `chat completions`, o
+  sea una conexion HTTP de Studio, sin codigo nuevo.
+- **Que funciona:** diez modelos a coste cero.
+- **Que no:** los modelos de pago devuelven **402** con saldo 0. Es el
+  comportamiento esperado, no una averia.
+- **Cuota:** **100.000.000 de tokens diarios**, renovados a las 00:00 UTC, y **no
+  cubren los modelos de pago**.
+- **Latencia medida el 2026-09-23:** `nex-n2.5-pro`, **70,7 s** para 160 tokens;
+  `nemotron-3.5-lightning-free`, **88,2 s** y 1.304 tokens para 502 caracteres
+  —razona largo antes de escribir—; `union-alpha` devuelve **404**, ya no existe.
+- **Conclusion:** no descartados, pendientes de medir con un turno real. La
+  primera version de este apendice los descartaba comparandolos con «unos 12 s de
+  DeepSeek»: **esa cifra era falsa y contradecia a este mismo documento**, que mide
+  203 s de mediana en sus lineas 32, 66 y 90. Con la linea base correcta, 70-88 s
+  es comparable a lo que se usa hoy. Los dos candidatos de esta ronda siguen siendo
+  mas rapidos: 2,4-3,3 s y 15,8 s.
+- **Pendiente:** la lista de los diez modelos, y si alguno escribe español de
+  España a la altura de los medidos aqui.

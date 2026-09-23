@@ -3819,3 +3819,36 @@ La comprobacion que vale es de Daniel y de su pantalla: encender el ajuste en un
 personaje, pedir una escena en la que salgan los dos, mirar en el panel que el
 texto nombra al otro y que ya no lleva `solo` ni las tres prohibiciones, y
 generar. Si sale mal, apagarlo: para eso existe.
+
+## D-098 — los cuatro parámetros de muestreo son opcionales y sin valor por defecto
+
+Fecha: 2026-09-17. Autor: Claude. Anotada aquí el 2026-09-23. Contexto:
+`F31-REPETICION-001`, commit `29f829d`.
+
+Estado: aceptada, implementada. **Nada medido todavía con ella.**
+
+Una conexión HTTP puede mandar ahora `temperature`, `frequencyPenalty`,
+`presencePenalty` y `repetitionPenalty`. Los cuatro son **opcionales y ninguno
+tiene defecto**, y eso es deliberado por dos motivos distintos:
+
+1. **Compatibilidad.** Hay servidores que devuelven 400 ante un parámetro que no
+   conocen. Una conexión que no los configure tiene que seguir mandando el mismo
+   cuerpo de siempre, campo por campo. Hay una prueba que lo fija.
+2. **Método.** Existen para poder MEDIR con y sin. Un valor «razonable» de
+   fábrica dejaría sin nada contra lo que comparar, y el problema que se está
+   persiguiendo —la misma promesa en 15 de 17 turnos— no se puede atribuir sin
+   línea base.
+
+Los rangos no son iguales y cada uno lleva su fuente en el esquema
+(`packages/shared/src/schemas.ts:1003-1045`): 0..2 y -2..2 son los que documenta
+OpenAI. De esos tres, las dos PENALIZACIONES (-2..2) son aditivas; `temperature`
+(0..2) no es una penalización ni es aditiva, y decirlo junto fue una compresión
+equivocada de esta decisión: el comentario del esquema lo dice bien.
+`repetition_penalty` viene de Hugging Face, la implementan
+vLLM, TGI, llama.cpp y OpenRouter, es multiplicativa sobre el logit, neutra en 1,
+y varios servidores la rechazan si no es estrictamente mayor que 0. El techo de 2
+no es del protocolo: es el límite de lo que se puede escribir sin que el texto se
+vuelva incoherente.
+
+**Consecuencia para quien herede esto:** rellenar los cuatro campos sin haber
+medido antes no es «configurar bien», es tirar la única comparación disponible.

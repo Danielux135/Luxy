@@ -1,9 +1,164 @@
 # Luxy — tarea activa
 
+> **Por dónde entrar (2026-09-23).** Este archivo va de más nuevo a más viejo y
+> tiene varios «siguiente paso exacto» abiertos a la vez, con dueños distintos.
+> El orden que manda es éste:
+>
+> 1. **`LA-045` es el bloqueo duro y va antes que nada.** Hasta que la pasada
+>    sobre las conversaciones del personaje no termine **en una sola sesión**, la
+>    guarda de
+>    desfase bloquea cualquier nota y todo `F23-PENDIENTES-001` parecerá roto.
+>    Es de Daniel, no de un agente.
+> 2. **`F31-REPETICION-001`: medir.** Es lo único con instrumentación puesta y
+>    sin usar. Va antes que cualquier arreglo de la repetición, porque tocar algo
+>    ahora destruye la línea base. Está justo debajo, fuera del orden de fecha a
+>    propósito.
+> 3. **Comprobaciones de pantalla de Daniel** de F28, F29-POSTURA-001 y F30. El
+>    índice está en `LOCAL-ACTIONS.md`, `LA-048`; el detalle, en cada bloque.
+> 4. Lo demás. `PROVEEDORES-005`, más abajo, tiene una prueba de diez minutos
+>    que no depende de nada de lo anterior.
+>
+> `KIMI-K3-EXPERIMENT-001`, al final del archivo, está **abandonado**, no en
+> curso. No lo retomes sin que Daniel lo pida.
+
+## F31-REPETICION-001 — medir la repetición antes de tocarla
+
+Estado: **instrumentación puesta y probada; NADA medido todavía — Claude,
+2026-09-17, anotado aquí el 2026-09-23.** Commit `29f829d`, 10 archivos, 796
+inserciones. Está fuera del orden de fecha a propósito: es el paso que manda
+después de `LA-045`.
+
+Origen, de Daniel: en una conversación de 17 turnos el personaje sacó la misma
+promesa en 15, casi con las mismas palabras.
+
+### Lo que se descartó, para que nadie lo reinvestigue
+
+La hipótesis obvia —que la dosificación de promesas no funciona— se cayó: de 95
+prompts registrados sólo 16 llevaban el bloque de pendientes, y su techo
+aritmético son 5-6 turnos seguidos, medido ejecutando el selector. **No busques
+el fallo ahí.**
+
+Lo que sí se verificó, y es la sospecha viva:
+
+- **los ocho últimos mensajes viajan literales en cada prompt**, o sea cuatro
+  respuestas enteras de ella, entre el 18 y el 44% del texto;
+- **la memoria acumulativa es un bucle sin reposo ni tope**: la escribe el modelo
+  y se le devuelve entera con la orden de conservarla;
+- el cuerpo que se mandaba era exactamente `{model, messages, max_tokens}`: ni
+  temperatura ni una sola penalización, y el esquema no permitía configurarlas.
+
+### Qué se construyó, y por qué NO se arregló nada
+
+A propósito: primero medir.
+
+1. **Dos contadores de eco en el registro.** `ecoMemoria` y `ecoHistorial`, en la
+   línea `prompt privado compuesto` de `apps/desktop/src/main/ipc/handlers.ts`
+   (~4488-4633): cuántas entradas de la memoria acumulativa casan con una promesa
+   viva, y cuántas de sus respuestas recientes también. Sólo enteros; ni una
+   palabra de texto. Van **fuera** del `try` del bloque de pendientes a propósito:
+   un fallo de la medida no puede quitarle al prompt algo ya calculado.
+2. **Cuatro parámetros de muestreo por conexión HTTP**, los cuatro opcionales y
+   **sin ningún valor por defecto**: `temperature` (0..2), `frequencyPenalty` y
+   `presencePenalty` (-2..2, aditivas, de OpenAI) y `repetitionPenalty` (>0..2,
+   multiplicativa, neutra en 1, **no** es de OpenAI). Esquema en
+   `packages/shared/src/schemas.ts:1003-1045`, envío condicional en
+   `apps/agent/src/providers/http-provider.ts:1439-1444`, formulario en
+   `apps/desktop/src/renderer/pages/Config.tsx:1235-1281`. Una conexión sin
+   configurar manda el mismo cuerpo que antes, campo por campo, y hay una prueba
+   que lo fija. El porqué de que sean opcionales está en `D-098`.
+
+### El siguiente paso exacto: MEDIR, no ajustar
+
+**No rellenes los cuatro campos «a ojo».** Existen para comparar con y sin; un
+valor puesto sin línea base destruye la comparación, que es lo único que compró
+el commit entero.
+
+El orden es: dejar los cuatro campos **vacíos**, mantener varias conversaciones
+normales, y leer `ecoMemoria` y `ecoHistorial` en `studio.log`. Sólo con esos
+números delante se decide qué se toca —el recorte de los ocho mensajes
+literales, el tope de la memoria acumulativa, o las penalizaciones— y en qué
+orden.
+
+Pruebas: el mensaje de `29f829d` declara `npm run check` exit 0 con 190
+archivos, 3.989 pruebas y 12 saltadas. **No se ha vuelto a ejecutar** en la
+pasada documental del 2026-09-23.
+
+## PROVEEDORES-005 — las cinco rondas de proveedores, y qué hacer con ellas
+
+Estado: **investigación cerrada con recomendación; sin ejecutar — anotado el
+2026-09-23.**
+
+Existen dos documentos que **ningún archivo de continuidad citaba**, y por eso
+casi se pierden: `docs/PROVEEDORES-INVESTIGACION.md` (125.599 bytes, cuatro
+rondas, hasta 2026-09-07) y `docs/PROVEEDORES-QUINTA-RONDA.md` (21.619 bytes,
+2026-09-15). El único enlace entre ambos es una línea dentro del segundo.
+
+**Dos cambios de criterio de Daniel** invalidan parte de las rondas 1 a 4: que un
+proveedor entrene con lo enviado **no descarta** —sólo descartan pedir tarjeta y
+prohibir el contenido por contrato—, y Claude Code y Codex no se niegan con el
+material de la bóveda, así que el trabajo de fondo ya no necesita alternativa
+(`D-087`).
+
+**Tres candidatos con números propios** en la quinta ronda:
+
+1. **OVHcloud anónimo**, sin clave, 2,4-3,3 s. El más barato de probar.
+2. **Puente OpenAI de AI Horde**, `https://oai.aihorde.net/v1`, con
+   Cydonia-24B-v4.3: mediana 15,8 s, 5 de 5 útiles.
+3. **llama.cpp local.** Ver el aviso de abajo antes de considerarlo.
+
+### El siguiente paso accionable, y son diez minutos
+
+Dar de alta **OVHcloud anónimo** como conexión HTTP en Conexiones y mandarle un
+turno. No requiere clave, no requiere código y no compromete nada.
+
+### Aviso: un modelo local no encaja con cómo se elige proveedor, y no es de configuración
+
+`D-064` es sobre **imágenes**, y dice que ese proveedor pertenece al
+**personaje**, no a la máquina. La quinta ronda extiende el argumento al texto en
+el punto 3 de la lista de su sección «5. Qué cuesta enchufarlo a Luxy» (línea 188;
+ese documento no tiene numeración de subsecciones), y el argumento se sostiene: un
+`llama-server` local es intrínsecamente
+**de la máquina** —vive en un puerto de un ordenador concreto—, así que si el
+turno cae en el portátil y el modelo está en el sobremesa, no hay modelo. La
+ronda propone modelarlo como capacidad de máquina en la selección de `shared`.
+**Esa decisión no está tomada**, así que no integres `llama.cpp` local hasta que
+lo esté. Los otros dos candidatos son remotos y no tienen el problema.
+
+### Sobre el método, y esto es una falta
+
+Los números de la quinta ronda salen de **llamadas reales** que hicieron los
+agentes, y así lo dice el propio documento. `AI-WORK-PROTOCOL.md` §6 y §10
+reservan esas llamadas a Daniel, y **no consta autorización en ningún registro**.
+No costó dinero (AI Horde con clave anónima, OVHcloud sin clave) y no se usó
+contenido de la bóveda. Queda escrito aquí porque es también la razón de que
+ésta sea la primera ronda con cifras medidas en vez de leídas, que es justo lo
+que falló en las cuatro anteriores.
+
+## DEFECTO-GLM-1113 — un fallo de saldo llega en chino y sin traducir
+
+Estado: **observado, no reproducido; sin arreglar — anotado el 2026-09-23.**
+
+Lo observado: una conexión a GLM falló con el código de negocio **1113** (saldo
+insuficiente) y el mensaje que llegó a la pantalla traía el cuerpo en chino, sin
+decir qué había pasado. Hubo que traducirlo para saber qué proveedor había
+fallado. Se ofreció arreglarlo en su momento y no se hizo. Esto es lo que se vio
+en una conversación, no una prueba: no está reproducido.
+
+Lo verificado hoy en el código, que es la mitad útil de la nota:
+`apps/agent/src/providers/http-provider.ts` ya tiene el molde —`esLimiteDePlan`
+(1901) y `providerSaid` (1921), que anteponen lo que dijo el proveedor sin
+adornarlo—, y el `displayName` viaja en todos los mensajes. Lo que falla es el
+caso que cae al genérico de la línea **2013**,
+`` `${displayName} fallo: ${message.slice(0, 300)}` ``, con el cuerpo en chino
+dentro. `grep 1113` sobre todo el código: **cero**. El arreglo es reconocer el
+código de negocio en el cuerpo y colgarlo de esa misma rama.
+
 ## F30-REPARTO-001 — poder dibujar las escenas en las que salís los dos
 
-Estado: **implementado y probado; sin ver en pantalla y sin una sola imagen
-generada — Claude, 2026-09-21.** Decisión nueva en `D-097`.
+Estado: **implementado y probado; el camino automático sin ver en pantalla.
+Dos imágenes de dos figuras SÍ generadas, a mano, pegando el prompt en el
+panel: anatomía correcta y el personaje reconocible — Claude, 2026-09-21.**
+Decisión nueva en `D-097`.
 
 Origen, de Daniel: quiere poder ilustrar enteras las escenas en las que salen
 los dos. Se le avisó de que la calidad con dos figuras es irregular en estos
@@ -316,13 +471,18 @@ Todo lo de aqui es de pantalla: las pruebas fijan que el texto llega al prompt,
 
 ### Pendiente de codigo, pequeño y anotado
 
-- En `apps/agent/src/providers/horde.ts`, el comentario del `throw` por
-  vencimiento —el de «la imagen no estuvo lista a tiempo»— todavia termina
-  diciendo «la peticion no llego a producir generacion». Esa frase se retiro del
-  resto del archivo por no ser comprobable (`processing > 0` dice lo contrario) y
-  ahi se quedo. Es un comentario, no comportamiento: no cambia lo que hace el
-  codigo, pero contradice la documentacion de `HordeError.attribution` unas lineas
-  mas arriba. La pasada que lo vio solo tenia permiso para editar `.md`.
+> **Retirado el 2026-09-23: este defecto no existe.** Decía que el comentario
+> del `throw` por vencimiento de `apps/agent/src/providers/horde.ts` todavía
+> terminaba diciendo «la peticion no llego a producir generacion». Esa cadena
+> **no está en el archivo** (`grep` sobre él: cero) y `git log -S` sobre ese
+> mismo archivo no devuelve ni un commit que la haya contenido nunca. Lo que
+> hay hoy en las líneas 1110-1123 es la versión corregida: distingue «NO SE
+> SABE» de «no lo hubo» y explica por qué el sondeo por `check` no puede
+> atribuir. La frase sólo vive en `CHANGELOG-WORK.md` y `DECISIONS.md` como
+> **cita de lo que se retiró**, y de ahí se copió aquí por error.
+>
+> No queda nada pendiente en `horde.ts`. No lo «arregles»: el comentario que
+> hay es el bueno.
 
 ## F28-PLAN-IMAGEN-001 — ver y corregir el prompt antes de que se genere
 
@@ -573,9 +733,30 @@ recuerda».
 
 ## F24-RECAP-001 — memoria acumulativa para los chats que ya existen
 
-Estado: **pasos 2 a 5 hechos y comprobados; faltan el IPC (6), el enganche (7)
-y la pantalla (8) — Claude, 2026-09-14.** Diseño en `docs/RECAP-DISENO.md`,
-con las correcciones de la revision en su §16.
+Estado: **entregada entera; falta que alguien la use — Claude, 2026-09-14,
+estado corregido el 2026-09-23.** Diseño en `docs/RECAP-DISENO.md`, con las
+correcciones de la revision en su §16.
+
+> **Corrección del 2026-09-23.** Este bloque decía «pasos 2 a 5 hechos; faltan
+> el IPC (6), el enganche (7) y la pantalla (8)». Era falso: los tres se
+> entregaron ese mismo día. `28c6b55` («enganchar la memoria retroactiva al
+> turno, con su canal», 14 archivos, 2.430 inserciones) cubre los pasos 6 y 7,
+> y `3d994c2` («Memoria de lo ya hablado, con probar antes de guardar») el 8.
+> Verificado en el árbol de hoy: `vaultRecapSync`, `vaultRecapList` y
+> `vaultRecapUpdate` en `apps/desktop/src/shared/channels.ts`; las pruebas
+> `apps/desktop/src/main/ipc/conversation-recap.test.ts` y
+> `apps/desktop/src/main/vault/recap-dry-run.test.ts`; y `RecapSection` en
+> `apps/desktop/src/renderer/pages/Vault.tsx`. **No hay nada que reconstruir.**
+>
+> Lo que de verdad queda: la pantalla «Memoria de lo ya hablado» existe, con
+> «Generar la memoria de lo ya hablado», «Probar sin guardar», ver la ficha,
+> «Aprobar» una o todas y rehacerla con el otro CLI, y **nadie la ha abierto**.
+> La pasada sobre las 17 conversaciones es de Daniel: `LA-045`.
+>
+> `keepSweepingRecaps`, en `apps/desktop/src/renderer/vault-sweep.ts` con su
+> `vault-sweep.test.ts`, es el módulo puro que protege del fallo que se entregó
+> mal dos veces: que la tanda parase al negarse las primeras y el panel dijera
+> que no queda nada. Una negativa parcial es un ÉXITO y la tanda sigue.
 
 Origen, de Daniel: «Quiero generar la memoria acumulativa de los chats
 antiguos». Cierra la linea que quedo abierta en `F22-MEMORIA-ACUMULATIVA-001`:
@@ -985,13 +1166,28 @@ describe `D-071`— sigue sin poderse hacer: `nativeImage` no decodifica webp
 ### Deuda del entorno
 
 Tres claves de API quedaron expuestas en la conversacion (Mistral x2, Groq x1).
-Daniel dijo que las rotaria. La rama `copia-antes-de-limpiar` se puede borrar
-cuando de por bueno el reescrito de historial. Hay 41 commits sin subir.
+Daniel dijo que las rotaria; **no consta que lo haya hecho** (2026-09-23). La
+rama `copia-antes-de-limpiar` sigue existiendo: es historial PRE-reescritura y
+se puede borrar cuando de por bueno el reescrito, cosa que **tampoco consta**.
+
+**Hay 135 commits sin subir** (`git rev-list --count origin/main..main`, medido
+el 2026-09-23). La cifra que había escrita aquí, 41, era de una foto vieja y se
+arrastró sin recontar.
+
+> **Aviso para quien reconstruya el estado a ciegas.** Los cinco commits más
+> recientes de `main` son `5ff93ae` (2026-09-23, `imageCast`), `4a7f289`,
+> `0538508`, `6bd4850` y `29f829d`. **No** son documentación de proveedores:
+> los de Featherless / Alibaba / «cuarta vuelta» son del 2026-09-07. Si ves
+> esos mensajes con hashes que no están en `main`, estás mirando
+> `copia-antes-de-limpiar`. No hubo trabajo de proveedores los días 22 y 23.
 
 
 ## BUG-CATALOGO-ORIGEN-001 — el catalogo solo sabia preguntarle a una conexion
 
-Estado: **`done` — Claude, 2026-09-04.** Falta probarlo contra Mistral: `LA-040`.
+Estado: **`done` — Claude, 2026-09-04.** Faltaba probarlo contra Mistral y eso
+ya no puede ocurrir: `LA-040` quedó cerrada sin hacer al descartarse Mistral
+(`LA-044`). Hay que probarlo contra **cualquier otra** conexión con catálogo
+propio, o darlo por bueno como está.
 
 Daniel guarda la clave de Mistral, va a Modelos, pulsa «Actualizar modelos» y le
 salen 19 modelos que no son de Mistral.
@@ -2453,7 +2649,22 @@ conservar.
 
 ## KIMI-K3-EXPERIMENT-001 — verificar ejecución agentic real
 
-Estado: **`in_progress` — Daniel/Codex, 2026-08-31**
+Estado: **`abandonado` — cerrado el 2026-09-23 sin evidencia.** Abierto
+`in_progress` por Daniel/Codex el 2026-08-31.
+
+> **Por qué se cierra.** En más de tres semanas no hay un solo commit, entrada
+> de `CHANGELOG-WORK.md` ni línea de `TEST-RESULTS.md` que lo toque, mientras
+> por encima se abrieron y cerraron F22 a F30. `AI-WORK-PROTOCOL.md` §3 prohíbe
+> dejar un paso vivo así, y era el único `in_progress` del archivo: hace creer
+> que hay trabajo en vuelo y que alguien lo está llevando.
+>
+> **Qué queda puesto en el código, y hay que saberlo antes de tocarlo:** el
+> catálogo habilita Kimi K3 con herramientas nativas y ejecutor confinado al
+> worktree, conservando `contractVerified: false` y la nota
+> `EXPERIMENTAL_TOOL_CALLING_2026-08-31`. **Eso sigue ahí.** No lo retires sin
+> preguntar a Daniel y no lo des por verificado: la evidencia nunca se obtuvo.
+>
+> Si se retoma, se abre un bloque nuevo. Éste no se reabre.
 
 Daniel pidió probar Kimi K3 después de observar su `tool_calls` real. El
 catálogo lo habilita temporalmente con herramientas nativas y ejecutor confinado

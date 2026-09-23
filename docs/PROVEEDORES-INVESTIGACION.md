@@ -21,6 +21,15 @@ Los cuatro criterios, en este orden:
 Vetados por politica del repositorio y fuera del estudio: la API de OpenAI y la
 de Anthropic.
 
+> **Reapertura condicional de PixAI, 2026-09-23.** Este informe descarta PixAI
+> en imagen por moderacion obligatoria, y se cierra diciendo que los
+> descartados lo estan «justo para que no se reabran». El descarte sigue siendo
+> correcto **para su via publica**. Pero Daniel ha cursado una solicitud de
+> acceso a su **API oficial** y esta esperando respuesta: ver `LA-046` en
+> `LOCAL-ACTIONS.md`. Si llega afirmativa, este descarte NO aplica y hay que
+> reevaluar los terminos que vengan con el acceso concedido. No lo cierres por
+> la frase de mas abajo sin leer `LA-046` antes.
+
 ---
 
 {

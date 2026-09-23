@@ -1,5 +1,17 @@
 # Luxy — plan maestro
 
+> **AVISO (2026-09-23): este archivo NO es el estado actual.** Se quedó el
+> 2026-09-02 y termina en F9.29; desde entonces el trabajo real ha ido de F16 a
+> F31 —la bóveda privada, el prompt de imagen, la memoria y las promesas— y nada
+> de eso tiene fila aquí. `CLAUDE.md` manda leer este archivo el tercero, así que
+> se abre antes que la nota equivalente de `PROJECT-STATE.md` §10: por eso el
+> aviso va arriba del todo.
+>
+> **Para saber qué se hace ahora, ve a la cabecera de `CURRENT-TASK.md`.**
+> Sincronizar esto es trabajo pendiente y con criterio de producto —hay que
+> decidir qué de la fase 9 sigue vivo—, así que se declara en vez de arreglarse a
+> medias.
+
 Actualización 2026-08-31 — Kimi K3 experimental corrige el guard SSE: un
 contexto agentic recibe y ejecuta `tool_calls`; una consulta sin contexto sigue
 rechazándolos de forma segura.

@@ -1,5 +1,78 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-09-23 — Claude — sincronización documental: un commit sin registrar y cuatro afirmaciones falsas
+
+- Estado anterior: 21.259 líneas repartidas en los siete archivos de
+  continuidad, un commit de código sin entrada de changelog y cuatro
+  afirmaciones que hacían rehacer trabajo ya entregado.
+- Objetivo: cerrar la conversación sin que el siguiente agente reconstruya algo
+  que ya existe.
+- Archivos modificados: `CURRENT-TASK.md`, `CHANGELOG-WORK.md`, `DECISIONS.md`,
+  `LOCAL-ACTIONS.md`, `PROJECT-STATE.md`, `docs/PROVEEDORES-INVESTIGACION.md`,
+  `docs/PROVEEDORES-QUINTA-RONDA.md`. **Ni una línea de código.**
+- Pruebas: ninguna ejecutada. Esta pasada no toca código, así que no hay nada
+  que ejecutar y no se declara ningún verde.
+
+**Lo que faltaba: `F31-REPETICION-001`, del 2026-09-17.** El commit `29f829d`
+(«medir la repeticion antes de tocarla, y poder penalizarla», 10 archivos, 796
+inserciones) no tenía entrada aquí ni bloque en `CURRENT-TASK.md`; un `grep -ciE`
+de `penaliz|temperatura|muestreo|dosificacion` sobre los ocho archivos de
+continuidad en `HEAD` da tres coincidencias en total, y las tres son de otros
+temas. Qué hizo: descartó la dosificación como causa
+de que el personaje repitiera la misma promesa en 15 de 17 turnos —de 95 prompts
+registrados sólo 16 llevaban el bloque de pendientes, techo aritmético 5-6
+turnos, medido ejecutando el selector— y **dejó puesta la medición sin arreglar
+nada**. Los dos contadores de eco (`ecoMemoria`, `ecoHistorial`) están en la
+línea `prompt privado compuesto` de `apps/desktop/src/main/ipc/handlers.ts`, y
+los cuatro parámetros de muestreo opcionales en
+`packages/shared/src/schemas.ts:1003-1045`,
+`apps/agent/src/providers/http-provider.ts:1439-1444` y
+`apps/desktop/src/renderer/pages/Config.tsx:1235-1281`. Decisión nueva: `D-098`.
+Siguiente paso, y es el que manda: **medir con los cuatro campos vacíos antes de
+tocar nada.** El mensaje del commit declara `npm run check` exit 0 con 190
+archivos, 3.989 pruebas y 12 saltadas; no se ha vuelto a ejecutar hoy.
+
+**Corrección: `F24-RECAP-001` se entregó entera, no hasta el paso 5.** La entrada
+de este changelog y el bloque de `CURRENT-TASK.md` se quedaron en «pasos 2 a 5».
+Es incorrecto: los pasos 6, 7 y 8 se entregaron el mismo 2026-09-14. `28c6b55`
+(«enganchar la memoria retroactiva al turno, con su canal», 14 archivos, 2.430
+inserciones) cubre 6 y 7 y añade `vaultRecapSync`, `vaultRecapList` y
+`vaultRecapUpdate` a `apps/desktop/src/shared/channels.ts` con
+`conversation-recap.test.ts` y `recap-dry-run.test.ts`; `3d994c2` («Memoria de lo
+ya hablado, con probar antes de guardar») es el paso 8, con `RecapSection` en
+`apps/desktop/src/renderer/pages/Vault.tsx`. Verificado en el árbol de hoy. Lo
+único que queda es que alguien abra la pantalla, y eso es de Daniel: `LA-045`.
+
+**Tres cifras y una nota corregidas en `CURRENT-TASK.md`:**
+
+- «Hay 41 commits sin subir» → **135**, medido hoy con
+  `git rev-list --count origin/main..main`.
+- El único defecto de código anotado de toda la documentación —un comentario en
+  `apps/agent/src/providers/horde.ts` que «todavía» decía «la peticion no llego a
+  producir generacion»— **no existe**: `grep` sobre el archivo da cero y
+  `git log -S` no devuelve ni un commit que lo haya contenido. La frase sólo
+  vive aquí y en `DECISIONS.md` como cita de lo retirado. Se retira la anotación.
+- La línea de estado de F30 decía «sin una sola imagen generada» y su propio
+  bloque, cuatro párrafos después, dice que se generaron dos a mano. Corregida la
+  línea de estado, que es la que se copia al resumir.
+- `KIMI-K3-EXPERIMENT-001` pasa de `in_progress` (2026-08-31, sin un solo commit
+  en 23 días) a `abandonado`, dejando escrito que la marca
+  `EXPERIMENTAL_TOOL_CALLING_2026-08-31` sigue puesta en el catálogo.
+
+**Tres líneas de trabajo que no estaban en ningún `.md`:** las dos
+investigaciones de proveedores, que ningún archivo de continuidad citaba
+(`PROVEEDORES-005` en `CURRENT-TASK.md`); la solicitud de API de PixAI, cursada y
+esperando respuesta mientras el documento de investigación lo lista como
+descartado (`LA-046`); y el router de Bynara, del que el repositorio entero no
+sabía nada (`LA-047`, con las cifras medidas hoy).
+
+- Riesgos o límites: `MASTER-PLAN.md` sigue sin una sola fila de F16 a F30 y las
+  secciones 4, 8, 9 y 10 de `PROJECT-STATE.md` siguen siendo un checkpoint de
+  agosto. Se han **declarado** con una nota, no sincronizado: es trabajo aparte y
+  se avisa para que no se lea como estado actual.
+- Siguiente paso exacto: `LA-045`, y después medir `F31-REPETICION-001`. Ver la
+  cabecera de `CURRENT-TASK.md`.
+
 ### 2026-09-21 — Claude — F30-REPARTO-001 — dibujar las escenas en las que salís los dos
 
 - Objetivo: que una escena con las dos figuras se pueda ilustrar entera, **con un
