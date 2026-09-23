@@ -1237,10 +1237,34 @@ export class RecapSync {
    * corta despues.
    */
   private async persistEntry(
-    entry: RecapEntry,
+    written: RecapEntry,
     state: ConversationState,
     pass: PassState,
   ): Promise<void> {
+    /**
+     * una aprobacion de Daniel no se cae en silencio.
+     *
+     * Reescribir una ficha le quita la aprobacion a proposito —el texto es otro,
+     * y `approved` existe para que nada que el no haya leido entre en un prompt—,
+     * pero el efecto de eso es que la ficha DEJA de viajar en ese hilo. Sin esta
+     * marca no quedaba ni rastro de la decision que se ha perdido: en la pantalla
+     * salia un «sin aprobar» igual que el de una ficha recien escrita.
+     *
+     * El disparador que lo hizo visible no es el trabajo de fondo haciendo su
+     * trabajo, sino borrar la memoria sellada de un hilo: eso quita
+     * `supersededAt`, la conversacion vuelve a la cola y la pasada amplia una
+     * ficha que Daniel ya habia aprobado. Aqui se apunta el hecho; el panel lo
+     * dice y «Aprobar» lo apaga.
+     *
+     * Va en el UNICO camino de escritura para que ninguna rama nueva se lo salte.
+     */
+    const entry = recapEntrySchema.parse({
+      ...written,
+      approvalReset: written.approved
+        ? false
+        : state.previous?.approved === true || state.previous?.approvalReset === true,
+    });
+
     const delta = state.delta;
     state.delta = zeroCounters();
     state.dirty = false;

@@ -67,8 +67,18 @@ export interface RecapRowView {
   title: string;
   /** `formatConversationMemory` de la ficha; vacio si no hay nada que leer */
   block: string;
+  /**
+   * la memoria SELLADA de la conversacion; vacia si no la tiene.
+   *
+   * Es el otro texto, no el mismo: `block` es la ficha retroactiva y esto es lo
+   * que ella lee de verdad en ese hilo. Cuando hay memoria propia los dos
+   * existen a la vez y solo uno viaja.
+   */
+  sealedBlock: string;
   source: 'cli' | 'index';
   approved: boolean;
+  /** estaba aprobada y el trabajo de fondo la reescribio, asi que dejo de viajar */
+  approvalReset: boolean;
   /** si HOY viajaria de verdad en el prompt, calculado como lo calcula el turno */
   inPrompt: boolean;
   /** la pasada ya la marco como que tiene memoria propia */
@@ -87,6 +97,16 @@ export interface RecapRowView {
   excluded: boolean;
   /** hay entrada suya en el almacen; falso mientras nadie la haya leido */
   hasEntry: boolean;
+  /**
+   * borrar la memoria propia destaparia su ficha retroactiva.
+   *
+   * Lo calcula el proceso principal con la misma funcion que decide en el
+   * turno: la sellada gana siempre, asi que mientras la haya la ficha es papel
+   * muerto, y en cuanto se borra vuelve a ser candidata. Esta aqui porque
+   * cambia lo que hay que DECIR antes de pulsar el boton rojo: ahi borrar no
+   * limpia, cambia un texto por otro.
+   */
+  cardRevivesOnForget: boolean;
   refusedKind: RecapRefusalKind | null;
   refusedProvider: LocalCliProvider | null;
 }
@@ -101,10 +121,68 @@ export interface RecapRowLook {
   retryWith: LocalCliProvider;
   /** el texto del boton: no se «rehace» lo que nadie ha leido todavia */
   redoLabel: string;
-  /** hay algo escrito que leer */
+  /** hay FICHA RETROACTIVA escrita que leer; no dice si viaja */
   canRead: boolean;
+  /**
+   * esa ficha existe y ya no entra en ningun prompt.
+   *
+   * Es papel muerto: la conversacion sello su propia memoria y la sellada gana
+   * siempre. Se marca porque el boton era el mismo «Ver» de una ficha viva y
+   * enseñaba la muerta sin decirlo, que es peor que no enseñar nada.
+   */
+  cardIsStale: boolean;
+  /** hay memoria sellada que leer: lo unico que ella lee hoy en ese hilo */
+  canReadSealed: boolean;
+  /**
+   * se puede borrar esa memoria propia, dejando la conversacion intacta.
+   *
+   * Es la MISMA condicion que leerla y no una distinta: lo que se puede enseñar
+   * se puede tirar. Va como campo aparte porque no significa lo mismo —uno abre
+   * un recuadro y el otro destruye contenido de Daniel— y porque mañana pueden
+   * dejar de coincidir; leerlas de un unico booleano seria darlo por hecho.
+   */
+  canForgetSealed: boolean;
+  /**
+   * al borrar esa memoria, la ficha retroactiva EMPEZARIA a viajar.
+   *
+   * Cambia el texto de la confirmacion y añade una salida: sin esto el dialogo
+   * decia «no se toca nada mas» y el acuse «empezara a recordar de nuevo desde
+   * estos ultimos», y las dos frases son falsas en ese caso —borrar no deja el
+   * hilo a cero, le pone delante un resumen de esa misma conversacion—.
+   *
+   * Se pide `canForgetSealed` ademas del dato: lo que no se puede borrar no
+   * puede destapar nada, y avisar de una consecuencia que no se puede provocar
+   * es ruido en un sitio donde todo lo escrito tiene que poder cumplirse.
+   */
+  forgetRevivesCard: boolean;
+  /**
+   * borrar esa memoria puede costarle a Daniel la aprobacion de su ficha.
+   *
+   * Quitar la memoria sellada quita tambien `supersededAt`, y ese campo es el
+   * unico filtro que sacaba la conversacion de la cola del trabajo de fondo. Si
+   * la pasada la coge y amplia la ficha, la ficha se queda sin aprobar: deja de
+   * viajar hasta que Daniel la lea otra vez.
+   *
+   * Se pide `!forgetRevivesCard` porque son los dos lados de la misma moneda: si
+   * la ficha ya cubre hasta el final, empieza a viajar en cuanto se borra la
+   * memoria y la pasada no tiene nada que ampliar —de eso avisa el aviso rojo—;
+   * si no llega hasta el final, es justo la que la pasada va a reescribir. En
+   * esa rama el dialogo decia «la ficha retroactiva se queda donde esta», y eso
+   * era verdad del texto y falso de la decision.
+   */
+  forgetCostsApproval: boolean;
   /** falta la ultima palabra de Daniel para que entre en los prompts */
   canApprove: boolean;
+  /**
+   * la habia aprobado y ya no lo esta, porque alguien reescribio la ficha.
+   *
+   * Es lo que separa «todavia no la has mirado» de «tu decision se ha caido».
+   * Las dos se veian igual —un «sin aprobar»— y la segunda ademas significa que
+   * ese hilo ha dejado de leer una ficha que si leia. Se exige `canApprove`
+   * porque avisar de una aprobacion perdida sin ofrecer el boton que la devuelve
+   * seria un callejon sin salida.
+   */
+  approvalLost: boolean;
   /** se puede volver a hacer desde cero */
   canRedo: boolean;
 }
@@ -150,11 +228,31 @@ export function describeRecapRow(row: RecapRowView, current: LocalCliProvider): 
     retryWith,
     // lo que nadie ha leido todavia no se «rehace»
     redoLabel: `${row.hasEntry ? 'Rehacerlo' : 'Leerla'} con ${CLI_LABELS[retryWith]}`,
+    // leer NO se condiciona a nada mas: es contenido del propio Daniel y verlo
+    // no cambia ningun prompt. Lo unico que decide es si hay algo escrito, y
+    // por eso son dos preguntas y no una —«¿hay ficha?» y «¿hay memoria
+    // sellada?»—: una fila sellada sin ficha previa contestaba que no a la
+    // unica pregunta que habia y se quedaba sin un solo boton
     canRead: conFicha,
+    cardIsStale: conFicha && propia,
+    canReadSealed: row.sealedBlock.length > 0,
+    // borrar SOLO se ofrece de lo que se ha podido enseñar. Sin bloque no se
+    // sabe si hay memoria —podria haberla y no haber llegado a leerse— y un
+    // boton destructivo sobre algo que no se ha visto es lo contrario de lo que
+    // pide una accion de este tipo: primero lees, luego decides
+    canForgetSealed: row.sealedBlock.length > 0,
+    // y con lo que se destaparia al hacerlo: es la diferencia entre «esto
+    // limpia» y «esto cambia un texto por otro», y hay que decirla antes
+    forgetRevivesCard: row.sealedBlock.length > 0 && row.cardRevivesOnForget,
+    forgetCostsApproval:
+      row.sealedBlock.length > 0 && !row.cardRevivesOnForget && conFicha && row.approved,
     // aprobar lo que no es una ficha —una negativa sola, o una conversacion que
     // ya tiene memoria propia— dejaria en disco un `approved` que no significa
     // nada y no la haria entrar en ningun prompt
     canApprove: conFicha && !row.approved && !propia,
+    // y decir que lo que falta es VOLVER a aprobarla, no aprobarla por primera
+    // vez: la ficha que hoy no viaja en ese hilo viajaba ayer
+    approvalLost: conFicha && !row.approved && !propia && row.approvalReset,
     // la sellada gana siempre, asi que rehacer la suya seria tirar el trabajo; y
     // una excluida no la coge la pasada, asi que el boton no haria nada
     canRedo: !propia && !row.excluded,
@@ -173,6 +271,9 @@ export function describeRecapRow(row: RecapRowView, current: LocalCliProvider): 
     return partes.join(' · ');
   };
 
+  // ese hilo sello su propia memoria, asi que nada de lo retroactivo le afecta
+  // ya: ni aprobar ni rehacer harian nada, y por eso `common` los apaga. Lo que
+  // SI queda es leerla, que es lo unico que no depende de que la ficha sirva
   if (propia) {
     return { ...common, tone: 'idle', state: 'ya tiene memoria propia' };
   }
@@ -218,5 +319,109 @@ export function describeRecapRow(row: RecapRowView, current: LocalCliProvider): 
     };
   }
 
-  return { ...common, tone: 'busy', state: decorar('sin aprobar') };
+  // «sin aprobar» a secas es verdad y esconde lo que importa: una ficha que
+  // Daniel habia aprobado y que ha dejado de viajar en ese hilo se leia igual
+  // que una que nadie ha mirado nunca
+  return {
+    ...common,
+    tone: 'busy',
+    state: decorar(common.approvalLost ? 'la aprobaste y se ha reescrito' : 'sin aprobar'),
+  };
+}
+
+/**
+ * lo que se le dice a Daniel DESPUES de borrar la memoria propia de un hilo.
+ *
+ * Vive aqui, y no suelto en el JSX, porque dos de sus frases eran falsas y solo
+ * una prueba las caza:
+ *
+ *   - «empezara a recordar de nuevo desde estos ultimos» no es verdad cuando al
+ *     quitar la sellada queda destapada la ficha retroactiva de esa MISMA
+ *     conversacion: entonces el proximo mensaje no va en blanco, va con ESA;
+ *   - «Borrado» a secas no es verdad fuera de este equipo. La subida es
+ *     idempotente por (boveda, conversacion, secuencia), asi que el registro
+ *     que ya esta en el servidor conserva su memoria y el borrado no viaja
+ *     (`D-099`). Callarlo seria prometer lo que el codigo no hace.
+ */
+export function describeForgetAck(input: { turns: number; cardNowInUse: boolean }): string {
+  const cuantos =
+    input.turns === 0
+      ? 'No quedaba ninguna memoria que quitar en este hilo.'
+      : input.turns === 1
+        ? 'Se ha quitado de 1 mensaje de este hilo.'
+        : `Se ha quitado de ${input.turns} mensajes de este hilo.`;
+
+  const siguiente = input.cardNowInUse
+    ? 'Los mensajes siguen ahí. Pero ojo: la ficha retroactiva que estaba tapada ha quedado al descubierto, así que desde el próximo mensaje ella leerá ESA, no una memoria en blanco. Si tampoco la quieres, quítala con «Borrarlo».'
+    : 'Los mensajes siguen ahí. Si vuelves a escribirle, empezará a recordar de nuevo desde estos últimos.';
+
+  const alcance =
+    'Borrado en este equipo: lo que ya se había sincronizado sigue en el servidor, así que en otro ordenador tuyo ella lo seguirá recordando.';
+
+  return `Borrado. ${cuantos} ${siguiente} ${alcance}`;
+}
+
+/** lo que hace falta de una fila para saber si la lista ha cambiado */
+export interface RecapRowStamp {
+  conversationId: string;
+  at: string;
+  chars: number;
+  covered: number;
+  turns: number;
+  gaps: number;
+  block: string;
+  sealedBlock: string;
+  source: 'cli' | 'index';
+  approved: boolean;
+  /** entra porque una aprobacion perdida es un cambio, y de los que hay que ver */
+  approvalReset: boolean;
+  inPrompt: boolean;
+  sealed: boolean;
+  superseded: boolean;
+  excluded: boolean;
+  hasEntry: boolean;
+  /** entra porque cambia lo que dice la confirmacion del boton rojo */
+  cardRevivesOnForget: boolean;
+  refusedKind: RecapRefusalKind | null;
+}
+
+/**
+ * una firma de la lista, para contestar «¿ha cambiado algo?».
+ *
+ * Existe porque «repasar lo que hay» no tenia forma de decir que se habia
+ * ejecutado: cuando lo releido coincide con lo que ya estaba, la pantalla se
+ * queda exactamente igual y una espera de varios segundos se lee como un boton
+ * roto. Comparando esto, el panel puede escribir «sigue igual», que es lo que
+ * de verdad ha pasado.
+ *
+ * NO entra ni una palabra del contenido: de los dos bloques solo se mide el
+ * largo. Es suficiente —una ficha reescrita cambia tambien su fecha, su tamaño o
+ * su estado— y evita quedarse con una segunda copia de texto descifrado
+ * colgando de un `ref` durante toda la sesion.
+ */
+export function recapSignature(rows: readonly RecapRowStamp[]): string {
+  return rows
+    .map((row) =>
+      [
+        row.conversationId,
+        row.at,
+        row.chars,
+        row.covered,
+        row.turns,
+        row.gaps,
+        row.block.length,
+        row.sealedBlock.length,
+        row.source,
+        row.approved,
+        row.approvalReset,
+        row.inPrompt,
+        row.sealed,
+        row.superseded,
+        row.excluded,
+        row.hasEntry,
+        row.cardRevivesOnForget,
+        row.refusedKind ?? '-',
+      ].join('|'),
+    )
+    .join('\n');
 }

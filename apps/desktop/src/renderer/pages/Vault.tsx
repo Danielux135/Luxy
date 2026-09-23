@@ -27,12 +27,15 @@ import {
 import {
   CLI_LABELS,
   RECAP_REFUSAL_LABELS,
+  describeForgetAck,
   describeRecapRow,
 } from '../vault-recap-row.js';
 import { describeKudosBreakdown } from '../vault-kudos-breakdown.js';
+import { vaultNoticeFor } from '../vault-notice.js';
 import { describeReply, replyAt, replyTabLabel, replyTone } from '../vault-compatibility-reply.js';
 import { auxiliaryName, backgroundAuxiliary } from '../vault-auxiliary.js';
 import type { ConfigSummary } from '../useConfig.js';
+import type { VaultErrorArea } from '../useVault.js';
 import {
   formatAutoLockOption,
   formatLockCountdown,
@@ -77,6 +80,33 @@ import {
   type ReasoningEffort,
   resolveAuxiliaryTarget,
 } from '@luxy/shared';
+
+/**
+ * el aviso de un recuadro: el motivo y, pegada, la salida.
+ *
+ * `slots` son las areas de las que ese recuadro se hace cargo; `null` es el
+ * aviso general de la pagina. Quien decide es una funcion pura con pruebas
+ * (`vault-notice.ts`), porque escribir la condicion a mano en cada panel es lo
+ * que dejo la pista huerfana: el motivo en su seccion y la unica frase que dice
+ * que hacer varios paneles mas abajo, en verde, junto a los «Clave guardada».
+ */
+function VaultNotice({
+  vault,
+  slots,
+}: {
+  vault: VaultController;
+  slots: readonly VaultErrorArea[] | null;
+}): JSX.Element | null {
+  const aviso = vaultNoticeFor(vault, slots);
+  if (aviso === null) return null;
+  return (
+    <Notice tone={aviso.tone}>
+      {aviso.error}
+      {aviso.error !== null && aviso.hint !== null && ' '}
+      {aviso.hint}
+    </Notice>
+  );
+}
 
 /** debe coincidir con AUTO_LOCK_MINUTES del proceso principal */
 const AUTO_LOCK_CHOICES = [1, 5, 15, 30, 60, 240, 0] as const;
@@ -440,7 +470,13 @@ function ConversationPanel({
         project={project}
       />
 
-      {vault.error !== null && <Notice tone="fault">{vault.error}</Notice>}
+      {/* el aviso general de la página: recoge lo que no es de ninguna sección
+          —enviar, adjuntar, generar— y nada más. Lo que sí tiene dueño se pinta
+          donde se pulsó, y repetirlo aquí era lo que llenaba la pantalla del
+          mismo texto cuatro o cinco veces */}
+      {vault.error !== null && vault.errorArea === null && (
+        <Notice tone="fault">{vault.error}</Notice>
+      )}
 
       {providers.length === 0 && (
         <Notice tone="warn">
@@ -2077,6 +2113,15 @@ function HordeCharacterForm({
         )}
       </div>
 
+      {/* el motivo, junto al botón que lo provocó. La consulta puede fallar
+          —red caída, clave mala— y el único aviso de la pantalla se pinta al
+          final de la página: desde aquí no se ve, y lo que quedaba era un botón
+          que no parecía hacer nada.
+          SÓLO el suyo: sin el dueño, un fallo cualquiera del controlador se
+          pintaba a la vez aquí, en el panel de personajes, en el de memoria y
+          al final de la página, cuatro recuadros rojos idénticos */}
+      <VaultNotice vault={vault} slots={['disponibilidad']} />
+
       <Field
         label="Aspecto fijo, en inglés"
         hint="Es lo único que se repite palabra por palabra en cada imagen: es lo que hace que sea la misma persona."
@@ -2586,6 +2631,19 @@ function GeneratePanel({
           }}
         />
       </details>
+
+      {/* aquí y no sólo al final de la página: el único aviso de la pantalla se
+          pinta DESPUÉS de este panel, del de memoria y del de compatibilidad, o
+          sea a varias pantallas de scroll de la «×» de olvidar un personaje y
+          de «Ver disponibilidad». Un error que no se ve desde donde se pulsa se
+          lee igual que un botón que no hizo nada.
+          Lo de «Ver disponibilidad» tiene su propio aviso DENTRO del formulario
+          y sólo se recoge aquí cuando ese formulario está plegado: si no, el
+          motivo se quedaría en un panel cerrado y no lo vería nadie */}
+      <VaultNotice
+        vault={vault}
+        slots={hordeFormOpen ? ['personajes'] : ['personajes', 'disponibilidad']}
+      />
 
       {vault.characters.length > 0 && (
         <>
@@ -4222,8 +4280,16 @@ function UnlockedPanel({ vault }: { vault: VaultController }): JSX.Element {
           ]}
         />
 
-        {vault.hint !== null && <Notice tone="ok">{vault.hint}</Notice>}
-        {vault.error !== null && <Notice tone="fault">{vault.error}</Notice>}
+        {/* la pista es la mitad ACCIONABLE de un fallo: dice qué hacer. Sólo se
+            queda aquí cuando su error también se queda aquí; con dueño se va con
+            él, pegada al botón que falló. Antes se quedaba siempre en este hueco
+            —el de «Clave guardada», y en verde— mientras el motivo se pintaba
+            varios paneles más arriba, así que la salida no la leía nadie */}
+        {/* sincronizar, cerrar la bóveda y la cuenta no pertenecen a ninguna
+            sección de arriba, así que su aviso llega aquí sin dueño. Un fallo
+            que SÍ es de una sección se queda en la suya —y se lleva su pista
+            con él— y no se repite aquí */}
+        <VaultNotice vault={vault} slots={null} />
 
         {vault.lastSync !== null && (
           <>
@@ -4928,6 +4994,7 @@ function MemoryPanel({
             const valor = event.currentTarget.value;
             void vault.setAuxiliary(
               valor === 'codex' || valor === 'claude' ? { provider: valor, model: null } : null,
+              'trabajo-de-fondo',
             );
           }}
         >
@@ -4936,6 +5003,12 @@ function MemoryPanel({
           <option value="claude">Claude</option>
         </select>
       </label>
+
+      {/* el motivo, junto al desplegable que lo provocó. Iba marcado como de
+          «Memoria de lo ya hablado», que es otra sección de este mismo panel y
+          está dos bloques más abajo: cambiar de CLI aquí y fallar pintaba el
+          aviso dentro de un recuadro que nadie había tocado */}
+      <VaultNotice vault={vault} slots={['trabajo-de-fondo']} />
 
       {/* comprobar la memoria sobre lo YA hablado: cobertura, la busqueda por
           fecha contra las fechas reales y el estilo, todo en cifras */}
@@ -5099,7 +5172,11 @@ function MemoryPanel({
                     setOpen(null);
                     return;
                   }
+                  // si la lectura falla NO se abre nada: un recuadro vacío se
+                  // lee como «este momento no tiene turnos», y el error queda
+                  // arriba del todo, fuera de la pantalla
                   void vault.readMemoryEpisode(episode).then((read) => {
+                    if (read === null) return;
                     setTurns(read);
                     setOpen(episode.id);
                   });
@@ -5264,6 +5341,9 @@ function PendingAffairsSection({ vault }: { vault: VaultController }): JSX.Eleme
                         to: affair.origin.sequence,
                       })
                       .then((read) => {
+                        // igual que en los momentos: un fallo no abre un
+                        // recuadro vacío, que diría que no hay turno
+                        if (read === null) return;
                         setTurns(read);
                         setOpenTurn(affair.id);
                       });
@@ -5333,8 +5413,34 @@ function RecapSection({
   destino: LocalCliProvider;
   destinoNombre: string;
 }): JSX.Element {
-  /** qué ficha tiene el bloque abierto, por su conversación */
-  const [open, setOpen] = useState<string | null>(null);
+  /**
+   * qué bloque está abierto, y CUÁL de los dos.
+   *
+   * Dos y no uno porque una conversación sellada tiene dos textos distintos: la
+   * ficha retroactiva, que ya no entra en ningún prompt, y su memoria propia,
+   * que es lo único que ella lee. Con un solo identificador el botón «Ver»
+   * enseñaba la muerta sin decirlo.
+   */
+  const [open, setOpen] = useState<{
+    conversationId: string;
+    kind: 'card' | 'sealed';
+  } | null>(null);
+  /**
+   * qué dejó el último repaso, para que se vea que se ha ejecutado.
+   *
+   * Aparte de `lastRecapSync` a propósito: aquella es «la última pasada que
+   * llamó a un CLI» y la lee `fuePrueba`. Escribir aquí habría hecho que el
+   * panel dijera «no se ha escrito ninguna ficha» después de un simple repaso,
+   * que no llama a nadie y no escribe nada.
+   *
+   * Lleva la hora porque el repaso más útil es justo el que no cambia nada: sin
+   * ella, pulsar dos veces deja la misma frase y vuelve a parecer que no pasa.
+   */
+  const [repaso, setRepaso] = useState<{
+    hora: string;
+    rows: number;
+    changed: boolean;
+  } | null>(null);
   /**
    * la última tanda fue una prueba y no se guardó nada.
    *
@@ -5359,14 +5465,58 @@ function RecapSection({
    * tiene que sobrevivir para etiquetar el resultado.
    */
   const [corriendo, setCorriendo] = useState<{
-    accion: 'rellenar' | 'prueba' | 'rehacer';
+    accion: 'rellenar' | 'prueba' | 'rehacer' | 'repasar';
     conversationId: string | null;
+  } | null>(null);
+  /**
+   * de qué conversación se está preguntando si borrar su memoria propia.
+   *
+   * Un paso intermedio y no un `confirm()` del navegador porque lo que hay que
+   * decir no cabe en una línea: qué se destruye, qué se queda —los mensajes, que
+   * es lo que de verdad da miedo perder— y que el hilo volverá a escribirse
+   * memoria en cuanto se le conteste. «¿Seguro?» no distingue «borro lo que
+   * recuerda» de «borro la conversación», que es la confusión que más caro sale.
+   */
+  const [borrando, setBorrando] = useState<string | null>(null);
+  /**
+   * qué se está borrando AHORA, y si con su ficha retroactiva.
+   *
+   * Local y no la bandera del controlador: `decidingRecap` la comparten el
+   * borrado y las decisiones sobre las fichas, así que aprobar o borrar la
+   * ficha de OTRA fila ponía «Borrando…» en el botón rojo de esta confirmación,
+   * afirmando en presente una destrucción que no estaba ocurriendo.
+   */
+  const [borrandoAhora, setBorrandoAhora] = useState<{
+    conversationId: string;
+    conFicha: boolean;
+  } | null>(null);
+  /**
+   * qué dejó el último borrado, para que se vea que ocurrió.
+   *
+   * Al borrar, la fila pierde sus botones y el bloque se cierra: la pantalla
+   * queda MÁS vacía que antes, que se lee igual que un botón que no hizo nada.
+   * La cifra son turnos, porque la memoria se vuelve a sellar en cada turno que
+   * la trae buena y una conversación larga guarda muchas copias.
+   *
+   * `fichaEnUso` se decide al pulsar y no al releer la lista: es lo que hay que
+   * contarle —si la ficha retroactiva se quedó y era de las que viajan, desde
+   * el próximo mensaje ella lee ESA— y la fila puede desaparecer del panel
+   * justo después de borrar, que es lo que le pasa a una conversación excluida.
+   */
+  const [borrado, setBorrado] = useState<{
+    conversationId: string;
+    turnos: number;
+    fichaEnUso: boolean;
   } | null>(null);
 
   const rows = vault.recaps;
   const cobertura = vault.recapCoverage;
   const ultima = vault.lastRecapSync;
-  const ocupado = vault.syncingRecaps || vault.decidingRecap;
+  // `corriendo` entra en la cuenta porque el repaso no mueve ninguna bandera del
+  // controlador: sin esto su botón se podía pulsar cinco veces seguidas mientras
+  // la primera lectura seguía descifrando
+  const ocupado =
+    vault.syncingRecaps || vault.decidingRecap || corriendo !== null || borrandoAhora !== null;
 
   /**
    * rellena hacia atrás, en tandas y hasta acabar.
@@ -5417,6 +5567,82 @@ function RecapSection({
   };
 
   /**
+   * vuelve a leer lo escrito, sin llamar a ningún CLI.
+   *
+   * Envuelto igual que sus dos vecinos aunque no llame a nadie, y por lo que
+   * cuesta: la lectura recorre la línea temporal entera y descifra la memoria de
+   * cada conversación. Antes era un `onClick` desnudo sin etiqueta ni acuse, así
+   * que la única lectura posible de esos segundos era que el botón no hacía
+   * nada. El acuse va aparte de `lastRecapSync`, que significa otra cosa.
+   */
+  const repasar = async (): Promise<void> => {
+    setCorriendo({ accion: 'repasar', conversationId: null });
+    try {
+      const leido = await vault.loadRecaps();
+      // en el fallo NO se escribe acuse: el error ya está puesto, y una frase
+      // de «repasado» al lado sería decir que fue bien
+      if (leido === null) {
+        setRepaso(null);
+        return;
+      }
+      setRepaso({
+        hora: new Date().toLocaleTimeString(),
+        rows: leido.rows,
+        changed: leido.changed,
+      });
+    } finally {
+      setCorriendo(null);
+    }
+  };
+
+  /**
+   * borra lo que ella recuerda de una conversación. Sólo tras confirmarlo.
+   *
+   * Cierra el bloque abierto de esa fila: si no, el recuadro se quedaría
+   * enseñando en pantalla un texto que ya no existe en disco.
+   *
+   * `tambienLaFicha` es la salida del caso feo, y existe porque avisar sin dar
+   * salida es lavarse las manos: cuando esa conversación tiene además una ficha
+   * retroactiva que empezaría a viajar al quedarse sin memoria propia, borrar
+   * sólo la memoria no limpia nada —cambia un texto por otro, y el otro habla
+   * de esta misma conversación—.
+   *
+   * ORDEN: primero la ficha y después la memoria. Si falla el primer paso no se
+   * ha destruido nada, la memoria sigue ahí y el botón también; al revés
+   * quedaría la ficha viva junto a una memoria ya borrada, que es exactamente
+   * el estado que esta pantalla acaba de prometer evitar.
+   */
+  const borrarMemoria = async (
+    conversationId: string,
+    opciones: { tambienLaFicha: boolean; revive: boolean },
+  ): Promise<void> => {
+    setBorrandoAhora({ conversationId, conFicha: opciones.tambienLaFicha });
+    try {
+      if (opciones.tambienLaFicha) {
+        const hecho = await vault.decideRecap({ action: 'forget', conversationId });
+        // el motivo ya está puesto en esta misma sección; seguir sería dejar la
+        // ficha viva y la memoria no, que es el peor de los dos resultados
+        if (!hecho) return;
+      }
+      const turnos = await vault.forgetSealedMemory(conversationId);
+      // en el fallo NO se cierra la pregunta ni se escribe acuse: el error ya
+      // está puesto arriba de esta misma sección, y quitar el diálogo se leería
+      // como que el borrado salió bien
+      if (turnos === null) return;
+      setBorrando(null);
+      setOpen((actual) => (actual?.conversationId === conversationId ? null : actual));
+      setBorrado({
+        conversationId,
+        turnos,
+        // la ficha sólo pasa a usarse si se quedó Y era de las que viajan
+        fichaEnUso: opciones.revive && !opciones.tambienLaFicha,
+      });
+    } finally {
+      setBorrandoAhora(null);
+    }
+  };
+
+  /**
    * vuelve a hacer una conversación desde cero.
    *
    * Con un CLI distinto cuando el otro se negó: quien se niega es un modelo
@@ -5431,7 +5657,7 @@ function RecapSection({
       // SIEMPRE, sin comparar con lo que el panel cree que está elegido: es
       // barato, es idempotente, y comparar era justo lo que hacía que el botón
       // dijera un CLI y el trabajo saliera por el otro
-      await vault.setAuxiliary({ provider: con, model: null });
+      await vault.setAuxiliary({ provider: con, model: null }, 'memoria');
       await vault.syncRecaps({ projectAlias: project, conversationId, force: true });
       await vault.loadRecaps();
     } finally {
@@ -5551,11 +5777,31 @@ function RecapSection({
           className="btn btn--quiet"
           disabled={ocupado}
           title="Vuelve a leer lo que ya hay escrito, sin llamar a ningún CLI"
-          onClick={() => void vault.loadRecaps()}
+          onClick={() => void repasar()}
         >
-          Repasar lo que hay
+          {corriendo?.accion === 'repasar' ? 'Repasando…' : 'Repasar lo que hay'}
         </button>
       </div>
+
+      {/* el error de esta sección se pintaba SÓLO en la cabecera de la página,
+          muy por encima de este panel: un fallo de cualquiera de estos botones
+          aparecía fuera de la pantalla y lo que se veía era un botón inerte.
+          Y SÓLO el de esta sección: sin el dueño, un fallo de listar modelos de
+          AI Horde salía aquí dentro diciendo que había fallado algo de la
+          memoria, que es justo lo que nadie había tocado */}
+      <VaultNotice vault={vault} slots={['memoria']} />
+
+      {/* el acuse del repaso. Se pinta también —sobre todo— cuando no ha
+          cambiado nada: que siga igual es información, una pantalla quieta no */}
+      {repaso !== null && (
+        <p className="field__hint">
+          <strong>Repasado a las {repaso.hora}:</strong>{' '}
+          {repaso.rows === 1
+            ? '1 conversación releída'
+            : `${repaso.rows} conversaciones releídas`}
+          . {repaso.changed ? 'La lista ha cambiado.' : 'Sigue igual que antes.'}
+        </p>
+      )}
 
       {ultima !== null && (
         <p className="field__hint">
@@ -5674,6 +5920,16 @@ function RecapSection({
         // con pruebas porque una de las dos cosas que decide es la regla de que
         // una negativa no anuncia de que iba la conversacion
         const look = describeRecapRow(row, destino);
+        /** cuál de los dos bloques de ESTA fila está abierto, si alguno */
+        const abierto =
+          open !== null && open.conversationId === row.conversationId ? open.kind : null;
+        // NO hay aquí ningún «esta fila no ofrece nada, y es lo correcto»: se
+        // escribió uno y era inalcanzable. Con entrada siempre queda
+        // «Borrarlo»; sin entrada, la sellada trae bloque —`formatConversation-
+        // Memory` emite al menos su «Resumen:»— y con él «Ver su memoria», y la
+        // que no está sellada o se puede rehacer o ni sale de la lista. Un
+        // párrafo que explica un estado que no existe es peor que nada, así que
+        // se quitó en vez de arreglarle la condición
 
         return (
           <div key={row.conversationId} className="vault-media__item">
@@ -5684,7 +5940,12 @@ function RecapSection({
                 {look.title === null ? '· ' : `· del ${row.day} · `}
                 {row.turns} mensajes
                 {look.canRead && ` · cubre ${row.covered} de ${row.turns} turnos`}
-                {look.canRead && ` · ${row.chars} caracteres en cada turno`}
+                {/* «en cada turno» sería mentira en una ficha que ya no entra en
+                    ningún prompt: esa no viaja en ninguno */}
+                {look.canRead &&
+                  (look.cardIsStale
+                    ? ` · ${row.chars} caracteres que ya no viajan`
+                    : ` · ${row.chars} caracteres en cada turno`)}
                 {row.source === 'index' && ' · sólo el índice de sus escenas'}
                 {row.gaps > 0 && ` · ${row.gaps} tramo(s) que nadie resumió`}
                 {row.provider !== null && ` · escrita con ${CLI_LABELS[row.provider]}`}
@@ -5701,16 +5962,87 @@ function RecapSection({
               </Notice>
             )}
 
+            {/* una aprobación de Daniel no puede caerse en silencio. El trabajo
+                de fondo amplía la ficha y la deja sin aprobar A PROPÓSITO —el
+                texto es otro—, pero el efecto es que ese hilo deja de leer una
+                ficha que sí leía, y hasta ahora eso se veía igual que una ficha
+                que nadie había mirado nunca. El disparador más probable es haber
+                borrado la memoria propia de ese hilo, que lo devuelve a la
+                pasada */}
+            {look.approvalLost && (
+              <Notice tone="warn">
+                <strong>Esta ficha la habías aprobado y ya no lo está.</strong> El
+                trabajo de fondo la ha vuelto a escribir con los mensajes nuevos, y
+                una ficha reescrita no entra en ningún mensaje hasta que la vuelves a
+                aprobar: no se mete en un prompt un texto que no has leído. Mientras
+                tanto, este hilo no está leyendo ninguna ficha. Léela con «Ver» y, si
+                te sirve, «Aprobar».
+              </Notice>
+            )}
+
             <div className="row">
+              {/* la memoria propia va PRIMERO porque es la que manda: cuando una
+                  conversación la tiene, la ficha retroactiva de al lado ya no
+                  entra en ningún prompt */}
+              {look.canReadSealed && (
+                <button
+                  className="btn btn--quiet"
+                  title="La memoria que esta conversación se escribió a sí misma. Es la que ella lee de verdad en cada mensaje de este hilo"
+                  onClick={() =>
+                    setOpen(
+                      abierto === 'sealed'
+                        ? null
+                        : { conversationId: row.conversationId, kind: 'sealed' },
+                    )
+                  }
+                >
+                  {abierto === 'sealed' ? 'Cerrar su memoria' : 'Ver su memoria'}
+                </button>
+              )}
+              {/* en rojo y con una pregunta detrás porque destruye contenido de
+                  Daniel. Al lado de «Ver su memoria» y no junto a «Borrarlo»,
+                  que es el de la ficha retroactiva: los dos botones de un mismo
+                  texto tienen que ir juntos para que no se confundan */}
+              {look.canForgetSealed && (
+                <button
+                  className="btn btn--danger"
+                  // se apaga mientras la pregunta está abierta en vez de hacer
+                  // de interruptor: cerrarla ya lo hace «Dejarlo estar», ahí
+                  // debajo, y dos botones con la misma palabra en la misma fila
+                  // se leen como dos cosas distintas
+                  disabled={ocupado || borrando === row.conversationId}
+                  title="Borra lo que ella recuerda de esta conversación. Los mensajes no se tocan"
+                  onClick={() => {
+                    setBorrando(row.conversationId);
+                    // el acuse del borrado anterior se retira: dejarlo encima de
+                    // una pregunta nueva diría que ésta ya se contestó
+                    setBorrado(null);
+                  }}
+                >
+                  Borrar su memoria
+                </button>
+              )}
               {look.canRead && (
                 <button
                   className="btn btn--quiet"
-                  title="Léela antes de aprobarla: esto es lo que ella va a leer en cada mensaje de ese hilo"
+                  title={
+                    look.cardIsStale
+                      ? 'La ficha que se escribió hacia atrás. Esta conversación ya tiene memoria propia, así que esto NO entra en ningún prompt: se conserva para que puedas leerla y borrarla'
+                      : 'Léela antes de aprobarla: esto es lo que ella va a leer en cada mensaje de ese hilo'
+                  }
                   onClick={() =>
-                    setOpen(open === row.conversationId ? null : row.conversationId)
+                    setOpen(
+                      abierto === 'card'
+                        ? null
+                        : { conversationId: row.conversationId, kind: 'card' },
+                    )
                   }
                 >
-                  {open === row.conversationId ? 'Cerrar' : 'Ver'}
+                  {abierto === 'card'
+                    ? 'Cerrar'
+                    : look.cardIsStale
+                      ? 'Ver la ficha antigua'
+                      : 'Ver'}
                 </button>
               )}
               {look.canApprove && (
@@ -5765,10 +6097,192 @@ function RecapSection({
               )}
             </div>
 
-            {open === row.conversationId && <p className="vault-recap__block">{row.block}</p>}
+            {/* la pregunta dice las dos mitades, y la de «qué NO se toca» va
+                primero: lo que da miedo al pulsar un botón rojo en una
+                conversación es perderla, y hasta que eso no queda descartado no
+                se lee nada más. Lo de volver a sellarse va DENTRO y no en una
+                nota aparte porque sin saberlo se volvería a encontrar memoria
+                en ese hilo y parecería que el borrado no funcionó */}
+            {borrando === row.conversationId && (
+              <>
+                <Notice tone="warn">
+                  <strong>Se borra sólo lo que ella recuerda de esta conversación:</strong>{' '}
+                  el resumen que este hilo se escribió a sí mismo y que viaja dentro de
+                  cada uno de sus mensajes. Es el texto que enseña «Ver su memoria».{' '}
+                  <strong>No se toca nada más:</strong> los mensajes de la conversación
+                  se quedan enteros, y sus imágenes también. Tampoco se tocan el catálogo
+                  de escenas ni lo que quedó apuntado entre vosotros.{' '}
+                  {/* «la ficha retroactiva tampoco se toca» SÓLO cuando además es
+                      verdad de la que sirve: si esa ficha iba a empezar a viajar
+                      al quitar la memoria, decir que no se toca es literalmente
+                      cierto y materialmente engañoso, y de eso se encarga el
+                      aviso rojo de abajo */}
+                  {look.canRead && !look.forgetRevivesCard && (
+                    <>
+                      La ficha retroactiva se queda donde está —ésa la quita «Borrarlo»—
+                      y borrar esto tampoco hace que pase a usarse.{' '}
+                      {/* «se queda donde está» era verdad a medias y dos revisores
+                          la cazaron: quitar la memoria propia devuelve esta
+                          conversación a la pasada de fondo, que puede ampliar la
+                          ficha. Ampliarla la deja sin aprobar, y eso sí es una
+                          decisión de Daniel que desaparece. Se dice ANTES, aquí, y
+                          además queda dicho DESPUÉS, en la propia fila */}
+                      {look.forgetCostsApproval && (
+                        <>
+                          <strong>Eso sí:</strong> esta conversación vuelve al trabajo
+                          de fondo, que puede ampliar esa ficha con los mensajes
+                          nuevos. Si lo hace, la ficha se queda <strong>sin tu
+                          aprobación</strong> hasta que la leas y la apruebes otra vez,
+                          y mientras tanto no viaja. La fila te lo dirá.{' '}
+                        </>
+                      )}
+                    </>
+                  )}
+                  <strong>Y se vuelve a escribir sola:</strong> en cuanto contestes otro
+                  mensaje en este hilo, ella escribirá memoria nueva, desde cero y a
+                  partir de los últimos mensajes. Esto limpia lo de antes; no apaga la
+                  memoria de esta conversación para siempre.{' '}
+                  {/* el alcance, que no es un detalle: `D-099` decide no propagar
+                      el borrado —el registro ya subido conserva su memoria porque
+                      la subida es inmutable— y a cambio obliga a decirlo aquí */}
+                  <strong>Y borra en este equipo:</strong> lo que ya se había
+                  sincronizado sigue en el servidor, así que en otro ordenador tuyo ella
+                  lo seguirá recordando, y si esta conversación se descarga otra vez
+                  desde cero, vuelve con ello.
+                </Notice>
+                {/* dos revisores lo encontraron por su cuenta, y es lo contrario de
+                    lo que prometía el texto de arriba: `chooseConversationMemory`
+                    sólo antepone la sellada, así que al quitarla la ficha
+                    retroactiva de esta MISMA conversación vuelve a ser candidata y
+                    entra en el prompt siguiente. Borrar no limpia: cambia un texto
+                    por otro. Se dice ANTES de pulsar, y con la salida al lado */}
+                {look.forgetRevivesCard && (
+                  <Notice tone="fault">
+                    <strong>Aquí borrar no deja el hilo a cero.</strong> Esta
+                    conversación tiene además una ficha retroactiva —el resumen que se
+                    escribió hacia atrás, el de «Ver la ficha antigua»— que hoy no entra
+                    en ningún mensaje porque la memoria propia gana siempre. En cuanto
+                    borres la memoria, <strong>esa ficha pasa a viajar</strong> en el
+                    siguiente mensaje de este hilo: no se queda sin nada, se queda con
+                    otro resumen de esta misma conversación. Léela antes de decidir con
+                    «Ver la ficha antigua»; si tampoco la quieres, «Sí, borra las dos»
+                    quita las dos de una vez.
+                  </Notice>
+                )}
+                <div className="row">
+                  {look.forgetRevivesCard ? (
+                    <>
+                      <button
+                        className="btn btn--danger"
+                        disabled={ocupado}
+                        title="Quita las dos cosas: la memoria propia de este hilo y la ficha retroactiva. Los mensajes no se tocan"
+                        onClick={() =>
+                          void borrarMemoria(row.conversationId, {
+                            tambienLaFicha: true,
+                            revive: true,
+                          })
+                        }
+                      >
+                        {borrandoAhora?.conversationId === row.conversationId &&
+                        borrandoAhora.conFicha
+                          ? 'Borrando…'
+                          : 'Sí, borra las dos'}
+                      </button>
+                      <button
+                        className="btn btn--quiet"
+                        disabled={ocupado}
+                        title="Deja la ficha retroactiva donde está: desde el próximo mensaje será ella la que viaje"
+                        onClick={() =>
+                          void borrarMemoria(row.conversationId, {
+                            tambienLaFicha: false,
+                            revive: true,
+                          })
+                        }
+                      >
+                        {borrandoAhora?.conversationId === row.conversationId &&
+                        !borrandoAhora.conFicha
+                          ? 'Borrando…'
+                          : 'Sólo la suya, y que pase a leer la ficha'}
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      className="btn btn--danger"
+                      disabled={ocupado}
+                      onClick={() =>
+                        void borrarMemoria(row.conversationId, {
+                          tambienLaFicha: false,
+                          revive: false,
+                        })
+                      }
+                    >
+                      {borrandoAhora?.conversationId === row.conversationId
+                        ? 'Borrando…'
+                        : 'Sí, borra lo que recuerda'}
+                    </button>
+                  )}
+                  <button
+                    className="btn btn--quiet"
+                    disabled={ocupado}
+                    onClick={() => setBorrando(null)}
+                  >
+                    Dejarlo estar
+                  </button>
+                </div>
+              </>
+            )}
+
+            {/* sin esto el borrado no se ve: la fila pierde sus botones y el
+                recuadro se cierra, así que la pantalla queda más vacía que
+                antes, que es como se ve un botón que no hace nada. El texto se
+                arma fuera, en un módulo puro con pruebas, porque dos de sus
+                frases eran falsas y sólo una prueba lo caza */}
+            {borrado?.conversationId === row.conversationId && (
+              <Notice tone="ok">
+                {describeForgetAck({
+                  turns: borrado.turnos,
+                  cardNowInUse: borrado.fichaEnUso,
+                })}
+              </Notice>
+            )}
+
+            {abierto === 'sealed' && (
+              <p className="vault-recap__block">{row.sealedBlock}</p>
+            )}
+
+            {abierto === 'card' && (
+              <>
+                {/* sin este aviso el bloque se leía como la memoria en uso, que
+                    es justo lo que no es: esa conversación ya se escribió la
+                    suya y la sellada gana siempre */}
+                {look.cardIsStale && (
+                  <Notice tone="warn">
+                    Esto es la ficha que se escribió hacia atrás, <strong>antes</strong> de
+                    que esta conversación tuviera memoria propia. Ya no viaja en ningún
+                    mensaje: lo que ella lee es su memoria, ahí al lado. Se conserva
+                    para que puedas leerla y, si no te sirve, borrarla.
+                  </Notice>
+                )}
+                <p className="vault-recap__block">{row.block}</p>
+              </>
+            )}
           </div>
         );
       })}
+
+      {/* el acuse cuando la fila ya no existe. Pasa de verdad, y justo en el
+          caso de una conversación de prueba: excluida del trabajo de fondo y
+          sin ficha, en cuanto pierde su memoria propia deja de salir en esta
+          lista. Sin esto, pulsar el botón rojo hacía desaparecer la fila sin
+          una sola palabra, que se lee igual que un fallo */}
+      {borrado !== null &&
+        !(rows ?? []).some((row) => row.conversationId === borrado.conversationId) && (
+          <Notice tone="ok">
+            {describeForgetAck({ turns: borrado.turnos, cardNowInUse: borrado.fichaEnUso })}{' '}
+            Esta conversación ya no aparece en la lista porque no le queda nada que
+            rellenar ni que borrar desde aquí.
+          </Notice>
+        )}
     </div>
   );
 }

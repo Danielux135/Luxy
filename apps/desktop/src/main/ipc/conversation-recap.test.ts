@@ -94,6 +94,7 @@ interface Entrada {
   memory?: ConversationMemory | null;
   source?: 'cli' | 'index';
   approved?: boolean;
+  approvalReset?: boolean;
   to?: number;
   gaps?: RecapEntry['gaps'];
   version?: number;
@@ -119,6 +120,7 @@ function entrada(over: Entrada = {}): RecapEntry {
     at: instante(TURNOS - 1),
     chars: 420,
     approved: over.approved ?? true,
+    approvalReset: over.approvalReset ?? false,
     supersededAt: over.supersededAt ?? null,
   });
 }
@@ -195,6 +197,15 @@ class FakeRecaps {
     this.entries = this.entries.filter((entry) => entry.conversationId !== conversationId);
     this.writes += 1;
   }
+
+  async clearSuperseded(_vault: unknown, conversationId: string): Promise<void> {
+    this.entries = this.entries.map((entry) =>
+      entry.conversationId === conversationId && entry.supersededAt !== null
+        ? { ...entry, supersededAt: null }
+        : entry,
+    );
+    this.writes += 1;
+  }
 }
 
 interface Huella {
@@ -225,6 +236,14 @@ interface Montaje {
   /** conversaciones fuera del trabajo de fondo */
   excluidas?: string[];
   /**
+   * deja el turno parado DENTRO del modelo hasta que la prueba lo suelte.
+   *
+   * Es la unica forma de tener un envio de verdad en vuelo mientras se invoca
+   * otro canal: con el controlador falso contestando al instante, el envio
+   * termina en el primer `await` de la prueba y la carrera no se puede montar.
+   */
+  pausarCli?: () => Promise<void>;
+  /**
    * conversaciones que el indice episodico NO publica.
    *
    * Es lo que hace de verdad: `PrivateMemory.build` se salta las excluidas, y
@@ -243,6 +262,10 @@ function montar(montaje: Montaje = {}): Huella {
   };
 
   const turnos = [...historial(CONV), ...historial(OTRA, 2)];
+  // mutable a proposito: el borrado de la memoria propia tiene que poder
+  // notarse en la lectura siguiente, que es la unica forma de comprobar que
+  // desaparece de verdad y no solo de la pantalla
+  let sellada = montaje.sellada ?? null;
   if (montaje.entryFalla !== undefined) {
     huella.recaps.entryFor = async (): Promise<RecapEntry | undefined> => {
       throw montaje.entryFalla;
@@ -286,7 +309,14 @@ function montar(montaje: Montaje = {}): Huella {
       },
       removeLastTurn: () => turnos.pop(),
       latestMemory: async (_vault: unknown, conversationId: string) =>
-        conversationId === CONV ? (montaje.sellada ?? null) : null,
+        conversationId === CONV ? sellada : null,
+      clearMemory: (conversationId: string) => {
+        if (conversationId !== CONV || sellada === null) return 0;
+        sellada = null;
+        // los turnos NO se tocan: es la mitad de la promesa del boton, y una
+        // implementacion que los perdiera pasaria esta prueba sin esto
+        return 1;
+      },
       latestInstructions: async () => null,
       latestCharacterId: async () => LIA,
       latestCharacterDescription: async () => 'Lia, veinticuatro años',
@@ -334,6 +364,7 @@ function montar(montaje: Montaje = {}): Huella {
     controller: {
       runLocalTurn: async (request: { prompt: string }) => {
         huella.prompts.push(request.prompt);
+        if (montaje.pausarCli !== undefined) await montaje.pausarCli();
         return {
           outcome: montaje.finalCli ?? 'completed',
           text: montaje.respuestaCli ?? '*se estira* buenas noches',
@@ -713,6 +744,18 @@ describe('el panel de la memoria de lo ya hablado', () => {
     return (await invocar(IPC_INVOKE.vaultRecapList, {})) as { ok: boolean; value: RecapList };
   }
 
+  it('la fila lleva si la aprobacion se cayo, que no es lo mismo que «sin aprobar»', async () => {
+    // sin este campo las dos se pintaban igual, y significan cosas distintas:
+    // una nunca ha viajado y la otra ha DEJADO de viajar en ese hilo porque el
+    // trabajo de fondo reescribio una ficha que Daniel habia aprobado
+    montar({ entries: [entrada({ approved: false, approvalReset: true })], excluidas: [] });
+
+    const { value } = await listar();
+    const fila = value.rows.find((row) => row.conversationId === CONV)!;
+    expect(fila.approved).toBe(false);
+    expect(fila.approvalReset).toBe(true);
+  });
+
   it('la linea de cobertura SUMA, y la fila dice si hoy viajaria de verdad', async () => {
     // sin excluidas: lo que se mide aqui es la cobertura, y una conversacion
     // excluida no cuenta en ninguno de los cinco cajones
@@ -820,6 +863,280 @@ describe('el panel de la memoria de lo ya hablado', () => {
     expect(value.coverage.sealed).toBe(1);
     expect(value.coverage.summarized).toBe(0);
     expect(value.rows[0]!.inPrompt).toBe(false);
+  });
+
+  it('la sellada VIAJA a la pantalla, que es la unica forma de poder leerla', async () => {
+    // sin esto no habia ninguna via: la lectura de `latestMemory` se tiraba
+    // entera para quedarse con un booleano, y la fila sellada sin ficha previa
+    // no ofrecia ni un boton. Ver lo que ella lee es lo minimo
+    montar({ entries: [entrada()], sellada: ficha(RESUMEN_SELLADO), excluidas: [] });
+
+    const { value } = await listar();
+    const fila = value.rows[0]!;
+    expect(fila.sealedBlock).toContain(RESUMEN_SELLADO);
+    // y NO se confunde con la ficha retroactiva, que es otro texto y ya no viaja
+    expect(fila.block).toContain(RESUMEN_RECAP);
+    expect(fila.block).not.toContain(RESUMEN_SELLADO);
+  });
+
+  it('sin memoria propia, el bloque sellado va vacio y no inventa nada', async () => {
+    montar({ entries: [entrada()], excluidas: [] });
+
+    const { value } = await listar();
+    expect(value.rows[0]!.sealedBlock).toBe('');
+  });
+
+  it('la fila dice si borrar la memoria DESTAPARIA su ficha retroactiva', async () => {
+    // `chooseConversationMemory` solo antepone la sellada: en cuanto se borra,
+    // la ficha de esa MISMA conversacion vuelve a ser candidata y entra en el
+    // prompt siguiente. Sin este dato la pantalla no podia avisar, y el dialogo
+    // prometia «no se toca nada mas» sin saberlo
+    montar({ entries: [entrada()], sellada: ficha(RESUMEN_SELLADO), excluidas: [] });
+
+    const { value } = await listar();
+    const fila = value.rows[0]!;
+    // hoy no viaja —la sellada gana siempre— y por eso mismo destaparia
+    expect(fila.inPrompt).toBe(false);
+    expect(fila.cardRevivesOnForget).toBe(true);
+  });
+
+  it('una ficha que NO llega a la cola no destapa nada al borrar', async () => {
+    // la invariante de cobertura la descarta igual sin sellada, asi que borrar
+    // ahi si deja el hilo sin memoria: avisar seria mentir al reves
+    montar({
+      entries: [entrada({ to: 1 })],
+      sellada: ficha(RESUMEN_SELLADO),
+      excluidas: [],
+    });
+
+    const { value } = await listar();
+    expect(value.rows[0]!.cardRevivesOnForget).toBe(false);
+  });
+
+  it('sin memoria propia nunca se avisa: no hay nada que destape', async () => {
+    // el aviso es del boton de borrar, y sin sellada ese boton no existe
+    montar({ entries: [entrada()], excluidas: [] });
+
+    const { value } = await listar();
+    expect(value.rows[0]!.inPrompt).toBe(true);
+    expect(value.rows[0]!.cardRevivesOnForget).toBe(false);
+  });
+
+  it('borrar las dos deja la conversacion sin ficha y sin memoria', async () => {
+    // la salida del caso feo: avisar de que la ficha revive sin ofrecer quitarla
+    // seria lavarse las manos. La pantalla encadena los dos verbos que ya hay
+    const huella = montar({
+      entries: [entrada()],
+      sellada: ficha(RESUMEN_SELLADO),
+      excluidas: [],
+    });
+
+    const ficha_ = (await invocar(IPC_INVOKE.vaultRecapUpdate, {
+      action: 'forget',
+      conversationId: CONV,
+    })) as { ok: boolean };
+    expect(ficha_.ok).toBe(true);
+
+    const borrado = (await invocar(IPC_INVOKE.vaultConversationMemoryForget, {
+      conversationId: CONV,
+    })) as { ok: true; value: RecapList & { cleared: number } };
+    expect(borrado.ok).toBe(true);
+
+    expect(huella.recaps.entries.find((each) => each.conversationId === CONV)).toBeUndefined();
+    const { value } = await listar();
+    const fila = value.rows.find((each) => each.conversationId === CONV)!;
+    expect(fila.sealedBlock).toBe('');
+    expect(fila.block).toBe('');
+    // y lo que importa: ya no hay ningun texto de esa conversacion en el prompt
+    expect(fila.inPrompt).toBe(false);
+    expect(fila.cardRevivesOnForget).toBe(false);
+  });
+
+  it('borrar su memoria la quita de verdad y devuelve la lista sin ella', async () => {
+    // el caso de Daniel: una conversacion de prueba —solo fotos para comprobar
+    // un cambio— cuya memoria se arrastraba a todos los turnos siguientes
+    montar({ entries: [entrada()], sellada: ficha(RESUMEN_SELLADO), excluidas: [] });
+
+    const borrado = (await invocar(IPC_INVOKE.vaultConversationMemoryForget, {
+      conversationId: CONV,
+    })) as { ok: true; value: RecapList & { cleared: number } };
+    expect(borrado.ok).toBe(true);
+    expect(borrado.value.cleared).toBe(1);
+    // la lista que vuelve ya no la lleva: la pantalla no tiene que volver a pedirla
+    expect(borrado.value.rows[0]!.sealedBlock).toBe('');
+    expect(borrado.value.rows[0]!.sealed).toBe(false);
+
+    // y no es solo de la respuesta: la lectura siguiente tampoco la ve
+    const { value } = await listar();
+    expect(value.rows[0]!.sealedBlock).toBe('');
+    expect(value.coverage.sealed).toBe(0);
+  });
+
+  it('borrar su memoria NO toca los mensajes ni la ficha retroactiva', async () => {
+    const huella = montar({
+      entries: [entrada()],
+      sellada: ficha(RESUMEN_SELLADO),
+      excluidas: [],
+    });
+
+    await invocar(IPC_INVOKE.vaultConversationMemoryForget, { conversationId: CONV });
+
+    const { value } = await listar();
+    // los turnos siguen contando igual: el boton promete dejarlos, y perderlos
+    // seria borrar la conversacion, que es otra cosa y tiene su propio boton
+    expect(value.rows[0]!.turns).toBeGreaterThan(0);
+    // la ficha retroactiva es OTRO texto y se queda: la quita «Borrarlo»
+    expect(huella.recaps.entries.find((each) => each.conversationId === CONV)).toBeDefined();
+    expect(value.rows[0]!.block).toContain(RESUMEN_RECAP);
+  });
+
+  it('borrar su memoria quita la marca de «ya tiene memoria propia»', async () => {
+    // dejarla puesta condenaria esa conversacion: la fila seguiria diciendo que
+    // tiene memoria propia y la pasada de relleno la saltaria para siempre
+    const huella = montar({
+      entries: [entrada({ supersededAt: '2026-09-14T10:00:00.000Z' })],
+      sellada: ficha(RESUMEN_SELLADO),
+      excluidas: [],
+    });
+
+    await invocar(IPC_INVOKE.vaultConversationMemoryForget, { conversationId: CONV });
+
+    expect(huella.recaps.entries.find((each) => each.conversationId === CONV)?.supersededAt).toBe(
+      null,
+    );
+    const { value } = await listar();
+    expect(value.rows[0]!.superseded).toBe(false);
+  });
+
+  it('con un envio en vuelo NO se borra: ese turno volveria a sellar lo borrado', async () => {
+    // el turno leyo la memoria vieja al empezar y la vuelve a sellar al acabar,
+    // escrita por el modelo teniendo delante la anterior. Borrar en esa ventana
+    // se deshace solo, y para cuando ocurre la pantalla ya ha dicho que se hizo
+    let soltar = (): void => undefined;
+    const puerta = new Promise<void>((resolve) => {
+      soltar = resolve;
+    });
+    montar({
+      entries: [entrada()],
+      sellada: ficha(RESUMEN_SELLADO),
+      excluidas: [],
+      pausarCli: () => puerta,
+    });
+
+    const envio = enviar('sigues despierto?');
+    const durante = (await invocar(IPC_INVOKE.vaultConversationMemoryForget, {
+      conversationId: CONV,
+    })) as { ok: boolean };
+    expect(durante.ok).toBe(false);
+
+    soltar();
+    await envio;
+
+    // y en cuanto el turno cierra, el mismo boton funciona: la guarda aplaza, no
+    // prohibe
+    const despues = (await invocar(IPC_INVOKE.vaultConversationMemoryForget, {
+      conversationId: CONV,
+    })) as { ok: true; value: { cleared: number } };
+    expect(despues.ok).toBe(true);
+    expect(despues.value.cleared).toBe(1);
+  });
+
+  it('si falla quitar la marca, la memoria NO se toca y se puede reintentar', async () => {
+    // los dos pasos pueden fallar por separado, y este es el orden que deja el
+    // estado recuperable: al reves quedaria sin memoria y con la marca puesta,
+    // que es la conversacion atrapada —el panel mintiendo y la pasada saltandola
+    // para siempre— y ademas sin boton con el que volver a intentarlo
+    const huella = montar({
+      entries: [entrada({ supersededAt: '2026-09-14T10:00:00.000Z' })],
+      sellada: ficha(RESUMEN_SELLADO),
+      excluidas: [],
+    });
+    huella.recaps.clearSuperseded = async (): Promise<void> => {
+      throw new Error('recap.json no se dejo reescribir');
+    };
+
+    const borrado = (await invocar(IPC_INVOKE.vaultConversationMemoryForget, {
+      conversationId: CONV,
+    })) as { ok: boolean };
+    expect(borrado.ok).toBe(false);
+
+    const { value } = await listar();
+    // lo que importa: la memoria sigue entera, asi que no se ha perdido nada
+    expect(value.rows[0]!.sealedBlock).toContain(RESUMEN_SELLADO);
+    expect(value.rows[0]!.sealed).toBe(true);
+    // y la marca sigue donde estaba, o sea que el disco es coherente consigo
+    // mismo: no hay ningun estado a medias que arreglar a mano
+    expect(huella.recaps.entries[0]!.supersededAt).not.toBeNull();
+  });
+
+  it('una EXCLUIDA sin ficha tambien sale, o su memoria no se podria borrar', async () => {
+    // el caso literal de Daniel: una conversacion de prueba se excluye del
+    // trabajo de fondo, asi que la pasada no le escribe ficha nunca... y aun asi
+    // sella memoria en cada turno. Sin fila no hay boton, y la unica salida era
+    // borrar la conversacion entera, que se lleva los mensajes
+    montar({
+      entries: [],
+      sellada: ficha(RESUMEN_SELLADO),
+      excluidas: [CONV, OTRA],
+      indiceCiego: [CONV, OTRA],
+    });
+
+    const { value } = await listar();
+    const fila = value.rows.find((each) => each.conversationId === CONV);
+    expect(fila).toBeDefined();
+    expect(fila!.hasEntry).toBe(false);
+    expect(fila!.excluded).toBe(true);
+    expect(fila!.sealed).toBe(true);
+    expect(fila!.sealedBlock).toContain(RESUMEN_SELLADO);
+    // y la excluida que NO tiene nada que borrar sigue sin salir: una fila sin
+    // una sola accion es justo lo que este panel no debe pintar
+    expect(value.rows.find((each) => each.conversationId === OTRA)).toBeUndefined();
+
+    const borrado = (await invocar(IPC_INVOKE.vaultConversationMemoryForget, {
+      conversationId: CONV,
+    })) as { ok: true; value: { cleared: number } };
+    expect(borrado.value.cleared).toBe(1);
+  });
+
+  it('borrar de una conversacion sin memoria propia devuelve cero, no un fallo', async () => {
+    montar({ entries: [entrada()], excluidas: [] });
+
+    const borrado = (await invocar(IPC_INVOKE.vaultConversationMemoryForget, {
+      conversationId: CONV,
+    })) as { ok: true; value: { cleared: number } };
+    expect(borrado.ok).toBe(true);
+    expect(borrado.value.cleared).toBe(0);
+  });
+
+  it('del borrado va al registro una cifra, nunca lo borrado', async () => {
+    const huella = montar({
+      entries: [entrada()],
+      sellada: ficha(RESUMEN_SELLADO),
+      excluidas: [],
+    });
+
+    await invocar(IPC_INVOKE.vaultConversationMemoryForget, { conversationId: CONV });
+
+    const campos = huella.campos('memoria de lo ya hablado corregida');
+    expect(campos).toEqual({ accion: 'olvidar-propia', turnos: 1 });
+    // ni el identificador ni una palabra del resumen que se acaba de destruir
+    const escrito = JSON.stringify(huella.registros);
+    expect(escrito).not.toContain(CONV);
+    expect(escrito).not.toContain(RESUMEN_SELLADO);
+  });
+
+  it('aprobar APAGA el aviso de que la aprobacion se habia caido', async () => {
+    // el aviso existe para que una aprobacion perdida no desaparezca en
+    // silencio; en cuanto Daniel vuelve a leerla y a decidir deja de haber
+    // ninguna decision perdida, y dejarlo encendido seria enseñar un aviso de
+    // algo que ya esta resuelto
+    const huella = montar({ entries: [entrada({ approved: false, approvalReset: true })] });
+
+    await invocar(IPC_INVOKE.vaultRecapUpdate, { action: 'approve', conversationId: CONV });
+
+    const entry = huella.recaps.entries.find((each) => each.conversationId === CONV);
+    expect(entry?.approved).toBe(true);
+    expect(entry?.approvalReset).toBe(false);
   });
 
   it('aprobar deja entrar esa ficha, y solo esa', async () => {

@@ -923,11 +923,35 @@ export const vaultRecapRowSchema = z.object({
   turns: z.number().int().min(0),
   /** `formatConversationMemory` de la ficha; cadena vacia si no hay nada que leer */
   block: z.string(),
+  /**
+   * la memoria SELLADA de esa conversacion, la que de verdad viaja hoy.
+   *
+   * Nada que ver con `block`, que es la ficha retroactiva: en una conversacion
+   * sellada `block` es papel muerto —ya no entra en ningun prompt— y esto es lo
+   * unico que ella lee. Viaja porque sin ello no habia NINGUNA via de leerlo: la
+   * fila sellada sin ficha previa se quedaba sin un solo boton, y la que si
+   * tenia ficha ofrecia un «Ver» que enseñaba la muerta sin avisar.
+   *
+   * Sale de la `latestMemory` que `readRecapList` ya descifra para saber si esta
+   * sellada, asi que no cuesta ni un descifrado mas. Cadena vacia cuando no hay
+   * memoria sellada.
+   */
+  sealedBlock: z.string(),
   chars: z.number().int().min(0),
   source: z.enum(RECAP_SOURCES),
   /** tramos declarados que nadie resumio: de esos no se sabe nada */
   gaps: z.number().int().min(0),
   approved: z.boolean(),
+  /**
+   * estaba aprobada y el trabajo de fondo la reescribio.
+   *
+   * No es un matiz de `approved`: es la unica forma de distinguir una ficha que
+   * nadie ha aprobado todavia de una cuya aprobacion se ha perdido. La segunda
+   * ha dejado de viajar en los prompts de ese hilo, y hasta ahora eso pasaba sin
+   * una palabra en pantalla. El disparador tipico es borrar la memoria sellada:
+   * devuelve la conversacion a la pasada, que amplia la ficha ya aprobada.
+   */
+  approvalReset: z.boolean(),
   /** con que CLI se escribio: «revisado con Codex» */
   provider: z.enum(LOCAL_CLI_PROVIDERS).nullable(),
   model: z.string().nullable(),
@@ -982,6 +1006,17 @@ export const vaultRecapRowSchema = z.object({
    * turno esta descartando.
    */
   inPrompt: z.boolean(),
+  /**
+   * borrar la memoria propia haria que su ficha retroactiva EMPEZARA a viajar.
+   *
+   * `chooseConversationMemory` solo antepone la sellada: en cuanto desaparece,
+   * la ficha de esa MISMA conversacion vuelve a ser candidata. O sea que borrar
+   * no siempre limpia —a veces cambia un texto por otro— y eso hay que decirlo
+   * ANTES de pulsar, no despues. Es el mismo calculo que `inPrompt`, hecho sin
+   * la sellada: si la conversacion no esta sellada esto es siempre `false`,
+   * porque entonces no hay nada que borrar que pueda destapar nada.
+   */
+  cardRevivesOnForget: z.boolean(),
 });
 
 /**
@@ -1036,6 +1071,21 @@ export const vaultRecapUpdateArgsSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('forget'), conversationId: conversationIdSchema }).strict(),
   z.object({ action: z.literal('approve-all') }).strict(),
 ]);
+
+/**
+ * lo que deja el borrado de la memoria propia de una conversacion.
+ *
+ * Devuelve la lista entera —como `vaultRecapUpdate`— para que la pantalla no
+ * tenga que volver a pedirla y pueda quedarse sin saber si el borrado prendio.
+ *
+ * `cleared` son TURNOS, no conversaciones: la memoria se vuelve a sellar en
+ * cada turno que la trae buena, asi que una conversacion larga guarda muchas
+ * copias y la que manda es la ultima. Cero no es un fallo: significa que esa
+ * conversacion no tenia memoria propia.
+ */
+export const vaultSealedMemoryForgetResultSchema = vaultRecapListResultSchema.extend({
+  cleared: z.number().int().min(0),
+});
 
 /**
  * quien hace el trabajo de fondo de la boveda.
@@ -2298,6 +2348,15 @@ export interface LuxyBridge {
   updateVaultRecap(
     args: z.infer<typeof vaultRecapUpdateArgsSchema>,
   ): Promise<IpcResult<z.infer<typeof vaultRecapListResultSchema>>>;
+  /**
+   * borra lo que ella recuerda de una conversacion, sin tocar la conversacion.
+   *
+   * Es la memoria SELLADA, la que viaja en cada turno de ese hilo; no la ficha
+   * retroactiva, que la quita `updateVaultRecap` con `forget`.
+   */
+  forgetVaultSealedMemory(
+    args: z.infer<typeof vaultConversationIdArgsSchema>,
+  ): Promise<IpcResult<z.infer<typeof vaultSealedMemoryForgetResultSchema>>>;
   getVaultAuxiliary(): Promise<IpcResult<z.infer<typeof vaultAuxiliaryChoiceSchema> | null>>;
   setVaultAuxiliary(
     args: z.infer<typeof vaultAuxiliarySetArgsSchema>,

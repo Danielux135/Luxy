@@ -1,10 +1,38 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
+import type * as NodeFs from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { VaultService, VaultError, type DeviceKeyStore } from './vault-service.js';
 import { vaultFilePathFor } from './key-file.js';
 import { PrivateConversationStore, conversationsDirectory } from './conversation-store.js';
+
+/**
+ * las dos llamadas que hacen durable una escritura, envueltas para ver su ORDEN.
+ *
+ * Mismo molde que en `recap-store.test.ts` y `relation-store.test.ts`, y aqui
+ * importa mas: lo que se reescribe entero son los MENSAJES. Forzar a disco
+ * DESPUES del rename no serviria de nada —el rename solo mueve metadatos—, asi
+ * que un corte entre los dos dejaria el nombre bueno apuntando a bloques sin
+ * escribir y no quedaria ni la conversacion nueva ni la vieja. Lo demas de
+ * `node:fs` sigue siendo el de verdad.
+ */
+const fsCalls = vi.hoisted(() => [] as string[]);
+vi.mock('node:fs', async (importOriginal) => {
+  const real = await importOriginal<typeof NodeFs>();
+  return {
+    ...real,
+    default: real,
+    fsyncSync: (descriptor: number) => {
+      fsCalls.push('fsync');
+      real.fsyncSync(descriptor);
+    },
+    renameSync: (from: NodeFs.PathLike, to: NodeFs.PathLike) => {
+      fsCalls.push('rename');
+      real.renameSync(from, to);
+    },
+  };
+});
 
 const PASSWORD = 'una frase larga de prueba';
 const FAST = { t: 1, m: 8 * 1024, p: 1 } as const;
@@ -352,5 +380,130 @@ describe('instrucciones fijas de la conversacion', () => {
     await store.appendTurn(vault, A, { ...turn('uno'), instructions: 'las de A' });
     await store.appendTurn(vault, B, turn('uno'));
     expect(await store.latestInstructions(vault, B)).toBeNull();
+  });
+});
+
+describe('borrar la memoria propia sin tocar la conversacion', () => {
+  let directory: string;
+  let vault: VaultService;
+  let store: PrivateConversationStore;
+  let conversations: string;
+
+  const memoria = (summary: string) => ({
+    memory: {
+      version: 1 as const,
+      summary,
+      facts: [],
+      decisions: [],
+      plan: [],
+      openQuestions: [],
+      lessons: [],
+    },
+  });
+
+  beforeEach(async () => {
+    directory = mkdtempSync(join(tmpdir(), 'luxy-olvido-'));
+    vault = new VaultService(vaultFilePathFor(directory), memoryDeviceKeys(), {
+      argon2Params: FAST,
+    });
+    await vault.create(PASSWORD);
+    conversations = conversationsDirectory(directory);
+    store = new PrivateConversationStore(conversations);
+  });
+
+  afterEach(() => {
+    rmSync(directory, { recursive: true, force: true });
+  });
+
+  it('quita la memoria y deja los turnos enteros', async () => {
+    await store.appendTurn(vault, A, turn('hola'));
+    await store.appendTurn(vault, A, turn('que tal', 'assistant'), memoria('lo de las fotos'));
+
+    expect(store.clearMemory(A)).toBe(1);
+    expect(await store.latestMemory(vault, A)).toBeNull();
+    // lo que NO se toca, que es la mitad de la promesa del boton
+    const turns = await store.read(vault, A);
+    expect(turns.map((each) => each.text)).toEqual(['hola', 'que tal']);
+  });
+
+  it('las quita TODAS, no solo la ultima', async () => {
+    // `latestMemory` busca hacia atras: dejar una sola sin borrar no borra nada,
+    // solo destapa la anterior
+    await store.appendTurn(vault, A, turn('uno', 'assistant'), memoria('la primera'));
+    await store.appendTurn(vault, A, turn('dos', 'assistant'), memoria('la segunda'));
+    await store.appendTurn(vault, A, turn('tres', 'assistant'), memoria('la tercera'));
+
+    expect(store.clearMemory(A)).toBe(3);
+    expect(await store.latestMemory(vault, A)).toBeNull();
+  });
+
+  it('el archivo deja de contener el sobre de la memoria', async () => {
+    await store.appendTurn(vault, A, turn('uno', 'assistant'), memoria('lo de las fotos'));
+    const file = join(conversations, `${A}.jsonl`);
+    expect(readFileSync(file, 'utf8')).toContain('"sealedMemory":{');
+
+    store.clearMemory(A);
+    expect(readFileSync(file, 'utf8')).toContain('"sealedMemory":null');
+  });
+
+  it('sin memoria que borrar devuelve cero y no reescribe nada', async () => {
+    await store.appendTurn(vault, A, turn('hola'));
+    const file = join(conversations, `${A}.jsonl`);
+    const antes = readFileSync(file, 'utf8');
+
+    expect(store.clearMemory(A)).toBe(0);
+    expect(readFileSync(file, 'utf8')).toBe(antes);
+  });
+
+  it('no toca las demas conversaciones', async () => {
+    await store.appendTurn(vault, A, turn('uno', 'assistant'), memoria('la de A'));
+    await store.appendTurn(vault, B, turn('uno', 'assistant'), memoria('la de B'));
+
+    store.clearMemory(A);
+    expect(await store.latestMemory(vault, B)).not.toBeNull();
+  });
+
+  it('una linea ilegible se conserva tal cual en vez de perderse', async () => {
+    await store.appendTurn(vault, A, turn('uno', 'assistant'), memoria('lo de las fotos'));
+    const file = join(conversations, `${A}.jsonl`);
+    // reescribir el archivo desde `readRecords` habria borrado esta linea de
+    // verdad: esa lectura descarta en silencio lo que no parsea
+    writeFileSync(file, `${readFileSync(file, 'utf8')}esto no es json\n`, 'utf8');
+
+    expect(store.clearMemory(A)).toBe(1);
+    expect(readFileSync(file, 'utf8')).toContain('esto no es json');
+  });
+
+  it('de una conversacion que no existe no se borra nada', () => {
+    expect(store.clearMemory(B)).toBe(0);
+  });
+
+  it('los mensajes se fuerzan a disco ANTES de renombrar', async () => {
+    // reescribir el archivo entero por querer quitar una ficha es la unica
+    // operacion que pone en juego la conversacion completa: sin el `fsync` un
+    // corte de luz podia dejar el nombre bueno apuntando a nada
+    await store.appendTurn(vault, A, turn('hola'));
+    await store.appendTurn(vault, A, turn('que tal', 'assistant'), memoria('lo de las fotos'));
+    fsCalls.length = 0;
+
+    expect(store.clearMemory(A)).toBe(1);
+
+    expect(fsCalls).toEqual(['fsync', 'rename']);
+  });
+
+  it('y retirar el ultimo turno tampoco puede dejar el historial a medias', async () => {
+    // el mismo camino y el mismo riesgo: `removeLastTurn` reescribe el archivo
+    // entero, y lo dispara sola cada envio que falla sin respuesta
+    await store.appendTurn(vault, A, turn('hola'));
+    await store.appendTurn(vault, A, turn('que tal', 'assistant'));
+    fsCalls.length = 0;
+
+    expect(store.removeLastTurn(A)).toBe(true);
+
+    expect(fsCalls).toEqual(['fsync', 'rename']);
+  });
+
+  it('un identificador que no es un uuid se rechaza', () => {
+    expect(() => store.clearMemory('../otra-cosa')).toThrow(VaultError);
   });
 });

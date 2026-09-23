@@ -59,6 +59,13 @@ export const IPC_INVOKE = {
   vaultConversationRead: 'luxy:vault:conversation:read',
   vaultConversationSend: 'luxy:vault:conversation:send',
   vaultConversationDelete: 'luxy:vault:conversation:delete',
+  /**
+   * borra lo que ella recuerda de un hilo, dejando el hilo entero.
+   *
+   * Va aparte de `vaultRecapUpdate`, que decide sobre la ficha RETROACTIVA: son
+   * dos textos distintos, viven en dos almacenes distintos y solo uno viaja.
+   */
+  vaultConversationMemoryForget: 'luxy:vault:conversation:memory:forget',
   vaultMediaAttach: 'luxy:vault:media:attach',
   vaultCompatibility: 'luxy:vault:compatibility',
   vaultMemoryList: 'luxy:vault:memory:list',

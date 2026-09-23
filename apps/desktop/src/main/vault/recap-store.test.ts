@@ -81,6 +81,7 @@ function entry(over: Partial<RecapEntry> & { conversationId: string }): RecapEnt
     gaps: [],
     turnsAtRecap: 12,
     version: RECAP_VERSION,
+    approvalReset: false,
     provider: 'codex',
     model: null,
     at: '2026-09-04T21:01:00.000Z',
@@ -427,6 +428,79 @@ describe('almacen de la memoria de lo ya hablado', () => {
     await store.markSuperseded(vault, CONV_C, '2026-09-14T10:00:00.000Z');
 
     expect((await store.read(vault)).entries).toHaveLength(1);
+  });
+
+  it('clearSuperseded quita la marca y deja la ficha entera', async () => {
+    await store.apply(vault, () =>
+      state({
+        entries: [entry({ conversationId: CONV_A }), entry({ conversationId: CONV_B })],
+      }),
+    );
+    await store.markSuperseded(vault, CONV_A, '2026-09-14T10:00:00.000Z');
+    await store.markSuperseded(vault, CONV_B, '2026-09-14T10:00:00.000Z');
+
+    await store.clearSuperseded(vault, CONV_A);
+
+    const leido = await store.read(vault);
+    const limpia = leido.entries.find((each) => each.conversationId === CONV_A);
+    const intacta = leido.entries.find((each) => each.conversationId === CONV_B);
+    expect(limpia?.supersededAt).toBeNull();
+    // el texto de la ficha NO es lo que quita esta operacion: eso lo hace
+    // `removeConversation`, y aqui quitarlo seria borrar dos cosas por una
+    expect(limpia?.memory?.summary).toBe(COCINA);
+    expect(intacta?.supersededAt).toBe('2026-09-14T10:00:00.000Z');
+  });
+
+  it('clearSuperseded sobre una que no estaba marcada no cambia nada', async () => {
+    await store.apply(vault, () => state({ entries: [entry({ conversationId: CONV_A })] }));
+
+    await store.clearSuperseded(vault, CONV_A);
+
+    const leido = await store.read(vault);
+    expect(leido.entries).toHaveLength(1);
+    expect(leido.entries[0]?.supersededAt).toBeNull();
+  });
+
+  it('clearSuperseded de una conversacion sin ficha no inventa ninguna', async () => {
+    await store.apply(vault, () => state({ entries: [entry({ conversationId: CONV_A })] }));
+
+    await store.clearSuperseded(vault, CONV_C);
+
+    expect((await store.read(vault)).entries).toHaveLength(1);
+  });
+
+  it('SIN MARCA NO ESCRIBE: sin archivo, no lo crea', async () => {
+    // el borrado de la memoria sellada llama a esto primero, y la fila que hizo
+    // falta hacer visible —excluida del trabajo de fondo, sellada, sin ficha— no
+    // tiene nada que quitar aqui. Escribir igualmente ataba ese borrado a poder
+    // reescribir `recap.json`, y encima creaba de la nada un archivo que no
+    // existia
+    const quito = await store.clearSuperseded(vault, CONV_C);
+
+    expect(existsSync(file)).toBe(false);
+    expect(quito).toBe(false);
+  });
+
+  it('SIN MARCA NO ESCRIBE: el archivo se queda byte a byte igual', async () => {
+    await store.apply(vault, () => state({ entries: [entry({ conversationId: CONV_A })] }));
+    const antes = readFileSync(file);
+
+    const quito = await store.clearSuperseded(vault, CONV_A);
+
+    // byte a byte y no «las fichas siguen»: cada guardado sella con un nonce
+    // nuevo, asi que si hubiera reescrito, el archivo seria otro
+    expect(readFileSync(file).equals(antes)).toBe(true);
+    expect(quito).toBe(false);
+  });
+
+  it('con marca SI escribe, y lo dice', async () => {
+    await store.apply(vault, () => state({ entries: [entry({ conversationId: CONV_A })] }));
+    await store.markSuperseded(vault, CONV_A, '2026-09-14T10:00:00.000Z');
+
+    const quito = await store.clearSuperseded(vault, CONV_A);
+
+    expect(quito).toBe(true);
+    expect((await store.read(vault)).entries[0]?.supersededAt).toBeNull();
   });
 
   it('sin archivo, leer devuelve vacio en vez de lanzar', async () => {

@@ -2,10 +2,15 @@
 //
 // Una entrada por conversacion: la ficha, hasta donde cubre, con que CLI se
 // escribio, si Daniel la aprobo y como termino el ultimo intento. Vive FUERA de
-// los `.jsonl` sellados a proposito: no existe API para reescribir un registro,
-// hacerlo obligaria a reescribir el archivo entero por el unico camino que no
-// hace `fsync`, y una memoria mal escrita dentro de un registro apaga la lista
-// entera de Privado.
+// los `.jsonl` sellados a proposito: cambiarla obligaria a reescribir el archivo
+// entero de la conversacion —cada guardado pondria en juego los mensajes, no la
+// ficha—, y una memoria mal escrita dentro de un registro apaga la lista entera
+// de Privado.
+//
+// Esa frase decia ademas «por el unico camino que no hace `fsync`». Ya no: el
+// borrado de la memoria propia necesitaba reescribir el `.jsonl`, y al hacerlo
+// se llevo el `fsync` a `conversation-store.ts`. El resto del argumento sigue
+// en pie, que es lo que mantiene esta ficha aqui fuera.
 //
 // Se cifra con el dominio `identity` y el contexto `recap`, hermano del
 // catalogo y de los pendientes. Deliberadamente NO se usa `subkeyFor('memory',
@@ -284,7 +289,20 @@ export class RecapStore {
 
   /** cambia lo guardado sin que dos cambios a la vez se pisen */
   async apply(vault: VaultService, mutator: RecapMutator): Promise<RecapState> {
-    const run = this.lane.then(() => this.mutate(vault, mutator));
+    return this.queue(() => this.mutate(vault, mutator));
+  }
+
+  /**
+   * el carril, suelto de lo que se hace dentro.
+   *
+   * Se separa de `apply` porque hay una operacion que necesita el carril y NO
+   * necesita escribir: `clearSuperseded`. Serializarla igual importa —lee para
+   * decidir si hay algo que quitar, y la pasada puede estar escribiendo a la
+   * vez—, pero obligarla a pasar por `mutate` la obligaba a reescribir el
+   * archivo entero siempre.
+   */
+  private queue<T>(task: () => Promise<T>): Promise<T> {
+    const run = this.lane.then(task);
     // el carril sigue vivo pase lo que pase, y ademas asi la rama que espera al
     // anterior nunca queda sin manejar
     this.lane = run.then(
@@ -332,6 +350,54 @@ export class RecapStore {
         return { ...entry, supersededAt: at };
       }),
     }));
+  }
+
+  /**
+   * la marca de arriba deja de ser cierta: esa memoria sellada ya no esta.
+   *
+   * Es el reverso exacto de `markSuperseded` y existe porque la marca es el
+   * apunte de un HECHO —«esta conversacion tiene memoria propia»—, no una
+   * decision de nadie. Cuando Daniel borra esa memoria, el hecho se acaba, y una
+   * marca que le sobrevive miente dos veces: el panel sigue diciendo «ya tiene
+   * memoria propia» de una conversacion que ya no la tiene, y la pasada de
+   * relleno la salta para siempre, con lo cual el borrado dejaria esa
+   * conversacion sin memoria y sin forma de volver a tenerla.
+   *
+   * No toca nada mas de la ficha: el texto retroactivo tiene su propio boton.
+   *
+   * SIN MARCA NO ESCRIBE, y devuelve si llego a quitar algo. El borrado de la
+   * memoria sellada llama a esto primero —ver el orden razonado en su handler—,
+   * asi que escribir siempre ataba ese borrado a poder reescribir `recap.json`
+   * incluso cuando esa conversacion no tiene ficha ninguna: es justo el caso de
+   * una conversacion de prueba, excluida del trabajo de fondo y por tanto sin
+   * entrada, donde ademas se CREABA un `recap.json` vacio que no existia. El
+   * orden no cambia; lo que se quita es el paso cuando no hay nada que hacer.
+   *
+   * Lo que sigue siendo obligatorio es la LECTURA: sin abrir el archivo no se
+   * puede saber si hay marca, y darla por ausente dejaria en pie la unica
+   * combinacion irrecuperable —memoria borrada con la marca viva—.
+   */
+  async clearSuperseded(vault: VaultService, conversationId: string): Promise<boolean> {
+    return this.queue(async () => {
+      const current = await this.read(vault);
+      const marcada = current.entries.some(
+        (entry) => entry.conversationId === conversationId && entry.supersededAt !== null,
+      );
+      if (!marcada) return false;
+
+      await this.persist(
+        vault,
+        {
+          counters: current.counters,
+          entries: current.entries.map((entry) => {
+            if (entry.conversationId !== conversationId) return entry;
+            return { ...entry, supersededAt: null };
+          }),
+        },
+        current.unreadable,
+      );
+      return true;
+    });
   }
 
   private async mutate(vault: VaultService, mutator: RecapMutator): Promise<RecapState> {

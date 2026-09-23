@@ -694,6 +694,82 @@ describe('la escalera de negativas', () => {
     // escribe esta entrada
     expect(entry.refusedKind).toBe('absent');
     expect(entry.refusedProvider).toBe('codex');
+    // y si la aprobacion se conserva, no hay ninguna aprobacion perdida que
+    // contar: el aviso del panel solo puede salir cuando de verdad se ha caido
+    expect(entry.approvalReset).toBe(false);
+  });
+
+  it('AMPLIAR una ficha aprobada deja constancia de que la aprobacion se cayo', async () => {
+    // reescribir la ficha le quita la aprobacion a proposito —el texto es otro y
+    // nada que Daniel no haya leido entra en un prompt—, pero el efecto es que
+    // ese hilo DEJA de leer una ficha que si leia, y eso se veia en pantalla
+    // igual que una ficha que nadie ha mirado nunca. El disparador tipico es
+    // borrar la memoria sellada del hilo: quita `supersededAt` y la conversacion
+    // vuelve a esta cola
+    const turns = conversacion(8);
+    const montaje = montar({
+      conversations: [{ conversationId: CONV_VIEJA, turns }],
+      replies: [ficha({ from: 0, to: 7 }, { summary: OTRO_RESUMEN })],
+    });
+    montaje.recaps.state = {
+      counters: recapCountersSchema.parse({}),
+      entries: [
+        recapEntrySchema.parse({
+          conversationId: CONV_VIEJA,
+          memory: memoria(RESUMEN),
+          source: 'cli',
+          covered: { from: 0, to: 3 },
+          coveredAt: turns[3]!.createdAt,
+          turnsAtRecap: 4,
+          version: RECAP_VERSION,
+          provider: 'codex',
+          model: null,
+          at: ANCHOR.instant,
+          chars: 120,
+          approved: true,
+        }),
+      ],
+    };
+
+    await montaje.sync.runOnce({ projectAlias: 'luxy' });
+
+    const entry = montaje.recaps.entry(CONV_VIEJA)!;
+    expect(entry.memory?.summary).toBe(OTRO_RESUMEN);
+    // sigue sin viajar hasta que la lea, que es lo que manda `D-088`
+    expect(entry.approved).toBe(false);
+    // lo nuevo: que se sepa que ANTES si estaba aprobada
+    expect(entry.approvalReset).toBe(true);
+  });
+
+  it('una ficha que nadie habia aprobado no inventa una aprobacion perdida', async () => {
+    const turns = conversacion(8);
+    const montaje = montar({
+      conversations: [{ conversationId: CONV_VIEJA, turns }],
+      replies: [ficha({ from: 0, to: 7 }, { summary: OTRO_RESUMEN })],
+    });
+    montaje.recaps.state = {
+      counters: recapCountersSchema.parse({}),
+      entries: [
+        recapEntrySchema.parse({
+          conversationId: CONV_VIEJA,
+          memory: memoria(RESUMEN),
+          source: 'cli',
+          covered: { from: 0, to: 3 },
+          coveredAt: turns[3]!.createdAt,
+          turnsAtRecap: 4,
+          version: RECAP_VERSION,
+          provider: 'codex',
+          model: null,
+          at: ANCHOR.instant,
+          chars: 120,
+          approved: false,
+        }),
+      ],
+    };
+
+    await montaje.sync.runOnce({ projectAlias: 'luxy' });
+
+    expect(montaje.recaps.entry(CONV_VIEJA)!.approvalReset).toBe(false);
   });
 
   it('«Rehacerlo» reintenta con el mismo CLI y empieza de cero', async () => {

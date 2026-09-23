@@ -178,6 +178,17 @@ export const recapEntrySchema = z.object({
   chars: z.number().int().min(0),
   /** hasta que Daniel no aprueba, no entra en ningun prompt */
   approved: z.boolean().default(false),
+  /**
+   * esta ficha ESTABA aprobada y el trabajo de fondo la reescribio.
+   *
+   * La aprobacion no se puede conservar: el texto es otro y meter en un prompt
+   * lo que Daniel no ha leido es justo lo que `approved` existe para impedir. Lo
+   * que si se puede conservar es el hecho de que la habia aprobado, porque sin
+   * esto la ficha dejaba de viajar en ese hilo y en la pantalla no quedaba ni
+   * una palabra de que hubiera pasado: un `approved: false` mas, identico al de
+   * una ficha recien escrita. Lo apaga «Aprobar».
+   */
+  approvalReset: z.boolean().default(false),
   refusedKind: z.enum(RECAP_REFUSAL_KINDS).nullable().default(null),
   refusedAtTurns: z.number().int().min(0).nullable().default(null),
   refusedProvider: z.enum(LOCAL_CLI_PROVIDERS).nullable().default(null),

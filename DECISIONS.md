@@ -3852,3 +3852,139 @@ vuelva incoherente.
 
 **Consecuencia para quien herede esto:** rellenar los cuatro campos sin haber
 medido antes no es «configurar bien», es tirar la única comparación disponible.
+
+## D-099 — borrar la memoria propia borra en ESTE equipo, y hay que decirlo
+
+Fecha: 2026-09-23. Autor: Claude. Contexto: los defectos de integridad del boton
+«Borrar su memoria» (`vaultConversationMemoryForget`).
+
+Estado: aceptada. **No se propaga. La consecuencia se dice en pantalla.**
+
+El boton reescribe el `.jsonl` local dejando intacta la `sequence` de cada
+registro. La subida a `/api/vault/records` es idempotente por (boveda,
+conversacion, secuencia) -lo dice el comentario de `apps/desktop/src/main/vault/
+sync.ts`-, asi que el registro que ya esta en el servidor conserva su sobre
+`sealedMemory` y el borrado **no viaja**. Dos consecuencias reales:
+
+1. en otro equipo ya sincronizado la memoria sigue entera y ella la sigue
+   leyendo;
+2. si el `.jsonl` local desaparece y se vuelve a sincronizar, la memoria vuelve
+   con el resto de la conversacion.
+
+**Por que no se propaga.** Haria falta un verbo nuevo en el gateway que MODIFIQUE
+o retire un registro ya subido, y la sincronizacion entera se apoya en lo
+contrario: «no hay resolucion de conflictos, y no hace falta» porque un turno es
+inmutable y su identidad es (conversacion, secuencia). Abrir esa puerta para una
+sola casilla pone en juego el historial de todos los equipos -un borrado mal
+dirigido deja de ser recuperable desde ningun sitio- y arrastra migracion,
+endpoint, autorizacion y despliegue, que en este proyecto no se hacen sin permiso
+expreso. El coste es enorme y el beneficio, para un solo usuario con un equipo
+principal, pequeño.
+
+**Lo que si es obligatorio, entonces.** El dialogo y el acuse no pueden seguir
+diciendo «Borrado» a secas: tienen que decir que borra **solo en este equipo**.
+Una promesa que el codigo no cumple es peor que no tener boton, y aqui la funcion
+entera existe para que ella deje de recordar algo. Esa redaccion es el paso
+siguiente de este mismo trabajo; el alcance queda escrito en el comentario del
+handler para que no se pierda.
+
+**Si algun dia se quiere de verdad global**, el camino honesto no es un borrado
+remoto de un registro: es subir un turno NUEVO -inmutable, como todos- que anule
+la memoria anterior, y que `latestMemory` lo respete. Eso encaja con el diseño
+que ya hay en vez de romperlo. No se hace hoy porque nadie lo ha pedido.
+
+**Cumplido el 2026-09-23.** El dialogo dice «Y borra en este equipo: lo que ya se
+habia sincronizado sigue en el servidor...» y el acuse termina en «Borrado en
+este equipo...». El acuse se arma en `describeForgetAck`
+(`apps/desktop/src/renderer/vault-recap-row.ts`), que es una funcion pura con
+pruebas: una prueba fija que esa frase sale SIEMPRE, con ficha destapada o sin
+ella. Estaba suelto en el JSX y ahi no lo comprobaba nadie.
+
+## D-100 — borrar la memoria propia puede destapar la ficha: se avisa y se ofrece quitar las dos
+
+Fecha: 2026-09-23. Autor: Claude. Contexto: los tres revisores adversariales del
+boton «Borrar su memoria» dieron con lo mismo por separado.
+
+Estado: aceptada.
+
+`chooseConversationMemory` (`packages/shared/src/vault-recap.ts`) solo antepone la
+memoria sellada. Mientras la hay, la ficha retroactiva de esa MISMA conversacion
+es papel muerto; en cuanto se borra, vuelve a ser candidata y entra en el prompt
+del turno siguiente. Con `source: 'index'` entra ademas sin aprobacion y sin
+comprobar cobertura. O sea: alli borrar **no limpia**, cambia un texto por otro,
+y el otro tambien habla de esa conversacion.
+
+**La decision de fondo no cambia**: revivir la ficha es exactamente el estado
+anterior al sellado y es defendible. Lo que no es defendible es callarlo. Se hace
+lo unico que cierra el defecto de verdad, y son dos mitades:
+
+1. **decirlo antes de pulsar.** La fila trae `cardRevivesOnForget`, calculado en
+   `readRecapList` con la misma funcion que decide en el turno pero sin la
+   sellada; `describeRecapRow` lo cruza con «¿hay boton?» en `forgetRevivesCard`,
+   y la confirmacion añade un aviso propio cuando se da el caso. No se avisa de
+   una consecuencia que no se puede provocar: sin boton no hay aviso;
+2. **dar la salida.** El mismo dialogo ofrece «Si, borra las dos», que encadena
+   los dos verbos que ya existian -primero `forget` de la ficha, despues la
+   memoria propia-. Ese orden y no el otro: si falla el primer paso no se ha
+   destruido nada y los botones siguen ahi; al reves quedaria la ficha viva
+   junto a una memoria ya borrada, que es justo lo que el aviso promete evitar.
+   Por eso `decideRecap` devuelve ahora un booleano.
+
+**Por que no basta con avisar.** Avisar sin dar salida es lavarse las manos: el
+caso que trajo todo este trabajo es una conversacion de prueba que Daniel queria
+dejar de arrastrar, y dejarle un aviso de que va a seguir arrastrandola por otra
+puerta no resuelve nada. Y por que no se borran las dos siempre: son dos textos
+distintos con su propio boton, y tirar la ficha de alguien sin preguntar es el
+error contrario.
+
+## D-101 — una aprobacion de Daniel no se pierde en silencio
+
+Fecha: 2026-09-23. Autor: Claude. Contexto: es el defecto 4 de la primera
+revision, el unico de los trece que seguia sin tocar, y lo volvieron a marcar las
+dos revisiones de la ultima vuelta. `D-099` y `D-100` no lo mencionaban.
+
+Estado: aceptada.
+
+**La cadena, verificada leyendo el codigo.** Borrar la memoria sellada de un hilo
+llama a `clearSuperseded`, que pone `supersededAt: null`. Ese campo es el UNICO
+filtro que sacaba esa conversacion de la cola del trabajo de fondo
+(`recap-sync.ts`, `pending`). Asi que vuelve a la cola; si el CLI amplia su ficha,
+`state.mutated` es cierto, no se cumple la rama que conserva `state.previous`
+(`keepsPrevious`) y `entryOf` escribe una entrada NUEVA con `approved: false`. La
+ficha deja de entrar en los prompts de ese hilo, y en pantalla eso se veia
+exactamente igual que una ficha que nadie ha mirado nunca.
+
+**Lo que NO se hace, y por que.**
+
+- **conservar la aprobacion.** El texto es otro: meter en un prompt lo que Daniel
+  no ha leido es justo lo que `approved` existe para impedir;
+- **sacar esa conversacion de la cola.** Una ficha aprobada que no crece deja de
+  cubrir la cola literal, y entonces el turno la descarta igual. Seria la misma
+  perdida por otro camino, y ademas silenciosa para siempre;
+- **avisar solo antes de borrar.** El disparador mas probable es el borrado, pero
+  no es el unico: la pasada amplia fichas por su cuenta cuando la conversacion
+  crece. Un aviso atado al boton dejaria fuera el resto de los casos.
+
+**Lo que se hace, y son dos mitades.**
+
+1. **el hecho se guarda.** `RecapEntry` gana `approvalReset`, que se estampa en
+   `persistEntry` -el UNICO camino de escritura de la pasada, para que ninguna
+   rama nueva se lo salte- cuando la entrada anterior estaba aprobada y la nueva
+   no. La fila lo lleva hasta el panel, el estado pasa a decir «la aprobaste y se
+   ha reescrito» en vez de «sin aprobar», y sale un aviso con el boton que la
+   devuelve. «Aprobar» lo apaga: leerla otra vez y decidir es justo lo que
+   cierra el asunto;
+2. **y se dice antes de pulsar.** `forgetCostsApproval` marca la rama exacta en la
+   que ocurre -ficha aprobada que todavia no llega hasta el final, o sea la que
+   la pasada va a ampliar-, y el dialogo del boton rojo lo cuenta ahi. Es la
+   rama en la que hasta hoy decia «la ficha retroactiva se queda donde esta»:
+   verdad del texto y falso de la decision.
+
+**Lo que se descubre de paso, y se arregla aparte.** `clearSuperseded` escribia
+`recap.json` entero aunque esa conversacion no tuviera ficha ninguna -el caso
+literal de una conversacion de prueba: excluida del trabajo de fondo, sellada, sin
+entrada-, y llegaba a CREAR el archivo cuando no existia. Ahora lee, y solo
+escribe si hay marca que quitar. El orden de los dos pasos no cambia: lo que se
+quita es el paso cuando no hay nada que hacer. Lo que sigue siendo obligatorio es
+la lectura, porque dar la marca por ausente sin poder mirarla dejaria en pie la
+unica combinacion irrecuperable -memoria borrada con la marca viva-.

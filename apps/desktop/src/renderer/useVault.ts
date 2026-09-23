@@ -20,8 +20,10 @@ import type {
   VaultImagePlanEdit,
 } from '@luxy/shared';
 import type { HordeQueueProgress } from '../shared/horde-progress.js';
+import { callBridge } from './bridge-call.js';
 import { compatibilityFor, type CompatibilityRun } from './vault-compatibility-reply.js';
 import { discardDecrypted } from './vault-lock-reset.js';
+import { recapSignature } from './vault-recap-row.js';
 import type { RecapSweepRound } from './vault-sweep.js';
 import type {
   vaultCompatibilityResultSchema,
@@ -331,11 +333,38 @@ const EMPTY_DRAFT = {
   | 'visionEffort'
 >;
 
+/**
+ * de qué sección es un aviso de error.
+ *
+ * Un nombre por RECUADRO y no uno por botón: lo que hace falta saber es en qué
+ * recuadro de la pantalla se tiene que ver el motivo. Lo que no lleva dueño se
+ * pinta en el aviso general de la página, que es el único que no puede quedar
+ * plegado ni fuera de pantalla.
+ *
+ * `trabajo-de-fondo` existe porque «Quién hace el trabajo de fondo» vive en «Lo
+ * que recuerda» y su fallo se estaba pintando dentro de «Memoria de lo ya
+ * hablado», que es OTRA sección del mismo panel y está dos bloques más abajo:
+ * exactamente el defecto que estos dueños vinieron a arreglar. El mismo verbo lo
+ * llaman dos sitios distintos, así que el dueño lo pone quien llama, no el verbo.
+ */
+export type VaultErrorArea =
+  | 'memoria'
+  | 'trabajo-de-fondo'
+  | 'personajes'
+  | 'disponibilidad';
+
 export interface VaultController {
   status: VaultStatusView;
   loading: boolean;
   busy: boolean;
   error: string | null;
+  /**
+   * la sección a la que pertenece `error`, o `null` si no es de ninguna.
+   *
+   * Sin esto un solo fallo pintaba cuatro o cinco recuadros rojos idénticos en
+   * la misma vista, y uno de ellos dentro de un panel que no se había tocado.
+   */
+  errorArea: VaultErrorArea | null;
   hint: string | null;
   /** sólo entre crear la boveda y confirmar que se copio */
   recoveryKey: string | null;
@@ -597,7 +626,14 @@ export interface VaultController {
   /** quien hace el trabajo de fondo de la boveda; `null` es automatico */
   auxiliary: AuxiliaryChoice | null;
   loadAuxiliary: () => Promise<void>;
-  setAuxiliary: (choice: AuxiliaryChoice | null) => Promise<void>;
+  /**
+   * `area` la pone quien llama: hay dos botones en dos secciones distintas.
+   *
+   * El desplegable de arriba pertenece a «Lo que recuerda»; «Rehacer con Claude»,
+   * a «Memoria de lo ya hablado». Fijar el dueño dentro del verbo mandaba el
+   * motivo de uno a la sección del otro.
+   */
+  setAuxiliary: (choice: AuxiliaryChoice | null, area: VaultErrorArea) => Promise<void>;
   loadMemory: () => Promise<void>;
   /**
    * cataloga en escenas lo que aun no lo este. Gasta una llamada por
@@ -725,14 +761,40 @@ export interface VaultController {
   recaps: RecapRow[] | null;
   /** la línea de cobertura que acompaña a la lista */
   recapCoverage: RecapCoverage | null;
-  loadRecaps: () => Promise<void>;
-  /** aprobar una, aprobarlas todas, u olvidar una; devuelve la lista ya rehecha */
-  decideRecap: (args: RecapDecision) => Promise<void>;
+  /**
+   * vuelve a leer la lista, sin llamar a ningún CLI. Devuelve qué salió.
+   *
+   * Devuelve algo y no `void` porque el botón que la dispara no tenía NADA que
+   * decir: si lo releído coincide con lo que ya estaba en pantalla, React pinta
+   * lo mismo y una acción que tarda segundos parecía no haberse ejecutado. Con
+   * esto el panel puede escribir «releídas 18, sigue igual», que es información.
+   *
+   * `null` cuando falló: el error ya está puesto, pero quien llama necesita
+   * saber que no hay nada que anunciar.
+   */
+  loadRecaps: () => Promise<{ rows: number; changed: boolean } | null>;
+  /**
+   * aprobar una, aprobarlas todas, u olvidar una; devuelve la lista ya rehecha.
+   *
+   * El booleano dice si la decisión llegó a escribirse: hace falta para
+   * encadenar «borra la ficha y después su memoria» sin dejar la ficha viva
+   * junto a una memoria ya borrada.
+   */
+  decideRecap: (args: RecapDecision) => Promise<boolean>;
+  /**
+   * borra lo que ella recuerda de una conversación, dejando la conversación.
+   *
+   * Devuelve cuántos turnos llevaban memoria, o `null` si falló. Devuelve la
+   * cifra y no `void` porque un borrado que no encuentra nada y otro que borra
+   * nueve copias se ven exactamente igual en pantalla —la fila se queda sin su
+   * botón— y quien pulsa tiene derecho a saber qué se llevó por delante.
+   */
+  forgetSealedMemory: (conversationId: string) => Promise<number | null>;
   /** hay una decisión escribiéndose: los botones se apagan mientras tanto */
   decidingRecap: boolean;
   readMemoryEpisode: (
     episode: MemoryEpisode,
-  ) => Promise<{ role: 'user' | 'assistant'; text: string }[]>;
+  ) => Promise<{ role: 'user' | 'assistant'; text: string }[] | null>;
   /**
    * los turnos de un tramo cualquiera, para verlos tal y como se dijeron.
    *
@@ -744,7 +806,7 @@ export interface VaultController {
     conversationId: string;
     from: number;
     to: number;
-  }) => Promise<{ role: 'user' | 'assistant'; text: string }[]>;
+  }) => Promise<{ role: 'user' | 'assistant'; text: string }[] | null>;
   excludeFromMemory: (conversationId: string, excluded: boolean) => Promise<void>;
   compatibility: CompatibilityResult[] | null;
   checkingCompatibility: boolean;
@@ -860,8 +922,31 @@ export function useVault(): VaultController {
   const [status, setStatus] = useState<VaultStatusView>(CLOSED);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setErrorText] = useState<string | null>(null);
+  const [errorArea, setErrorArea] = useState<VaultErrorArea | null>(null);
   const [hint, setHint] = useState<string | null>(null);
+  /**
+   * el aviso, y de quién es.
+   *
+   * `error` es uno solo para todo el controlador, y eso estaba bien mientras se
+   * pintara en un solo sitio. Al acercar el motivo a los botones que lo
+   * provocan, el mismo texto acabó saliendo hasta cinco veces en la misma
+   * pantalla —y un fallo de listar modelos de AI Horde aparecía dentro de
+   * «Memoria de lo ya hablado», diciendo que falló algo que nadie había
+   * tocado—. Con dueño, cada sección pinta lo suyo y el aviso general de la
+   * página se queda con lo que no es de nadie, que es lo que hacía antes.
+   *
+   * Por defecto NO hay dueño: `setError` lo borra en cada llamada, así que un
+   * fallo nuevo sin marcar no puede heredar la sección de uno viejo y quedarse
+   * escondido en un panel plegado.
+   */
+  const setError = useCallback(
+    (message: string | null, area: VaultErrorArea | null = null): void => {
+      setErrorText(message);
+      setErrorArea(message === null ? null : area);
+    },
+    [],
+  );
   const [recoveryKey, setRecoveryKey] = useState<string | null>(null);
   const [conversations, setConversations] = useState<PrivateConversation[]>([]);
   const [openConversationId, setOpenConversationId] = useState<string | null>(null);
@@ -917,6 +1002,16 @@ export function useVault(): VaultController {
   const [lastRecapSync, setLastRecapSync] = useState<RecapSyncSummary | null>(null);
   const [recapPreview, setRecapPreview] = useState<RecapPreview[] | null>(null);
   const [recaps, setRecaps] = useState<RecapRow[] | null>(null);
+  /**
+   * la firma de lo último que se leyó, para poder decir si ha cambiado.
+   *
+   * Es un `ref` y no un estado porque nadie la pinta: sólo la compara el
+   * `loadRecaps` siguiente, y dentro del callback un `useState` llegaría con el
+   * valor de la renderización anterior. Y son METADATOS —identificador, fecha,
+   * tamaños, banderas—, nunca el texto: comparar bloques obligaría a guardar una
+   * segunda copia de contenido descifrado sin necesidad.
+   */
+  const recapSignatureRef = useRef<string | null>(null);
   const [recapCoverage, setRecapCoverage] = useState<RecapCoverage | null>(null);
   const [decidingRecap, setDecidingRecap] = useState(false);
   // atada a la conversacion con la que se pidio, y no suelta: se genera con SU
@@ -1035,16 +1130,25 @@ export function useVault(): VaultController {
     };
   }, [refresh]);
 
-  /** envuelve una operacion: un solo sitio decide como se ven los errores */
+  /**
+   * envuelve una operacion: un solo sitio decide como se ven los errores.
+   *
+   * `area` dice en qué recuadro de la pantalla tiene que verse el motivo si
+   * falla. Sin ella el aviso va al general de la página, que es el
+   * comportamiento de siempre y el que no puede esconderse.
+   */
   const run = useCallback(
-    async <T>(operation: () => Promise<{ ok: true; value: T } | { ok: false; error: string; hint: string | null }>): Promise<T | null> => {
+    async <T>(operation: () => Promise<{ ok: true; value: T } | { ok: false; error: string; hint: string | null }>, area: VaultErrorArea | null = null): Promise<T | null> => {
       setBusy(true);
       setError(null);
       setHint(null);
       try {
-        const result = await operation();
+        // por `callBridge` y no a pelo: si el puente se rompe, el rechazo sale
+        // de aquí sin que nadie lo recoja —los manejadores son `void f()`— y la
+        // pantalla queda igual que si la operación hubiera ido bien
+        const result = await callBridge(operation);
         if (!result.ok) {
-          setError(result.error);
+          setError(result.error, area);
           setHint(result.hint);
           return null;
         }
@@ -1169,9 +1273,18 @@ export function useVault(): VaultController {
   }, [run]);
 
   const loadHordeModels = useCallback(async (): Promise<void> => {
-    const result = await window.luxy.listVaultHordeModels();
-    setHordeModels(result.ok ? result.value.models : []);
-  }, []);
+    // por `run`, y por lo mismo que `readHordeAccount`: antes se tragaba el
+    // error y ADEMAS borraba la lista que hubiera en pantalla, de modo que con
+    // la red caída el panel decía «la consulta no ha devuelto ningún modelo» —o
+    // sea, confundía «no hay» con «no se pudo preguntar»— y el motivo real no
+    // aparecía en ninguna parte
+    // el motivo se queda en el formulario, que es donde está «Ver
+    // disponibilidad»: pintarlo además en los otros tres avisos de esta misma
+    // vista repetía el mismo texto cuatro veces
+    const value = await run(() => window.luxy.listVaultHordeModels(), 'disponibilidad');
+    if (value === null) return;
+    setHordeModels(value.models);
+  }, [run]);
 
   const saveHordeCharacter = useCallback(
     async (input: {
@@ -1262,15 +1375,21 @@ export function useVault(): VaultController {
     if (mounted.current && result.ok) setAuxiliaryState(result.value);
   }, []);
 
-  const setAuxiliary = useCallback(async (choice: AuxiliaryChoice | null): Promise<void> => {
-    const result = await window.luxy.setVaultAuxiliary({ choice });
-    if (!mounted.current) return;
-    if (!result.ok) {
-      setError(result.error);
-      return;
-    }
-    setAuxiliaryState(result.value);
-  }, []);
+  const setAuxiliary = useCallback(
+    async (choice: AuxiliaryChoice | null, area: VaultErrorArea): Promise<void> => {
+      const result = await callBridge(() => window.luxy.setVaultAuxiliary({ choice }));
+      if (!mounted.current) return;
+      if (!result.ok) {
+        // el dueño lo pone quien pulsa: este verbo tiene dos botones y están en
+        // dos secciones distintas del mismo panel
+        setError(result.error, area);
+        setHint(result.hint);
+        return;
+      }
+      setAuxiliaryState(result.value);
+    },
+    [],
+  );
 
   const syncCatalog = useCallback(
     async (input: {
@@ -1407,20 +1526,22 @@ export function useVault(): VaultController {
       // en disco
       if (input.dryRun !== true) setRecapPreview(null);
       try {
-        const result = await window.luxy.syncVaultRecaps({
-          projectAlias: input.projectAlias,
-          ...(input.conversationId === undefined
-            ? {}
-            : { conversationId: input.conversationId }),
-          // el mismo numero que `RECAP_DEFAULT_LIMIT` en la pasada: dos y no
-          // tres como los pendientes, porque aqui una sola conversacion puede
-          // gastar una llamada por cada cuarenta turnos
-          limit: 2,
-          force: input.force ?? false,
-          dryRun: input.dryRun ?? false,
-        });
+        const result = await callBridge(() =>
+          window.luxy.syncVaultRecaps({
+            projectAlias: input.projectAlias,
+            ...(input.conversationId === undefined
+              ? {}
+              : { conversationId: input.conversationId }),
+            // el mismo numero que `RECAP_DEFAULT_LIMIT` en la pasada: dos y no
+            // tres como los pendientes, porque aqui una sola conversacion puede
+            // gastar una llamada por cada cuarenta turnos
+            limit: 2,
+            force: input.force ?? false,
+            dryRun: input.dryRun ?? false,
+          }),
+        );
         if (!result.ok) {
-          setError(result.error);
+          setError(result.error, 'memoria');
           return null;
         }
         if (!mounted.current) return null;
@@ -1452,31 +1573,91 @@ export function useVault(): VaultController {
     [],
   );
 
-  const loadRecaps = useCallback(async (): Promise<void> => {
-    const result = await window.luxy.listVaultRecaps();
-    if (!mounted.current) return;
+  const loadRecaps = useCallback(async (): Promise<{
+    rows: number;
+    changed: boolean;
+  } | null> => {
+    const result = await callBridge(() => window.luxy.listVaultRecaps());
+    if (!mounted.current) return null;
     if (!result.ok) {
-      setError(result.error);
-      return;
+      setError(result.error, 'memoria');
+      setHint(result.hint);
+      return null;
     }
     setRecaps(result.value.rows);
     setRecapCoverage(result.value.coverage);
+    const signature = recapSignature(result.value.rows);
+    const previous = recapSignatureRef.current;
+    recapSignatureRef.current = signature;
+    // la primera lectura no ha «cambiado» nada: antes no había nada con lo que
+    // comparar, y decir que sí sería inventarse una diferencia
+    return { rows: result.value.rows.length, changed: previous !== null && previous !== signature };
   }, []);
 
-  const decideRecap = useCallback(async (args: RecapDecision): Promise<void> => {
+  /**
+   * decide sobre una ficha retroactiva. Devuelve si la decisión se escribió.
+   *
+   * El booleano existe para poder encadenar: «borra las dos» quita primero la
+   * ficha y sólo entonces la memoria propia, y si el primer paso falla el
+   * segundo NO puede correr —quedaría la ficha viva y la memoria borrada, que
+   * es exactamente el estado que ese botón promete evitar—.
+   */
+  const decideRecap = useCallback(async (args: RecapDecision): Promise<boolean> => {
     setDecidingRecap(true);
     try {
-      const result = await window.luxy.updateVaultRecap(args);
-      if (!mounted.current) return;
+      const result = await callBridge(() => window.luxy.updateVaultRecap(args));
+      if (!mounted.current) return false;
       if (!result.ok) {
-        setError(result.error);
-        return;
+        setError(result.error, 'memoria');
+        setHint(result.hint);
+        return false;
       }
       // el proceso principal devuelve la lista y la cobertura ya rehechas:
       // volver a pedirlas abriria una ventana en la que los botones enseñan el
       // estado anterior
       setRecaps(result.value.rows);
       setRecapCoverage(result.value.coverage);
+      // la firma sigue a lo que se ENSEÑA, no a la última lectura: si no, el
+      // repaso siguiente diría «ha cambiado» de un cambio que Daniel acaba de
+      // hacer y ya está viendo
+      recapSignatureRef.current = recapSignature(result.value.rows);
+      return true;
+    } finally {
+      if (mounted.current) setDecidingRecap(false);
+    }
+  }, []);
+
+  /**
+   * borra la memoria propia de una conversación, sin tocar sus mensajes.
+   *
+   * Comparte `decidingRecap` con `decideRecap` a propósito: las dos escriben
+   * sobre la misma fila y los botones de esa sección ya se apagan con esa
+   * bandera. Una bandera nueva sólo conseguiría que se pudiera pulsar «Aprobar»
+   * mientras se está borrando.
+   *
+   * Lo que NO puede salir de esta bandera es la ETIQUETA del botón rojo: es
+   * compartida, así que una decisión sobre la ficha de otra fila ponía
+   * «Borrando…» en una confirmación abierta donde no se estaba borrando nada.
+   * Quién está borrando qué lo lleva el panel, que es el único que lo sabe.
+   */
+  const forgetSealedMemory = useCallback(async (conversationId: string): Promise<number | null> => {
+    setDecidingRecap(true);
+    try {
+      const result = await callBridge(() =>
+        window.luxy.forgetVaultSealedMemory({ conversationId }),
+      );
+      if (!mounted.current) return null;
+      // un borrado que falla en silencio es lo peor de los dos: la fila se queda
+      // igual y no hay forma de saber si es que no prendió o que no había nada
+      if (!result.ok) {
+        setError(result.error, 'memoria');
+        setHint(result.hint);
+        return null;
+      }
+      setRecaps(result.value.rows);
+      setRecapCoverage(result.value.coverage);
+      recapSignatureRef.current = recapSignature(result.value.rows);
+      return result.value.cleared;
     } finally {
       if (mounted.current) setDecidingRecap(false);
     }
@@ -1487,11 +1668,15 @@ export function useVault(): VaultController {
       conversationId: string;
       from: number;
       to: number;
-    }): Promise<{ role: 'user' | 'assistant'; text: string }[]> => {
-      const result = await window.luxy.readVaultMemory(input);
+    }): Promise<{ role: 'user' | 'assistant'; text: string }[] | null> => {
+      const result = await callBridge(() => window.luxy.readVaultMemory(input));
       if (!result.ok) {
         setError(result.error);
-        return [];
+        setHint(result.hint);
+        // `null` y no `[]`: una lista vacía abría el recuadro sin nada dentro y
+        // eso se lee como «esta conversación no tiene turnos», que es falso.
+        // Quien llama tiene que poder NO abrirlo
+        return null;
       }
       return result.value.turns;
     },
@@ -1499,7 +1684,9 @@ export function useVault(): VaultController {
   );
 
   const readMemoryEpisode = useCallback(
-    async (episode: MemoryEpisode): Promise<{ role: 'user' | 'assistant'; text: string }[]> =>
+    async (
+      episode: MemoryEpisode,
+    ): Promise<{ role: 'user' | 'assistant'; text: string }[] | null> =>
       readMemoryTurns({
         conversationId: episode.conversationId,
         from: episode.from,
@@ -1510,10 +1697,13 @@ export function useVault(): VaultController {
 
   const excludeFromMemory = useCallback(
     async (conversationId: string, excluded: boolean): Promise<void> => {
-      const result = await window.luxy.excludeFromVaultMemory({ conversationId, excluded });
+      const result = await callBridge(() =>
+        window.luxy.excludeFromVaultMemory({ conversationId, excluded }),
+      );
       if (!mounted.current) return;
       if (!result.ok) {
         setError(result.error);
+        setHint(result.hint);
         return;
       }
       setMemoryEpisodes(result.value.episodes);
@@ -2264,8 +2454,16 @@ export function useVault(): VaultController {
   }, []);
 
   const forgetCharacter = useCallback(async (characterId: string): Promise<void> => {
-    const result = await window.luxy.forgetVaultCharacter({ characterId });
-    if (result.ok) setCharacters(result.value.characters);
+    const result = await callBridge(() => window.luxy.forgetVaultCharacter({ characterId }));
+    if (!mounted.current) return;
+    // sin esta rama, la «×» de olvidar un personaje fallaba en silencio
+    // absoluto: ni el personaje desaparecía ni se decía por qué
+    if (!result.ok) {
+      setError(result.error, 'personajes');
+      setHint(result.hint);
+      return;
+    }
+    setCharacters(result.value.characters);
   }, []);
 
   const sync = useCallback(async (): Promise<void> => {
@@ -2299,6 +2497,7 @@ export function useVault(): VaultController {
     loading,
     busy,
     error,
+    errorArea,
     hint,
     recoveryKey,
     registerAccount,
@@ -2389,6 +2588,7 @@ export function useVault(): VaultController {
     recapCoverage,
     loadRecaps,
     decideRecap,
+    forgetSealedMemory,
     decidingRecap,
     readMemoryEpisode,
     readMemoryTurns,

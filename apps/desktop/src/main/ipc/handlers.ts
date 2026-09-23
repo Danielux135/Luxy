@@ -1836,14 +1836,21 @@ export function registerIpcHandlers(context: HandlerContext): void {
     };
 
     // la sellada gana siempre. Sin mirarla, el panel diria «resumida» de una
-    // conversacion cuyo relleno el turno ni llega a mirar
-    const sealed = new Set<string>();
+    // conversacion cuyo relleno el turno ni llega a mirar.
+    //
+    // Se guarda el BLOQUE y no un booleano: esta lectura ya descifra la memoria
+    // entera y antes se tiraba para quedarse solo con «la hay o no la hay», asi
+    // que no habia forma de leer en pantalla lo unico que de verdad viaja en
+    // esos hilos. Lo que va al renderer es lo mismo que ya va en `block`.
+    const sealed = new Map<string, string>();
     for (const summary of summaries) {
       const memory = await context.privateConversations.latestMemory(
         context.vault,
         summary.conversationId,
       );
-      if (memory !== null) sealed.add(summary.conversationId);
+      if (memory !== null) {
+        sealed.set(summary.conversationId, formatConversationMemory(memory));
+      }
     }
 
     const byEntry = new Map(snapshot.entries.map((entry) => [entry.conversationId, entry]));
@@ -1880,17 +1887,32 @@ export function registerIpcHandlers(context: HandlerContext): void {
       const entry = byEntry.get(summary.conversationId);
       const esSellada = sealed.has(summary.conversationId);
       const esExcluida = excluded.has(summary.conversationId);
-      // sin entrada, solo sale lo que la pasada podria coger algun dia
-      if (entry === undefined && (esExcluida || summary.turns === 0)) continue;
+      // sin entrada sale lo que la pasada podria coger algun dia... y ademas lo
+      // que tenga memoria propia que borrar, aunque la pasada no lo vaya a mirar
+      // nunca. Es el caso exacto de una conversacion de prueba: se excluye del
+      // trabajo de fondo, asi que no llega a tener entrada —la pasada la salta—,
+      // y sin embargo sella memoria en CADA turno. Sin esta condicion su memoria
+      // no se podia borrar desde ningun sitio, y la unica salida era borrar la
+      // conversacion entera, que se lleva los mensajes por delante
+      if (entry === undefined && !esSellada && (esExcluida || summary.turns === 0)) continue;
 
       const turns = turnsOf.get(summary.conversationId) ?? [];
       // la MISMA funcion que decide en el turno, con la sellada tratada aparte
       // exactamente como hace `recapCoverage`: si el panel y el prompt pudieran
       // discrepar, «resumida» dejaria de significar nada
       const chosen =
-        entry === undefined || esSellada
-          ? null
-          : chooseConversationMemory({ sealed: null, entry, turns });
+        entry === undefined ? null : chooseConversationMemory({ sealed: null, entry, turns });
+      /**
+       * su ficha retroactiva viajaria si no hubiera sellada por delante.
+       *
+       * Se calcula SIEMPRE, este sellada o no, porque contesta dos preguntas
+       * distintas con el mismo numero: sin sellada es «¿viaja hoy?»
+       * (`inPrompt`), y con sellada es «¿empezaria a viajar si se borrara?»
+       * (`cardRevivesOnForget`). Antes la rama sellada devolvia `null` y esa
+       * segunda pregunta no se podia contestar desde la pantalla, asi que el
+       * dialogo del borrado prometia «no se toca nada mas» sin saberlo.
+       */
+      const fichaViajaria = chosen !== null && chosen.memory !== null && chosen.source !== 'turn';
 
       rows.push({
         conversationId: summary.conversationId,
@@ -1911,10 +1933,17 @@ export function registerIpcHandlers(context: HandlerContext): void {
           entry === undefined || entry.memory === null
             ? ''
             : formatConversationMemory(entry.memory),
+        // lo que de verdad lee ella en ese hilo, cuando lo hay. Va aparte de
+        // `block` a proposito: son dos textos distintos y confundirlos es
+        // exactamente lo que hacia el panel
+        sealedBlock: sealed.get(summary.conversationId) ?? '',
         chars: entry?.chars ?? 0,
         source: entry?.source ?? 'cli',
         gaps: entry?.gaps.length ?? 0,
         approved: entry?.approved ?? false,
+        // la habia aprobado y el trabajo de fondo la reescribio: sin esto, la
+        // decision de Daniel desaparecia sin una palabra
+        approvalReset: entry?.approvalReset ?? false,
         provider: entry?.provider ?? null,
         model: entry?.model ?? null,
         at: entry?.at ?? summary.updatedAt,
@@ -1924,7 +1953,11 @@ export function registerIpcHandlers(context: HandlerContext): void {
         sealed: esSellada,
         excluded: esExcluida,
         hasEntry: entry !== undefined,
-        inPrompt: chosen !== null && chosen.memory !== null && chosen.source !== 'turn',
+        // con memoria propia NUNCA viaja la ficha: la sellada gana siempre
+        inPrompt: !esSellada && fichaViajaria,
+        // y justo por eso, la misma cuenta del otro lado: lo que hoy tapa la
+        // sellada es lo que se destapa al borrarla
+        cardRevivesOnForget: esSellada && fichaViajaria,
       });
     }
 
@@ -1983,7 +2016,9 @@ export function registerIpcHandlers(context: HandlerContext): void {
           if (entry.memory === null || entry.supersededAt !== null) return entry;
           if (entry.approved) return entry;
           aprobadas += 1;
-          return { ...entry, approved: true };
+          // y se apaga el aviso de «te la habian reescrito»: acaba de volver a
+          // leerla y a decidir, asi que ya no queda ninguna decision perdida
+          return { ...entry, approved: true, approvalReset: false };
         }),
       };
     });
@@ -1993,6 +2028,115 @@ export function registerIpcHandlers(context: HandlerContext): void {
       fichas: aprobadas,
     });
     return readRecapList();
+  });
+
+  /**
+   * borra lo que ella recuerda de una conversacion. Los mensajes se quedan.
+   *
+   * Es la memoria SELLADA: la que el propio hilo se escribio a si mismo y la
+   * unica que viaja en cada uno de sus turnos. Existe porque no habia forma de
+   * quitarla —una conversacion de prueba, donde solo se pidieron fotos para
+   * comprobar un cambio, se arrastraba a todos los turnos siguientes— y porque
+   * borrar la conversacion entera para conseguirlo se lleva por delante los
+   * mensajes, que es otra cosa muy distinta.
+   *
+   * Lo que toca, y nada mas:
+   *
+   *   - el sobre `sealedMemory` de cada turno de esa conversacion. El texto del
+   *     turno vive en otro sobre, con otra subclave, y no se abre siquiera;
+   *   - la marca `supersededAt` de su ficha, que decia «esta ya tiene memoria
+   *     propia» y acaba de dejar de ser verdad. Sin quitarla, el panel seguiria
+   *     diciendolo y la pasada de relleno saltaria esa conversacion para
+   *     siempre: el borrado la dejaria sin memoria y sin forma de recuperarla.
+   *
+   * Lo que NO toca: los mensajes, las imagenes, la ficha retroactiva —que tiene
+   * su propio boton—, el catalogo de escenas ni lo apuntado entre los dos.
+   *
+   * Y no es para siempre por si solo: el siguiente turno de ese hilo que termine
+   * bien vuelve a sellar memoria, escrita desde cero sobre los ultimos mensajes.
+   * Quien pulsa el boton tiene que saberlo ANTES, y por eso lo dice el dialogo.
+   *
+   * ALCANCE: borra en ESTE equipo, y solo en este. La subida a
+   * `/api/vault/records` es idempotente por (boveda, conversacion, secuencia)
+   * —`sync.ts`—, asi que el registro que ya esta en el servidor conserva su
+   * sobre `sealedMemory` y este borrado no viaja a ninguna parte. Se decide asi
+   * a sabiendas y no por descuido: propagarlo exigiria un verbo nuevo en el
+   * gateway que MODIFIQUE un registro ya subido, y la sincronizacion entera se
+   * apoya en que un turno es inmutable —«no hay resolucion de conflictos, y no
+   * hace falta»—; abrir esa puerta para una sola casilla pondria en juego el
+   * historial de todos los equipos, ademas de exigir migracion y despliegue, que
+   * aqui no se hacen sin permiso. La consecuencia hay que decirla en pantalla,
+   * no esconderla: en otro equipo ya sincronizado la memoria sigue entera, y un
+   * equipo que se descargue esta conversacion desde cero se la baja con ella.
+   */
+  handle(IPC_INVOKE.vaultConversationMemoryForget, vaultConversationIdArgsSchema, async (args) => {
+    // se exige abierta aunque `clearMemory` no descifre nada: lo que devuelve es
+    // `readRecapList`, que si necesita la boveda, y sobre todo porque borrar
+    // contenido de la boveda con la boveda cerrada no deberia poder hacerse
+    if (!context.vault.isUnlocked()) throw new VaultError('la boveda esta bloqueada');
+
+    /**
+     * un envio en curso deshace el borrado solo, y despues del acuse verde.
+     *
+     * Ese turno leyo la memoria vieja al empezar (`latestMemory`, mas arriba) y
+     * la vuelve a sellar al terminar (`appendTurn`), escrita por el modelo
+     * TENIENDO DELANTE la anterior: lo borrado vuelve a disco como continuacion
+     * de si mismo, minutos despues de que la pantalla dijera que se habia ido.
+     * Un borrado que se deshace solo es peor que no tener boton.
+     *
+     * Es la misma guarda que ya usan el catalogo y el relleno (`isSending`), y
+     * por el mismo motivo: esa conversacion esta cambiando mientras se la lee.
+     */
+    const contestandoAhora = (): VaultError =>
+      new VaultError(
+        'esa conversacion esta contestando ahora mismo',
+        'espera a que llegue la respuesta y vuelve a borrar: ese turno todavia puede sellar lo que quites',
+      );
+    if (sendInFlight.has(args.conversationId)) throw contestandoAhora();
+
+    /**
+     * ORDEN: primero la marca, despues la memoria. Los dos pasos pueden fallar
+     * por separado —`clearSuperseded` descifra y reescribe `recap.json` entero—
+     * y solo uno de los dos ordenes deja un estado del que se pueda salir.
+     *
+     *   - si falla este, no se ha destruido nada: la memoria sigue ahi, la fila
+     *     conserva su boton y se vuelve a pulsar;
+     *   - al reves, la memoria ya no estaria y la marca sobreviviria diciendo
+     *     «esta ya tiene memoria propia»: el panel mentiria, `recap-sync` se
+     *     saltaria esa conversacion para siempre y la fila perderia su boton en
+     *     cuanto la lista se refrescara. Sin memoria y sin forma de recuperarla.
+     *
+     * El estado intermedio de este orden —marca quitada, memoria todavia ahi— no
+     * pierde nada y se corrige solo: la pasada vuelve a marcarla al ver que hay
+     * sellada. Y la marca se quita aunque no hubiera nada que borrar, porque una
+     * marca que dice que si la hay es justo lo que deja la fila muerta.
+     *
+     * Lo que SI se ha quitado es el paso cuando no hay marca: `clearSuperseded`
+     * lee y solo escribe si encuentra algo que quitar. Sin eso, la fila que esta
+     * lista hizo visible —excluida del trabajo de fondo, sellada, sin ficha— no
+     * tenia nada que tocar ahi y aun asi su borrado dependia de poder reescribir
+     * `recap.json`, que en ese caso ni siquiera existe.
+     */
+    await context.recaps.clearSuperseded(context.vault, args.conversationId);
+
+    // y se vuelve a mirar: en ese `await` cabe el arranque de un envio, y a
+    // partir de aqui ya no hay ninguno mas hasta que la memoria este borrada
+    if (sendInFlight.has(args.conversationId)) throw contestandoAhora();
+
+    const cleared = context.privateConversations.clearMemory(args.conversationId);
+    // el indice episodico guarda turnos ya descifrados, no memorias, asi que
+    // esto no lo cambia; se invalida igual porque lo que compone el prompt lee
+    // de los dos y dejarlos discrepando es la clase de fallo que no se ve
+    context.privateMemory.invalidate();
+
+    // una cifra y el verbo. Ni el titulo, ni el identificador, ni una palabra de
+    // lo borrado: lo que se destruye aqui es contenido de la boveda
+    context.log('memoria de lo ya hablado corregida', {
+      accion: 'olvidar-propia',
+      turnos: cleared,
+    });
+
+    return { ...(await readRecapList()), cleared };
   });
 
   /**

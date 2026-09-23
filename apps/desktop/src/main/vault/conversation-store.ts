@@ -12,8 +12,11 @@
 // aleatorio. Nunca el titulo: `%APPDATA%` no puede revelar de que hablas.
 import {
   appendFileSync,
+  closeSync,
   existsSync,
+  fsyncSync,
   mkdirSync,
+  openSync,
   readFileSync,
   readdirSync,
   renameSync,
@@ -37,6 +40,32 @@ function fileFor(directory: string, conversationId: string): string {
     throw new VaultError('identificador de conversacion no valido');
   }
   return join(directory, `${conversationId}.jsonl`);
+}
+
+/**
+ * reemplaza el archivo ENTERO de una conversacion sin poder dejarlo a medias.
+ *
+ * El `rename` solo mueve metadatos, asi que escribir el temporal y renombrarlo
+ * sin mas no basta: un corte de luz en medio puede dejar el nombre bueno
+ * apuntando a bloques que todavia no se habian escrito, y entonces no queda ni
+ * lo nuevo ni lo viejo. Forzar el contenido a disco antes del `rename` es lo
+ * unico que lo impide.
+ *
+ * Aqui importa mas que en ningun otro almacen porque lo que se reescribe son
+ * los MENSAJES: una ficha perdida se rehace con una llamada, una conversacion
+ * perdida no se rehace. Es el molde de `recap-store.ts` y `relation-store.ts`,
+ * que es justo el que la cabecera de aquel echaba en falta en este archivo.
+ */
+function replaceFileAtomically(file: string, contents: string): void {
+  const temporary = `${file}.tmp`;
+  const descriptor = openSync(temporary, 'w');
+  try {
+    writeFileSync(descriptor, contents, 'utf8');
+    fsyncSync(descriptor);
+  } finally {
+    closeSync(descriptor);
+  }
+  renameSync(temporary, file);
 }
 
 export interface PrivateTurnView {
@@ -374,12 +403,66 @@ export class PrivateConversationStore {
       return true;
     }
 
-    // escritura atomica, como el resto: un corte a medias no puede dejar el
+    // escritura atomica y forzada a disco: un corte a medias no puede dejar el
     // historial ilegible
-    const temporary = `${file}.tmp`;
-    writeFileSync(temporary, `${lines.join('\n')}\n`, 'utf8');
-    renameSync(temporary, file);
+    replaceFileAtomically(file, `${lines.join('\n')}\n`);
     return true;
+  }
+
+  /**
+   * borra la memoria sellada de una conversacion SIN tocar sus turnos.
+   *
+   * Por que hace falta. La memoria vive DENTRO de cada registro, en su propio
+   * sobre (`sealedMemory`) y con su propia subclave, y `latestMemory` la busca
+   * hacia atras hasta dar con la primera que haya: quitarla del ultimo turno no
+   * la quita, solo destapa la anterior. Por eso se recorren TODOS.
+   *
+   * Por que se trabaja sobre las lineas crudas y no sobre `readRecords`. Esa
+   * lectura descarta en silencio la linea que no parsea —es lo correcto para
+   * leer— y reescribir el archivo desde ahi borraria de verdad esos turnos. Aqui
+   * la linea que no se entiende se copia tal cual: lo unico que se cambia es el
+   * campo de la memoria, y solo en las lineas que validan y la llevan.
+   *
+   * El texto del turno (`content`) no se toca ni se descifra: esto no necesita
+   * la boveda abierta y no produce ni un byte en claro.
+   *
+   * Devuelve cuantos registros llevaban memoria. Cero significa que no habia
+   * ninguna, que no es un fallo.
+   */
+  clearMemory(conversationId: string): number {
+    const file = fileFor(this.directory, conversationId);
+    if (!existsSync(file)) return 0;
+
+    let cleared = 0;
+    // se conserva el separador final tal y como estaba: `split`/`join` sobre el
+    // mismo caracter devuelve el archivo con su ultima linea vacia incluida
+    const lines = readFileSync(file, 'utf8')
+      .split('\n')
+      .map((line) => {
+        if (line.trim().length === 0) return line;
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(line);
+        } catch {
+          return line;
+        }
+        const record = privateRecordSchema.safeParse(parsed);
+        if (!record.success || record.data.sealedMemory === null) return line;
+        cleared += 1;
+        // se escribe desde el objeto ORIGINAL y no desde el validado: zod
+        // descarta las claves que no conoce, asi que reserializar lo parseado
+        // tiraria cualquier campo que una version posterior haya añadido
+        return JSON.stringify({ ...(parsed as object), sealedMemory: null });
+      });
+
+    if (cleared === 0) return 0;
+
+    // escritura atomica y forzada a disco, como `removeLastTurn`: un corte a
+    // mitad no puede dejar el historial ilegible, que aqui seria perder la
+    // conversacion entera por haber querido borrar solo su memoria. Sin el
+    // `fsync` esa frase era falsa, y es la unica del metodo que no puede serlo
+    replaceFileAtomically(file, lines.join('\n'));
+    return cleared;
   }
 
   /** borra una conversacion. no hay papelera: es lo que se espera aqui */
