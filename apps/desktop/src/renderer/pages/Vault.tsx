@@ -1725,6 +1725,30 @@ function CharacterRow({
         </span>
       </label>
 
+      {/* sólo cambia las escenas en las que salís los dos; el resto se pide
+          igual que siempre. Existe porque estos modelos encajan dos figuras de
+          forma irregular, y apagarlo devuelve el comportamiento de antes */}
+      <label className="check">
+        <input
+          type="checkbox"
+          checked={character.imageCast === 'both'}
+          onChange={(event) =>
+            void vault.setCharacterImageCast(
+              character.characterId,
+              event.target.checked ? 'both' : 'character-only',
+            )
+          }
+        />
+        <span>
+          Dibujar las escenas en las que salís los dos
+          <small>
+            {character.imageCast === 'both'
+              ? 'sólo afecta a esas escenas; con dos figuras estos modelos fallan a menudo la anatomía, así que apágalo si sale mal'
+              : 'sólo afecta a esas escenas: se pide únicamente al personaje, en plano cercano y sin ti'}
+          </small>
+        </span>
+      </label>
+
       {active ? (
         <Tag tone="ok">en uso</Tag>
       ) : (

@@ -20,6 +20,7 @@ import {
   imagePlanEstimateBlockReason,
   planFromEdit,
   restoreDroppedFragment,
+  VAULT_IMAGE_SOLO_TAGS,
   type HordeImagePlan,
   type ImageAttempt,
   type VaultImagePlan,
@@ -236,6 +237,19 @@ function PlanBody({
             coinciden, el generador recibe dos descripciones de la misma persona. Si lo pedías a
             propósito, devuélvelo:
           </p>
+          {/* el recorte del «solo» va al revés que los demás —quita de la apariencia
+              fija lo que contradice a la escena, no al contrario—, así que explicarlo
+              con el cartel de arriba no se entendería. Sólo aparece cuando se ha
+              quitado de verdad: con el ajuste apagado no se quita nunca */}
+          {plan.dropped.some((fragment) =>
+            (VAULT_IMAGE_SOLO_TAGS as readonly string[]).includes(fragment.toLowerCase()),
+          ) && (
+            <p className="field__hint">
+              Y <code>solo</code> significa «una sola persona en la imagen»: en una escena en la
+              que salís los dos contradice lo que has pedido, así que sale del texto. Devolverlo
+              deja fuera al otro.
+            </p>
+          )}
           <div className="row">
             {plan.dropped.map((fragment) => (
               <button

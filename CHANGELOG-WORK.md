@@ -1,5 +1,127 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-09-21 — Claude — F30-REPARTO-001 — dibujar las escenas en las que salís los dos
+
+- Objetivo: que una escena con las dos figuras se pueda ilustrar entera, **con un
+  interruptor por personaje** para apagarlo si sale mal. Decisión en `D-097`.
+- Archivos de código (venían de la tanda anterior de esta misma sesión, y esta
+  pasada **no tocó ninguno**): `packages/shared/src/vault-image-request.ts`,
+  `vault-image-provider.ts`, `vault-image-plan.ts`, `vault-prompt.ts`;
+  `apps/desktop/src/main/vault/character-store.ts`,
+  `apps/desktop/src/main/ipc/handlers.ts`, `apps/desktop/src/shared/ipc.ts`,
+  `apps/desktop/src/shared/channels.ts`, `apps/desktop/src/preload/index.ts`,
+  `apps/desktop/src/renderer/useVault.ts`,
+  `apps/desktop/src/renderer/pages/Vault.tsx` y
+  `apps/desktop/src/renderer/pages/vault/ImagePlanPanel.tsx`; pruebas en
+  `packages/shared/src/vault-image-cast.test.ts` (nuevo),
+  `apps/desktop/src/main/ipc/character-image-cast.test.ts` (nuevo),
+  `apps/desktop/src/main/vault/character-store.test.ts`,
+  `apps/desktop/src/shared/ipc.test.ts` y
+  `apps/desktop/src/main/ipc/character-image-review.test.ts`.
+- Archivos de esta pasada, que es **sólo documentación**: `DECISIONS.md`,
+  `CURRENT-TASK.md`, `CHANGELOG-WORK.md`, `TEST-RESULTS.md` y
+  `PROJECT-STATE.md`. Ni una línea de código.
+
+**El interruptor.** Campo `imageCast` dentro de `vaultCharacterSchema`, con
+`.default('character-only')`. Compatible con lo ya guardado sin rama nueva: el
+defecto se aplica al leer y el archivo no se reescribe, así que un personaje
+escrito antes de hoy se lee como `character-only` —igual que siempre—. Los
+valores van **en inglés**: `imageReview` guarda «siempre»/«nunca» en castellano
+contra la regla de identificadores de `CLAUDE.md`, y esa deuda no se hereda.
+
+Contrato IPC con **verbo propio** (`vaultCharacterImageCastArgsSchema`, canal
+`luxy:vault:character:image-cast`), no un «guardar personaje» genérico: un canal
+que sólo puede cambiar una cosa no puede reescribir por accidente la receta, el
+nombre ni el avatar. El handler parte de `...existing`, cambia un solo campo,
+devuelve la lista entera ya aplicada, exige bóveda abierta y personaje existente,
+y al registro manda **sólo la decisión** (`{ reparto }`), nunca quién es.
+
+**La trampa que ya mordió una vez, fijada con prueba.** Un campo con `.default()`
+renace apagado cuando otro verbo reescribe la lista entera. Pasó con
+`imageReview`. `vaultHordeCharacterSave` parte de `...existing`, así que conserva
+`imageCast`; hay una prueba que lo afirma con ese nombre
+(`GUARDAR LA RECETA CONSERVA imageCast`) y otra para el verbo de revisión.
+
+**Las tres piezas**, que es lo que hace que encenderlo cambie algo de verdad:
+
+1. **La instrucción.** `buildVaultImageInstruction` acepta un quinto parámetro
+   `cast` con defecto `'character-only'`. Cambian DOS frases: (a) el caso 2 de
+   CUÁNDO, de «generala solo contigo, en plano cercano y sin el» a «describe la
+   escena ENTERA, con los dos»; (b) el bullet de CÓMO —«Solo aparece EL
+   PERSONAJE, a solas: nunca el usuario…»—, que es **donde de verdad se prohibía
+   nombrarlo**, y nombrarlo es lo único que lo hace aparecer. Con la primera
+   frase sola la foto seguiría saliendo de una figura. La rama encendida pide
+   nombrarlo corto —«1boy», «a man»— y nada más de él: su aspecto no está en
+   ninguna receta. Son ramas **excluyentes dentro del mismo array**, no bloques
+   duplicados, y los saltos de línea de la rama apagada están exactamente donde
+   estaban.
+2. **El negativo.** `VAULT_IMAGE_NEGATIVE` sigue siendo el mismo string byte a
+   byte: las tres etiquetas se extraen a `VAULT_IMAGE_SECOND_PERSON_BANS` y se
+   vuelven a intercalar en su sitio con un spread, así que el orden no se mueve.
+   `withoutSecondPersonBans()` las retira; `2girls`, `multiple girls` y las de
+   cámaras y móviles se quedan. Se aplica al negativo **ya fundido** (bóveda más
+   receta), no sólo al nuestro: si la receta del personaje repitiera «2boys» por
+   su cuenta, el interruptor no serviría de nada. El texto resultante se enseña
+   entero en el panel antes de generar, así que no desaparece nada en silencio.
+3. **El `solo`.** `stripSoloTagsDetailed` se aplica al **positivo compuesto**
+   entero —apariencia, ropa y escena ya recortada— en vez de sólo a la
+   apariencia: así lo caza venga de donde venga con una pasada y sin duplicar lo
+   apuntado. Exige coincidencia **exacta** del elemento entre comas (`solo`,
+   `solo focus`), de modo que «solo lit by the window» es escena y se queda;
+   `1girl` no se toca nunca —dice cuántas mujeres hay, que sigue siendo una—. Lo
+   quitado va a `dropped`, el mismo canal que el recorte de rasgos, así que sale
+   en el cartel del panel con su botón para devolverlo.
+
+**Dos puertas, no una**, y es una decisión de diseño que conviene conocer antes
+de tocar esto: el ajuste dice que **se puede** dibujar a los dos; la escena dice
+si en **ésa** hacen falta los dos. El bloque de instrucciones depende sólo del
+ajuste —se escribe antes de que exista la escena—, pero el negativo y el recorte
+del `solo` sólo se relajan cuando la escena nombra de verdad a la segunda figura.
+Así una foto de ella sola conserva sus defensas aunque el interruptor esté
+encendido, que es lo que evita reabrir el fallo por el que nació el negativo
+(`D-057`).
+
+**Detectar la segunda figura**: `sceneIncludesSecondFigure`, lista cerrada en
+inglés de NOMBRES de persona (`1boy`, `2boys`, `man`, `male`, `guy`, `hetero`,
+`multiple people`, `another person`…), **nunca pronombres**. «wearing his shirt»
+es una escena de ella sola, y con `his` dentro de la lista esa foto perdería sus
+defensas sin que salga nadie. Con fronteras de palabra: «woman» no trae un «man»
+que cuente, ni «female» un «male», ni «heterochromia» un «hetero».
+
+**Cableado**: `composeImagePlan` en `handlers.ts` resuelve
+`character?.imageCast ?? 'character-only'` y se lo pasa a los dos compositores;
+`composeVaultPrompt` recibe `imageCast` y se lo pasa al bloque. `@luxy/shared` no
+lee ningún ajuste: se lo dan resuelto.
+
+**El panel**: el cartel de lo descartado explica lo contrario de lo que pasa aquí
+—quita de la escena lo que la apariencia fija ya dice, y el recorte del `solo` va
+al revés—, así que se añadió un párrafo que **sólo aparece si de verdad se quitó
+un `solo`**. Con el interruptor apagado no se pinta nunca.
+
+**Texto del control**, que no promete resultados: «Dibujar las escenas en las que
+salís los dos»; encendido, «sólo afecta a esas escenas; con dos figuras estos
+modelos fallan a menudo la anatomía, así que apágalo si sale mal»; apagado,
+«sólo afecta a esas escenas: se pide únicamente al personaje, en plano cercano y
+sin ti».
+
+**Medido en esta pasada** (no heredado de ninguna entrada): el bloque apagado
+ocupa **6.474** caracteres en `prose` y **6.478** en `tags`; encendido, **6.411**
+y **6.415** —63 menos, porque las dos redacciones son excluyentes y la nueva es
+más corta—, con la misma entrada que usa el guardián de tamaño. El tope de 6.500
+no se toca. Y el valor de `VAULT_IMAGE_NEGATIVE` que devuelve el módulo
+compilado es idéntico a la lista literal que tiene `HEAD`.
+
+**Lo que sí se midió, y desmiente lo que esta misma entrada iba a decir**: Daniel
+generó dos imágenes de dos figuras a mano mientras esto se escribía, y las dos
+salieron limpias. El aviso del interruptor —«con dos figuras estos modelos fallan
+a menudo la anatomía»— era sabiduría recibida y no se ha cumplido aquí. Se deja,
+porque dos no son una medida, pero deja de presentarse como un hecho.
+
+**Lo que sigue sin medir**: el camino automático, o sea que con el interruptor
+encendido el modelo escriba la escena entera. Y una tercera, pequeña: que
+quitar `solo` cambie algo en la imagen; lo que se sabe es lo que la etiqueta
+significa, no cuánto pesa.
+
 ### 2026-09-18 — Claude — F29-POSTURA-005 — la decision retirada y la nueva, completas
 
 - Objetivo: cerrar lo que `F29-POSTURA-003` y `-004` dejaron a medias en la

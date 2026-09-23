@@ -831,6 +831,96 @@ export function stripConflictingTraits(scene: string, appearance: string): strin
 }
 
 /**
+ * las etiquetas que significan «UNA SOLA PERSONA en la imagen».
+ *
+ * No son una opinion nuestra: en el vocabulario de estos modelos `solo` es una
+ * etiqueta con ese significado exacto, y casi todas las recetas empiezan por
+ * ella porque hasta ahora era justo lo que se queria.
+ *
+ * `1girl` NO esta aqui: dice cuantas MUJERES hay, que sigue siendo una, y
+ * quitarla desdibujaria al personaje sin arreglar nada.
+ */
+export const VAULT_IMAGE_SOLO_TAGS = ['solo', 'solo focus'] as const;
+
+const SOLO_TAG_SET = new Set<string>(VAULT_IMAGE_SOLO_TAGS.map((tag) => tag.toLowerCase()));
+
+/**
+ * el tercer camino por el que una escena de dos acaba dibujando a una.
+ *
+ * El recorte de arriba mira la ESCENA contra la apariencia fija; esto mira al
+ * reves, porque la contradiccion vive en la apariencia: la escribio el usuario
+ * cuando todas sus fotos eran de ella sola, y ahi sigue, contradiciendo a la
+ * escena sin que nadie la haya puesto para eso.
+ *
+ * Se quita el ELEMENTO entero y solo si es exactamente una de esas etiquetas:
+ * `solo` nunca califica a nada, asi que no hay frase que conservar, y exigir la
+ * coincidencia exacta evita llevarse un «solo lit by the window» de la escena.
+ *
+ * Lo quitado sale en `dropped`, igual que lo del recorte de rasgos: el panel lo
+ * enseña con un boton para devolverlo, que es la diferencia entre un recorte que
+ * se puede discutir y uno que solo se sufre.
+ */
+export function stripSoloTagsDetailed(text: string): StrippedScene {
+  const dropped: string[] = [];
+  const quedan = text.split(',').filter((elemento) => {
+    const limpio = elemento.trim();
+    if (!SOLO_TAG_SET.has(limpio.toLowerCase())) return true;
+    dropped.push(limpio);
+    return false;
+  });
+  // quitar el elemento entero se lleva su coma: no quedan comas huerfanas que
+  // limpiar, solo el espacio con el que empezaba o terminaba el texto
+  return { text: quedan.join(',').trim(), dropped: dedupeFragments(dropped) };
+}
+
+/**
+ * las palabras con las que una escena nombra a la SEGUNDA figura.
+ *
+ * Lista cerrada y en ingles, como las de los rasgos: el prompt del generador
+ * siempre va en ingles. Son nombres de persona, nunca pronombres: «wearing his
+ * shirt» es una escena de ella sola con la camisa de el, y con `his` dentro de
+ * la lista esa foto perderia sus defensas sin que salga nadie mas.
+ *
+ * Es la contrapartida exacta de lo que pide el bloque de instrucciones cuando el
+ * ajuste esta encendido —nombrar al otro con «1boy» o «a man»—, asi que lo que
+ * el modelo escribe ahi es justo lo que esto reconoce.
+ */
+const SECOND_FIGURE_WORDS = [
+  '1boy',
+  '2boys',
+  'multiple boys',
+  'boy',
+  'boys',
+  'man',
+  'men',
+  'male',
+  'males',
+  'guy',
+  'guys',
+  'husband',
+  'boyfriend',
+  'hetero',
+  'multiple people',
+  'two people',
+  'another person',
+];
+
+/**
+ * true cuando la escena de verdad tiene a alguien mas.
+ *
+ * El ajuste del personaje dice que se PUEDE dibujar a los dos; esto dice si en
+ * ESTA escena hacen falta los dos. Sin esta segunda puerta, una foto de ella
+ * sola perderia el negativo que la protege de que aparezca gente de mas, que es
+ * exactamente el fallo que hizo nacer ese negativo.
+ *
+ * Las palabras van con frontera de palabra: «woman» no contiene un «man» que
+ * cuente, ni «female» un «male», ni «heterochromia» un «hetero».
+ */
+export function sceneIncludesSecondFigure(scene: string): boolean {
+  return new RegExp(`\\b(?:${traitAlternation(SECOND_FIGURE_WORDS)})\\b`, 'i').test(scene);
+}
+
+/**
  * los modelos de la familia Pony, que piden su propio prefijo de calidad.
  *
  * Se reconocen por el nombre —todos lo llevan— y no por una lista aparte que

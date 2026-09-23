@@ -137,6 +137,7 @@ import {
   vaultHordeCharacterSaveArgsSchema,
   vaultCharacterProviderArgsSchema,
   vaultCharacterImageReviewArgsSchema,
+  vaultCharacterImageCastArgsSchema,
   vaultDeviceUnlockSetArgsSchema,
   vaultPasswordArgsSchema,
   vaultUnlockArgsSchema,
@@ -3047,6 +3048,34 @@ export function registerIpcHandlers(context: HandlerContext): void {
   );
 
   /**
+   * decide si una escena donde salen LOS DOS se dibuja entera o solo con el.
+   *
+   * Igual que los otros dos verbos: parte de lo que ya estaba y cambia un solo
+   * campo. Tampoco exige nada del destino —no depende del proveedor ni de que
+   * haya receta—, porque es una decision sobre QUE se pide, no sobre con que se
+   * genera.
+   *
+   * Mientras valga `character-only` no cambia absolutamente nada de lo que se
+   * manda: ese es el valor por defecto y el comportamiento que ya existia.
+   */
+  handle(IPC_INVOKE.vaultCharacterImageCast, vaultCharacterImageCastArgsSchema, async (args) => {
+    if (!context.vault.isUnlocked()) throw new VaultError('la boveda esta bloqueada');
+
+    const existing = (await context.characters.list(context.vault)).find(
+      (entry) => entry.characterId === args.characterId,
+    );
+    if (existing === undefined) throw new VaultError('ese personaje no esta en la boveda');
+
+    const characters = await context.characters.add(context.vault, {
+      ...existing,
+      imageCast: args.cast,
+    });
+    // la decision, y nada mas: ni quien es el personaje ni que escena era
+    context.log('reparto de la imagen cambiado', { reparto: args.cast });
+    return { characters };
+  });
+
+  /**
    * las ultimas instrucciones que se usaron con este personaje.
    *
    * La personalidad es del personaje, no del hilo: escribirla otra vez en cada
@@ -3158,6 +3187,9 @@ export function registerIpcHandlers(context: HandlerContext): void {
     character: VaultCharacter | undefined,
     scene: string,
   ): VaultImagePlan => {
+    // el ajuste del personaje, resuelto AQUI: `@luxy/shared` no lee ajustes de
+    // nadie, se le dan ya decididos. Sin personaje se usa el de siempre
+    const cast = character?.imageCast ?? 'character-only';
     if (character?.imageProvider === 'horde') {
       const recipe = character.horde?.recipe ?? null;
       if (recipe === null) {
@@ -3166,9 +3198,9 @@ export function registerIpcHandlers(context: HandlerContext): void {
           'en AI Horde la apariencia vive en la receta: editalo en Privado y elige modelo y aspecto',
         );
       }
-      return composeHordeImagePlan({ recipe, scene, extraNegative: VAULT_IMAGE_NEGATIVE });
+      return composeHordeImagePlan({ recipe, scene, extraNegative: VAULT_IMAGE_NEGATIVE, cast });
     }
-    return composeXaviraImagePlan({ scene, extraNegative: VAULT_IMAGE_NEGATIVE });
+    return composeXaviraImagePlan({ scene, extraNegative: VAULT_IMAGE_NEGATIVE, cast });
   };
 
   /**
@@ -4523,6 +4555,9 @@ export function registerIpcHandlers(context: HandlerContext): void {
         xaviraModelId: character?.xavira?.modelId ?? null,
         recipe: character?.horde?.recipe ?? null,
       }),
+      // el ajuste del personaje: decide si el bloque le pide la escena entera o
+      // solo a ella. Sin personaje, el de siempre
+      imageCast: character?.imageCast ?? 'character-only',
     });
 
     // el TAMAÑO de cada bloque, nunca su contenido. Sin esto, «el bloque de

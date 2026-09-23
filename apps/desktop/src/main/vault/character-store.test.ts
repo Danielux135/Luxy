@@ -298,6 +298,63 @@ describe('personajes guardados', () => {
     await vault.unlock(PASSWORD);
     expect((await store.list(vault))[0]?.imageReview).toBe('nunca');
   });
+
+  // -------------------------------------------------------------------------
+  // dibujar la escena entera cuando salen los dos
+  //
+  // Mismo patron que la revision, y la misma razon para que sea del personaje:
+  // con quien salga bien acompañado se deja entero y con quien no, no. Lo que
+  // se protege aqui es que NAZCA APAGADO: encendido significa pedir dos figuras
+  // a modelos que las encajan mal, y este personaje se usa a diario.
+  // -------------------------------------------------------------------------
+
+  it('un personaje guardado antes de este ajuste se lee con la escena apagada', async () => {
+    // el ayudante de estas pruebas no lo escribe: es exactamente la forma que
+    // tiene en disco una boveda anterior a este campo
+    await store.add(vault, character('per-1'));
+    expect((await store.list(vault))[0]?.imageCast).toBe('character-only');
+  });
+
+  it('encenderlo no toca ni el proveedor ni la receta ni el otro interruptor', async () => {
+    await store.add(vault, {
+      ...character('per-1', 'Lia'),
+      imageProvider: 'horde',
+      imageReview: 'nunca',
+      horde: { recipe: { models: ['Prefect Pony'], appearance: 'green eyes', seed: '1080257389' } },
+    });
+    const [antes] = await store.list(vault);
+
+    const despues = await store.add(vault, { ...antes!, imageCast: 'both' });
+
+    expect(despues[0]?.imageCast).toBe('both');
+    expect(despues[0]?.imageReview).toBe('nunca');
+    expect(despues[0]?.imageProvider).toBe('horde');
+    expect(despues[0]?.horde?.recipe.seed).toBe('1080257389');
+    expect(despues[0]?.xavira?.modelId).toBe('anime-pure-v1');
+    expect(despues[0]?.label).toBe('Lia');
+  });
+
+  it('el valor sobrevive a guardar otro personaje distinto', async () => {
+    // `add` reescribe la lista ENTERA, asi que tocar a uno es reescribir a
+    // todos: es justo donde un campo nuevo se pierde sin dar ningun error
+    await store.add(vault, character('per-1'));
+    const [antes] = await store.list(vault);
+    await store.add(vault, { ...antes!, imageCast: 'both' });
+
+    await store.add(vault, character('per-2'));
+
+    const guardados = await store.list(vault);
+    expect(guardados.find((c) => c.characterId === 'per-1')?.imageCast).toBe('both');
+    // y el que llega nuevo nace apagado, que es el comportamiento de hoy
+    expect(guardados.find((c) => c.characterId === 'per-2')?.imageCast).toBe('character-only');
+  });
+
+  it('sobrevive a cerrar y volver a abrir la boveda', async () => {
+    await store.add(vault, { ...character('per-1'), imageCast: 'both' });
+    vault.lock();
+    await vault.unlock(PASSWORD);
+    expect((await store.list(vault))[0]?.imageCast).toBe('both');
+  });
 });
 
 describe('personajes escritos antes de D-068', () => {
@@ -371,6 +428,22 @@ describe('personajes escritos antes de D-068', () => {
       createdAt: '2026-09-04T10:00:00.000Z',
     });
     expect(leido.imageReview).toBe('siempre');
+  });
+
+  it('tampoco traen el ajuste de la escena, y se lee apagado', () => {
+    // el archivo no se reescribe al leer, asi que esta lectura es lo unico que
+    // decide como se comporta una boveda que ya existia. Tiene que dar el
+    // comportamiento de hoy: solo el personaje
+    const leido = storedCharacterSchema.parse({
+      characterId: 'per-1',
+      provider: 'horde',
+      recipe: { models: ['Prefect Pony'], appearance: 'green eyes' },
+      description: '',
+      label: 'Lia',
+      avatarObjectKey: null,
+      createdAt: '2026-09-04T10:00:00.000Z',
+    });
+    expect(leido.imageCast).toBe('character-only');
   });
 
   it('uno ya escrito en la forma nueva no se vuelve a traducir', () => {

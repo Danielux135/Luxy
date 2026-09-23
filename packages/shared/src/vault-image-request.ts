@@ -161,6 +161,36 @@ export function imageDescriptionFor(metadata: {
 export type VaultImagePromptStyle = 'prose' | 'tags';
 
 /**
+ * quien puede salir en la imagen de una escena.
+ *
+ * Es una decision DEL PERSONAJE, no de la maquina, y quien la conoce la
+ * resuelve antes de llamar aqui: este paquete no lee ajustes de nadie. El valor
+ * por defecto es el de siempre, asi que un camino que no la pase se comporta
+ * exactamente como antes de que esto existiera.
+ */
+export const VAULT_IMAGE_CASTS = ['character-only', 'both'] as const;
+export type VaultImageCast = (typeof VAULT_IMAGE_CASTS)[number];
+
+/**
+ * las etiquetas del negativo que prohiben JUSTO lo que pide `both`.
+ *
+ * Se nombran aparte porque son las unicas que hay que retirar cuando la escena
+ * tiene a los dos: prohibir «another person» mientras se pide dibujar a otra
+ * persona es pedir y prohibir lo mismo, y el generador obedece al negativo.
+ *
+ * `2girls` y `multiple girls` NO estan aqui a proposito: el fallo real que hizo
+ * nacer esta lista fue una segunda MUJER que no habia pedido nadie, y eso sigue
+ * siendo un fallo aunque en la escena salgan los dos.
+ *
+ * Y `2boys` TAMPOCO, aunque estuvo una version: la instruccion encendida le
+ * pide al modelo nombrar al otro en SINGULAR —«1boy», «a man»—, asi que
+ * prohibir el plural no contradice nada de lo que se pide, y retirarlo abria la
+ * puerta a exactamente el mismo fallo por el que existe la lista, con el otro
+ * sexo. Se queda prohibido siempre.
+ */
+export const VAULT_IMAGE_SECOND_PERSON_BANS = ['multiple people', 'another person'] as const;
+
+/**
  * negativo que se manda SIEMPRE con una imagen de una conversacion.
  *
  * Sale de tres fallos observados en una generacion real: aparecio una segunda
@@ -168,13 +198,18 @@ export type VaultImagePromptStyle = 'prose' | 'tags';
  * usuario habia dicho «mandame una foto» y el emparejador de poses del
  * proveedor lo entendio como un selfie. La instruccion de arriba lo ataca en el
  * origen; esto es el cinturon por si el modelo se despista.
+ *
+ * Las tres de `VAULT_IMAGE_SECOND_PERSON_BANS` van intercaladas en su sitio de
+ * siempre —y no al final— para que este texto siga siendo byte a byte el de
+ * antes: es lo que se manda en la inmensa mayoria de los turnos.
  */
 export const VAULT_IMAGE_NEGATIVE = [
   '2girls',
   'multiple girls',
+  // en su sitio de siempre y fuera de los retirables: el plural no contradice
+  // lo que pide la instruccion encendida, que nombra al otro en singular
   '2boys',
-  'multiple people',
-  'another person',
+  ...VAULT_IMAGE_SECOND_PERSON_BANS,
   'camera',
   'holding camera',
   'holding phone',
@@ -182,6 +217,30 @@ export const VAULT_IMAGE_NEGATIVE = [
   'selfie',
   'taking a photo',
 ].join(', ');
+
+/**
+ * el mismo negativo sin las tres prohibiciones de la segunda persona.
+ *
+ * Se aplica al negativo YA FUNDIDO —el de la boveda y el de la receta juntos— y
+ * no solo al nuestro: si la receta del personaje repite «2boys» por su cuenta, el
+ * ajuste que el usuario acaba de encender no serviria de nada. Es una retirada
+ * acotada a esas tres etiquetas y solo en la escena que las contradice; el texto
+ * resultante se enseña entero en el panel antes de generar, asi que no desaparece
+ * nada en silencio.
+ *
+ * Funcion PURA sobre texto: no sabe de personajes ni de ajustes, se le dice que
+ * hacer.
+ */
+export function withoutSecondPersonBans(negative: string): string {
+  const prohibidas = new Set<string>(
+    VAULT_IMAGE_SECOND_PERSON_BANS.map((term) => term.toLowerCase()),
+  );
+  return negative
+    .split(',')
+    .map((term) => term.trim())
+    .filter((term) => term.length > 0 && !prohibidas.has(term.toLowerCase()))
+    .join(', ');
+}
 
 /**
  * lo que se le dice cuando la imagen que ofrecio sigue sin salir.
@@ -229,6 +288,15 @@ export function buildVaultImageInstruction(
    * `null` cuando la anterior salio bien o no hubo ninguna, que es lo normal.
    */
   lastError: string | null = null,
+  /**
+   * quien puede salir en la imagen, YA RESUELTO por quien conoce al personaje.
+   *
+   * Con `character-only` —el valor de siempre y el de por defecto— este bloque
+   * sale byte a byte igual que antes de que el ajuste existiera. Con `both`
+   * cambian DOS frases, no se añade ninguna: las dos redacciones son
+   * excluyentes, asi que solo viaja una y el bloque no engorda.
+   */
+  cast: VaultImageCast = 'character-only',
 ): string {
   // reenviar solo existe si hay algo que reenviar. Sin nada guardado se
   // enviaban igual el apartado a) y CUAL DE LAS DOS entero —702 caracteres, el
@@ -385,8 +453,22 @@ export function buildVaultImageInstruction(
           '1. el usuario pide ver, recibir o volver a ver una imagen;',
           '2. el usuario HACE UNA FOTO en este turno, dentro de la escena, y sales tu en ella («te',
           '   saco una foto»). No la pide, pero tiene que existir: GENERALA.',
-          '   Si salis los dos, o os la hace otra persona, generala solo contigo, en plano cercano',
-          '   y sin el. Si solo se fotografia a si mismo, o solo lo dice o lo recuerda («ayer te',
+          // LA FRASE DEL AJUSTE. Las dos redacciones ocupan el mismo sitio y son
+          // excluyentes: la de `both` es mas corta, asi que encender el ajuste
+          // nunca acerca el bloque al tope de tamaño.
+          //
+          // Los saltos de linea de la rama `character-only` estan donde estaban:
+          // este texto viaja en casi todos los turnos y tiene que seguir siendo
+          // el mismo byte a byte
+          ...(cast === 'both'
+            ? [
+                '   Si salis los dos, o os la hace otra persona, describe la escena ENTERA, con los dos.',
+                '   Si solo se fotografia a si mismo, o solo lo dice o lo recuerda («ayer te',
+              ]
+            : [
+                '   Si salis los dos, o os la hace otra persona, generala solo contigo, en plano cercano',
+                '   y sin el. Si solo se fotografia a si mismo, o solo lo dice o lo recuerda («ayer te',
+              ]),
           '   hice una», «voy a hacerte una»), no. Lo que decide es CUANDO se hace la foto, no el',
           '   tiempo verbal: la de antes de este mensaje («la ultima», «esa») es del caso 1; la que',
           '   hace aqui es del 2, aunque escriba «ya te he hecho una».',
@@ -466,8 +548,19 @@ export function buildVaultImageInstruction(
     'COMO escribir `prompt`, que es lo que recibe el generador:',
     '- EN INGLES, siempre: en otro idioma el generador ignora la escena. La respuesta va en el',
     '  idioma de la conversacion y solo este campo en ingles.',
-    '- Solo aparece EL PERSONAJE, a solas: nunca el usuario, sus manos ni su cuerpo, porque',
-    '  si mencionas a alguien mas, sale en la imagen.',
+    // LA OTRA MITAD DEL AJUSTE, y sin ella la primera no sirve de nada: aqui es
+    // donde se prohibe nombrar al usuario, que es lo unico que hace que salga.
+    //
+    // La rama `both` pide NOMBRARLO con una etiqueta corta —«1boy», «a man»— y
+    // no describirlo: su aspecto no esta en ninguna receta, asi que cada detalle
+    // que se invente le quita peso a la escena. Ademas es la misma palabra que
+    // despues reconoce el recorte para saber que en esta escena salen los dos.
+    ...(cast === 'both'
+      ? ['- Si estais los dos, nombralo —«1boy», «a man»—, y nada mas de el; si no, solo tu.']
+      : [
+          '- Solo aparece EL PERSONAJE, a solas: nunca el usuario, sus manos ni su cuerpo, porque',
+          '  si mencionas a alguien mas, sale en la imagen.',
+        ]),
     // condensado el 2026-09-18 para dejar sitio a la regla del angulo, sin perder ninguno de
     // los dos casos que le costaron una imagen: que se la pidan asi y que la foto la haga el
     '- Nada de camaras, moviles, espejos, selfies ni el acto de fotografiar, aunque te la pidan',

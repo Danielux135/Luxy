@@ -3666,3 +3666,156 @@ trabajo de no repetir el fallo de `D-095`:
 
 Si Daniel cambia de modelo de imagen, **esta decision no se hereda: se vuelve a
 medir**, y por el camino de arriba —adelgazando lo que funcione—.
+
+## D-097 — dibujar a los dos es del personaje, y hacen falta tres piezas a la vez
+
+Fecha: 2026-09-21. Autor: Claude. Origen: Daniel pide poder ilustrar las escenas
+en las que salen los dos. Se le avisa de que estos modelos encajan mal dos
+figuras y aun asi lo quiere, **con un interruptor para apagarlo si sale mal**.
+
+Estado: aceptada, implementada. **Ninguna imagen generada con ella todavia.**
+
+### Por que dibujar solo al personaje era el comportamiento por defecto, y lo sigue siendo
+
+No es una precaucion abstracta: detras hay una imagen concreta. `D-057`
+(2026-09-02) la dejo escrita —una generacion real devolvio al personaje
+correcto, con la pose correcta, **mas una segunda mujer que nadie habia pedido**
+y una camara de fotos en la mano— y de ahi salieron las dos defensas que este
+ajuste toca: el bloque de instrucciones prohibiendo nombrar a nadie mas, y el
+prompt negativo prohibiendolo ademas en el unico sitio donde un generador
+entiende un «no».
+
+Ese fallo sigue siendo un fallo. Por eso el valor por defecto del ajuste es
+`character-only`, que es exactamente lo que se venia haciendo, y por eso —esto
+conviene leerlo dos veces— **`2girls` y `multiple girls` no se retiran nunca**:
+la persona de mas que costo aquella imagen era una MUJER, y una mujer de mas
+sigue sobrando aunque en la escena salgan los dos.
+
+### Por que se abre de todas formas
+
+Porque la escena es de Daniel y la decision de que se ilustra tambien. Hoy una
+escena en la que salen los dos se dibuja recortada —solo el personaje, en plano
+cercano— y eso no es un fallo que nadie haya visto: esta escrito a proposito en
+el bloque de instrucciones desde `D-057`. Lo que pidio Daniel no es cambiar el
+comportamiento, es poder cambiarlo el.
+
+De ahi la forma exacta que tiene: **gemelo de `imageReview`**, por personaje
+—con quien salga bien acompañado se deja encendido y con quien no, no—, apagado
+por defecto y de una pulsacion. Un ajuste que no se puede deshacer en una
+pulsacion no sirve para probar algo que puede salir mal.
+
+Dos detalles de forma, que valen para el siguiente que añada uno:
+
+- el campo se llama `imageCast` y sus valores van en ingles
+  (`character-only` | `both`). `imageReview` guarda «siempre»/«nunca» en
+  castellano, contra la regla de identificadores de `CLAUDE.md`; esa deuda queda
+  donde esta y no se hereda;
+- **verbo IPC propio** (`luxy:vault:character:image-cast`), no un «guardar
+  personaje» generico. Un canal que solo puede cambiar una cosa no puede
+  reescribirle por accidente la receta, el nombre ni el avatar.
+
+### Las tres piezas, y por que cualquiera sola no sirve
+
+Esto es el fondo de la decision. La primera es la unica que se ve leyendo el
+bloque de instrucciones; las otras dos la anulan en silencio.
+
+1. **La instruccion.** `buildVaultImageInstruction` cambia DOS frases, no una: la
+   del caso 2 de CUANDO —«si salis los dos, o os la hace otra persona, generala
+   solo contigo, en plano cercano y sin el» pasa a «describe la escena ENTERA,
+   con los dos»— y el bullet de COMO, que es donde de verdad se prohibia nombrar
+   al usuario. **Nombrarlo es lo unico que lo hace aparecer**, asi que con la
+   primera frase sola el modelo seguiria escribiendo un prompt de una sola
+   figura. La rama encendida le pide nombrarlo corto —«1boy», «a man»— y nada
+   mas de el: su aspecto no esta en ninguna receta, y cada detalle inventado le
+   quita peso a lo que si esta descrito.
+2. **El negativo.** `2boys`, `multiple people` y `another person` prohiben
+   literalmente lo que la instruccion acaba de pedir, y el generador obedece al
+   negativo. Se retiran esas tres, solo esas, y solo en la escena que las
+   contradice.
+3. **El `solo` de la receta.** Es la pieza que se descubre escribiendo un prompt
+   a mano y que es facil no ver nunca: en el vocabulario de etiquetas de estos
+   modelos `solo` significa literalmente «una sola persona en la imagen», y vive
+   en el texto de apariencia que escribio el usuario —donde casi todas las
+   recetas lo ponen, porque hasta hoy era justo lo que se queria—. Nadie lo puso
+   ahi para contradecir una escena, y las contradice todas.
+
+Se quita del positivo **compuesto** —apariencia, ropa y escena ya recortada—, no
+solo de la apariencia, para cazarlo venga de donde venga con una sola pasada. La
+coincidencia es EXACTA sobre el elemento entre comas (`solo`, `solo focus`), asi
+que «solo lit by the window» es escena y se queda. `1girl` no se toca nunca:
+dice cuantas mujeres hay, y sigue siendo una.
+
+### Dos puertas, no una
+
+El ajuste dice que **se puede** dibujar a los dos; la escena dice si en **esa**
+hacen falta los dos. Son condiciones distintas y se aplican en sitios distintos:
+
+- el **bloque de instrucciones** depende solo del ajuste, porque se escribe antes
+  de que exista la escena: es lo que le da permiso al modelo para escribirla;
+- el **negativo** y el **recorte del `solo`** se relajan solo cuando la escena ya
+  redactada nombra de verdad a la segunda figura (`sceneIncludesSecondFigure`).
+
+Asi una foto del personaje a solas conserva todas sus defensas aunque el
+interruptor este encendido, que es lo que evita reabrir el fallo de `D-057` en
+cada foto normal.
+
+La deteccion es una **lista cerrada de nombres de persona en ingles** —`1boy`,
+`2boys`, `man`, `male`, `guy`, `hetero`, `multiple people`, `another person`...—
+y **nunca pronombres**: «wearing his shirt» es una escena de ella sola, y con
+`his` en la lista esa foto perderia sus defensas sin que salga nadie. Va con
+frontera de palabra, para que «woman» no traiga un «man» que cuente, ni «female»
+un «male», ni «heterochromia» un «hetero». Es la contrapartida exacta de lo que
+el bloque encendido le pide escribir al modelo: lo que el escribe ahi es justo
+lo que esto reconoce.
+
+### Con el interruptor apagado no cambia nada, y como se comprobo
+
+Era la condicion que mandaba sobre todo lo demas, porque es un personaje que
+Daniel usa a diario.
+
+- `VAULT_IMAGE_NEGATIVE` sigue siendo **el mismo string byte a byte**. Las tres
+  etiquetas se extraen a una constante y se vuelven a intercalar en su sitio con
+  un spread, asi que el orden no se mueve. Medido en esta pasada: el valor que
+  devuelve el modulo compilado es identico a la lista literal que tiene `HEAD`;
+- el bloque de instrucciones apagado ocupa lo mismo que antes: **6.474 (prosa) y
+  6.478 (etiquetas)**, medidos en esta pasada con la misma entrada que usa el
+  guardian de tamaño. Encendido ocupa **6.411 y 6.415**, o sea 63 caracteres
+  MENOS, porque las dos redacciones son excluyentes y la nueva es mas corta. **El
+  tope de 6.500 no se toca**, y el ajuste no puede romperlo;
+- el recorte del `solo` no se ejecuta nunca con el ajuste apagado, y el parrafo
+  del panel que lo explica solo se pinta si de verdad se quito uno.
+
+### Lo que NO esta medido, y es la mitad de esta decision
+
+**La calidad con dos figuras: MEDIDA mientras se escribia esto, y mejor de lo
+que se esperaba.** Daniel genero dos imagenes a mano —pegando el prompt en el
+panel, sin el interruptor— y las dos salieron limpias: anatomia correcta, el
+personaje reconocible. El aviso de que «con dos figuras estos modelos fallan a
+menudo la anatomia» era sabiduria recibida, y de momento no se sostiene con este
+modelo. Se deja en la interfaz porque dos imagenes no son una medida, pero que
+conste que las dos que hay salieron bien.
+
+Lo que SIGUE sin estar probado es el camino automatico: que con el interruptor
+encendido el modelo escriba de verdad la escena entera. Lo unico que fijan las
+pruebas es que el texto que sale es el que se queria; que el generador obedezca
+no lo fija ninguna, y esa leccion la pago `D-095` con un modulo entero.
+
+Y una de esas dos generaciones dejo un dato para `D-096`: **`pov` tampoco
+funciona**. Es la septima etiqueta de camara que falla, y cuando una de las dos
+fotos si salio en punto de vista, lo que lo consiguio fueron las etiquetas de lo
+que se veia, no la que nombraba el encuadre. La regla aguanta.
+
+Tampoco esta medido lo contrario, y hay que decirlo igual de claro: el aviso que
+lleva escrito el propio interruptor —«con dos figuras estos modelos fallan a
+menudo la anatomia»— es sabiduria recibida sobre esta familia de modelos, no una
+medicion hecha aqui. Por eso el texto de la pantalla no promete ningun
+resultado: dice que hace el ajuste y dice que se apague si sale mal.
+
+Y una tercera cosa sin medir, mas pequeña y facil de olvidar: **que quitar `solo`
+cambie algo en la imagen**. Lo que se sabe es lo que la etiqueta significa en el
+vocabulario de estos modelos; cuanto pesa frente al resto del prompt, no.
+
+La comprobacion que vale es de Daniel y de su pantalla: encender el ajuste en un
+personaje, pedir una escena en la que salgan los dos, mirar en el panel que el
+texto nombra al otro y que ya no lleva `solo` ni las tres prohibiciones, y
+generar. Si sale mal, apagarlo: para eso existe.

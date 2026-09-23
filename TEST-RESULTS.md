@@ -1,5 +1,94 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-21 — F30-REPARTO-001 — el interruptor del reparto, y lo que cuesta encenderlo
+
+Pasada de **sólo `.md`**: el código venía de la tanda anterior de esta misma
+sesión y aquí no se tocó ni una línea. Aun así se ejecuta todo, porque decir «no
+debería moverse» no es lo mismo que haberlo mirado. **Todas las cifras de abajo
+se midieron en esta pasada; ninguna viene de otra entrada.**
+
+Lo primero, las dos familias de pruebas del ajuste —la del núcleo puro y la del
+verbo IPC—, que son las que fijan que con el interruptor apagado no cambia nada:
+
+```
+node_modules\.bin\vitest.cmd run packages/shared/src/vault-image-cast.test.ts apps/desktop/src/main/ipc/character-image-cast.test.ts
+ ✓ packages/shared/src/vault-image-cast.test.ts (20 tests)
+ ✓ apps/desktop/src/main/ipc/character-image-cast.test.ts (11 tests)
+ Test Files  2 passed (2)
+      Tests  31 passed (31)
+   Duration  5.57s
+```
+
+Exit 0. La primera de las 20 es la que manda —«con el ajuste APAGADO no cambia
+absolutamente nada»— y compara contra el **valor literal** escrito a mano en el
+archivo de pruebas, no contra otra llamada a la misma función: comparar una
+función consigo misma pasa igual de bien cuando las dos ramas están rotas.
+
+**Las medidas de tamaño, hechas aquí y no heredadas.** Se ejecutó el módulo
+compilado (`packages/shared/dist/vault-image-request.js`) con la misma entrada
+que usa el guardián de tamaño —las cuatro imágenes guardadas, pudiendo generar—:
+
+| estilo      | `character-only` | `both` | diferencia |
+| ----------- | ---------------- | ------ | ---------- |
+| `prose`     | 6.474            | 6.411  | −63        |
+| `tags`      | 6.478            | 6.415  | −63        |
+
+El tope es 6.500 y **no se tocó**: encender el ajuste acerca menos al límite, no
+más, porque las dos redacciones son excluyentes y la nueva es más corta. Los dos
+números de la columna apagada son exactamente los que dejó escritos
+`F29-POSTURA-004`, y llamar a la función sin el quinto parámetro devuelve el
+mismo texto que llamarla con `character-only` —comprobado con una comparación de
+cadenas, no por el tamaño—.
+
+**El negativo, byte a byte.** El valor de `VAULT_IMAGE_NEGATIVE` que devuelve el
+módulo es:
+
+```
+2girls, multiple girls, 2boys, multiple people, another person, camera, holding camera, holding phone, smartphone, selfie, taking a photo
+```
+
+Se comparó con la lista que tiene `HEAD` —extraída del archivo con
+`git show HEAD:packages/shared/src/vault-image-request.ts`— y los once elementos
+salen en el mismo orden: el refactor a constante más spread no movió nada.
+`withoutSecondPersonBans()` sobre ese mismo texto devuelve los ocho restantes,
+con `2girls` y `multiple girls` delante, que es lo que tenía que conservar.
+
+La suite entera, ejecutada **después** de escribir los cinco archivos `.md`:
+
+```
+npm test
+ Test Files  192 passed (192)
+      Tests  4036 passed | 12 skipped (4048)
+   Duration  223.03s
+```
+
+Exit 0, capturado sin tubería de por medio. (Se había ejecutado también antes de
+escribir la documentación, con los mismos recuentos y 229,27 s; la duración
+cambia entre corridas y por eso no dice nada.) Sube de los 190 archivos y 3.996
+pruebas de `F29-POSTURA-005` por los dos archivos nuevos del ajuste y por las
+pruebas añadidas en `character-store.test.ts` y `ipc.test.ts`.
+
+Y el único archivo de pruebas que mira documentación, ejecutado **después** de
+escribir los cinco `.md` de esta tanda:
+
+```
+node_modules\.bin\vitest.cmd run packages/shared/src/docs.test.ts
+ Test Files  1 passed (1)
+      Tests  64 passed (64)
+   Duration  2.03s
+```
+
+Exit 0. **Y lo que ese archivo NO cubre, que hay que repetirlo cada vez:**
+ninguna prueba del repositorio lee `DECISIONS.md`, `PROJECT-STATE.md`,
+`CURRENT-TASK.md`, `CHANGELOG-WORK.md` ni `TEST-RESULTS.md`. De ellos se ha
+comprobado lo que se puede sin una prueba: que siguen en UTF-8 con finales CRLF
+(`file`), y que **cada ancla de inserción aparecía exactamente una vez** antes de
+escribir —el script que hizo los cambios aborta si no, y no abortó—.
+
+**Lo que ninguna de estas cifras dice**, y es lo que importa del ajuste: que una
+imagen con dos figuras salga bien. **No se ha generado ninguna.** Las pruebas
+fijan qué texto sale hacia el generador, nunca que el generador obedezca.
+
 ### 2026-09-18 — F29-POSTURA-005 — la tanda de documentación, comprobada igual
 
 Pasada de **sólo `.md`**: no se tocó una línea de código. Aun así se ejecuta la

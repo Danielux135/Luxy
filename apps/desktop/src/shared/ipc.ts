@@ -1707,6 +1707,15 @@ export const vaultCharacterSummarySchema = z.object({
    * propia lista sin que la pantalla tenga que adivinar nada.
    */
   imageReview: z.enum(['siempre', 'nunca']).default('siempre'),
+  /**
+   * en una escena donde salen los dos, si se dibuja entera o sólo el personaje.
+   *
+   * Viaja al renderer por lo mismo que `imageReview`: el interruptor vive en su
+   * ficha y tiene que pintar el estado real. Y trae defecto por lo mismo: una
+   * bóveda escrita antes de este campo se lee sin que la pantalla adivine nada,
+   * y lo que lee es el comportamiento de siempre.
+   */
+  imageCast: z.enum(['character-only', 'both']).default('character-only'),
   /** su identidad en Xavira, si la tiene. El identificador es el de SU API */
   xavira: z
     .object({ characterId: z.string(), modelId: z.string() })
@@ -1745,6 +1754,17 @@ export const vaultCharacterProviderArgsSchema = z.object({
 export const vaultCharacterImageReviewArgsSchema = z.object({
   characterId: z.string().min(1).max(128),
   review: z.enum(['siempre', 'nunca']),
+});
+
+/**
+ * decide si una escena donde salen los dos se dibuja entera o sólo con él.
+ *
+ * Verbo propio, por el mismo motivo que los otros dos: un canal que sólo puede
+ * cambiar una cosa no puede reescribirle por accidente la receta ni el nombre.
+ */
+export const vaultCharacterImageCastArgsSchema = z.object({
+  characterId: z.string().min(1).max(128),
+  cast: z.enum(['character-only', 'both']),
 });
 
 export const vaultCharacterListResultSchema = z.object({
@@ -2218,6 +2238,10 @@ export interface LuxyBridge {
   /** decide si ese personaje enseña el texto de la imagen antes de generarla */
   setVaultCharacterImageReview(
     args: z.infer<typeof vaultCharacterImageReviewArgsSchema>,
+  ): Promise<IpcResult<z.infer<typeof vaultCharacterListResultSchema>>>;
+  /** decide si una escena con los dos se dibuja entera o sólo con el personaje */
+  setVaultCharacterImageCast(
+    args: z.infer<typeof vaultCharacterImageCastArgsSchema>,
   ): Promise<IpcResult<z.infer<typeof vaultCharacterListResultSchema>>>;
   createVault(password: string): Promise<IpcResult<z.infer<typeof vaultCreateResultSchema>>>;
   unlockVault(

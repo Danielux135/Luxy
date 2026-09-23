@@ -30,6 +30,7 @@ import {
   vaultCharacterSummarySchema,
   vaultCharacterProviderArgsSchema,
   vaultCharacterImageReviewArgsSchema,
+  vaultCharacterImageCastArgsSchema,
   vaultHordeCharacterSaveArgsSchema,
   vaultCompatibilityArgsSchema,
   vaultCompatibilityResultSchema,
@@ -253,6 +254,42 @@ describe('validacion de argumentos', () => {
     );
     expect(
       vaultCharacterImageReviewArgsSchema.safeParse({ characterId: '', review: 'nunca' }).success,
+    ).toBe(false);
+  });
+
+  it('un personaje sin el ajuste de la escena se lee dibujando solo al personaje', () => {
+    // el defecto es lo que hace que una boveda escrita antes de este campo siga
+    // comportandose EXACTAMENTE como hoy, sin que la pantalla adivine nada
+    const leido = vaultCharacterSummarySchema.parse({
+      characterId: '83cc7f03-5eb3-4d03-833f-56dfbe80cd7d',
+      description: '',
+      label: 'Lía',
+      avatarObjectKey: null,
+      createdAt: '2026-09-02T08:50:37.000Z',
+    });
+    expect(leido.imageCast).toBe('character-only');
+  });
+
+  it('el interruptor de la escena solo admite sus dos valores, y solo eso', () => {
+    // mismo criterio que los otros dos verbos: uno que cambia una cosa no puede
+    // ser la puerta por la que se le reescribe la receta a un personaje
+    expect(
+      vaultCharacterImageCastArgsSchema.safeParse({ characterId: 'per-1', cast: 'both' }).success,
+    ).toBe(true);
+    expect(
+      vaultCharacterImageCastArgsSchema.safeParse({ characterId: 'per-1', cast: 'character-only' })
+        .success,
+    ).toBe(true);
+    expect(
+      vaultCharacterImageCastArgsSchema.safeParse({ characterId: 'per-1', cast: 'ambos' }).success,
+    ).toBe(false);
+    // sin `cast` no hay nada que decidir: el defecto vive en el almacen, no en
+    // un argumento que llega a medias
+    expect(vaultCharacterImageCastArgsSchema.safeParse({ characterId: 'per-1' }).success).toBe(
+      false,
+    );
+    expect(
+      vaultCharacterImageCastArgsSchema.safeParse({ characterId: '', cast: 'both' }).success,
     ).toBe(false);
   });
 

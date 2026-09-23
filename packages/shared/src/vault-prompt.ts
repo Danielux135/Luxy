@@ -11,6 +11,7 @@
 import {
   buildVaultImageInstruction,
   VAULT_IMAGE_PENDING_NOTICE,
+  type VaultImageCast,
   type VaultImageOnFile,
   type VaultImagePromptStyle,
 } from './vault-image-request.js';
@@ -292,6 +293,13 @@ export interface VaultPromptInput {
    * para que este modulo siga sin saber nada de ningun proveedor.
    */
   imagePromptStyle?: VaultImagePromptStyle;
+  /**
+   * quien puede salir en la imagen cuando la escena tiene a los dos.
+   *
+   * Lo decide el personaje y lo resuelve quien lo conoce; aqui solo se
+   * transmite. Sin este campo el bloque sale como ha salido siempre.
+   */
+  imageCast?: VaultImageCast;
   /** momentos anteriores que puede recordar en este turno */
   recall?: VaultRecall;
   recentTurns?: number;
@@ -771,6 +779,7 @@ export function composeVaultPrompt(input: VaultPromptInput): VaultPromptBlock[] 
         input.imagePromptStyle ?? 'prose',
         input.canGenerateImage === true,
         fallo,
+        input.imageCast ?? 'character-only',
       ),
     });
   }

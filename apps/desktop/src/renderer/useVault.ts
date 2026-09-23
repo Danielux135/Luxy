@@ -140,6 +140,14 @@ export interface VaultCharacterView {
    * en vez de gastar una generación a ciegas.
    */
   imageReview: 'siempre' | 'nunca';
+  /**
+   * qué se dibuja cuando en la escena salen los dos.
+   *
+   * Con `character-only` —lo de siempre— se pide sólo a él, en plano cercano.
+   * Con `both` se ilustra la escena entera, a cambio de que estos modelos
+   * encajen dos figuras de forma irregular.
+   */
+  imageCast: 'character-only' | 'both';
   /** su identidad en Xavira, si la tiene. El identificador es el de SU API */
   xavira: { characterId: string; modelId: string } | null;
   /**
@@ -464,6 +472,16 @@ export interface VaultController {
    * revisar un texto se puede hacer siempre.
    */
   setCharacterImageReview: (characterId: string, review: 'siempre' | 'nunca') => Promise<boolean>;
+  /**
+   * decide si una escena donde salen los dos se dibuja entera o sólo con él.
+   *
+   * No toca nada más suyo y no depende del proveedor: es una decisión sobre qué
+   * se pide, no sobre con qué se genera.
+   */
+  setCharacterImageCast: (
+    characterId: string,
+    cast: 'character-only' | 'both',
+  ) => Promise<boolean>;
   create: (password: string) => Promise<boolean>;
   unlock: (method: 'password' | 'recovery' | 'device', secret?: string) => Promise<boolean>;
   lock: () => Promise<void>;
@@ -2214,6 +2232,24 @@ export function useVault(): VaultController {
     [],
   );
 
+  const setCharacterImageCast = useCallback(
+    async (characterId: string, cast: 'character-only' | 'both'): Promise<boolean> => {
+      setError(null);
+      setHint(null);
+      const result = await window.luxy.setVaultCharacterImageCast({ characterId, cast });
+      if (!result.ok) {
+        setError(result.error);
+        setHint(result.hint);
+        return false;
+      }
+      // igual que el de revisión: vuelve la lista aplicada para que el
+      // interruptor no se quede pintando el valor viejo
+      setCharacters(result.value.characters);
+      return true;
+    },
+    [],
+  );
+
   const readCharacterInstructions = useCallback(
     async (characterId: string): Promise<string | null> => {
       const result = await window.luxy.readVaultCharacterInstructions({ characterId });
@@ -2280,6 +2316,7 @@ export function useVault(): VaultController {
     saveHordeCharacter,
     setCharacterImageProvider,
     setCharacterImageReview,
+    setCharacterImageCast,
     setMediaCaption,
     describeMedia,
     describingMedia,

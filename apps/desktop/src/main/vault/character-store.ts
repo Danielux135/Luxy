@@ -92,6 +92,29 @@ export const vaultCharacterSchema = z.object({
    * sin aviso.
    */
   imageReview: z.enum(['siempre', 'nunca']).default('siempre'),
+  /**
+   * en una escena donde salen LOS DOS, que se dibuja: solo el personaje o la
+   * escena entera.
+   *
+   * Es del personaje y no de la maquina por lo mismo que `imageReview`: con
+   * quien salga bien acompañado se deja entero, y con quien no, no. Estos
+   * modelos encajan mal dos figuras —anatomias cruzadas, miembros de mas—, asi
+   * que la decision tiene que poder deshacerse en una pulsacion.
+   *
+   * Nace en `character-only`, que es EXACTAMENTE lo que se venia haciendo: el
+   * bloque de instrucciones pide plano cercano de ella sola y el negativo
+   * prohibe una segunda persona. Mientras valga `character-only` no cambia ni
+   * un byte de lo que se manda.
+   *
+   * Los valores van en ingles a proposito. `imageReview` los guarda en
+   * castellano y eso contradice la regla de identificadores de `CLAUDE.md`; se
+   * anoto como deuda al escribirlo y no se repite aqui.
+   *
+   * MISMA TRAMPA que `imageReview`, y no da ningun error: `add()` reescribe la
+   * lista ENTERA, asi que un Studio anterior a este campo lo devolveria a su
+   * valor por defecto al tocar cualquier otro personaje.
+   */
+  imageCast: z.enum(['character-only', 'both']).default('character-only'),
   xavira: xaviraIdentitySchema.nullable().default(null),
   horde: hordeIdentitySchema.nullable().default(null),
   /** quien es, en texto, para el modelo que escribe */

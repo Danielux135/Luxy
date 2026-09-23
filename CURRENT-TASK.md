@@ -1,5 +1,85 @@
 # Luxy — tarea activa
 
+## F30-REPARTO-001 — poder dibujar las escenas en las que salís los dos
+
+Estado: **implementado y probado; sin ver en pantalla y sin una sola imagen
+generada — Claude, 2026-09-21.** Decisión nueva en `D-097`.
+
+Origen, de Daniel: quiere poder ilustrar enteras las escenas en las que salen
+los dos. Se le avisó de que la calidad con dos figuras es irregular en estos
+modelos y aun así lo quiere, **con un interruptor para apagarlo si sale mal**.
+
+Hasta hoy esas escenas se dibujaban recortadas —sólo el personaje, en plano
+cercano— y no por descuido: está escrito a propósito desde `D-057`, que nació de
+una generación real con una segunda mujer que nadie había pedido.
+
+### Qué hay
+
+**El interruptor, de punta a punta**, gemelo exacto de `imageReview`: campo
+`imageCast` con valores en inglés (`character-only` | `both`), por defecto
+`character-only`, que es el comportamiento de siempre. Almacén cifrado, contrato
+IPC con verbo propio, canal, puente, handler y casilla en la ficha del personaje,
+justo debajo de la de revisión. Al registro va sólo la decisión (`{ reparto }`),
+nunca quién es.
+
+**Las tres piezas que hacen que `both` cambie de verdad lo que se manda**, porque
+cualquiera sola deja la foto igual:
+
+1. **la instrucción**, que cambia DOS frases —la del caso 2 de CUÁNDO y el bullet
+   de CÓMO, que es donde de verdad se prohibía nombrar al usuario—;
+2. **el negativo**, que pierde `2boys`, `multiple people` y `another person` —y
+   sólo esas tres: `2girls` y `multiple girls` se quedan siempre—;
+3. **el `solo` de la receta**, que en el vocabulario de estos modelos significa
+   «una sola persona en la imagen» y vive en la apariencia que escribió el
+   usuario, contradiciendo la escena sin que nadie lo pusiera ahí para eso.
+
+**Dos puertas, no una.** El ajuste dice que se PUEDE dibujar a los dos; la escena
+dice si en ésa hacen falta los dos. El bloque depende sólo del ajuste —se escribe
+antes de que exista la escena—, pero el negativo y el recorte del `solo` sólo se
+relajan cuando la escena nombra de verdad a la segunda figura. Así una foto de
+ella sola conserva sus defensas con el interruptor encendido, que es lo que evita
+reabrir el fallo de `D-057`.
+
+### Con el interruptor apagado no cambia nada, y está medido
+
+Era la condición que mandaba sobre todo lo demás. Medido en esta pasada, no
+heredado:
+
+- `VAULT_IMAGE_NEGATIVE` es **el mismo string byte a byte** que en `HEAD`: las
+  tres etiquetas se extraen a una constante y se vuelven a intercalar en su sitio
+  con un spread, así que el orden no se mueve;
+- el bloque de instrucciones apagado ocupa **6.474** (prosa) y **6.478**
+  (etiquetas), igual que lo dejó `F29-POSTURA-004`; encendido ocupa **6.411** y
+  **6.415**, 63 caracteres menos. El tope de 6.500 no se toca;
+- el recorte del `solo` no se ejecuta nunca con el ajuste apagado, y el párrafo
+  del panel que lo explica sólo se pinta si de verdad se quitó uno.
+
+### Lo que falta, y es de Daniel
+
+Nada del camino AUTOMATICO se ha visto en pantalla. Lo que sí se ha probado, y
+salió bien, son **dos imágenes de dos figuras generadas a mano** con el prompt
+pegado en el panel: anatomía correcta y el personaje reconocible.
+
+1. **Reconstruir y abrir Studio**: ha cambiado `packages/shared`, así que
+   `npm run build` y abrir.
+2. **Encender el ajuste** en la ficha del personaje —«Dibujar las escenas en las
+   que salís los dos»— y comprobar que la casilla se queda encendida al volver a
+   entrar. Con un personaje guardado antes de hoy tiene que aparecer **apagada**:
+   el valor por defecto se aplica al leer.
+3. **Pedir una escena en la que salgáis los dos** y mirar el panel ANTES de
+   generar: el texto tiene que nombrar al otro (`1boy`, `a man`), el negativo ya
+   no puede llevar las tres prohibiciones, y `solo` tiene que aparecer en lo
+   descartado, con su botón para devolverlo.
+4. **Pedir una foto de ella sola con el ajuste encendido** y comprobar lo
+   contrario: ahí el negativo sigue entero y `solo` no se quita. Es la segunda
+   puerta, y es lo único que protege de que vuelva a colarse gente de más.
+5. **Generar, y decidir.** Que la imagen salga bien no lo dice ninguna prueba:
+   **es una expectativa, no una observación**. Si sale mal, apagarlo; para eso
+   existe. Y si sale mal, decir con qué modelo, que es lo que permitiría medirlo.
+
+**Siguiente paso exacto:** el punto 3 de esa lista —una escena de dos, mirando el
+panel antes de gastar nada—.
+
 ## F29-POSTURA-005 — la decision retirada y la nueva, completas
 
 Estado: **hecho — Claude, 2026-09-18.** Pasada de sólo documentación: **ni una

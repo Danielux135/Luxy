@@ -22,10 +22,13 @@ import { z } from 'zod';
 
 import {
   mergeNegatives,
+  sceneIncludesSecondFigure,
   stripConflictingTraitsDetailed,
+  stripSoloTagsDetailed,
   type HordeImageRequest,
   type HordeRecipe,
 } from './vault-image-provider.js';
+import { withoutSecondPersonBans, type VaultImageCast } from './vault-image-request.js';
 
 /**
  * los topes de texto del plan, que NO son los del bloque que escribe el modelo.
@@ -278,14 +281,37 @@ export function composeHordeImagePlan(input: {
   recipe: HordeRecipe;
   scene: string;
   extraNegative: string;
+  /**
+   * quien puede salir en la imagen, YA RESUELTO por quien conoce al personaje.
+   *
+   * Este modulo no lee ningun ajuste: se le dice. Sin este campo —y con
+   * `character-only`, que es el valor de siempre— compone exactamente lo mismo
+   * que antes de que el ajuste existiera, byte a byte.
+   */
+  cast?: VaultImageCast;
 }): HordeImagePlan {
   const { recipe } = input;
+  // DOS puertas, no una: el ajuste dice que se PUEDE dibujar a los dos, y la
+  // escena dice si en esta hacen falta. Una foto de ella sola conserva sus
+  // defensas aunque el ajuste este encendido, que es lo que evita reabrir el
+  // fallo por el que nacio el negativo: una segunda persona sin pedirla.
+  const bothInFrame = input.cast === 'both' && sceneIncludesSecondFigure(input.scene);
   const escena = stripConflictingTraitsDetailed(input.scene, recipe.appearance);
-  const positive = [recipe.appearance, recipe.outfit, escena.text]
+  const compuesto = [recipe.appearance, recipe.outfit, escena.text]
     .map((part) => part.trim())
     .filter((part) => part.length > 0)
     .join(', ');
-  const negative = mergeNegatives(recipe.negative, input.extraNegative);
+  // `solo` significa «una sola persona» y casi siempre vive en la apariencia
+  // fija, no en la escena: el recorte de rasgos no lo alcanza porque mira en la
+  // direccion contraria. Se pasa el positivo ENTERO para cazarlo venga de donde
+  // venga —apariencia, ropa o la propia escena— y sin duplicar lo apuntado.
+  const identidad = bothInFrame
+    ? stripSoloTagsDetailed(compuesto)
+    : { text: compuesto, dropped: [] };
+  const positive = identidad.text;
+  const negative = bothInFrame
+    ? withoutSecondPersonBans(mergeNegatives(recipe.negative, input.extraNegative))
+    : mergeNegatives(recipe.negative, input.extraNegative);
 
   return sealPlan({
     provider: 'horde',
@@ -308,7 +334,10 @@ export function composeHordeImagePlan(input: {
       denoisingStrength: recipe.denoisingStrength,
       shared: recipe.shared,
     },
-    dropped: escena.dropped,
+    // lo del recorte de rasgos y lo del `solo`, en el mismo cartel: para quien
+    // lo lee es lo mismo —texto que pidio y no se mando— y se devuelve igual.
+    // `escena.dropped` nunca trae una de esas etiquetas, asi que no se repiten
+    dropped: [...escena.dropped, ...identidad.dropped],
     scene: input.scene,
   });
 }
@@ -323,11 +352,19 @@ export function composeHordeImagePlan(input: {
 export function composeXaviraImagePlan(input: {
   scene: string;
   extraNegative: string;
+  /** igual que en el horde: resuelto fuera, y por defecto el de siempre */
+  cast?: VaultImageCast;
 }): XaviraImagePlan {
+  // aqui no hay positivo que limpiar —la apariencia vive en su servidor y su
+  // `solo`, si lo tiene, tambien—, pero el negativo si es nuestro y prohibiria
+  // lo mismo que se acaba de pedir
+  const bothInFrame = input.cast === 'both' && sceneIncludesSecondFigure(input.scene);
   return sealPlan({
     provider: 'xavira',
     prompt: input.scene,
-    negativeAppend: input.extraNegative,
+    negativeAppend: bothInFrame
+      ? withoutSecondPersonBans(input.extraNegative)
+      : input.extraNegative,
     scene: input.scene,
   });
 }

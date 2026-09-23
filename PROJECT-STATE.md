@@ -1,7 +1,52 @@
 # Luxy — estado canónico del proyecto
 
-Última actualización: **2026-09-18 — doce generaciones tumban el desambiguador
-de orientación, y dejan una regla mejor en su sitio**
+Última actualización: **2026-09-21 — una escena con los dos se puede dibujar
+entera, y hacen falta tres piezas a la vez**
+
+Daniel pidió poder ilustrar las escenas en las que salen los dos. Hasta hoy esas
+escenas se dibujaban recortadas —sólo el personaje, en plano cercano— y no por
+descuido: está escrito a propósito desde `D-057`, que nació de una generación
+real con **una segunda mujer que nadie había pedido**. Se le avisó de que la
+calidad con dos figuras es irregular en estos modelos y aun así lo quiere, con un
+interruptor para apagarlo. Todo está en `D-097`.
+
+**Lo que se abre, y cómo.** Un ajuste por personaje —`imageCast`, gemelo exacto
+de `imageReview`, apagado por defecto y de una pulsación—. Con él apagado **no
+cambia absolutamente nada**, y eso está medido, no supuesto: el prompt negativo
+es el mismo string byte a byte que en `HEAD`, y el bloque de instrucciones ocupa
+los mismos **6.474** caracteres en prosa y **6.478** en etiquetas que dejó
+`F29-POSTURA-004`. Encendido ocupa 63 menos, porque las dos redacciones son
+excluyentes.
+
+**Las tres piezas, que es lo que hay que aprenderse:** con una sola, la foto
+sigue saliendo de una figura. La **instrucción** (dos frases, no una: la del caso
+2 y el bullet donde de verdad se prohibía nombrar al usuario, que es lo único que
+lo hace aparecer); el **negativo**, que prohíbe literalmente lo que la
+instrucción acaba de pedir; y el **`solo` de la receta**, que es la que se
+descubre escribiendo un prompt a mano y es fácil no ver nunca: en el vocabulario
+de estos modelos significa «una sola persona en la imagen» y vive en el texto de
+apariencia del usuario, contradiciendo la escena sin que nadie lo pusiera ahí
+para eso.
+
+**Dos puertas, no una.** El ajuste dice que se PUEDE dibujar a los dos; la escena
+dice si en ésa hacen falta los dos. El bloque depende sólo del ajuste —se escribe
+antes de que exista la escena—, pero el negativo y el recorte del `solo` sólo se
+relajan cuando la escena nombra de verdad a la segunda figura, con una lista
+cerrada de nombres de persona y **nunca pronombres**. Una foto de ella sola
+conserva así sus defensas con el interruptor encendido, que es lo que evita
+reabrir el fallo de `D-057`.
+
+**Probado, no visto, y sin una sola imagen.** Suite completa en verde en esta
+pasada —**192 archivos, 4.036 pruebas pasadas y 12 saltadas**, medidas
+ejecutándola en este worktree—, con 31 pruebas nuevas repartidas en dos archivos.
+Nadie ha abierto Studio con el interruptor, pero **sí hay dos imágenes de dos
+figuras**, generadas a mano por Daniel con el prompt pegado en el panel: las dos
+limpias. O sea que lo que falta por ver es el camino automático, no si el modelo
+sabe dibujar dos figuras. Que el generador obedezca no lo fija ninguna prueba;
+ésa sigue siendo la única comprobación que vale y es de la pantalla de Daniel.
+
+Lo anterior — **doce generaciones tumban el desambiguador de orientación, y
+dejan una regla mejor en su sitio** (2026-09-18):
 
 Daniel repitió la misma petición doce veces con la semilla `1080257389` y el
 modelo WAI-ANI-NSFW-PONYXL, moviendo una cosa cada vez. El resultado no admite
