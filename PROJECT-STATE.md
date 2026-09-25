@@ -1,6 +1,20 @@
 # Luxy — estado canónico del proyecto
 
-Última actualización: **2026-09-23 — se puede borrar la memoria que una
+Última actualización: **2026-09-25 — la bóveda no tiene copia; Lía tiene
+con qué dejar de copiarse; el enganche, diseñado**
+
+> **Lo primero: la bóveda no tiene ninguna copia de seguridad.** Existe sólo en
+> este disco, no se ha sincronizado nunca, y la sincronización de hoy no serviría:
+> tres fallos en el código y, por diseño, no sube ni a Lía ni las fichas de
+> memoria. Copia a mano en `LA-049`; el detalle, en `SEG-SYNC-001`.
+
+> **Lo segundo: `F33-VARIEDAD-001`.** Cuatro cambios contra la autocopia de Lía,
+> con interruptor y sin verse en pantalla. Se prueban con `LA-050`.
+
+> Lo de abajo, hasta el próximo encabezado, es del **2026-09-23** y sigue siendo
+> cierto, incluido que la bóveda no se cierra sola (`SEG-BOVEDA-001`).
+
+Última actualización anterior: **2026-09-23 — se puede borrar la memoria que una
 conversación se escribe sola, y la bóveda no se cierra por inactividad**
 
 > **Lo primero, porque es seguridad y está SIN ARREGLAR.** La bóveda no se cierra

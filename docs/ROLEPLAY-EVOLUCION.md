@@ -498,8 +498,12 @@ sin llamada extra.
 1. Temperatura opcional en las **familias** de una conexión: hoy
    `buildFamilyProviders` (`apps/agent/src/agent.ts:386-404`) crea el proveedor sin
    ningún parámetro de muestreo, así que los cuatro de `D-098` solo alcanzan a
-   `providers.http`, que tampoco tienen ninguno puesto. Para DeepSeek, **sin
-   penalizaciones**: su documentación dice que «will not take effect».
+   `providers.http`, que tampoco tienen ninguno puesto. Para DeepSeek, las
+   penalizaciones solo valen **sin razonamiento**: en ese modo su documentación
+   dice que «will also have no effect»
+   (https://api-docs.deepseek.com/guides/thinking_mode). Y aunque lleguen,
+   castigan sobre todo lo repetido dentro de la propia respuesta, no lo copiado
+   de turnos anteriores. *(Corregido el 2026-09-25: decía que no valían nunca.)*
 2. Registrar el muestreo efectivo en «llamada al proveedor».
 3. Comprobar primero que la pasarela `hcnsec` reenvía la temperatura (3 llamadas
    neutras, fuera de la bóveda, a 0 y otras 3 a 1,8). Y si su «DeepSeek-V4-Flash»
@@ -968,7 +972,7 @@ y niveles se sostiene solo.
 | idea | motivo |
 | --- | --- |
 | Reintento automático cuando la respuesta repite (Repetition Guard de Kindroid, corte temprano de Janitor) | Es una segunda llamada dentro del turno de pago. Kindroid lo dejó apagado por defecto en agosto de 2026 y admite que no cubre ideas repetidas con otras palabras |
-| Penalizaciones de frecuencia y presencia con DeepSeek | La API oficial dice que «will not take effect». Además, en servidores tipo vLLM solo miran lo generado en esa llamada, no los turnos anteriores (docstrings de vLLM) |
+| Penalizaciones de frecuencia y presencia con DeepSeek | **Corregido el 2026-09-25: no se descarta del todo.** DeepSeek dice que no tienen efecto **en modo razonamiento** (https://api-docs.deepseek.com/guides/thinking_mode), y por la pasarela de Daniel 12 de 13 llamadas de V4-Flash iban sin razonar. Lo que sigue en pie: en servidores tipo vLLM solo miran lo generado en esa llamada, no los turnos anteriores (docstrings de vLLM), así que contra la autocopia ayudarían poco |
 | DRY y XTC con el proveedor actual de Lía | La pasarela es de DeepSeek, que no los tiene, y ese motivo basta. El segundo —que DRY solo corta copias literales; su autor admite que no para «paraphrasing and situational looping»— pierde fuerza tras 1.6: el caso original fueron repeticiones «casi con las mismas palabras». Si Lía cambia a un proveedor que lo tenga, se reabre |
 | Palabras vetadas (muted words de Character.AI) | Solo coincidencias exactas: se esquivan con un sinónimo o una forma flexionada (terceros) |
 | Cualquier paso que piense antes de responder con otra llamada (Stepped Thinking, Objective con comprobación) | Segunda llamada dentro del turno |

@@ -13,12 +13,18 @@
 >    guarda de
 >    desfase bloquea cualquier nota y todo `F23-PENDIENTES-001` parecerá roto.
 >    Es de Daniel, no de un agente.
-> 2. **`F31-REPETICION-001`: medido el 2026-09-25, y el contador NO sirve.**
->    Compara vocabulario con diez promesas y por azar casa el 39-83 % de las
->    respuestas. El diagnóstico nuevo, el plan por pasos y 23 ideas están en
->    `docs/ROLEPLAY-EVOLUCION.md`. El paso 0 es de Daniel: marcar a mano 20-30
->    respuestas con un solo modelo. Está justo debajo, fuera del orden de fecha
->    a propósito.
+> 2. **`F33-VARIEDAD-001`: los cuatro cambios contra la autocopia de Lía están
+>    hechos (`D-102`), con `npm run check` en verde y SIN verse en pantalla.**
+>    Daniel tiene que encender la casilla en la ficha de Lía y poner la
+>    temperatura en el MODELO que de verdad usa (`LA-050`). Releva al «paso 0»
+>    de `F31-REPETICION-001`: la conversación que Daniel pegó el 25/09 ya sirvió
+>    de muestra de referencia.
+> 2b. **`SEG-SYNC-001`: la bóveda no tiene ninguna copia.** No se ha
+>    sincronizado nunca, y la sincronización de hoy no la haría: tres fallos en
+>    el código y, por diseño, no sube ni el personaje ni las fichas de memoria.
+>    Mientras tanto, copia a mano (`LA-049`).
+> 2c. **`F33-ENGANCHE-001`: diseñado, nada construido.** Depende de arreglar
+>    antes la sincronización, porque va montado encima.
 > 3. **Comprobaciones de pantalla de Daniel** de F28, F29-POSTURA-001 y F30. El
 >    índice está en `LOCAL-ACTIONS.md`, `LA-048`; el detalle, en cada bloque.
 > 4. Lo demás. `PROVEEDORES-005`, más abajo, tiene una prueba de diez minutos
@@ -26,6 +32,116 @@
 >
 > `KIMI-K3-EXPERIMENT-001`, al final del archivo, está **abandonado**, no en
 > curso. No lo retomes sin que Daniel lo pida.
+
+## F33-VARIEDAD-001 — que Lía no se copie a sí misma (2026-09-25)
+
+Estado: **construido, `npm run check` en verde (200 archivos, 4220 pruebas en verde y 12 omitidas (4232)),
+NADA visto en pantalla.** La decisión completa es `D-102`.
+
+**Origen.** Daniel pegó en el chat una conversación de 16 turnos con Lía en
+DeepSeek. **No se guardó en ningún sitio ni se pasó a ningún agente**: se les
+describió el patrón en abstracto. La repetición no eran las promesas, era la
+**forma**: 11 de 14 respuestas abrían con la misma acotación, 9 cerraban igual (6
+palabra por palabra), había acotaciones de dos líneas idénticas letra por letra y
+una plantilla de siete pasos que se endurecía turno a turno. Y le cedió la
+iniciativa tres veces de forma explícita y las tres se la devolvió.
+
+**Lo construido**, cuatro cambios, todos con interruptor:
+
+1. **Muestreo por modelo** en cada conexión (`modelSampling`), que
+   `familyProviderConfig` pasa a las familias. Arregla que los cuatro campos de
+   `D-098` no llegaran nunca al modelo de Lía. Sin valor por defecto.
+2. y 3. **Dos notas de dirección** (`packages/shared/src/vault-reply-guidance.ts`)
+   detrás de un ajuste por personaje, `replyGuidance`, apagado por defecto. Apagado,
+   el prompt sale byte a byte como antes. El texto salió de cuatro redacciones y
+   tres jueces.
+4. **Medidor de copia** (`packages/shared/src/self-copy.ts`): una línea «copia de
+   sus respuestas» en `studio.log`, sólo con enteros, que compara lo copiado de la
+   ventana con un control de respuestas que no tenía delante.
+
+**Lo que se corrigió después del flujo, a mano y con escépticos:**
+
+- la nota de iniciativa acababa con una regla **sin excepción** («ciérrala tú, sin
+  devolverle el turno») que Daniel no aprobó y que chocaba con las órdenes de
+  preguntar en vez de inventar (`D-061`). Pasó a «no siempre» con permiso para
+  preguntar; **un escéptico demostró que ese permiso dejaba la puerta abierta**
+  —«¿qué quieres que te haga?» podía pasar por un dato que le falta—, y quedó con
+  el criterio «lo que puedes decidir tú no es un dato»;
+- el método de medir de `D-102` (tandas de 5 turnos sin descartar nada, cuando
+  cada respuesta sigue viajando cuatro turnos más);
+- **una afirmación falsa**, en cuatro sitios, uno de ellos texto de la pantalla de
+  Conexiones: que DeepSeek ignora las penalizaciones. Sólo es cierto **en modo
+  razonamiento** (https://api-docs.deepseek.com/guides/thinking_mode), y por la
+  pasarela de Daniel 12 de 13 llamadas iban sin razonar. El error salió del
+  encargo que se les dio a los agentes.
+
+**Siguiente paso exacto: `LA-050`, de Daniel.**
+
+**Menores que quedan abiertos:** el medidor no recibe el mensaje de él, así que su
+eco literal cuenta como autocopia (afecta igual a los dos brazos); el `system` de
+conversación sigue llamando al historial «el canon» (el paso 2.2 del plan, que no
+estaba aprobado); y un comentario de `handlers.ts` que no cuenta los turnos citados
+en un recuerdo como «lo que tenía delante».
+
+## SEG-SYNC-001 — la bóveda no tiene copia, y la sincronización no la haría (2026-09-25)
+
+Estado: **diagnosticado con lectura de código y mediciones, NADA arreglado.**
+
+**Lo demostrado.** La bóveda sólo existe en este disco (Daniel, 25/09: la bóveda
+ni existe en el otro ordenador) y **no hay ni una sincronización** en los
+registros. El gateway en producción es **byte a byte el commit `5bde157`**:
+probado con el log de wrangler del 02/09 y con el paquete del dry-run que quedó
+en `apps/gateway/.wrangler/dry-run/`, cuyas 52 fuentes coinciden. El código de la
+sincronización no ha cambiado desde entonces en ningún lado: **volver a desplegar
+no arregla nada.**
+
+**Tres fallos, en el código de hoy:**
+
+1. **Fechas.** La bajada exige `z.string().datetime()` (fechas en «Z»,
+   `packages/shared/src/vault.ts:135` y `:162`), y el gateway devuelve
+   `row.created_at` tal cual (`handlers/vault.ts:67` y `:79`). Postgres escribe
+   `+00:00`: la sincronización se cortaría tras la primera conversación. Hipótesis
+   de confianza alta; la confirma `select to_json(now());` (`LA-051`).
+2. **Congelación.** `insertVaultRecords` usa `on_conflict` sin `Prefer:
+   resolution=ignore-duplicates` y se traga los errores (`repository.ts:784-785`):
+   desde la segunda sincronización, lo nuevo no sube y no avisa.
+3. **Límite de 200.** El push admite 200 registros y la bajada no pagina. La
+   conversación más larga tiene hoy 122.
+
+**Por diseño no sube**, aunque todo lo anterior funcionara: `characters.json`
+(Lía, su semilla y su receta), los avatares, `catalog.json`, `recap.json` —la
+memoria de **18 de las 22 conversaciones** vive sólo ahí—, `relation.json` e
+`image-attempts/`.
+
+**Siguiente paso exacto:** `LA-049` ya. Arreglar los tres fallos está pendiente
+de que Daniel lo apruebe; desplegarlo exige su autorización expresa.
+
+## F33-ENGANCHE-001 — enganchar una conversación a un personaje (2026-09-25)
+
+Estado: **diseñado, NADA construido.** Plan en `docs/ENGANCHE-DISENO.md`.
+
+**Origen.** Daniel empezó sin querer una conversación sin personaje (`3657a284`,
+19 turnos) y le habló a Lía. Pidió un botón para engancharla y que Lía la
+recuerde.
+
+**Demostrado:** no hay fuga entre personajes —el índice filtra por igualdad
+estricta, `private-memory.ts:257-262`—; el enganche **ya existe a medias**: el campo
+«Personaje de esta conversación» sella sólo el id, sin la descripción ni las
+instrucciones, y soltar deja la descripción vieja en vigor. Y **enganchar no es
+recordar**: la memoria de una conversación no la lee ninguna otra, y desde otra
+Lía sólo vería una línea de índice.
+
+**Decisiones de Daniel (25/09):** enganche **inmediato y en los dos ordenadores**
+(exige una migración nueva y volver a desplegar); resumen de las 2 últimas
+conversaciones en cada mensaje; el cuaderno de la relación, **después** del
+resumen; y aviso «¿Es de Lía?» al nombrarla. Lía sólo existe en este ordenador.
+
+**El diseño tiene 22 fallos** de tres escépticos. El peor: la regla del dueño
+ignora la causalidad, y un cambio posterior puede perder contra uno anterior.
+
+**Siguiente paso:** arreglar `SEG-SYNC-001`, porque el enganche va encima; después,
+segunda vuelta del diseño. La parte que sólo vive en este ordenador —botón,
+selector de personaje siempre visible y aviso— se puede construir antes.
 
 ## SEG-BOVEDA-001 — la bóveda no se cierra por inactividad (2026-09-23)
 
@@ -99,6 +215,9 @@ a otras conversaciones:
 no una pasada de relleno en vuelo (`recap-sync.ts:1275-1288`); y el acuse puede
 quedarse mintiendo si la fila desaparece por otro motivo (borrar la conversación
 entera).
+
+> **Relevado el 2026-09-25 por `F33-VARIEDAD-001`**, que construyó los cambios.
+> Lo de abajo se conserva como historia del diagnóstico.
 
 ## F31-REPETICION-001 — medir la repetición antes de tocarla
 

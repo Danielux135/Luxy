@@ -1,5 +1,24 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-25 — F33-VARIEDAD-001 — `npm run check` tras el último cambio
+
+**200 archivos, 4220 pruebas en verde y 12 omitidas (4232).** Los cuatro pasos en verde: lint, typecheck (con
+`typecheck:tests`), test y build. Ejecutado después del último cambio del día, que
+fue una cadena de texto de `vault-reply-guidance.ts`.
+
+Antes, el flujo de implementación pasó `npm run check` tres veces en verde (200
+archivos; 4.219 y 4.220 pruebas). **Las tres pasadas estaban en verde también
+mientras había defectos importantes abiertos**: el verde dice que no se ha roto
+nada, no que el texto que lee Lía sea bueno.
+
+Las pruebas de las notas usan las constantes exportadas y no copian el texto, así
+que cambiar una frase no rompe ninguna. Lo que sí vigilan: que apagado el prompt
+sale byte a byte igual, y que ninguna nota lleve el vocabulario de la plantilla
+observada.
+
+**Lo NO ejecutado:** nada se ha visto en pantalla, y el medidor no se ha leído
+sobre ninguna conversación real.
+
 ### 2026-09-23 — borrar la memoria propia — cuatro pasadas de `npm run check`
 
 **Todas las cifras se midieron en esta sesión.** `npm run check` son cuatro pasos

@@ -8,6 +8,61 @@
 > esos cinco es ambigua** y hay que leer las dos. Renumerarlos tocaría citas en
 > varios documentos y no se ha hecho hoy. Los números nuevos se toman de LA-049.
 
+## LA-049 — copia de seguridad de la bóveda, a mano
+
+Estado: **`pending` — abierta el 2026-09-25. Es la más urgente de la lista.**
+
+La bóveda —Lía, las 22 conversaciones, las 70 imágenes y sus fichas de memoria—
+existe sólo en el disco de este ordenador, y la sincronización no serviría de copia
+(`SEG-SYNC-001`). Son unos 9 MB en 114 archivos, casi todo cifrado.
+
+1. Cerrar Luxy **del todo**: la X no la cierra, la manda al icono junto al reloj.
+   Salir desde ahí.
+2. Windows + R, escribir `%APPDATA%\Luxy` e Intro.
+3. En un disco externo, una carpeta con la fecha, por ejemplo
+   `Luxy copia 2026-09-25`.
+4. Copiar dentro **la carpeta `vault` y el archivo `vault.json`**. Sólo esos dos:
+   `config.json` lleva el token de la máquina y `secrets.enc` está atado a este
+   Windows, y ninguno sirve para abrir la bóveda en otro equipo.
+5. Comprobar con Propiedades que la copia tiene **114 archivos y unos 9 MB**.
+6. Tener la contraseña de la bóveda y la clave de recuperación apuntadas **fuera**
+   de este ordenador. Sin ellas la copia no se abre.
+
+Si se sube además a la nube: `vault.json` lleva el correo sin cifrar y la llave
+maestra protegida sólo por la contraseña, y `memory-excluded.json` va sin cifrar a
+propósito (sólo lleva identificadores). Repetir de vez en cuando.
+
+## LA-050 — probar la variedad de Lía
+
+Estado: **`pending` — abierta el 2026-09-25.** Detalle en `F33-VARIEDAD-001` y
+`D-102`.
+
+1. Reconstruir y abrir Luxy.
+2. **Averiguar en qué modelo está Lía.** El registro dice que el 25/09, tras un
+   fallo de V4-Flash a las 08:47, los 16 turnos siguientes fueron con
+   **DeepSeek-V4-Pro**. El ajuste de temperatura es por modelo: si se pone en el
+   otro, no le llega.
+3. **Primero sólo la casilla**, en la ficha de Lía: «Pedirle que varíe la forma y
+   ponga su parte». Sin tocar la temperatura.
+4. Hablar con ella en tandas de **8 mensajes o más**, y no contar los 4 primeros
+   de cada tanda: cada respuesta sigue viajando literal los cuatro mensajes
+   siguientes.
+5. **Leer las respuestas**, que es lo que manda: si siguen el mismo orden, si
+   decide cuando se le cede la decisión, si aporta algo suyo. La línea «copia de sus
+   respuestas» de `studio.log` sólo ve copias palabra por palabra.
+6. Después, y sólo después: Conexiones → la pasarela → «Muestreo por modelo» →
+   Añadir modelo, con el nombre exacto, y `1,3` en Temperatura. Comprobar en
+   `luxy.log` que la línea «llamada al proveedor» lleva `temperature: 1.3`.
+
+## LA-051 — confirmar el fallo de fechas de la sincronización (opcional)
+
+Estado: **`pending` — abierta el 2026-09-25. Sólo lectura.**
+
+Panel de Supabase → SQL Editor → `select to_json(now());` → Run. Si termina en
+`+00:00`, la sincronización de hoy falla seguro en la primera conversación
+(`SEG-SYNC-001`, fallo 1). Si termina en `Z`, ese fallo no existe y quedan los
+otros dos.
+
 ## LA-048 — comprobaciones de pantalla pendientes: F28, F29-POSTURA-001 y F30
 
 Estado: **`pending` — anotada el 2026-09-23.** Es un índice, no una acción nueva.

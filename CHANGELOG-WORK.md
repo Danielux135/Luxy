@@ -1,5 +1,41 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-09-25 — Claude — que Lía no se copie a sí misma; la sincronización no sirve de copia; el enganche, diseñado
+
+- Estado anterior: el diagnóstico de la mañana (`docs/ROLEPLAY-EVOLUCION.md`).
+- Objetivo: los cuatro cambios que aprobó Daniel contra la autocopia; y, por el
+  camino, dos peticiones nuevas (enganchar una conversación a un personaje, y
+  comprobar si la sincronización sirve de copia de seguridad).
+
+**La autocopia (`F33-VARIEDAD-001`, `D-102`).** Un flujo de 31 agentes: tres
+diseños, cuatro redacciones de las notas con tres jueces, tres implementaciones en
+serie y tres rondas de cuatro revisores con dos de corrección. Terminó en verde con
+dos defectos importantes abiertos por el tope de rondas; se cerraron a mano, y un
+escéptico más encontró que la excepción nueva de la nota de iniciativa dejaba la
+puerta abierta. Quedó con el criterio «lo que puedes decidir tú no es un dato».
+
+**Una corrección de fondo**, y el error fue de quien coordinaba: se dijo a Daniel y
+se escribió en cuatro sitios que DeepSeek ignora las penalizaciones. Sólo lo hace
+**en modo razonamiento** (https://api-docs.deepseek.com/guides/thinking_mode); la
+página que se citaba (`parameter_settings`) no dice nada de penalizaciones. Por la
+pasarela de Daniel, 12 de 13 llamadas de V4-Flash van sin razonar.
+
+**La sincronización (`SEG-SYNC-001`).** Siete agentes, sólo lectura, sin llamar a
+ninguna ruta de la bóveda ni desplegar. Identificaron el código de producción
+byte a byte (`5bde157`) y encontraron tres fallos en el código de hoy y cinco
+archivos que por diseño no suben nunca. Veredicto: no pulsar; copia a mano
+(`LA-049`).
+
+**El enganche (`F33-ENGANCHE-001`).** Tres flujos de diseño. El primero perdió
+cinco de siete agentes por una **eñe en el nombre de un campo del esquema** —la
+API exige `^[a-zA-Z0-9_.-]{1,64}$`—, y los dos que sobrevivieron investigaron por
+su cuenta y trajeron lo mejor: no hay fuga entre personajes, el enganche ya existe
+a medias, y enganchar no es recordar. El diseño final (`docs/ENGANCHE-DISENO.md`)
+tiene 22 fallos de tres escépticos.
+
+**Lo verificado:** `npm run check` entero tras el último cambio: 200 archivos, 4220 pruebas en verde y 12 omitidas (4232).
+**Lo no verificado:** nada de esto se ha visto en pantalla.
+
 ### 2026-09-25 — Claude — la repetición, medida: el contador no sirve; y cómo evolucionan los personajes
 
 - Estado anterior: `F31-REPETICION-001` instrumentado el 17/09 y sin medir.
