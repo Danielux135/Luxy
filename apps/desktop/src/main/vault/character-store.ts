@@ -17,7 +17,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from '
 import { join } from 'node:path';
 import { z } from 'zod';
 import { openBlob, openText, sealBlob, sealText, wipe, type SealedEnvelope } from '@luxy/vault-crypto';
-import { hordeRecipeSchema } from '@luxy/shared';
+import { hordeRecipeSchema, VAULT_REPLY_GUIDANCES } from '@luxy/shared';
 import { VaultError, type VaultService } from './vault-service.js';
 import { randomObjectKey } from './private-store.js';
 import type { BlobStore } from './blob-store.js';
@@ -115,6 +115,23 @@ export const vaultCharacterSchema = z.object({
    * valor por defecto al tocar cualquier otro personaje.
    */
   imageCast: z.enum(['character-only', 'both']).default('character-only'),
+  /**
+   * si su prompt lleva las dos notas de direccion contra la autocopia y la
+   * pasividad (`D-102`): no reutilizar la forma de sus respuestas anteriores y
+   * poner su parte en la escena en vez de devolver la decision.
+   *
+   * Del personaje y no de la maquina, como `imageCast`: es como escribe ESE
+   * personaje, y tiene que poder compararse con y sin en una pulsacion. Nace en
+   * `none`, que no añade nada: el prompt sale byte a byte como siempre.
+   *
+   * MISMA TRAMPA que los dos de arriba: `add()` reescribe la lista ENTERA, asi
+   * que un Studio anterior a este campo lo devolveria a `none` al tocar
+   * cualquier otro personaje. Y por eso mismo, si un dia se separan las dos
+   * notas, se hace con un campo nuevo y no con valores nuevos del enum: un
+   * valor que un Studio antiguo no conoce hace que `list()` descarte la lista
+   * entera, y el siguiente `add()` la borraria.
+   */
+  replyGuidance: z.enum(VAULT_REPLY_GUIDANCES).default('none'),
   xavira: xaviraIdentitySchema.nullable().default(null),
   horde: hordeIdentitySchema.nullable().default(null),
   /** quien es, en texto, para el modelo que escribe */

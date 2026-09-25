@@ -35,7 +35,13 @@ import {
   resolveEnabledHttpProviders,
 } from './config.js';
 import { buildProviderPrompt, resolveJobModel } from './job-runner.js';
-import { agentConfigSchema, projectConfigSchema } from '@luxy/shared';
+import {
+  agentConfigSchema,
+  buildDefaultCatalog,
+  connectionProfileSchema,
+  projectConfigSchema,
+} from '@luxy/shared';
+import { familyProviderConfig } from './agent.js';
 import type { JobEventInput, TestRunResult, ClaimedJob } from '@luxy/shared';
 import { runProcess, BASE_ENV_ALLOWLIST } from './process.js';
 
@@ -1082,5 +1088,46 @@ describe('resolveJobModel con el catalogo', () => {
       },
     });
     expect(resolveJobModel(trabajo('ovh-nemo'), config)).toBe('Mistral-Nemo-Instruct-2407');
+  });
+});
+
+// POR QUE EXISTE: hasta F31 el proveedor de una familia se construia sin
+// ningun parametro de muestreo, asi que la temperatura no tenia forma de llegar
+// al modelo de Lia. Y lo contrario importa igual: sin `modelSampling`, el
+// objeto tiene que ser clave por clave el de siempre.
+describe('familyProviderConfig', () => {
+  const conexion = connectionProfileSchema.parse({
+    id: 'hcnsec',
+    displayName: 'Pasarela',
+    baseUrl: 'https://api.example/v1',
+  });
+  const preferido = buildDefaultCatalog('hcnsec').find(
+    (model) => model.apiModel === 'DeepSeek-V4-Pro',
+  )!;
+
+  it('sin muestreo es el literal de siempre, sin la clave nueva', () => {
+    const config = familyProviderConfig('deepseek', conexion, preferido);
+    expect(config).toEqual({
+      id: 'deepseek',
+      displayName: preferido.displayName,
+      baseUrl: 'https://api.example/v1',
+      model: 'DeepSeek-V4-Pro',
+      apiKeyEnv: 'connection:hcnsec',
+      enabled: true,
+      supportsStreaming: preferido.supportsStreaming,
+      maxOutputTokens: preferido.maxOutputTokens,
+      dailyBudget: preferido.limits.dailyBudget,
+      dailyCallLimit: preferido.limits.dailyCalls,
+    });
+    expect('modelSampling' in config).toBe(false);
+    // y sin los cuatro de nivel superior: una familia nunca los tuvo
+    expect('temperature' in config).toBe(false);
+  });
+
+  it('con muestreo lo pasa tal cual, sin tocarlo', () => {
+    const modelSampling = { 'DeepSeek-V4-Flash': { temperature: 1.3 } };
+    const config = familyProviderConfig('deepseek', { ...conexion, modelSampling }, preferido);
+    expect(config.modelSampling).toEqual(modelSampling);
+    expect('temperature' in config).toBe(false);
   });
 });

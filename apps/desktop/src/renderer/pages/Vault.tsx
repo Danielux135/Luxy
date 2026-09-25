@@ -1785,6 +1785,32 @@ function CharacterRow({
         </span>
       </label>
 
+      {/* D-102. Dice lo que PIDE, no lo que consigue (D-093): que funcione no
+          está medido. La línea «copia de sus respuestas» del registro solo ve
+          copias palabra por palabra, así que con la nota de forma encendida puede
+          bajar aunque la plantilla siga con otras palabras: hay que leer respuestas.
+          Apagado, el prompt sale byte a byte como antes */}
+      <label className="check">
+        <input
+          type="checkbox"
+          checked={character.replyGuidance === 'vary-and-lead'}
+          onChange={(event) =>
+            void vault.setCharacterReplyGuidance(
+              character.characterId,
+              event.target.checked ? 'vary-and-lead' : 'none',
+            )
+          }
+        />
+        <span>
+          Pedirle que varíe la forma y ponga su parte
+          <small>
+            {character.replyGuidance === 'vary-and-lead'
+              ? 'le pide no reutilizar entradas, gestos ni cierres de sus respuestas anteriores y que decida cuando le cedes la decisión; no está medido que funcione, y se apaga aquí'
+              : 'el prompt sale exactamente como siempre'}
+          </small>
+        </span>
+      </label>
+
       {active ? (
         <Tag tone="ok">en uso</Tag>
       ) : (

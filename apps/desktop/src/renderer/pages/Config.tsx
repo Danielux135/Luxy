@@ -31,11 +31,16 @@ import {
 } from '../project-profile.js';
 import {
   buildHttpProvider,
+  describeSampling,
   emptyHttpProviderDraft,
+  emptySamplingDraft,
   httpProviderToDraft,
   HTTP_PROVIDER_PRESETS,
+  samplingToDraft,
+  withModelSampling,
   type HttpProviderConfig,
   type HttpProviderDraft,
+  type SamplingDraft,
 } from '../http-provider-config.js';
 import { Empty, Explica, Field, Notice, Panel, Tag } from '../ui/primitives.js';
 import type { ConfigSummary } from '../useConfig.js';
@@ -789,6 +794,219 @@ function defaultProject(): NonNullable<StoredAgentConfig['projects']>[string] {
 // Conexiones
 // -----------------------------------------------------------------------------
 
+/**
+ * muestreo POR MODELO de una conexion.
+ *
+ * Es por modelo y no por conexion porque una conexion registra a la vez varias
+ * familias —y esas mismas ejecutan los trabajos con herramientas—: una
+ * temperatura de conexion se la llevarian todas. Aqui solo la recibe el modelo
+ * exacto que se elige, y por eso el aviso dice que no acompaña a un cambio de
+ * modelo.
+ *
+ * Los cuatro campos son los mismos, con el mismo aviso y las mismas reglas, que
+ * los de un proveedor HTTP: vacio = no se envia.
+ */
+function ConnectionSamplingSection({
+  connection,
+  onSave,
+}: {
+  connection: ConnectionProfile;
+  onSave: (next: ConnectionProfile) => Promise<boolean>;
+}): JSX.Element {
+  const entries = Object.entries(connection.modelSampling ?? {});
+  const [editing, setEditing] = useState<{
+    apiModel: string;
+    isNew: boolean;
+    draft: SamplingDraft;
+  } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const puestos = new Set(entries.map(([model]) => model));
+  // sugerencias, no una lista cerrada: el modelo de una conversacion puede
+  // salir del catalogo real de la pasarela y no del de fabrica
+  const sugerencias = buildDefaultCatalog(connection.id)
+    .map((model) => model.apiModel)
+    .filter((model) => !puestos.has(model));
+  const listId = `sampling-models-${connection.id}`;
+
+  const aplicar = async (apiModel: string, draft: SamplingDraft): Promise<void> => {
+    const result = withModelSampling(connection, apiModel, draft);
+    if (result.connection === null) {
+      setError(result.error);
+      return;
+    }
+    if (await onSave(result.connection)) {
+      setEditing(null);
+      setError(null);
+    }
+  };
+
+  const campo = (key: keyof SamplingDraft, value: string): void => {
+    if (editing === null) return;
+    setEditing({ ...editing, draft: { ...editing.draft, [key]: value } });
+  };
+
+  return (
+    <>
+      <div className="row">
+        <strong style={{ flex: 1 }}>Muestreo por modelo</strong>
+        <button
+          className="btn"
+          type="button"
+          disabled={editing !== null}
+          onClick={() => {
+            setEditing({ apiModel: '', isNew: true, draft: emptySamplingDraft() });
+            setError(null);
+          }}
+        >
+          Añadir modelo
+        </button>
+      </div>
+
+      {entries.length === 0 && editing === null ? (
+        <p className="page__lede">
+          Ningún modelo de esta conexión lleva parámetros de muestreo: Luxy no envía ninguno.
+        </p>
+      ) : (
+        entries.map(([model, parameters]) => (
+          <div className="row" key={model}>
+            <span style={{ flex: 1 }}>
+              <strong>{model}</strong> · {describeSampling(parameters)}
+            </span>
+            <button
+              className="btn btn--quiet"
+              type="button"
+              disabled={editing !== null}
+              onClick={() => {
+                setEditing({ apiModel: model, isNew: false, draft: samplingToDraft(parameters) });
+                setError(null);
+              }}
+            >
+              Editar
+            </button>
+            <button
+              className="btn btn--danger btn--quiet"
+              type="button"
+              disabled={editing !== null}
+              onClick={() => void aplicar(model, emptySamplingDraft())}
+            >
+              Quitar
+            </button>
+          </div>
+        ))
+      )}
+
+      {editing !== null && (
+        <>
+          <Notice tone="idle">
+            Se aplican <strong>sólo a este modelo</strong>, en todo lo que haga por esta conexión:
+            conversaciones y trabajos. Si cambias de modelo, no le acompañan. Vacío significa que
+            Luxy <strong>no los envía</strong>: el cuerpo de la petición sale igual que si estos
+            campos no existieran. Las penalizaciones actúan sobre <strong>tokens</strong> que ya han
+            salido, no sobre temas ni sobre ideas, y valores altos degradan la prosa. Cada servidor
+            decide cuáles admite: puede ignorarlos o contestar con un error.
+          </Notice>
+          {/deepseek/i.test(editing.apiModel) && (
+            <Notice tone="idle">
+              DeepSeek documenta que, cuando el modelo razona, ni la temperatura ni las
+              penalizaciones de frecuencia y de presencia hacen efecto. Para medir, toca sólo la
+              temperatura y mira en el registro si esa llamada razonó.
+            </Notice>
+          )}
+          <Field
+            label="Modelo"
+            hint="El nombre exacto con el que viaja en la petición. Distingue mayúsculas."
+          >
+            <input
+              type="text"
+              list={listId}
+              value={editing.apiModel}
+              readOnly={!editing.isNew}
+              placeholder="DeepSeek-V4-Flash"
+              onChange={(event) => setEditing({ ...editing, apiModel: event.target.value })}
+            />
+          </Field>
+          <datalist id={listId}>
+            {sugerencias.map((model) => (
+              <option key={model} value={model} />
+            ))}
+          </datalist>
+          <div className="row">
+            {/* de TEXTO y no `number`, por lo mismo que en el formulario de
+                proveedor: «1,3» con un campo numérico llegaba vacío */}
+            <Field label="Temperatura" hint="Vacío = no se envía. De 0 a 2.">
+              <input
+                type="text"
+                inputMode="decimal"
+                placeholder="sin enviar"
+                value={editing.draft.temperature}
+                onChange={(event) => campo('temperature', event.target.value)}
+              />
+            </Field>
+            <Field
+              label="Penalización por frecuencia"
+              hint="Vacío = no se envía. De -2 a 2. Crece con las veces que ya salió ese token."
+            >
+              <input
+                type="text"
+                inputMode="decimal"
+                placeholder="sin enviar"
+                value={editing.draft.frequencyPenalty}
+                onChange={(event) => campo('frequencyPenalty', event.target.value)}
+              />
+            </Field>
+          </div>
+          <div className="row">
+            <Field
+              label="Penalización por presencia"
+              hint="Vacío = no se envía. De -2 a 2. Se aplica una vez, en cuanto el token apareció."
+            >
+              <input
+                type="text"
+                inputMode="decimal"
+                placeholder="sin enviar"
+                value={editing.draft.presencePenalty}
+                onChange={(event) => campo('presencePenalty', event.target.value)}
+              />
+            </Field>
+            <Field
+              label="Penalización por repetición"
+              hint="Vacío = no se envía. Mayor que 0, neutro en 1. No es de OpenAI: sólo la admiten algunos servidores."
+            >
+              <input
+                type="text"
+                inputMode="decimal"
+                placeholder="sin enviar"
+                value={editing.draft.repetitionPenalty}
+                onChange={(event) => campo('repetitionPenalty', event.target.value)}
+              />
+            </Field>
+          </div>
+          {error !== null && <Notice tone="fault">{error}</Notice>}
+          <div className="row">
+            <button
+              className="btn btn--primary"
+              type="button"
+              onClick={() => void aplicar(editing.apiModel, editing.draft)}
+            >
+              Guardar
+            </button>
+            <button
+              className="btn btn--quiet"
+              type="button"
+              onClick={() => {
+                setEditing(null);
+                setError(null);
+              }}
+            >
+              Cancelar
+            </button>
+          </div>
+        </>
+      )}
+    </>
+  );
+}
+
 export function ConnectionsPage({
   summary,
   onSave,
@@ -819,6 +1037,16 @@ export function ConnectionsPage({
       setEditing(null);
       setValue('');
     }
+  };
+
+  // sustituye UNA conexion y deja el resto de la configuracion tal cual; el
+  // proceso principal la vuelve a validar entera con Zod antes de escribirla
+  const guardarConexion = async (next: ConnectionProfile): Promise<boolean> => {
+    if (summary.config === null) return false;
+    return onSave({
+      ...summary.config,
+      connections: connections.map((item) => (item.id === next.id ? next : item)),
+    });
   };
 
   const editarProveedor = (provider: HttpProviderConfig): void => {
@@ -1028,6 +1256,8 @@ export function ConnectionsPage({
                   </div>
                 )}
               </Field>
+
+              <ConnectionSamplingSection connection={connection} onSave={guardarConexion} />
             </Panel>
           );
         })

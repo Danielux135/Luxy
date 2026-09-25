@@ -7,6 +7,9 @@ import type {
   AgentEventSink,
   AgentStatus,
   ClaimedJob,
+  ConnectionProfile,
+  HttpProviderConfig,
+  ModelDefinition,
   ProviderExecution,
   ProviderId,
   MachineCapabilities,
@@ -61,6 +64,40 @@ async function withTimeout(promise: Promise<void> | null, ms: number): Promise<b
 // el tipo vive en shared porque cruza IPC hasta el renderer; se reexporta para
 // no romper a quien ya lo importaba desde aqui
 export type { AgentStatus } from '@luxy/shared';
+
+/**
+ * configuracion del proveedor de una FAMILIA servida por una conexion.
+ *
+ * Esta fuera de la clase para poder probarla sin arrancar un agente: es el
+ * unico sitio por el que el muestreo de una conexion llega al modelo de una
+ * familia, y hasta que existio `modelSampling` no llegaba ninguno.
+ *
+ * `modelSampling` se añade SOLO si la conexion lo tiene. Sin el, el objeto es
+ * clave por clave el de siempre, y el cuerpo de la peticion tambien.
+ */
+export function familyProviderConfig(
+  family: string,
+  connection: ConnectionProfile,
+  preferred: ModelDefinition,
+): HttpProviderConfig {
+  return {
+    id: family,
+    displayName: preferred.displayName,
+    baseUrl: connection.baseUrl,
+    model: preferred.apiModel,
+    // la clave ya viene del almacen cifrado, no de una variable
+    apiKeyEnv: `connection:${connection.id}`,
+    enabled: true,
+    supportsStreaming: preferred.supportsStreaming,
+    maxOutputTokens: preferred.maxOutputTokens,
+    dailyBudget: preferred.limits.dailyBudget,
+    // el tope por NUMERO de llamadas. Es el que protege cuando la pasarela
+    // cobra una tarifa plana por peticion: contra esa, el presupuesto en dinero
+    // no ve una llamada que devuelve 0 tokens
+    dailyCallLimit: preferred.limits.dailyCalls,
+    ...(connection.modelSampling === undefined ? {} : { modelSampling: connection.modelSampling }),
+  };
+}
 
 /**
  * dependencias inyectables del agente.
@@ -388,22 +425,7 @@ export class LuxyAgent {
         built.push({
           id: family as ProviderId,
           provider: new HttpApiProvider(
-            {
-              id: family,
-              displayName: preferred.displayName,
-              baseUrl: connection.baseUrl,
-              model: preferred.apiModel,
-              // la clave ya viene del almacen cifrado, no de una variable
-              apiKeyEnv: `connection:${connection.id}`,
-              enabled: true,
-              supportsStreaming: preferred.supportsStreaming,
-              maxOutputTokens: preferred.maxOutputTokens,
-              dailyBudget: preferred.limits.dailyBudget,
-              // el tope por NUMERO de llamadas. Es el que protege cuando la
-              // pasarela cobra una tarifa plana por peticion: contra esa, el
-              // presupuesto en dinero no ve una llamada que devuelve 0 tokens
-              dailyCallLimit: preferred.limits.dailyCalls,
-            },
+            familyProviderConfig(family, connection, preferred),
             apiKey,
             budget,
             undefined,

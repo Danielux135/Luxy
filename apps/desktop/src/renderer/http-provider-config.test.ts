@@ -1,10 +1,15 @@
 import { describe, expect, it } from 'vitest';
+import { connectionProfileSchema } from '@luxy/shared';
 import {
   apiKeyNameForProvider,
   buildHttpProvider,
+  describeSampling,
   emptyHttpProviderDraft,
+  emptySamplingDraft,
   httpProviderToDraft,
   HTTP_PROVIDER_PRESETS,
+  samplingToDraft,
+  withModelSampling,
 } from './http-provider-config.js';
 
 describe('configuracion de proveedores HTTP', () => {
@@ -236,5 +241,96 @@ describe('configuracion de proveedores HTTP', () => {
     // dos con el mismo id chocarian al guardar, porque el id debe ser unico
     const ids = HTTP_PROVIDER_PRESETS.map((preset) => preset.id);
     expect(new Set(ids).size).toBe(ids.length);
+  });
+});
+
+// el formulario de muestreo POR MODELO de una conexion. Mismo molde que el de
+// un proveedor HTTP —coma decimal, vacio = no se envia, NaN no se descarta—,
+// mas una regla propia: vaciarlo tiene que dejar la conexion como estaba.
+describe('muestreo por modelo de una conexion', () => {
+  const conexion = connectionProfileSchema.parse({
+    id: 'hcnsec',
+    displayName: 'Pasarela',
+    baseUrl: 'https://api.example/v1',
+  });
+
+  it('la coma decimal llega como numero y los vacios se omiten', () => {
+    const result = withModelSampling(conexion, 'DeepSeek-V4-Flash', {
+      ...emptySamplingDraft(),
+      temperature: '1,3',
+    });
+    expect(result.error).toBeNull();
+    expect(result.connection?.modelSampling).toEqual({ 'DeepSeek-V4-Flash': { temperature: 1.3 } });
+  });
+
+  it('un borrador vacio quita la entrada, y la ultima se lleva la clave entera', () => {
+    const conDos = withModelSampling(
+      withModelSampling(conexion, 'DeepSeek-V4-Flash', {
+        ...emptySamplingDraft(),
+        temperature: '1,3',
+      }).connection!,
+      'DeepSeek-V4-Pro',
+      { ...emptySamplingDraft(), temperature: '0,9' },
+    ).connection!;
+    expect(Object.keys(conDos.modelSampling ?? {})).toHaveLength(2);
+
+    const conUna = withModelSampling(conDos, 'DeepSeek-V4-Pro', emptySamplingDraft()).connection!;
+    expect(conUna.modelSampling).toEqual({ 'DeepSeek-V4-Flash': { temperature: 1.3 } });
+
+    const sinNinguna = withModelSampling(
+      conUna,
+      'DeepSeek-V4-Flash',
+      emptySamplingDraft(),
+    ).connection!;
+    // la conexion vuelve a ser la de antes, sin un `{}` muerto
+    expect('modelSampling' in sinNinguna).toBe(false);
+    expect(sinNinguna).toEqual(conexion);
+  });
+
+  it('editar sustituye la entrada del modelo entera', () => {
+    const antes = withModelSampling(conexion, 'DeepSeek-V4-Flash', {
+      ...emptySamplingDraft(),
+      temperature: '1,3',
+      frequencyPenalty: '0,2',
+    }).connection!;
+    const despues = withModelSampling(antes, 'DeepSeek-V4-Flash', {
+      ...samplingToDraft(antes.modelSampling?.['DeepSeek-V4-Flash']),
+      frequencyPenalty: '',
+    }).connection!;
+    expect(despues.modelSampling).toEqual({ 'DeepSeek-V4-Flash': { temperature: 1.3 } });
+  });
+
+  it('un «-» a medio escribir da error y no se descarta en silencio', () => {
+    // «-» y no «1.»: `Number('1.')` es 1, asi que ese no llega a ser NaN
+    const result = withModelSampling(conexion, 'DeepSeek-V4-Flash', {
+      ...emptySamplingDraft(),
+      temperature: '-',
+    });
+    expect(result.connection).toBeNull();
+    expect(result.error).toContain('Temperatura');
+  });
+
+  it('fuera de rango y sin modelo tambien se explican', () => {
+    const fuera = withModelSampling(conexion, 'DeepSeek-V4-Flash', {
+      ...emptySamplingDraft(),
+      temperature: '2,5',
+    });
+    expect(fuera.connection).toBeNull();
+    expect(fuera.error).toContain('Temperatura');
+
+    expect(withModelSampling(conexion, '  ', emptySamplingDraft()).error).toBe('Elige el modelo.');
+    expect(
+      withModelSampling(conexion, 'modelo con espacios', {
+        ...emptySamplingDraft(),
+        temperature: '1',
+      }).connection,
+    ).toBeNull();
+  });
+
+  it('el resumen de la lista usa coma decimal', () => {
+    expect(describeSampling({ temperature: 1.3 })).toBe('Temperatura 1,3');
+    expect(describeSampling({ temperature: 0, repetitionPenalty: 1.05 })).toBe(
+      'Temperatura 0 · Penalización por repetición 1,05',
+    );
   });
 });

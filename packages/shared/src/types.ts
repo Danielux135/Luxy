@@ -1,5 +1,6 @@
 // tipos derivados de las constantes y modelos de dominio
 import type { ModelLimits } from './models/types.js';
+import type { SamplingParameters } from './sampling.js';
 import type { ResponseTermination } from './schemas.js';
 import type {
   JOB_STATUSES,
@@ -223,6 +224,17 @@ export interface HttpProviderConfig {
   frequencyPenalty?: number;
   presencePenalty?: number;
   repetitionPenalty?: number;
+  /**
+   * muestreo POR MODELO, con el `model` que viaja en el cuerpo como clave.
+   *
+   * Lo rellena el agente con `ConnectionProfile.modelSampling` al construir los
+   * proveedores de familia; `providers.http` no lo usa.
+   *
+   * PRECEDENCIA: si el modelo de la peticion tiene entrada, se usa SOLO esa y
+   * sustituye entera a los cuatro de arriba, sin mezclarse. Si no la tiene, se
+   * usan los de arriba, como siempre.
+   */
+  modelSampling?: Readonly<Record<string, SamplingParameters>>;
 }
 
 /**

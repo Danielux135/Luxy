@@ -1,5 +1,10 @@
-import { httpProviderConfigSchema } from '@luxy/shared';
-import type { StoredAgentConfig } from '@luxy/shared';
+import { connectionProfileSchema, httpProviderConfigSchema } from '@luxy/shared';
+import type {
+  ConnectionProfile,
+  SamplingParameterKey,
+  SamplingParameters,
+  StoredAgentConfig,
+} from '@luxy/shared';
 
 export type HttpProviderConfig = StoredAgentConfig['providers']['http'][number];
 
@@ -134,12 +139,120 @@ function numberToDraft(value: number | undefined): string {
  * la clave se omite entera en vez de ponerla a `undefined` para que el objeto
  * guardado no arrastre claves muertas hasta `config.json`.
  */
-function sampling(
-  key: 'temperature' | 'frequencyPenalty' | 'presencePenalty' | 'repetitionPenalty',
-  value: string,
-): Record<string, number> {
+function sampling(key: SamplingParameterKey, value: string): Record<string, number> {
   const parsed = draftNumber(value);
   return parsed === undefined ? {} : { [key]: parsed };
+}
+
+/**
+ * los cuatro campos de muestreo de un formulario, en el MISMO molde que los de
+ * un proveedor HTTP: cadenas, con la vacia como «sin poner». Lo comparten el
+ * formulario de proveedor y el de muestreo por modelo de una conexion, para
+ * que la coma, el vacio y el NaN a medio escribir se traten igual en los dos.
+ */
+export type SamplingDraft = Pick<HttpProviderDraft, SamplingParameterKey>;
+
+export function emptySamplingDraft(): SamplingDraft {
+  return { temperature: '', frequencyPenalty: '', presencePenalty: '', repetitionPenalty: '' };
+}
+
+export function samplingToDraft(parameters: SamplingParameters | undefined): SamplingDraft {
+  return {
+    temperature: numberToDraft(parameters?.temperature),
+    frequencyPenalty: numberToDraft(parameters?.frequencyPenalty),
+    presencePenalty: numberToDraft(parameters?.presencePenalty),
+    repetitionPenalty: numberToDraft(parameters?.repetitionPenalty),
+  };
+}
+
+/** los campos rellenos, listos para Zod; los vacios se omiten enteros */
+function samplingDraftFields(draft: SamplingDraft): Record<string, number> {
+  return {
+    ...sampling('temperature', draft.temperature),
+    ...sampling('frequencyPenalty', draft.frequencyPenalty),
+    ...sampling('presencePenalty', draft.presencePenalty),
+    ...sampling('repetitionPenalty', draft.repetitionPenalty),
+  };
+}
+
+const SAMPLING_FIELD_LABELS: Record<SamplingParameterKey, string> = {
+  temperature: 'Temperatura',
+  frequencyPenalty: 'Penalización por frecuencia',
+  presencePenalty: 'Penalización por presencia',
+  repetitionPenalty: 'Penalización por repetición',
+};
+
+/**
+ * resumen de una entrada para la lista de la conexion, con coma decimal: es lo
+ * que se escribio en el campo, y leerlo con punto haria dudar de si se guardo
+ */
+export function describeSampling(parameters: SamplingParameters): string {
+  const partes: string[] = [];
+  for (const [key, label] of Object.entries(SAMPLING_FIELD_LABELS) as [
+    SamplingParameterKey,
+    string,
+  ][]) {
+    const value = parameters[key];
+    if (value !== undefined) partes.push(`${label} ${String(value).replace('.', ',')}`);
+  }
+  return partes.length === 0 ? 'sin parámetros' : partes.join(' · ');
+}
+
+export interface ModelSamplingResult {
+  connection: ConnectionProfile | null;
+  error: string | null;
+}
+
+/**
+ * pone, cambia o quita el muestreo de UN modelo dentro de una conexion.
+ *
+ * Un borrador con los cuatro campos vacios QUITA la entrada del modelo, y si
+ * era la ultima quita tambien la clave `modelSampling`: vacio tiene que volver
+ * a ser exactamente lo de antes, sin dejar un `{}` en `config.json` —que el
+ * esquema, ademas, rechaza—.
+ *
+ * Valida con el MISMO esquema que aplicara el proceso principal al guardar, asi
+ * que un «1.» a medio escribir o un 2,5 de temperatura se explican aqui, junto
+ * al campo, y no como un fallo generico de configuracion.
+ */
+export function withModelSampling(
+  connection: ConnectionProfile,
+  apiModel: string,
+  draft: SamplingDraft,
+): ModelSamplingResult {
+  const model = apiModel.trim();
+  if (model.length === 0) return { connection: null, error: 'Elige el modelo.' };
+
+  // se filtra por clave en vez de indexar: un modelo llamado `toString` no
+  // puede tocar el prototipo
+  const rest = Object.fromEntries(
+    Object.entries(connection.modelSampling ?? {}).filter(([key]) => key !== model),
+  );
+  const fields = samplingDraftFields(draft);
+  const entries = Object.keys(fields).length === 0 ? rest : { ...rest, [model]: fields };
+  const { modelSampling: _previous, ...base } = connection;
+  const next: ConnectionProfile =
+    Object.keys(entries).length === 0 ? base : { ...base, modelSampling: entries };
+
+  const parsed = connectionProfileSchema.safeParse(next);
+  if (parsed.success) return { connection: next, error: null };
+
+  return {
+    connection: null,
+    error: parsed.error.issues
+      .slice(0, 3)
+      .map((issue) => {
+        // la ruta es [modelSampling, <modelo>, <campo>]: se nombra el campo en
+        // castellano para que se sepa cual de los cuatro esta mal
+        const field = issue.path[2];
+        const label =
+          typeof field === 'string' && field in SAMPLING_FIELD_LABELS
+            ? SAMPLING_FIELD_LABELS[field as SamplingParameterKey]
+            : null;
+        return label === null ? issue.message : `${label}: ${issue.message}`;
+      })
+      .join('; '),
+  };
 }
 
 export function httpProviderToDraft(provider: HttpProviderConfig): HttpProviderDraft {
@@ -152,10 +265,7 @@ export function httpProviderToDraft(provider: HttpProviderConfig): HttpProviderD
     supportsStreaming: provider.supportsStreaming,
     maxOutputTokens: String(provider.maxOutputTokens),
     dailyBudget: String(provider.dailyBudget),
-    temperature: numberToDraft(provider.temperature),
-    frequencyPenalty: numberToDraft(provider.frequencyPenalty),
-    presencePenalty: numberToDraft(provider.presencePenalty),
-    repetitionPenalty: numberToDraft(provider.repetitionPenalty),
+    ...samplingToDraft(provider),
   };
 }
 
@@ -182,10 +292,7 @@ export function buildHttpProvider(
     // los cuatro de muestreo se OMITEN si el campo esta vacio. Omitir no es lo
     // mismo que mandar el valor neutro: una conexion sin configurar tiene que
     // seguir mandando el mismo cuerpo de siempre
-    ...sampling('temperature', draft.temperature),
-    ...sampling('frequencyPenalty', draft.frequencyPenalty),
-    ...sampling('presencePenalty', draft.presencePenalty),
-    ...sampling('repetitionPenalty', draft.repetitionPenalty),
+    ...samplingDraftFields(draft),
     ...(existing?.softTerminalGraceMs === undefined
       ? {}
       : { softTerminalGraceMs: existing.softTerminalGraceMs }),

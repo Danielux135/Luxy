@@ -31,6 +31,7 @@ import {
   vaultCharacterProviderArgsSchema,
   vaultCharacterImageReviewArgsSchema,
   vaultCharacterImageCastArgsSchema,
+  vaultCharacterReplyGuidanceArgsSchema,
   vaultHordeCharacterSaveArgsSchema,
   vaultCompatibilityArgsSchema,
   vaultCompatibilityResultSchema,
@@ -291,6 +292,29 @@ describe('validacion de argumentos', () => {
     expect(
       vaultCharacterImageCastArgsSchema.safeParse({ characterId: '', cast: 'both' }).success,
     ).toBe(false);
+  });
+
+  it('un personaje sin las notas de direccion se lee con ellas apagadas', () => {
+    // apagadas es el prompt de siempre (`D-102`)
+    const leido = vaultCharacterSummarySchema.parse({
+      characterId: 'e0000000-5555-4555-8555-555555555555',
+      description: '',
+      label: 'Nora',
+      avatarObjectKey: null,
+      createdAt: '2026-09-02T08:50:37.000Z',
+    });
+    expect(leido.replyGuidance).toBe('none');
+  });
+
+  it('el interruptor de las notas solo admite sus dos valores', () => {
+    const valido = (args: unknown) => vaultCharacterReplyGuidanceArgsSchema.safeParse(args).success;
+    expect(valido({ characterId: 'per-1', guidance: 'vary-and-lead' })).toBe(true);
+    expect(valido({ characterId: 'per-1', guidance: 'none' })).toBe(true);
+    expect(valido({ characterId: 'per-1', guidance: 'vary' })).toBe(false);
+    expect(valido({ characterId: 'per-1', guidance: true })).toBe(false);
+    // sin valor no hay nada que decidir: el defecto vive en el almacen
+    expect(valido({ characterId: 'per-1' })).toBe(false);
+    expect(valido({ characterId: '', guidance: 'none' })).toBe(false);
   });
 
   it('el pie de foto de un adjunto es opcional y acotado', () => {

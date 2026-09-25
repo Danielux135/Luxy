@@ -19,6 +19,7 @@ import type {
   ProviderCallRecord,
   ProviderCallMetrics,
   StreamTransportEnd,
+  SamplingParameters,
 } from '@luxy/shared';
 import {
   CALL_ATTENDED_AFTER_MS,
@@ -35,6 +36,9 @@ import {
   secretRegistry,
   redact,
   utcDay,
+  samplingForModel,
+  samplingLogFields,
+  samplingRequestFields,
 } from '@luxy/shared';
 import { runAgenticLoop, type LoopMessage, type LoopTurnResult } from './agentic-loop.js';
 import { isSilenceTimeout, silenceTransport } from './http-dispatcher.js';
@@ -1142,6 +1146,9 @@ export class HttpApiProvider implements ProviderExecution {
         outputCap: this.maxTokensFor(request),
         callsToday: hoy?.calls ?? 0,
         spentToday: hoy?.spent ?? 0,
+        // lo que viajo en el cuerpo, sacado de la misma funcion que lo compuso.
+        // Sin muestreo no añade ninguna clave: la linea sale como antes
+        ...samplingLogFields(this.samplingFor(request)),
       });
     } catch {
       /* contabilizar o registrar no puede costar la respuesta */
@@ -1270,7 +1277,7 @@ export class HttpApiProvider implements ProviderExecution {
           max_tokens: this.maxTokensFor(request),
           // vacio salvo que la conexion los tenga puestos: sin configurar, el
           // cuerpo sale identico al de antes de que existiera este campo
-          ...this.samplingParameters(),
+          ...samplingRequestFields(this.samplingFor(request)),
           ...(tools === null ? {} : { tools, tool_choice: 'auto' }),
           ...(transmitir ? { stream: true, stream_options: { include_usage: true } } : {}),
         }),
@@ -1416,33 +1423,26 @@ export class HttpApiProvider implements ProviderExecution {
   }
 
   /**
-   * parametros de muestreo de esta conexion, y SOLO los que tenga puestos.
+   * parametros de muestreo de ESTA peticion, y SOLO los que esten puestos.
    *
-   * POR QUE DEVUELVE UN OBJETO VACIO CUANDO NO HAY NINGUNO, en vez de mandar
-   * valores neutros: hay pasarelas que contestan 400 ante un parametro que no
-   * reconocen, asi que una conexion sin configurar tiene que seguir mandando
-   * el cuerpo de siempre, byte por byte. Extendido con `...`, un objeto vacio
-   * no añade ni una clave. Hay una prueba que lo fija.
+   * Depende de la peticion porque el modelo viaja en cada una: un mismo
+   * proveedor de familia sirve varios modelos, y el muestreo es por modelo
+   * (`modelSampling`). Si el modelo no tiene entrada, se usan los cuatro del
+   * nivel superior, que es lo que habia antes.
    *
-   * DONDE VA `repetition_penalty`: en la RAIZ del cuerpo, igual que los otros
-   * tres, aunque no sea de OpenAI. Los servidores que lo implementan —vLLM,
-   * TGI, llama.cpp, OpenRouter— lo leen de la raiz. `extra_body` NO es un
-   * campo del protocolo: es una comodidad del SDK de Python de OpenAI, que
-   * vuelca su contenido en la raiz antes de enviar, asi que anidarlo aqui
-   * produciria un cuerpo que no lee ningun servidor. Y este proveedor no tiene
-   * hoy ningun mecanismo de extras donde colgarlo.
-   *
-   * Los nombres de los otros tres son los del contrato de OpenAI, en
-   * snake_case, no los del esquema.
+   * Lo leen el cuerpo Y la linea de registro, y es una funcion pura de la
+   * configuracion —que es de solo lectura— y de la peticion: asi lo que se
+   * apunta es exactamente lo que viajo. Vacio, no añade ni una clave al cuerpo
+   * (ver `samplingRequestFields`); hay una prueba que lo fija.
    */
-  private samplingParameters(): Record<string, number> {
+  private samplingFor(request: ProviderRunRequest): SamplingParameters {
     const { temperature, frequencyPenalty, presencePenalty, repetitionPenalty } = this.config;
-    return {
+    return samplingForModel(this.modelFor(request), this.config.modelSampling, {
       ...(temperature === undefined ? {} : { temperature }),
-      ...(frequencyPenalty === undefined ? {} : { frequency_penalty: frequencyPenalty }),
-      ...(presencePenalty === undefined ? {} : { presence_penalty: presencePenalty }),
-      ...(repetitionPenalty === undefined ? {} : { repetition_penalty: repetitionPenalty }),
-    };
+      ...(frequencyPenalty === undefined ? {} : { frequencyPenalty }),
+      ...(presencePenalty === undefined ? {} : { presencePenalty }),
+      ...(repetitionPenalty === undefined ? {} : { repetitionPenalty }),
+    });
   }
 
   private async callApi(
@@ -1494,7 +1494,7 @@ export class HttpApiProvider implements ProviderExecution {
           max_tokens: this.maxTokensFor(request),
           // vacio salvo que la conexion los tenga puestos: sin configurar, el
           // cuerpo sale identico al de antes de que existiera este campo
-          ...this.samplingParameters(),
+          ...samplingRequestFields(this.samplingFor(request)),
           stream: this.config.supportsStreaming,
           // algunos proveedores solo devuelven usage si se pide explicitamente
           ...(this.config.supportsStreaming ? { stream_options: { include_usage: true } } : {}),

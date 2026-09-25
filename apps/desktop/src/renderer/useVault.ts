@@ -18,6 +18,7 @@ import type {
   ReasoningEffort,
   RelationStatus,
   VaultImagePlanEdit,
+  VaultReplyGuidance,
 } from '@luxy/shared';
 import type { HordeQueueProgress } from '../shared/horde-progress.js';
 import { callBridge } from './bridge-call.js';
@@ -150,6 +151,13 @@ export interface VaultCharacterView {
    * encajen dos figuras de forma irregular.
    */
   imageCast: 'character-only' | 'both';
+  /**
+   * si su prompt lleva las notas de dirección contra la autocopia (`D-102`).
+   *
+   * Con `none` —lo de siempre— el prompt no cambia. Con `vary-and-lead` le pide
+   * no reutilizar la forma de sus respuestas anteriores y poner su parte.
+   */
+  replyGuidance: VaultReplyGuidance;
   /** su identidad en Xavira, si la tiene. El identificador es el de SU API */
   xavira: { characterId: string; modelId: string } | null;
   /**
@@ -510,6 +518,15 @@ export interface VaultController {
   setCharacterImageCast: (
     characterId: string,
     cast: 'character-only' | 'both',
+  ) => Promise<boolean>;
+  /**
+   * enciende o apaga las notas de dirección contra la autocopia.
+   *
+   * No toca nada más suyo. Apagadas, el prompt sale como siempre.
+   */
+  setCharacterReplyGuidance: (
+    characterId: string,
+    guidance: VaultReplyGuidance,
   ) => Promise<boolean>;
   create: (password: string) => Promise<boolean>;
   unlock: (method: 'password' | 'recovery' | 'device', secret?: string) => Promise<boolean>;
@@ -2440,6 +2457,23 @@ export function useVault(): VaultController {
     [],
   );
 
+  const setCharacterReplyGuidance = useCallback(
+    async (characterId: string, guidance: VaultReplyGuidance): Promise<boolean> => {
+      setError(null);
+      setHint(null);
+      const result = await window.luxy.setVaultCharacterReplyGuidance({ characterId, guidance });
+      if (!result.ok) {
+        setError(result.error);
+        setHint(result.hint);
+        return false;
+      }
+      // como los otros dos: la lista aplicada, para no pintar el valor viejo
+      setCharacters(result.value.characters);
+      return true;
+    },
+    [],
+  );
+
   const readCharacterInstructions = useCallback(
     async (characterId: string): Promise<string | null> => {
       const result = await window.luxy.readVaultCharacterInstructions({ characterId });
@@ -2516,6 +2550,7 @@ export function useVault(): VaultController {
     setCharacterImageProvider,
     setCharacterImageReview,
     setCharacterImageCast,
+    setCharacterReplyGuidance,
     setMediaCaption,
     describeMedia,
     describingMedia,

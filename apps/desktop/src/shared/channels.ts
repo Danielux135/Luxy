@@ -130,6 +130,8 @@ export const IPC_INVOKE = {
   vaultCharacterImageReview: 'luxy:vault:character:image-review',
   /** decide si una escena con los dos se dibuja entera o solo con el personaje */
   vaultCharacterImageCast: 'luxy:vault:character:image-cast',
+  /** enciende o apaga las notas de direccion contra la autocopia (`D-102`) */
+  vaultCharacterReplyGuidance: 'luxy:vault:character:reply-guidance',
   /**
    * el intento de imagen que quedo esperando decision en esa conversacion.
    *

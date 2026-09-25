@@ -124,6 +124,20 @@ export interface ProviderCallRecord {
   callsToday: number;
   /** gasto estimado acumulado hoy en esta conexion */
   spentToday: number;
+  /**
+   * parametros de muestreo que viajaron en ESTE cuerpo, con los nombres del
+   * esquema. Cada uno aparece SOLO si se envio: una linea sin muestreo sale
+   * igual que antes de que existieran, y la ausencia de la clave significa
+   * «no se mando», que es distinto de mandar el neutro.
+   *
+   * Existen para poder comparar con y sin. Que un valor viajara no dice que el
+   * modelo lo aplicara: DeepSeek, por ejemplo, documenta que ignora la
+   * temperatura cuando razona, y eso se ve cruzandolo con `reasoningChars`.
+   */
+  temperature?: number;
+  frequencyPenalty?: number;
+  presencePenalty?: number;
+  repetitionPenalty?: number;
 }
 
 /** lo que hace falta para decidir como acabo una llamada */

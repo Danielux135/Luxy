@@ -3988,3 +3988,144 @@ escribe si hay marca que quitar. El orden de los dos pasos no cambia: lo que se
 quita es el paso cuando no hay nada que hacer. Lo que sigue siendo obligatorio es
 la lectura, porque dar la marca por ausente sin poder mirarla dejaria en pie la
 unica combinacion irrecuperable -memoria borrada con la marca viva-.
+
+## D-102 — contra la autocopia del personaje: muestreo, dos notas de direccion y un medidor, todo con interruptor
+
+Fecha: 2026-09-25. Autor: Claude. Contexto: `F31-REPETICION-001`. En una
+conversacion real de 16 turnos con DeepSeek-V4-Flash, el personaje abria 11 de
+14 respuestas largas con la misma acotacion, cerraba 9 con la misma (6 palabra
+por palabra), repetia acotaciones de dos lineas identicas letra por letra en
+respuestas separadas por una, y desde la novena seguia una plantilla de siete
+pasos. Las tres veces que Daniel le cedio la decision, se la devolvio. El texto
+no se reproduce aqui: solo la estructura.
+
+Estado: aceptada. Los cuatro cambios los aprobo Daniel; **ninguno esta medido
+todavia contra una conversacion real**.
+
+**Lo que se sabia, verificado en el codigo.** Sus ultimas respuestas viajan
+literales en cada prompt (`VAULT_RECENT_TURNS = 8`, bajo «ULTIMOS TURNOS
+(DATOS)» y rotuladas «Asistente:»), no habia ni una orden contra la repeticion en
+el camino de conversacion, y los cuatro parametros de muestreo de `D-098` no
+llegaban al modelo del personaje: entra como FAMILIA de una conexion y
+`buildFamilyProviders` construia el proveedor sin ninguno.
+
+**Los cuatro cambios.**
+
+1. **el muestreo llega a las familias.** La conexion gana `modelSampling`, por
+   modelo y con el `apiModel` exacto como clave (`models/types.ts`,
+   `sampling.ts`), y `familyProviderConfig` (`apps/agent/src/agent.ts`) lo pasa
+   solo si existe. La linea «llamada al proveedor» registra los valores que
+   viajaron, solo numeros. **Sin valor por defecto** (`D-098`): una conexion sin
+   entrada manda el mismo cuerpo de siempre. DeepSeek trae 1,0 por defecto y
+   recomienda 1,3 para conversacion
+   (https://api-docs.deepseek.com/quick_start/parameter_settings/), que es lo que
+   probara Daniel. **En modo razonamiento**, que es el que trae por defecto,
+   `temperature`, `presence_penalty` y `frequency_penalty` «will not trigger an
+   error but will also have no effect»
+   (https://api-docs.deepseek.com/guides/thinking_mode). Por la pasarela de
+   Daniel el registro da 12 de 13 llamadas de V4-Flash sin razonamiento, asi que
+   ahi deberian surtir efecto si la pasarela los reenvia, cosa que no esta
+   comprobada. **Corregido el 2026-09-25:** la primera version de este punto
+   atribuia las dos afirmaciones a la pagina de parametros, que no dice ninguna,
+   y daba las penalizaciones por inutiles sin condicion. Era falso fuera del modo
+   razonamiento, y el error venia del encargo que se dio a los agentes.
+2. **nota de direccion sobre la FORMA**: que no reutilice aperturas, frases,
+   gestos, cierres ni el orden de sus respuestas anteriores, y que el registro
+   vaya con la intensidad de la escena.
+3. **nota de direccion sobre SU PARTE**: que no devuelva reformulado lo que el
+   acaba de decir, que aporte algo suyo y que, cuando le ceden la decision,
+   decida. Cuanto empuja lo siguen fijando su descripcion y las instrucciones de
+   la conversacion.
+4. **el medidor** (`packages/shared/src/self-copy.ts`): la linea «copia de sus
+   respuestas» dice cuantos grupos de seis palabras de la respuesta nueva
+   estaban en las suyas que viajaron, y lo mismo contra un control del mismo
+   tamaño que NO viajo. Solo cuentas: ni texto ni huellas.
+
+**2 y 3, como van.** Texto en `packages/shared/src/vault-reply-guidance.ts`,
+salido de cuatro redacciones y tres jueces. Son dos bloques de ORDENES
+(`directiveBlock`, sin «(DATOS)»: el envoltorio solo aplica como orden lo que no
+lleva esa marca) en posiciones distintas de `composeVaultPrompt`:
+
+- `iniciativa` justo detras de `mensaje-nuevo` y antes del bloque de imagen.
+  Pegada al mensaje en el que el puede haber cedido la decision; y como dice
+  «hazlo o proponlo», el freno de fotos tiene que seguir leyendose despues, para
+  no reabrir `D-090`;
+- `forma` detras del bloque de imagen -miles de caracteres en un personaje con
+  foto- y antes de `instruccion-memoria`, que sigue siendo lo ultimo. Solo sale
+  si en la cola hay alguna respuesta suya: sin ella hablaria de algo que no esta.
+
+Que la posicion cambie el resultado es **una suposicion, no una medida**.
+
+**Por que en el prompt de Studio y no en el `system` del proveedor HTTP.** El
+prompt lo envuelve `buildProviderPrompt` para TODOS los proveedores, asi que
+llega igual a Claude, a Codex y a cualquier conexion sin tocar el agente ni el
+protocolo. En el `system` solo llegaria a las conexiones HTTP -con Claude o
+Codex el interruptor no haria nada, en silencio- y habria que cruzar diez
+archivos y tres paquetes, el camino que ya hizo `effort`.
+
+**Por que un interruptor por personaje y uno solo.** `replyGuidance`, enum
+`none | vary-and-lead`, en `vaultCharacterSchema`, igual que `imageCast`: es como
+escribe ESE personaje. Nace en `none`, y con `none` el prompt sale **byte a byte**
+como antes; lo fija una prueba contra un literal rico capturado antes del cambio
+(`vault-reply-guidance.test.ts`). Uno y no dos porque con dos salen cuatro
+combinaciones, ocho con la temperatura, y una conversacion de 16 turnos no da
+para separarlas; porque el medidor mide forma y para la iniciativa no hay
+instrumento; y porque los sintomas se solapan -el cierre que le devuelve el turno
+es a la vez forma e iniciativa-. El texto va en dos constantes y en dos
+etiquetas, asi que se pueden separar sin reescribir nada.
+
+**Regla para separarlos algun dia: con un CAMPO nuevo, nunca con valores nuevos
+del enum.** `VaultCharacterStore.list()` devuelve `[]` si el contenido no pasa el
+esquema, y `add()` escribe `[...list(), nuevo]`: un Studio anterior que lea un
+valor que no conoce y guarde cualquier personaje BORRA todos los demas, incluidos
+identificadores de Xavira que se pagaron. Un campo desconocido, en cambio, se
+descarta al leer sin romper nada. Vale igual para `imageCast` e `imageReview`.
+
+**Descartado.**
+
+- citar las frases repetidas para prohibirlas: nombrarlas las pone delante y las
+  refuerza (arXiv 2402.07896). Una prueba vigila que ninguna nota lleve comillas
+  ni el vocabulario de la plantilla observada;
+- tocar la encarnacion: dice que no decide cuanto lleva la iniciativa, y
+  cambiarla rompe la identidad del prompt apagado. La nota se presenta como
+  configuracion del usuario, al nivel de las instrucciones;
+- valores por defecto de muestreo: `D-098`;
+- llevarlo a la sonda de compatibilidad: mide si el modelo acepta el contenido,
+  no el estilo.
+
+**Como se mide.** El prompt compuesto registra `notaIniciativa` y `notaForma`
+(leidos de lo compuesto, no del ajuste), y la linea de la copia `variedad`, de la
+misma variable. Con la temperatura, «llamada al proveedor». La cifra que se
+compara es `ventana.copiados / grupos`, sumada por bloques; **ventana menos
+control NO mide la copia**: la autocopia va en cadena, la plantilla asentada
+esta tambien en las respuestas del control y la resta da cero justo cuando la
+copia es maxima (comprobado con texto inventado: 68 % copiado y resta 0). El
+control separa la edad de lo copiado: `soloVentana` es la copia reciente y
+`ventana.copiados - soloVentana`, la plantilla que ya venia de antes.
+**Con la nota de forma encendida, que `copiados` baje NO prueba que la plantilla
+se haya roto.** El medidor solo ve la copia literal, y la nota pide justo cambiar
+frases y gestos: si el modelo obedece a medias y rehace la misma plantilla con
+sinonimos, `copiados`, `aperturas` y `cierres` dan cero, lo mismo que una
+respuesta sin copia (comprobado con texto inventado: parafrasis de los siete
+pasos, 0 de 78 grupos, 0 aperturas y 0 cierres). `racha` sube algo (5 frente a
+2), pero cuatro o cinco palabras seguidas en comun son normales entre dos textos
+cualesquiera: es un indicio, no una prueba. Tampoco lo arregla medir el solape de
+palabras de contenido en la primera y la ultima frase: probado igual, da 1 de 6
+a la parafrasis y 1 de 6 a una respuesta libre que por azar abre hablando del
+cuerpo. La bajada es necesaria pero no basta: el orden de los pasos, la
+pasividad y el eco solo se ven **leyendo muestras** del bloque encendido. La
+comparacion va por bloques de **ocho turnos o mas**, o por sesiones,
+**descartando los cuatro primeros turnos de cada bloque**, y **sin cambiar la
+temperatura a la vez**: una respuesta viaja literal en los cuatro turnos
+siguientes, asi que los cuatro primeros de un bloque todavia llevan en la ventana
+respuestas escritas con el otro ajuste, y alternar turno a turno contamina los
+dos lados. Esos turnos se reconocen ordenando las lineas por `conversacion` y
+mirando cuando cambia `variedad`. **Corregido el 2026-09-25:** decia «cinco
+turnos o mas» sin descartar nada, y con eso cuatro de cada cinco turnos median
+la mezcla de los dos ajustes. El ajuste
+vive en `characters.json`, que es LOCAL: con dos equipos, cada uno tiene el suyo,
+y hay que leer el registro del equipo desde el que se hablo. Vigilar ademas
+`memoriaHuecos` y el tamaño de la memoria con las notas encendidas: la de forma
+va pegada a la instruccion de memoria y podria leerse como «no repitas» sobre lo
+que la memoria debe conservar. Las dos notas suman unos 1.950 caracteres por
+turno de pago mientras esten encendidas; el tamaño exacto sale en `bloques`.

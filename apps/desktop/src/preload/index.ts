@@ -80,6 +80,8 @@ const bridge: LuxyBridge = {
     ipcRenderer.invoke(IPC_INVOKE.vaultCharacterImageReview, args),
   setVaultCharacterImageCast: (args: unknown) =>
     ipcRenderer.invoke(IPC_INVOKE.vaultCharacterImageCast, args),
+  setVaultCharacterReplyGuidance: (args: unknown) =>
+    ipcRenderer.invoke(IPC_INVOKE.vaultCharacterReplyGuidance, args),
   createVault: (password: string) => ipcRenderer.invoke(IPC_INVOKE.vaultCreate, { password }),
   unlockVault: (args: unknown) => ipcRenderer.invoke(IPC_INVOKE.vaultUnlock, args),
   lockVault: () => ipcRenderer.invoke(IPC_INVOKE.vaultLock),

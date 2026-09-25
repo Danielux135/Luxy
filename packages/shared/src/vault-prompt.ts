@@ -21,6 +21,13 @@ import {
   type ConversationMemory,
 } from './schemas.js';
 import type { RelationParty } from './vault-relation.js';
+import {
+  VAULT_REPLY_FORM_BODY,
+  VAULT_REPLY_FORM_TITLE,
+  VAULT_REPLY_INITIATIVE_BODY,
+  VAULT_REPLY_INITIATIVE_TITLE,
+  type VaultReplyGuidance,
+} from './vault-reply-guidance.js';
 // `import type` a proposito: `vault-recap.ts` importa VAULT_RECENT_TURNS de
 // aqui, asi que un import normal crearia un ciclo en tiempo de ejecucion. Con
 // `verbatimModuleSyntax` esta linea se borra al compilar y el ciclo no existe.
@@ -300,6 +307,13 @@ export interface VaultPromptInput {
    * transmite. Sin este campo el bloque sale como ha salido siempre.
    */
   imageCast?: VaultImageCast;
+  /**
+   * si viajan las dos notas de direccion contra la autocopia y la pasividad.
+   *
+   * Lo decide el personaje y aqui solo se transmite. Ausente o `'none'` no
+   * añade nada: el prompt sale byte a byte como antes de existir el campo.
+   */
+  replyGuidance?: VaultReplyGuidance;
   /** momentos anteriores que puede recordar en este turno */
   recall?: VaultRecall;
   recentTurns?: number;
@@ -745,6 +759,23 @@ export function composeVaultPrompt(input: VaultPromptInput): VaultPromptBlock[] 
     text: dataBlock('MENSAJE NUEVO DEL USUARIO', input.message),
   });
 
+  // las notas de `D-102`. Apagadas no hay ningun push, asi que el prompt sale
+  // byte a byte como antes. Son ORDENES del ajuste del usuario, sin «(DATOS)».
+  //
+  // Van partidas a proposito. La de tu parte va pegada al mensaje, donde el
+  // puede haberle cedido la decision, y ANTES del bloque de imagen: dice «hazlo
+  // o proponlo», y el freno de fotos tiene que seguir leyendose despues. La de
+  // la forma no tiene nada que ver con fotos y va detras de ese bloque, que
+  // ocupa miles de caracteres y la dejaria enterrada. Que la posicion cambie el
+  // resultado es una suposicion, no una medida
+  const guided = input.replyGuidance === 'vary-and-lead';
+  if (guided) {
+    blocks.push({
+      label: 'iniciativa',
+      text: directiveBlock(VAULT_REPLY_INITIATIVE_TITLE, VAULT_REPLY_INITIATIVE_BODY),
+    });
+  }
+
   // el orden importa: la imagen ANTES que la memoria, porque la instruccion de
   // memoria dice que no se escriba nada despues de su bloque. Al separarlos se
   // quita primero el de memoria y luego el de imagen, en el orden inverso
@@ -781,6 +812,14 @@ export function composeVaultPrompt(input: VaultPromptInput): VaultPromptBlock[] 
         fallo,
         input.imageCast ?? 'character-only',
       ),
+    });
+  }
+  // sin ninguna respuesta suya en la ventana, la nota hablaria de algo que no
+  // tiene delante
+  if (guided && tail.some((turn) => turn.role === 'assistant')) {
+    blocks.push({
+      label: 'forma',
+      text: directiveBlock(VAULT_REPLY_FORM_TITLE, VAULT_REPLY_FORM_BODY),
     });
   }
   blocks.push({ label: 'instruccion-memoria', text: CONVERSATION_MEMORY_INSTRUCTION });

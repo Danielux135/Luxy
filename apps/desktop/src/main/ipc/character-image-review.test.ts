@@ -49,6 +49,7 @@ function personaje(over: Partial<VaultCharacter> = {}): VaultCharacter {
     imageProvider: 'horde',
     imageReview: 'siempre',
     imageCast: 'character-only',
+    replyGuidance: 'none',
     xavira: null,
     horde: {
       recipe: {

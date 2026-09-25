@@ -13,6 +13,10 @@ import {
   estimateTokens,
   measureVaultPrompt,
   VAULT_RECENT_TURNS,
+  measureSelfCopy,
+  selfCopyReferences,
+  SELF_COPY_NGRAM,
+  type SelfCopyMeasure,
   parseConversationMemoryResponse,
   PROFILE_PHOTO_LABEL,
   imageDescriptionFor,
@@ -138,6 +142,7 @@ import {
   vaultCharacterProviderArgsSchema,
   vaultCharacterImageReviewArgsSchema,
   vaultCharacterImageCastArgsSchema,
+  vaultCharacterReplyGuidanceArgsSchema,
   vaultDeviceUnlockSetArgsSchema,
   vaultPasswordArgsSchema,
   vaultUnlockArgsSchema,
@@ -3220,6 +3225,34 @@ export function registerIpcHandlers(context: HandlerContext): void {
   });
 
   /**
+   * enciende o apaga las notas de direccion contra la autocopia (`D-102`).
+   *
+   * Igual que los otros verbos: parte de lo que ya estaba y cambia un solo
+   * campo. Mientras valga `none` no cambia ni un byte del prompt: ese es el
+   * valor por defecto y lo que se mandaba antes de existir.
+   */
+  handle(
+    IPC_INVOKE.vaultCharacterReplyGuidance,
+    vaultCharacterReplyGuidanceArgsSchema,
+    async (args) => {
+      if (!context.vault.isUnlocked()) throw new VaultError('la boveda esta bloqueada');
+
+      const existing = (await context.characters.list(context.vault)).find(
+        (entry) => entry.characterId === args.characterId,
+      );
+      if (existing === undefined) throw new VaultError('ese personaje no esta en la boveda');
+
+      const characters = await context.characters.add(context.vault, {
+        ...existing,
+        replyGuidance: args.guidance,
+      });
+      // la decision, y nada mas: ni quien es el personaje ni de que iba la escena
+      context.log('notas de direccion cambiadas', { notas: args.guidance });
+      return { characters };
+    },
+  );
+
+  /**
    * las ultimas instrucciones que se usaron con este personaje.
    *
    * La personalidad es del personaje, no del hilo: escribirla otra vez en cada
@@ -4646,8 +4679,11 @@ export function registerIpcHandlers(context: HandlerContext): void {
           ...(memoriaElegida.memory?.plan ?? []),
           ...(memoriaElegida.memory?.openQuestions ?? []),
         ];
-        // las suyas que viajan como historial reciente. El mensaje nuevo no
-        // cuenta: es del usuario y va aparte
+        // TODAS sus respuestas anteriores de la conversacion, no solo las que
+        // viajan como historial reciente: el filtro recorre el hilo entero, y
+        // por eso `respuestas` crece con la conversacion. La autocopia sobre lo
+        // que viaja la mide la linea 'copia de sus respuestas'. El mensaje nuevo
+        // no cuenta: es del usuario y va aparte
         const respuestas = history.slice(0, -1).filter((turn) => turn.role === 'assistant');
         ecoMemoria = {
           entradas: entradas.length,
@@ -4702,7 +4738,18 @@ export function registerIpcHandlers(context: HandlerContext): void {
       // el ajuste del personaje: decide si el bloque le pide la escena entera o
       // solo a ella. Sin personaje, el de siempre
       imageCast: character?.imageCast ?? 'character-only',
+      // las notas de direccion contra la autocopia (`D-102`). El `??` hace falta
+      // por lo mismo que en `imageCast`: sin personaje, apagadas
+      replyGuidance: character?.replyGuidance ?? 'none',
     });
+
+    // si viajaron las notas de direccion, leido de lo COMPUESTO y no del ajuste:
+    // la de la forma no sale sin respuestas suyas en la ventana aunque el ajuste
+    // este encendido. Es la misma variable que lee el registro de la copia, para
+    // que las dos lineas digan lo mismo de este prompt
+    const notaIniciativa = bloques.some((bloque) => bloque.label === 'iniciativa');
+    const notaForma = bloques.some((bloque) => bloque.label === 'forma');
+    const variedad = notaIniciativa || notaForma;
 
     // el TAMAÑO de cada bloque, nunca su contenido. Sin esto, «el bloque de
     // imagen se lleva 2.050 tokens» era una estimacion de sobremesa; con esto es
@@ -4775,6 +4822,10 @@ export function registerIpcHandlers(context: HandlerContext): void {
       // promesa viva. Enteros y nada mas; `null` si no se pudo leer lo apuntado
       ecoMemoria,
       ecoHistorial,
+      // si viajo cada nota de direccion (`D-102`). Siempre presentes, en `false`
+      // cuando no viajan: sin eso no se puede separar un turno con y sin
+      notaIniciativa,
+      notaForma,
     });
 
     // dicho ya, se olvida: si no, el personaje seguiria disculpandose por una
@@ -5126,6 +5177,109 @@ export function registerIpcHandlers(context: HandlerContext): void {
         aludidos: pendientes.lines.filter((linea) =>
           matchesNote(respuestaVisible, quoteStems(linea.quote)),
         ).length,
+      });
+    }
+
+    // cuanto de lo que acaba de escribir estaba ya en sus respuestas anteriores.
+    //
+    // Es la cifra con la que se juzga todo lo que se haga contra la autocopia
+    // (temperatura, instrucciones de forma): sin ella, «se repite menos» seria
+    // una impresion. La cifra que manda es la de la ventana —lo que tenia
+    // delante, literal—: `ventana.copiados / grupos`, sumada por bloques y
+    // comparada con el interruptor encendido y apagado.
+    //
+    // Pero solo ve la copia LITERAL, y la nota de forma pide justo cambiar las
+    // palabras: si la obedece a medias y rehace la misma plantilla con otras,
+    // `copiados`, `aperturas` y `cierres` salen a cero, igual que sin copia.
+    // Con la nota encendida, que bajen es condicion necesaria, no prueba de que
+    // la plantilla se haya roto: eso se ve leyendo las respuestas (`D-102`).
+    //
+    // El control —otras tantas suyas, las de antes, que NO tenia delante— no es
+    // una referencia de «cero copia», y ventana menos control NO mide la copia:
+    // la autocopia va en cadena, asi que una plantilla asentada esta en los dos
+    // lados y la resta da cero justo cuando la copia es maxima. Lo que separa es
+    // la edad: `soloVentana` es la copia reciente, y `ventana.copiados` menos
+    // eso, la plantilla que ya venia de antes.
+    //
+    // Linea propia y no dentro de 'turno privado terminado': esa se escribe
+    // tambien cuando la llamada falla, y aqui solo tiene sentido con respuesta.
+    // Se mide en cualquier final que la haya guardado, cortado incluido: esa
+    // respuesta viaja igual en los prompts siguientes.
+    //
+    // Cifras y nada mas. Ni texto, ni huellas —seis palabras se adivinan por
+    // diccionario—, ni en que posicion estaba lo copiado. Y el fallo va mudo
+    // (`D-088`): esto es medida y no puede costar el turno, que ya esta guardado.
+    if (wroteReply) {
+      let copia: SelfCopyMeasure | null = null;
+      let copiaExcluidas = 0;
+      let copiaError = false;
+      try {
+        const referencias = selfCopyReferences(
+          // lo mismo que recibio el compositor: sin el mensaje nuevo y con la
+          // misma cola, para que la ventana sea la que viajo
+          history.slice(0, -1),
+          VAULT_RECENT_TURNS,
+          // sus turnos dentro de un recuerdo citado viajan literales aunque sean
+          // anteriores a la ventana: en el control mentirian
+          (recall.quoted?.conversation ?? [])
+            .filter((turn) => turn.role === 'assistant')
+            .map((turn) => turn.text),
+        );
+        copiaExcluidas = referencias.excluded;
+        copia = measureSelfCopy({
+          // lo que se guardo como turno, sin el bloque de memoria ni el de
+          // imagen: es lo que viajara en los prompts siguientes
+          reply: respuestaVisible,
+          window: referencias.window,
+          control: referencias.control,
+        });
+      } catch {
+        // el motivo NO se registra: un error aqui podria arrastrar un trozo de
+        // lo que se estaba midiendo
+        copia = null;
+        copiaError = true;
+      }
+      context.log('copia de sus respuestas', {
+        conversacion: conversationId,
+        proveedor: args.provider,
+        modelo: result.executedModel ?? args.model,
+        final: result.outcome,
+        // si el prompt llevo alguna nota de direccion (`D-102`), de la misma
+        // variable que la linea 'prompt privado compuesto'
+        variedad,
+        // el tamaño de grupo al lado de las cuentas: si un dia cambia, las
+        // lineas viejas no se pueden sumar con las nuevas sin saberlo
+        palabrasPorGrupo: SELF_COPY_NGRAM,
+        // `null` si la respuesta era mas corta que un grupo: no hay que medir
+        grupos: copia?.ngrams ?? null,
+        ventana:
+          copia === null
+            ? null
+            : {
+                respuestas: copia.window.replies,
+                copiados: copia.window.copied,
+                racha: copia.window.longestRun,
+                aperturas: copia.window.openings,
+                cierres: copia.window.closings,
+              },
+        // `null` mientras no haya ninguna respuesta suya anterior a la ventana.
+        // Solo es comparable con la ventana cuando las dos tienen las mismas
+        // `respuestas`: al principio de una conversacion el control va corto
+        control:
+          copia?.control == null
+            ? null
+            : {
+                respuestas: copia.control.replies,
+                copiados: copia.control.copied,
+                racha: copia.control.longestRun,
+                aperturas: copia.control.openings,
+                cierres: copia.control.closings,
+                excluidas: copiaExcluidas,
+              },
+        // de lo copiado de la ventana, lo que no estaba en el control; `null`
+        // cuando no hay control con el que separarlo
+        soloVentana: copia?.windowOnly ?? null,
+        copiaError,
       });
     }
 

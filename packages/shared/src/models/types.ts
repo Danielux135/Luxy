@@ -8,6 +8,7 @@
 //
 // una conexion sirve muchos modelos, y un modelo puede tener varios alias.
 import { z } from 'zod';
+import { modelSamplingSchema } from '../sampling.js';
 
 // -----------------------------------------------------------------------------
 // conexiones
@@ -36,6 +37,17 @@ export const connectionProfileSchema = z.object({
   headers: z.record(z.string().max(64), z.string().max(512)).default({}),
   timeoutMs: z.number().int().min(1000).max(3_600_000).default(120_000),
   enabled: z.boolean().default(true),
+  /**
+   * parametros de muestreo POR MODELO de los que sirve esta conexion, con el
+   * `apiModel` exacto como clave. Es lo unico que hace llegar una temperatura
+   * a un modelo de familia: sin esto, `buildFamilyProviders` no tenia de donde
+   * sacarla.
+   *
+   * OPCIONAL Y SIN `.default({})`, a proposito: un `config.json` anterior tiene
+   * que volver a guardarse sin ganar ninguna clave, y un modelo sin entrada
+   * tiene que mandar el mismo cuerpo de siempre (D-098).
+   */
+  modelSampling: modelSamplingSchema.optional(),
 });
 
 export type ConnectionProfile = z.infer<typeof connectionProfileSchema>;

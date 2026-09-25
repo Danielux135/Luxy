@@ -40,6 +40,7 @@ import {
   studioJobResponseSchema,
   studioJobsResponseSchema,
   studioOptionsResponseSchema,
+  VAULT_REPLY_GUIDANCES,
   vaultImagePlanSchema,
 } from '@luxy/shared';
 
@@ -1766,6 +1767,14 @@ export const vaultCharacterSummarySchema = z.object({
    * y lo que lee es el comportamiento de siempre.
    */
   imageCast: z.enum(['character-only', 'both']).default('character-only'),
+  /**
+   * si su prompt lleva las notas de dirección contra la autocopia (`D-102`).
+   *
+   * Viaja por lo mismo que `imageCast`: la casilla vive en su ficha y tiene que
+   * pintar el estado real. Con el defecto, una bóveda anterior se lee apagada,
+   * que es el prompt de siempre.
+   */
+  replyGuidance: z.enum(VAULT_REPLY_GUIDANCES).default('none'),
   /** su identidad en Xavira, si la tiene. El identificador es el de SU API */
   xavira: z
     .object({ characterId: z.string(), modelId: z.string() })
@@ -1815,6 +1824,17 @@ export const vaultCharacterImageReviewArgsSchema = z.object({
 export const vaultCharacterImageCastArgsSchema = z.object({
   characterId: z.string().min(1).max(128),
   cast: z.enum(['character-only', 'both']),
+});
+
+/**
+ * enciende o apaga las notas de dirección contra la autocopia de un personaje.
+ *
+ * Verbo propio, por el mismo motivo que los otros tres: un canal que sólo puede
+ * cambiar una cosa no puede reescribirle por accidente la receta ni el nombre.
+ */
+export const vaultCharacterReplyGuidanceArgsSchema = z.object({
+  characterId: z.string().min(1).max(128),
+  guidance: z.enum(VAULT_REPLY_GUIDANCES),
 });
 
 export const vaultCharacterListResultSchema = z.object({
@@ -2292,6 +2312,10 @@ export interface LuxyBridge {
   /** decide si una escena con los dos se dibuja entera o sólo con el personaje */
   setVaultCharacterImageCast(
     args: z.infer<typeof vaultCharacterImageCastArgsSchema>,
+  ): Promise<IpcResult<z.infer<typeof vaultCharacterListResultSchema>>>;
+  /** enciende o apaga las notas de dirección contra la autocopia */
+  setVaultCharacterReplyGuidance(
+    args: z.infer<typeof vaultCharacterReplyGuidanceArgsSchema>,
   ): Promise<IpcResult<z.infer<typeof vaultCharacterListResultSchema>>>;
   createVault(password: string): Promise<IpcResult<z.infer<typeof vaultCreateResultSchema>>>;
   unlockVault(

@@ -2524,6 +2524,87 @@ describe('HttpApiProvider: una linea de registro por llamada', () => {
     }
   }, 15_000);
 
+  // el muestreo se apunta para poder comparar con y sin. Ausente = no se mando,
+  // que es distinto de mandar el neutro: por eso la clave no aparece.
+  it('apunta el muestreo que viajo, y nada si no viajo ninguno', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => flujo(respuestaBuena));
+    const conMuestreo = {
+      ...config,
+      modelSampling: { 'DeepSeek-V4-Flash': { temperature: 1.3 } },
+    };
+
+    const lineas: ProviderCallRecord[] = [];
+    const provider = new HttpApiProvider(
+      conMuestreo,
+      'una-clave',
+      new MemoryBudgetStore(),
+      undefined,
+      (record) => lineas.push(record),
+    );
+
+    await provider.run(peticion({ model: 'DeepSeek-V4-Flash' }));
+    await provider.run(peticion({ model: 'DeepSeek-V4-Pro' }));
+
+    expect(lineas).toHaveLength(2);
+    expect(lineas[0]?.temperature).toBe(1.3);
+    for (const clave of ['frequencyPenalty', 'presencePenalty', 'repetitionPenalty']) {
+      expect(clave in lineas[0]!).toBe(false);
+    }
+    for (const clave of [
+      'temperature',
+      'frequencyPenalty',
+      'presencePenalty',
+      'repetitionPenalty',
+    ]) {
+      expect(clave in lineas[1]!).toBe(false);
+    }
+  }, 15_000);
+
+  it('la linea ESCRITA conserva los cuatro de muestreo sin redactar', async () => {
+    // mismo barrido que la prueba de arriba, con los cuatro puestos: un nombre
+    // de campo desafortunado saldria a disco como «[REDACTADO]»
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => flujo(respuestaBuena));
+
+    const carpeta = mkdtempSync(join(tmpdir(), 'luxy-registro-'));
+    try {
+      const logger = new AgentLogger('info', carpeta, false);
+      const lineas: ProviderCallRecord[] = [];
+      const provider = new HttpApiProvider(
+        {
+          ...config,
+          temperature: 1.3,
+          frequencyPenalty: 0,
+          presencePenalty: -0.5,
+          repetitionPenalty: 1.05,
+        },
+        'una-clave',
+        new MemoryBudgetStore(),
+        undefined,
+        (record) => {
+          lineas.push(record);
+          logger.info(PROVIDER_CALL_LOG_MESSAGE, { ...record });
+        },
+      );
+
+      await provider.run(peticion());
+
+      const contenido = readFileSync(join(carpeta, 'luxy.log'), 'utf8').trim();
+      const escrita = JSON.parse(contenido.split('\n')[0]!) as Record<string, unknown>;
+      const registro = lineas[0]! as unknown as Record<string, unknown>;
+      for (const clave of Object.keys(registro)) {
+        expect(escrita[clave]).toBe(registro[clave]);
+      }
+      expect(escrita).toMatchObject({
+        temperature: 1.3,
+        frequencyPenalty: 0,
+        presencePenalty: -0.5,
+        repetitionPenalty: 1.05,
+      });
+    } finally {
+      rmSync(carpeta, { recursive: true, force: true });
+    }
+  }, 15_000);
+
   // POR QUE EXISTE: el cupo se miraba UNA vez, en `run()`, antes de los
   // reintentos y antes de ramificar al bucle de herramientas. Un turno de tres
   // intentos se pasaba del tope por dos; un trabajo agentic, por cuarenta y
@@ -2698,6 +2779,111 @@ describe('HttpApiProvider: parametros de muestreo', () => {
     expect((await provider.run(peticion())).ok).toBe(true);
     expect(espia.body()?.['temperature']).toBe(0);
     expect(espia.body()?.['frequency_penalty']).toBe(0);
+  });
+
+  // POR MODELO: un proveedor de familia sirve varios modelos, porque el modelo
+  // viaja en cada peticion. Lo que se fija aqui es que la temperatura puesta a
+  // UNO no se le cuele a los demas, ni por el camino con herramientas.
+  describe('por modelo (familias de una conexion)', () => {
+    const porModelo = { ...base, modelSampling: { 'DeepSeek-V4-Flash': { temperature: 1.3 } } };
+
+    it('otro modelo del mismo proveedor manda el cuerpo de siempre', async () => {
+      const espia = espiar();
+      const provider = new HttpApiProvider(porModelo, 'una-clave');
+
+      expect((await provider.run(peticion({ model: 'DeepSeek-V4-Pro' }))).ok).toBe(true);
+      expect(Object.keys(espia.body() ?? {}).sort()).toEqual([
+        'max_tokens',
+        'messages',
+        'model',
+        'stream',
+      ]);
+    });
+
+    it('el modelo con entrada recibe SOLO lo suyo', async () => {
+      const espia = espiar();
+      const provider = new HttpApiProvider(porModelo, 'una-clave');
+
+      expect((await provider.run(peticion({ model: 'DeepSeek-V4-Flash' }))).ok).toBe(true);
+      expect(Object.keys(espia.body() ?? {}).sort()).toEqual([
+        'max_tokens',
+        'messages',
+        'model',
+        'stream',
+        'temperature',
+      ]);
+      expect(espia.body()?.['temperature']).toBe(1.3);
+      expect(espia.body()?.['model']).toBe('DeepSeek-V4-Flash');
+    });
+
+    it('sin modelo en la peticion se mira el de la configuracion', async () => {
+      const espia = espiar();
+      const provider = new HttpApiProvider(
+        { ...porModelo, model: 'DeepSeek-V4-Flash' },
+        'una-clave',
+      );
+
+      expect((await provider.run(peticion())).ok).toBe(true);
+      expect(espia.body()?.['temperature']).toBe(1.3);
+    });
+
+    it('la entrada del modelo sustituye al nivel superior, no se mezcla', async () => {
+      const espia = espiar();
+      const provider = new HttpApiProvider({ ...porModelo, frequencyPenalty: 0.4 }, 'una-clave');
+
+      expect((await provider.run(peticion({ model: 'DeepSeek-V4-Flash' }))).ok).toBe(true);
+      expect(espia.body()?.['temperature']).toBe(1.3);
+      expect('frequency_penalty' in (espia.body() ?? {})).toBe(false);
+    });
+
+    it('un modelo llamado como el prototipo no saca nada de ahi', async () => {
+      for (const model of ['toString', 'constructor']) {
+        const espia = espiar();
+        const provider = new HttpApiProvider(porModelo, 'una-clave');
+        expect((await provider.run(peticion({ model }))).ok).toBe(true);
+        expect(Object.keys(espia.body() ?? {}).sort()).toEqual([
+          'max_tokens',
+          'messages',
+          'model',
+          'stream',
+        ]);
+      }
+    });
+
+    it('tambien por el camino con herramientas, y solo para su modelo', async () => {
+      const conHerramientas = (model: string) => ({
+        ...peticion({ readOnly: false, model }),
+        agentic: {
+          runner: { execute: vi.fn(async () => ({ ok: true, content: 'ok' })) },
+          allowedTools: ['write_file' as const],
+          limits: modelLimitsSchema.parse({}),
+          useNativeTools: true,
+        },
+      });
+
+      const otro = espiar();
+      expect(
+        (await new HttpApiProvider(porModelo, 'una-clave').run(conHerramientas('DeepSeek-V4-Pro')))
+          .ok,
+      ).toBe(true);
+      expect(Object.keys(otro.body() ?? {}).sort()).toEqual([
+        'max_tokens',
+        'messages',
+        'model',
+        'tool_choice',
+        'tools',
+      ]);
+
+      const suyo = espiar();
+      expect(
+        (
+          await new HttpApiProvider(porModelo, 'una-clave').run(
+            conHerramientas('DeepSeek-V4-Flash'),
+          )
+        ).ok,
+      ).toBe(true);
+      expect(suyo.body()?.['temperature']).toBe(1.3);
+    });
   });
 });
 

@@ -355,6 +355,57 @@ describe('personajes guardados', () => {
     await vault.unlock(PASSWORD);
     expect((await store.list(vault))[0]?.imageCast).toBe('both');
   });
+
+  // -------------------------------------------------------------------------
+  // las notas de direccion contra la autocopia (`D-102`)
+  //
+  // El mismo patron que los dos de arriba. Lo que se protege es que NAZCA
+  // APAGADO: apagado, el prompt de un personaje que se usa a diario sale igual.
+  // -------------------------------------------------------------------------
+
+  it('un personaje guardado antes de las notas se lee con ellas apagadas', async () => {
+    await store.add(vault, character('per-1'));
+    expect((await store.list(vault))[0]?.replyGuidance).toBe('none');
+  });
+
+  it('encenderlas no toca ni el proveedor ni la receta ni los otros interruptores', async () => {
+    await store.add(vault, {
+      ...character('per-1', 'Nora'),
+      imageProvider: 'horde',
+      imageReview: 'nunca',
+      imageCast: 'both',
+      horde: { recipe: { models: ['Modelo Inventado'], appearance: 'short grey hair', seed: '424242' } },
+    });
+    const [antes] = await store.list(vault);
+
+    const despues = await store.add(vault, { ...antes!, replyGuidance: 'vary-and-lead' });
+
+    expect(despues[0]?.replyGuidance).toBe('vary-and-lead');
+    expect(despues[0]?.imageReview).toBe('nunca');
+    expect(despues[0]?.imageCast).toBe('both');
+    expect(despues[0]?.imageProvider).toBe('horde');
+    expect(despues[0]?.horde?.recipe.seed).toBe('424242');
+    expect(despues[0]?.label).toBe('Nora');
+  });
+
+  it('las notas sobreviven a guardar otro personaje distinto', async () => {
+    await store.add(vault, character('per-1'));
+    const [antes] = await store.list(vault);
+    await store.add(vault, { ...antes!, replyGuidance: 'vary-and-lead' });
+
+    await store.add(vault, character('per-2'));
+
+    const guardados = await store.list(vault);
+    expect(guardados.find((c) => c.characterId === 'per-1')?.replyGuidance).toBe('vary-and-lead');
+    expect(guardados.find((c) => c.characterId === 'per-2')?.replyGuidance).toBe('none');
+  });
+
+  it('las notas sobreviven a cerrar y volver a abrir la boveda', async () => {
+    await store.add(vault, { ...character('per-1'), replyGuidance: 'vary-and-lead' });
+    vault.lock();
+    await vault.unlock(PASSWORD);
+    expect((await store.list(vault))[0]?.replyGuidance).toBe('vary-and-lead');
+  });
 });
 
 describe('personajes escritos antes de D-068', () => {
@@ -444,6 +495,21 @@ describe('personajes escritos antes de D-068', () => {
       createdAt: '2026-09-04T10:00:00.000Z',
     });
     expect(leido.imageCast).toBe('character-only');
+  });
+
+  it('ni las notas de direccion, y se leen apagadas', () => {
+    // lo mismo: la lectura es lo unico que decide, y tiene que dar el prompt de
+    // siempre
+    const leido = storedCharacterSchema.parse({
+      characterId: 'per-1',
+      provider: 'horde',
+      recipe: { models: ['Modelo Inventado'], appearance: 'short grey hair' },
+      description: '',
+      label: 'Nora',
+      avatarObjectKey: null,
+      createdAt: '2026-09-04T10:00:00.000Z',
+    });
+    expect(leido.replyGuidance).toBe('none');
   });
 
   it('uno ya escrito en la forma nueva no se vuelve a traducir', () => {
