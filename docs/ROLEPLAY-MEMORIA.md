@@ -1,5 +1,7 @@
 # Roleplay con estado — investigación y plan
 
+> **Continuación (2026-09-25):** la repetición de las promesas, el aprendizaje del usuario, la evolución, la iniciativa y la voz de Lía siguen en `docs/ROLEPLAY-EVOLUCION.md`, que además corrige algunos descartes de este documento (sección 6).
+
 Investigación del 2026-09-10 sobre cómo mejorar la parte de roleplay con memoria
 de la bóveda privada. **Es un plan, no está implementado.**
 

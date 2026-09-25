@@ -13,10 +13,12 @@
 >    guarda de
 >    desfase bloquea cualquier nota y todo `F23-PENDIENTES-001` parecerá roto.
 >    Es de Daniel, no de un agente.
-> 2. **`F31-REPETICION-001`: medir.** Es lo único con instrumentación puesta y
->    sin usar. Va antes que cualquier arreglo de la repetición, porque tocar algo
->    ahora destruye la línea base. Está justo debajo, fuera del orden de fecha a
->    propósito.
+> 2. **`F31-REPETICION-001`: medido el 2026-09-25, y el contador NO sirve.**
+>    Compara vocabulario con diez promesas y por azar casa el 39-83 % de las
+>    respuestas. El diagnóstico nuevo, el plan por pasos y 23 ideas están en
+>    `docs/ROLEPLAY-EVOLUCION.md`. El paso 0 es de Daniel: marcar a mano 20-30
+>    respuestas con un solo modelo. Está justo debajo, fuera del orden de fecha
+>    a propósito.
 > 3. **Comprobaciones de pantalla de Daniel** de F28, F29-POSTURA-001 y F30. El
 >    índice está en `LOCAL-ACTIONS.md`, `LA-048`; el detalle, en cada bloque.
 > 4. Lo demás. `PROVEEDORES-005`, más abajo, tiene una prueba de diez minutos
@@ -100,10 +102,78 @@ entera).
 
 ## F31-REPETICION-001 — medir la repetición antes de tocarla
 
-Estado: **instrumentación puesta y probada; NADA medido todavía — Claude,
-2026-09-17, anotado aquí el 2026-09-23.** Commit `29f829d`, 10 archivos, 796
-inserciones. Está fuera del orden de fecha a propósito: es el paso que manda
-después de `LA-045`.
+Estado: **medido el 2026-09-25 con 62 turnos reales — y la medida no sirve.**
+Diagnóstico completo, con tres refutaciones, en `docs/ROLEPLAY-EVOLUCION.md`
+§1-§2. Lo de abajo, desde «Origen», es del 2026-09-17 y se conserva como
+historia; **donde contradiga a este párrafo, manda este párrafo.**
+
+### Lo medido el 2026-09-25, en corto
+
+**El contador no mide lo que se creía.** `matchesStems` es una bolsa de raíces:
+basta con compartir `min(2, k)` raíces de la cita, al menos el 40 %, en
+cualquier orden, con **una cualquiera** de las diez notas vivas
+(`apps/desktop/src/main/vault/relation.ts:35-38` y `97-113`). Con una prueba
+sintética —promesas y textos inventados, nada de la bóveda— casa por azar el
+39 % de las respuestas de 500 caracteres y el 83 % de las de 1.000.
+
+**`ecoHistorial` recorre la conversación entera, no la ventana.**
+`history.slice(0, -1).filter(assistant)` sobre el hilo completo
+(`handlers.ts:4403` y `4651`); **el comentario de `handlers.ts:4649-4650` dice
+lo contrario y es falso**. Y `ecoMemoria` sólo mira `plan` y `openQuestions`:
+no ve `summary`, `facts`, `decisions` ni `lessons`, así que su 0 no descarta la
+memoria.
+
+**Lo que sí separa el contador es el MODELO**, y con fuerza: glm-4.5-air y Qwen
+casan 17 de 17 respuestas largas; DeepSeek-V4-Flash 4 de 10 con respuestas igual
+de largas o más (Fisher unilateral p ≈ 0,0007, confundido con el día).
+
+**El caso original de los 17 turnos ocurrió casi sin bloque de pendientes.** Si
+es la conversación `d0685ae5` —la hipótesis más probable—, el bloque iba en 7 de
+17 y los turnos 2-11 fueron diez seguidos sin él. **Un tope al bloque no habría
+evitado ese caso.** Hace esporádico lo que Daniel pide, pero no ataca la causa.
+
+**Demostrado en el código, y es lo que se puede tocar ya:**
+
+- no hay **ni una instrucción contra la repetición** en el camino de
+  conversación: `grep repit|repeti` en `vault-prompt.ts` y en el `system` de
+  conversación da cero;
+- sus cuatro últimas respuestas viajan literales, rotuladas «Asistente:», y el
+  `system` las presenta como «el canon y el contenido al que respondes»
+  (`http-provider.ts:461`);
+- cuando una promesa está en la ventana, el selector la quita del bloque **en
+  silencio** (`relation-selection.ts:388-391`): nada le dice que ya la sacó;
+- el bloque de pendientes va en el **71 %** de los prompts recientes, no
+  esporádico, con «Puedes sacar una tu sola»;
+- **los cuatro parámetros de muestreo de `D-098` no llegan al modelo de Lía.**
+  `buildFamilyProviders` (`apps/agent/src/agent.ts:367-410`) construye el
+  proveedor de cada familia de una conexión sin `temperature` ni ninguna
+  penalización; sólo los recibe `providers.http`. Verificado leyendo el código
+  el 2026-09-25. Además DeepSeek declara que sus penalizaciones «will not take
+  effect».
+
+**Tres cosas rotas que salieron de paso:** cinco respuestas de 24 caracteres de
+glm-4.5-air con `finishReason null` se guardaron como `completed` y viajan en el
+historial; el bloque de imagen va **después** del mensaje nuevo y crece unos 257
+caracteres por imagen sin tope (7.647 hoy, el 36 %); y el comparador ruidoso
+también decide qué promesas se enfrían (`relation-selection.ts:398-402`), así
+que el ruido contamina la dosificación, no sólo la medida.
+
+**El extractor no está atascado**, contra lo que se sospechó: el cursor avanza
+y las 58 revisiones reales desde el 16/09 terminaron bien. Pero ninguna apuntó
+ni cerró nada, y el registro no dice por qué.
+
+### El siguiente paso exacto
+
+**Paso 0, de Daniel:** 20-30 respuestas con un solo modelo, marcando a mano
+cuáles repiten una promesa. Es la única verdad de referencia que hay. **Y decir
+con qué modelo notó el bucle**, porque el modelo es la palanca más fuerte que se
+ve en los datos.
+
+Después, por orden (`docs/ROLEPLAY-EVOLUCION.md` §2): arreglar la medida
+—placebo por pares, solapamiento de cinco palabras, `ecoMemoria` por campo, el
+modelo en la línea—; la frase «lo dicho está dicho» sin nombrar ninguna
+promesa, con interruptor para A/B; el tope global al bloque; y la temperatura
+por familia, que exige arreglar `buildFamilyProviders` primero.
 
 Origen, de Daniel: en una conversación de 17 turnos el personaje sacó la misma
 promesa en 15, casi con las mismas palabras.

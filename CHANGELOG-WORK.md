@@ -1,5 +1,52 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-09-25 — Claude — la repetición, medida: el contador no sirve; y cómo evolucionan los personajes
+
+- Estado anterior: `F31-REPETICION-001` instrumentado el 17/09 y sin medir.
+  Daniel: «Lía sigue en bucle con las promesas a cada mensaje».
+- Objetivo: diagnóstico en profundidad, e investigación amplia de cómo hacen las
+  plataformas para que un personaje aprenda del usuario y evolucione.
+- **Sólo lectura. No se ha tocado una línea de código ni el comportamiento de
+  Lía.**
+
+**Cómo se hizo.** Un flujo de 43 agentes en tres ramas: seis investigaciones de
+la repetición sobre `studio.log` y el código, con tres escépticos; trece frentes
+de plataformas e investigación, cada uno con un verificador que abrió las URLs; y
+un inventario de lo que Luxy ya tiene. Después un crítico de completitud
+encontró tres huecos y se cubrieron.
+
+**Lo que tumbó la medida.** El contador `ecoHistorial` casa por vocabulario con
+cualquiera de diez promesas y por azar da el 39-83 %; recorre la conversación
+entera y no la ventana, con un comentario que dice lo contrario; y `ecoMemoria`
+mira dos de seis campos. La lectura provisional de esta misma mañana —«quitar el
+bloque no reduce nada», «la memoria no es la fuente»— **se retira**: no está
+demostrada ni a favor ni en contra.
+
+**Lo que dos escépticos corrigieron al diagnóstico.** La síntesis afirmó que el
+registro era «indistinguible del ruido» y que la tasa seguía a la longitud. Es
+falso: las respuestas de glm-4.5-air y Qwen casan 17 de 17 y las de
+DeepSeek-V4-Flash 4 de 10 **con igual o más longitud**. El contador sí separa
+algo, y ese algo es sobre todo el modelo.
+
+**Lo que el crítico encontró**, y que habría preguntado Daniel: el caso original
+de 15 repeticiones en 17 turnos ocurrió con el bloque de pendientes en sólo 7 de
+esos turnos. El tope al bloque bajó de la primera prioridad a la segunda por eso,
+y el documento lo dice sin rodeos.
+
+**Verificado a mano después del flujo:** `buildFamilyProviders`
+(`apps/agent/src/agent.ts:367-410`) construye el proveedor sin ninguno de los
+cuatro parámetros de `D-098`. El trabajo del 17/09 sobre el muestreo no llega al
+modelo que hoy atiende a Lía.
+
+**Lo producido:** `docs/ROLEPLAY-EVOLUCION.md`, 1.203 líneas en CRLF, con el
+diagnóstico, un plan de ocho pasos, 23 ideas priorizadas, lo descartado con
+motivo y seis correcciones a `docs/ROLEPLAY-MEMORIA.md`. A este último sólo se le
+añadió una línea de enlace, respetando su LF.
+
+**Límites declarados por los propios agentes:** la búsqueda web se agotó a mitad
+de un frente y el resto salió de páginas abiertas directamente; los números de
+línea de RisuAI son aproximados; y nada se ha visto en pantalla.
+
 ### 2026-09-23 — Claude — borrar la memoria que una conversación se escribe a sí misma
 
 - Estado anterior: una conversación con memoria propia no ofrecía **ninguna**
