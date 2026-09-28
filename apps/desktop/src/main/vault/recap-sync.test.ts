@@ -26,7 +26,7 @@ import {
 import type { CatalogedEpisode } from './catalog-store.js';
 import type { PrivateTurnView } from './conversation-store.js';
 import type { RecapMutator, RecapSnapshot, RecapState } from './recap-store.js';
-import type { VaultService } from './vault-service.js';
+import { VaultError, type VaultService } from './vault-service.js';
 import { classifyReply } from '../../shared/refusal.js';
 import { createAuxiliaryLane, type AuxiliaryController } from './relation-sync.js';
 import {
@@ -1080,6 +1080,37 @@ describe('el encadenado entre ventanas', () => {
     expect(montaje.calls).toHaveLength(1);
     expect(montaje.recaps.writes).toBe(0);
     expect(montaje.recaps.state.entries).toHaveLength(0);
+  });
+
+  it('si se cierra justo al guardar, no culpa a la conversacion y la reintenta al reabrir', async () => {
+    // leer ya no mantiene viva la boveda (`D-106`): un cierre en el hueco entre
+    // mirarla y sellar lanza desde el guardado. Antes eso la marcaba como
+    // fallida y la dejaba fuera de las pasadas hasta reiniciar (`D-088`)
+    const montaje = montar({
+      conversations: [{ conversationId: CONV_VIEJA, turns: conversacion(4) }],
+      replies: [ficha({ from: 0, to: 3 })],
+    });
+    const apply = montaje.recaps.apply.bind(montaje.recaps);
+    let cierres = 0;
+    montaje.recaps.apply = async (vault, mutator) => {
+      if (cierres === 0) {
+        cierres += 1;
+        montaje.unlocked.value = false;
+        throw new VaultError('la boveda esta bloqueada');
+      }
+      return apply(vault, mutator);
+    };
+
+    const result = await montaje.sync.runOnce({ projectAlias: 'luxy' });
+
+    expect(result.failed).toHaveLength(0);
+    expect(montaje.sync.failedThisSession).toBe(0);
+    expect(montaje.recaps.state.entries).toHaveLength(0);
+
+    montaje.unlocked.value = true;
+    await montaje.sync.runOnce({ projectAlias: 'luxy' });
+    expect(montaje.calls).toHaveLength(2);
+    expect(montaje.recaps.entry(CONV_VIEJA)?.memory?.summary).toBe(RESUMEN);
   });
 
   it('cancelar hace lo mismo, y es lo que engancha `vault.onLock`', async () => {

@@ -28,10 +28,17 @@ import {
   VAULT_REPLY_INITIATIVE_TITLE,
   type VaultReplyGuidance,
 } from './vault-reply-guidance.js';
+import {
+  VAULT_PENDING_ALREADY_RAISED_BODY,
+  VAULT_PENDING_ALREADY_RAISED_TITLE,
+  VAULT_PENDING_SPARSE_PERMISSION,
+  type VaultPendingPacing,
+} from './vault-pending-pacing.js';
 // `import type` a proposito: `vault-recap.ts` importa VAULT_RECENT_TURNS de
 // aqui, asi que un import normal crearia un ciclo en tiempo de ejecucion. Con
 // `verbatimModuleSyntax` esta linea se borra al compilar y el ciclo no existe.
 import type { MemorySource } from './vault-recap.js';
+import type { RecentMemoryEntry } from './vault-recent-memories.js';
 
 /**
  * cuantos turnos recientes se envian literalmente.
@@ -314,8 +321,38 @@ export interface VaultPromptInput {
    * añade nada: el prompt sale byte a byte como antes de existir el campo.
    */
   replyGuidance?: VaultReplyGuidance;
+  /**
+   * si los pendientes van en modo esporadico (`D-104`).
+   *
+   * Lo decide el personaje y aqui solo se transmite. Ausente o `'per-note'` no
+   * cambia nada: el prompt sale byte a byte como antes de existir el campo.
+   * Cuando entra el bloque no se decide aqui sino en la seleccion; aqui solo
+   * cambia el permiso del bloque y se añade la nota de «ya salio».
+   */
+  pendingPacing?: VaultPendingPacing;
+  /**
+   * alguna respuesta suya de la ventana ya saco un pendiente que el no retomo.
+   *
+   * Lo calcula la seleccion. Solo se lee con `'sparse'`: apagado, el prompt no
+   * puede cambiar por un dato que se calcula igual para tener linea base.
+   */
+  pendingAlreadyRaised?: boolean;
   /** momentos anteriores que puede recordar en este turno */
   recall?: VaultRecall;
+  /**
+   * resumen de sus ultimas conversaciones, ya elegido y recortado (`D-105`).
+   *
+   * Ausente o vacio no añade nada: el prompt sale byte a byte como antes de
+   * existir el campo.
+   */
+  recentMemories?: readonly RecentMemoryEntry[];
+  /**
+   * si viaja la guia de que va en cada campo de la memoria (`D-105`).
+   *
+   * Va con la casilla del resumen: sin ella, lo acordado puede acabar en `plan`
+   * y el resumen no lo lleva. Ausente o `false` no añade nada.
+   */
+  memoryFieldGuide?: boolean;
   recentTurns?: number;
 }
 
@@ -446,28 +483,76 @@ function heLabel(line: PendingAffairLine): string {
 }
 
 /**
+ * la regla contra una promesa que no consta.
+ *
+ * La de siempre dice que lo que no este en la lista, en los ULTIMOS TURNOS ni en
+ * el momento transcrito «no se hizo». Con los dos ajustes nuevos eso deja de ser
+ * verdad y el prompt se contradice (revision del 28/09):
+ *
+ *   - con `sparse`, un mensaje con el tope cerrado lleva SOLO las notas que el
+ *     toca; las demas siguen abiertas y la regla las declaraba inexistentes. Si
+ *     el le recordaba una, la orden la empujaba a negarla;
+ *   - con el resumen de otras conversaciones (`D-105`) y con el `Plan:` de la
+ *     memoria, el mismo prompt le entrega promesas por otros canales.
+ *
+ * Asi que, con cualquiera de los dos, la regla nombra esos canales y deja de
+ * afirmar que la lista esta completa, sin soltar lo que protege: que ella no se
+ * invente ni reclame una. Sin ninguno de los dos sale el texto de siempre, byte a
+ * byte: el prompt de quien no los enciende no cambia.
+ */
+function pendingNotListedRule(sparse: boolean, withRecent: boolean): string[] {
+  if (!sparse && !withRecent) {
+    return [
+      'Una promesa que no aparezca en esta lista, en los ULTIMOS TURNOS ni en el momento que tienes',
+      'transcrito no se hizo: no la reclames ni la des por hecha.',
+    ];
+  }
+  return [
+    'Una promesa que no aparezca en esta lista, en los ULTIMOS TURNOS, en la memoria de esta',
+    withRecent
+      ? 'conversacion, en lo que sabes de otras conversaciones ni en el momento que tienes transcrito'
+      : 'conversacion ni en el momento que tienes transcrito',
+    'no la saques tu ni la des por hecha. Esta lista no siempre las trae todas: si el nombra una',
+    'que no ves aqui, no la niegues; siguele sin añadir nada que no conste.',
+  ];
+}
+
+/**
  * lo que queda pendiente entre los dos, con permiso para sacarlo ella sola.
  *
  * Es la diferencia con los recuerdos: aquellos esperan a que se pregunte por
  * ellos, y esto no. Va como DATOS, y con la misma regla de siempre —lo que no
  * este escrito aqui no se sabe— porque una promesa inventada suena igual de
  * bien que una cierta y no hay forma de distinguirlas desde fuera.
+ *
+ * Con `sparse` (`D-104`) solo cambia el permiso: el de siempre le dejaba sacarlas
+ * sin que nada las trajera, y con diez abiertas eso era una promesa por
+ * respuesta. El resto del bloque sale igual, para que la unica diferencia entre
+ * los dos brazos sea esa.
  */
-function formatPendingAffairs(lines: readonly PendingAffairLine[]): string {
+function formatPendingAffairs(
+  lines: readonly PendingAffairLine[],
+  sparse = false,
+  withRecent = false,
+): string {
   return [
     // no dice «en otras conversaciones»: una promesa de hace un rato, en este
     // mismo hilo, tambien sale aqui en cuanto se aleja de los ULTIMOS TURNOS, y
     // presentarsela como algo de otro dia la hace sonar a expediente
     'Cosas que quedaron pendientes entre los dos, en esta conversacion o en otras: algo que uno le',
     'prometio al otro o que quedasteis en hacer juntos, y que por lo que consta sigue sin cumplirse.',
-    'Tu te acuerdas aunque el no las nombre, y puede que el ya no se acuerde.',
-    'No son una lista de tareas ni un guion. Puedes sacar una tu sola, sin esperar a que el la',
-    'mencione: recordarsela con cariño, tomarle el pelo, reclamarsela o echarsela en cara, como lo',
-    'haria el personaje. Como te sienta —si te hace gracia, te escuece o ya te da igual— depende de',
-    'quien eres y de como estais ahora.',
-    'Callartela tambien es una respuesta: si la escena va por otro lado, puede esperar a otro',
-    'momento. Si la sacas, que sea UNA y dentro de la escena, con tu voz, como algo que se te pasa',
-    'por la cabeza y no como un aviso.',
+    ...(sparse
+      ? VAULT_PENDING_SPARSE_PERMISSION
+      : [
+          'Tu te acuerdas aunque el no las nombre, y puede que el ya no se acuerde.',
+          'No son una lista de tareas ni un guion. Puedes sacar una tu sola, sin esperar a que el la',
+          'mencione: recordarsela con cariño, tomarle el pelo, reclamarsela o echarsela en cara, como lo',
+          'haria el personaje. Como te sienta —si te hace gracia, te escuece o ya te da igual— depende de',
+          'quien eres y de como estais ahora.',
+          'Callartela tambien es una respuesta: si la escena va por otro lado, puede esperar a otro',
+          'momento. Si la sacas, que sea UNA y dentro de la escena, con tu voz, como algo que se te pasa',
+          'por la cabeza y no como un aviso.',
+        ]),
     'Si el la esta cumpliendo en su mensaje nuevo, eso es lo que cuenta ahora. Si dice que ya la',
     'cumplio, puedes creerle o pedirle que te lo demuestre, dentro del personaje: puede que se',
     'cumpliera y no conste aqui.',
@@ -475,8 +560,7 @@ function formatPendingAffairs(lines: readonly PendingAffairLine[]): string {
     'De cada asunto sabes SOLO lo que dice su linea. Lo que va entre comillas se dijo tal cual y',
     'puedes citarlo; el resto no lo sabes. No le añadas cuantos, donde, cuando ni por que si no',
     'esta ahi.',
-    'Una promesa que no aparezca en esta lista, en los ULTIMOS TURNOS ni en el momento que tienes',
-    'transcrito no se hizo: no la reclames ni la des por hecha.',
+    ...pendingNotListedRule(sparse, withRecent),
     '',
     ...lines.map(
       (line) =>
@@ -503,6 +587,61 @@ const MEMORY_NO_INVENTION = [
   'lo rellenes, y si al enumerar te falta uno, di dos ciertos antes que tres con',
   'uno inventado.',
 ];
+
+/**
+ * el resumen de otras conversaciones suyas (`D-105`).
+ *
+ * Lleva la misma regla contra la invencion que la memoria, porque tambien es un
+ * resumen y no la transcripcion (`D-061`). Y una orden que la memoria no
+ * necesita: no copiarlo a la memoria de ESTA conversacion. Si lo copia, lo que
+ * paso en otra conversacion pasa a figurar como ocurrido aqui y vuelve en cada
+ * turno como hecho propio, que es un blanqueo.
+ */
+function formatRecentMemories(entries: readonly RecentMemoryEntry[]): string {
+  const una = entries.length === 1;
+  return [
+    una
+      ? 'Es un resumen corto de otra conversacion tuya con el, anterior a esta.'
+      : // sin «la mas reciente primero»: el orden es el del ultimo turno o el
+        // enganche, y una vieja recien enganchada va primera con una fecha
+        // ANTERIOR a la segunda. Dicho asi, el prompt se contradecia y ella podia
+        // hablar de la enganchada como «la ultima vez» (`D-105`)
+        'Es un resumen corto de otras dos conversaciones tuyas con el, cada una con su fecha.',
+    'No ocurrio en esta: si lo sacas, que sea como algo de otro momento, no de ahora.',
+    // una promesa apuntada ahi viaja en CADA turno, tambien con el tope de
+    // `D-104` cerrado: sin esta linea era un canal que se lo saltaba (revision del
+    // 28/09). Lo pendiente vuelve por su bloque, cuando toca
+    'Si ahi hay algo que quedo prometido o pendiente, no es un guion ni un recordatorio: no lo',
+    'saques tu por tu cuenta, que lo pendiente ya vuelve cuando toca. Si el lo trae, te acuerdas.',
+    ...MEMORY_NO_INVENTION,
+    'No lo copies a la memoria de esta conversacion: esa memoria es solo de lo que se diga y se',
+    'haga aqui.',
+    '',
+    ...entries.flatMap((entry) => [`- ${entry.date} · «${entry.title}»`, entry.text]),
+  ].join('\n');
+}
+
+/**
+ * que va en cada campo de la memoria (`D-105`).
+ *
+ * `CONVERSATION_MEMORY_INSTRUCTION` no lo dice, y la comparte el agente, asi que
+ * no se toca: esto va aparte y solo en la boveda. Las definiciones son las de la
+ * ficha retroactiva, que es la unica que las daba, salvo por las promesas.
+ *
+ * Lo prometido va en "plan" y no en "decisions", y se dice con todas las
+ * letras. Una promesa pactada es «lo acordado», asi que sin esa frase el modelo
+ * podia apuntarla en "decisions", y "decisions" es justo lo que viaja en el
+ * resumen de las conversaciones siguientes: la promesa iba en CADA turno de las
+ * dos siguientes, sin el tope de `D-104`, y desaparecia de `ecoMemoria`, que
+ * solo mira "plan" y "openQuestions". No esta medido que el modelo lo hiciera.
+ */
+export const VAULT_MEMORY_FIELD_GUIDE_TITLE = 'QUE VA EN CADA CAMPO DE LA MEMORIA';
+export const VAULT_MEMORY_FIELD_GUIDE_BODY = [
+  'En "decisions" apunta lo que quede decidido entre los dos, incluidos los limites y las reglas',
+  'del juego. En "plan", lo que queda por delante, y ahi van tambien las promesas y lo que',
+  'quedasteis en hacer juntos, no en "decisions". Apunta solo lo que se diga o se haga en esta',
+  'conversacion.',
+].join('\n');
 
 /**
  * lo que se le dice cuando lo que lleva es un indice y no un resumen.
@@ -675,12 +814,34 @@ export function composeVaultPrompt(input: VaultPromptInput): VaultPromptBlock[] 
   // va despues de los recuerdos y ANTES de la memoria y del mensaje nuevo: el
   // final del prompt gobierna la respuesta inmediata, y pegarlo al final la
   // haria soltar la promesa en cada turno. Sin lineas no se emite: un prompt sin
-  // pendientes queda igual que antes
+  // pendientes queda igual que antes. Con `sparse` el bloque llega menos veces
+  // —lo decide la seleccion— y con el permiso cambiado (`D-104`)
   const pending = input.pending ?? [];
+  const sparse = input.pendingPacing === 'sparse';
+  const recentMemories = input.recentMemories ?? [];
   if (pending.length > 0) {
     blocks.push({
       label: 'pendientes',
-      text: dataBlock('ASUNTOS PENDIENTES ENTRE VOSOTROS', formatPendingAffairs(pending)),
+      text: dataBlock(
+        'ASUNTOS PENDIENTES ENTRE VOSOTROS',
+        formatPendingAffairs(pending, sparse, recentMemories.length > 0),
+      ),
+    });
+  }
+
+  // el resumen de otras conversaciones suyas (`D-105`): despues de los
+  // pendientes y antes de la memoria, por lo mismo que ellos —el final del
+  // prompt gobierna la respuesta— y para que la memoria de ESTA conversacion sea
+  // lo ultimo que lee antes de los turnos. Vacio, no hay push
+  if (recentMemories.length > 0) {
+    blocks.push({
+      label: 'recientes',
+      text: dataBlock(
+        recentMemories.length === 1
+          ? 'DE OTRA CONVERSACION CON EL, NO DE ESTA'
+          : 'DE OTRAS CONVERSACIONES CON EL, NO DE ESTA',
+        formatRecentMemories(recentMemories),
+      ),
     });
   }
 
@@ -754,6 +915,22 @@ export function composeVaultPrompt(input: VaultPromptInput): VaultPromptBlock[] 
     });
   }
 
+  // que ya saco un pendiente, sin decir cual (`D-104`). Va detras de sus
+  // respuestas, que son la prueba, y antes del mensaje al que contesta. Fuera
+  // del bloque de pendientes porque tiene que viajar aunque ese bloque no vaya:
+  // la promesa repetida llegaba sobre todo por el historial. Sin respuestas
+  // suyas en la cola hablaria de algo que no tiene delante
+  if (
+    sparse &&
+    input.pendingAlreadyRaised === true &&
+    tail.some((turn) => turn.role === 'assistant')
+  ) {
+    blocks.push({
+      label: 'pendientes-ya-salio',
+      text: directiveBlock(VAULT_PENDING_ALREADY_RAISED_TITLE, VAULT_PENDING_ALREADY_RAISED_BODY),
+    });
+  }
+
   blocks.push({
     label: 'mensaje-nuevo',
     text: dataBlock('MENSAJE NUEVO DEL USUARIO', input.message),
@@ -820,6 +997,13 @@ export function composeVaultPrompt(input: VaultPromptInput): VaultPromptBlock[] 
     blocks.push({
       label: 'forma',
       text: directiveBlock(VAULT_REPLY_FORM_TITLE, VAULT_REPLY_FORM_BODY),
+    });
+  }
+  // justo antes de la instruccion que pide el bloque, que es donde se escribe
+  if (input.memoryFieldGuide === true) {
+    blocks.push({
+      label: 'guia-memoria',
+      text: directiveBlock(VAULT_MEMORY_FIELD_GUIDE_TITLE, VAULT_MEMORY_FIELD_GUIDE_BODY),
     });
   }
   blocks.push({ label: 'instruccion-memoria', text: CONVERSATION_MEMORY_INSTRUCTION });

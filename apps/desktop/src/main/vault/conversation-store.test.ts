@@ -117,7 +117,7 @@ describe('conversaciones privadas en disco', () => {
 
   it('sobrevive a cerrar y volver a abrir la boveda', async () => {
     await store.appendTurn(vault, A, turn('escrito antes de cerrar'));
-    vault.lock();
+    vault.lock('manual');
 
     const otra = new VaultService(vaultFilePathFor(directory), memoryDeviceKeys(), {
       argon2Params: FAST,
@@ -129,7 +129,7 @@ describe('conversaciones privadas en disco', () => {
 
   it('con la boveda cerrada no se puede leer nada', async () => {
     await store.appendTurn(vault, A, turn('hola'));
-    vault.lock();
+    vault.lock('manual');
     await expect(store.read(vault, A)).rejects.toThrow(VaultError);
     await expect(store.list(vault)).rejects.toThrow(VaultError);
   });
@@ -251,6 +251,26 @@ describe('conversaciones privadas en disco', () => {
     expect(store.removeLastTurn(A)).toBe(false);
   });
 
+  it('con un registro concreto, solo retira la ultima linea si es la suya', async () => {
+    // revision del 28/09: sin la llave no se ve el rol, y detras del mensaje sin
+    // contestar puede haber quedado otra linea —una respuesta buena o lo que bajo
+    // la sincronizacion—. Esa no se toca
+    await store.appendTurn(vault, A, turn('hola'));
+    const suyo = await store.appendTurn(vault, A, turn('mensaje sin respuesta'));
+    const detras = await store.appendTurn(vault, A, turn('otra linea que quedo detras'));
+
+    expect(store.removeLastTurn(A, suyo.recordId)).toBe(false);
+    expect((await store.read(vault, A)).map((each) => each.text)).toEqual([
+      'hola',
+      'mensaje sin respuesta',
+      'otra linea que quedo detras',
+    ]);
+
+    expect(store.removeLastTurn(A, detras.recordId)).toBe(true);
+    expect(store.removeLastTurn(A, suyo.recordId)).toBe(true);
+    expect((await store.read(vault, A)).map((each) => each.text)).toEqual(['hola']);
+  });
+
   it('lo retirado no deja rastro para el siguiente turno', async () => {
     await store.appendTurn(vault, A, turn('primero'));
     await store.appendTurn(vault, A, turn('intento fallido'));
@@ -274,8 +294,8 @@ describe('conversaciones privadas en disco', () => {
       instructions: 'Dulce, curiosa, un poco tímida',
     });
 
-    expect(await store.latestCharacterId(vault, A)).toBe(LIA);
-    expect(await store.latestInstructions(vault, A)).toBe('Dulce, curiosa, un poco tímida');
+    expect((await store.owner(vault, A)).characterId).toBe(LIA);
+    expect((await store.owner(vault, A)).instructions).toBe('Dulce, curiosa, un poco tímida');
   });
 
   it('borrar elimina el archivo', async () => {
@@ -338,27 +358,27 @@ describe('instrucciones fijas de la conversacion', () => {
 
   it('sin instrucciones no hay instrucciones', async () => {
     await store.appendTurn(vault, A, turn('hola'));
-    expect(await store.latestInstructions(vault, A)).toBeNull();
+    expect((await store.owner(vault, A)).instructions).toBeNull();
   });
 
   it('valen las del ultimo turno que las llevaba', async () => {
     await store.appendTurn(vault, A, { ...turn('uno'), instructions: 'responde en gallego' });
     // un turno que no las toca NO las borra: solo significa que no las cambio
     await store.appendTurn(vault, A, turn('dos'));
-    expect(await store.latestInstructions(vault, A)).toBe('responde en gallego');
+    expect((await store.owner(vault, A)).instructions).toBe('responde en gallego');
   });
 
   it('la ultima gana', async () => {
     await store.appendTurn(vault, A, { ...turn('uno'), instructions: 'la primera' });
     await store.appendTurn(vault, A, { ...turn('dos'), instructions: 'la segunda' });
-    expect(await store.latestInstructions(vault, A)).toBe('la segunda');
+    expect((await store.owner(vault, A)).instructions).toBe('la segunda');
   });
 
   it('una cadena vacia las borra, y se distingue de no tocarlas', async () => {
     await store.appendTurn(vault, A, { ...turn('uno'), instructions: 'algo' });
     await store.appendTurn(vault, A, { ...turn('dos'), instructions: '' });
     // sin esta distincion no habria forma de volver atras una vez puestas
-    expect(await store.latestInstructions(vault, A)).toBeNull();
+    expect((await store.owner(vault, A)).instructions).toBeNull();
   });
 
   it('no salen en claro en el archivo', async () => {
@@ -372,14 +392,14 @@ describe('instrucciones fijas de la conversacion', () => {
 
   it('con la boveda cerrada no se pueden leer', async () => {
     await store.appendTurn(vault, A, { ...turn('uno'), instructions: 'secreto' });
-    vault.lock();
-    await expect(store.latestInstructions(vault, A)).rejects.toThrow(VaultError);
+    vault.lock('manual');
+    await expect(store.owner(vault, A)).rejects.toThrow(VaultError);
   });
 
   it('cada conversacion tiene las suyas', async () => {
     await store.appendTurn(vault, A, { ...turn('uno'), instructions: 'las de A' });
     await store.appendTurn(vault, B, turn('uno'));
-    expect(await store.latestInstructions(vault, B)).toBeNull();
+    expect((await store.owner(vault, B)).instructions).toBeNull();
   });
 });
 

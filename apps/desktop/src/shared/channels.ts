@@ -52,6 +52,8 @@ export const IPC_INVOKE = {
   vaultCreate: 'luxy:vault:create',
   vaultUnlock: 'luxy:vault:unlock',
   vaultLock: 'luxy:vault:lock',
+  /** hay alguien delante de Privado: lo unico, ademas de esperar, que la mantiene abierta */
+  vaultPresence: 'luxy:vault:presence',
   vaultChangePassword: 'luxy:vault:change-password',
   vaultDeviceUnlockSet: 'luxy:vault:device-unlock:set',
   vaultAutoLockSet: 'luxy:vault:auto-lock:set',
@@ -66,6 +68,14 @@ export const IPC_INVOKE = {
    * dos textos distintos, viven en dos almacenes distintos y solo uno viaja.
    */
   vaultConversationMemoryForget: 'luxy:vault:conversation:memory:forget',
+  /**
+   * lo que pasaria al enganchar o soltar esa conversacion, SIN hacerlo.
+   *
+   * La confirmacion no se enseña hasta tenerlo: su texto sale de aqui (`D-093`).
+   */
+  vaultConversationOwnerPreview: 'luxy:vault:conversation:owner:preview',
+  /** engancha una conversacion sin personaje, o suelta un enganche propio (`D-103`) */
+  vaultConversationOwnerSet: 'luxy:vault:conversation:owner:set',
   vaultMediaAttach: 'luxy:vault:media:attach',
   vaultCompatibility: 'luxy:vault:compatibility',
   vaultMemoryList: 'luxy:vault:memory:list',
@@ -132,6 +142,9 @@ export const IPC_INVOKE = {
   vaultCharacterImageCast: 'luxy:vault:character:image-cast',
   /** enciende o apaga las notas de direccion contra la autocopia (`D-102`) */
   vaultCharacterReplyGuidance: 'luxy:vault:character:reply-guidance',
+  vaultCharacterPendingPacing: 'luxy:vault:character:pending-pacing',
+  /** enciende o apaga el resumen de sus dos ultimas conversaciones (`D-105`) */
+  vaultCharacterRecentMemories: 'luxy:vault:character:recent-memories',
   /**
    * el intento de imagen que quedo esperando decision en esa conversacion.
    *
@@ -151,7 +164,7 @@ export const IPC_INVOKE = {
 /** canales de notificacion (main -> renderer) */
 export const IPC_EVENT = {
   agentEvent: 'luxy:agent:event',
-  /** la boveda se cerro sola por inactividad. viaja el hecho, nada mas */
+  /** la boveda se cerro; viaja el motivo, un enumerado cerrado, nada mas */
   vaultLocked: 'luxy:vault:locked',
   /**
    * como va la cola de AI Horde mientras se espera una imagen.

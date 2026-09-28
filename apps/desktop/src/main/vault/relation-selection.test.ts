@@ -5,9 +5,22 @@
 // escrita a mano: sin boveda, sin disco y sin esperar tres dias a que venza un
 // reposo.
 import { describe, it, expect } from 'vitest';
-import { RELATION_EXTRACTOR_VERSION, type RelationCursor, type RelationNote, type TemporalAnchor } from '@luxy/shared';
-import { noteId } from './relation.js';
-import { selectPendingForTurn, type PendingSelection } from './relation-selection.js';
+import {
+  RELATION_EXTRACTOR_VERSION,
+  VAULT_RECENT_TURNS,
+  type RelationCursor,
+  type RelationNote,
+  type TemporalAnchor,
+} from '@luxy/shared';
+import { matchesStems, noteId, quoteStems } from './relation.js';
+import {
+  OFFER_RUN_USER_TURNS,
+  PENDING_BLOCK_EVERY,
+  cadenceOpens,
+  clearlyRaises,
+  selectPendingForTurn,
+  type PendingSelection,
+} from './relation-selection.js';
 import { tokenize } from './turn-index.js';
 
 const CONV_A = 'aaaaaaaa-1111-4111-8111-111111111111';
@@ -54,6 +67,8 @@ interface Fixture {
     oldestRecent: number | null;
   }>;
   now?: string;
+  /** el tope del modo esporadico; ausente, la seleccion de siempre */
+  cadence?: { every: number; userTurn: number };
 }
 
 const turn = (
@@ -149,6 +164,7 @@ function select(fixture: Fixture): PendingSelection {
     current,
     anchor: ANCHOR,
     now: fixture.now ?? NOW,
+    ...(fixture.cadence === undefined ? {} : { cadence: fixture.cadence }),
   });
 }
 
@@ -733,5 +749,399 @@ describe('30 bis. lo dicho antes de la promesa no es haberla sacado', () => {
     expect(result.lines).toHaveLength(2);
     expect(result.lines[0]).toMatchObject({ by: 'user', quote: CAFES, raisedCount: 0 });
     expect(result.lines[1]).toMatchObject({ by: 'both', quote: MERCADO });
+  });
+});
+
+// `D-104`: el tope del bloque entero en el modo esporadico
+describe('31. el tope del bloque, sin estado', () => {
+  const CUATRO = [LIBRO_NOTE, PLAYA_NOTE, MERCADO_NOTE, CAFES_NOTE];
+
+  it('sin tope, la seleccion y los contadores son los de siempre', () => {
+    const result = select({ notes: CUATRO, turns: TARDE });
+
+    expect(result.cadenceClosed).toBe(false);
+    expect(result.lines.map((line) => line.quote)).toEqual([CAFES, MERCADO]);
+    expect(result.counters).toEqual({
+      open: 4,
+      offered: 2,
+      touched: 0,
+      inScene: 0,
+      cooling: 0,
+      waiting: 0,
+      dormant: 0,
+      blockedStale: 0,
+      quoteBroken: 0,
+      heldByCadence: 0,
+      raisedByHer: 0,
+    });
+  });
+
+  it('en el primer mensaje, el quinto y el noveno el tope esta abierto', () => {
+    const sinTope = select({ notes: CUATRO, turns: TARDE });
+    for (const userTurn of [1, 5, 9]) {
+      const result = select({ notes: CUATRO, turns: TARDE, cadence: { every: 4, userTurn } });
+      expect(result.cadenceClosed).toBe(false);
+      expect(result.counters.heldByCadence).toBe(0);
+      expect(result.lines).toEqual(sinTope.lines);
+    }
+  });
+
+  it('en el segundo, tercero y cuarto no sale nada, y se cuenta lo que se quedo fuera', () => {
+    for (const userTurn of [2, 3, 4]) {
+      const result = select({ notes: CUATRO, turns: TARDE, cadence: { every: 4, userTurn } });
+      expect(result.cadenceClosed).toBe(true);
+      expect(result.lines).toEqual([]);
+      expect(result.counters.offered).toBe(0);
+      // las cuatro habian pasado todos los filtros por nota
+      expect(result.counters.heldByCadence).toBe(4);
+    }
+  });
+
+  it('una nota tocada salta el tope, sola: la otra candidata se queda fuera', () => {
+    const result = select({
+      notes: [MERCADO_NOTE, CAFES_NOTE],
+      turns: TARDE,
+      current: { text: 'estoy preparando los dos cafés y la tarta de chocolate' },
+      cadence: { every: 4, userTurn: 2 },
+    });
+
+    expect(result.cadenceClosed).toBe(true);
+    expect(result.lines).toHaveLength(1);
+    expect(result.lines[0]).toMatchObject({ quote: CAFES, touchedNow: true });
+    expect(result.counters.touched).toBe(1);
+    expect(result.counters.heldByCadence).toBe(1);
+  });
+
+  it('un numero que no es un entero positivo deja el tope abierto', () => {
+    for (const userTurn of [0, -3, Number.NaN, 1.5, Number.POSITIVE_INFINITY]) {
+      expect(cadenceOpens(userTurn, 4)).toBe(true);
+    }
+    for (const every of [0, Number.NaN, 2.5]) {
+      expect(cadenceOpens(3, every)).toBe(true);
+    }
+    expect(cadenceOpens(1, 4)).toBe(true);
+    expect(cadenceOpens(2, 4)).toBe(false);
+    expect(cadenceOpens(4, 4)).toBe(false);
+    expect(cadenceOpens(5, 4)).toBe(true);
+  });
+
+  it('cambiar la ventana o la tanda obliga a revisar el tope', () => {
+    // con cuatro respuestas suyas en la ventana, una sola escrita tras un bloque
+    expect(PENDING_BLOCK_EVERY * 2).toBe(VAULT_RECENT_TURNS);
+    // y toda tanda de una nota tiene al menos un mensaje abierto
+    expect(PENDING_BLOCK_EVERY).toBeLessThanOrEqual(OFFER_RUN_USER_TURNS);
+  });
+});
+
+// `D-104`: cuando una nota esta en escena porque la saco ELLA
+describe('32. sacada por ella en la ventana, con la regla estricta', () => {
+  /** seis de las siete raices de la cita de los cafes */
+  const SACA_CAFES =
+    'oye, ¿y esos dos cafés con la tarta de chocolate en la cama que me ibas a traer mañana?';
+  const base = {
+    cursors: [cursor(CONV_A, 6), cursor(CONV_NOW, 11)],
+    current: { sequence: 12, oldestRecent: 4 },
+  };
+  const suya = (sequence: number, text: string, at = '2026-09-11T20:30:00.000Z') =>
+    turn(CONV_NOW, sequence, 'assistant', at, text);
+  const conKeywords = note({
+    quote: CAFES,
+    keywords: ['desayuno', 'bandeja'],
+    origin: { conversationId: CONV_A, sequence: 0, role: 'user', at: '2026-09-01T18:00:00.000Z' },
+  });
+
+  it('una respuesta suya dentro de la ventana que la saca cuenta', () => {
+    const result = select({ ...base, notes: [CAFES_NOTE], turns: [...TARDE, suya(9, SACA_CAFES)] });
+
+    expect(result.counters.inScene).toBe(1);
+    expect(result.counters.raisedByHer).toBe(1);
+    expect(result.lines).toEqual([]);
+  });
+
+  it('si solo casa por la bolsa de siempre, esta en escena pero no cuenta', () => {
+    const result = select({
+      ...base,
+      notes: [CAFES_NOTE],
+      turns: [...TARDE, suya(9, RECUERDA_CAFES)],
+    });
+
+    expect(result.counters.inScene).toBe(1);
+    expect(result.counters.raisedByHer).toBe(0);
+  });
+
+  it('si la promesa se hizo dentro de la ventana, se esta viviendo: no cuenta', () => {
+    const origen = '2026-09-11T20:00:00.000Z';
+    const result = select({
+      ...base,
+      notes: [
+        note({
+          quote: CAFES,
+          origin: { conversationId: CONV_NOW, sequence: 6, role: 'user', at: origen },
+        }),
+      ],
+      turns: [turn(CONV_NOW, 6, 'user', origen, CAFES), suya(7, SACA_CAFES)],
+    });
+
+    expect(result.counters.inScene).toBe(1);
+    expect(result.counters.raisedByHer).toBe(0);
+  });
+
+  it('si el la nombro en la ventana, ya es de los dos: no cuenta', () => {
+    const result = select({
+      ...base,
+      notes: [CAFES_NOTE],
+      turns: [
+        ...TARDE,
+        suya(9, SACA_CAFES),
+        turn(CONV_NOW, 10, 'user', '2026-09-11T20:40:00.000Z', RECUERDA_CAFES),
+      ],
+    });
+
+    expect(result.counters.inScene).toBe(1);
+    expect(result.counters.raisedByHer).toBe(0);
+  });
+
+  it('tampoco si el la retomo solo con sus keywords', () => {
+    const result = select({
+      ...base,
+      notes: [conKeywords],
+      turns: [
+        ...TARDE,
+        suya(9, SACA_CAFES),
+        turn(CONV_NOW, 10, 'user', '2026-09-11T20:40:00.000Z', 'te subo el desayuno en una bandeja'),
+      ],
+    });
+
+    expect(result.counters.inScene).toBe(1);
+    expect(result.counters.raisedByHer).toBe(0);
+  });
+
+  it('si el mensaje de ahora la toca, no cuenta, y tocadas sigue sin subir en escena', () => {
+    const result = select({
+      ...base,
+      notes: [CAFES_NOTE],
+      turns: [...TARDE, suya(9, SACA_CAFES)],
+      current: { ...base.current, text: 'estoy preparando los dos cafés y la tarta de chocolate' },
+    });
+
+    expect(result.counters.inScene).toBe(1);
+    expect(result.counters.raisedByHer).toBe(0);
+    expect(result.counters.touched).toBe(0);
+  });
+
+  it('si la saco fuera de la ventana, esta en reposo y no en escena', () => {
+    const result = select({
+      ...base,
+      notes: [CAFES_NOTE],
+      turns: [...TARDE, suya(2, SACA_CAFES, '2026-09-11T19:00:00.000Z')],
+    });
+
+    expect(result.counters.inScene).toBe(0);
+    expect(result.counters.cooling).toBe(1);
+    expect(result.counters.raisedByHer).toBe(0);
+  });
+
+  it('una respuesta que casa solo por keywords no cuenta nunca', () => {
+    const result = select({
+      ...base,
+      notes: [conKeywords],
+      turns: [...TARDE, suya(9, 'mañana te subo el desayuno en una bandeja')],
+    });
+
+    expect(result.counters.inScene).toBe(1);
+    expect(result.counters.raisedByHer).toBe(0);
+  });
+
+  describe('en un mensaje con el tope abierto', () => {
+    // una conversacion seguida: el es el 1 (seq 4), 2, 3, 4 y ahora el 5 (seq
+    // 12), que abre el tope. Su respuesta en la 5 fue a la apertura anterior
+    const el = (sequence: number, minute: number) =>
+      turn(CONV_NOW, sequence, 'user', `2026-09-11T20:${minute}:00.000Z`, 'hace frio hoy, ¿verdad?');
+    const hilo = (quienSaca: number) => [
+      ...TARDE,
+      el(4, 10),
+      suya(5, quienSaca === 5 ? SACA_CAFES : 'se rie y se acurruca', '2026-09-11T20:11:00.000Z'),
+      el(6, 12),
+      suya(7, quienSaca === 7 ? SACA_CAFES : 'le da un beso', '2026-09-11T20:13:00.000Z'),
+      el(8, 14),
+      suya(9, 'se estira', '2026-09-11T20:15:00.000Z'),
+      el(10, 16),
+      suya(11, 'bosteza', '2026-09-11T20:17:00.000Z'),
+    ];
+
+    it('lo que saco tras la apertura anterior no cuenta: el bloque y la nota no chocan', () => {
+      // con K = 4 y ocho turnos de ventana, esa respuesta es SIEMPRE la mas
+      // antigua de la ventana. Contarla ponia «no saques otro todavia» en cada
+      // apertura, junto al bloque que le ofrece otro
+      const result = select({
+        ...base,
+        notes: [CAFES_NOTE],
+        turns: hilo(5),
+        cadence: { every: 4, userTurn: 5 },
+      });
+      expect(result.cadenceClosed).toBe(false);
+      expect(result.counters.inScene).toBe(1);
+      expect(result.counters.raisedByHer).toBe(0);
+    });
+
+    it('lo que saco con el tope cerrado si cuenta', () => {
+      const result = select({
+        ...base,
+        notes: [CAFES_NOTE],
+        turns: hilo(7),
+        cadence: { every: 4, userTurn: 5 },
+      });
+      expect(result.counters.raisedByHer).toBe(1);
+    });
+
+    it('sin el modo esporadico se cuenta como siempre: es la linea base', () => {
+      const result = select({ ...base, notes: [CAFES_NOTE], turns: hilo(5) });
+      expect(result.counters.raisedByHer).toBe(1);
+    });
+
+    it('y con el tope cerrado tambien cuenta la de la apertura', () => {
+      const result = select({
+        ...base,
+        notes: [CAFES_NOTE],
+        turns: hilo(5),
+        cadence: { every: 4, userTurn: 6 },
+      });
+      expect(result.cadenceClosed).toBe(true);
+      expect(result.counters.raisedByHer).toBe(1);
+    });
+  });
+
+  it('se cuenta igual con el tope puesto: es un dato, no una oferta', () => {
+    const result = select({
+      ...base,
+      notes: [CAFES_NOTE],
+      turns: [...TARDE, suya(9, SACA_CAFES)],
+      cadence: { every: 4, userTurn: 3 },
+    });
+
+    expect(result.counters.raisedByHer).toBe(1);
+    expect(result.counters.heldByCadence).toBe(0);
+  });
+});
+
+describe('33. la regla estricta', () => {
+  const stems = (...words: string[]) => new Set(words);
+
+  it('con citas de una, dos, tres y siete raices', () => {
+    // revision del 28/09: con una o dos raices la regla estricta era la laxa, o
+    // sea una palabra clave. Esas citas no cuentan nunca
+    expect(clearlyRaises(stems('cafe'), ['cafe'])).toBe(false);
+    expect(clearlyRaises(stems('tart'), ['cafe'])).toBe(false);
+
+    expect(clearlyRaises(stems('cafe'), ['cafe', 'tart'])).toBe(false);
+    expect(clearlyRaises(stems('cafe', 'tart'), ['cafe', 'tart'])).toBe(false);
+
+    expect(clearlyRaises(stems('cafe', 'tart'), ['cafe', 'tart', 'cama'])).toBe(false);
+    expect(clearlyRaises(stems('cafe', 'tart', 'cama'), ['cafe', 'tart', 'cama'])).toBe(true);
+
+    const siete = quoteStems(CAFES);
+    expect(siete).toHaveLength(7);
+    expect(clearlyRaises(stems(...siete.slice(0, 3)), siete)).toBe(false);
+    expect(clearlyRaises(stems(...siete.slice(0, 4)), siete)).toBe(false);
+    expect(clearlyRaises(stems(...siete.slice(0, 5)), siete)).toBe(true);
+    expect(clearlyRaises(stems(), [])).toBe(false);
+  });
+
+  it('todo lo que acepta lo acepta tambien la bolsa de siempre', () => {
+    // todas las combinaciones de raices compartidas, para citas de 1 a 7
+    const cita = quoteStems(CAFES);
+    let aceptadas = 0;
+    for (let size = 1; size <= cita.length; size += 1) {
+      const nota = cita.slice(0, size);
+      for (let mask = 0; mask < 1 << size; mask += 1) {
+        const turno = stems('ajena', ...nota.filter((_stem, index) => (mask & (1 << index)) !== 0));
+        if (!clearlyRaises(turno, nota)) continue;
+        aceptadas += 1;
+        expect(matchesStems(turno, nota)).toBe(true);
+      }
+    }
+    // que el bucle no pase por no aceptar nada
+    expect(aceptadas).toBeGreaterThan(10);
+  });
+
+  // tercera revision del 28/09: ella saca una promesa con SUS palabras y el
+  // verbo cambia de persona o de tiempo. Sin raices equivalentes, de estos
+  // cinco pares inventados la regla reconocia cero
+  const PARAFRASIS: [string, string][] = [
+    [
+      'mañana te traigo el desayuno a la cama',
+      '*te mira de reojo* Oye, ¿y el desayuno en la cama que me ibas a traer? Sigo esperando, eh.',
+    ],
+    [
+      'te prometo que esta noche te doy un masaje en la espalda',
+      '*se tumba boca abajo* Me duele la espalda... alguien me prometio un masaje, ¿no?',
+    ],
+    [
+      'algun dia te llevo a ver el mar',
+      'Todavia me debes lo del mar, que me dijiste que me llevarias a verlo.',
+    ],
+    [
+      'te debo un baile lento en la cocina',
+      '*pone musica en el movil* Me debes un baile, ¿te acuerdas? Aqui mismo, en la cocina.',
+    ],
+    [
+      'la proxima vez me pongo el vestido rojo para ti',
+      '*sale del baño con el vestido rojo* Te dije que me lo pondria para ti.',
+    ],
+  ];
+
+  it('reconoce una promesa que ella saca con otras formas del verbo', () => {
+    for (const [cita, respuesta] of PARAFRASIS) {
+      const turno = new Set(tokenize(respuesta));
+      expect(clearlyRaises(turno, quoteStems(cita)), cita).toBe(true);
+      // y sigue dentro de la bolsa de siempre: en escena
+      expect(matchesStems(turno, quoteStems(cita)), cita).toBe(true);
+    }
+  });
+
+  it('reconoce el infinitivo con pronombre y el gerundio (cuarta revision del 28/09)', () => {
+    // los tres fallaban: «traerme» no llegaba a la tabla de traer, «prepararte»
+    // se quedaba en «prepar» cuando «preparo» es «prep», y el gerundio con
+    // pronombre no lo quitaba nadie. Texto INVENTADO
+    const casos: [string, string][] = [
+      [
+        'mañana te traigo el desayuno a la cama',
+        '*se estira entre las sabanas* Alguien prometio traerme el desayuno a la cama y aqui no veo nada.',
+      ],
+      ['te preparo la cena el viernes', 'El viernes me toca prepararte la cena, como te dije.'],
+      ['te escribo una carta de amor', 'Estoy escribiendote la carta de amor que te debia.'],
+    ];
+    for (const [cita, respuesta] of casos) {
+      const turno = new Set(tokenize(respuesta));
+      expect(clearlyRaises(turno, quoteStems(cita)), cita).toBe(true);
+      expect(matchesStems(turno, quoteStems(cita)), cita).toBe(true);
+    }
+  });
+
+  it('las raices equivalentes no cuentan si la bolsa exacta no casa', () => {
+    // tres raices «iguales» y ninguna exacta: la laxa no casa, asi que la
+    // estricta tampoco. Si contara, `raisedByHer` la contaria fuera de escena
+    const cita = quoteStems('te traigo, vengo y me pongo');
+    const turno = new Set(tokenize('traeras, vendras y te pondras'));
+    expect(cita).toHaveLength(3);
+    expect(matchesStems(turno, cita)).toBe(false);
+    expect(clearlyRaises(turno, cita)).toBe(false);
+    const soloUna = new Set(tokenize('*te trae algo* Ponte comodo, que hoy toca descansar'));
+    expect(clearlyRaises(soloUna, quoteStems('mañana te traigo el desayuno a la cama'))).toBe(false);
+  });
+
+  it('una respuesta que usa los mismos verbos sin sacar ninguna promesa no cuenta', () => {
+    const respuestas = [
+      '*se acurruca contra tu pecho* Ven aqui. ¿Te traigo algo de beber? Esta noche no te dejo escapar.',
+      '*te mira a los ojos* Me pongo nerviosa cuando me miras asi. Y ahora vuelve aqui y dame un beso.',
+      '*camina descalza por la cocina* Podriamos poner musica y no hacer nada. Te debo una por lo de ayer.',
+      '*te da un beso en la mejilla* Me voy a duchar y vuelvo. No te duermas, que luego te cuento una cosa.',
+    ];
+    for (const respuesta of respuestas) {
+      const turno = new Set(tokenize(respuesta));
+      for (const [cita] of PARAFRASIS) {
+        expect(clearlyRaises(turno, quoteStems(cita)), `${cita} | ${respuesta}`).toBe(false);
+      }
+    }
   });
 });

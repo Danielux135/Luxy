@@ -167,6 +167,14 @@ interface TurnoFalso {
 
 interface Huella {
   prompts: string[];
+  /** cuantos turnos habia guardados cuando llego cada medio */
+  turnosAlGuardarMedio: number[];
+  /** las esperas del usuario abiertas cuando llego cada medio, por clase */
+  esperasAlGuardarMedio: string[][];
+  /** las esperas que siguen abiertas: al acabar el envio no puede quedar ninguna */
+  esperas: Map<symbol, string>;
+  /** la clase de cada espera que se abrio, en orden */
+  esperasEmpezadas: string[];
   turnos: TurnoFalso[];
   intentos: ImageAttempt[];
   registros: { mensaje: string; campos: Record<string, unknown> | undefined }[];
@@ -182,11 +190,17 @@ interface Montaje {
   respuestas?: string[];
   /** el registro de intentos no abre */
   registroRoto?: boolean;
+  /** guardar el medio falla, como cuando la boveda se cierra a mitad */
+  medioFalla?: boolean;
 }
 
 function montar(montaje: Montaje = {}): Huella {
   const huella: Huella = {
     prompts: [],
+    turnosAlGuardarMedio: [],
+    esperasAlGuardarMedio: [],
+    esperas: new Map(),
+    esperasEmpezadas: [],
     turnos: [],
     intentos: [],
     registros: [],
@@ -200,7 +214,18 @@ function montar(montaje: Montaje = {}): Huella {
   let medios = 0;
 
   const context = {
-    vault: { isUnlocked: () => true, onLock: () => () => undefined },
+    vault: {
+      isUnlocked: () => true,
+      onLock: () => () => undefined,
+      beginUserWait: (kind: string) => {
+        const token = Symbol(kind);
+        huella.esperas.set(token, kind);
+        huella.esperasEmpezadas.push(kind);
+        return () => {
+          huella.esperas.delete(token);
+        };
+      },
+    },
     privateConversations: {
       list: async () => [
         { conversationId: CONV, title: '', turns: huella.turnos.length, updatedAt: '' },
@@ -218,12 +243,24 @@ function montar(montaje: Montaje = {}): Huella {
           text: turno.text,
           createdAt: new Date().toISOString(),
         });
+        // el almacen de verdad devuelve el registro; el envio retira por su recordId
+        return { recordId: `registro-${huella.turnos.length}` };
       },
       removeLastTurn: () => huella.turnos.pop(),
       latestMemory: async () => null,
-      latestInstructions: async () => null,
-      latestCharacterId: async () => LIA,
-      latestCharacterDescription: async () => 'Lia, veinticuatro años',
+      // el dueño se lee SOLO por `owner()` (`D-103`)
+      owner: async () => ({
+        characterId: LIA,
+        characterDescription: 'Lia, veinticuatro años',
+        instructions: null,
+        characterLabel: null,
+        source: 'turn' as const,
+        signedAfter: 0,
+        linkedAt: null,
+        events: 0,
+        winningEventId: null,
+        instructionsSource: null,
+      }),
     },
     characters: {
       list: async () => [
@@ -243,6 +280,9 @@ function montar(montaje: Montaje = {}): Huella {
     privateMedia: {
       list: async () => [],
       add: async () => {
+        huella.turnosAlGuardarMedio.push(huella.turnos.length);
+        huella.esperasAlGuardarMedio.push([...huella.esperas.values()]);
+        if (montaje.medioFalla === true) throw new Error('la boveda esta bloqueada');
         medios += 1;
         return { mediaId: `medio-${medios}`, byteSize: 4, hasThumbnail: false };
       },
@@ -303,6 +343,8 @@ function montar(montaje: Montaje = {}): Huella {
           createdAt: turno.createdAt,
           stems: new Set(tokenize(turno.text)),
         })),
+      // sin enganches: ningun cursor se invalida por dueño (`D-103`)
+      ownerOf: () => undefined,
       conversationsFor: () => new Set([CONV]),
       turnAt: (conversationId: string, sequence: number) =>
         huella.turnos.find(
@@ -480,6 +522,47 @@ describe('el turno termina sin generar y deja el plan pendiente', () => {
     expect(horde.submitCalls).toBe(1);
     expect(horde.lastPrompt).toBe(PLAN.joined);
     expect(huella.intentos[0]?.state).toBe('ok');
+  });
+
+  // revision del 28/09: la imagen se generaba ANTES de guardar su texto, y con
+  // AI Horde eso son hasta 23 minutos. Un cierre de la boveda en medio tiraba la
+  // respuesta ya pagada y el mensaje de el
+  it('sin revision, su texto se guarda ANTES de generar la imagen', async () => {
+    const huella = montar({ review: 'nunca' });
+    await enviar('mandame una foto tuya');
+    expect(huella.turnosAlGuardarMedio).toEqual([2]);
+    expect(huella.turnos.map((turno) => turno.role)).toEqual(['user', 'assistant']);
+  });
+
+  // tercera revision del 28/09: la imagen del turno se generaba dentro de la
+  // espera `reply`, asi que un Win+L la aplazaba hasta 10 minutos con la
+  // respuesta ya guardada. Con el texto a salvo, la espera pasa a ser `image`,
+  // que no aplaza Win+L pero si sigue frenando la inactividad (`D-106`)
+  it('con su texto guardado, la imagen del turno se espera como imagen y no como envio', async () => {
+    const huella = montar({ review: 'nunca' });
+    await enviar('mandame una foto tuya');
+    expect(huella.esperasEmpezadas).toEqual(['reply', 'image']);
+    expect(huella.esperasAlGuardarMedio).toEqual([['image']]);
+    // y al acabar no queda ninguna abierta
+    expect([...huella.esperas.values()]).toEqual([]);
+  });
+
+  it('un turno sin imagen se espera entero como envio y la suelta al acabar', async () => {
+    const huella = montar({ review: 'nunca', respuestas: ['una respuesta inventada sin imagen'] });
+    await enviar('hola');
+    expect(huella.esperasEmpezadas).toEqual(['reply']);
+    expect([...huella.esperas.values()]).toEqual([]);
+  });
+
+  it('si la imagen no se puede guardar, el turno sale con su texto y el fallo al lado', async () => {
+    const huella = montar({ review: 'nunca', medioFalla: true });
+    const respuesta = await enviar('mandame una foto tuya');
+    expect(respuesta.ok).toBe(true);
+    expect(respuesta.value?.userTurnKept).toBe(true);
+    expect(respuesta.value?.image?.mediaId).toBeNull();
+    expect(respuesta.value?.image?.error).toBeTypeOf('string');
+    expect(huella.turnos.map((turno) => turno.role)).toEqual(['user', 'assistant']);
+    expect(huella.turnos[1]?.text).toBe('*se muerde el labio* toma, mirame');
   });
 
   it('UN BLOQUE CORTADO deja de ser invisible', async () => {

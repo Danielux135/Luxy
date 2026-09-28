@@ -1,7 +1,52 @@
 # Enganchar una conversación a un personaje: plan de implementación
 
-Fecha: 2026-09-25. Autor: Claude. Estado: **plan, sin implementar**. Nada de lo
-que aquí se describe está escrito en código, probado ni desplegado.
+Fecha: 2026-09-25. Autor: Claude. Estado: **plan; la parte de este equipo,
+construida con cambios (nota de abajo); la del servidor, sin implementar**. Nada
+del servidor está escrito, probado ni desplegado.
+
+> **Nota del 2026-09-25 (tarde): la parte de ESTE equipo está construida**
+> (`F33-ENGANCHE-LOCAL-001`, `F33-RECUERDO-001`, decisiones `D-103` y `D-105`).
+> Sin servidor, sin migración y sin sincronización. Lo que cambia respecto a
+> este plan:
+>
+> - **§3.2 y §5.1**: el almacén local NO sella evento a evento con la subclave de
+>   la conversación ni rellena a tamaño fijo. Guarda `{event, uploadedAt: null}`
+>   dentro de un archivo sellado entero con `identity|conversation-owners`
+>   (`vault/conversation-owners.json`). `event` es ya la carga v1 definitiva
+>   (`conversationOwnerEventSchema`, en `packages/shared/src/vault-owner.ts`, no en
+>   `vault-payloads.ts`), sin `deviceLabel` ni `pad`: el relleno y el propósito
+>   del sobre son del servidor. Subir será sellar cada `event` y marcar
+>   `uploadedAt`.
+> - **§4.1**: la regla es «último no nulo por posición», pero **no igual para los
+>   tres campos**: el dueño es el del último hecho que lo fija; la ficha cuenta
+>   solo desde la posición de ese hecho y, si ganó un TURNO sin ficha, hereda la
+>   última sellada con ese mismo dueño o sin ninguno, nunca la de otro personaje
+>   (`inheritedDescription`, revisión del 28/09); las instrucciones, sin límite de
+>   posición. Desde la segunda ronda del 28/09, además, main sella la ficha
+>   actual de la bóveda con el turno cuando cambia, así que una ficha editada
+>   gana por posición (`D-103`). Y el ANCLA DE UN EVENTO NUEVO HEREDA LA MAYOR DE
+>   LOS EVENTOS CONOCIDOS (`nextOwnerEventPosition`). Es el arreglo de la refutación
+>   de sincronización n.º 1: un evento que sustituye a otro le gana siempre. No
+>   hay `legacyCharacterId`, `timeline`, `heads`, `conflict` ni `missing`: en un
+>   equipo no hacen falta y quedan para la fase del servidor.
+> - **§4.2**: `owner()` descifra la conversación entera; `list()` para antes.
+>   Los lectores `latest*` de personaje e instrucciones se borraron sin
+>   envoltorios.
+> - **§6.3**: un cursor sin `owner` vale solo si la conversación no tiene
+>   eventos (refutación de producción n.º 5), en vez de compararse con
+>   `legacyCharacterId`.
+> - **§7**: «Soltar» solo deshace un enganche propio; no se puede soltar ni
+>   cambiar una conversación que nació con personaje. Las respuestas se firman
+>   por posición y hay un solo separador, el del enganche en vigor.
+> - **§8 (R1)**: va detrás de la casilla `recentMemories` del personaje, apagada
+>   por defecto, con 240/400/800 caracteres (160/400/800 desde la segunda
+>   revisión del 28/09, con la primera frase y las últimas del resumen), la ficha
+>   retroactiva solo si está
+>   APROBADA y la guía de campos detrás de la misma casilla. M1 y M2 no se
+>   construyeron.
+>
+> Lo de §3.3, §3.4, §5.2, §5.3, §6.4, §6.5 (salvo lo dicho), §6.6 y las fases C y
+> H sigue sin construir.
 
 Este documento es el plan que un implementador sigue paso a paso sin volver a
 investigar. Reúne las cuatro investigaciones del flujo `wf_92cec875-c48`

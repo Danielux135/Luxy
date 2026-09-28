@@ -17,7 +17,7 @@ import {
 } from '@luxy/shared';
 import type { PrivateConversationSummary, PrivateTurnView } from './conversation-store.js';
 import type { RelationMutator, RelationSnapshot, RelationState } from './relation-store.js';
-import type { VaultService } from './vault-service.js';
+import { VaultError, type VaultService } from './vault-service.js';
 import {
   RELATION_IDLE_MS,
   RelationSync,
@@ -475,6 +475,40 @@ describe('la pasada sobre lo ya hablado', () => {
     const segunda = await montaje.sync.runOnce({ projectAlias: 'luxy', limit: 2 });
     expect(segunda.failed).toHaveLength(0);
     expect(montaje.calls).toHaveLength(1);
+  });
+
+  it('un cierre de la boveda a mitad no culpa a la conversacion ni mueve el cursor', async () => {
+    // leer ya no mantiene viva la boveda (`D-106`): Win+L o la X durante la
+    // llamada es lo normal. Antes quedaba marcada como fallida y fuera de las
+    // pasadas hasta reiniciar Studio, sin culpa ninguna (`D-088`)
+    const montaje = montar({
+      conversations: dosConversaciones(),
+      replies: [PROMESA],
+      onCall: () => {
+        if (montaje.calls.length === 1) montaje.unlocked.value = false;
+      },
+    });
+    const apply = montaje.relations.apply.bind(montaje.relations);
+    montaje.relations.apply = async (vault, mutator) => {
+      if (!montaje.unlocked.value) throw new VaultError('la boveda esta bloqueada');
+      return apply(vault, mutator);
+    };
+
+    const result = await montaje.sync.runOnce({ projectAlias: 'luxy', limit: 2 });
+
+    expect(result.failed).toHaveLength(0);
+    expect(montaje.sync.failedThisSession).toBe(0);
+    // la segunda ni se pidio: la pasada se paro con la boveda
+    expect(montaje.calls).toHaveLength(1);
+    expect(montaje.relations.state.cursors).toEqual([]);
+
+    // al reabrir, la siguiente pasada la vuelve a pedir
+    montaje.unlocked.value = true;
+    await montaje.sync.runOnce({ projectAlias: 'luxy', limit: 2 });
+    expect(montaje.calls).toHaveLength(3);
+    expect(
+      montaje.relations.state.cursors.find((cursor) => cursor.conversationId === CONV_VIEJA),
+    ).toMatchObject({ through: 3 });
   });
 
   it('lo que queda se cuenta AL TERMINAR, no restando las intentadas', async () => {

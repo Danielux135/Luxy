@@ -270,11 +270,15 @@ export class VaultAccountManager {
    */
   async logout(): Promise<void> {
     const stored = this.session;
+    // la boveda y la sesion local se cierran PRIMERO, y el aviso al servidor va
+    // despues. Al reves, con la red colgada la boveda seguia abierta mientras
+    // «Cerrar sesion» esperaba a un `fetch` sin tiempo limite propio (revision
+    // del 28/09). Avisar al servidor solo necesita el token, que ya esta aqui
+    this.forgetSession();
+    this.vault.lock('sesion-cerrada');
     if (stored !== null && this.options.gatewayUrl() !== null) {
       await logoutAccount(this.deps(), stored.sessionToken);
     }
-    this.forgetSession();
-    this.vault.lock();
   }
 
   /**

@@ -17,6 +17,20 @@ import { segmentIntoEpisodes, type Episode, type SegmentOptions } from './episod
 import { TurnIndex, tokenize, type IndexedTurn, type TurnMatch } from './turn-index.js';
 import type { CatalogedEpisode } from './catalog-store.js';
 import type { TimelineTurn } from './relation-selection.js';
+import { pickRecentConversations } from '@luxy/shared';
+
+/**
+ * lo que se sabe de una conversacion sin descifrarla otra vez: sale del resumen
+ * de `list()`, que ya resuelve el dueño con la misma funcion que `owner()`.
+ */
+interface ConversationFacts {
+  characterId: string | null;
+  /** tiene algun evento de enganche, aunque se soltara */
+  linked: boolean;
+  linkedAt: string | null;
+  updatedAt: string;
+  title: string;
+}
 
 export interface PrivateMemoryOptions extends SegmentOptions {
   /**
@@ -61,7 +75,7 @@ export class PrivateMemory {
    * otro personaje, o las de ninguno—, que es a la vez incoherente y una fuga:
    * un hilo nuevo sin personaje contaba la intimidad de otro.
    */
-  private characterOf = new Map<string, string | null>();
+  private facts = new Map<string, ConversationFacts>();
   private episodes: Episode[] = [];
   /**
    * cuando se dijo cada cosa y con que palabras, sin el texto.
@@ -128,7 +142,7 @@ export class PrivateMemory {
     this.scenes?.clear();
     this.index = null;
     this.scenes = null;
-    this.characterOf.clear();
+    this.facts.clear();
     this.episodes = [];
     // las raices tambien salen de lo que se dijo: una boveda cerrada no puede
     // seguir sabiendo de que hablaba cada turno
@@ -151,17 +165,22 @@ export class PrivateMemory {
      * la del indice: o con conversaciones que ya no estan, o vacio mientras el
      * indice si tenia turnos, que callaba los recuerdos del personaje entero.
      */
-    const characterOf = new Map<string, string | null>();
+    const facts = new Map<string, ConversationFacts>();
     const excluded = this.options.excluded?.() ?? new Set<string>();
     const cataloged = (await this.options.catalog?.()) ?? [];
 
     for (const conversation of await this.conversations.list(vault)) {
       if (excluded.has(conversation.conversationId)) continue;
 
-      characterOf.set(
-        conversation.conversationId,
-        await this.conversations.latestCharacterId(vault, conversation.conversationId),
-      );
+      // del resumen, que ya trae el dueño resuelto: antes se volvia a descifrar
+      // la conversacion hacia atras solo para esto
+      facts.set(conversation.conversationId, {
+        characterId: conversation.characterId,
+        linked: conversation.ownerLinked === true,
+        linkedAt: conversation.linkedAt ?? null,
+        updatedAt: conversation.updatedAt,
+        title: conversation.title,
+      });
 
       const turns = await this.conversations.read(vault, conversation.conversationId);
       const withId = turns.map((turn) => ({
@@ -219,7 +238,7 @@ export class PrivateMemory {
 
     this.index = index;
     this.scenes = scenes;
-    this.characterOf = characterOf;
+    this.facts = facts;
     // agrupada por conversacion, que es como se leyo. Quien necesite orden
     // cronologico lo rehace: mezclar aqui costaria una ordenacion en cada
     // arranque que casi nadie usa
@@ -256,10 +275,57 @@ export class PrivateMemory {
    */
   conversationsFor(characterId: string | null): ReadonlySet<string> {
     const own = new Set<string>();
-    for (const [conversationId, owner] of this.characterOf) {
-      if (owner === characterId) own.add(conversationId);
+    for (const [conversationId, facts] of this.facts) {
+      if (facts.characterId === characterId) own.add(conversationId);
     }
     return own;
+  }
+
+  /**
+   * el dueño de una conversacion segun lo construido; `undefined` si no esta
+   * (excluida, borrada o sin construir todavia).
+   */
+  ownerOf(conversationId: string): { characterId: string | null; linked: boolean } | undefined {
+    const facts = this.facts.get(conversationId);
+    return facts === undefined
+      ? undefined
+      : { characterId: facts.characterId, linked: facts.linked };
+  }
+
+  /**
+   * si hay indice construido.
+   *
+   * `timeline()` devuelve `[]` tanto cuando no hay nada como cuando otra cosa
+   * invalido el indice a mitad de construirlo, y los lectores de lo construido
+   * —`recentFor`, `conversationsFor`— se quedan vacios igual. Para ELEGIR, los
+   * dos casos valen lo mismo (no ofrecer nada); para MEDIR no: sin esto la cifra
+   * de `D-105` daba por bueno un turno en el que no llego nada.
+   */
+  isBuilt(): boolean {
+    return this.index !== null;
+  }
+
+  /**
+   * sus conversaciones mas recientes, sin la actual (`D-105`).
+   *
+   * Las excluidas no estan en el mapa, asi que no salen. Recencia es el ultimo
+   * turno o el enganche, lo mas tarde: una recien enganchada entra desde el
+   * momento de engancharla. Lee lo ya construido, como `conversationsFor`.
+   */
+  recentFor(
+    characterId: string,
+    excludeId: string,
+    count: number,
+  ): { conversationId: string; title: string; updatedAt: string; linkedAt: string | null }[] {
+    const candidates = [...this.facts]
+      .filter(([, facts]) => facts.characterId === characterId)
+      .map(([conversationId, facts]) => ({
+        conversationId,
+        title: facts.title,
+        updatedAt: facts.updatedAt,
+        linkedAt: facts.linkedAt,
+      }));
+    return pickRecentConversations(candidates, excludeId, count);
   }
 
   /**

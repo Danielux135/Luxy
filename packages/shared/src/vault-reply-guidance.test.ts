@@ -198,6 +198,15 @@ describe('con el ajuste apagado nada cambia', () => {
     expect(buildVaultPrompt({ ...RICO, replyGuidance: 'none' })).toBe(RICO_DE_HOY);
   });
 
+  // `D-104` se apoya en este mismo literal: es el unico rico capturado antes de
+  // los dos ajustes, y el modo esporadico apagado tampoco puede mover un byte
+  it("con los pendientes en 'per-note' y el dato de «ya salio» puesto, tambien", () => {
+    expect(
+      buildVaultPrompt({ ...RICO, pendingPacing: 'per-note', pendingAlreadyRaised: true }),
+    ).toBe(RICO_DE_HOY);
+    expect(buildVaultPrompt({ ...RICO, pendingAlreadyRaised: true })).toBe(RICO_DE_HOY);
+  });
+
   it("'none' deja igual el literal minimo de siempre", () => {
     // el mismo que fija `vault-prompt.test.ts` sin el campo
     const esperado = buildVaultPrompt({ memory: null, turns: turnos(30), message: 'x' });

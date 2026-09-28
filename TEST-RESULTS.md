@@ -1,5 +1,205 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-28 — REV-TRES-ENCARGOS-001, quinta ronda — pruebas de `apps/desktop` enteras, typecheck y lint de lo tocado
+
+**No es un `npm run check` completo**: ni las pruebas de los demás paquetes, ni
+`npm run lint` de todo, ni `npm run build`.
+
+- `vitest run apps/desktop packages/shared/src/docs.test.ts`: **113 archivos,
+  1962 pruebas en verde, salida 0** (276 s).
+- `tsc -p apps/desktop/tsconfig.renderer.json --noEmit` y
+  `tsc -p apps/desktop/tsconfig.node.json --noEmit`: sin errores.
+- `eslint` de los nueve archivos de código y pruebas tocados: salida 0.
+- Comprobadas FALLANDO sin el arreglo, quitándolo a mano y volviéndolo a poner:
+  «un envío por conversación» (`private-turn-vault-lock.test.ts`; sin la guarda,
+  el segundo envío se queda esperando al modelo y la prueba caduca) y «ficha de
+  solo espacios» (`conversation-owner.test.ts`). Las nuevas de `raise-roots` y
+  §33 no se han visto fallar quitando el arreglo; los mismos pares y los tres
+  casos daban `false` con el código anterior en el script del revisor
+  (`medir-ya-salio-2.ts`), ejecutado antes de tocar nada.
+- «Ya salió», con el texto inventado del revisor (orientación, no medida):
+  paráfrasis **29 de 32** (antes 25; con la regla exacta, 17); neutras 0 de 600
+  pares y 0 de 40 turnos; cruzadas 0 de 448; adversarias del mismo tema 10 de
+  136, las mismas que antes. Regla vieja frente a nueva sobre 274 palabras
+  inventadas elegidas para romperla (`diff-roots.ts`): 89 pares nuevos, todos del
+  mismo verbo o su sustantivo salvo «sentarnos»~«sentir»; ninguno perdido.
+- Finales de línea comprobados por bytes: `handlers.ts`, `Vault.tsx`,
+  `useVault.ts` y los documentos siguen en CRLF; `raise-roots*.ts`,
+  `relation-selection.test.ts`, `private-turn-vault-lock.test.ts` y
+  `conversation-owner.test.ts` siguen en LF.
+
+### 2026-09-28 — REV-TRES-ENCARGOS-001, cuarta ronda — pruebas de `apps/desktop` enteras, typecheck y lint de lo tocado
+
+**No es un `npm run check` completo**: no se han pasado las pruebas de los demás
+paquetes, ni `npm run lint` de todo, ni `npm run build`.
+
+- `vitest run apps/desktop packages/shared/src/docs.test.ts`: **113 archivos,
+  1951 pruebas en verde, salida 0** (197 s). Después, un cambio de una línea en
+  `handlers.ts` (el registro dice si la retirada ocurrió de verdad) y otra vez
+  `private-turn-vault-lock`, `private-turn-image` y `private-turn-pending-pacing`:
+  38 de 38.
+- `tsc -b tsconfig.build.json` (todos los paquetes, con el renderer): salida 0.
+  `typecheck:tests` no se ha pasado: no cubre `apps/desktop`, que no se tocó
+  fuera de ahí.
+- `eslint` de los 21 archivos tocados: salida 0.
+- Comprobadas FALLANDO sin el arreglo, quitándolo a mano y volviéndolo a poner:
+  las dos nuevas de `private-turn-vault-lock.test.ts` (el turno que lanza y «otra
+  línea detrás») y dos de `sync.test.ts` (conversación con envío en curso y envío
+  que empieza mientras baja): 4 fallidas, 23 en verde.
+- «Ya salió», con texto inventado en el scratchpad (`r4/medir.ts`; orientación, no
+  medida): 16 de 28 paráfrasis (13 de 19 cortas, antes 14; 3 de 9 largas, igual),
+  0 falsos en 510 pares neutros, 4 de 18 respuestas largas del mismo tema con
+  alguna nota (igual que antes). El falso fabricado por el revisor (`falso.ts`)
+  ya no pasa. Variantes para citas largas, medidas y descartadas: `D-104`.
+
+Antes de esta ronda, **el `npm run check` completo tras la tercera** (lo pasó quien
+coordina, con la parte de pantalla ya hecha): lint, typecheck, test y build con
+salida 0; **222 archivos, 4511 pruebas en verde y 12 omitidas (4523)**, 266 s;
+`account-manager.test.ts` pasó sin caducar.
+
+No ejecutado: `npm run check` tras la cuarta ronda, nada en Electron, nada contra
+una conversación real.
+
+### 2026-09-28 — REV-TRES-ENCARGOS-001, tercera ronda (main, shared y documentos) — pruebas de lo tocado y `npm run typecheck`
+
+**No es un `npm run check` completo**: falta la parte de pantalla de esta ronda,
+que hace otro agente, y el check va después.
+
+- `npm run typecheck` (los paquetes y `typecheck:tests`): **salida 0**.
+- `eslint` de los diez archivos de código tocados: salida 0.
+- `vitest run apps/desktop/src/main/ipc apps/desktop/src/main/vault
+  packages/shared/src/docs.test.ts apps/desktop/src/shared/model-selection.test.ts`:
+  **54 archivos, 1166 pruebas en verde, salida 0** (224 s).
+- `account-manager.test.ts` sola, tres veces seguidas: 26 de 26 cada vez. La
+  prueba que caducó con la suite entera («permite elegir una contraseña nueva…»)
+  tardó 8,9 s, 11,3 s y 9,0 s; el archivo entero, 106 s, 128 s y 111 s. Es carga,
+  no un fallo: ahora esa prueba tiene 60 s.
+- Comprobadas FALLANDO sin el arreglo, quitándolo a mano y volviéndolo a poner:
+  las dos de la doble retirada (`private-turn-vault-lock.test.ts`: 2 fallidas, 8
+  en verde), la de la espera de la imagen (`private-turn-image.test.ts`: 1
+  fallida, 16 en verde) y la de las paráfrasis (`relation-selection.test.ts`: 1
+  fallida, 57 en verde).
+- Regla estricta de «ya salió», con texto inventado en el scratchpad (no es
+  medida): 7 de 9 paráfrasis reconocidas (antes 2 de 9), 0 falsos en 80 pares
+  neutros y 0 en 168 pares que usan a propósito los mismos verbos.
+
+No ejecutado: la suite entera, `npm run build`, nada en Electron ni en pantalla,
+nada contra una conversación real.
+
+### 2026-09-28 — REV-TRES-ENCARGOS-001, segunda ronda — `npm run check`
+
+**220 archivos, 4489 pruebas en verde y 12 omitidas (4501), salida 0.** Los cuatro
+pasos: lint, typecheck (con `typecheck:tests`), test (345 s) y build.
+
+**La pasada anterior no era reproducible.** La entrada de abajo dice «4475 en
+verde, salida 0», pero quien coordina volvió a pasarla y salió en ROJO: 1 fallida
+(`conversation-owner.test.ts`, «engancha con la ficha de la boveda…»), 4474 en
+verde. La prueba pasaba sola (26 de 26) y fallaba con la suite entera: esperaba
+una tarea de fondo con un temporizador de 30 ms. Arreglado con `vi.waitFor` en
+las tres esperas de ese archivo.
+
+Antes de la pasada entera, en verde por separado: `npm run typecheck`, `npm run
+lint` y los archivos de prueba tocados con `vitest run`.
+
+**Pruebas nuevas o cambiadas:** `conversation-owner.test.ts` (+4: la ficha
+editada llega a una nacida y a una enganchada y se sella una vez, una vacía no
+borra la sellada, `ecoOtras` apagado; y `fuera`, `sinIndice` y `ecoOtras` en la
+encendida); `providers.test.ts` (+2: `--no-session-persistence` y `--ephemeral`,
+con la línea real de `claude --help` 2.1.267); `private-turn-image.test.ts` (+2:
+el texto se guarda antes de generar, y un fallo al guardar la imagen deja el
+turno con su texto); `vault-recent-memories.test.ts` (+3);
+`vault-prompt-recent.test.ts` (+1); `vault-pending-pacing.test.ts` y
+`private-turn-pending-pacing.test.ts` (la regla de la promesa que no consta, con
+el literal viejo y el nuevo); `relation-selection.test.ts` (citas de una o dos
+raíces); `account-manager.test.ts` (+1, cierre antes del servidor);
+`vault-lock-reset.test.ts` (+1); `vault-character-link.test.ts`.
+
+**Comprobado que la prueba sirve, razonado y no ejecutado contra el código
+viejo:** la de la ficha editada exige «QUIEN ERES» con la ficha nueva, y antes
+`owner()` devolvía la sellada; la del orden de la imagen exige 2 turnos guardados
+al llegar el medio, y antes había 1. No se volvió a ejecutar contra el código
+anterior.
+
+**No probado:** nada en pantalla ni con Electron de verdad; que los CLI de
+verdad dejen de escribir la sesión con esos flags (solo se comprobó que la ayuda
+los anuncia; no se miraron sus carpetas de sesiones, a propósito); nada medido
+contra una conversación real. **Sin revisión independiente.**
+
+### 2026-09-28 — REV-TRES-ENCARGOS-001 — `npm run check`
+
+**220 archivos, 4475 pruebas en verde y 12 omitidas (4487), salida 0.** Los cuatro pasos: lint, typecheck (con `typecheck:tests`),
+test y build.
+
+Antes de la pasada entera, en verde por separado: `npm run typecheck`, `npm run
+lint` y los archivos de prueba tocados con `vitest run`.
+
+**Comprobado que la prueba sirve:** la de `conversation-owner.test.ts` «una
+conversación del Studio anterior que soltó y volvió a elegir a Nora sigue con su
+ficha» se ejecutó ANTES de reconstruir `packages/shared` con el arreglo y falló:
+el prompt salía sin «QUIEN ERES». Después, en verde. La simulación de los
+revisores (`pacing-sim.ts`, fuera del repositorio, con texto inventado y la
+selección y el compositor reales) daba bloque y nota juntos en los mensajes 5, 9…;
+tras el arreglo, `ambos: 0` en 16 mensajes.
+
+**No probado:** nada en pantalla ni con Electron de verdad; que Windows entregue
+`lock-screen` (`LA-053`); nada medido contra una conversación real (`LA-054`,
+`LA-052`). **Sin revisión independiente de estos arreglos.**
+
+### 2026-09-25 — SEG-BOVEDA-001 — `npm run check`
+
+**220 archivos, 4452 pruebas en verde y 12 omitidas (4464).** Los cuatro pasos en
+verde (salida 0): lint, typecheck (con `typecheck:tests`), test y build. Antes,
+`npm run typecheck` y `vitest run apps/desktop` (110 archivos, 1831 pruebas) en
+verde por separado.
+
+Pruebas nuevas, todas en verde en esa pasada: `vault-lock-coordinator.test.ts`
+(18, con el `setInterval` real bajo relojes falsos, una bóveda real con Argon2
+rápido y un `EventEmitter` como `powerMonitor`), `vault-service.test.ts` (la que
+exigía que leer fuera actividad, reescrita, y 9 nuevas: esperas, su tope, el
+hecho que reciben los oyentes, oyentes que fallan), `ipc/private-turn-vault-lock.test.ts`
+(8: envío cortado antes y después de guardar la respuesta, bóveda cerrada de
+entrada, y la presencia con y sin foco o ventana), `ipc/catalog-lock.test.ts` (2),
+un caso nuevo en `relation-sync.test.ts` y otro en `recap-sync.test.ts`,
+`main/index-wiring.test.ts` (4, estática), `main/renderer-effect-deps.test.ts` (4,
+estática), `renderer/vault-presence.test.ts` (5) y `shared/vault-lock.test.ts` (4).
+
+**Comprobado que sirven, quitando cada arreglo a mano y restaurándolo después:** la
+de `relation-sync` falla («expected [ {…} ] to have a length of +0 but got 1»), la
+de `recap-sync` igual, y la estática falla con `pages\Vault.tsx:3862` al volver a
+poner `vault` en las dependencias del visor, y con `clearError` al volver a
+devolverlo como flecha.
+
+Centinela de privacidad del coordinador: con una contraseña inventada y un texto
+testigo sellado con una subclave, se abre y se cierra por los siete motivos; ni la
+contraseña ni el testigo aparecen en los registros, y cada campo es un número, un
+booleano o un valor de los enumerados cerrados.
+
+**No probado:** nada en pantalla ni con Electron de verdad; que `powerMonitor`
+emita `lock-screen`, `unlock-screen` y `suspend` en este Windows (`LA-053`).
+
+### 2026-09-25 — F33-ENGANCHE-LOCAL-001 y F33-RECUERDO-001 — `npm run check`
+
+**213 archivos, 4396 pruebas en verde y 12 omitidas (4408).** Los cuatro pasos en
+verde: lint, typecheck (con `typecheck:tests`), test y build. Línea base antes de
+tocar nada: `npm run typecheck` en verde.
+
+Pruebas nuevas, todas en verde en esa pasada: `vault-owner.test.ts` (18),
+`vault-recent-memories.test.ts` (9), `vault-prompt-recent.test.ts` (6),
+`conversation-owner-store.test.ts` (11), `relation-sync-owner.test.ts` (7),
+`recent-echo.test.ts` (4), `owner-single-source.test.ts` (3),
+`ipc/conversation-owner.test.ts` (19, con boveda, conversaciones, enganches e
+indice DE VERDAD en una carpeta temporal), `ipc/character-recent-memories.test.ts`
+(9) y `renderer/vault-character-link.test.ts` (29).
+
+Lo que fijan, entre otras cosas: la causalidad (un evento que cita a otro le gana
+aunque su equipo tenga menos turnos); `list().characterId === owner().characterId`;
+la carrera del cursor (una pasada que empezó sin dueño escribe un cursor que nace
+inválido y la siguiente relee desde el turno 0); el prompt byte a byte igual con la
+casilla apagada; que el registro del enganche no lleva ni ids ni nombres; y que
+mandar un personaje a una conversación empezada se rechaza sin llamar al modelo.
+
+**No probado:** nada en pantalla (`LA-052`).
+
 ### 2026-09-25 — F33-VARIEDAD-001 — `npm run check` tras el último cambio
 
 **200 archivos, 4220 pruebas en verde y 12 omitidas (4232).** Los cuatro pasos en verde: lint, typecheck (con

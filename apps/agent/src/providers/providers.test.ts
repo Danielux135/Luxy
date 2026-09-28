@@ -92,6 +92,22 @@ Options:
   --effort <level>             Effort level for the current session (low, medium, high, xhigh, max)
 `;
 
+/**
+ * la linea de `--no-session-persistence` de Claude Code 2.1.267, leida del
+ * binario instalado el 2026-09-28 con `claude --help`. Va sola: es lo unico que
+ * hace falta para distinguir esta version de las anteriores.
+ */
+const CLAUDE_HELP_2_1_267_PERSISTENCE = `
+Usage: claude [options] [command] [prompt]
+Options:
+  --disallowedTools <tools...> Tools to disallow
+  --no-session-persistence              Disable session persistence - sessions
+                                        will not be saved to disk and cannot be
+                                        resumed (only works with --print)
+  --permission-mode <mode>     Permission mode to use for the session
+  -p, --print                  Print response and exit
+`;
+
 // ayuda real recortada de codex-cli 0.141.0
 const CODEX_HELP = `
 Run Codex non-interactively
@@ -255,6 +271,25 @@ describe('buildClaudeArgs', () => {
     expect(texto).toContain('WebFetch');
   });
 
+  // sin el flag, `--print` guarda la sesion entera, prompt incluido, en claro
+  // en la carpeta de Claude Code. Un turno de la boveda va en solo lectura
+  it('en solo lectura no deja la sesion en disco, si la version lo admite', () => {
+    const nueva = parseClaudeCapabilities(CLAUDE_HELP_2_1_267_PERSISTENCE);
+    expect(nueva.noSessionPersistence).toBe(true);
+    expect(buildClaudeArgs({ prompt: 'hola', capabilities: nueva, readOnly: true })).toContain(
+      '--no-session-persistence',
+    );
+    // un trabajo de codigo conserva su transcripcion
+    expect(buildClaudeArgs({ prompt: 'hola', capabilities: nueva })).not.toContain(
+      '--no-session-persistence',
+    );
+    // y una version que no lo trae no lo recibe: abortaria la invocacion
+    expect(parseClaudeCapabilities(CLAUDE_HELP_2_1_250).noSessionPersistence).toBe(false);
+    expect(buildClaudeArgs({ prompt: 'hola', capabilities: caps, readOnly: true })).not.toContain(
+      '--no-session-persistence',
+    );
+  });
+
   it('el prompt NUNCA aparece en los argumentos', () => {
     // antes iba como ultimo posicional, y --disallowedTools -que es variadico-
     // se tragaba sus palabras como reglas de herramienta. Ahora va por stdin.
@@ -279,6 +314,7 @@ describe('buildClaudeArgs', () => {
       inputFormat: false,
       restricted: false,
       effort: false,
+      noSessionPersistence: false,
     };
     const args = buildClaudeArgs({ prompt: 'algo', model: 'opus', capabilities: antigua });
     expect(args).not.toContain('--output-format');
@@ -456,9 +492,28 @@ describe('buildCodexArgs', () => {
       image: false,
       // ni `app-server`: sin el no hay forma de mandarle una imagen en memoria
       appServer: false,
+      ephemeral: false,
     };
     const args = buildCodexArgs({ workingDirectory: 'C:/wt', capabilities: antigua });
     expect(args).toEqual(['exec', '--cd', 'C:/wt', '-']);
+  });
+
+  // sin el flag, `codex exec` guarda la sesion entera, prompt incluido, en
+  // claro. Todo lo de la boveda va en solo lectura
+  it('en solo lectura no deja la sesion en disco, si la version lo admite', () => {
+    const nueva = parseCodexCapabilities(`${CODEX_HELP}      --ephemeral\n          Run without persisting session files to disk\n`);
+    expect(nueva.ephemeral).toBe(true);
+    expect(
+      buildCodexArgs({ workingDirectory: 'C:/wt', capabilities: nueva, sandboxMode: 'read-only' }),
+    ).toContain('--ephemeral');
+    // un trabajo de codigo conserva su sesion
+    expect(buildCodexArgs({ workingDirectory: 'C:/wt', capabilities: nueva })).not.toContain(
+      '--ephemeral',
+    );
+    // y la version que no lo trae no lo recibe: abortaria
+    expect(
+      buildCodexArgs({ workingDirectory: 'C:/wt', capabilities: caps, sandboxMode: 'read-only' }),
+    ).not.toContain('--ephemeral');
   });
 });
 

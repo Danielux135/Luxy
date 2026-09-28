@@ -114,7 +114,7 @@ describe('medios privados', () => {
     it('sobrevive a cerrar y volver a abrir la boveda', async () => {
       const original = randomBytes(2048);
       const stored = await store.add(vault, CONVERSATION, original, metadata);
-      vault.lock();
+      vault.lock('manual');
 
       const otra = new VaultService(vaultFilePathFor(directory), memoryDeviceKeys(), {
         argon2Params: FAST,
@@ -126,7 +126,7 @@ describe('medios privados', () => {
 
     it('con la boveda cerrada no se puede leer nada', async () => {
       const stored = await store.add(vault, CONVERSATION, randomBytes(1024), metadata);
-      vault.lock();
+      vault.lock('manual');
 
       await expect(store.read(vault, CONVERSATION, stored.mediaId)).rejects.toThrow(VaultError);
       await expect(store.list(vault, CONVERSATION)).rejects.toThrow(VaultError);
@@ -251,7 +251,7 @@ describe('medios privados', () => {
     it('sobrevive a cerrar y volver a abrir la boveda', async () => {
       const stored = await store.add(vault, CONVERSATION, randomBytes(2048), metadata);
       await store.setCaption(vault, CONVERSATION, stored.mediaId, 'lo que se ve, ya corregido');
-      vault.lock();
+      vault.lock('manual');
 
       const otra = new VaultService(vaultFilePathFor(directory), memoryDeviceKeys(), {
         argon2Params: FAST,

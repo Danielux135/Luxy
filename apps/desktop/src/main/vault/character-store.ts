@@ -17,7 +17,12 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from '
 import { join } from 'node:path';
 import { z } from 'zod';
 import { openBlob, openText, sealBlob, sealText, wipe, type SealedEnvelope } from '@luxy/vault-crypto';
-import { hordeRecipeSchema, VAULT_REPLY_GUIDANCES } from '@luxy/shared';
+import {
+  hordeRecipeSchema,
+  VAULT_PENDING_PACINGS,
+  VAULT_RECENT_MEMORIES,
+  VAULT_REPLY_GUIDANCES,
+} from '@luxy/shared';
 import { VaultError, type VaultService } from './vault-service.js';
 import { randomObjectKey } from './private-store.js';
 import type { BlobStore } from './blob-store.js';
@@ -122,7 +127,8 @@ export const vaultCharacterSchema = z.object({
    *
    * Del personaje y no de la maquina, como `imageCast`: es como escribe ESE
    * personaje, y tiene que poder compararse con y sin en una pulsacion. Nace en
-   * `none`, que no añade nada: el prompt sale byte a byte como siempre.
+   * `none`, que no añade nada: esta casilla, apagada, no cambia ni un byte del
+   * prompt.
    *
    * MISMA TRAMPA que los dos de arriba: `add()` reescribe la lista ENTERA, asi
    * que un Studio anterior a este campo lo devolveria a `none` al tocar
@@ -132,6 +138,38 @@ export const vaultCharacterSchema = z.object({
    * entera, y el siguiente `add()` la borraria.
    */
   replyGuidance: z.enum(VAULT_REPLY_GUIDANCES).default('none'),
+  /**
+   * si sus pendientes van en modo esporadico (`D-104`): el bloque solo entra en
+   * uno de cada varios mensajes, le pide sacarlos solo si la escena los trae y
+   * le avisa, sin decir cual, cuando ya saco uno.
+   *
+   * Del personaje, como `replyGuidance`, y con la misma idea: compararlo con y
+   * sin en una pulsacion. Nace en `per-note`, que es la dosificacion de siempre:
+   * apagada, esta casilla no cambia ni un byte del prompt. Ojo: con
+   * `recentMemories` encendido la regla del bloque de pendientes SI cambia
+   * (`pendingNotListedRule`), por esa otra casilla y no por esta.
+   *
+   * MISMA TRAMPA que los de arriba: `add()` reescribe la lista ENTERA, asi que un
+   * Studio anterior a este campo lo devolveria a `per-note` al tocar cualquier
+   * otro personaje. Y si un dia se separan los tres cambios, se hace con campos
+   * nuevos y no con valores nuevos del enum: un valor que un Studio antiguo no
+   * conoce hace que `list()` descarte la lista entera, y el siguiente `add()` la
+   * borraria.
+   */
+  pendingPacing: z.enum(VAULT_PENDING_PACINGS).default('per-note'),
+  /**
+   * si en cada turno le llega un resumen corto de sus dos conversaciones mas
+   * recientes (`D-105`), y con el la guia de que va en cada campo de la memoria.
+   *
+   * Del personaje, como los de arriba. Nace en `off`, que no añade nada: esta
+   * casilla, apagada, no cambia ni un byte del prompt.
+   *
+   * MISMA TRAMPA que los de arriba: `add()` reescribe la lista ENTERA, asi que un
+   * Studio anterior a este campo lo devolveria a `off` al tocar cualquier otro
+   * personaje. Y si un dia se separan el resumen y la guia, se hace con un campo
+   * nuevo y no con valores nuevos del enum, por lo mismo.
+   */
+  recentMemories: z.enum(VAULT_RECENT_MEMORIES).default('off'),
   xavira: xaviraIdentitySchema.nullable().default(null),
   horde: hordeIdentitySchema.nullable().default(null),
   /** quien es, en texto, para el modelo que escribe */

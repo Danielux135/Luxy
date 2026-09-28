@@ -64,6 +64,15 @@ import {
   recapCoverage,
   formatConversationMemory,
   civilDayLabel,
+  condenseRecentMemories,
+  DEFAULT_AUXILIARY_PROVIDER,
+  isLocalCliProvider,
+  RECENT_MEMORIES_COUNT,
+  RELATION_WINDOW_TURNS,
+  type ConversationMemory,
+  type ConversationOwner,
+  type LocalCliProvider,
+  type RecentMemoryEntry,
   type ChosenMemory,
   type RecapCoverage,
   type RecapTurnRef,
@@ -143,11 +152,18 @@ import {
   vaultCharacterImageReviewArgsSchema,
   vaultCharacterImageCastArgsSchema,
   vaultCharacterReplyGuidanceArgsSchema,
+  vaultCharacterPendingPacingArgsSchema,
+  vaultCharacterRecentMemoriesArgsSchema,
+  vaultConversationOwnerPreviewArgsSchema,
+  vaultConversationOwnerSetArgsSchema,
+  type VaultConversationOwnerPreview,
+  type VaultConversationOwnerView,
   vaultDeviceUnlockSetArgsSchema,
   vaultPasswordArgsSchema,
   vaultUnlockArgsSchema,
   type vaultStatusSchema,
   type vaultRecapListResultSchema,
+  type vaultConversationSendResultSchema,
   type IpcResult,
 } from '../../shared/ipc.js';
 import type { AgentController } from '../agent-controller.js';
@@ -161,6 +177,8 @@ import { VaultError, type VaultService } from '../vault/vault-service.js';
 import type { VaultAccountManager } from '../vault/account-manager.js';
 import type { VaultCharacter, VaultCharacterStore } from '../vault/character-store.js';
 import type { PrivateConversationStore } from '../vault/conversation-store.js';
+import type { ConversationOwnerStore } from '../vault/conversation-owner-store.js';
+import { measureRecentEcho, type RecentEcho } from '../vault/recent-echo.js';
 import type { PrivateMediaStore } from '../vault/media-store.js';
 import { syncVault } from '../vault/sync.js';
 import { randomUUID } from 'node:crypto';
@@ -219,7 +237,7 @@ import type { CatalogStore } from '../vault/catalog-store.js';
 import type { RelationStore } from '../vault/relation-store.js';
 import type { RecapStore } from '../vault/recap-store.js';
 import type { ImageAttemptPatch, ImageAttemptStore } from '../vault/image-attempt-store.js';
-import { RelationSync, createAuxiliaryLane } from '../vault/relation-sync.js';
+import { RelationSync, createAuxiliaryLane, cursorMatchesOwner } from '../vault/relation-sync.js';
 import { RecapSync } from '../vault/recap-sync.js';
 import {
   decideRelation,
@@ -230,6 +248,7 @@ import { buildRecall } from '../vault/recall.js';
 import { diagnoseMemory, type DiagnosticMessage } from '../vault/memory-diagnostics.js';
 import { diagnoseRelations } from '../vault/relation-diagnostics.js';
 import {
+  PENDING_BLOCK_EVERY,
   isLiveNote,
   selectPendingForTurn,
   type PendingSelection,
@@ -333,6 +352,12 @@ export interface HandlerContext {
   /** conversaciones privadas cifradas en disco */
   privateConversations: PrivateConversationStore;
   /**
+   * los enganches de conversacion a personaje, cifrados y solo en este equipo
+   * (`D-103`). Se LEEN a traves de `privateConversations.owner()`; aqui solo se
+   * escriben y se borran.
+   */
+  conversationOwners: Pick<ConversationOwnerStore, 'append' | 'removeConversation'>;
+  /**
    * memoria episodica: indice de busqueda y episodios sobre esos turnos.
    *
    * Se construye sola en la primera busqueda y se vacia sola al cerrar la
@@ -377,6 +402,51 @@ export interface HandlerContext {
   /** vuelve a cargar configuracion y secretos y se los pasa al agente */
   reconfigureAgent: () => Promise<void>;
 }
+
+type VaultConversationSendResult = z.infer<typeof vaultConversationSendResultSchema>;
+
+/**
+ * hasta donde llego un turno privado.
+ *
+ * Lo lee el envio cuando la boveda se cierra a mitad —Win+L sin nada en camino,
+ * suspender, la X—: sin saber si el mensaje del usuario y la respuesta llegaron
+ * a guardarse, no se puede dejar la conversacion entera ni decirle la verdad.
+ */
+interface PrivateTurnProgress {
+  /** hay en disco un mensaje suyo sin contestar que retirar */
+  userTurnWritten: boolean;
+  /**
+   * el registro de ese mensaje. Retirar pide este `recordId` y no «la ultima
+   * linea»: sin la llave no se puede mirar el rol, y detras puede haber quedado
+   * otra (revision del 28/09)
+   */
+  userRecordId: string | null;
+  /** el propio turno ya lo retiro: el corte no retira nada mas, pero lo cuenta */
+  userTurnRetired: boolean;
+  /**
+   * su texto ya esta guardado y lo que queda es la imagen del turno.
+   *
+   * La pone el envio: cambia su espera `reply` por una `image`. Win+L se aplaza
+   * para no tirar una respuesta ya pagada (`D-106`); con el texto a salvo, lo
+   * que queda es una imagen, y una imagen nunca aplaza Win+L. La inactividad
+   * sigue sin cerrarla mientras se genera, como desde el panel
+   */
+  onReplySaved: () => void;
+  reply: {
+    outcome: VaultConversationSendResult['outcome'];
+    model: string | null;
+    memoryStatus: VaultConversationSendResult['memoryStatus'];
+    image: VaultConversationSendResult['image'];
+  } | null;
+}
+
+/** lo que se le dice a Daniel cuando el cierre corta un envio suyo */
+export const SEND_CUT_BY_LOCK = {
+  lostMessage: 'la bóveda se cerró antes de que llegara su respuesta',
+  lostHint:
+    'tu mensaje no se ha guardado en la conversación, pero sigue escrito en el cuadro de texto. Cópialo antes de abrir esa conversación: al abrirla, el cuadro se vacía, y si lo envías sin abrirla empieza una conversación nueva.',
+  savedReply: 'la bóveda se cerró justo después de guardar su respuesta: ábrela para leerla',
+} as const;
 
 /** convierte cualquier fallo en algo que se puede enseñar sin filtrar nada */
 function toFailure(error: unknown): IpcResult<never> {
@@ -1116,9 +1186,43 @@ export function registerIpcHandlers(context: HandlerContext): void {
   });
 
   handle(IPC_INVOKE.vaultLock, emptyArgsSchema, () => {
-    context.vault.lock();
+    context.vault.lock('manual');
     return vaultStatus();
   });
+
+  /**
+   * hay alguien delante de la pantalla Privado.
+   *
+   * Es la unica forma de mantener abierta la boveda sin estar esperando nada:
+   * leer ya no cuenta (`D-106`). Lo manda la pantalla con eventos reales de
+   * teclado y raton, como mucho uno cada 20 s, y aqui se exige ademas que la
+   * ventana este a la vista y con el foco: un raton que pasa por encima de una
+   * ventana sin foco, o un renderer escondido en la bandeja, no es nadie delante.
+   */
+  handle(IPC_INVOKE.vaultPresence, emptyArgsSchema, () => {
+    const window = context.getMainWindow();
+    const delante =
+      window !== null && !window.isDestroyed() && window.isVisible() && window.isFocused();
+    if (!delante || !context.vault.isUnlocked()) return { counted: false };
+    context.vault.touch();
+    return { counted: true };
+  });
+
+  /**
+   * una imagen que el usuario pidio y esta esperando: la boveda no se cierra
+   * por inactividad mientras dure. La usan generar una imagen y aprobarla; el
+   * envio lleva la suya aparte (`reply`). El trabajo de fondo nunca, aunque se
+   * pulse con un boton. Una espera de imagen NO aplaza el cierre por Win+L: eso
+   * solo lo hace un envio (`D-106`)
+   */
+  const whileUserWaits = async <T>(work: () => Promise<T>): Promise<T> => {
+    const release = context.vault.beginUserWait('image');
+    try {
+      return await work();
+    } finally {
+      release();
+    }
+  };
 
   /**
    * cambia la contraseña por el camino que corresponda.
@@ -1165,35 +1269,84 @@ export function registerIpcHandlers(context: HandlerContext): void {
         ...conversation,
         // un personaje olvidado deja huerfanos sus hilos, y siguen siendo
         // suyos: se agrupan igual, sin nombre, en vez de desaparecer
+        // el de la boveda si esta; si no, la copia que guardo el enganche
         characterLabel:
           conversation.characterId === null
             ? null
-            : (labels.get(conversation.characterId) ?? null),
+            : (labels.get(conversation.characterId) ?? conversation.ownerLabel ?? null),
       })),
     };
   });
 
-  handle(IPC_INVOKE.vaultConversationRead, vaultConversationIdArgsSchema, async (args) => ({
-    instructions: await context.privateConversations.latestInstructions(
-      context.vault,
-      args.conversationId,
-    ),
-    characterId: await context.privateConversations.latestCharacterId(
-      context.vault,
-      args.conversationId,
-    ),
-    characterDescription: await context.privateConversations.latestCharacterDescription(
-      context.vault,
-      args.conversationId,
-    ),
-    conversationId: args.conversationId,
-    turns: await context.privateConversations.read(context.vault, args.conversationId),
-    provider: await context.privateConversations.latestProvider(
-      context.vault,
-      args.conversationId,
-    ),
-    model: await context.privateConversations.latestModel(context.vault, args.conversationId),
-  }));
+  /**
+   * el dueño, como lo pinta la pantalla. El nombre sale de la boveda si el
+   * personaje sigue en ella; si no, de la copia que guardo el enganche.
+   */
+  const ownerView = async (owner: ConversationOwner): Promise<VaultConversationOwnerView> => {
+    // un nombre vacio no es «sin nombre»: con `''` las respuestas salian
+    // firmadas con nada y el titulo acababa en «· ». La pantalla ya llama «Sin
+    // nombre» a un personaje asi, y aqui se dice lo mismo
+    const found =
+      owner.characterId === null
+        ? undefined
+        : (await context.characters.list(context.vault)).find(
+            (entry) => entry.characterId === owner.characterId,
+          );
+    const label =
+      owner.characterId === null
+        ? null
+        : found !== undefined
+          ? found.label.length > 0
+            ? found.label
+            : 'Sin nombre'
+          : owner.characterLabel !== null && owner.characterLabel.length > 0
+            ? owner.characterLabel
+            : null;
+    return {
+      source: owner.source,
+      label,
+      signedAfter: owner.signedAfter,
+      linkedAt: owner.linkedAt,
+    };
+  };
+
+  /** una conversacion leida, con el dueño resuelto por la unica funcion que lo hace */
+  const readConversation = async (conversationId: string) => {
+    const store = context.privateConversations;
+    const owner = await store.owner(context.vault, conversationId);
+    return {
+      instructions: owner.instructions,
+      characterId: owner.characterId,
+      characterDescription: owner.characterDescription,
+      conversationId,
+      turns: await store.read(context.vault, conversationId),
+      provider: await store.latestProvider(context.vault, conversationId),
+      model: await store.latestModel(context.vault, conversationId),
+      owner: await ownerView(owner),
+    };
+  };
+
+  handle(IPC_INVOKE.vaultConversationRead, vaultConversationIdArgsSchema, async (args) =>
+    readConversation(args.conversationId),
+  );
+
+  /**
+   * las ultimas instrucciones que se usaron con este personaje.
+   *
+   * Se busca en la conversacion mas reciente que fuera suya y tuviera algunas,
+   * con el dueño resuelto por `owner()`. `null` si nunca se le pusieron.
+   */
+  const characterInstructionsFor = async (characterId: string): Promise<string | null> => {
+    const store = context.privateConversations;
+    // `list` viene de la mas reciente a la mas antigua: la primera que sea suya
+    // y tenga instrucciones es la que vale
+    for (const conversation of await store.list(context.vault)) {
+      if (conversation.characterId !== characterId) continue;
+      const owner = await store.owner(context.vault, conversation.conversationId);
+      if (owner.instructions !== null && owner.instructions.length > 0) return owner.instructions;
+    }
+    return null;
+  };
 
   handle(IPC_INVOKE.vaultConversationDelete, vaultConversationIdArgsSchema, async (args) => {
     // los medios primero: si solo se borrara la conversacion, sus archivos
@@ -1247,6 +1400,11 @@ export function registerIpcHandlers(context: HandlerContext): void {
       // la que borrarlo— a la conversacion que lo produjo
       await intentar(() =>
         context.imageAttempts.removeConversation(context.vault, args.conversationId),
+      );
+      // y su enganche, que lleva copiadas la ficha y las instrucciones del
+      // personaje: sin conversacion no tiene nada que decidir
+      await intentar(() =>
+        context.conversationOwners.removeConversation(context.vault, args.conversationId),
       );
     } finally {
       // pase lo que pase con los cuatro almacenes. El indice guarda los turnos ya
@@ -1357,14 +1515,16 @@ export function registerIpcHandlers(context: HandlerContext): void {
       memoria = { memory: sealedMemory, source: 'turn', gaps: 0 };
     }
 
+    // el dueño por la misma funcion que el turno de verdad (`D-103`)
+    const ownerNow = await store.owner(context.vault, args.conversationId);
     const prompt = buildVaultPrompt({
       memory: memoria.memory,
       memorySource: memoria.source,
       memoryGaps: memoria.gaps,
       turns: before.map((turn) => ({ role: turn.role, text: turn.text })),
       message: lastUser.text,
-      instructions: await store.latestInstructions(context.vault, args.conversationId),
-      character: await store.latestCharacterDescription(context.vault, args.conversationId),
+      instructions: ownerNow.instructions,
+      character: ownerNow.characterDescription,
       // no se ofrece generar: esto comprueba el texto, y prometer una imagen
       // aqui gastaria creditos del proveedor de medios sin motivo
       canGenerateImage: false,
@@ -2144,6 +2304,204 @@ export function registerIpcHandlers(context: HandlerContext): void {
     return { ...(await readRecapList()), cleared };
   });
 
+  // ---------------------------------------------------------------------------
+  // enganchar una conversacion a un personaje, en ESTE equipo (`D-103`)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * conversaciones a las que se les esta cambiando el dueño ahora mismo.
+   *
+   * La otra mitad de `sendInFlight`: un turno que leyo el dueño ANTES del
+   * enganche escribiria su respuesta sin ficha DESPUES del ancla, y saldria
+   * firmada con el personaje. Ni enganchar con un envio en curso, ni enviar con
+   * un enganche en curso.
+   */
+  const ownerChangeInFlight = new Set<string>();
+
+  /**
+   * lo que decide el enganche o el soltar, calculado en main y nunca en el
+   * renderer. Lo usan la vista previa y el cambio de verdad, para que la
+   * confirmacion diga exactamente lo que despues se hace.
+   */
+  const planOwnerChange = async (args: {
+    conversationId: string;
+    characterId: string | null;
+  }): Promise<{
+    preview: VaultConversationOwnerPreview;
+    owner: ConversationOwner;
+    lastSequence: number;
+    character: VaultCharacter | undefined;
+    eventInstructions: string | null;
+  }> => {
+    if (!context.vault.isUnlocked()) throw new VaultError('la boveda esta bloqueada');
+    const store = context.privateConversations;
+    const records = store.rawRecords(args.conversationId);
+    const last = records[records.length - 1];
+    if (last === undefined) {
+      throw new VaultError(
+        'esa conversacion no tiene mensajes todavia',
+        'en una conversacion nueva, elige el personaje antes del primer mensaje',
+      );
+    }
+    const owner = await store.owner(context.vault, args.conversationId);
+    const characters = await context.characters.list(context.vault);
+    const excluded = context.memoryPreferences.excluded().has(args.conversationId);
+
+    let character: VaultCharacter | undefined;
+    let label: string;
+    let instructionsOutcome: VaultConversationOwnerPreview['instructionsOutcome'];
+    let eventInstructions: string | null = null;
+    let profilePhotoStays = false;
+
+    if (args.characterId !== null) {
+      // enganchar: solo una conversacion que no es de nadie. Cambiarla de un
+      // personaje a otro queda fuera, a proposito
+      if (owner.characterId !== null) {
+        throw new VaultError(
+          'esta conversacion ya es de un personaje',
+          'cambiarla de uno a otro no esta disponible',
+        );
+      }
+      character = characters.find((entry) => entry.characterId === args.characterId);
+      if (character === undefined) throw new VaultError('ese personaje no esta en la boveda');
+      label = character.label.length > 0 ? character.label : 'este personaje';
+      // las suyas solo si la conversacion no tiene propias: las propias las
+      // escribio Daniel aqui y no se pisan
+      if (owner.instructions !== null && owner.instructions.length > 0) {
+        instructionsOutcome = 'own';
+      } else {
+        eventInstructions = await characterInstructionsFor(character.characterId);
+        instructionsOutcome = eventInstructions === null ? 'none' : 'character';
+      }
+    } else {
+      // soltar: solo deshace un enganche propio. Una conversacion que nacio con
+      // su personaje no se suelta desde aqui
+      // `turn` no siempre es haber nacido con el: el campo del Studio anterior
+      // lo fijaba en cualquier mensaje, asi que no se dice «nacio con»
+      if (owner.source === 'turn') {
+        throw new VaultError(
+          'esa conversacion tiene su personaje fijado en sus propios mensajes',
+          'soltar solo deshace un enganche hecho con el selector',
+        );
+      }
+      if (owner.source !== 'link' || owner.characterId === null) {
+        throw new VaultError('esa conversacion no es de ningun personaje');
+      }
+      const linkedId = owner.characterId;
+      character = characters.find((entry) => entry.characterId === linkedId);
+      label =
+        character !== undefined && character.label.length > 0
+          ? character.label
+          : (owner.characterLabel ?? 'su personaje');
+      // se quitan solo si las que rigen son las que puso ESTE enganche; si
+      // alguien las cambio despues, son de la conversacion y se quedan
+      const fromThisLink =
+        owner.instructionsSource?.kind === 'event' &&
+        owner.instructionsSource.eventId === owner.winningEventId;
+      instructionsOutcome = fromThisLink ? 'removed' : 'kept';
+      eventInstructions = fromThisLink ? '' : null;
+      const media = await context.privateMedia.list(context.vault, args.conversationId);
+      profilePhotoStays = media.some((item) => item.metadata.characterId === linkedId);
+    }
+
+    const target = resolveAuxiliaryTarget(null, context.memoryPreferences.auxiliary());
+    const backgroundCli: LocalCliProvider = isLocalCliProvider(target.provider)
+      ? target.provider
+      : DEFAULT_AUXILIARY_PROVIDER;
+
+    return {
+      preview: {
+        characterLabel: label,
+        turns: records.length,
+        instructionsOutcome,
+        hasOwnMemory:
+          (await store.latestMemory(context.vault, args.conversationId)) !== null,
+        recentMemoriesOn: character?.recentMemories === 'recent-two',
+        excluded,
+        backgroundCli,
+        // una tanda lee una ventana de 40; es lo que hay que decir, no «una»
+        reviewCalls: excluded ? 0 : Math.ceil(records.length / RELATION_WINDOW_TURNS),
+        profilePhotoStays,
+      },
+      owner,
+      lastSequence: last.sequence,
+      character,
+      eventInstructions,
+    };
+  };
+
+  handle(
+    IPC_INVOKE.vaultConversationOwnerPreview,
+    vaultConversationOwnerPreviewArgsSchema,
+    async (args) => (await planOwnerChange(args)).preview,
+  );
+
+  handle(IPC_INVOKE.vaultConversationOwnerSet, vaultConversationOwnerSetArgsSchema, async (args) => {
+    if (!context.vault.isUnlocked()) throw new VaultError('la boveda esta bloqueada');
+    if (sendInFlight.has(args.conversationId)) {
+      throw new VaultError(
+        'esa conversacion esta contestando ahora mismo',
+        'espera a que llegue la respuesta y vuelve a intentarlo',
+      );
+    }
+    if (ownerChangeInFlight.has(args.conversationId)) {
+      throw new VaultError(
+        'se esta cambiando el personaje de esta conversacion',
+        'espera un momento y vuelve a intentarlo',
+      );
+    }
+    // antes del primer `await`: desde aqui ningun envio de esta conversacion
+    // puede empezar hasta que el evento este escrito
+    ownerChangeInFlight.add(args.conversationId);
+    try {
+      const plan = await planOwnerChange(args);
+      const linking = args.characterId !== null;
+
+      await context.conversationOwners.append(context.vault, args.conversationId, {
+        lastSequence: plan.lastSequence,
+        characterId: linking ? (plan.character?.characterId ?? null) : null,
+        characterLabel: linking ? (plan.character?.label ?? null) : null,
+        // la ficha la pone main desde la boveda, nunca el renderer
+        characterDescription: linking ? (plan.character?.description ?? null) : null,
+        instructions: plan.eventInstructions,
+        now: new Date().toISOString(),
+      });
+
+      // el indice guarda de quien es cada conversacion: sin esto, los recuerdos
+      // y los pendientes seguirian viendola con el dueño de antes
+      context.privateMemory.invalidate();
+      // lo que fallo antes se revisaba con otro personaje
+      relationSync.forgetFailure(args.conversationId);
+      // el catalogo no lee al dueño: solo se le quita la marca de fallo para
+      // que vuelva a ser candidata si la tenia
+      catalogFailures.delete(args.conversationId);
+
+      // la relectura de pendientes, en segundo plano y sin esperar. El cursor ya
+      // no vale por si solo —guarda con que dueño se reviso—, asi que esto solo
+      // la adelanta. Una conversacion excluida no se revisa nunca
+      const revision = !plan.preview.excluded;
+      if (revision) {
+        void relationSync.reviewConversation({
+          conversationId: args.conversationId,
+          projectAlias: args.projectAlias,
+          rounds: plan.preview.reviewCalls + 1,
+        });
+      }
+
+      // el verbo y cifras. Ni la conversacion, ni el personaje, ni su nombre
+      context.log('personaje de una conversacion', {
+        accion: linking ? 'enganchar' : 'soltar',
+        turnos: plan.preview.turns,
+        instrucciones: plan.preview.instructionsOutcome,
+        revision,
+      });
+
+      return readConversation(args.conversationId);
+    } finally {
+      ownerChangeInFlight.delete(args.conversationId);
+    }
+  });
+
   /**
    * quien hace el trabajo de fondo: lo elegido, o `null` si es automatico.
    *
@@ -2192,8 +2550,16 @@ export function registerIpcHandlers(context: HandlerContext): void {
     let scenes = 0;
     const failed: { conversationId: string; reason: string }[] = [];
     const uneven: { conversationId: string; scenes: number }[] = [];
+    // leer ya no mantiene viva la boveda (`D-106`), asi que cerrarse a mitad de
+    // una tanda pasa a ser lo normal. Y no es culpa de la conversacion: marcarla
+    // como fallida la dejaba fuera de las pasadas hasta reiniciar (`D-088`)
+    let cortadaPorCierre = false;
 
     for (const conversation of pending.slice(0, args.limit)) {
+      if (!context.vault.isUnlocked()) {
+        cortadaPorCierre = true;
+        break;
+      }
       const turns = await context.privateConversations.read(
         context.vault,
         conversation.conversationId,
@@ -2264,6 +2630,12 @@ export function registerIpcHandlers(context: HandlerContext): void {
           });
         }
       } catch (error) {
+        // el guardado fallo porque se cerro, no por la conversacion. El catalogo
+        // no se escribio, asi que la siguiente pasada la vuelve a pedir
+        if (!context.vault.isUnlocked()) {
+          cortadaPorCierre = true;
+          break;
+        }
         catalogFailures.add(conversation.conversationId);
         failed.push({
           conversationId: conversation.conversationId,
@@ -2281,6 +2653,7 @@ export function registerIpcHandlers(context: HandlerContext): void {
       // quien lo hizo, y si se sustituyo un proveedor de pago
       proveedor: destino.provider,
       sustituido: destino.replaced,
+      cortadaPorCierre,
     });
     return {
       cataloged,
@@ -2618,6 +2991,7 @@ export function registerIpcHandlers(context: HandlerContext): void {
         conversations: todas.map((conversacion) => ({
           conversationId: conversacion.conversationId,
           characterId: conversacion.characterId,
+          linked: conversacion.ownerLinked === true,
         })),
         excluded: context.memoryPreferences.excluded(),
         // la de TODOS los personajes: las notas se reparten por su conversacion
@@ -2955,6 +3329,9 @@ export function registerIpcHandlers(context: HandlerContext): void {
         gatewayUrl: stored.gatewayUrl,
         sessionToken: context.accounts.sessionToken(),
         onUnauthorized: () => context.accounts.forgetSession(),
+        // la conversacion a la que se le esta contestando se deja para la
+        // proxima: su ultimo mensaje aun puede retirarse (revision del 28/09)
+        isSending: (conversationId) => sendInFlight.has(conversationId),
       },
       context.privateMedia,
     );
@@ -3054,14 +3431,25 @@ export function registerIpcHandlers(context: HandlerContext): void {
       }
     }
 
+    // volver a dar de alta a uno que ya esta —para traer otra vez su avatar, por
+    // ejemplo— SE PARTE DE LO QUE YA ESTABA, como en la ruta del Horde: `add()`
+    // hace `parse()` y cada campo con `.default()` que no se pase renace con su
+    // valor por defecto. Apagaba sin avisar el resumen de sus conversaciones,
+    // los pendientes esporadicos, las notas de direccion y la revision de
+    // imagenes, y tiraba su receta del Horde
+    const characterId = args.characterId.trim();
+    const existing = (await context.characters.list(context.vault)).find(
+      (entry) => entry.characterId === characterId,
+    );
     const characters = await context.characters.add(context.vault, {
-      characterId: args.characterId.trim(),
+      ...existing,
+      characterId,
       imageProvider: 'xavira',
-      xavira: { characterId: args.characterId.trim(), modelId: args.modelId },
+      xavira: { characterId, modelId: args.modelId },
       description: args.description,
       label: args.label.trim(),
-      avatarObjectKey,
-      createdAt: new Date().toISOString(),
+      avatarObjectKey: avatarObjectKey ?? existing?.avatarObjectKey ?? null,
+      createdAt: existing?.createdAt ?? new Date().toISOString(),
     });
     context.log('personaje dado de alta', { modelId: args.modelId });
     return { characters };
@@ -3253,6 +3641,61 @@ export function registerIpcHandlers(context: HandlerContext): void {
   );
 
   /**
+   * enciende o apaga el resumen de sus dos ultimas conversaciones (`D-105`).
+   *
+   * El mismo molde que los demas: parte de lo que ya estaba y cambia un solo
+   * campo. Con `off`, el valor por defecto, el prompt no cambia ni un byte.
+   */
+  handle(
+    IPC_INVOKE.vaultCharacterRecentMemories,
+    vaultCharacterRecentMemoriesArgsSchema,
+    async (args) => {
+      if (!context.vault.isUnlocked()) throw new VaultError('la boveda esta bloqueada');
+
+      const existing = (await context.characters.list(context.vault)).find(
+        (entry) => entry.characterId === args.characterId,
+      );
+      if (existing === undefined) throw new VaultError('ese personaje no esta en la boveda');
+
+      const characters = await context.characters.add(context.vault, {
+        ...existing,
+        recentMemories: args.recent,
+      });
+      // la decision, y nada mas: ni quien es el personaje ni que recuerda
+      context.log('resumen de sus conversaciones cambiado', { recientes: args.recent });
+      return { characters };
+    },
+  );
+
+  /**
+   * enciende o apaga el modo esporadico de los pendientes (`D-104`).
+   *
+   * El mismo molde que las notas de direccion: parte de lo que ya estaba y
+   * cambia un solo campo. Con `per-note`, que es el valor por defecto, el prompt
+   * no cambia ni un byte.
+   */
+  handle(
+    IPC_INVOKE.vaultCharacterPendingPacing,
+    vaultCharacterPendingPacingArgsSchema,
+    async (args) => {
+      if (!context.vault.isUnlocked()) throw new VaultError('la boveda esta bloqueada');
+
+      const existing = (await context.characters.list(context.vault)).find(
+        (entry) => entry.characterId === args.characterId,
+      );
+      if (existing === undefined) throw new VaultError('ese personaje no esta en la boveda');
+
+      const characters = await context.characters.add(context.vault, {
+        ...existing,
+        pendingPacing: args.pacing,
+      });
+      // la decision, y nada mas: ni quien es el personaje ni que tiene pendiente
+      context.log('pendientes esporadicos cambiado', { pendientes: args.pacing });
+      return { characters };
+    },
+  );
+
+  /**
    * las ultimas instrucciones que se usaron con este personaje.
    *
    * La personalidad es del personaje, no del hilo: escribirla otra vez en cada
@@ -3264,21 +3707,7 @@ export function registerIpcHandlers(context: HandlerContext): void {
    */
   handle(IPC_INVOKE.vaultCharacterInstructions, vaultCharacterForgetArgsSchema, async (args) => {
     if (!context.vault.isUnlocked()) throw new VaultError('la boveda esta bloqueada');
-
-    const store = context.privateConversations;
-    // `list` viene de la mas reciente a la mas antigua: la primera que sea suya
-    // y tenga instrucciones es la que vale
-    for (const conversation of await store.list(context.vault)) {
-      const owner = await store.latestCharacterId(context.vault, conversation.conversationId);
-      if (owner !== args.characterId) continue;
-
-      const instructions = await store.latestInstructions(
-        context.vault,
-        conversation.conversationId,
-      );
-      if (instructions !== null && instructions.length > 0) return { instructions };
-    }
-    return { instructions: null };
+    return { instructions: await characterInstructionsFor(args.characterId) };
   });
 
   /** avatar descifrado, para enseñarlo. Nunca se escribe sin cifrar en disco */
@@ -3941,7 +4370,8 @@ export function registerIpcHandlers(context: HandlerContext): void {
     }
   };
 
-  handle(IPC_INVOKE.vaultMediaGenerate, vaultMediaGenerateArgsSchema, async (args) => {
+  /** generar desde el panel: lo pide el y lo espera, asi que es una espera suya */
+  const generateMediaNow = async (args: z.infer<typeof vaultMediaGenerateArgsSchema>) => {
     if (!context.vault.isUnlocked()) throw new VaultError('la boveda esta bloqueada');
     const character = (await context.characters.list(context.vault)).find(
       (entry) => entry.characterId === args.characterId,
@@ -3967,7 +4397,11 @@ export function registerIpcHandlers(context: HandlerContext): void {
       ...(args.fromGenerationId === undefined ? {} : { fromGenerationId: args.fromGenerationId }),
       ...(args.fromMediaId === undefined ? {} : { fromMediaId: args.fromMediaId }),
     });
-  });
+  };
+
+  handle(IPC_INVOKE.vaultMediaGenerate, vaultMediaGenerateArgsSchema, (args) =>
+    whileUserWaits(() => generateMediaNow(args)),
+  );
 
   /**
    * cierra un intento cuando el fallo del registro SI importa.
@@ -4114,7 +4548,7 @@ export function registerIpcHandlers(context: HandlerContext): void {
    * `generate` marca el intento como mandado ANTES de tocar al proveedor, para
    * que el mismo pendiente no se pueda pagar dos veces.
    */
-  handle(IPC_INVOKE.vaultImageCommit, vaultImageCommitArgsSchema, async (args) => {
+  const commitImageNow = async (args: z.infer<typeof vaultImageCommitArgsSchema>) => {
     if (!context.vault.isUnlocked()) throw new VaultError('la boveda esta bloqueada');
 
     const lock = `${args.conversationId}:${args.attemptId}`;
@@ -4203,7 +4637,11 @@ export function registerIpcHandlers(context: HandlerContext): void {
     } finally {
       decidingAttempts.delete(lock);
     }
-  });
+  };
+
+  handle(IPC_INVOKE.vaultImageCommit, vaultImageCommitArgsSchema, (args) =>
+    whileUserWaits(() => commitImageNow(args)),
+  );
 
   /**
    * lo que costaria ese texto, preguntado en seco.
@@ -4301,6 +4739,7 @@ export function registerIpcHandlers(context: HandlerContext): void {
   const runPrivateTurn = async (
     args: z.infer<typeof vaultConversationSendArgsSchema>,
     conversationId: string,
+    progress: PrivateTurnProgress,
   ) => {
     if (!context.vault.isUnlocked()) {
       throw new VaultError(
@@ -4316,31 +4755,54 @@ export function registerIpcHandlers(context: HandlerContext): void {
       existing[0]?.title ??
       args.message.slice(0, 60).replace(/\s+/g, ' ').trim();
 
+    // UNA sola forma de cambiar el dueño de una conversacion que ya existe: el
+    // selector Personaje (`D-103`). Se rechaza aqui, antes de guardar nada y de
+    // llamar a ningun modelo
+    const birth = existing.length === 0;
+    if (!birth && (args.characterId !== null || args.characterDescription !== null)) {
+      throw new VaultError(
+        'el personaje de una conversacion ya empezada se cambia con el selector Personaje',
+        'no se ha enviado nada',
+      );
+    }
+
+    // el dueño, su ficha y las instrucciones, por la UNICA funcion que los
+    // resuelve: la misma que la lista, el indice y la pantalla
+    const owner = await store.owner(context.vault, conversationId);
+
     // instrucciones fijas: `null` significa «no las toques» y conserva las que
     // hubiera; una cadena vacia si las borra. Se sellan con el turno del
     // usuario, asi que el historial guarda cuales regian cada respuesta.
-    const previousInstructions = await store.latestInstructions(context.vault, conversationId);
-    const instructions = args.instructions === null ? previousInstructions : args.instructions;
-    const changed = args.instructions !== null && args.instructions !== (previousInstructions ?? '');
+    const previousInstructions = owner.instructions;
+    let instructions = args.instructions === null ? previousInstructions : args.instructions;
+    let changed = args.instructions !== null && args.instructions !== (previousInstructions ?? '');
 
-    // el personaje sigue la misma regla que las instrucciones: pertenece a la
-    // conversacion, no a un campo que haya que rescribir en cada mensaje
-    const previousCharacter = await store.latestCharacterId(context.vault, conversationId);
-    const characterId = args.characterId === null ? previousCharacter : args.characterId;
-    const characterChanged =
-      args.characterId !== null && args.characterId !== (previousCharacter ?? '');
-
-    // quien es el personaje, para el MODELO. El identificador de arriba solo le
-    // sirve al proveedor de imagenes; el modelo no ve ninguna imagen
-    const previousDescription = await store.latestCharacterDescription(
-      context.vault,
-      conversationId,
-    );
-    const characterDescription =
-      args.characterDescription === null ? previousDescription : args.characterDescription;
-    const descriptionChanged =
-      args.characterDescription !== null &&
-      args.characterDescription !== (previousDescription ?? '');
+    // el personaje solo se sella al NACER la conversacion, en su turno 0, y con
+    // los tres campos juntos: el id, la ficha de la boveda —nunca la que mande el
+    // renderer— y, si no llegan instrucciones, las del personaje. Las cargaba el
+    // renderer de forma asincrona y podian llegar tarde
+    let characterId = owner.characterId;
+    let characterDescription = owner.characterDescription;
+    let characterChanged = false;
+    let descriptionChanged = false;
+    if (birth && args.characterId !== null && args.characterId.length > 0) {
+      const born = (await context.characters.list(context.vault)).find(
+        (entry) => entry.characterId === args.characterId,
+      );
+      characterId = args.characterId;
+      characterChanged = true;
+      // un personaje que no esta en la boveda nace sin ficha: la que mande el
+      // renderer no se usa nunca, tampoco como repuesto
+      characterDescription = born?.description ?? null;
+      descriptionChanged = characterDescription !== null && characterDescription.length > 0;
+      if (born !== undefined && args.instructions === null) {
+        const inherited = await characterInstructionsFor(born.characterId);
+        if (inherited !== null) {
+          instructions = inherited;
+          changed = true;
+        }
+      }
+    }
 
     // el avatar del personaje se copia a la conversacion la primera vez que se
     // usa aqui. Vive en la ficha del personaje, que es de otro sitio: sin esta
@@ -4356,6 +4818,26 @@ export function registerIpcHandlers(context: HandlerContext): void {
         : (await context.characters.list(context.vault)).find(
             (entry) => entry.characterId === characterId,
           );
+
+    // la ficha EDITADA llega a las conversaciones que ya existen. Antes de
+    // `D-103` llegaba al pulsar «Usar» y enviar; con el dueño fijo, sin esto una
+    // correccion de su ficha solo se aplicaba abriendo una conversacion nueva.
+    // La pone main desde la boveda, nunca el renderer, y se sella con el turno
+    // solo cuando cambia. Una ficha vacia en la boveda no borra la sellada: vaciar
+    // el campo no es una orden de dejarla sin ficha. Vacia es tambien solo
+    // espacios, con el mismo `trim` que el compositor: sin el, una ficha de
+    // espacios sustituia a la buena y el prompt se quedaba sin QUIEN ERES
+    if (!birth && character !== undefined) {
+      const current: unknown = character.description;
+      if (
+        typeof current === 'string' &&
+        current.trim().length > 0 &&
+        current !== (characterDescription ?? '')
+      ) {
+        characterDescription = current;
+        descriptionChanged = true;
+      }
+    }
 
     if (character !== undefined && character.avatarObjectKey !== null) {
       const known = await context.privateMedia.list(context.vault, conversationId);
@@ -4414,7 +4896,7 @@ export function registerIpcHandlers(context: HandlerContext): void {
     // toca» es el error que este modulo existe para no repetir
     const imageCapable = imageBlock === null;
 
-    await store.appendTurn(context.vault, conversationId, {
+    const userRecord = await store.appendTurn(context.vault, conversationId, {
       role: 'user',
       text: args.message,
       title,
@@ -4424,10 +4906,14 @@ export function registerIpcHandlers(context: HandlerContext): void {
       outputTokens: null,
       // solo se vuelven a sellar cuando cambian: repetirlas en cada turno
       // engordaria el archivo sin decir nada nuevo
-      ...(changed ? { instructions: args.instructions } : {}),
-      ...(characterChanged ? { characterId: args.characterId } : {}),
-      ...(descriptionChanged ? { characterDescription: args.characterDescription } : {}),
+      ...(changed ? { instructions } : {}),
+      ...(characterChanged ? { characterId } : {}),
+      ...(descriptionChanged ? { characterDescription } : {}),
     });
+    // desde aqui, un cierre de la boveda deja un mensaje suyo sin contestar que
+    // hay que retirar
+    progress.userTurnWritten = true;
+    progress.userRecordId = userRecord.recordId;
 
     // el prompt se arma con la memoria acumulativa mas los ultimos turnos, no
     // con el hilo entero. Si no, cada mensaje de una conversacion larga volveria
@@ -4591,6 +5077,87 @@ export function registerIpcHandlers(context: HandlerContext): void {
         : { alreadyInPrompt: { conversationId, fromSequence: oldestRecent } }),
     });
 
+    // el resumen de sus dos ultimas conversaciones (`D-105`), solo con la casilla
+    // de su ficha encendida. Entero dentro de un `try`: lee memorias selladas y
+    // fichas del disco, y un fallo suyo no vale un turno de pago (`D-088`). Sin
+    // bloque, el prompt queda como sin la casilla. El motivo NO se registra: un
+    // error de validacion trae dentro el texto que no valido
+    const recentOn = character?.recentMemories === 'recent-two' && characterId !== null;
+    let recentEntries: RecentMemoryEntry[] = [];
+    let recentPhrases: string[] = [];
+    let recientes: {
+      conversaciones: number;
+      sinMemoria: number;
+      caracteres: number;
+      decisiones: number;
+      recortadas: number;
+      fuera: number;
+      sinIndice: boolean;
+    } | null = null;
+    let recientesError = false;
+    if (recentOn && characterId !== null) {
+      try {
+        // la linea temporal construye el indice si aun no esta; `recentFor` lee
+        // lo construido
+        const linea = await context.privateMemory.timeline(context.vault);
+        const elegidas = context.privateMemory.recentFor(
+          characterId,
+          conversationId,
+          RECENT_MEMORIES_COUNT,
+        );
+        const items = [];
+        let sinMemoria = 0;
+        for (const elegida of elegidas) {
+          const sellada = await store.latestMemory(context.vault, elegida.conversationId);
+          let usable = sellada;
+          if (usable === null) {
+            // la ficha retroactiva, solo APROBADA: el indice deducido del
+            // catalogo entra sin que nadie lo apruebe y no vale aqui
+            const elegido = chooseConversationMemory({
+              sealed: null,
+              entry: await context.recaps.entryFor(context.vault, elegida.conversationId),
+              turns: linea
+                .filter((turno) => turno.conversationId === elegida.conversationId)
+                .map((turno) => ({ sequence: turno.sequence, createdAt: turno.createdAt })),
+            });
+            usable = elegido.source === 'recap' ? elegido.memory : null;
+          }
+          // sin memoria usable se salta y NO se rellena con una tercera: la
+          // pantalla dice «sus dos mas recientes»
+          if (usable === null) {
+            sinMemoria += 1;
+            continue;
+          }
+          items.push({
+            date: civilDayLabel(elegida.updatedAt, anchor),
+            title: elegida.title,
+            memory: usable,
+          });
+        }
+        const condensado = condenseRecentMemories(items);
+        recentEntries = condensado.entries;
+        recentPhrases = condensado.phrases;
+        recientes = {
+          conversaciones: condensado.entries.length,
+          sinMemoria,
+          caracteres: condensado.stats.caracteres,
+          decisiones: condensado.stats.decisiones,
+          recortadas: condensado.stats.recortadas,
+          // cuanto de los resumenes se quedo fuera, en caracteres: `recortadas`
+          // dice que se corto, no cuanto
+          fuera: condensado.stats.fuera,
+          // el indice se invalido a mitad de construirlo: `conversaciones: 0`
+          // no es «no tiene otras», es que este turno no pudo mirar
+          sinIndice: !context.privateMemory.isBuilt(),
+        };
+      } catch {
+        recentEntries = [];
+        recentPhrases = [];
+        recientes = null;
+        recientesError = true;
+      }
+    }
+
     // lo que quedo pendiente entre los dos y toca sacar HOY, si toca alguno.
     //
     // Va entero dentro de un `try`. El almacen se lee de disco y se abre con la
@@ -4599,6 +5166,9 @@ export function registerIpcHandlers(context: HandlerContext): void {
     // ninguna vale un turno de pago perdido. Sin pendientes el prompt queda
     // exactamente como estaba, que es el lado seguro.
     let pendientes: PendingSelection | null = null;
+    // el ajuste del personaje (`D-104`). Sin personaje, apagado, como las notas
+    // de direccion
+    const esporadicos = character?.pendingPacing === 'sparse';
     // lo apuntado y su alcance, guardados para MEDIR despues. Se quedan aqui
     // porque solo existen si el almacen se dejo abrir, y la medida no puede
     // volver a leerlo: seria descifrar el mismo archivo dos veces por turno.
@@ -4621,7 +5191,16 @@ export function registerIpcHandlers(context: HandlerContext): void {
       notasYAlcance = { notes: apuntado.notes, conversations: conversaciones };
       pendientes = selectPendingForTurn({
         notes: apuntado.notes,
-        cursors: apuntado.cursors,
+        // un cursor escrito con otro dueño no cuenta como revisado (`D-103`): la
+        // guarda de desfase lo tiene que ver como pendiente de releer, que es el
+        // lado seguro. La seleccion lee `through` en crudo, asi que se hace aqui
+        // con la misma comparacion que `effectiveThrough`
+        cursors: apuntado.cursors.map((cursor) => {
+          const ownerNow = context.privateMemory.ownerOf(cursor.conversationId);
+          return ownerNow === undefined || cursorMatchesOwner(cursor, ownerNow)
+            ? cursor
+            : { ...cursor, through: -1, throughAt: null };
+        }),
         // una conversacion que no se ha podido leer en esta sesion deja turnos
         // sin extraer que hoy no se van a extraer. Contarlos como desfase
         // callaba TODAS las promesas del personaje sin mas aviso que un contador
@@ -4639,6 +5218,13 @@ export function registerIpcHandlers(context: HandlerContext): void {
         },
         anchor,
         now: anchor.instant,
+        // el tope del bloque entero, solo con el modo esporadico (`D-104`). El
+        // numero de orden sale del historial de ESTA conversacion, que ya lleva
+        // el mensaje recien guardado; la linea temporal no vale porque excluye
+        // conversaciones y en un hilo excluido daria siempre el primero
+        ...(esporadicos
+          ? { cadence: { every: PENDING_BLOCK_EVERY, userTurn: userTurns.length } }
+          : {}),
       });
     } catch {
       // el motivo NO se registra. Un error de validacion trae dentro el dato que
@@ -4664,6 +5250,7 @@ export function registerIpcHandlers(context: HandlerContext): void {
     // puede quitarle al prompt un bloque que ya estaba calculado.
     let ecoMemoria: { entradas: number; enNotas: number } | null = null;
     let ecoHistorial: { respuestas: number; enNotas: number } | null = null;
+    let ecoOtras: { frases: number; enNotas: number } | null = null;
     const medibles = notasYAlcance;
     if (medibles !== null) {
       try {
@@ -4693,11 +5280,21 @@ export function registerIpcHandlers(context: HandlerContext): void {
           respuestas: respuestas.length,
           enNotas: respuestas.filter((turn) => enAlgunaNota(turn.text)).length,
         };
+        // el resumen de otras conversaciones (`D-105`) es el tercer canal: sus
+        // frases viajan en cada turno, tambien con el tope de `D-104` cerrado.
+        // Solo con la casilla y con bloque; sin el, `null`
+        if (recientes !== null) {
+          ecoOtras = {
+            frases: recentPhrases.length,
+            enNotas: recentPhrases.filter((frase) => enAlgunaNota(frase)).length,
+          };
+        }
       } catch {
         // el motivo NO se registra, por lo mismo que arriba: un error de
         // validacion trae dentro la cita que no valido
         ecoMemoria = null;
         ecoHistorial = null;
+        ecoOtras = null;
       }
     }
 
@@ -4741,6 +5338,15 @@ export function registerIpcHandlers(context: HandlerContext): void {
       // las notas de direccion contra la autocopia (`D-102`). El `??` hace falta
       // por lo mismo que en `imageCast`: sin personaje, apagadas
       replyGuidance: character?.replyGuidance ?? 'none',
+      // el modo esporadico de los pendientes (`D-104`). La nota de «ya salio»
+      // solo se lee con `sparse`; el dato se pasa siempre porque se calcula
+      // siempre, y apagado no puede cambiar nada
+      pendingPacing: esporadicos ? 'sparse' : 'per-note',
+      pendingAlreadyRaised: (pendientes?.counters.raisedByHer ?? 0) > 0,
+      // el resumen de otras conversaciones y la guia de campos (`D-105`). Con la
+      // casilla apagada, lista vacia y `false`: ningun push
+      recentMemories: recentEntries,
+      memoryFieldGuide: recentOn,
     });
 
     // si viajaron las notas de direccion, leido de lo COMPUESTO y no del ajuste:
@@ -4750,6 +5356,9 @@ export function registerIpcHandlers(context: HandlerContext): void {
     const notaIniciativa = bloques.some((bloque) => bloque.label === 'iniciativa');
     const notaForma = bloques.some((bloque) => bloque.label === 'forma');
     const variedad = notaIniciativa || notaForma;
+    // lo mismo con la nota de «ya salio»: el ajuste encendido no basta, hace
+    // falta que ella haya sacado una y que haya respuestas suyas en la ventana
+    const notaYaSalio = bloques.some((bloque) => bloque.label === 'pendientes-ya-salio');
 
     // el TAMAÑO de cada bloque, nunca su contenido. Sin esto, «el bloque de
     // imagen se lleva 2.050 tokens» era una estimacion de sobremesa; con esto es
@@ -4813,6 +5422,14 @@ export function registerIpcHandlers(context: HandlerContext): void {
               dormidas: pendientes.counters.dormant,
               bloqueadasPorDesfase: pendientes.counters.blockedStale,
               citaRota: pendientes.counters.quoteBroken,
+              // el tope del modo esporadico (`D-104`): si estaba cerrado y
+              // cuantas se quedaron fuera por el. «El tope actuo» es lo segundo
+              // mayor que cero; lo primero solo dice que no tocaba
+              topeCerrado: pendientes.cadenceClosed,
+              retenidasPorTope: pendientes.counters.heldByCadence,
+              // las que saco ella en la ventana y el no retomo. Se cuenta tambien
+              // con el modo apagado: es la linea base de la nota de «ya salio»
+              sacadasPorElla: pendientes.counters.raisedByHer,
             },
       // y si no salio ninguna porque la seleccion se cayo. Sin distinguirlo,
       // un almacen ilegible se lee igual que «hoy no tocaba»
@@ -4822,10 +5439,23 @@ export function registerIpcHandlers(context: HandlerContext): void {
       // promesa viva. Enteros y nada mas; `null` si no se pudo leer lo apuntado
       ecoMemoria,
       ecoHistorial,
+      // el tercero, con `D-105`: frases del resumen de otras conversaciones que
+      // hablan de una promesa viva. Viajan en cada turno, con el tope cerrado
+      // tambien. `null` sin la casilla o sin bloque
+      ecoOtras,
       // si viajo cada nota de direccion (`D-102`). Siempre presentes, en `false`
       // cuando no viajan: sin eso no se puede separar un turno con y sin
       notaIniciativa,
       notaForma,
+      // el modo esporadico de los pendientes y si viajo su nota (`D-104`).
+      // Siempre presentes, igual que las dos de arriba
+      pendientesEsporadicos: esporadicos,
+      notaYaSalio,
+      // el resumen de sus ultimas conversaciones (`D-105`): `null` con la casilla
+      // apagada; con ella, cuantas viajaron y cuantas se saltaron por no tener
+      // memoria. Enteros, nunca de que iban
+      recientes,
+      recientesError,
     });
 
     // dicho ya, se olvida: si no, el personaje seguiria disculpandose por una
@@ -4905,6 +5535,9 @@ export function registerIpcHandlers(context: HandlerContext): void {
       result.outcome === 'failed' ? null : 'absent';
 
     let wroteReply = false;
+    // la memoria que selle este turno, para medir si copia el resumen de otras
+    // conversaciones. Nunca va al registro
+    let memoriaNueva: ConversationMemory | null = null;
     // lo que de verdad leyo el usuario, sin el bloque de memoria ni la peticion
     // de imagen. Es contra esto —y no contra la respuesta cruda— contra lo que
     // se mira si ella saco alguna de las promesas que se le enseñaron
@@ -4919,10 +5552,18 @@ export function registerIpcHandlers(context: HandlerContext): void {
       // la memoria acumulativa de Privado no se guardaba nunca
       const memoria = memoryOfTurn(result, parsed);
       memoryStatus = memoria.status;
+      memoriaNueva = memoria.memory;
       // y despues la peticion de imagen, sobre lo que quedo. El orden es el
       // inverso al del prompt: la memoria va la ultima, asi que sale la primera
       const imageRequest = parseVaultImageRequest(parsed.visibleText);
       respuestaVisible = imageRequest.visibleText;
+      // una imagen que se genera en cuanto su texto este guardado
+      let generacionAplazada: {
+        characterId: string;
+        plan: VaultImagePlan;
+        attemptId: string;
+        kind: 'image' | 'video';
+      } | null = null;
 
       if (imageRequest.request?.mediaId !== undefined) {
         // reenviar lo que ya existe: gratis e inmediato. Se comprueba que sea
@@ -5005,17 +5646,23 @@ export function registerIpcHandlers(context: HandlerContext): void {
               state: 'sent',
               kind: imageRequest.request.kind,
             });
-            const generated = await generatePrivateMedia({
-              conversationId,
+            // se genera DESPUES de guardar su texto, no aqui (revision del
+            // 28/09). Generar antes dejaba la respuesta —ya recibida y pagada—
+            // colgando de la imagen: con AI Horde eso son hasta 23 minutos, mas
+            // que el aplazamiento de Win+L (10) y, sumados al turno, mas que la
+            // espera maxima (35). Si la boveda se cerraba en medio se perdian el
+            // texto de ella y el mensaje de el. Ahora lo unico que se puede
+            // perder es la imagen, como cuando se genera desde el panel (`D-106`)
+            generacionAplazada = {
               characterId: character.characterId,
               plan,
               attemptId: apunte,
               kind: imageRequest.request.kind,
-            });
+            };
             image = {
-              mediaId: generated.mediaId,
-              costCredits: generated.costCredits,
-              costUnit: generated.costUnit,
+              mediaId: null,
+              costCredits: null,
+              costUnit: null,
               error: null,
               state: 'done',
               attemptId: apunte,
@@ -5119,18 +5766,6 @@ export function registerIpcHandlers(context: HandlerContext): void {
         };
       }
 
-      // si este turno llevo imagen, el siguiente sabe que el tema esta abierto.
-      // Se apunta aqui y no dentro de cada rama porque las tres —reenviar,
-      // generar y fallar— acaban en el mismo sitio, y lo que importa es si el
-      // usuario vio una imagen, no como llego.
-      //
-      // Un pendiente NO cuenta: no hubo imagen. La condicion mira `mediaId` y
-      // por eso ya era correcta, pero es la clase de linea que alguien
-      // «arreglaria» a `image !== null` sin ver que eso haria creer al turno
-      // siguiente que el usuario vio algo que sigue esperando aprobacion
-      if (image !== null && image.mediaId !== null) ultimaRespuestaConImagen.add(conversationId);
-      else ultimaRespuestaConImagen.delete(conversationId);
-
       await store.appendTurn(
         context.vault,
         conversationId,
@@ -5147,6 +5782,62 @@ export function registerIpcHandlers(context: HandlerContext): void {
         // sigue siendo buena. Un turno malo no borra la conversacion (D-019)
         memoria.memory === null ? undefined : { memory: memoria.memory },
       );
+      // la respuesta ya esta en disco: un cierre a partir de aqui no la pierde
+      progress.reply = {
+        outcome: result.outcome,
+        model: result.executedModel ?? args.model,
+        memoryStatus,
+        image,
+      };
+
+      // y ahora, con su texto a salvo, la imagen. Un cierre de la boveda a mitad
+      // tira solo esto: el `catch` lo trata como cualquier generacion fallida y
+      // el turno sale con su texto
+      const aplazada = generacionAplazada;
+      if (aplazada !== null) {
+        progress.onReplySaved();
+        try {
+          const generated = await generatePrivateMedia({ conversationId, ...aplazada });
+          image = {
+            mediaId: generated.mediaId,
+            costCredits: generated.costCredits,
+            costUnit: generated.costUnit,
+            error: null,
+            state: 'done',
+            attemptId: aplazada.attemptId,
+            plan: null,
+          };
+        } catch (error) {
+          // lo mismo que el `catch` de arriba: el fallo, redactado, para la
+          // pantalla y para el turno siguiente, que si no cree que la mando
+          ultimaImagenFallida.set(
+            conversationId,
+            redact(error instanceof Error ? error.message : String(error)),
+          );
+          image = {
+            mediaId: null,
+            costCredits: null,
+            costUnit: null,
+            error: redact(error instanceof Error ? error.message : String(error)),
+            state: 'done',
+            attemptId: aplazada.attemptId,
+            plan: null,
+          };
+        }
+        progress.reply = { ...progress.reply, image };
+      }
+
+      // si este turno llevo imagen, el siguiente sabe que el tema esta abierto.
+      // Se apunta aqui y no dentro de cada rama porque las tres —reenviar,
+      // generar y fallar— acaban en el mismo sitio, y lo que importa es si el
+      // usuario vio una imagen, no como llego.
+      //
+      // Un pendiente NO cuenta: no hubo imagen. La condicion mira `mediaId` y
+      // por eso ya era correcta, pero es la clase de linea que alguien
+      // «arreglaria» a `image !== null` sin ver que eso haria creer al turno
+      // siguiente que el usuario vio algo que sigue esperando aprobacion
+      if (image !== null && image.mediaId !== null) ultimaRespuestaConImagen.add(conversationId);
+      else ultimaRespuestaConImagen.delete(conversationId);
     }
 
     // si no llego a escribirse ninguna respuesta, el mensaje del usuario queda
@@ -5155,7 +5846,24 @@ export function registerIpcHandlers(context: HandlerContext): void {
     // reescriba lo mismo y acabe con su mensaje dos veces —en pantalla y en el
     // proximo prompt—
     const userTurnKept = wroteReply;
-    if (!userTurnKept) store.removeLastTurn(conversationId);
+    if (!userTurnKept) {
+      // sin su `recordId` no se retira nada: `removeLastTurn` sin registro quita
+      // «la ultima linea» sin mirar cual es, justo lo que esta guarda prohibe.
+      // Hoy no pasa —`appendTurn` lo devuelve antes de llegar aqui—, pero un
+      // cambio que lo saltara borraria la respuesta anterior de ella
+      const retired =
+        progress.userRecordId !== null &&
+        store.removeLastTurn(conversationId, progress.userRecordId);
+      // ya no hay mensaje suyo que retirar. Sin esto, si la boveda se cerro
+      // durante la llamada, lo siguiente que necesita la llave lanza y el
+      // envio llama a `turnCutByLock`, que retiraria OTRA linea: la ultima
+      // respuesta buena de ella, sin papelera. `removeLastTurn` no puede
+      // mirar el rol —no tiene la llave—, asi que esta marca es la guarda, y el
+      // `recordId` la segunda: aunque se volviera a llamar, no casaria
+      progress.userTurnWritten = false;
+      // el registro dice si se retiro de verdad: con otra linea detras no se toca
+      progress.userTurnRetired = retired;
+    }
 
     // el historial ha cambiado: el indice de la memoria episodica deja de estar
     // al dia. Se reconstruye solo, y perezosamente, en la siguiente busqueda
@@ -5286,7 +5994,25 @@ export function registerIpcHandlers(context: HandlerContext): void {
     // cuanto tardo el turno de pago y si habia una extraccion corriendo por
     // detras. Son las dos cifras con las que se decide si el disparo inmediato
     // se queda o se deja solo el de inactividad: sin medirlo seria una opinion
+    // si la memoria nueva copia frases del resumen de otras conversaciones, y
+    // cuantas sin que nada de ESTA conversacion las respalde: el blanqueo
+    // (`D-105`). La respuesta nueva no cuenta como respaldo: puede ser justo la
+    // que lo copio. Mudo si falla, como toda medida
+    let ecoRecientes: RecentEcho | null = null;
+    if (recentOn && memoriaNueva !== null && recentPhrases.length > 0) {
+      try {
+        ecoRecientes = measureRecentEcho({
+          memory: memoriaNueva,
+          phrases: recentPhrases,
+          turns: history,
+        });
+      } catch {
+        ecoRecientes = null;
+      }
+    }
+
     context.log('turno privado terminado', {
+      ecoRecientes,
       duracionMs: result.durationMs,
       extraccionEnCurso: relationSync.busy,
       final: result.outcome,
@@ -5297,13 +6023,15 @@ export function registerIpcHandlers(context: HandlerContext): void {
       imagenIntento: image?.attemptId ?? null,
     });
 
+    const ownerAfter = await store.owner(context.vault, conversationId);
     return {
       conversationId,
       outcome: result.outcome,
       turns: await store.read(context.vault, conversationId),
-      instructions: await store.latestInstructions(context.vault, conversationId),
-      characterId: await store.latestCharacterId(context.vault, conversationId),
-      characterDescription: await store.latestCharacterDescription(context.vault, conversationId),
+      instructions: ownerAfter.instructions,
+      characterId: ownerAfter.characterId,
+      characterDescription: ownerAfter.characterDescription,
+      owner: await ownerView(ownerAfter),
       provider: args.provider,
       model: result.executedModel ?? args.model,
       memoryStatus,
@@ -5313,18 +6041,139 @@ export function registerIpcHandlers(context: HandlerContext): void {
     };
   };
 
+  /**
+   * retira el mensaje suyo que se quedo sin respuesta, si lo hay, UNA vez.
+   *
+   * Lo usan el corte por el cierre de la boveda y el fallo con la boveda abierta
+   * (`runLocalTurn` lanza con el agente parado, por ejemplo). En los dos, el
+   * mensaje sigue en el cuadro de texto: dejarlo en el historial hacia que al
+   * reenviarlo saliera dos veces, en pantalla y en el prompt, y corria la cuenta
+   * del tope de `D-104`. Retira por `recordId`, nunca «la ultima linea», y marca
+   * que ya lo hizo para que nadie mas lo intente.
+   */
+  const retireUnansweredTurn = (conversationId: string, progress: PrivateTurnProgress): boolean => {
+    if (progress.reply !== null || !progress.userTurnWritten || progress.userRecordId === null) {
+      return false;
+    }
+    const retirado = context.privateConversations.removeLastTurn(
+      conversationId,
+      progress.userRecordId,
+    );
+    progress.userTurnWritten = false;
+    if (retirado) progress.userTurnRetired = true;
+    return retirado;
+  };
+
+  /**
+   * la boveda se cerro con un envio en curso: Win+L sin esperar, suspender, la
+   * X, el boton o salir.
+   *
+   * La conversacion no puede quedar a medio escribir. Con la respuesta ya
+   * guardada se devuelve un resultado correcto —el cuadro de texto se vacia y
+   * no se reenvia un duplicado— sin nada descifrado. Sin respuesta, el mensaje
+   * suyo se retira, que es la regla de siempre para un turno sin contestar, y
+   * se le dice donde sigue su texto. `removeLastTurn` no necesita la llave.
+   */
+  const turnCutByLock = (
+    args: z.infer<typeof vaultConversationSendArgsSchema>,
+    conversationId: string,
+    progress: PrivateTurnProgress,
+  ): VaultConversationSendResult => {
+    const reply = progress.reply;
+    const retirado = retireUnansweredTurn(conversationId, progress);
+    // el hecho y nada mas: ni el mensaje, ni la respuesta, ni el error
+    context.log('turno privado cortado por el cierre de la boveda', {
+      mensajeRetirado: retirado || progress.userTurnRetired,
+      respuestaGuardada: reply !== null,
+    });
+    if (reply === null) {
+      throw new VaultError(SEND_CUT_BY_LOCK.lostMessage, SEND_CUT_BY_LOCK.lostHint);
+    }
+    return {
+      conversationId,
+      outcome: reply.outcome,
+      turns: [],
+      instructions: null,
+      characterId: null,
+      characterDescription: null,
+      owner: { source: 'none', label: null, signedAfter: null, linkedAt: null },
+      provider: args.provider,
+      model: reply.model,
+      memoryStatus: reply.memoryStatus,
+      userTurnKept: true,
+      // el plan es el texto que saldria hacia el proveedor: contenido, y la
+      // pantalla que lo recibe ya esta cerrada
+      image: reply.image === null ? null : { ...reply.image, plan: null },
+      error: SEND_CUT_BY_LOCK.savedReply,
+    };
+  };
+
   handle(IPC_INVOKE.vaultConversationSend, vaultConversationSendArgsSchema, async (args) => {
     const conversationId = args.conversationId ?? randomUUID();
+    // con un cambio de dueño a medio escribir, este turno leeria el dueño de
+    // antes y firmaria su respuesta con el de despues (`D-103`)
+    if (ownerChangeInFlight.has(conversationId)) {
+      throw new VaultError(
+        'se esta cambiando el personaje de esta conversacion',
+        'espera un momento y vuelve a enviar',
+      );
+    }
+    // un envio por conversacion. La pantalla desactiva Enviar mientras contesta,
+    // pero al salir de Privado y volver su estado empieza de cero y dejaba
+    // mandar otro: los dos turnos se intercalaban, el primero en terminar
+    // quitaba la marca de abajo con el segundo aun en vuelo y, si el primero se
+    // quedaba sin respuesta, su mensaje ya no era la ultima linea y quedaba
+    // huerfano (revision del 28/09)
+    if (sendInFlight.has(conversationId)) {
+      throw new VaultError(
+        'esa conversacion esta contestando ahora mismo',
+        'espera a que llegue su respuesta y vuelve a enviar: tu texto sigue en el cuadro',
+      );
+    }
     // mientras dure el envio, esta conversacion no se le manda a ningun CLI de
     // fondo: sus turnos estan cambiando, y uno del usuario sin respuesta puede
     // retirarse y reutilizar su numero
     sendInFlight.add(conversationId);
-    let turn: Awaited<ReturnType<typeof runPrivateTurn>>;
+    // el espera la respuesta: mientras llegue, la boveda no se cierra por
+    // inactividad (`D-106`). DeepSeek tarda minutos y mirar la pantalla sin
+    // tocarla no es irse
+    const openAtStart = context.vault.isUnlocked();
+    const releaseReply = context.vault.beginUserWait('reply');
+    let releaseImage: () => void = () => undefined;
+    const progress: PrivateTurnProgress = {
+      userTurnWritten: false,
+      userRecordId: null,
+      userTurnRetired: false,
+      reply: null,
+      onReplySaved: () => {
+        // la nueva antes de soltar la vieja: sin un instante en que no haya
+        // ninguna y la inactividad pueda cerrarla
+        releaseImage = context.vault.beginUserWait('image');
+        releaseReply();
+      },
+    };
+    let turn: VaultConversationSendResult;
     try {
-      turn = await runPrivateTurn(args, conversationId);
+      turn = await runPrivateTurn(args, conversationId, progress);
+    } catch (error) {
+      // con la boveda abierta es un fallo como los de siempre, y si ya estaba
+      // cerrada al empezar no la ha cortado nada. Pero un mensaje suyo ya escrito
+      // y sin respuesta se retira igual que cuando la llamada vuelve vacia: su
+      // texto sigue en el cuadro, y dejarlo aqui lo duplicaba al reenviar
+      if (!openAtStart || context.vault.isUnlocked()) {
+        retireUnansweredTurn(conversationId, progress);
+        throw error;
+      }
+      turn = turnCutByLock(args, conversationId, progress);
     } finally {
+      // soltar dos veces no hace nada: vale haya o no habido imagen
+      releaseReply();
+      releaseImage();
       sendInFlight.delete(conversationId);
     }
+
+    // cerrada no hay llave con la que apuntar nada
+    if (!context.vault.isUnlocked()) return turn;
 
     // y con el envio ya cerrado se apunta lo que se haya prometido. Sin esperar:
     // la respuesta de Lia no puede depender de que Codex arranque, y un fallo de

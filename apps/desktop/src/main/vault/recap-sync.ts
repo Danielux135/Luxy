@@ -569,7 +569,11 @@ export class RecapSync {
         // almacen y guardar, y cualquiera de las tres puede fallar SIEMPRE para
         // la misma conversacion. Sin esto la excepcion saldria de la tanda, la
         // conversacion no quedaria marcada y, como el orden es cronologico,
-        // volveria a ser la primera candidata en cada disparo
+        // volveria a ser la primera candidata en cada disparo.
+        //
+        // Pero un cierre a mitad no es culpa de la conversacion: marcarla la
+        // dejaba fuera de las pasadas hasta reiniciar (`D-088`, `D-106`)
+        if (this.stopped()) break;
         this.markFailure(candidate.conversationId, target.provider, options);
         result.failed.push({
           conversationId: candidate.conversationId,

@@ -161,7 +161,7 @@ function montar(montaje: Montaje = {}): Huella {
   const turnos: TurnoFalso[] = linea.filter((turno) => turno.conversationId === CONV_AHORA);
 
   const context = {
-    vault: { isUnlocked: () => true, onLock: () => () => undefined },
+    vault: { isUnlocked: () => true, onLock: () => () => undefined, beginUserWait: () => () => undefined },
     privateConversations: {
       list: async () => [
         { conversationId: CONV_VIEJA, title: '', turns: 2, updatedAt: '', characterId: LIA },
@@ -181,12 +181,24 @@ function montar(montaje: Montaje = {}): Huella {
           text: turno.text,
           createdAt: new Date().toISOString(),
         });
+        // el almacen de verdad devuelve el registro; el envio retira por su recordId
+        return { recordId: `registro-${turnos.length}` };
       },
       removeLastTurn: () => turnos.pop(),
       latestMemory: async () => montaje.memoria ?? null,
-      latestInstructions: async () => null,
-      latestCharacterId: async () => LIA,
-      latestCharacterDescription: async () => 'Lia, veinticuatro años',
+      // el dueño se lee SOLO por `owner()` (`D-103`)
+      owner: async () => ({
+        characterId: LIA,
+        characterDescription: 'Lia, veinticuatro años',
+        instructions: null,
+        characterLabel: null,
+        source: 'turn' as const,
+        signedAfter: 0,
+        linkedAt: null,
+        events: 0,
+        winningEventId: null,
+        instructionsSource: null,
+      }),
     },
     characters: { list: async () => [] },
     privateMedia: { list: async () => [] },
@@ -229,6 +241,8 @@ function montar(montaje: Montaje = {}): Huella {
           createdAt: turno.createdAt,
           stems: new Set(tokenize(turno.text)),
         })),
+      // sin enganches: ningun cursor se invalida por dueño (`D-103`)
+      ownerOf: () => undefined,
       conversationsFor: (characterId: string | null) =>
         characterId === LIA ? new Set([CONV_VIEJA, CONV_AHORA]) : new Set<string>(),
       turnAt: (conversationId: string, sequence: number) =>

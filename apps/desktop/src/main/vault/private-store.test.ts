@@ -133,7 +133,7 @@ describe('cifrado en el cliente', () => {
 
     it('con la boveda bloqueada no se puede sellar ni abrir', async () => {
       const record = await sealTurn(vault, { conversationId: CONVERSATION, sequence: 0, turn: turno });
-      vault.lock();
+      vault.lock('manual');
 
       await expect(
         sealTurn(vault, { conversationId: CONVERSATION, sequence: 1, turn: turno }),

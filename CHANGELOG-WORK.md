@@ -1,5 +1,444 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-09-28 — Claude — `REV-TRES-ENCARGOS-001`, quinta ronda: «traerme», «prepararte» y un envío por conversación
+
+- Estado anterior: cuarta ronda cerrada; según el registro del flujo, `npm run
+  check` completo en verde tras ella (222 archivos, 4520 pruebas y 12 omitidas).
+  Seis revisores sobre ella: nada que rompa, dos defectos importantes de «ya
+  salió» y catorce menores.
+- Objetivo: cerrar los dos importantes y los menores baratos y seguros,
+  verificando cada uno en el código antes. Sin commit, sin push, sin desplegar.
+- Hipótesis o causa demostrada (las dos, reproducidas con el script de medida
+  del revisor antes de tocar nada):
+  - `sameRoot` consultaba la tabla de irregulares con la raíz tal cual: «traerm»
+    no es ninguna clave, aunque `regularRoot('traerm')` sea «traer».
+  - `stem('preparo')` es «prep» (dos recortes) y `regularRoot('preparart')` era
+    «prepar» (uno): la regla del prefijo exige cinco letras y no los unía.
+- Archivos leídos: el diario de la revisión (`r2:*`), `CLAUDE.md`,
+  `raise-roots.ts`, `turn-index.ts`, `relation-selection.ts`, `handlers.ts`
+  (envío, retirada, ficha editada), `vault-prompt.ts` (el `trim` del
+  compositor), `useVault.ts` (envío), `Vault.tsx` (botón de enganchar, pista) y
+  las pruebas de todos ellos; `D-103`…`D-106`.
+- Archivos modificados:
+  - `apps/desktop/src/main/vault/raise-roots.ts`: `verbOf` (tabla también sin
+    pronombre); `regularRoot` quita pronombres simples y dobles del infinitivo o
+    del gerundio y recorta lo que queda con `stem()`; la «n» de «nos» solo tras
+    -ar/-ir; formas añadidas a venir, salir, dormir, dar, ver, traer y poner.
+  - `apps/desktop/src/main/ipc/handlers.ts`: un segundo envío a la misma
+    conversación se rechaza; sin `userRecordId` no se retira nada; la ficha de la
+    bóveda se juzga con `trim`.
+  - `apps/desktop/src/renderer/pages/Vault.tsx`: `title` del botón de enganchar
+    desactivado; `trim` en la pista «Has cambiado su ficha».
+  - `apps/desktop/src/renderer/useVault.ts`: comentario con el nombre real de la
+    guarda.
+  - Pruebas: `raise-roots.test.ts` (cinco nuevas), `relation-selection.test.ts`
+    (§33, una), `private-turn-vault-lock.test.ts` (tres: «responde» y «lanza» con
+    historial, y un envío por conversación), `conversation-owner.test.ts` (ficha
+    de espacios), `owner-change-panel.test.ts` (el `title`).
+  - Documentos: `D-103`…`D-106` (quinta ronda), `CLAUDE.md` y `AGENTS.md` (iguales),
+    `CURRENT-TASK.md`, este registro, `TEST-RESULTS.md`.
+- Comandos ejecutados: los dos scripts de medida del revisor
+  (`medir-ya-salio*.ts`, con `vite-node`, antes y después); uno propio que
+  compara la regla vieja con la nueva sobre 274 palabras inventadas; `vitest run`
+  de 13 archivos tocados o vecinos; `tsc -p apps/desktop/tsconfig.renderer.json`
+  y `tsconfig.node.json` con `--noEmit`; `eslint` de los archivos tocados.
+- Resultado real: ver `TEST-RESULTS.md`, entrada de la quinta ronda.
+- Decisiones: no se tocan umbrales ni `stem()`; la bolsa exacta sigue primero
+  (`D-104`, quinta ronda).
+- No hecho: `npm run check` completo; nada visto en Electron; ninguna medida
+  con conversaciones reales. El texto «tu mensaje no se ha guardado» cuando la
+  retirada no casa, y la ficha vigente que llega sin aviso a una conversación sin
+  ficha sellada, quedan anotados sin arreglar.
+- Siguiente paso: `npm run check` completo y la revisión independiente.
+
+### 2026-09-28 — Claude — `REV-TRES-ENCARGOS-001`, cuarta ronda: sincronizar a mitad de un envío, citas largas y lo que faltaba registrar
+
+- Estado anterior: tercera ronda cerrada en main y en pantalla (dos agentes a la
+  vez), `npm run check` completo en verde tras ella (222 archivos, 4511 pruebas y
+  12 omitidas). Seis revisores sobre ella dejaron tres defectos importantes y
+  once menores.
+- Objetivo: cerrarlos, verificando cada uno en el código antes. Sin commit, sin
+  push, sin desplegar.
+- Hipótesis o causa demostrada:
+  - «Sincronizar» durante un envío subía el mensaje sin respuesta: el handler no
+    miraba `sendInFlight` (venía de antes) y `removeLastTurn` quitaba «la última
+    línea» sin saber cuál. Reproducido con pruebas que fallan sin el arreglo.
+  - Con citas largas la nota «ya salió» casi no se dispara: cierto. Medido con
+    texto inventado que bajar el listón mete falsos: no se baja (`D-104`).
+  - Los documentos daban por pendiente la pantalla ya hecha: cierto, y ningún
+    registro recogía ese trabajo.
+- Archivos leídos: el diario de la revisión (`r1:*` de este flujo),
+  `CLAUDE.md`, `CURRENT-TASK.md`, `D-103`…`D-106`, `handlers.ts`, `sync.ts`,
+  `conversation-store.ts`, `raise-roots.ts`, `relation-selection.ts`,
+  `relation-diagnostics.ts`, `turn-index.ts`, `Vault.tsx`, `useVault.ts`,
+  `vault-character-link.ts` y las pruebas de todos ellos.
+- Archivos modificados:
+  - `apps/desktop/src/main/vault/conversation-store.ts`: `removeLastTurn(id,
+    expectedRecordId?)` solo retira la última línea si es ese registro.
+  - `apps/desktop/src/main/vault/sync.ts`: `isSending` en las dependencias;
+    la conversación con un envío en curso se deja para la siguiente, mirado antes
+    de subir y antes de cada escritura; `conversationsDeferred` en el resultado.
+  - `apps/desktop/src/main/ipc/handlers.ts`: `userRecordId` en el progreso del
+    turno; `retireUnansweredTurn` (corte por cierre y fallo con la bóveda
+    abierta); el handler de sincronizar pasa `sendInFlight`.
+  - `apps/desktop/src/main/vault/raise-roots.ts`: fuera la regla de la vocal
+    final; tabla de cuatro verbos de raíz corta; comentario de la tabla corregido.
+  - `apps/desktop/src/main/vault/relation-diagnostics.ts` y
+    `apps/desktop/src/shared/ipc.ts`: `longQuotes`, `herMentionsClear`,
+    `herMentionsLong` y `herMentionsClearLong` en `raising`; `conversationsDeferred`
+    en el resultado de sincronizar.
+  - Pantalla: `Vault.tsx` (la línea «Ya salió» del diagnóstico, el aviso de la
+    conversación aplazada al sincronizar, «Aplicando el cambio…», `trim` de la
+    ficha, sin salto al volver a la conversación, la pista de ficha editada),
+    `useVault.ts` y `vault-character-link.ts` (nombre de la casilla).
+  - Pruebas: `sync.test.ts` (+3), `conversation-store.test.ts` (+1),
+    `private-turn-vault-lock.test.ts` (+2, y el doble retira por `recordId`),
+    `raise-roots.test.ts` (+2), `relation-diagnostics.test.ts` (+1 y cuatro campos
+    más en la que ya había), `vault-character-link.test.ts`, y los dobles de
+    `appendTurn` de otras seis pruebas de `ipc/` devuelven un `recordId`.
+  - Documentos: este registro, `CURRENT-TASK.md` (la parte de pantalla de la
+    tercera ronda, registrada, y la cuarta ronda), `PROJECT-STATE.md`,
+    `MASTER-PLAN.md`, `DECISIONS.md` (`D-103`…`D-106`), `LOCAL-ACTIONS.md`
+    (`LA-052`, `LA-054`), `TEST-RESULTS.md`, `CLAUDE.md` y `AGENTS.md` (iguales).
+- Comandos ejecutados: `vitest run` de lo tocado y de `apps/desktop` entero con
+  `docs.test.ts`; `tsc -b tsconfig.build.json`; `tsc -p
+  apps/desktop/tsconfig.renderer.json --noEmit`; `eslint` de los 21 archivos
+  tocados; las pruebas nuevas contra el código sin arreglo; mediciones con texto
+  inventado en el scratchpad (`r4/medir.ts`, `verbos`, `falso`).
+- Resultado real: ver `TEST-RESULTS.md`, entrada de la cuarta ronda.
+- Decisiones: no se baja el listón de «ya salió» para citas largas, se mide
+  (`D-104`); retirar va por `recordId` (`D-106`); el nombre de la casilla dice
+  «resumen corto» (`D-105`).
+- No hecho: `npm run check` completo y `npm run build`; nada visto en Electron;
+  nada medido con citas reales; los verbos de raíz corta que son otra palabra no
+  se unen; el tope de 35 minutos sigue siendo por espera, no por envío.
+- Siguiente paso: `npm run check` completo y la revisión independiente de las
+  cuatro rondas; después, `LA-052`, `LA-053` y `LA-054`.
+
+### 2026-09-28 — Claude — `REV-TRES-ENCARGOS-001`, tercera ronda: la parte de pantalla (registrada después)
+
+- Lo hizo otro agente a la vez que la entrada de abajo y no dejó registro; se
+  anota aquí para que nadie lo rehaga. Detalle en `CURRENT-TASK.md`, «Parte de
+  pantalla de la tercera ronda».
+- Archivos modificados: `apps/desktop/src/renderer/pages/Vault.tsx`, `useVault.ts`,
+  `vault-character-link.ts`, `vault-character-link.test.ts` y
+  `apps/desktop/src/main/owner-change-panel.test.ts` (nueva, estática sobre el
+  texto del código).
+- Resultado real, según ese agente y el revisor de pantalla: 39 pruebas en verde
+  entre `vault-character-link.test.ts` y `owner-change-panel.test.ts`, `tsc` del
+  renderer sin errores; después, el `npm run check` completo de quien coordina en
+  verde (222 archivos). Nada visto en Electron.
+
+### 2026-09-28 — Claude — `REV-TRES-ENCARGOS-001`, tercera ronda: main, shared y documentos
+
+- Estado anterior: dos rondas de arreglos del 28/09 sin revisión independiente.
+  Una tercera ronda de siete revisores dejó abierto un defecto que rompía, seis
+  importantes y varios menores, y `npm run check` en ROJO por un TIMEOUT de 20 s
+  en `account-manager.test.ts` con el equipo cargado por los revisores.
+- Objetivo: cerrar lo de main, `packages/shared` y documentos (puntos 1, 2, 3, 4
+  y 9 del encargo, y los menores baratos). **El renderer no se toca**: va otro
+  agente detrás. Sin commit, sin push, sin desplegar.
+- Hipótesis o causa demostrada: cada defecto se leyó en el código antes de
+  tocarlo; los tres de código se reprodujeron con una prueba que falla sin el
+  arreglo (quitándolo a mano y volviendo a ponerlo).
+- Archivos leídos: el diario de la revisión (`r3:*`), `CLAUDE.md`,
+  `AI-WORK-PROTOCOL.md`, `CURRENT-TASK.md` (bloques de `REV-TRES-ENCARGOS-001` y
+  `F33-*`), `D-103`…`D-106`, `handlers.ts` (turno privado, corte por cierre y
+  envío), `conversation-store.ts` (`removeLastTurn`), `relation-selection.ts`,
+  `relation.ts`, `turn-index.ts`, `vault-service.ts` (esperas),
+  `vault-lock-coordinator.ts`, `vault-recent-memories.ts`, `character-store.ts`.
+- Archivos modificados:
+  - `apps/desktop/src/main/ipc/handlers.ts`: `PrivateTurnProgress` gana
+    `userTurnRetired` y `onReplySaved`; el turno sin respuesta marca que ya retiró
+    el mensaje y el corte no retira otra línea; antes de generar la imagen del
+    turno, el envío cambia su espera `reply` por `image`.
+  - `apps/desktop/src/main/vault/raise-roots.ts` (nuevo) y
+    `relation-selection.ts`: `clearlyRaises` cuenta como la misma raíz las formas
+    de un mismo verbo, exige antes la bolsa laxa exacta y no toca umbrales.
+  - `apps/desktop/src/main/vault/character-store.ts` y
+    `vault-lock-coordinator.ts`: comentarios que ya no prometen «byte a byte» de
+    más ni un Win+L aplazado por una imagen.
+  - Pruebas: `raise-roots.test.ts` (nuevo), `relation-selection.test.ts`,
+    `private-turn-vault-lock.test.ts`, `private-turn-image.test.ts` y
+    `account-manager.test.ts` (60 s solo para la prueba de cuatro derivaciones).
+  - Documentos: `DECISIONS.md` (tercera ronda de `D-103`…`D-106`, dos cifras
+    viejas), `CLAUDE.md` y `AGENTS.md` (iguales entre sí), `LOCAL-ACTIONS.md`
+    (`LA-053`), `CURRENT-TASK.md`, `PROJECT-STATE.md` (vuelve a CRLF),
+    `MASTER-PLAN.md`, `TEST-RESULTS.md`, `docs/ROLEPLAY-EVOLUCION.md` y
+    `docs/PENDIENTES-DISENO.md` (nota de estado).
+- Comandos ejecutados: `node_modules/.bin/vitest run` de los archivos tocados y
+  de `apps/desktop/src/main/ipc` y `apps/desktop/src/main/vault` enteros;
+  `account-manager.test.ts` sola tres veces; `npm run typecheck`; `eslint` de los
+  archivos de código tocados; las pruebas de texto inventado del revisor de
+  promesas y una nueva de control, en el scratchpad.
+- Resultado real: ver `TEST-RESULTS.md`, entrada de la tercera ronda.
+- Decisiones: la ficha editada que sella main se mantiene (`D-103`, tercera
+  ronda); Win+L se arregla en el código y no en el texto (`D-106`); los topes del
+  resumen no se tocan (`D-105`).
+- No hecho: todo lo de pantalla (lista en `CURRENT-TASK.md`, «Para el agente del
+  renderer»); `npm run check` completo; la regla contra inventar promesas con el
+  tope cerrado, `conversation-owners.json` ilegible y el fragmento final sin «…»
+  quedan anotados en su decisión, sin arreglar.
+- Siguiente paso: el agente del renderer; después `npm run check` y la revisión
+  independiente. (Nota de la quinta ronda: ese bloque de `CURRENT-TASK.md` ya no
+  existe; la cuarta ronda lo sustituyó por «Parte de pantalla de la tercera
+  ronda: HECHA», y el paso del renderer está cumplido.)
+
+### 2026-09-28 — Claude — `REV-TRES-ENCARGOS-001`, segunda ronda: lo que encontró la segunda revisión, corregido
+
+- Estado anterior: la primera ronda de arreglos del 28/09, sin revisión
+  independiente. Una segunda ronda de revisores dejó nueve defectos importantes,
+  veintitantos menores y `npm run check` en ROJO: `conversation-owner.test.ts`,
+  «engancha con la ficha de la boveda…», `expected 0 to be greater than or equal
+  to 1` (220 archivos, 1 fallida, 4474 en verde, 12 omitidas).
+- Objetivo: verificar cada defecto en el código antes de tocarlo y corregir lo
+  que se sostiene. Sin commit, sin push, sin desplegar.
+
+**Corregido (cada uno con su prueba):**
+
+- `apps/desktop/src/main/ipc/conversation-owner.test.ts`: la prueba roja pasaba
+  sola (26 de 26 en solitario) y fallaba con la suite entera: esperaba la
+  relectura de fondo con un temporizador de 30 ms. Las tres esperas del archivo
+  esperan ahora a lo que miran (`vi.waitFor`).
+- `apps/desktop/src/main/ipc/handlers.ts`:
+  - la ficha EDITADA en la bóveda se sella con el turno de una conversación ya
+    empezada cuando cambia (regresión de `D-103`); una vacía no borra la sellada;
+  - el turno con imagen guarda el texto de ella ANTES de generarla
+    (`generacionAplazada`);
+  - «prompt privado compuesto» gana `ecoOtras` y, dentro de `recientes`, `fuera`
+    y `sinIndice`.
+- `apps/agent/src/providers/claude.ts` y `codex.ts`: `--no-session-persistence` y
+  `--ephemeral` en solo lectura, detectados en `--help` (Claude Code 2.1.267,
+  codex-cli 0.154.0, comprobado el 28/09).
+- `packages/shared/src/vault-prompt.ts`: la regla de la promesa que no consta,
+  reescrita solo con tope o con resumen (apagado, byte a byte igual); el bloque
+  `recientes` dice que lo prometido ahí no es un guion.
+- `packages/shared/src/vault-recent-memories.ts`: primera frase y últimas del
+  resumen, con « … »; decisiones a 160; `fuera` en las cifras.
+- `packages/shared/src/vault-recap.ts`: la ficha retroactiva manda las promesas a
+  `plan` (solo las fichas nuevas).
+- `apps/desktop/src/main/vault/relation-selection.ts`: una cita de menos de tres
+  raíces no cuenta nunca en `clearlyRaises`.
+- `apps/desktop/src/main/vault/private-memory.ts`: `isBuilt()`.
+- `apps/desktop/src/main/vault/account-manager.ts`: cerrar la sesión cierra la
+  bóveda antes de esperar al servidor.
+- `apps/desktop/src/renderer/useVault.ts` y `vault-lock-reset.ts`: los descartes
+  de «¿Es de Lía?» en la purga; la purga anula la vista previa en vuelo; el
+  descarte de una nueva no pasa a la siguiente; soltar vale como descarte.
+- `apps/desktop/src/renderer/pages/Vault.tsx` y `vault-character-link.ts`:
+  «Usar» solo elige para generar en una conversación empezada; no se envía con
+  la confirmación abierta; textos de «Memoria de lo ya hablado», la casilla, la
+  pista del selector, el aviso de personaje desconocido y la confirmación
+  (`D-093`); el botón de enganchar no sale sin proyectos.
+- Documentos: «Segunda ronda» en `D-103`…`D-106` y criterio de medida de `D-104`
+  reescrito; `LA-052` y `LA-054`; `CURRENT-TASK.md`; `PROJECT-STATE.md`;
+  `MASTER-PLAN.md`; `docs/ENGANCHE-DISENO.md` §4.1 y §8; `docs/RECAP-DISENO.md`;
+  `CLAUDE.md` y `AGENTS.md` (los dos `touch()` nuevos, la ficha la sella main y la
+  regla de las sesiones en disco).
+
+**No hecho, con el motivo:** en `D-104`, `D-106` y `CURRENT-TASK.md`
+(«Sabido y no arreglado en esta ronda»).
+
+**Comprobaciones:** `npm run check` en verde el 28/09: 220 archivos, 4489 pruebas en verde y 12 omitidas (4501), salida 0 (lint, typecheck con `typecheck:tests`, test y build). Detalle en `TEST-RESULTS.md`.
+
+**Siguiente paso:** revisión independiente de las dos rondas; después `LA-052`, `LA-053` y `LA-054`, de Daniel.
+
+
+### 2026-09-28 — Claude — `REV-TRES-ENCARGOS-001`: los defectos que encontró la revisión de los tres encargos, corregidos
+
+- Estado anterior: `SEG-BOVEDA-001`, `F33-ENGANCHE-LOCAL-001` con
+  `F33-RECUERDO-001` y `F33-PROMESAS-001`, construidos el 25/09 por un flujo cuya
+  **revisión independiente no se hizo**: la autenticación caducó y los siete
+  revisores se cayeron. `npm run check` estaba en verde (220 archivos, 4452
+  pruebas). Una ronda de revisión posterior, encargada por quien coordina, dejó
+  una lista de defectos.
+- Objetivo: verificar cada defecto en el código antes de tocarlo y corregir los
+  que se sostienen. Sin commit, sin push, sin desplegar.
+
+**Corregido (cada uno con su prueba):**
+
+- `apps/desktop/src/renderer/useVault.ts`: `conversationAfterSend`; si el primer
+  mensaje de una conversación nueva se queda sin respuesta, la pantalla vuelve a
+  «nueva» y el reenvío nace con el personaje. `'characters'` en la purga del
+  cierre. Las vistas previas del enganche llevan número y solo pinta la última;
+  su error va al área nueva `'enganche'`. Los fallos de las casillas de la ficha,
+  al área `'personajes'`.
+- `apps/desktop/src/renderer/vault-lock-reset.ts`: `'characters'` en
+  `DECRYPTED_RENDERER_STATE`.
+- `apps/desktop/src/renderer/pages/Vault.tsx`: la confirmación del enganche atada a
+  su conversación; «Volver a comprobar» y el aviso de fallo con su pista dentro;
+  sus botones y los del aviso «¿Es de…?» desactivados durante un envío; la pista
+  del selector ya no dice «Nació con» de lo que no nació con él.
+- `packages/shared/src/vault-owner.ts`: `inheritedDescription`; soltar y volver a
+  elegir a la misma con el Studio anterior conserva su ficha.
+- `apps/desktop/src/main/ipc/handlers.ts`: la ficha del renderer ya no es repuesto
+  al nacer; `ownerView` da «Sin nombre» a un nombre vacío; el texto de «soltar»;
+  `vaultCharacterImport` parte del personaje que ya había; las esperas del envío
+  son `reply` y las de imagen `image`.
+- `apps/desktop/src/main/vault/vault-service.ts` y `vault-lock-coordinator.ts`:
+  `UserWaitKind`; solo un envío aplaza Win+L; la línea «cierre de la boveda
+  aplazado» lleva `envios`.
+- `apps/desktop/src/main/vault/relation-selection.ts`: `previousOpenBoundary`; en
+  un mensaje con el tope abierto no cuenta para «ya salió» la respuesta a la
+  apertura anterior.
+- `packages/shared/src/vault-prompt.ts`: la guía de campos manda las promesas a
+  `plan`; el bloque `recientes` dice «cada una con su fecha»; el JSDoc de
+  `MEMORY_INDEX_NOTE`, en su sitio.
+- `apps/desktop/src/renderer/vault-character-link.ts`: la confirmación, en
+  condicional donde prometía de más (`D-093`).
+- `apps/desktop/src/renderer/vault-presence.ts`: la puerta mira foco y visibilidad
+  antes de gastar sus 20 s.
+- Guardas: `owner-single-source.test.ts` (más formas y `characterOf`) y
+  `renderer-effect-deps.test.ts` (`useMemo`/`useCallback`).
+
+**Pruebas añadidas o cambiadas:** `vault-owner.test.ts` (+6),
+`ipc/conversation-owner.test.ts` (+3, una de ellas falló antes del arreglo con el
+prompt sin «QUIEN ERES»), `relation-selection.test.ts` (+4),
+`vault-lock-coordinator.test.ts` (+2), `vault-service.test.ts` (+1),
+`ipc/character-recent-memories.test.ts` (+1), `vault-character-link.test.ts`,
+`vault-lock-reset.test.ts` (+1), `useVault.test.ts` (+3),
+`vault-presence.test.ts` (+1), `owner-single-source.test.ts` (+1) y
+`renderer-effect-deps.test.ts`. La simulación de los revisores
+(`pacing-sim.ts`, en el scratchpad, con texto inventado) pasó de bloque y nota
+juntos en los mensajes 5, 9… a ninguna vez.
+
+**Documentación:** `CURRENT-TASK.md` (bloques `REV-TRES-ENCARGOS-001` y
+`F33-PROMESAS-001`, que no existía; «Arreglado» pasa a «Construido»; el cuerpo de
+`F33-ENGANCHE-001` ya no describe el campo retirado como actual),
+`PROJECT-STATE.md` (sin la contradicción sobre la bóveda), `DECISIONS.md` (una
+«Revisión del 28/09» en `D-103` a `D-106`), `LOCAL-ACTIONS.md` (`LA-054` nueva;
+`LA-053` dice dónde está la cuenta atrás y que Win+L solo se aplaza por un envío),
+`MASTER-PLAN.md`, `CLAUDE.md` y `AGENTS.md` (la presencia y los `touch()` que
+quedan, y lo que de verdad caza la guarda del dueño).
+
+**Resultado:** `npm run check` en verde el 28/09 (220 archivos, 4475 pruebas en verde y 12 omitidas, 4487; salida 0). Nada visto en pantalla. **Estos
+arreglos no han tenido revisión independiente.**
+
+**Siguiente paso:** una revisión independiente; después `LA-052`, `LA-053` y
+`LA-054`, de Daniel.
+
+### 2026-09-25 — Claude — `F33-PROMESAS-001`: las promesas, de vez en cuando (entrada escrita el 28/09)
+
+- No se registró el día que se construyó: el agente lo dejó para quien coordina y
+  nadie lo escribió. Se reconstruye aquí desde `D-104` y el diff.
+- Archivos: `packages/shared/src/vault-pending-pacing.ts` (nuevo, el enum y el
+  permiso), `vault-prompt.ts` (permiso sustituido y bloque `pendientes-ya-salio`),
+  `apps/desktop/src/main/vault/relation-selection.ts` (`PENDING_BLOCK_EVERY`,
+  `cadenceOpens`, `clearlyRaises`, `raisedByHer`), `character-store.ts`,
+  `shared/ipc.ts`, `channels.ts`, `preload`, `useVault.ts`, `Vault.tsx` (la
+  casilla) y `handlers.ts` (el verbo y la medida en «prompt privado compuesto»).
+- Pruebas: `vault-pending-pacing.test.ts`, `relation-selection.test.ts`,
+  `ipc/character-pending-pacing.test.ts`, `ipc/private-turn-pending-pacing.test.ts`
+  y casos en `vault-reply-guidance.test.ts`, `character-store.test.ts` e
+  `ipc.test.ts`. Entraron en las pasadas en verde del 25/09.
+- Siguiente paso: `LA-054`.
+
+### 2026-09-25 — Claude — la bóveda se cierra sola: leer ya no es actividad, y Win+L, suspender y la X la cierran
+
+- Estado anterior: `SEG-BOVEDA-001` con la causa medida el 23/09 y nada arreglado.
+  Diagnóstico en el diario `wf_451f2251-e93` y diseño de este flujo, comprobado
+  contra el código de hoy (varias líneas se habían movido).
+- Objetivo: el encargo C aprobado por Daniel. Decisión `D-106`; prueba de Daniel
+  `LA-053`.
+
+**Archivos nuevos:** `apps/desktop/src/shared/vault-lock.ts` (motivos, puertas y
+avisos), `apps/desktop/src/main/vault/vault-lock-coordinator.ts` (el reloj de 15 s
+y el `powerMonitor`, sin Electron), `apps/desktop/src/renderer/vault-presence.ts`
+(la puerta de la presencia y su hook), y sus pruebas:
+`vault-lock-coordinator.test.ts`, `shared/vault-lock.test.ts`,
+`renderer/vault-presence.test.ts`, `ipc/private-turn-vault-lock.test.ts`,
+`ipc/catalog-lock.test.ts`, `main/index-wiring.test.ts` y
+`main/renderer-effect-deps.test.ts`.
+
+**Archivos tocados:** `vault-service.ts` (`touch()` fuera de `subkeyFor` y
+`vaultId`; `lock(reason)` obligatorio con el hecho para los oyentes, que se avisan
+todos aunque uno falle; `onUnlock`; `beginUserWait`/`activeUserWaits` con tope de
+35 min; `derivations`), `main/index.ts` (el coordinador sustituye al
+`setInterval`; la X cierra la bóveda; `stop()` va al `finally` de la salida),
+`handlers.ts` (`lock('manual')`, canal `vaultPresence`, `whileUserWaits` en el
+envío, generar y aprobar imagen; el envío cortado por un cierre retira el mensaje
+o devuelve la respuesta guardada sin nada descifrado; `catalogOnce` no marca como
+fallida una conversación por un cierre y lo dice con `cortadaPorCierre`),
+`account-manager.ts` (`lock('sesion-cerrada')`), `relation-sync.ts` y
+`recap-sync.ts` (un cierre a mitad no marca la conversación), `channels.ts`,
+`shared/ipc.ts`, `preload/index.ts` (el aviso de cierre lleva el motivo),
+`useVault.ts` (`markPresence`; aviso por motivo validado con Zod; las tres flechas
+del `return` a `useCallback`), `Vault.tsx` (la presencia en `VaultPage`; los dos
+efectos dependen de la función, no del objeto). Pruebas: la de
+`vault-service.test.ts` que exigía que leer fuera actividad, **reescrita**; 28
+`lock()` de pruebas pasan a `lock('manual')`; y `beginUserWait` en los 15 dobles de
+`ipc/` que lo necesitan (van con `as unknown as`, así que el tipo no avisaba).
+
+**Cambio en el registro:** la línea «boveda bloqueada por inactividad» ya no se
+escribe. Pasa a ser «boveda cerrada» `{motivo:'inactividad', abiertaMs,
+derivaciones}`, y ahora hay una por cada cierre y una «boveda abierta» `{via}` por
+cada apertura. Quien busque la frase antigua en `studio.log` la encontrará solo
+hasta hoy.
+
+**Corregido respecto al diseño recibido:** `LA-052` ya estaba ocupada por el
+enganche, así que la prueba de Daniel es `LA-053`, y la decisión es `D-106`;
+`account-manager.ts` es LF, no CRLF; `vault-effect-deps.test.ts` vive en `main/`
+(`renderer-effect-deps.test.ts`) porque el tsconfig del renderer no tiene tipos de
+Node; y además de «sin flechas», la prueba exige que cada cosa que devuelve
+`useVault` sea estado, `useCallback` o `useMemo`, que es lo que de verdad importa.
+Añadido: `lock()` avisa a todos los oyentes aunque uno lance, y un oyente de la
+apertura que falle no la tumba (`create` borraba la llave adoptada si algo lanzaba
+después).
+
+**Comprobado que las pruebas nuevas sirven:** con cada arreglo quitado a mano,
+fallan la de `relation-sync`, la de `recap-sync` y la estática (con
+`pages/Vault.tsx:3862` y con `clearError`); después se restauró el código.
+
+**Comandos:** `npm run check` → lint, typecheck (con `typecheck:tests`), test y
+build en verde: 220 archivos, 4452 pruebas y 12 omitidas (4464). Salida en
+`TEST-RESULTS.md`.
+
+**No ejecutado:** nada en pantalla ni con Electron de verdad; que `powerMonitor`
+emita `lock-screen` en su Windows no está comprobado. **Siguiente paso:** `LA-053`,
+de Daniel.
+
+### 2026-09-25 — Claude — el enganche en este equipo y el resumen de sus dos últimas conversaciones
+
+- Estado anterior: `F33-ENGANCHE-001` diseñado y sin construir; dos rondas de
+  diseño (`wf_92cec875-c48`, `wf_aae72735-8f2`) con 22 fallos de tres escépticos.
+- Objetivo: la parte de ESTE equipo, sin servidor ni migración, más R1, porque sin
+  él el enganche no le sirve a Daniel. IDs `F33-ENGANCHE-LOCAL-001` y
+  `F33-RECUERDO-001`; decisiones `D-103` y `D-105`.
+
+**Archivos nuevos:** `packages/shared/src/vault-owner.ts`,
+`packages/shared/src/vault-recent-memories.ts`,
+`apps/desktop/src/main/vault/conversation-owner-store.ts`,
+`apps/desktop/src/main/vault/recent-echo.ts`,
+`apps/desktop/src/renderer/vault-character-link.ts`, y sus pruebas:
+`vault-owner.test.ts`, `vault-recent-memories.test.ts`,
+`vault-prompt-recent.test.ts`, `conversation-owner-store.test.ts`,
+`relation-sync-owner.test.ts`, `recent-echo.test.ts`,
+`owner-single-source.test.ts`, `ipc/conversation-owner.test.ts`,
+`ipc/character-recent-memories.test.ts`, `renderer/vault-character-link.test.ts`.
+
+**Archivos tocados:** `vault-prompt.ts` (bloques `recientes` y `guia-memoria`),
+`vault-relation.ts` (`owner` en el cursor), `index.ts` de shared,
+`conversation-store.ts` (`owner()`; fuera `characterOf` y los `latest*` de
+personaje e instrucciones), `private-memory.ts` (`ownerOf`, `recentFor`; ya no
+descifra dos veces), `relation-sync.ts` (`cursorMatchesOwner`, `effectiveThrough`
+con dueño, `forgetFailure`, `reviewConversation`), `relation-diagnostics.ts`,
+`character-store.ts` (`recentMemories`), `main/index.ts`, `handlers.ts`,
+`shared/ipc.ts`, `channels.ts`, `preload/index.ts`, `useVault.ts`,
+`vault-lock-reset.ts` (la ficha del personaje no estaba en la purga del candado:
+defecto previo, arreglado), `Vault.tsx`; y los dobles de siete pruebas de
+`ipc/` que usaban los lectores retirados.
+
+**Corregido respecto al diseño recibido:** se quitó de la pantalla la frase «las
+promesas antiguas suyas que ya se dieron por cumplidas aquí siguen cumplidas»,
+porque no está probada; el texto de «R1 encendida sin memoria» dice que el resumen
+saldrá de la ficha retroactiva si está aprobada, que es lo que hace el código.
+
+**Comandos:** `npm run check` → lint, typecheck (con `typecheck:tests`), test y
+build en verde: 213 archivos, 4396 pruebas y 12 omitidas (4408). Salida en
+`TEST-RESULTS.md`.
+
+**No ejecutado:** nada en pantalla. **Siguiente paso:** `LA-052`, de Daniel.
+
 ### 2026-09-25 — Claude — que Lía no se copie a sí misma; la sincronización no sirve de copia; el enganche, diseñado
 
 - Estado anterior: el diagnóstico de la mañana (`docs/ROLEPLAY-EVOLUCION.md`).

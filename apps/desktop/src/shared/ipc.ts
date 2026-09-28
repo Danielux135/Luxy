@@ -40,6 +40,8 @@ import {
   studioJobResponseSchema,
   studioJobsResponseSchema,
   studioOptionsResponseSchema,
+  VAULT_PENDING_PACINGS,
+  VAULT_RECENT_MEMORIES,
   VAULT_REPLY_GUIDANCES,
   vaultImagePlanSchema,
 } from '@luxy/shared';
@@ -223,6 +225,14 @@ export const vaultAccountStatusSchema = z.object({
   openedWithRecoveryKey: z.boolean(),
 });
 
+/**
+ * si el aviso de presencia se ha contado.
+ *
+ * `false` con la ventana escondida, sin el foco o con la boveda cerrada: un
+ * renderer no puede mantenerla abierta sin nadie delante (`D-106`).
+ */
+export const vaultPresenceResultSchema = z.object({ counted: z.boolean() });
+
 export const vaultStatusSchema = z.object({
   configured: z.boolean(),
   unlocked: z.boolean(),
@@ -349,6 +359,24 @@ export const vaultConversationIdArgsSchema = z.object({
   conversationId: conversationIdSchema,
 });
 
+/**
+ * de quien es la conversacion abierta, para la pantalla (`D-103`).
+ *
+ * Lo resuelve el proceso principal con la misma funcion que el prompt: la
+ * pantalla no deduce nada por su cuenta.
+ */
+export const vaultConversationOwnerViewSchema = z.object({
+  /** `none` sin dueño; `turn` si nacio con el; `link` si se engancho */
+  source: z.enum(['none', 'turn', 'link']),
+  /** su nombre ya resuelto; `null` sin dueño o si ya no esta en la boveda */
+  label: z.string().nullable(),
+  /** las respuestas con secuencia mayor se escribieron con su ficha */
+  signedAfter: z.number().int().min(-1).nullable(),
+  /** cuando se engancho, si se engancho */
+  linkedAt: z.string().nullable(),
+});
+export type VaultConversationOwnerView = z.infer<typeof vaultConversationOwnerViewSchema>;
+
 export const vaultConversationSummarySchema = z.object({
   conversationId: z.string(),
   title: z.string(),
@@ -398,7 +426,56 @@ export const vaultConversationReadResultSchema = z.object({
   provider: z.string().nullable(),
   /** modelo del ultimo turno; `null` si nunca se eligio uno */
   model: z.string().nullable(),
+  owner: vaultConversationOwnerViewSchema,
 });
+
+/**
+ * enganchar (con un personaje) o soltar (con `null`) una conversacion.
+ *
+ * Solo el identificador: la ficha y las instrucciones las pone el proceso
+ * principal desde la boveda, nunca el renderer.
+ */
+export const vaultConversationOwnerPreviewArgsSchema = z
+  .object({
+    conversationId: conversationIdSchema,
+    characterId: z.string().min(1).max(128).nullable(),
+  })
+  .strict();
+
+export const vaultConversationOwnerSetArgsSchema = z
+  .object({
+    conversationId: conversationIdSchema,
+    characterId: z.string().min(1).max(128).nullable(),
+    /** el proyecto donde corre la relectura de pendientes en segundo plano */
+    projectAlias: z.string().min(1).max(64),
+  })
+  .strict();
+
+/** lo que la confirmacion necesita saber ANTES de enseñarse */
+export const vaultConversationOwnerPreviewSchema = z.object({
+  /** el nombre del personaje que entra o que sale */
+  characterLabel: z.string(),
+  /** registros que ya tiene la conversacion */
+  turns: z.number().int().min(0),
+  /**
+   * que pasa con las instrucciones: se cargan las del personaje, se quedan las
+   * propias, el personaje no tiene, se quitan las del enganche, o se quedan.
+   */
+  instructionsOutcome: z.enum(['character', 'own', 'none', 'removed', 'kept']),
+  /** tiene memoria sellada propia, escrita sin la ficha */
+  hasOwnMemory: z.boolean(),
+  /** el personaje tiene encendido el resumen de sus dos ultimas conversaciones */
+  recentMemoriesOn: z.boolean(),
+  /** la conversacion esta excluida de lo que recuerda */
+  excluded: z.boolean(),
+  /** quien hara la relectura de pendientes */
+  backgroundCli: z.enum(LOCAL_CLI_PROVIDERS),
+  /** cuantas llamadas, como mucho: una por cada 40 registros */
+  reviewCalls: z.number().int().min(0),
+  /** al soltar: la foto de perfil que se copio se queda entre sus imagenes */
+  profilePhotoStays: z.boolean(),
+});
+export type VaultConversationOwnerPreview = z.infer<typeof vaultConversationOwnerPreviewSchema>;
 
 /**
  * en que quedo la peticion de imagen de un turno.
@@ -423,6 +500,7 @@ export const vaultConversationSendResultSchema = z.object({
   provider: z.string().nullable(),
   /** modelo con el que se respondio, tal y como lo ejecuto el agente */
   model: z.string().nullable(),
+  owner: vaultConversationOwnerViewSchema,
   /**
    * que le paso al bloque de memoria en este turno.
    *
@@ -1408,6 +1486,12 @@ export const vaultRelationDiagnosticsSchema = z.object({
     sameNoteWithin24h: diagnosticCount,
     maxRaisesPerNote: diagnosticCount,
     medianDaysToFirstRaise: diagnosticCount,
+    /** de las anteriores, las que habrian llevado la nota de «ya salio» (`D-104`) */
+    herMentionsClear: diagnosticCount,
+    /** citas de nueve raices o mas, donde la regla estricta casi nunca acepta */
+    longQuotes: diagnosticCount,
+    herMentionsLong: diagnosticCount,
+    herMentionsClearLong: diagnosticCount,
   }),
   /** lo que reclama ella y cuanto de eso consta; `unbacked` no puede subir */
   inventionGuard: z.object({
@@ -1775,6 +1859,20 @@ export const vaultCharacterSummarySchema = z.object({
    * que es el prompt de siempre.
    */
   replyGuidance: z.enum(VAULT_REPLY_GUIDANCES).default('none'),
+  /**
+   * si sus pendientes van en modo esporádico (`D-104`).
+   *
+   * Viaja por lo mismo que `replyGuidance`: la casilla vive en su ficha. Con el
+   * defecto, una bóveda anterior se lee apagada, que es el prompt de siempre.
+   */
+  pendingPacing: z.enum(VAULT_PENDING_PACINGS).default('per-note'),
+  /**
+   * si le llega el resumen de sus dos ultimas conversaciones (`D-105`).
+   *
+   * Viaja por lo mismo que los de arriba: la casilla vive en su ficha. Con el
+   * defecto, una boveda anterior se lee apagada, que es el prompt de siempre.
+   */
+  recentMemories: z.enum(VAULT_RECENT_MEMORIES).default('off'),
   /** su identidad en Xavira, si la tiene. El identificador es el de SU API */
   xavira: z
     .object({ characterId: z.string(), modelId: z.string() })
@@ -1836,6 +1934,29 @@ export const vaultCharacterReplyGuidanceArgsSchema = z.object({
   characterId: z.string().min(1).max(128),
   guidance: z.enum(VAULT_REPLY_GUIDANCES),
 });
+
+/**
+ * enciende o apaga el modo esporádico de los pendientes de un personaje.
+ *
+ * Verbo propio, por el mismo motivo que los demás: un canal que sólo puede
+ * cambiar una cosa no puede reescribirle por accidente otra.
+ */
+export const vaultCharacterPendingPacingArgsSchema = z.object({
+  characterId: z.string().min(1).max(128),
+  pacing: z.enum(VAULT_PENDING_PACINGS),
+});
+
+/**
+ * enciende o apaga el resumen de sus dos ultimas conversaciones.
+ *
+ * Verbo propio, por el mismo motivo que los demas.
+ */
+export const vaultCharacterRecentMemoriesArgsSchema = z
+  .object({
+    characterId: z.string().min(1).max(128),
+    recent: z.enum(VAULT_RECENT_MEMORIES),
+  })
+  .strict();
 
 export const vaultCharacterListResultSchema = z.object({
   characters: z.array(vaultCharacterSummarySchema),
@@ -1999,6 +2120,8 @@ export const vaultSyncResultSchema = z.object({
   mediaDownloaded: z.number().int().min(0),
   /** demasiado grandes para una peticion; se quedan en su equipo */
   mediaSkipped: z.number().int().min(0),
+  /** con un envio en curso: no se tocaron y van en la siguiente */
+  conversationsDeferred: z.number().int().min(0),
 });
 
 export const configSaveArgsSchema = z.object({
@@ -2317,11 +2440,29 @@ export interface LuxyBridge {
   setVaultCharacterReplyGuidance(
     args: z.infer<typeof vaultCharacterReplyGuidanceArgsSchema>,
   ): Promise<IpcResult<z.infer<typeof vaultCharacterListResultSchema>>>;
+  /** enciende o apaga el modo esporádico de los pendientes */
+  setVaultCharacterPendingPacing(
+    args: z.infer<typeof vaultCharacterPendingPacingArgsSchema>,
+  ): Promise<IpcResult<z.infer<typeof vaultCharacterListResultSchema>>>;
+  /** enciende o apaga el resumen de sus dos ultimas conversaciones */
+  setVaultCharacterRecentMemories(
+    args: z.infer<typeof vaultCharacterRecentMemoriesArgsSchema>,
+  ): Promise<IpcResult<z.infer<typeof vaultCharacterListResultSchema>>>;
+  /** lo que pasaria al enganchar o soltar esa conversacion, sin hacerlo */
+  previewVaultConversationOwner(
+    args: z.infer<typeof vaultConversationOwnerPreviewArgsSchema>,
+  ): Promise<IpcResult<z.infer<typeof vaultConversationOwnerPreviewSchema>>>;
+  /** engancha o suelta; devuelve la conversacion leida con el dueño nuevo */
+  setVaultConversationOwner(
+    args: z.infer<typeof vaultConversationOwnerSetArgsSchema>,
+  ): Promise<IpcResult<z.infer<typeof vaultConversationReadResultSchema>>>;
   createVault(password: string): Promise<IpcResult<z.infer<typeof vaultCreateResultSchema>>>;
   unlockVault(
     args: z.infer<typeof vaultUnlockArgsSchema>,
   ): Promise<IpcResult<z.infer<typeof vaultStatusSchema>>>;
   lockVault(): Promise<IpcResult<z.infer<typeof vaultStatusSchema>>>;
+  /** hay alguien delante; `counted` dice si el proceso principal lo ha contado */
+  markVaultPresence(): Promise<IpcResult<z.infer<typeof vaultPresenceResultSchema>>>;
   changeVaultPassword(
     args: z.infer<typeof vaultChangePasswordArgsSchema>,
   ): Promise<IpcResult<z.infer<typeof vaultStatusSchema>>>;
@@ -2452,8 +2593,12 @@ export interface LuxyBridge {
     args: z.infer<typeof vaultCharacterForgetArgsSchema>,
   ): Promise<IpcResult<z.infer<typeof vaultCharacterAvatarResultSchema>>>;
   syncVault(): Promise<IpcResult<z.infer<typeof vaultSyncResultSchema>>>;
-  /** avisa de que la boveda se cerro sola. devuelve la funcion de baja */
-  onVaultLocked(listener: () => void): () => void;
+  /**
+   * avisa de que la boveda se cerro, por el camino que sea. Devuelve la funcion
+   * de baja. Llega el motivo SIN validar: quien lo reciba lo pasa por
+   * `vaultLockReasonSchema` antes de fiarse de el.
+   */
+  onVaultLocked(listener: (payload: unknown) => void): () => void;
   /**
    * como va la cola de AI Horde mientras se genera. Devuelve la funcion de baja.
    *

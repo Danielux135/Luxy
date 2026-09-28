@@ -98,7 +98,7 @@ function montar(montaje: Montaje = {}): Huella {
   }));
 
   const context = {
-    vault: { isUnlocked: () => true, onLock: () => () => undefined },
+    vault: { isUnlocked: () => true, onLock: () => () => undefined, beginUserWait: () => () => undefined },
     privateConversations: {
       list: async () => [
         { conversationId: CONV, title: '', turns: turnos.length, updatedAt: '', characterId: NORA },
@@ -116,12 +116,24 @@ function montar(montaje: Montaje = {}): Huella {
           text: turno.text,
           createdAt: new Date().toISOString(),
         });
+        // el almacen de verdad devuelve el registro; el envio retira por su recordId
+        return { recordId: `registro-${turnos.length}` };
       },
       removeLastTurn: () => turnos.pop(),
       latestMemory: async () => null,
-      latestInstructions: async () => null,
-      latestCharacterId: async () => NORA,
-      latestCharacterDescription: async () => 'Te llamas Nora.',
+      // el dueño se lee SOLO por `owner()` (`D-103`)
+      owner: async () => ({
+        characterId: NORA,
+        characterDescription: 'Te llamas Nora.',
+        instructions: null,
+        characterLabel: null,
+        source: 'turn' as const,
+        signedAfter: 0,
+        linkedAt: null,
+        events: 0,
+        winningEventId: null,
+        instructionsSource: null,
+      }),
     },
     characters: { list: async () => montaje.personajes ?? [] },
     privateMedia: { list: async () => [] },
@@ -142,6 +154,8 @@ function montar(montaje: Montaje = {}): Huella {
       listEpisodes: async () => [],
       readEpisode: async () => [],
       timeline: async () => [],
+      // sin enganches: ningun cursor se invalida por dueño (`D-103`)
+      ownerOf: () => undefined,
       conversationsFor: () => new Set<string>(),
       turnAt: () => null,
     },

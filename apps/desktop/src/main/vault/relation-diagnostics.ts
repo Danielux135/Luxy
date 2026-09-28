@@ -43,6 +43,7 @@ import {
   DORMANT_AFTER_DAYS,
   DORMANT_QUIET_DAYS,
   MENTION_MIN_GAP_MS,
+  clearlyRaises,
   selectPendingForTurn,
   type TimelineTurn,
 } from './relation-selection.js';
@@ -55,6 +56,16 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 /** dos veces la misma promesa dentro de esto es repetirse */
 const REPEAT_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * a partir de aqui una cita es LARGA para la nota de «ya salio» (`D-104`).
+ *
+ * Con nueve raices o mas, el 60 % pide seis, y ella saca una promesa con cuatro o
+ * cinco de sus sustantivos: con texto inventado se reconocian 3 de 9 (revision
+ * del 28/09). Bajar el liston para ellas metia falsos, asi que se cuenta cuantas
+ * hay de verdad antes de decidir nada.
+ */
+export const LONG_QUOTE_ROOTS = 9;
 
 /**
  * un turno con su instante ya leido.
@@ -73,6 +84,8 @@ const activeKinds: readonly string[] = ACTIVE_RELATION_KINDS;
 export interface RelationDiagnosticsConversation {
   conversationId: string;
   characterId: string | null;
+  /** tiene algun evento de enganche (`D-103`); ausente cuenta como que no */
+  linked?: boolean;
 }
 
 /** un mensaje del USUARIO, el mismo que ya lee el diagnostico de memoria */
@@ -208,6 +221,16 @@ export interface RelationDiagnostics {
     sameNoteWithin24h: number;
     maxRaisesPerNote: number;
     medianDaysToFirstRaise: number;
+    /**
+     * de `herMentions`, las que ademas pasan la regla estricta: las que habrian
+     * llevado la nota de «ya salio» (`clearlyRaises`)
+     */
+    herMentionsClear: number;
+    /** notas cuya cita tiene `LONG_QUOTE_ROOTS` raices o mas */
+    longQuotes: number;
+    /** `herMentions` y `herMentionsClear` de esas notas largas, por separado */
+    herMentionsLong: number;
+    herMentionsClearLong: number;
   };
   /** lo que reclama ella y cuanto de eso consta; `unbacked` no puede subir */
   inventionGuard: {
@@ -309,9 +332,12 @@ export function diagnoseRelations(input: RelationDiagnosticsInput): RelationDiag
   // solo las que siguen existiendo y no estan excluidas: es el mismo alcance
   // que `PrivateMemory.conversationsFor`, que es quien manda en un turno real
   const ownerOf = new Map<string, string | null>();
+  // las que tienen enganche: un cursor anterior al campo `owner` ya no les vale
+  const linkedOf = new Set<string>();
   for (const conversation of input.conversations) {
     if (input.excluded.has(conversation.conversationId)) continue;
     ownerOf.set(conversation.conversationId, conversation.characterId);
+    if (conversation.linked === true) linkedOf.add(conversation.conversationId);
   }
   const scopeOf = new Map<string | null, Set<string>>();
   for (const [conversationId, characterId] of ownerOf) {
@@ -359,7 +385,10 @@ export function diagnoseRelations(input: RelationDiagnosticsInput): RelationDiag
       upToDate += 1;
       continue;
     }
-    const through = effectiveThrough(cursor, turns);
+    const through = effectiveThrough(cursor, turns, {
+      characterId: ownerOf.get(conversationId) ?? null,
+      linked: linkedOf.has(conversationId),
+    });
     const pending = turns.filter(
       (turn) => turn.sequence > through && turn.sequence <= lastReviewable,
     ).length;
@@ -446,12 +475,27 @@ export function diagnoseRelations(input: RelationDiagnosticsInput): RelationDiag
   let sameNoteWithin24h = 0;
   let maxRaisesPerNote = 0;
   let dormant = 0;
+  let herMentionsClear = 0;
+  let longQuotes = 0;
+  let herMentionsLong = 0;
+  let herMentionsClearLong = 0;
   const daysToFirstRaise: number[] = [];
 
   for (const note of pooled) {
     const mentions = mentionsOf(note, sortedTimeline, scopeFor(note.characterId));
     herMentions += mentions.hers.length;
     maxRaisesPerNote = Math.max(maxRaisesPerNote, mentions.hers.length);
+
+    // cuantas de sus alusiones habrian llevado la nota de «ya salio», y cuanto
+    // pesan las citas largas, donde la regla estricta casi nunca acepta. Solo
+    // cuentas: ni la cita ni sus raices salen de aqui
+    const clear = mentions.hers.filter((turn) => clearlyRaises(turn.stems, note.stems)).length;
+    herMentionsClear += clear;
+    if (note.stems.length >= LONG_QUOTE_ROOTS) {
+      longQuotes += 1;
+      herMentionsLong += mentions.hers.length;
+      herMentionsClearLong += clear;
+    }
 
     const first = mentions.hers[0];
     if (first !== undefined) {
@@ -525,6 +569,10 @@ export function diagnoseRelations(input: RelationDiagnosticsInput): RelationDiag
       sameNoteWithin24h,
       maxRaisesPerNote,
       medianDaysToFirstRaise: median(daysToFirstRaise),
+      herMentionsClear,
+      longQuotes,
+      herMentionsLong,
+      herMentionsClearLong,
     },
     inventionGuard: detectClaims(
       input.replies,

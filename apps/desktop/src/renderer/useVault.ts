@@ -18,12 +18,20 @@ import type {
   ReasoningEffort,
   RelationStatus,
   VaultImagePlanEdit,
+  VaultPendingPacing,
+  VaultRecentMemories,
   VaultReplyGuidance,
 } from '@luxy/shared';
+import type { OwnerChangePreview, OwnerView } from './vault-character-link.js';
 import type { HordeQueueProgress } from '../shared/horde-progress.js';
 import { callBridge } from './bridge-call.js';
 import { compatibilityFor, type CompatibilityRun } from './vault-compatibility-reply.js';
 import { discardDecrypted } from './vault-lock-reset.js';
+import {
+  VAULT_LOCK_NOTICE_UNKNOWN,
+  lockNoticeFor,
+  vaultLockReasonSchema,
+} from '../shared/vault-lock.js';
 import { recapSignature } from './vault-recap-row.js';
 import type { RecapSweepRound } from './vault-sweep.js';
 import type {
@@ -158,6 +166,20 @@ export interface VaultCharacterView {
    * no reutilizar la forma de sus respuestas anteriores y poner su parte.
    */
   replyGuidance: VaultReplyGuidance;
+  /**
+   * si sus pendientes van en modo esporádico (`D-104`).
+   *
+   * Con `per-note` —lo de siempre— el prompt no cambia. Con `sparse` la lista
+   * entra en menos mensajes, se le pide sacarlos sólo si la escena los trae y
+   * se le avisa, sin decir cuál, cuando ya sacó uno.
+   */
+  pendingPacing: VaultPendingPacing;
+  /**
+   * si le llega el resumen de sus dos ultimas conversaciones (`D-105`).
+   *
+   * Con `off` —lo de siempre— el prompt no cambia.
+   */
+  recentMemories: VaultRecentMemories;
   /** su identidad en Xavira, si la tiene. El identificador es el de SU API */
   xavira: { characterId: string; modelId: string } | null;
   /**
@@ -359,7 +381,13 @@ export type VaultErrorArea =
   | 'memoria'
   | 'trabajo-de-fondo'
   | 'personajes'
-  | 'disponibilidad';
+  | 'disponibilidad'
+  /**
+   * la confirmacion de enganchar o soltar (`D-103`). Su fallo y su pista se
+   * pintan dentro de ella: en el aviso general la pista no salia, y la
+   * confirmacion se quedaba en «Comprobando…» sin decir que habia fallado
+   */
+  | 'enganche';
 
 export interface VaultController {
   status: VaultStatusView;
@@ -522,15 +550,62 @@ export interface VaultController {
   /**
    * enciende o apaga las notas de dirección contra la autocopia.
    *
-   * No toca nada más suyo. Apagadas, el prompt sale como siempre.
+   * No toca nada más suyo. Apagadas, esta casilla no añade nada al prompt; no
+   * es «el prompt de siempre», porque otras casillas y la ficha editada también
+   * lo cambian (`D-093`).
    */
   setCharacterReplyGuidance: (
     characterId: string,
     guidance: VaultReplyGuidance,
   ) => Promise<boolean>;
+  /**
+   * enciende o apaga el modo esporádico de los pendientes.
+   *
+   * No toca nada más suyo. Apagado, esta casilla no añade nada al prompt; la
+   * regla del bloque de pendientes sí cambia con la casilla del resumen
+   * (`recentMemories`) encendida, y eso es de la otra casilla (`D-093`).
+   */
+  setCharacterPendingPacing: (characterId: string, pacing: VaultPendingPacing) => Promise<boolean>;
+  /** enciende o apaga el resumen de sus dos ultimas conversaciones */
+  setCharacterRecentMemories: (
+    characterId: string,
+    recent: VaultRecentMemories,
+  ) => Promise<boolean>;
+  /**
+   * de quien es la conversacion abierta, resuelto en main (`D-103`); `null`
+   * en una conversacion nueva, que todavia no es de nadie.
+   */
+  conversationOwner: OwnerView | null;
+  /** lo que pasaria al enganchar o soltar, ya pedido; `null` si no hay ninguno */
+  ownerPreview: OwnerChangePreview | null;
+  /**
+   * sube cada vez que se relee la conversacion abierta y con ello se tira su
+   * vista previa. La confirmacion depende de el para volver a pedirla: sin esto,
+   * reabrir la MISMA conversacion o «Sincronizar» la dejaban para siempre en
+   * «Comprobando qué cambiaría…», con Enviar bloqueado (revision del 28/09)
+   */
+  ownerPreviewEpoch: number;
+  /** pide la vista previa; la confirmacion no se enseña hasta tenerla */
+  previewConversationOwner: (characterId: string | null) => Promise<OwnerChangePreview | null>;
+  clearOwnerPreview: () => void;
+  /** engancha (con un personaje) o suelta (con `null`) la conversacion abierta */
+  setConversationOwner: (characterId: string | null, projectAlias: string) => Promise<boolean>;
+  /**
+   * conversaciones en las que se dijo «No, esta no» al aviso por nombre.
+   *
+   * Solo en memoria: no se guarda en ningun sitio y vuelve a salir al reiniciar
+   * Studio. La conversacion nueva, sin id todavia, va con la clave `''`.
+   */
+  ownerHintDismissed: ReadonlySet<string>;
+  dismissOwnerHint: (conversationId: string | null) => void;
   create: (password: string) => Promise<boolean>;
   unlock: (method: 'password' | 'recovery' | 'device', secret?: string) => Promise<boolean>;
   lock: () => Promise<void>;
+  /**
+   * hay alguien delante (`D-106`). Lo llama `useVaultPresence` con eventos
+   * reales de teclado y raton; leer la boveda ya no cuenta como actividad.
+   */
+  markPresence: () => void;
   changePassword: (current: string, next: string) => Promise<boolean>;
   setDeviceUnlock: (enabled: boolean) => Promise<boolean>;
   setAutoLock: (minutes: number) => Promise<boolean>;
@@ -929,6 +1004,8 @@ export interface VaultController {
     mediaUploaded: number;
     mediaDownloaded: number;
     mediaSkipped: number;
+    /** con un envio en curso: se deja para la siguiente (revision del 28/09) */
+    conversationsDeferred: number;
   } | null;
   sync: () => Promise<void>;
   acknowledgeRecoveryKey: () => void;
@@ -971,6 +1048,12 @@ export function useVault(): VaultController {
   const [instructions, setInstructions] = useState<string | null>(null);
   const [characterId, setCharacterId] = useState<string | null>(null);
   const [characterDescription, setCharacterDescription] = useState<string | null>(null);
+  const [conversationOwner, setConversationOwnerView] = useState<OwnerView | null>(null);
+  const [ownerPreview, setOwnerPreview] = useState<OwnerChangePreview | null>(null);
+  const [ownerPreviewEpoch, setOwnerPreviewEpoch] = useState(0);
+  /** el numero de la ultima vista previa pedida: ver `previewConversationOwner` */
+  const previewTicket = useRef(0);
+  const [ownerHintDismissed, setOwnerHintDismissed] = useState<ReadonlySet<string>>(new Set());
   const [characters, setCharacters] = useState<VaultCharacterView[]>([]);
   const [describingMedia, setDescribingMedia] = useState(false);
   const [rewritingCaption, setRewritingCaption] = useState(false);
@@ -1092,6 +1175,20 @@ export function useVault(): VaultController {
       compatibility: () => setCompatibility(null),
       pendingImagePlan: () => setPendingImagePlan(null),
       openImageAttempt: () => setOpenImageAttempt(null),
+      characterDescription: () => {
+        setCharacterDescription(null);
+        setCharacterId(null);
+      },
+      conversationOwner: () => setConversationOwnerView(null),
+      ownerPreview: () => {
+        // y la que este en vuelo, fuera: su respuesta llegaria DESPUES de la
+        // purga, pasaria la comprobacion del numero y volveria a escribir el
+        // nombre y las cifras con la boveda cerrada (revision del 28/09)
+        previewTicket.current += 1;
+        setOwnerPreview(null);
+      },
+      characters: () => setCharacters([]),
+      ownerHintDismissed: () => setOwnerHintDismissed(new Set()),
     }),
     [],
   );
@@ -1129,9 +1226,19 @@ export function useVault(): VaultController {
     // el bloqueo automatico ocurre en el proceso principal; aqui solo se
     // refresca la cuenta atras para que la interfaz no mienta
     const timer = setInterval(() => void refresh(), TICK_MS);
-    const unsubscribe = window.luxy.onVaultLocked(() => {
+    const unsubscribe = window.luxy.onVaultLocked((payload) => {
       void refresh();
-      setHint('La bóveda se cerró sola por inactividad.');
+      // el aviso dice POR QUE, y solo lo que ha pasado de verdad (`D-093`):
+      // «por inactividad» despues de un Win+L seria falso. El motivo llega de
+      // fuera del renderer y se valida antes de fiarse de el
+      const motivo = vaultLockReasonSchema.safeParse(payload);
+      if (!motivo.success) {
+        setHint(VAULT_LOCK_NOTICE_UNKNOWN);
+        return;
+      }
+      // el boton, salir y cerrar la sesion los ha pedido el: sin aviso
+      const aviso = lockNoticeFor(motivo.data);
+      if (aviso !== null) setHint(aviso);
     });
     // la cola de AI Horde. Llega muchas veces por imagen —el sondeo da unas
     // ochenta vueltas en diez minutos—, asi que es un contador que se pisa a si
@@ -1337,6 +1444,13 @@ export function useVault(): VaultController {
     },
     [run, reloadConversations, reloadCharacters],
   );
+
+  // sin `run`: no toca `busy` ni borra el error de la pantalla, y un fallo aqui
+  // no es nada que Daniel tenga que ver. Si no llega, la boveda se cierra antes,
+  // que es el lado seguro
+  const markPresence = useCallback((): void => {
+    void callBridge(() => window.luxy.markVaultPresence());
+  }, []);
 
   const lock = useCallback(async (): Promise<void> => {
     const value = await run(() => window.luxy.lockVault());
@@ -1778,6 +1892,16 @@ export function useVault(): VaultController {
       // El proyecto es preferencia y se conserva; el proveedor lo trae la propia
       // conversacion unas lineas mas abajo, porque pertenece a ella
       setComposerState((previous) => ({ ...previous, ...EMPTY_DRAFT }));
+      // el «No, esta no» de una conversacion nueva es de ESA, que aun no tiene
+      // id y va con la clave `''`. Al cambiar de conversacion se suelta: si no,
+      // la siguiente nueva nacia con un descarte que nadie habia dicho y lo
+      // heredaba al primer envio (revision del 28/09)
+      setOwnerHintDismissed((previous) => {
+        if (!previous.has('')) return previous;
+        const next = new Set(previous);
+        next.delete('');
+        return next;
+      });
       if (conversationId === null) {
         setTurns([]);
         // una conversación nueva empieza sin instrucciones: arrastrar las de la
@@ -1785,6 +1909,9 @@ export function useVault(): VaultController {
         setInstructions(null);
         setCharacterId(null);
         setCharacterDescription(null);
+        setConversationOwnerView(null);
+        previewTicket.current += 1;
+        setOwnerPreview(null);
         setLastImage(null);
         setPendingImagePlan(null);
         setLastMemoryStatus(null);
@@ -1796,6 +1923,13 @@ export function useVault(): VaultController {
         setInstructions(result.value.instructions);
         setCharacterId(result.value.characterId);
         setCharacterDescription(result.value.characterDescription);
+        setConversationOwnerView(result.value.owner);
+        previewTicket.current += 1;
+        setOwnerPreview(null);
+        // la vista previa que se acaba de tirar puede ser de ESTA misma
+        // conversacion, con la confirmacion abierta: que la vuelva a pedir, ya
+        // con los turnos releidos
+        setOwnerPreviewEpoch((value) => value + 1);
         // el proveedor pertenece a la conversacion, no a la ventana: viene
         // sellado con su ultimo turno y por eso sobrevive a reiniciar Studio.
         // Sin turnos todavia se conserva el que estuviera elegido
@@ -2054,11 +2188,35 @@ export function useVault(): VaultController {
           setHint(result.hint);
           return false;
         }
+        // una conversacion nueva cuyo primer mensaje se quedo sin respuesta ya no
+        // existe: main retiro el turno y borro el archivo. Si la pantalla se
+        // quedara con su id, el reenvio iria como conversacion YA EMPEZADA, sin
+        // el personaje elegido, y naceria sin su ficha (`D-103`)
+        const openAfter = conversationAfterSend(result.value);
+        if (openAfter === null) {
+          setOpenConversationId(null);
+          setTurns([]);
+          setComposerState((previous) => ({ ...previous, message: input.message }));
+          if (result.value.error !== null) setError(result.value.error);
+          await reloadConversations();
+          return false;
+        }
+        // el «No, esta no» de una conversacion nueva pasa a su id al nacer
+        if (openConversationId === null) {
+          setOwnerHintDismissed((previous) => {
+            if (!previous.has('')) return previous;
+            const next = new Set(previous);
+            next.delete('');
+            next.add(result.value.conversationId);
+            return next;
+          });
+        }
         setOpenConversationId(result.value.conversationId);
         setTurns(result.value.turns);
         setInstructions(result.value.instructions);
         setCharacterId(result.value.characterId);
         setCharacterDescription(result.value.characterDescription);
+        setConversationOwnerView(result.value.owner);
         if (result.value.provider !== null) {
           setComposerState((previous) => ({ ...previous, provider: result.value.provider }));
         }
@@ -2411,7 +2569,7 @@ export function useVault(): VaultController {
       setHint(null);
       const result = await window.luxy.setVaultCharacterImageProvider({ characterId, provider });
       if (!result.ok) {
-        setError(result.error);
+        setError(result.error, 'personajes');
         setHint(result.hint);
         return false;
       }
@@ -2427,7 +2585,7 @@ export function useVault(): VaultController {
       setHint(null);
       const result = await window.luxy.setVaultCharacterImageReview({ characterId, review });
       if (!result.ok) {
-        setError(result.error);
+        setError(result.error, 'personajes');
         setHint(result.hint);
         return false;
       }
@@ -2445,7 +2603,7 @@ export function useVault(): VaultController {
       setHint(null);
       const result = await window.luxy.setVaultCharacterImageCast({ characterId, cast });
       if (!result.ok) {
-        setError(result.error);
+        setError(result.error, 'personajes');
         setHint(result.hint);
         return false;
       }
@@ -2463,7 +2621,7 @@ export function useVault(): VaultController {
       setHint(null);
       const result = await window.luxy.setVaultCharacterReplyGuidance({ characterId, guidance });
       if (!result.ok) {
-        setError(result.error);
+        setError(result.error, 'personajes');
         setHint(result.hint);
         return false;
       }
@@ -2473,6 +2631,119 @@ export function useVault(): VaultController {
     },
     [],
   );
+
+  const setCharacterPendingPacing = useCallback(
+    async (characterId: string, pacing: VaultPendingPacing): Promise<boolean> => {
+      setError(null);
+      setHint(null);
+      const result = await window.luxy.setVaultCharacterPendingPacing({ characterId, pacing });
+      if (!result.ok) {
+        setError(result.error, 'personajes');
+        setHint(result.hint);
+        return false;
+      }
+      // la lista aplicada, para que la casilla no se quede con el valor viejo
+      setCharacters(result.value.characters);
+      return true;
+    },
+    [],
+  );
+
+  const setCharacterRecentMemories = useCallback(
+    async (characterId: string, recent: VaultRecentMemories): Promise<boolean> => {
+      setError(null);
+      setHint(null);
+      const result = await window.luxy.setVaultCharacterRecentMemories({ characterId, recent });
+      if (!result.ok) {
+        setError(result.error, 'personajes');
+        setHint(result.hint);
+        return false;
+      }
+      // la lista aplicada, para que la casilla no se quede con el valor viejo
+      setCharacters(result.value.characters);
+      return true;
+    },
+    [],
+  );
+
+  const previewConversationOwner = useCallback(
+    async (characterId: string | null): Promise<OwnerChangePreview | null> => {
+      // cada peticion lleva su numero y solo la ULTIMA puede pintar. Sin esto,
+      // cambiar de personaje en la confirmacion dejaba llegar tarde la vista
+      // previa del anterior: el boton decia «Enganchar a Lia» y enganchaba a
+      // otra, y el acuse repetia el nombre equivocado (`D-093`)
+      previewTicket.current += 1;
+      const ticket = previewTicket.current;
+      setOwnerPreview(null);
+      if (openConversationId === null) return null;
+      setError(null);
+      setHint(null);
+      const result = await window.luxy.previewVaultConversationOwner({
+        conversationId: openConversationId,
+        characterId,
+      });
+      if (!mounted.current || ticket !== previewTicket.current) return null;
+      if (!result.ok) {
+        setError(result.error, 'enganche');
+        setHint(result.hint);
+        return null;
+      }
+      setOwnerPreview(result.value);
+      return result.value;
+    },
+    [openConversationId, setError],
+  );
+
+  const clearOwnerPreview = useCallback((): void => {
+    // lo que este en camino ya no puede pintar
+    previewTicket.current += 1;
+    setOwnerPreview(null);
+  }, []);
+
+  const setConversationOwner = useCallback(
+    async (characterId: string | null, projectAlias: string): Promise<boolean> => {
+      if (openConversationId === null) return false;
+      setBusy(true);
+      setError(null);
+      setHint(null);
+      try {
+        const result = await window.luxy.setVaultConversationOwner({
+          conversationId: openConversationId,
+          characterId,
+          projectAlias,
+        });
+        if (!result.ok) {
+          setError(result.error, 'enganche');
+          setHint(result.hint);
+          return false;
+        }
+        if (!mounted.current) return true;
+        // la conversacion tal y como la ve main con el dueño nuevo
+        setTurns(result.value.turns);
+        setInstructions(result.value.instructions);
+        setCharacterId(result.value.characterId);
+        setCharacterDescription(result.value.characterDescription);
+        setConversationOwnerView(result.value.owner);
+        setOwnerPreview(null);
+        // soltar a proposito vale como «No, esta no»: sin esto el aviso «¿Es de
+        // Lia? · Si, es suya» volvia a salir en el acto, invitando a enganchar
+        // lo que se acababa de soltar (revision del 28/09)
+        if (characterId === null) {
+          const soltada = openConversationId;
+          setOwnerHintDismissed((previous) => new Set([...previous, soltada]));
+        }
+        await reloadConversations();
+        return true;
+      } finally {
+        if (mounted.current) setBusy(false);
+      }
+    },
+    [openConversationId, reloadConversations],
+  );
+
+  const dismissOwnerHint = useCallback((conversationId: string | null): void => {
+    setOwnerHintDismissed((previous) => new Set([...previous, conversationId ?? '']));
+  }, []);
 
   const readCharacterInstructions = useCallback(
     async (characterId: string): Promise<string | null> => {
@@ -2517,6 +2788,7 @@ export function useVault(): VaultController {
         mediaUploaded: result.value.mediaUploaded,
         mediaDownloaded: result.value.mediaDownloaded,
         mediaSkipped: result.value.mediaSkipped,
+        conversationsDeferred: result.value.conversationsDeferred,
       });
       // lo descargado puede incluir conversaciones que aqui no existian
       await reloadConversations();
@@ -2525,6 +2797,15 @@ export function useVault(): VaultController {
       if (mounted.current) setSyncing(false);
     }
   }, [reloadConversations, openConversation, openConversationId]);
+
+  // las tres que faltaban por estabilizar. El objeto que devuelve este hook es
+  // nuevo en cada render —y hay uno cada 5 s por el latido—, asi que NADIE debe
+  // depender de el en un efecto: se depende de la funcion, y la funcion tiene
+  // que ser estable. Dos efectos que dependian del objeto releian la boveda
+  // sola cada pocos segundos (`D-106`); `main/renderer-effect-deps.test.ts` lo vigila
+  const clearRecapPreview = useCallback((): void => setRecapPreview(null), []);
+  const acknowledgeRecoveryKey = useCallback((): void => setRecoveryKey(null), []);
+  const clearError = useCallback((): void => setError(null), [setError]);
 
   return {
     status,
@@ -2551,6 +2832,16 @@ export function useVault(): VaultController {
     setCharacterImageReview,
     setCharacterImageCast,
     setCharacterReplyGuidance,
+    setCharacterPendingPacing,
+    setCharacterRecentMemories,
+    conversationOwner,
+    ownerPreview,
+    ownerPreviewEpoch,
+    previewConversationOwner,
+    clearOwnerPreview,
+    setConversationOwner,
+    ownerHintDismissed,
+    dismissOwnerHint,
     setMediaCaption,
     describeMedia,
     describingMedia,
@@ -2567,6 +2858,7 @@ export function useVault(): VaultController {
     create,
     unlock,
     lock,
+    markPresence,
     changePassword,
     setDeviceUnlock,
     setAutoLock,
@@ -2618,7 +2910,7 @@ export function useVault(): VaultController {
     syncingRecaps,
     lastRecapSync,
     recapPreview,
-    clearRecapPreview: () => setRecapPreview(null),
+    clearRecapPreview,
     recaps,
     recapCoverage,
     loadRecaps,
@@ -2643,9 +2935,26 @@ export function useVault(): VaultController {
     syncing,
     lastSync,
     sync,
-    acknowledgeRecoveryKey: () => setRecoveryKey(null),
-    clearError: () => setError(null),
+    acknowledgeRecoveryKey,
+    clearError,
   };
+}
+
+/**
+ * la conversacion que queda abierta tras un envio, o `null` si ya no existe.
+ *
+ * Un turno sin respuesta se retira, y si era el unico main borra el archivo:
+ * la conversacion no llego a nacer. Quedarse con su id convertia el reenvio en
+ * el de una conversacion ya empezada, sin personaje, y la confirmacion del
+ * enganche se atascaba en una vista previa que no podia calcularse.
+ */
+export function conversationAfterSend(result: {
+  conversationId: string;
+  userTurnKept: boolean;
+  turns: readonly unknown[];
+}): string | null {
+  if (!result.userTurnKept && result.turns.length === 0) return null;
+  return result.conversationId;
 }
 
 /** etiqueta legible de cada opcion de bloqueo automatico */

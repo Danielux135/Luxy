@@ -24,7 +24,17 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
-import { privateRecordSchema, type ConversationMemory, type PrivateRecord } from '@luxy/shared';
+import {
+  privateRecordSchema,
+  resolveConversationOwner,
+  type ConversationMemory,
+  type ConversationOwner,
+  type ConversationOwnerEvent,
+  type ConversationOwnerSource,
+  type OwnerTurnFact,
+  type PrivateRecord,
+} from '@luxy/shared';
+import type { ConversationOwnerStore } from './conversation-owner-store.js';
 import { openTurn, sealTurn, type SealTurnInput } from './private-store.js';
 import { VaultError, type VaultService } from './vault-service.js';
 
@@ -90,34 +100,87 @@ export interface PrivateConversationSummary {
    * le hace las fotos. `null` cuando nunca se eligio personaje.
    */
   characterId: string | null;
+  /**
+   * de donde sale ese dueño (`D-103`). Opcionales para no romper los dobles de
+   * las pruebas; el almacen real los rellena siempre.
+   */
+  ownerSource?: ConversationOwnerSource;
+  /** la conversacion tiene algun evento de enganche, aunque ya se soltara */
+  ownerLinked?: boolean;
+  /** cuando se engancho, si el dueño lo puso un enganche */
+  linkedAt?: string | null;
+  /** la copia del nombre que lleva el enganche ganador */
+  ownerLabel?: string | null;
 }
 
+/** lo que se le pide al almacen de enganches; una interfaz para poder probar */
+export type ConversationOwnerEvents = Pick<ConversationOwnerStore, 'all' | 'forConversation'>;
+
 /**
- * de quien es la conversacion, mirando hacia atras desde el ultimo turno.
+ * el `recordId` de una linea del archivo, sin descifrar nada.
  *
- * Hay que recorrerla porque el personaje SOLO se vuelve a sellar cuando cambia:
- * quedarse con el del ultimo turno devolveria `null` en casi todos los hilos, y
- * entonces la lista no podria separar los de Lia de los demas. Se corta en el
- * primero que lo lleve, que es el que esta en vigor.
+ * Una linea que no parsea o no valida no tiene identificador: `null`, y quien
+ * pregunta por uno concreto no la toma por el suyo.
  */
-async function characterOf(
-  vault: VaultService,
-  records: PrivateRecord[],
-  fromLastTurn: string | null,
-): Promise<string | null> {
-  if (fromLastTurn !== null) return fromLastTurn.length === 0 ? null : fromLastTurn;
-  // el ultimo ya viene abierto por quien llama: descifrarlo otra vez seria
-  // pagar dos veces por el mismo turno en cada conversacion de la lista
-  for (let index = records.length - 2; index >= 0; index -= 1) {
-    const opened = await openTurn(vault, records[index]!);
-    if (opened.turn.characterId === null) continue;
-    return opened.turn.characterId.length === 0 ? null : opened.turn.characterId;
+function recordIdOf(line: string | undefined): string | null {
+  if (line === undefined) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(line);
+  } catch {
+    return null;
   }
-  return null;
+  const record = privateRecordSchema.safeParse(parsed);
+  return record.success ? record.data.recordId : null;
+}
+
+/** los hechos de dueño que sello un turno */
+function ownerFact(sequence: number, turn: {
+  characterId: string | null;
+  characterDescription: string | null;
+  instructions: string | null;
+}): OwnerTurnFact {
+  return {
+    sequence,
+    characterId: turn.characterId,
+    characterDescription: turn.characterDescription,
+    instructions: turn.instructions,
+  };
 }
 
 export class PrivateConversationStore {
-  constructor(private readonly directory: string) {}
+  constructor(
+    private readonly directory: string,
+    /**
+     * los enganches (`D-103`). Sin el, ninguna conversacion tiene eventos y el
+     * dueño sale solo de los turnos, que es lo que habia antes.
+     */
+    private readonly owners?: ConversationOwnerEvents,
+  ) {}
+
+  /**
+   * de quien es la conversacion, con su ficha y sus instrucciones.
+   *
+   * Es el UNICO sitio que lee el personaje de un turno: todos los lectores —el
+   * prompt, el indice, los pendientes, la lista y la pantalla— pasan por aqui o
+   * por `list()`, que usa la misma funcion. Una prueba estructural lo vigila.
+   *
+   * Descifra la conversacion entera. Se usa en operaciones puntuales —leer,
+   * enviar, enganchar—; la lista, que se pide mucho, para antes.
+   */
+  async owner(
+    vault: VaultService,
+    conversationId: string,
+    events?: readonly ConversationOwnerEvent[],
+  ): Promise<ConversationOwner> {
+    const known = events ?? (await this.owners?.forConversation(vault, conversationId)) ?? [];
+    const facts: OwnerTurnFact[] = [];
+    for (const record of this.readRecords(conversationId)) {
+      const opened = await openTurn(vault, record);
+      facts.push(ownerFact(record.sequence, opened.turn));
+    }
+    return resolveConversationOwner({ turns: facts, events: known });
+  }
 
   /** lee los registros crudos: siguen cifrados, no hace falta la boveda */
   private readRecords(conversationId: string): PrivateRecord[] {
@@ -225,6 +288,9 @@ export class PrivateConversationStore {
   async list(vault: VaultService): Promise<PrivateConversationSummary[]> {
     if (!existsSync(this.directory)) return [];
 
+    // los enganches se leen UNA vez para toda la lista
+    const allEvents = (await this.owners?.all(vault)) ?? new Map<string, ConversationOwnerEvent[]>();
+
     const summaries: PrivateConversationSummary[] = [];
     for (const entry of readdirSync(this.directory)) {
       if (!entry.endsWith('.jsonl')) continue;
@@ -235,14 +301,37 @@ export class PrivateConversationStore {
       const last = records[records.length - 1];
       if (last === undefined) continue;
 
-      // el titulo se lee del ultimo turno, que es el mas actualizado
-      const opened = await openTurn(vault, last);
+      const events = allEvents.get(conversationId) ?? [];
+      // hacia atras, y parando en cuanto nada de lo que queda pueda ganar: el
+      // primer turno que fijo dueño, o la posicion del ancla mas alta (un turno
+      // en esa secuencia o antes pierde contra el evento). Es la misma funcion
+      // que `owner()` con un sufijo que basta para el dueño y su ficha; lo fija
+      // una prueba en `vault-owner.test.ts`
+      const maxAnchor = events.reduce((max, event) => Math.max(max, event.anchorSequence), -1);
+      const facts: OwnerTurnFact[] = [];
+      let title: string | null = null;
+      for (let index = records.length - 1; index >= 0; index -= 1) {
+        const record = records[index]!;
+        if (index < records.length - 1 && record.sequence <= maxAnchor) break;
+        const opened = await openTurn(vault, record);
+        // el titulo se lee del ultimo turno, que es el mas actualizado
+        if (index === records.length - 1) title = opened.turn.title;
+        if (record.sequence <= maxAnchor) break;
+        facts.unshift(ownerFact(record.sequence, opened.turn));
+        if (opened.turn.characterId !== null) break;
+      }
+      const owner = resolveConversationOwner({ turns: facts, events });
+
       summaries.push({
         conversationId,
-        title: opened.turn.title ?? 'Sin titulo',
+        title: title ?? 'Sin titulo',
         turns: records.length,
         updatedAt: last.createdAt,
-        characterId: await characterOf(vault, records, opened.turn.characterId),
+        characterId: owner.characterId,
+        ownerSource: owner.source,
+        ownerLinked: owner.events > 0,
+        linkedAt: owner.linkedAt,
+        ownerLabel: owner.characterLabel,
       });
     }
     return summaries.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
@@ -266,30 +355,6 @@ export class PrivateConversationStore {
       if (record.sealedMemory === null) continue;
       const opened = await openTurn(vault, record);
       if (opened.memory !== null) return opened.memory.memory;
-    }
-    return null;
-  }
-
-  /**
-   * instrucciones fijas en vigor, leidas del ultimo turno que las llevaba.
-   *
-   * Mismo criterio que `latestMemory`: se busca hacia atras y vale la primera
-   * que aparezca. Un turno que no las llevaba no significa que se hayan
-   * borrado; significa que ese turno no las cambio.
-   *
-   * Para quitarlas de verdad se guarda una cadena vacia, que si se distingue de
-   * «no las toque». Sin esa distincion no habria forma de volver atras.
-   */
-  async latestInstructions(
-    vault: VaultService,
-    conversationId: string,
-  ): Promise<string | null> {
-    const records = this.readRecords(conversationId);
-    for (let index = records.length - 1; index >= 0; index -= 1) {
-      const record = records[index]!;
-      const opened = await openTurn(vault, record);
-      if (opened.turn.instructions === null) continue;
-      return opened.turn.instructions.length === 0 ? null : opened.turn.instructions;
     }
     return null;
   }
@@ -335,48 +400,6 @@ export class PrivateConversationStore {
   }
 
   /**
-   * personaje en vigor, leido del ultimo turno que lo llevaba.
-   *
-   * Mismo criterio que `latestInstructions`: hacia atras y vale el primero que
-   * aparezca. Es lo que hace que «el personaje» sea de la conversacion y no de
-   * un campo que hay que rellenar en cada mensaje.
-   */
-  async latestCharacterId(
-    vault: VaultService,
-    conversationId: string,
-  ): Promise<string | null> {
-    const records = this.readRecords(conversationId);
-    for (let index = records.length - 1; index >= 0; index -= 1) {
-      const opened = await openTurn(vault, records[index]!);
-      if (opened.turn.characterId === null) continue;
-      return opened.turn.characterId.length === 0 ? null : opened.turn.characterId;
-    }
-    return null;
-  }
-
-  /**
-   * descripcion del personaje en vigor, para el modelo.
-   *
-   * Mismo criterio que `latestCharacterId`, y va aparte porque son dos cosas
-   * distintas: el identificador lo usa el proveedor de imagenes; esta
-   * descripcion la lee el modelo, que no ve ninguna imagen.
-   */
-  async latestCharacterDescription(
-    vault: VaultService,
-    conversationId: string,
-  ): Promise<string | null> {
-    const records = this.readRecords(conversationId);
-    for (let index = records.length - 1; index >= 0; index -= 1) {
-      const opened = await openTurn(vault, records[index]!);
-      if (opened.turn.characterDescription === null) continue;
-      return opened.turn.characterDescription.length === 0
-        ? null
-        : opened.turn.characterDescription;
-    }
-    return null;
-  }
-
-  /**
    * retira el ultimo turno.
    *
    * Existe para un caso concreto: el mensaje del usuario se sella ANTES de
@@ -387,13 +410,24 @@ export class PrivateConversationStore {
    *
    * Un turno sin contestacion no es parte de la conversacion: es un intento
    * fallido. Devuelve true si habia algo que retirar.
+   *
+   * Con `expectedRecordId`, solo retira la ultima linea si ES ese registro. Sin
+   * la llave no se puede mirar el rol, pero el `recordId` va en claro: es la
+   * unica forma de no llevarse otra linea que haya quedado detras —una respuesta
+   * suya si el turno ya se retiro una vez, o un registro que haya bajado la
+   * sincronizacion mientras se esperaba la respuesta (revision del 28/09)—. Si
+   * no casa no toca nada y devuelve false.
    */
-  removeLastTurn(conversationId: string): boolean {
+  removeLastTurn(conversationId: string, expectedRecordId?: string): boolean {
     const file = fileFor(this.directory, conversationId);
     if (!existsSync(file)) return false;
 
     const lines = readFileSync(file, 'utf8').split('\n').filter((line) => line.trim().length > 0);
     if (lines.length === 0) return false;
+
+    if (expectedRecordId !== undefined && recordIdOf(lines[lines.length - 1]) !== expectedRecordId) {
+      return false;
+    }
 
     lines.pop();
     // sin turnos, la conversacion deja de existir: una entrada vacia en la

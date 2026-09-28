@@ -222,7 +222,7 @@ describe('sincronizacion de medios', () => {
 
   it('con la boveda cerrada no sincroniza', async () => {
     const { vault, store } = await machine();
-    vault.lock();
+    vault.lock('manual');
     await expect(syncMedia(vault, store, deps())).rejects.toThrow(VaultError);
     expect(gateway.calls).toHaveLength(0);
   });

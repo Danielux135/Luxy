@@ -273,7 +273,7 @@ function montar(montaje: Montaje = {}): Huella {
   }
 
   const context = {
-    vault: { isUnlocked: () => true, onLock: () => () => undefined },
+    vault: { isUnlocked: () => true, onLock: () => () => undefined, beginUserWait: () => () => undefined },
     privateConversations: {
       list: async () => [
         {
@@ -306,6 +306,8 @@ function montar(montaje: Montaje = {}): Huella {
           text: turno.text,
           createdAt: new Date().toISOString(),
         });
+        // el almacen de verdad devuelve el registro; el envio retira por su recordId
+        return { recordId: `registro-${turnos.length}` };
       },
       removeLastTurn: () => turnos.pop(),
       latestMemory: async (_vault: unknown, conversationId: string) =>
@@ -317,9 +319,19 @@ function montar(montaje: Montaje = {}): Huella {
         // implementacion que los perdiera pasaria esta prueba sin esto
         return 1;
       },
-      latestInstructions: async () => null,
-      latestCharacterId: async () => LIA,
-      latestCharacterDescription: async () => 'Lia, veinticuatro años',
+      // el dueño se lee SOLO por `owner()` (`D-103`)
+      owner: async () => ({
+        characterId: LIA,
+        characterDescription: 'Lia, veinticuatro años',
+        instructions: null,
+        characterLabel: null,
+        source: 'turn' as const,
+        signedAfter: 0,
+        linkedAt: null,
+        events: 0,
+        winningEventId: null,
+        instructionsSource: null,
+      }),
       latestProvider: async () => null,
       latestModel: async () => null,
     },
@@ -354,6 +366,8 @@ function montar(montaje: Montaje = {}): Huella {
             createdAt: turno.createdAt,
             stems: new Set(tokenize(turno.text)),
           })),
+      // sin enganches: ningun cursor se invalida por dueño (`D-103`)
+      ownerOf: () => undefined,
       conversationsFor: () => new Set([CONV, OTRA]),
       turnAt: () => null,
     },

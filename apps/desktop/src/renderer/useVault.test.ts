@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
+  conversationAfterSend,
   formatAutoLockOption,
   formatLockCountdown,
   imageCostOutcome,
@@ -470,5 +471,27 @@ describe('que se dice sobre lo que costo una imagen', () => {
       unit: 'creditos',
       amount: 5,
     });
+  });
+});
+
+describe('la conversacion que queda abierta tras un envio', () => {
+  const ID = '22222222-2222-4222-8222-222222222222';
+
+  it('si el primer mensaje se quedo sin respuesta, no queda ninguna (`D-103`)', () => {
+    // main retiro el turno y borro el archivo: quedarse con el id hacia que el
+    // reenvio saliera como conversacion ya empezada, sin el personaje elegido
+    expect(conversationAfterSend({ conversationId: ID, userTurnKept: false, turns: [] })).toBeNull();
+  });
+
+  it('con turnos que quedan, sigue abierta aunque se retirara el ultimo', () => {
+    expect(
+      conversationAfterSend({ conversationId: ID, userTurnKept: false, turns: [{}, {}] }),
+    ).toBe(ID);
+  });
+
+  it('con la respuesta guardada sigue abierta, aunque el cierre de la boveda no devuelva turnos', () => {
+    // el corte por el candado con la respuesta ya en disco devuelve `turns: []`
+    // y `userTurnKept: true`: la conversacion existe
+    expect(conversationAfterSend({ conversationId: ID, userTurnKept: true, turns: [] })).toBe(ID);
   });
 });

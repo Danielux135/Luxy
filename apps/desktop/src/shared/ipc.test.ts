@@ -32,6 +32,7 @@ import {
   vaultCharacterImageReviewArgsSchema,
   vaultCharacterImageCastArgsSchema,
   vaultCharacterReplyGuidanceArgsSchema,
+  vaultCharacterPendingPacingArgsSchema,
   vaultHordeCharacterSaveArgsSchema,
   vaultCompatibilityArgsSchema,
   vaultCompatibilityResultSchema,
@@ -315,6 +316,29 @@ describe('validacion de argumentos', () => {
     // sin valor no hay nada que decidir: el defecto vive en el almacen
     expect(valido({ characterId: 'per-1' })).toBe(false);
     expect(valido({ characterId: '', guidance: 'none' })).toBe(false);
+  });
+
+  it('un personaje sin el modo esporadico se lee con el apagado', () => {
+    // apagado es el prompt de siempre (`D-104`)
+    const leido = vaultCharacterSummarySchema.parse({
+      characterId: 'e0000000-5555-4555-8555-555555555555',
+      description: '',
+      label: 'Nora',
+      avatarObjectKey: null,
+      createdAt: '2026-09-02T08:50:37.000Z',
+    });
+    expect(leido.pendingPacing).toBe('per-note');
+  });
+
+  it('el interruptor del modo esporadico solo admite sus dos valores', () => {
+    const valido = (args: unknown) => vaultCharacterPendingPacingArgsSchema.safeParse(args).success;
+    expect(valido({ characterId: 'per-1', pacing: 'sparse' })).toBe(true);
+    expect(valido({ characterId: 'per-1', pacing: 'per-note' })).toBe(true);
+    expect(valido({ characterId: 'per-1', pacing: 'rare' })).toBe(false);
+    expect(valido({ characterId: 'per-1', pacing: true })).toBe(false);
+    // sin valor no hay nada que decidir: el defecto vive en el almacen
+    expect(valido({ characterId: 'per-1' })).toBe(false);
+    expect(valido({ characterId: '', pacing: 'sparse' })).toBe(false);
   });
 
   it('el pie de foto de un adjunto es opcional y acotado', () => {

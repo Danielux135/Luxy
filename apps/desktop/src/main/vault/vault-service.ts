@@ -48,6 +48,37 @@ import {
   type AutoLockMinutes,
   type VaultKeyFile,
 } from './key-file.js';
+import type { VaultLockReason, VaultUnlockVia } from '../../shared/vault-lock.js';
+
+/**
+ * tope de una espera del usuario, medido con el reloj de pared.
+ *
+ * Un turno local se corta a los 30 minutos (`LOCAL_TURN_TIMEOUT_MS`) y aqui se
+ * le dan 5 de margen. Existe para que una espera que un fallo deje sin soltar no
+ * apague el cierre automatico para siempre (`D-106`).
+ */
+export const MAX_USER_WAIT_MS = 35 * 60_000;
+
+/**
+ * que espera el usuario.
+ *
+ * Las dos mantienen abierta la boveda por inactividad, pero solo `reply` —un
+ * envio suyo— aplaza el cierre por Win+L (`D-106`). Generar o aprobar una imagen
+ * no: el tope del aplazamiento se midio sobre turnos privados, no sobre el
+ * Horde, y la llave no se queda en memoria con Windows bloqueado por una imagen.
+ */
+export type UserWaitKind = 'reply' | 'image';
+
+/** lo que reciben quienes escuchan el cierre. Solo el hecho: enteros y un motivo */
+export interface VaultLockEvent {
+  reason: VaultLockReason;
+  /** `false` si ya estaba cerrada: hay que seguir avisando, pero no es un cierre nuevo */
+  wasUnlocked: boolean;
+  /** cuanto estuvo abierta; `null` si no lo estaba */
+  openMs: number | null;
+  /** cuantas subclaves se derivaron desde que se abrio */
+  derivations: number;
+}
 
 export class VaultError extends Error {
   constructor(
@@ -101,10 +132,23 @@ export interface VaultServiceOptions {
 }
 
 export class VaultService {
-  private readonly lockListeners = new Set<() => void>();
+  private readonly lockListeners = new Set<(event: VaultLockEvent) => void>();
+  private readonly unlockListeners = new Set<(via: VaultUnlockVia) => void>();
 
   private masterKey: Uint8Array | null = null;
   private lastActivityAt = 0;
+  /** cuando se abrio esta sesion; `null` con la boveda cerrada */
+  private unlockedAt: number | null = null;
+  /**
+   * subclaves derivadas en esta sesion.
+   *
+   * Leer ya no cuenta como actividad (`D-106`), asi que un lector que se relea
+   * solo deja de mantener viva la boveda sin que nadie lo vea. Este numero, en
+   * la linea de cierre, es lo que lo delata.
+   */
+  private derivations = 0;
+  /** esperas del usuario en curso, con cuando empezaron */
+  private readonly userWaits = new Map<symbol, { startedAt: number; kind: UserWaitKind }>();
   private readonly now: () => number;
   private readonly argon2Params: Argon2Params;
 
@@ -181,6 +225,10 @@ export class VaultService {
     const limit = this.autoLockMs(contents);
     // sin bloqueo automatico no hay cuenta atras que mostrar
     if (limit === 0) return null;
+    // mientras el espera una respuesta, la cuenta no corre: el limite empieza
+    // cuando llega, y bajar hasta cero en pantalla seria anunciar un cierre que
+    // no va a ocurrir
+    if (this.activeUserWaits() > 0) return limit;
     return Math.max(0, this.lastActivityAt + limit - this.now());
   }
 
@@ -232,7 +280,7 @@ export class VaultService {
       writeVaultKeyFile(this.file, createVaultKeyFile([passwordWrap, recoveryWrap]));
       // se queda abierta: acabar de crearla y tener que escribir la contraseña
       // otra vez no aporta nada
-      this.adopt(masterKey);
+      this.adopt(masterKey, 'create');
       return { recoveryKey };
     } catch (error) {
       wipe(masterKey);
@@ -314,7 +362,7 @@ export class VaultService {
       }
     }
     writeVaultKeyFile(this.file, contents);
-    this.adopt(input.masterKey);
+    this.adopt(input.masterKey, 'account');
   }
 
   /**
@@ -485,7 +533,7 @@ export class VaultService {
     }
 
     try {
-      this.adopt(await unwrapMasterKey(wrap, secret));
+      this.adopt(await unwrapMasterKey(wrap, secret), method);
     } catch (error) {
       if (error instanceof VaultCryptoError) {
         // no se distingue "contraseña incorrecta" de "archivo alterado": decirlo
@@ -514,7 +562,7 @@ export class VaultService {
 
     const deviceKey = fromBase64Url(stored);
     try {
-      this.adopt(await unwrapMasterKeyFromDevice(wrap, deviceKey));
+      this.adopt(await unwrapMasterKeyFromDevice(wrap, deviceKey), 'device');
     } catch (error) {
       if (error instanceof VaultCryptoError) {
         throw new VaultError(
@@ -529,38 +577,82 @@ export class VaultService {
   }
 
   /**
-   * cierra la boveda.
-   *
-   * a partir de aqui los datos siguen en disco pero son indescifrables, tambien
-   * para Luxy. Es la diferencia entre esconder una seccion y no poder leerla.
-   */
-  /**
    * avisa cuando la boveda se cierra, por el camino que sea.
    *
    * Lo necesita todo lo que mantenga contenido descifrado en memoria: una
    * boveda cerrada que siga teniendo su contenido accesible no esta cerrada.
    * Devuelve la funcion de baja.
    */
-  onLock(listener: () => void): () => void {
+  onLock(listener: (event: VaultLockEvent) => void): () => void {
     this.lockListeners.add(listener);
     return () => this.lockListeners.delete(listener);
   }
 
-  lock(): void {
+  /** avisa cada vez que se abre, con la puerta por la que se abrio */
+  onUnlock(listener: (via: VaultUnlockVia) => void): () => void {
+    this.unlockListeners.add(listener);
+    return () => this.unlockListeners.delete(listener);
+  }
+
+  /**
+   * cierra la boveda.
+   *
+   * a partir de aqui los datos siguen en disco pero son indescifrables, tambien
+   * para Luxy. Es la diferencia entre esconder una seccion y no poder leerla.
+   *
+   * El motivo es obligatorio para que el compilador encuentre cada sitio que
+   * cierra: con un valor por defecto, salir de Luxy se habria registrado como un
+   * cierre a mano.
+   */
+  lock(reason: VaultLockReason): void {
+    const wasUnlocked = this.masterKey !== null;
+    // se mide ANTES de borrar: despues ya no queda de cuando se abrio
+    const event: VaultLockEvent = {
+      reason,
+      wasUnlocked,
+      openMs:
+        wasUnlocked && this.unlockedAt !== null ? Math.max(0, this.now() - this.unlockedAt) : null,
+      derivations: wasUnlocked ? this.derivations : 0,
+    };
     wipe(this.masterKey);
     this.masterKey = null;
     this.lastActivityAt = 0;
+    this.unlockedAt = null;
+    this.derivations = 0;
+    // una espera de esta sesion no puede mantener abierta la siguiente
+    this.userWaits.clear();
     // se avisa DESDE AQUI y no desde cada sitio que cierra, porque cerrar
-    // ocurre por tres caminos —a mano, por inactividad y al salir— y olvidar uno
-    // dejaria contenido descifrado en memoria con la boveda cerrada
-    for (const listener of this.lockListeners) listener();
+    // ocurre por muchos caminos y olvidar uno dejaria contenido descifrado en
+    // memoria con la boveda cerrada. Se avisa a TODOS aunque uno falle: si el
+    // del registro lanzara, los que vacian la memoria no se enteraban
+    let failure: unknown = null;
+    for (const listener of this.lockListeners) {
+      try {
+        listener(event);
+      } catch (error) {
+        failure ??= error;
+      }
+    }
+    if (failure !== null) throw failure;
   }
 
-  private adopt(masterKey: Uint8Array): void {
+  private adopt(masterKey: Uint8Array, via: VaultUnlockVia): void {
     // si ya habia una abierta, la anterior se borra en vez de quedar suelta
     wipe(this.masterKey);
     this.masterKey = masterKey;
+    this.unlockedAt = this.now();
+    this.derivations = 0;
     this.touch();
+    // un oyente que falle no puede tumbar la apertura: `create` borra la llave
+    // si algo lanza despues de adoptarla, y quedaria una boveda «abierta» con
+    // una llave a ceros
+    for (const listener of this.unlockListeners) {
+      try {
+        listener(via);
+      } catch {
+        // el oyente es el registro; perder una linea es mejor que la llave
+      }
+    }
   }
 
   private requireContents(): VaultKeyFile {
@@ -575,9 +667,52 @@ export class VaultService {
   // bloqueo automatico
   // ---------------------------------------------------------------------------
 
-  /** marca actividad. lo llama cada operacion que use la boveda */
+  /**
+   * marca que hay alguien delante.
+   *
+   * NINGUNA lectura lo llama (`D-106`). Hasta el 25/09 lo hacia `subkeyFor`, la
+   * unica puerta a cualquier contenido, y la propia pantalla, al releerse sola,
+   * mantenia la boveda abierta hora y media sin nadie delante. Lo llaman abrir,
+   * la presencia real en la pantalla Privado, las operaciones de cuenta que pide
+   * el y el final de una espera suya.
+   */
   touch(): void {
     if (this.isUnlocked()) this.lastActivityAt = this.now();
+  }
+
+  /**
+   * el usuario espera algo que pidio el: una respuesta, una imagen.
+   *
+   * Mientras dure, la boveda no se cierra por inactividad: un modelo puede
+   * tardar minutos, y quedarse mirando la pantalla sin tocarla no es irse. El
+   * trabajo de fondo no la usa nunca. Soltarla cuenta como actividad, asi que
+   * el limite empieza cuando llega lo que esperaba. Devuelve la funcion que la
+   * suelta, y soltarla dos veces no hace nada.
+   */
+  beginUserWait(kind: UserWaitKind): () => void {
+    // con la boveda cerrada no hay nada que mantener abierto, y guardarla haria
+    // que la espera sobreviviera a la apertura siguiente
+    if (!this.isUnlocked()) return () => undefined;
+    const token = Symbol('espera');
+    this.userWaits.set(token, { startedAt: this.now(), kind });
+    return () => {
+      // si se cerro entre medias, la espera ya no existe y no hay nada que tocar
+      if (this.userWaits.delete(token)) this.touch();
+    };
+  }
+
+  /**
+   * esperas en curso; una de mas de `MAX_USER_WAIT_MS` ya no cuenta. Con `kind`,
+   * solo las de esa clase: Win+L solo se aplaza por un envio
+   */
+  activeUserWaits(kind?: UserWaitKind): number {
+    const now = this.now();
+    let active = 0;
+    for (const wait of this.userWaits.values()) {
+      if (kind !== undefined && wait.kind !== kind) continue;
+      if (now - wait.startedAt < MAX_USER_WAIT_MS) active += 1;
+    }
+    return active;
   }
 
   /**
@@ -598,8 +733,11 @@ export class VaultService {
     }
     const limit = this.autoLockMs(contents);
     if (limit === 0) return false;
+    // esperando una respuesta suya no esta inactivo. Tiene tope: ver
+    // `activeUserWaits`
+    if (this.activeUserWaits() > 0) return false;
     if (this.now() - this.lastActivityAt < limit) return false;
-    this.lock();
+    this.lock('inactividad');
     return true;
   }
 
@@ -628,7 +766,6 @@ export class VaultService {
     if (this.masterKey === null) {
       throw new VaultError('la boveda esta bloqueada');
     }
-    this.touch();
     return deriveVaultId(this.masterKey);
   }
 
@@ -639,7 +776,10 @@ export class VaultService {
         'introduce tu contraseña para volver a abrirla',
       );
     }
-    this.touch();
+    // usar la llave NO es actividad (`D-106`): la pantalla, el catalogo y la
+    // sincronizacion leen solos, y cualquier lector periodico apagaba el cierre
+    // automatico en silencio. Solo se cuenta, para que el registro lo delate
+    this.derivations += 1;
     return deriveSubkey(this.masterKey, domain, context);
   }
 

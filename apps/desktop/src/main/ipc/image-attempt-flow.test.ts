@@ -233,7 +233,7 @@ function registrar(averia: Averia = {}): Huella {
   let contador = 0;
 
   const context = {
-    vault: { isUnlocked: () => true, onLock: () => () => undefined },
+    vault: { isUnlocked: () => true, onLock: () => () => undefined, beginUserWait: () => () => undefined },
     log: (message: string, fields?: Record<string, unknown>) => {
       huella.log.push({ message, fields: fields ?? {} });
     },

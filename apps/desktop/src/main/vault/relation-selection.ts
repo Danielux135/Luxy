@@ -14,6 +14,12 @@
 //
 // PURO y con el reloj y el ancla INYECTADOS, como `recall.ts`: es la unica forma
 // de probar «a las 72 horas y un minuto» sin esperar tres dias.
+//
+// Encima de la dosificacion por nota hay un tope para el bloque entero
+// (`D-104`), opcional y tambien sin estado: se deduce del numero de orden del
+// mensaje de el en la conversacion, que ya existe. Hacia falta porque cada nota
+// descansa por su cuenta, pero con diez abiertas que se turnan casi siempre
+// habia alguna disponible y el bloque viajaba en el 71 % de los prompts.
 import {
   ACTIVE_RELATION_KINDS,
   RELATION_EXTRACTOR_VERSION,
@@ -27,6 +33,7 @@ import {
   type TemporalAnchor,
 } from '@luxy/shared';
 import { MENTION_MIN_SHARED, matchesNote, matchesStems, quoteStems } from './relation.js';
+import { hasSameRoot } from './raise-roots.js';
 import { tokenize } from './turn-index.js';
 
 /**
@@ -49,6 +56,42 @@ export const OFFER_RUN_USER_TURNS = 6;
 
 /** y lo que descansa despues de esa tanda */
 export const OFFER_WAIT_MS = 48 * 60 * 60 * 1000;
+
+/**
+ * con el modo esporadico, el bloque de pendientes entra en uno de cada tantos
+ * mensajes de el (`D-104`).
+ *
+ * Cuatro y no tres por la ventana: viajan `VAULT_RECENT_TURNS` = 8 turnos, que
+ * son cuatro respuestas suyas. Con el bloque en los mensajes 1, 5, 9... cualquier
+ * ventana contiene exactamente UNA respuesta escrita justo despues de un prompt
+ * con bloque; con tres pueden coincidir dos, y esas dos se copian entre si, que
+ * es la autocopia que ya se mide. Y no mas de cuatro porque la tanda de una nota
+ * dura `OFFER_RUN_USER_TURNS` = 6 mensajes: con cuatro, en una conversacion
+ * seguida toda tanda tiene al menos un mensaje abierto y ninguna nota se queda
+ * sin ocasion. Si la tanda salta de conversacion, la cuenta es aproximada. Una prueba fija
+ * las dos relaciones, para que cambiar la ventana obligue a revisar esto.
+ */
+export const PENDING_BLOCK_EVERY = 4;
+
+/**
+ * cuanto tiene que parecerse una respuesta suya a una cita para decir que la
+ * saco ELLA (`D-104`).
+ *
+ * Mas estricto que `matchesStems` —dos raices y el 40 %— a proposito. Esa bolsa
+ * decide cosas donde equivocarse cuesta poco (callar una nota un rato); esta
+ * decide si se le dice «ya salio algo», y medido en el registro la regla laxa
+ * marcaba «en escena» 99 de cada 111 turnos con abiertas: con ella la nota
+ * viajaria casi siempre y casi siempre en falso. Con texto inventado, la laxa
+ * casaba 3 de 8 respuestas que no hablaban de ninguna promesa y esta 1 de 8; la
+ * muestra es minima y sirve de orientacion, no de medida.
+ *
+ * Los umbrales no se tocaron en la tercera revision (28/09): lo que cambio es
+ * que dos formas del mismo verbo cuentan como la misma raiz (`raise-roots.ts`).
+ * Sin eso la regla casi nunca se disparaba, porque ella saca una promesa con
+ * sus palabras y el verbo cambia de persona o de tiempo.
+ */
+export const RAISED_MIN_SHARED = 3;
+export const RAISED_MIN_RATIO = 0.6;
 
 /** a partir de aqui una promesa puede haberse quedado sin sentido */
 export const DORMANT_AFTER_DAYS = 30;
@@ -131,6 +174,16 @@ export interface PendingSelectionInput {
   anchor: TemporalAnchor;
   /** el reloj, inyectado */
   now: string;
+  /**
+   * el tope del bloque entero, solo con el modo esporadico (`D-104`).
+   *
+   * `userTurn` es el numero de orden del mensaje de ahora entre los de el en
+   * ESTA conversacion, empezando en 1. Sale del historial de la conversacion y
+   * no de la linea temporal, que excluye conversaciones: en un hilo excluido
+   * daria siempre 1 y el tope estaria siempre abierto. Ausente, la seleccion es
+   * exactamente la de antes; el diagnostico no lo pasa.
+   */
+  cadence?: { every: number; userTurn: number };
 }
 
 /**
@@ -158,11 +211,76 @@ export interface PendingSelectionCounters {
   blockedStale: number;
   /** cita rota */
   quoteBroken: number;
+  /**
+   * candidatas que se quedaron fuera porque el tope estaba cerrado (`D-104`).
+   *
+   * Es la que dice si el tope actuo: con el tope cerrado y cero aqui, no habia
+   * nada que frenar.
+   */
+  heldByCadence: number;
+  /**
+   * notas en escena porque la saco ELLA en la ventana, con la regla estricta, y
+   * que el no ha retomado (`D-104`).
+   *
+   * Se calcula siempre, tambien con el modo apagado: no cambia el prompt y da la
+   * linea base de cuantos turnos habrian llevado la nota de «ya salio».
+   */
+  raisedByHer: number;
 }
 
 export interface PendingSelection {
   lines: PendingAffairLine[];
   counters: PendingSelectionCounters;
+  /** el tope del bloque estaba cerrado en este mensaje; `false` sin tope */
+  cadenceClosed: boolean;
+}
+
+/**
+ * si en este mensaje se abre el tope del bloque.
+ *
+ * El primero de la conversacion abre: es el reencuentro, el momento natural de
+ * «oye, ¿y lo de...?», y con la ventana vacia no hay nada que copiar. Un numero
+ * que no sea un entero positivo deja el tope abierto, que es fallar hacia lo de
+ * antes y no hacia callarlo todo.
+ */
+export function cadenceOpens(userTurn: number, every: number): boolean {
+  if (!Number.isInteger(userTurn) || userTurn < 1) return true;
+  if (!Number.isInteger(every) || every < 1) return true;
+  return (userTurn - 1) % every === 0;
+}
+
+/**
+ * si una respuesta saca una cita con claridad, con la regla estricta.
+ *
+ * Nunca por palabras clave: con ellas cualquier respuesta sobre el mismo tema
+ * contaria, y una nota que diga «ya salio» cuando no salio le quita la palabra
+ * sobre algo que nunca dijo. Todo lo que acepta lo acepta tambien
+ * `matchesStems`, asi que una nota contada aqui esta siempre en escena: se
+ * comprueba primero, con las raices exactas.
+ *
+ * Una cita de menos de `RAISED_MIN_SHARED` raices no cuenta NUNCA (revision del
+ * 28/09). Con una o dos, «estricta» valia lo mismo que la bolsa laxa —todas las
+ * raices y el 100 %— y eso es exactamente contar por palabra clave: «cafe» en
+ * cualquier respuesta. Mejor que la nota no salga para esas que decirle «ya
+ * salio» por una palabra suelta.
+ */
+export function clearlyRaises(
+  turnStems: ReadonlySet<string>,
+  noteStems: readonly string[],
+): boolean {
+  if (noteStems.length < RAISED_MIN_SHARED) return false;
+  // la bolsa de siempre, con las raices EXACTAS, tiene que casar antes. Es lo
+  // que garantiza que una nota contada aqui esta siempre en escena: si esta
+  // regla aceptara algo que la laxa no, `raisedByHer` no lo contaria (solo se
+  // cuenta en escena) y la nota saldria en el bloque justo despues de sacarla
+  if (!matchesStems(turnStems, noteStems)) return false;
+  let shared = 0;
+  for (const stem of noteStems) {
+    // «traigo» y «traer» son la misma raiz aqui, y SOLO aqui (`raise-roots.ts`)
+    if (hasSameRoot(turnStems, stem)) shared += 1;
+  }
+  if (shared < RAISED_MIN_SHARED) return false;
+  return shared / noteStems.length >= RAISED_MIN_RATIO;
 }
 
 /** dias civiles entre dos instantes, con el corte de las 05:00 del ancla */
@@ -241,6 +359,29 @@ function withCurrentMessage(input: PendingSelectionInput): DatedTurn[] {
   return turns;
 }
 
+/**
+ * la secuencia a partir de la cual una respuesta suya cuenta para «ya salio».
+ *
+ * Solo en un mensaje con el tope abierto y con una apertura anterior: entonces
+ * es la del primer mensaje de el DESPUES de aquella apertura, y lo que ella
+ * escribio antes —la respuesta al prompt que si llevaba el bloque— no cuenta.
+ * En cualquier otro caso, -1: cuentan todas, como antes. Sale de la linea
+ * temporal porque es ahi donde estan los turnos que se comparan; en un hilo
+ * excluido no hay ninguno y el resultado da igual.
+ */
+function previousOpenBoundary(input: PendingSelectionInput, timeline: readonly DatedTurn[]): number {
+  if (input.cadence === undefined) return -1;
+  if (!cadenceOpens(input.cadence.userTurn, input.cadence.every)) return -1;
+  const own = timeline
+    .filter((turn) => turn.conversationId === input.current.conversationId && turn.role === 'user')
+    .map((turn) => turn.sequence)
+    .sort((a, b) => a - b);
+  // own[k] es el mensaje siguiente a la apertura anterior, que fue own[k - 1]
+  const k = own.length - input.cadence.every;
+  if (k < 1) return -1;
+  return own[k] ?? -1;
+}
+
 /** un pendiente que ha pasado todos los filtros, con lo que hace falta para ordenarlo */
 interface Candidate {
   note: RelationNote;
@@ -285,6 +426,8 @@ export function selectPendingForTurn(input: PendingSelectionInput): PendingSelec
     dormant: 0,
     blockedStale: 0,
     quoteBroken: 0,
+    heldByCadence: 0,
+    raisedByHer: 0,
   };
 
   const now = Date.parse(input.now);
@@ -316,6 +459,15 @@ export function selectPendingForTurn(input: PendingSelectionInput): PendingSelec
     ref.conversationId === input.current.conversationId &&
     (input.current.oldestRecent === null || ref.sequence >= input.current.oldestRecent);
 
+  // en un mensaje con el tope ABIERTO, la respuesta que ella escribio tras la
+  // apertura anterior no cuenta para «ya salio». Con `PENDING_BLOCK_EVERY * 2 ===
+  // VAULT_RECENT_TURNS` esa respuesta es siempre la mas antigua de la ventana: si
+  // saco la promesa que se le permitio, la nota «no saques otro todavia» viajaba
+  // en CADA apertura junto al bloque que le ofrece otra, se contradecian, y el
+  // ritmo real pasaba a una cada ocho mensajes. Solo cuentan sus respuestas desde
+  // el primer mensaje de el despues de aquella apertura
+  const herRaisedAfter = previousOpenBoundary(input, timeline);
+
   const candidates: Candidate[] = [];
 
   for (const note of input.notes) {
@@ -339,6 +491,10 @@ export function selectPendingForTurn(input: PendingSelectionInput): PendingSelec
     const hisByQuote: DatedTurn[] = [];
     const anyByQuote: DatedTurn[] = [];
     const anyByAnything: DatedTurn[] = [];
+    // solo para la nota de «ya salio» (`D-104`): si una respuesta suya de la
+    // ventana la saca con la regla estricta, y si el la retomo en la ventana
+    let herClearInWindow = false;
+    let hisInWindow = false;
 
     for (const turn of timeline) {
       // el mensaje de ahora no es una mencion: es «tocada», que se decide aparte
@@ -378,6 +534,17 @@ export function selectPendingForTurn(input: PendingSelectionInput): PendingSelec
         anyByAnything.push(turn);
         if (turn.role === 'assistant') herByAnything.push(turn);
       }
+      if (inRecentWindow(turn)) {
+        if (turn.role === 'assistant') {
+          if (turn.sequence > herRaisedAfter && clearlyRaises(turn.stems, stems)) {
+            herClearInWindow = true;
+          }
+        } else if (byAnything) {
+          // para el, la regla mas ancha: equivocarse aqui solo quita la nota,
+          // y si el la retomo ya es un hilo de los dos, no algo que saco ella
+          hisInWindow = true;
+        }
+      }
       if (sameRun) continue;
       if (!byQuote) continue;
       anyByQuote.push(turn);
@@ -385,14 +552,23 @@ export function selectPendingForTurn(input: PendingSelectionInput): PendingSelec
       else hisByQuote.push(turn);
     }
 
+    // lo nombra en su mensaje de ahora: eso manda sobre cualquier descanso,
+    // porque callarse justo cuando el lo saca seria lo mas raro de todo. Se
+    // calcula antes de «en escena» porque la nota de «ya salio» lo necesita,
+    // pero se sigue CONTANDO donde siempre: una nota en escena no suma tocadas
+    const touched = matchesNote(input.current.text, stems);
+
     if (inRecentWindow(note.origin) || anyByAnything.some((turn) => inRecentWindow(turn))) {
       counters.inScene += 1;
+      // la saco ELLA y el no la ha retomado. Si la promesa se hizo dentro de la
+      // ventana, se esta viviendo ahora y no es algo que «ya salio»: soltarla
+      // ahi la haria parecer fria
+      if (!inRecentWindow(note.origin) && !touched && herClearInWindow && !hisInWindow) {
+        counters.raisedByHer += 1;
+      }
       continue;
     }
 
-    // lo nombra en su mensaje de ahora: eso manda sobre cualquier descanso,
-    // porque callarse justo cuando el lo saca seria lo mas raro de todo
-    const touched = matchesNote(input.current.text, stems);
     if (touched) counters.touched += 1;
 
     if (!touched) {
@@ -455,7 +631,19 @@ export function selectPendingForTurn(input: PendingSelectionInput): PendingSelec
     });
   }
 
-  const chosen = candidates
+  // el tope del bloque entero (`D-104`), despues de todos los filtros por nota:
+  // asi `heldByCadence` cuenta solo lo que de verdad habria podido salir. Una
+  // nota tocada lo salta siempre, porque si el la saca ella tiene que poder
+  // contestar. Las demas no se cuelan en ese mensaje: ir fuera del mensaje
+  // abierto seria justo la invitacion que el tope quita
+  const cadenceClosed =
+    input.cadence !== undefined && !cadenceOpens(input.cadence.userTurn, input.cadence.every);
+  const eligible = cadenceClosed
+    ? candidates.filter((candidate) => candidate.touched)
+    : candidates;
+  counters.heldByCadence = candidates.length - eligible.length;
+
+  const chosen = eligible
     .sort(
       (a, b) =>
         Number(b.touched) - Number(a.touched) ||
@@ -468,7 +656,7 @@ export function selectPendingForTurn(input: PendingSelectionInput): PendingSelec
     .slice(0, PENDING_MAX_LINES);
 
   counters.offered = chosen.length;
-  return { lines: chosen.map((candidate) => candidate.line), counters };
+  return { lines: chosen.map((candidate) => candidate.line), counters, cadenceClosed };
 }
 
 /**

@@ -343,10 +343,18 @@ export function buildRecapPrompt(input: RecapPromptInput): string {
     '  vestida, como la llama el, que sabe cada uno de la vida del otro.',
     '  SIRVE: «El la llama nena cuando esta de buenas».',
     '  NO SIRVE: «Tienen buena quimica».',
+    // las promesas, a `plan` y no a `decisions` (revision del 28/09): una ficha
+    // aprobada sin memoria sellada es fuente del resumen de `D-105`, que lleva
+    // "decisions" a CADA turno de sus otras conversaciones, sin el tope de
+    // `D-104`. `plan` no viaja ahi, y en su propia conversacion lo mide `ecoMemoria`.
+    // Es la misma regla que `VAULT_MEMORY_FIELD_GUIDE_BODY`; solo cambia las
+    // fichas que se escriban a partir de ahora
     '- `decisions`: lo que quedo acordado entre los dos, incluidos los limites y las',
-    '  reglas del juego.',
+    '  reglas del juego. Una promesa o algo que quedaron en hacer juntos NO va',
+    '  aqui: va en `plan`.',
     '  SIRVE: «Quedaron en que ella escribe primero por las mañanas».',
-    '- `plan`: lo que queda por delante, si lo hay.',
+    '- `plan`: lo que queda por delante, si lo hay, con las promesas que sigan sin',
+    '  cumplirse.',
     '- `openQuestions`: lo que quedo en el aire sin respuesta.',
     '- `lessons`: lo que ELLA ha aprendido de EL. Que le gusta, que le corta, que',
     '  tono funciona y cual no.',

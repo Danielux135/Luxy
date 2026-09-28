@@ -1,24 +1,97 @@
 # Luxy — estado canónico del proyecto
 
-Última actualización: **2026-09-25 — la bóveda no tiene copia; Lía tiene
-con qué dejar de copiarse; el enganche, diseñado**
+Última actualización: **2026-09-28 — tres encargos construidos (la bóveda se
+cierra sola, el enganche local con el resumen de sus conversaciones y las
+promesas de vez en cuando), revisados después y corregidos, sin verse en
+pantalla; la bóveda sigue sin copia**
 
 > **Lo primero: la bóveda no tiene ninguna copia de seguridad.** Existe sólo en
 > este disco, no se ha sincronizado nunca, y la sincronización de hoy no serviría:
 > tres fallos en el código y, por diseño, no sube ni a Lía ni las fichas de
 > memoria. Copia a mano en `LA-049`; el detalle, en `SEG-SYNC-001`.
 
+> **Cómo se revisaron los tres encargos del 25/09 (`REV-TRES-ENCARGOS-001`).** El
+> flujo que los construyó se cortó al caducar la autenticación y **su revisión
+> independiente no llegó a hacerse**: los siete revisores se cayeron. Una ronda de
+> revisión posterior encontró defectos reales —entre ellos que reintentar el
+> primer mensaje fallido de una conversación nueva la dejaba sin personaje, que la
+> galería de personajes sobrevivía al cierre de la bóveda y que Win+L se aplazaba
+> también por una imagen—, y se corrigieron el 28/09. Una segunda ronda ese mismo
+> día encontró más, también corregido: la ficha editada de Lía ya no llegaba a
+> ninguna conversación existente (ahora main la sella cuando cambia); Claude Code
+> y `codex exec` guardaban en claro, en sus carpetas de sesiones, el prompt entero
+> de cada turno de la bóveda (ahora van sin sesión en disco; lo ya escrito sigue
+> ahí); un turno con imagen del Horde podía perder la respuesta de Lía al cerrarse
+> la bóveda; y la regla de pendientes negaba promesas que el mismo prompt le
+> daba. **Ninguna de las dos rondas de arreglos ha tenido revisión
+> independiente.** Detalle en `CURRENT-TASK.md`.
+>
+> **Tercera ronda (28/09), parte de main, shared y documentos.** Un envío cortado
+> por el cierre de la bóveda, con la llamada sin respuesta, podía borrar la
+> respuesta anterior de Lía (el turno se retiraba dos veces): corregido. La imagen
+> de un turno ya no aplaza Win+L una vez guardado el texto, que es lo que decían
+> los documentos. La nota de «ya salió» reconoce las formas de un mismo verbo
+> («traigo» y «traer») sin tocar sus umbrales. Y queda escrito que la ficha
+> editada que sella main cambia el prompt de conversaciones empezadas aunque
+> todas las casillas estén apagadas, a propósito. La parte de pantalla de esta
+> ronda también está hecha: la confirmación del enganche lleva la vista a sí
+> misma, el aviso «¿Es de…?» ya no trocea la conversación en cada tecla y los
+> textos de las casillas ya no prometen de más. **Tampoco esta ronda ha tenido
+> revisión independiente, y nada de la pantalla se ha visto en Electron.**
+>
+> **Cuarta ronda (28/09).** «Sincronizar» durante un envío podía subir el mensaje
+> de Daniel que luego se retiraba, y el servidor se quedaba con ese en vez del
+> bueno: ahora la conversación a la que se está contestando se deja para la
+> siguiente sincronización, y retirar un mensaje sin respuesta mira su
+> identificador en vez de quitar «la última línea». Si el turno falla con la
+> bóveda abierta (el agente parado, por ejemplo), el mensaje ya no se queda
+> huérfano. La nota de «ya salió» deja de unir palabras distintas («casa» y
+> «caso»); con citas largas sigue casi sin dispararse, y en vez de bajar el listón
+> —medido: metía falsos— el diagnóstico cuenta cuántas citas largas hay. Revisada
+> después sin nada que rompa, y `npm run check` en verde tras ella.
+>
+> **Quinta ronda (28/09).** La nota de «ya salió» reconoce ahora «traerme» frente
+> a «traigo», «prepararte» frente a «preparo» y el gerundio con pronombre: con el
+> texto inventado de la revisión, 29 de 32 paráfrasis (antes 25), sin falsos
+> nuevos. No se puede enviar dos veces a la misma conversación a la vez, y una
+> ficha de solo espacios ya no sustituye a la buena. **Sin revisión
+> independiente, sin `npm run check` completo y nada visto en Electron.**
+
+> **Construido (25/09, corregido el 28/09): la bóveda se cierra sola
+> (`SEG-BOVEDA-001`, `D-106`).** Leer ya no cuenta como actividad: solo abrirla,
+> teclado y ratón reales en Privado con la ventana visible y con el foco, esperar
+> una respuesta o una imagen que pidió él, y las operaciones de cuenta. Win+L,
+> suspender y la X de la ventana la cierran; Win+L solo se aplaza por un envío
+> suyo hasta que su respuesta queda guardada, no por una imagen. Cada apertura y
+> cada cierre dejan una línea en
+> `studio.log` con el motivo. **Nada visto en pantalla**, y que Windows avise de
+> Win+L a Luxy no está comprobado: `LA-053`.
+
+> **Construido (25/09, corregido el 28/09): `F33-ENGANCHE-LOCAL-001` y
+> `F33-RECUERDO-001`.** Se puede enganchar una conversación sin personaje a Lía
+> **en este equipo** (no sube al servidor), el dueño se resuelve en un solo sitio
+> (`D-103`) y, con una casilla en su ficha, Lía recibe un resumen de sus dos
+> últimas conversaciones (`D-105`). Sin verse en pantalla: `LA-052`.
+
+> **Construido (25/09, corregido el 28/09): `F33-PROMESAS-001`.** Con la casilla
+> «Sacar los pendientes solo de vez en cuando» de su ficha, el bloque de
+> pendientes va como mucho en uno de cada cuatro mensajes, el permiso pide que la
+> escena la traiga y una nota le dice que ya sacó una sin decir cuál (`D-104`).
+> Sin medir contra una conversación real: `LA-054`.
+
 > **Lo segundo: `F33-VARIEDAD-001`.** Cuatro cambios contra la autocopia de Lía,
 > con interruptor y sin verse en pantalla. Se prueban con `LA-050`.
 
 > Lo de abajo, hasta el próximo encabezado, es del **2026-09-23** y sigue siendo
-> cierto, incluido que la bóveda no se cierra sola (`SEG-BOVEDA-001`).
+> cierto, **salvo `SEG-BOVEDA-001`**: lo que dice de que la bóveda no se cierra
+> sola es de antes de construir el arreglo (arriba).
 
 Última actualización anterior: **2026-09-23 — se puede borrar la memoria que una
 conversación se escribe sola, y la bóveda no se cierra por inactividad**
 
-> **Lo primero, porque es seguridad y está SIN ARREGLAR.** La bóveda no se cierra
-> sola. El ajuste de Daniel son 15 minutos y estuvo hora y media abierta. La causa
+> *(Histórico: esto era el 23/09. El arreglo se construyó el 25/09 y está
+> arriba.)* **Lo primero, porque es seguridad y está SIN ARREGLAR.** La bóveda no
+> se cierra sola. El ajuste de Daniel son 15 minutos y estuvo hora y media abierta. La causa
 > está **medida** en su equipo: la propia pantalla se relee cada uno o dos minutos
 > y toda lectura reinicia el contador, porque `touch()` vive dentro de
 > `subkeyFor()`. Además, cerrar la ventana con la X y bloquear Windows con Win+L

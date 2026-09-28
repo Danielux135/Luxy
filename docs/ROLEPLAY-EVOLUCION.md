@@ -6,6 +6,13 @@ repite las promesas en cada respuesta**, y cómo hacen las plataformas de rolepl
 para que un personaje **aprenda del usuario, evolucione con él, varíe, tome la
 iniciativa y siga sonando a sí mismo**.
 
+> **Estado (28/09).** Lo que aquí se dice en presente de los pendientes es el
+> estado del 25/09. Desde entonces el **Paso 3** —el tope del bloque entero— está
+> construido detrás de la casilla «Sacar los pendientes solo de vez en cuando»
+> (`pendingPacing`, `D-104`), junto con el permiso como condición y la nota de «ya
+> salió». Donde pone «no hay un tope» o «le falta: el tope del bloque entero», hoy
+> existe, apagado por defecto y sin medir contra una conversación real (`LA-054`).
+
 Se hizo con tres ramas: un diagnóstico de la repetición con los registros reales
 y tres revisores escépticos que intentaron tumbarlo; trece frentes de
 investigación (Character.AI, Replika, Nomi, Kindroid, SillyTavern, plataformas

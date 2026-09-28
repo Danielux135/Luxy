@@ -69,16 +69,26 @@ function montar(fallo?: Error): { registros: Registro[] } {
   const registros: Registro[] = [];
 
   const context = {
-    vault: { isUnlocked: () => true, onLock: () => () => undefined },
+    vault: { isUnlocked: () => true, onLock: () => () => undefined, beginUserWait: () => () => undefined },
     privateConversations: {
       list: async () => [
         { conversationId: CONV, title: '', turns: 2, updatedAt: AYER, characterId: LIA },
       ],
       read: async () => TURNOS,
       latestMemory: async () => null,
-      latestInstructions: async () => null,
-      latestCharacterId: async () => LIA,
-      latestCharacterDescription: async () => null,
+      // el dueño se lee SOLO por `owner()` (`D-103`)
+      owner: async () => ({
+        characterId: LIA,
+        characterDescription: null,
+        instructions: null,
+        characterLabel: null,
+        source: 'turn' as const,
+        signedAfter: 0,
+        linkedAt: null,
+        events: 0,
+        winningEventId: null,
+        instructionsSource: null,
+      }),
     },
     characters: { list: async () => [{ characterId: LIA, label: 'Lía' }] },
     privateMedia: { list: async () => [] },
@@ -118,6 +128,8 @@ function montar(fallo?: Error): { registros: Registro[] } {
           createdAt: turno.createdAt,
           stems: new Set(tokenize(turno.text)),
         })),
+      // sin enganches: ningun cursor se invalida por dueño (`D-103`)
+      ownerOf: () => undefined,
       conversationsFor: () => new Set([CONV]),
       turnAt: (conversationId: string, sequence: number) =>
         TURNOS.find(

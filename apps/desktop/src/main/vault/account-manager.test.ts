@@ -37,6 +37,8 @@ function memoryStore(): DeviceKeyStore & SessionStore {
 function fakeGateway() {
   const accounts = new Map<string, Record<string, unknown>>();
   const revoked: string[] = [];
+  /** para dejar colgado el aviso de salida, como con la red caida */
+  const control: { logoutGate: Promise<void> | null } = { logoutGate: null };
   let issued = 0;
 
   const impl = (async (url: string | URL, init?: RequestInit) => {
@@ -78,6 +80,7 @@ function fakeGateway() {
       return Response.json({ ...session(), vaultId: account.vaultId });
     }
     if (path === '/api/vault/logout') {
+      if (control.logoutGate !== null) await control.logoutGate;
       revoked.push(new Headers(init?.headers ?? {}).get('Authorization') ?? '');
       return Response.json({ ok: true });
     }
@@ -101,7 +104,7 @@ function fakeGateway() {
     return new Response('', { status: 404 });
   }) as unknown as typeof fetch;
 
-  return { impl, accounts, revoked };
+  return { impl, accounts, revoked, control };
 }
 
 describe('cuenta de la boveda', () => {
@@ -182,7 +185,7 @@ describe('cuenta de la boveda', () => {
 
       const segundo = machine();
       await segundo.accounts.login(EMAIL, PASSWORD);
-      segundo.vault.lock();
+      segundo.vault.lock('manual');
 
       // un gateway que ya no responde: el arranque siguiente no depende de el
       const sinRed = new VaultService(vaultFilePathFor(segundo.directory), memoryStore(), {
@@ -291,7 +294,13 @@ describe('cuenta de la boveda', () => {
       const tercero = machine();
       await tercero.accounts.login(EMAIL, 'una contraseña nueva larga');
       expect(toBase64Url(tercero.vault.subkeyFor('conversation', 'c1'))).toBe(esperada);
-    });
+      // mas tiempo que el global de 20 s, y solo aqui: son cuatro derivaciones
+      // de clave de verdad (alta, entrada con la clave, cambio y entrada con la
+      // nueva), lentas a proposito. Sola tarda 9-11 s en este equipo; con la
+      // suite entera y el equipo cargado paso de 20 s el 28/09 sin fallar
+      // ninguna asercion. Rebajar el coste de la derivacion en la prueba dejaria
+      // de probar la de verdad
+    }, 60_000);
 
     it('cambiar la contraseña no invalida la clave de recuperacion', async () => {
       const primero = machine();
@@ -406,6 +415,25 @@ describe('cuenta de la boveda', () => {
       expect(accounts.status().signedIn).toBe(false);
       // lo cifrado sigue en el equipo: salir no borra nada
       expect(vault.status().configured).toBe(true);
+    });
+
+    // revision del 28/09: con la red colgada, la boveda seguia abierta mientras
+    // «Cerrar sesion» esperaba al servidor
+    it('salir cierra la boveda ANTES de esperar al servidor', async () => {
+      const { vault, accounts } = machine();
+      await accounts.register(EMAIL, PASSWORD);
+      let soltar: () => void = () => undefined;
+      gateway.control.logoutGate = new Promise<void>((resolve) => {
+        soltar = resolve;
+      });
+
+      const salida = accounts.logout();
+      expect(vault.isUnlocked()).toBe(false);
+      expect(accounts.status().signedIn).toBe(false);
+
+      soltar();
+      await salida;
+      expect(gateway.revoked).toHaveLength(1);
     });
 
     it('el token no aparece en el estado que ve la interfaz', async () => {

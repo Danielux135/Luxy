@@ -107,11 +107,50 @@ lo pida explícitamente.
   y cifrada (`D-064`). La clave de AI Horde no se rellena sola con la anónima:
   con ella el servidor fuerza `shared` y dona lo generado (`D-065`). Ver
   `docs/IMAGENES-GRATIS.md`.
+- El dueño de una conversación privada se lee **sólo** con
+  `PrivateConversationStore.owner()` o `list()`, que usan la misma
+  `resolveConversationOwner` (`D-103`). `owner-single-source.test.ts` falla si en
+  `apps/desktop/src/main`, fuera de `conversation-store.ts`, alguien lee
+  `characterId`, `characterDescription` o `instructions` de un `turn` (con punto,
+  `?.`, corchetes o desestructurando), o si vuelven `characterOf` y los `latest*`;
+  es una guarda de texto y un alias se le escapa. En una conversación con
+  mensajes el dueño solo cambia con el enganche, guardado cifrado en
+  `vault/conversation-owners.json` y **sólo en este equipo**: «Sincronizar» no lo
+  sube. El envío rechaza un personaje en una conversación ya empezada; la ficha
+  la sella main desde la bóveda cuando cambia, nunca el renderer, y va dentro
+  del turno: ese sí lo sube «Sincronizar», sellado como cualquier turno. El
+  resumen de las dos últimas conversaciones de un personaje va detrás de su
+  casilla `recentMemories`, apagada por defecto (`D-105`).
+- **Leer la bóveda no es actividad** (`D-106`): `subkeyFor()` no llama a
+  `touch()`, y no se lo vuelvas a poner, ni a ningún lector. Mantienen abierta la
+  bóveda: abrirla; la presencia real en Privado (`vaultPresence`: eventos REALES
+  —`isTrusted`— de teclado, clic, movimiento o rueda, contados solo con la
+  ventana visible y con el foco; tener Luxy delante sin tocarla no cuenta); una
+  espera del usuario (`VaultService.beginUserWait`) mientras dura algo que pidió
+  él; los `touch()` de las operaciones de cuenta y del ajuste de minutos, que ya
+  existían; y dos que añadió `D-106` y no se tocan sin leerla: el final de una
+  espera y volver a Windows con un cierre aplazado (`unlockScreen`). El
+  trabajo de fondo nunca. Win+L solo se aplaza por una espera `reply` (un envío
+  hasta que su respuesta queda guardada), nunca por una imagen: la imagen de un
+  turno se espera como `image` en cuanto su texto está en disco. La cierran la
+  inactividad, Win+L, suspender, la X de la ventana, el botón, salir y cerrar la
+  sesión, y todo cierre pasa por `lock(motivo)`. Un mensaje suyo sin respuesta
+  se retira por su `recordId` (`removeLastTurn`), nunca «la última línea», y
+  «Sincronizar» no toca los turnos de una conversación con un envío en curso
+  (sus medios sí viajan), y no hay dos envíos a la vez a la misma. El
+  temporizador y el `powerMonitor` viven en `VaultLockCoordinator`, no en
+  `main/index.ts`. Ningún efecto del renderer depende del objeto `vault` entero:
+  `renderer-effect-deps.test.ts` falla si alguien lo hace con ese nombre (es una
+  guarda de texto: un alias se le escapa).
 - Prohibida cualquier automatización de navegador (Selenium, Playwright) y de
   las interfaces web de Claude o ChatGPT.
 - Claude Code y Codex CLI se usan con la **sesión local** del ordenador.
 - Prohibido `--dangerously-skip-permissions` y
   `--dangerously-bypass-approvals-and-sandbox`.
+- Todo lo de solo lectura (la bóveda y Conversaciones) va sin sesión en disco:
+  `--no-session-persistence` en Claude y `--ephemeral` en `codex exec`, si la
+  versión lo anuncia en su `--help`. Sin eso el CLI deja en claro, en su carpeta
+  de sesiones, lo que la bóveda cifra.
 
 **Secretos**
 

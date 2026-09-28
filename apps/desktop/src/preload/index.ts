@@ -82,9 +82,18 @@ const bridge: LuxyBridge = {
     ipcRenderer.invoke(IPC_INVOKE.vaultCharacterImageCast, args),
   setVaultCharacterReplyGuidance: (args: unknown) =>
     ipcRenderer.invoke(IPC_INVOKE.vaultCharacterReplyGuidance, args),
+  setVaultCharacterPendingPacing: (args: unknown) =>
+    ipcRenderer.invoke(IPC_INVOKE.vaultCharacterPendingPacing, args),
+  setVaultCharacterRecentMemories: (args: unknown) =>
+    ipcRenderer.invoke(IPC_INVOKE.vaultCharacterRecentMemories, args),
+  previewVaultConversationOwner: (args: unknown) =>
+    ipcRenderer.invoke(IPC_INVOKE.vaultConversationOwnerPreview, args),
+  setVaultConversationOwner: (args: unknown) =>
+    ipcRenderer.invoke(IPC_INVOKE.vaultConversationOwnerSet, args),
   createVault: (password: string) => ipcRenderer.invoke(IPC_INVOKE.vaultCreate, { password }),
   unlockVault: (args: unknown) => ipcRenderer.invoke(IPC_INVOKE.vaultUnlock, args),
   lockVault: () => ipcRenderer.invoke(IPC_INVOKE.vaultLock),
+  markVaultPresence: () => ipcRenderer.invoke(IPC_INVOKE.vaultPresence),
   changeVaultPassword: (args: unknown) =>
     ipcRenderer.invoke(IPC_INVOKE.vaultChangePassword, args),
   setVaultDeviceUnlock: (enabled: boolean) =>
@@ -144,8 +153,9 @@ const bridge: LuxyBridge = {
   readVaultCharacterAvatar: (args: unknown) =>
     ipcRenderer.invoke(IPC_INVOKE.vaultCharacterAvatar, args),
   syncVault: () => ipcRenderer.invoke(IPC_INVOKE.vaultSync),
-  onVaultLocked: (listener: () => void) => {
-    const handler = (): void => listener();
+  onVaultLocked: (listener: (payload: unknown) => void) => {
+    // el motivo pasa tal cual y sin el IpcRendererEvent: lo valida el renderer
+    const handler = (_event: unknown, payload: unknown): void => listener(payload);
     ipcRenderer.on(IPC_EVENT.vaultLocked, handler);
     return () => ipcRenderer.removeListener(IPC_EVENT.vaultLocked, handler);
   },

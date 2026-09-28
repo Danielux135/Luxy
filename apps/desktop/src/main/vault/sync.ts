@@ -39,6 +39,17 @@ export interface VaultSyncDeps {
   signal?: AbortSignal;
   /** se llama al recibir un 401, para que la sesion guardada deje de usarse */
   onUnauthorized?: () => void;
+  /**
+   * conversaciones a las que se les esta contestando ahora mismo.
+   *
+   * Esas se dejan para la proxima vez, enteras (revision del 28/09). Su ultimo
+   * mensaje puede estar esperando respuesta y retirarse si no llega: subido, el
+   * servidor lo conservaria —la subida es idempotente por secuencia— y el
+   * mensaje bueno que ocupara despues ese numero se descartaria en silencio. Y
+   * un registro bajado del otro equipo en medio quedaria detras del mensaje que
+   * luego se retira.
+   */
+  isSending?: (conversationId: string) => boolean;
 }
 
 export interface VaultSyncResult {
@@ -50,6 +61,8 @@ export interface VaultSyncResult {
   mediaDownloaded: number;
   /** medios que no caben en una peticion y se quedan en su equipo */
   mediaSkipped: number;
+  /** conversaciones con un envio en curso: no se tocaron y van la proxima vez */
+  conversationsDeferred: number;
 }
 
 class SyncError extends VaultError {}
@@ -99,7 +112,10 @@ export async function syncConversation(
   store: PrivateConversationStore,
   conversationId: string,
   deps: VaultSyncDeps,
-): Promise<{ uploaded: number; downloaded: number }> {
+): Promise<{ uploaded: number; downloaded: number; deferred: boolean }> {
+  const sending = (): boolean => deps.isSending?.(conversationId) === true;
+  if (sending()) return { uploaded: 0, downloaded: 0, deferred: true };
+
   const local = store.rawRecords(conversationId);
 
   // 1. subir. Es idempotente por (vault, conversacion, secuencia), asi que
@@ -134,11 +150,16 @@ export async function syncConversation(
     } catch {
       continue;
     }
+    // entre las esperas de red y de verificacion ha podido empezar un envio en
+    // esta conversacion. Se mira justo antes de escribir, sin nada que espere en
+    // medio: o el envio aun no ha leido el archivo y vera este registro, o ya
+    // esta en marcha y esto no escribe. Lo que falte baja la proxima vez
+    if (sending()) return { uploaded, downloaded, deferred: true };
     store.appendRaw(conversationId, record);
     downloaded += 1;
   }
 
-  return { uploaded, downloaded };
+  return { uploaded, downloaded, deferred: false };
 }
 
 /** sincroniza todas las conversaciones, locales y remotas */
@@ -173,10 +194,12 @@ export async function syncVault(
 
   let uploaded = 0;
   let downloaded = 0;
+  let conversationsDeferred = 0;
   for (const conversationId of ids) {
     const result = await syncConversation(vault, store, conversationId, deps);
     uploaded += result.uploaded;
     downloaded += result.downloaded;
+    if (result.deferred) conversationsDeferred += 1;
   }
 
   // los medios van DESPUES de los turnos: si algo falla aqui, lo que ya se
@@ -193,6 +216,7 @@ export async function syncVault(
     mediaUploaded: mediaResult.uploaded,
     mediaDownloaded: mediaResult.downloaded,
     mediaSkipped: mediaResult.skipped,
+    conversationsDeferred,
   };
 }
 

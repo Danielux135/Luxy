@@ -133,6 +133,14 @@ export const relationCursorSchema = z.object({
   /** negativa persistida: no bloquea el desfase y no se reintenta sola si no ha crecido */
   refusedVersion: z.number().int().min(1).nullable().default(null),
   refusedAtTurns: z.number().int().min(0).nullable().default(null),
+  /**
+   * el dueño con el que SE REVISO, capturado al empezar la pasada (`D-103`).
+   *
+   * Si no casa con el de ahora, el cursor no vale y se relee: asi no hay un
+   * «reinicio» que una extraccion en curso pueda pisar al terminar. Ausente =
+   * cursor escrito antes de esta version; `null` = se reviso sin personaje.
+   */
+  owner: z.string().max(128).nullable().optional(),
 });
 export type RelationCursor = z.infer<typeof relationCursorSchema>;
 

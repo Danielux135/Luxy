@@ -70,6 +70,27 @@ describe('la purga del cierre de la boveda', () => {
     expect(DECRYPTED_RENDERER_STATE).toContain('openImageAttempt');
   });
 
+  it('y la ficha del personaje y lo del enganche (`D-103`)', () => {
+    // la ficha es el texto que lee el modelo y faltaba aqui: sobrevivia al
+    // candado. El dueño y la vista previa llevan su nombre y lo de su memoria
+    expect(DECRYPTED_RENDERER_STATE).toContain('characterDescription');
+    expect(DECRYPTED_RENDERER_STATE).toContain('conversationOwner');
+    expect(DECRYPTED_RENDERER_STATE).toContain('ownerPreview');
+  });
+
+  it('y la galeria de personajes, que lleva la ficha entera de cada uno', () => {
+    // se añadio `characterDescription` y se dejo fuera la lista de la que sale
+    // ese mismo texto: con la boveda cerrada seguian en memoria el nombre, la
+    // ficha y la receta de cada personaje
+    expect(DECRYPTED_RENDERER_STATE).toContain('characters');
+  });
+
+  it('y los descartes de «¿Es de Lia?», que salen de lo que dicen sus mensajes', () => {
+    // son identificadores, pero el aviso solo aparece si el texto descifrado
+    // nombra a un personaje: pasaban de una apertura a la siguiente
+    expect(DECRYPTED_RENDERER_STATE).toContain('ownerHintDismissed');
+  });
+
   it('y lo demas que ya llevaba contenido descifrado sigue estando', () => {
     // la lista se junto de dos copias escritas a mano que habian divergido: el
     // cierre de sesion vaciaba seis cosas y el bloqueo diez

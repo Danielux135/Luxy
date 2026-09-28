@@ -99,7 +99,7 @@ describe('memoria episodica', () => {
     await memory.search(vault, 'secreto');
     expect(memory.ready).toBe(true);
 
-    vault.lock();
+    vault.lock('manual');
 
     // esto no es higiene: aqui habia texto descifrado, y una boveda cerrada que
     // conserve su contenido en memoria no esta cerrada
@@ -204,7 +204,7 @@ describe('memoria episodica', () => {
     expect(linea[0]?.stems.has(tokenize('vainilla')[0]!)).toBe(true);
     expect(memory.timelineSize).toBe(2);
 
-    vault.lock();
+    vault.lock('manual');
 
     // aqui habia raices de lo que se dijo: una boveda cerrada que las conserve
     // no esta cerrada

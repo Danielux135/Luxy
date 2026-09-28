@@ -264,9 +264,11 @@ En `packages/shared/src/vault-recap.ts`, función `buildRecapPrompt(input)`. Los
 >   SIRVE: «El la llama nena cuando esta de buenas».
 >   NO SIRVE: «Tienen buena quimica».
 > - `decisions`: lo que quedo acordado entre los dos, incluidos los limites y las
->   reglas del juego.
+>   reglas del juego. Una promesa o algo que quedaron en hacer juntos NO va
+>   aqui: va en `plan`.
 >   SIRVE: «Quedaron en que ella escribe primero por las mañanas».
-> - `plan`: lo que queda por delante, si lo hay.
+> - `plan`: lo que queda por delante, si lo hay, con las promesas que sigan sin
+>   cumplirse.
 > - `openQuestions`: lo que quedo en el aire sin respuesta.
 > - `lessons`: lo que ELLA ha aprendido de EL. Que le gusta, que le corta, que
 >   tono funciona y cual no.

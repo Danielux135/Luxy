@@ -4,10 +4,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ARGON2_PARAMS, openText, sealText, toBase64Url } from '@luxy/vault-crypto';
 import {
+  MAX_USER_WAIT_MS,
   MIN_PASSWORD_LENGTH,
   VaultError,
   VaultService,
   type DeviceKeyStore,
+  type VaultLockEvent,
 } from './vault-service.js';
 import { DEFAULT_AUTO_LOCK_MINUTES, readVaultKeyFile, vaultFilePathFor } from './key-file.js';
 
@@ -166,7 +168,7 @@ describe('VaultService', () => {
       await vault.create(PASSWORD);
       expect(() => vault.subkeyFor('conversation', 'c1')).not.toThrow();
 
-      vault.lock();
+      vault.lock('manual');
 
       expect(vault.isUnlocked()).toBe(false);
       expect(() => vault.subkeyFor('conversation', 'c1')).toThrow('la boveda esta bloqueada');
@@ -179,7 +181,7 @@ describe('VaultService', () => {
       const key = vault.subkeyFor('conversation', 'c1');
       const envelope = await sealText(key, 'vault.conversation', 'contenido privado');
 
-      vault.lock();
+      vault.lock('manual');
       // la boveda ya no puede dar la llave: los datos siguen ahi, ilegibles
       expect(() => vault.subkeyFor('conversation', 'c1')).toThrow(VaultError);
 
@@ -191,8 +193,8 @@ describe('VaultService', () => {
     it('bloquear dos veces no rompe nada', async () => {
       const vault = service();
       await vault.create(PASSWORD);
-      vault.lock();
-      expect(() => vault.lock()).not.toThrow();
+      vault.lock('manual');
+      expect(() => vault.lock('manual')).not.toThrow();
     });
   });
 
@@ -224,15 +226,163 @@ describe('VaultService', () => {
       expect(vault.isUnlocked()).toBe(true);
     });
 
-    it('usar la boveda cuenta como actividad', async () => {
+    // REESCRITA (`D-106`). Decia lo contrario —«usar la boveda cuenta como
+    // actividad»— y exigia que `subkeyFor` aplazara el cierre. Con esa prueba en
+    // verde la propia pantalla, al releerse sola, tuvo la boveda abierta hora y
+    // media sin nadie delante, y ninguna prueba podia fallar por ello
+    it('leer la boveda NO cuenta como actividad', async () => {
       const vault = service();
       await vault.create(PASSWORD);
       vault.setAutoLockMinutes(1);
 
       clock += 50_000;
       vault.subkeyFor('media');
+      vault.subkeyFor('identity', 'characters');
       clock += 50_000;
+      expect(vault.tickAutoLock()).toBe(true);
+      expect(vault.isUnlocked()).toBe(false);
+    });
+
+    it('una espera del usuario aplaza el cierre, y el limite empieza al soltarla', async () => {
+      const vault = service();
+      await vault.create(PASSWORD);
+      vault.setAutoLockMinutes(1);
+
+      const release = vault.beginUserWait('reply');
+      clock += 10 * 60_000;
       expect(vault.tickAutoLock()).toBe(false);
+      // la cuenta atras no baja mientras espera: anunciaria un cierre que no llega
+      expect(vault.status().lockingInMs).toBe(60_000);
+
+      release();
+      clock += 59_000;
+      expect(vault.tickAutoLock()).toBe(false);
+      clock += 2_000;
+      expect(vault.tickAutoLock()).toBe(true);
+    });
+
+    it('una espera de imagen tambien aplaza la inactividad, y se cuenta por clase', async () => {
+      const vault = service();
+      await vault.create(PASSWORD);
+      vault.setAutoLockMinutes(1);
+      const release = vault.beginUserWait('image');
+      clock += 10 * 60_000;
+      expect(vault.tickAutoLock()).toBe(false);
+      expect(vault.activeUserWaits()).toBe(1);
+      expect(vault.activeUserWaits('image')).toBe(1);
+      // Win+L solo mira los envios
+      expect(vault.activeUserWaits('reply')).toBe(0);
+      release();
+    });
+
+    it('soltar una espera dos veces no la vuelve a contar', async () => {
+      const vault = service();
+      await vault.create(PASSWORD);
+      vault.setAutoLockMinutes(1);
+      const release = vault.beginUserWait('reply');
+      release();
+      clock += 61_000;
+      release();
+      expect(vault.tickAutoLock()).toBe(true);
+    });
+
+    it('una espera olvidada no apaga el cierre para siempre', async () => {
+      const vault = service();
+      await vault.create(PASSWORD);
+      vault.setAutoLockMinutes(1);
+
+      vault.beginUserWait('reply');
+      clock += MAX_USER_WAIT_MS - 1;
+      expect(vault.tickAutoLock()).toBe(false);
+      clock += 61_000;
+      expect(vault.activeUserWaits()).toBe(0);
+      expect(vault.tickAutoLock()).toBe(true);
+    });
+
+    it('cerrar borra las esperas: una de antes no mantiene abierta la siguiente', async () => {
+      const vault = service();
+      await vault.create(PASSWORD);
+      vault.setAutoLockMinutes(1);
+
+      const release = vault.beginUserWait('reply');
+      vault.lock('manual');
+      await vault.unlock(PASSWORD);
+      clock += 61_000;
+      expect(vault.tickAutoLock()).toBe(true);
+      // y soltarla despues no toca la sesion nueva
+      await vault.unlock(PASSWORD);
+      clock += 30_000;
+      release();
+      clock += 31_000;
+      expect(vault.tickAutoLock()).toBe(true);
+    });
+
+    it('con la boveda cerrada no se puede empezar una espera', () => {
+      const vault = service();
+      const release = vault.beginUserWait('reply');
+      expect(vault.activeUserWaits()).toBe(0);
+      expect(() => release()).not.toThrow();
+    });
+
+    it('quien escucha el cierre recibe el motivo y el hecho, sin nada mas', async () => {
+      const vault = service();
+      await vault.create(PASSWORD);
+      const events: VaultLockEvent[] = [];
+      vault.onLock((event) => events.push(event));
+      const vias: string[] = [];
+      vault.onUnlock((via) => vias.push(via));
+
+      await vault.unlock(PASSWORD);
+      clock += 5_000;
+      vault.subkeyFor('media');
+      vault.subkeyFor('media', 'otro');
+      vault.subkeyFor('identity', 'characters');
+      clock += 2_000;
+      vault.lock('suspension');
+      vault.lock('salida');
+
+      expect(events).toEqual([
+        { reason: 'suspension', wasUnlocked: true, openMs: 7_000, derivations: 3 },
+        { reason: 'salida', wasUnlocked: false, openMs: null, derivations: 0 },
+      ]);
+      expect(vias).toEqual(['password']);
+    });
+
+    it('la apertura avisa por donde se abrio', async () => {
+      const vias: string[] = [];
+      const vault = service();
+      vault.onUnlock((via) => vias.push(via));
+      const { recoveryKey } = await vault.create(PASSWORD);
+      vault.lock('manual');
+      await vault.unlockWithRecoveryKey(recoveryKey);
+      expect(vias).toEqual(['create', 'recovery']);
+    });
+
+    it('un oyente del cierre que falla no deja sin aviso a los demas', async () => {
+      const vault = service();
+      await vault.create(PASSWORD);
+      let avisado = false;
+      vault.onLock(() => {
+        throw new Error('registro roto');
+      });
+      vault.onLock(() => {
+        avisado = true;
+      });
+      expect(() => vault.lock('manual')).toThrow('registro roto');
+      expect(avisado).toBe(true);
+      expect(vault.isUnlocked()).toBe(false);
+    });
+
+    it('un oyente de la apertura que falla no tumba la apertura', async () => {
+      const vault = service();
+      await vault.create(PASSWORD);
+      vault.lock('manual');
+      vault.onUnlock(() => {
+        throw new Error('registro roto');
+      });
+      await vault.unlock(PASSWORD);
+      expect(vault.isUnlocked()).toBe(true);
+      expect(() => vault.subkeyFor('media')).not.toThrow();
     });
 
     it('un equipo suspendido mucho tiempo aparece bloqueado al volver', async () => {
@@ -269,7 +419,7 @@ describe('VaultService', () => {
       const vault = service();
       await vault.create(PASSWORD);
       vault.setAutoLockMinutes(60);
-      vault.lock();
+      vault.lock('manual');
 
       const otra = service();
       await otra.unlock(PASSWORD);
@@ -279,7 +429,7 @@ describe('VaultService', () => {
     it('no se puede cambiar con la boveda cerrada', async () => {
       const vault = service();
       await vault.create(PASSWORD);
-      vault.lock();
+      vault.lock('manual');
       // si no, cualquiera que se siente delante lo desactivaria para la proxima
       expect(() => vault.setAutoLockMinutes(0)).toThrow('abre la boveda antes');
     });
@@ -297,7 +447,7 @@ describe('VaultService', () => {
       clock += 20_000;
       expect(vault.status().lockingInMs).toBe(40_000);
 
-      vault.lock();
+      vault.lock('manual');
       expect(vault.status().lockingInMs).toBeNull();
     });
   });
@@ -316,7 +466,7 @@ describe('VaultService', () => {
       await vault.create(PASSWORD);
       const before = toBase64Url(vault.subkeyFor('media', 'm1'));
 
-      vault.lock();
+      vault.lock('manual');
       await vault.unlock(PASSWORD);
       expect(toBase64Url(vault.subkeyFor('media', 'm1'))).toBe(before);
     });
@@ -347,7 +497,7 @@ describe('VaultService', () => {
     it('no se puede activar con la boveda cerrada', async () => {
       const vault = service();
       await vault.create(PASSWORD);
-      vault.lock();
+      vault.lock('manual');
       await expect(vault.enableDeviceUnlock()).rejects.toThrow('abre la boveda antes');
     });
 

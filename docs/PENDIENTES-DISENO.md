@@ -1,5 +1,11 @@
 # F23-PENDIENTES-001: asuntos pendientes que Lía saca sola
 
+> **Estado (28/09).** Encima de la dosificación por nota que describe este
+> documento hay ahora un modo esporádico por personaje (`pendingPacing`,
+> `D-104`): el bloque solo entra en los mensajes 1, 5, 9… de él, el permiso pasa a
+> ser una condición y una nota avisa, sin nombrarla, de que ella ya sacó una. Nace
+> apagado; apagado, la dosificación es la de aquí.
+
 ## 1. Qué hace
 
 Luxy guarda, dentro de la bóveda cifrada, cada promesa o plan que quedó pendiente entre Daniel y Lía. Cada uno es un puntero a un turno real con una cita literal que el código comprueba. Un modelo de suscripción (Codex o Claude) los extrae entre turnos, siempre con la misma función y el mismo cursor para las 17 conversaciones antiguas y para las nuevas. En el turno de pago, el código elige como mucho 2 y los añade como un bloque de DATOS. Cada línea lleva hechos ya calculados («hace 7 dias», «no lo has sacado nunca», «el no ha vuelto a nombrarlo»). Así ella puede recordárselo, reclamárselo, echárselo en cara o callárselo con su voz, sin que Daniel lo nombre y sin repetirse. La llamada de pago sigue siendo una sola: no hay salida nueva, y el bloque solo existe los turnos en que la selección da líneas.

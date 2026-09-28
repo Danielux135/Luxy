@@ -177,6 +177,8 @@ export interface RelationRunResult {
 interface Candidate {
   conversationId: string;
   characterId: string | null;
+  /** tiene algun evento de enganche: un cursor anterior al campo `owner` ya no vale */
+  linked: boolean;
   /** createdAt del primer turno: el orden de la pasada */
   startedAt: string;
 }
@@ -223,6 +225,34 @@ function withCursor(cursors: readonly RelationCursor[], next: RelationCursor): R
   return [...rest, next];
 }
 
+/** el dueño en vigor de una conversacion, como lo compara un cursor */
+export interface ConversationOwnerRef {
+  characterId: string | null;
+  /** tiene algun evento de enganche, aunque ya se soltara */
+  linked: boolean;
+}
+
+/**
+ * si un cursor se escribio con el dueño que tiene ahora la conversacion.
+ *
+ * Es una COMPARACION y no un reinicio a proposito: un reinicio lo pisaba una
+ * extraccion que ya estaba en marcha, que al terminar escribia un cursor valido
+ * de antes del enganche. Asi, esa extraccion escribe un cursor que nace
+ * invalido y la siguiente pasada relee.
+ *
+ * Un cursor SIN el campo es anterior a esta version, cuando no habia eventos:
+ * vale solo si la conversacion sigue sin tenerlos. Con eventos se relee, que
+ * tambien cubre volver de un Studio anterior que haya quitado el campo al
+ * reescribir el archivo.
+ */
+export function cursorMatchesOwner(
+  cursor: Pick<RelationCursor, 'owner'>,
+  owner: ConversationOwnerRef,
+): boolean {
+  if (cursor.owner === undefined) return !owner.linked;
+  return cursor.owner === owner.characterId;
+}
+
 /**
  * hasta donde se reviso de verdad esta conversacion.
  *
@@ -235,9 +265,13 @@ function withCursor(cursors: readonly RelationCursor[], next: RelationCursor): R
 export function effectiveThrough(
   cursor: RelationCursor | undefined,
   turns: readonly { sequence: number; createdAt: string }[],
+  owner: ConversationOwnerRef,
 ): number {
   if (cursor === undefined) return -1;
   if (cursor.version < RELATION_EXTRACTOR_VERSION) return -1;
+  // lo reviso otro dueño: sus notas se apuntaron con otras abiertas delante y
+  // otro personaje como dueño, asi que no cuenta como revisado (`D-103`)
+  if (!cursorMatchesOwner(cursor, owner)) return -1;
   if (cursor.through < 0) return -1;
 
   const turn = turns.find((each) => each.sequence === cursor.through);
@@ -414,6 +448,53 @@ export class RelationSync {
     return new Set(this.failures.keys());
   }
 
+  /**
+   * olvida que esa conversacion fallo en esta sesion.
+   *
+   * Tras cambiar su dueño, el fallo de antes no dice nada: se revisaba con otro
+   * personaje. Sin esto, la relectura que el cambio exige se saltaria.
+   */
+  forgetFailure(conversationId: string): void {
+    this.failures.delete(conversationId);
+  }
+
+  /**
+   * relee una conversacion entera, en segundo plano, tras cambiar su dueño.
+   *
+   * Una tanda revisa una ventana de 40 turnos (`RELATION_WINDOW_TURNS`), asi que
+   * una conversacion larga necesita varias: se repite hasta que no avanza o se
+   * acaban las vueltas. Devuelve cuantas tandas hizo. No lanza nunca: un fallo
+   * del trabajo de fondo no puede llegar a ninguna pantalla (`D-088`).
+   */
+  async reviewConversation(input: {
+    conversationId: string;
+    projectAlias: string;
+    rounds: number;
+  }): Promise<number> {
+    let done = 0;
+    for (let round = 0; round < Math.max(0, input.rounds); round += 1) {
+      if (!this.deps.vault.isUnlocked()) break;
+      let reviewed = 0;
+      try {
+        const result = await this.runOnce({
+          projectAlias: input.projectAlias,
+          conversationId: input.conversationId,
+          limit: 1,
+          force: true,
+        });
+        reviewed = result.reviewed;
+      } catch (error) {
+        this.deps.log('no se pudieron apuntar los pendientes', {
+          motivo: redact(error instanceof Error ? error.message : String(error)),
+        });
+        break;
+      }
+      done += 1;
+      if (reviewed === 0) break;
+    }
+    return done;
+  }
+
   /** cancela el temporizador. Se engancha a `vault.onLock` */
   cancel(): void {
     if (this.idle === null) return;
@@ -535,9 +616,19 @@ export class RelationSync {
     const snapshot = await this.deps.relations.read(this.deps.vault);
     const summaries = await this.deps.conversations.list(this.deps.vault);
     const owners = new Map(summaries.map((each) => [each.conversationId, each.characterId]));
+    const linked = new Set(
+      summaries.filter((each) => each.ownerLinked === true).map((each) => each.conversationId),
+    );
     const cursors = new Map(snapshot.cursors.map((cursor) => [cursor.conversationId, cursor]));
 
-    const candidates = this.pending(await this.deps.timeline(), owners, cursors, target, options);
+    const candidates = this.pending(
+      await this.deps.timeline(),
+      owners,
+      linked,
+      cursors,
+      target,
+      options,
+    );
     result.pending = Math.max(0, candidates.length - Math.min(candidates.length, limit));
 
     for (const candidate of candidates.slice(0, limit)) {
@@ -553,7 +644,13 @@ export class RelationSync {
         // abre, un sobre corrupto. Sin esto, la excepcion salia de la tanda
         // entera, la conversacion no quedaba marcada y, como el orden es
         // cronologico, volvia a ser la primera candidata en cada disparo: la
-        // pasada no avanzaba nunca y reiniciar no lo arreglaba
+        // pasada no avanzaba nunca y reiniciar no lo arreglaba.
+        //
+        // Salvo que el fallo sea que la boveda se cerro a mitad: eso no es culpa
+        // de la conversacion, y marcarla la dejaba fuera de las pasadas hasta
+        // reiniciar. Leer ya no mantiene viva la boveda (`D-106`), asi que pasa.
+        // El cursor no ha avanzado —lo que lanza es el guardado— (`D-088`)
+        if (!this.deps.vault.isUnlocked()) break;
         this.failures.set(candidate.conversationId, target.provider);
         result.failed.push({
           conversationId: candidate.conversationId,
@@ -566,7 +663,7 @@ export class RelationSync {
     // despues de cada turno, que casi siempre no toca nada— no paga otra lectura
     // del almacen
     if (candidates.length > 0) {
-      result.pending = await this.remaining(owners, target, options, result.pending);
+      result.pending = await this.remaining(owners, linked, target, options, result.pending);
     }
 
     // ni una cita, ni una palabra clave, ni de que conversacion: solo cuantas
@@ -598,6 +695,7 @@ export class RelationSync {
    */
   private async remaining(
     owners: ReadonlyMap<string, string | null>,
+    linked: ReadonlySet<string>,
     target: { provider: LocalCliProvider; model: string | null },
     options: RelationRunOptions,
     fallback: number,
@@ -611,7 +709,7 @@ export class RelationSync {
       // siempre SIN `force`: lo que queda es lo que la pasada va a hacer sola.
       // Contando lo que se acaba de negar, una tanda pedida a mano diria que
       // sigue quedando trabajo y el panel daria una vuelta de mas
-      return this.pending(await this.deps.timeline(), owners, cursors, target, {
+      return this.pending(await this.deps.timeline(), owners, linked, cursors, target, {
         ...options,
         force: false,
       }).length;
@@ -648,6 +746,7 @@ export class RelationSync {
   private pending(
     timeline: readonly RelationSyncTurn[],
     owners: ReadonlyMap<string, string | null>,
+    linked: ReadonlySet<string>,
     cursors: ReadonlyMap<string, RelationCursor>,
     target: { provider: LocalCliProvider; model: string | null },
     options: RelationRunOptions,
@@ -687,7 +786,11 @@ export class RelationSync {
       const lastReviewable = lastReviewableOf(ordered);
       if (lastReviewable === null) continue;
 
-      const through = effectiveThrough(cursor, ordered);
+      const owner = {
+        characterId: owners.get(conversationId) ?? null,
+        linked: linked.has(conversationId),
+      };
+      const through = effectiveThrough(cursor, ordered, owner);
       const behind = ordered.filter(
         (turn) => turn.sequence > through && turn.sequence <= lastReviewable,
       ).length;
@@ -702,7 +805,8 @@ export class RelationSync {
 
       candidates.push({
         conversationId,
-        characterId: owners.get(conversationId) ?? null,
+        characterId: owner.characterId,
+        linked: owner.linked,
         startedAt: first.createdAt,
       });
     }
@@ -734,7 +838,13 @@ export class RelationSync {
 
     const snapshot = await this.deps.relations.read(this.deps.vault);
     const cursor = snapshot.cursors.find((each) => each.conversationId === conversationId);
-    const window = relationWindow(turns, effectiveThrough(cursor, turns));
+    const window = relationWindow(
+      turns,
+      effectiveThrough(cursor, turns, {
+        characterId: candidate.characterId,
+        linked: candidate.linked,
+      }),
+    );
     if (window === null) return;
 
     const anchor = this.deps.anchor();
@@ -858,6 +968,9 @@ export class RelationSync {
           // salio bien: si venia de una negativa, deja de estar marcada
           refusedVersion: null,
           refusedAtTurns: null,
+          // el dueño con el que se REVISO, capturado al empezar la pasada, no
+          // el de ahora: si cambio entre medias, este cursor nace invalido
+          owner: candidate.characterId,
         }),
         counters: addCounters(current.counters, {
           ...merged.counters,
@@ -897,6 +1010,9 @@ export class RelationSync {
           at: now,
           refusedVersion: RELATION_EXTRACTOR_VERSION,
           refusedAtTurns: turns,
+          // una negativa no reviso nada: no puede certificar con que dueño se
+          // reviso `through`, asi que conserva lo que hubiera
+          ...(previous?.owner === undefined ? {} : { owner: previous.owner }),
         }),
         counters: addCounters(current.counters, { ...zeroCounters(), refused: 1 }),
       };

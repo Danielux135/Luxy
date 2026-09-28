@@ -63,6 +63,141 @@ Panel de Supabase → SQL Editor → `select to_json(now());` → Run. Si termin
 (`SEG-SYNC-001`, fallo 1). Si termina en `Z`, ese fallo no existe y quedan los
 otros dos.
 
+## LA-052 — probar el enganche y el resumen de Lía, primero con una conversación desechable
+
+Estado: **`pending` — abierta el 2026-09-25.** Es de Daniel, no de un agente: hasta
+hacerlo, nada del enganche está «verificado» (`D-093`). Requiere reconstruir Studio
+con los cambios de `F33-ENGANCHE-LOCAL-001` y `F33-RECUERDO-001`.
+
+**Con una conversación desechable** (una nueva sin personaje, dos o tres mensajes):
+
+1. En Privado, abrirla. El título dice «Conversación privada · sin personaje» y el
+   selector «Personaje», junto a Proveedor, dice «Nadie».
+2. Pulsar «Enganchar a un personaje» (arriba) o elegir a Lía en el selector. Sale
+   la confirmación; leerla: tiene que decir que solo vale en este equipo y cómo se
+   deshace. Pulsar «Enganchar a Lía».
+3. Comprobar: el título pasa a «· Lía», la conversación sale en su grupo de la
+   lista, bajo los mensajes de antes hay una línea «Enganchada a Lía el …», y el
+   selector dice «Enganchada a Lía el … Solo en este equipo.» con «Soltar».
+4. Escribir un mensaje. La respuesta sale firmada «Lía»; las de antes, «Respuesta».
+5. En `studio.log`, la línea «prompt privado compuesto» de ese turno: `recientes`
+   tiene que ser `null` (casilla apagada).
+6. Pulsar «Soltar» y confirmar. El título vuelve a «· sin personaje».
+
+**El resumen (casilla apagada por defecto):** en la ficha de Lía, dentro de
+«Generar imagen o vídeo», encender «Pasarle un resumen corto de sus dos últimas
+conversaciones» (antes se llamaba «Recordar sus dos últimas conversaciones»).
+Escribir en OTRA conversación de Lía y mirar en `studio.log`, en «prompt privado
+compuesto», el objeto `recientes`. `conversaciones` cuenta solo las que tienen
+memoria usable: las que no la tienen (ni memoria sellada ni una ficha de «Memoria
+de lo ya hablado» aprobada y al día) van a `sinMemoria` y **no se sustituyen**
+por otra. Así que `conversaciones: 0` con `sinMemoria: 2` es lo diseñado, no un
+fallo: quiere decir que a sus dos más recientes les falta memoria. Avisar si
+sale `recientesError: true` o `sinIndice: true` a menudo. `fuera` dice cuántos
+caracteres de esos resúmenes no viajaron.
+
+**Después, la 3657a284**, la que empezó sin personaje. Engancharla leyendo antes la
+confirmación: su memoria se escribió sin la ficha de Lía, y el resumen solo la
+llevará mientras sea una de sus dos conversaciones más recientes.
+
+**Qué no hace todavía:** no llega al otro ordenador («Sincronizar» no lo sube) y no
+se puede soltar ni cambiar una conversación que ya tenía personaje antes de este
+cambio.
+
+**La ficha editada (segunda ronda del 28/09):** cambiar algo pequeño de la ficha
+de Lía, escribir en una conversación suya YA empezada y comprobar en la línea
+«El modelo sabe que es:» de «Instrucciones de la conversación» que sale la
+ficha nueva. Ya no hace falta pulsar «Usar». Antes de enviar, esa misma línea
+tiene que avisar «Has cambiado su ficha: desde tu próximo mensaje le llega la
+nueva…» (cuarta ronda del 28/09).
+
+**Un caso que conviene probar (corregido el 28/09):** en una conversación NUEVA,
+elegir a Lía y enviar con un proveedor que falle. El mensaje vuelve al cuadro, el
+título sigue siendo «Conversación privada · Lía» y, al reenviarlo, la
+conversación nace con ella.
+
+## LA-053 — comprobar que la bóveda se cierra sola, con Win+L y con la X
+
+Estado: **`pending` — abierta el 2026-09-25.** Es de Daniel: hasta hacerlo, nada
+de `SEG-BOVEDA-001` está «verificado» (`D-093`, `D-106`). Requiere reconstruir
+Studio con los cambios de ese bloque.
+
+**Lo que va a notar:** leer sin tocar el ratón ni el teclado durante el tiempo del
+ajuste cierra la bóveda, y trabajar en otra sección de Studio no la mantiene
+abierta. Es lo que dice el ajuste; hasta hoy no pasaba por el fallo.
+
+1. **La cuenta atrás.** Abrir la bóveda y quedarse en Privado. El tiempo está en
+   el panel «Bóveda abierta», **abajo del todo** de Privado: bajar hasta él antes
+   de empezar, apuntar el tiempo y no tocar nada dos minutos: tiene que **bajar**.
+   Mover el ratón por encima de la ventana, que tiene que estar activa (con un
+   clic basta): vuelve al tiempo completo en unos segundos. El aviso sale como
+   mucho cada 20 s, y con la ventana sin el foco no cuenta (ni gasta esos 20 s).
+2. **Esperando una respuesta.** Enviar un mensaje a Lía y no tocar nada: mientras
+   contesta, la cuenta atrás se queda en el tiempo completo y no baja.
+3. **Win+L.** Con la bóveda abierta y nada enviándose, pulsar Win+L, volver a
+   entrar en Windows y mirar Privado: tiene que estar cerrada con el aviso «La
+   bóveda se cerró al bloquear Windows.». **Si sigue abierta, Windows no le está
+   avisando a Luxy**, y hay que decirlo: es lo único de este cambio que no se ha
+   podido probar fuera de su equipo.
+4. **La X.** Con la bóveda abierta, cerrar la ventana con la X, volver a abrirla
+   desde el icono junto al reloj: cerrada, con «La bóveda se cerró al cerrar la
+   ventana.».
+5. **El registro.** En Registros o en `studio.log`, buscar «boveda abierta» y
+   «boveda cerrada». Cada cierre lleva `motivo` y `derivaciones`. La frase antigua,
+   «boveda bloqueada por inactividad», ya no sale. Si con la pantalla quieta sale un
+   cierre por `inactividad` con `derivaciones` de cientos, algo sigue leyendo la
+   bóveda solo, y conviene decirlo.
+
+**Opcional:** Win+L justo después de enviar un mensaje. La bóveda espera a que la
+respuesta se guarde (como mucho 10 minutos) y entonces se cierra; si se vuelve
+antes, no se cierra. En `studio.log`, «cierre de la boveda aplazado» con
+`envios: 1`. **Solo un envío lo aplaza, y solo hasta que su texto se guarda**:
+con una imagen generándose desde el panel, Win+L cierra en el acto, y si el
+turno pidió una imagen, en cuanto su texto está guardado Win+L cierra aunque la
+imagen siga generándose (esa imagen se pierde; el texto no). Si prefiere que Win+L cierre siempre en el acto
+aunque se pierda esa respuesta, es cambiar una constante (`D-106`).
+
+## LA-054 — probar las promesas de vez en cuando, midiendo antes
+
+Estado: **`pending` — abierta el 2026-09-28.** Es de Daniel: hasta hacerlo, nada de
+`F33-PROMESAS-001` está «verificado» (`D-093`, `D-104`). Requiere reconstruir
+Studio. **Con `LA-045` abierto, el tope parecerá no hacer nada**: la guarda de
+desfase calla casi todas las notas antes de que el tope las vea.
+
+1. **Primero, con la casilla APAGADA.** Hablar con Lía en tandas de **8 mensajes o
+   más**, sin contar los 4 primeros de cada tanda. En `studio.log`, en cada línea
+   «prompt privado compuesto», mirar `pendientes.sacadasPorElla`. Es la línea
+   base, y **alta no quiere decir que la nota vaya a ser falsa**: con la casilla
+   apagada ella saca una promesa en casi cada respuesta, que es justo la queja,
+   así que una cifra alta aquí es mayormente cierta (corregido en la segunda
+   ronda del 28/09; antes decía lo contrario). Solo dice cuántos turnos habrá
+   que leer en el paso 4.
+2. **Después, encenderla**: en la ficha de Lía, dentro de «Generar imagen o
+   vídeo», «Sacar los pendientes solo de vez en cuando». Mismas tandas.
+3. Mirar en cada «prompt privado compuesto»: `pendientesEsporadicos: true`;
+   `pendientes.topeCerrado` en tres de cada cuatro mensajes; `retenidasPorTope`
+   mayor que 0 cuando el tope actuó; y `notaYaSalio` solo después de que ella
+   sacara una. Si ella usa cada apertura, **la nota viaja en 3 de cada 4
+   mensajes**: «casi siempre» es lo esperado cuando funciona, no ruido. Y
+   `ecoOtras.enNotas` > 0 con «Pasarle un resumen corto de sus dos últimas
+   conversaciones» encendida quiere decir que alguna promesa viaja por el resumen de otra
+   conversación, sin tope.
+4. **Leer las respuestas**, que es lo que manda: si deja de repetir la misma
+   promesa y si, cuando la escena la trae, todavía la saca. La nota es falsa
+   solo si viajó y la respuesta anterior NO había sacado ninguna promesa.
+5. No cambiar a la vez «Pedirle que varíe la forma», la temperatura ni «Pasarle
+   un resumen corto de sus dos últimas conversaciones»: las tres cambian lo que se
+   mide. **Tampoco editar la ficha de Lía ni escribir o aprobar una ficha de
+   «Memoria de lo ya hablado» entre los dos brazos**: la ficha editada entra en la
+   conversación desde el mensaje siguiente y la retroactiva cambia `ecoMemoria`,
+   sin que ningún ajuste lo registre (`D-104`, tercera ronda; revisión del 28/09).
+6. **Cuánto pesan las citas largas.** Tras pulsar «Comprobar la memoria», la
+   línea «Ya salió» dice
+   cuántas veces ella sacó un pendiente y cuántas habrían llevado la nota, y
+   aparte las de citas largas. Si muchas de las suyas son largas y casi ninguna
+   cuenta, la nota no le va a llegar en esas: decírselo a Claude antes de
+   ajustar nada (`D-104`, cuarta ronda).
+
 ## LA-048 — comprobaciones de pantalla pendientes: F28, F29-POSTURA-001 y F30
 
 Estado: **`pending` — anotada el 2026-09-23.** Es un índice, no una acción nueva.

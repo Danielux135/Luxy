@@ -339,7 +339,68 @@ describe('55. cifras correctas con datos sinteticos', () => {
       sameNoteWithin24h: 0,
       maxRaisesPerNote: 1,
       medianDaysToFirstRaise: 4,
+      // comparte cuatro de siete raices: en escena, pero no «ya salio»
+      herMentionsClear: 0,
+      longQuotes: 0,
+      herMentionsLong: 0,
+      herMentionsClearLong: 0,
     });
+  });
+
+  it('separa las citas largas y cuenta cuantas alusiones pasarian la regla estricta', () => {
+    // diez raices: el 60 % pide seis (texto inventado, revision del 28/09)
+    const LARGA =
+      'te prometo que mañana por la mañana te traigo el desayuno a la cama, con tostadas y zumo de naranja recién exprimido';
+    const origen = turn(CONV_A, 4, 'user', '2026-09-01T19:00:00.000Z', LARGA);
+    // la saca con claridad: casi todas sus raices
+    const clara = turn(
+      CONV_B,
+      4,
+      'assistant',
+      '2026-09-06T09:00:00.000Z',
+      'mañana me traes el desayuno a la cama, con tostadas y zumo de naranja recién exprimido, lo prometiste',
+    );
+    // la saca tambien, pero con cinco de diez: en escena, no «ya salio»
+    const corta = turn(
+      CONV_B,
+      5,
+      'assistant',
+      '2026-09-07T09:00:00.000Z',
+      '*se incorpora en la cama* Huele a tostadas... ¿Me has traído el desayuno como me prometiste?',
+    );
+    const todos = [...TURNS, origen, clara, corta];
+    const result = diagnoseRelations(
+      input({
+        notes: [
+          CAFES_NOTE,
+          MERCADO_NOTE,
+          PLAYA_NOTE,
+          ORPHAN_NOTE,
+          note({
+            quote: LARGA,
+            origin: {
+              conversationId: CONV_A,
+              sequence: 4,
+              role: 'user',
+              at: '2026-09-01T19:00:00.000Z',
+            },
+          }),
+        ],
+        timeline: todos.map((item) => ({
+          conversationId: item.conversationId,
+          sequence: item.sequence,
+          role: item.role,
+          createdAt: item.createdAt,
+          stems: new Set(tokenize(item.text)),
+        })),
+      }),
+    );
+    expect(result.raising.longQuotes).toBe(1);
+    expect(result.raising.herMentionsLong).toBe(2);
+    expect(result.raising.herMentionsClearLong).toBe(1);
+    // la de los cafes sigue sin pasar: la unica clara es la larga
+    expect(result.raising.herMentionsClear).toBe(1);
+    expect(result.raising.herMentions).toBe(3);
   });
 
   it('dos veces la misma en el mismo dia se cuenta como repeticion', () => {

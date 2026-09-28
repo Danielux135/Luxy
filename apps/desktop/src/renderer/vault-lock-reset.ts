@@ -62,6 +62,27 @@ export const DECRYPTED_RENDERER_STATE = [
    * y por eso tiene que irse con el candado igual que el que espera decision.
    */
   'openImageAttempt',
+  /**
+   * la ficha del personaje de la conversacion abierta: es el texto que lee el
+   * modelo, descifrado. Faltaba en esta lista y sobrevivia al candado
+   */
+  'characterDescription',
+  /** de quien es la conversacion abierta, con su nombre (`D-103`) */
+  'conversationOwner',
+  /** la vista previa del enganche lleva el nombre y lo que se sabe de su memoria */
+  'ownerPreview',
+  /**
+   * la galeria de personajes: el nombre, la ficha ENTERA y la receta de cada
+   * uno. Es el mismo texto que `characterDescription`, solo que de todos a la
+   * vez, y se quedaba fuera. Al abrir se vuelve a pedir (`unlock`, `loginAccount`)
+   */
+  'characters',
+  /**
+   * en que conversaciones se dijo «No, esta no» al aviso «¿Es de Lia?». Son
+   * identificadores y nada mas, pero salen del contenido descifrado: el aviso
+   * solo aparece si sus mensajes nombran a un personaje (revision del 28/09)
+   */
+  'ownerHintDismissed',
 ] as const;
 
 export type DecryptedRendererState = (typeof DECRYPTED_RENDERER_STATE)[number];

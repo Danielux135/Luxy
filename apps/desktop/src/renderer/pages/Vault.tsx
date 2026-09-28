@@ -32,6 +32,20 @@ import {
 } from '../vault-recap-row.js';
 import { describeKudosBreakdown } from '../vault-kudos-breakdown.js';
 import { vaultNoticeFor } from '../vault-notice.js';
+import { useVaultPresence } from '../vault-presence.js';
+import {
+  RECENT_MEMORIES_CHECKBOX,
+  charactersNamedIn,
+  describeCharacterLink,
+  describeCharacterUnlink,
+  linkSeparator,
+  ownerHintQuestion,
+  ownerTitle,
+  replySpeaker,
+  shortDate,
+  suggestWithHistory,
+  userTextsOf,
+} from '../vault-character-link.js';
 import { describeReply, replyAt, replyTabLabel, replyTone } from '../vault-compatibility-reply.js';
 import { auxiliaryName, backgroundAuxiliary } from '../vault-auxiliary.js';
 import type { ConfigSummary } from '../useConfig.js';
@@ -220,6 +234,9 @@ export function VaultPage({
    */
   providers: string[];
 }): JSX.Element {
+  // teclado y raton dentro de Privado mantienen abierta la boveda; leerla, no
+  // (`D-106`). Va antes de los `return` tempranos: un hook no puede saltarse
+  useVaultPresence(vault.status.unlocked, vault.markPresence);
   if (vault.loading) return <Skeleton rows={4} />;
   if (vault.recoveryKey !== null) return <RecoveryKeyPanel vault={vault} />;
   // sin bóveda en este equipo la puerta es la cuenta, no la contraseña: es lo
@@ -269,6 +286,36 @@ function ConversationPanel({
   // quiera. Un modal automático a mitad de conversación es lo que hace que una
   // función así se apague a la semana
   const [reviewingAttempt, setReviewingAttempt] = useState<string | null>(null);
+  /**
+   * el cambio de dueño que se esta confirmando: con un personaje es enganchar,
+   * con `null` es soltar. `undefined` es que no hay ninguno abierto.
+   *
+   * Lleva la conversacion en la que se pidio, y solo vale mientras siga siendo
+   * la abierta. Este panel no se remonta al cambiar de hilo: sin eso, pulsar
+   * «Nueva» o abrir otra con la confirmacion delante dejaba el selector
+   * desactivado sin forma de cerrarla, y la confirmacion saltaba a la otra
+   * conversacion, donde se podia enganchar un hilo que no era el elegido.
+   */
+  const [ownerChangeRequest, setOwnerChange] = useState<
+    | {
+        conversationId: string;
+        characterId: string | null;
+        /**
+         * ya se llevo la vista a la confirmacion una vez. Al volver a esta
+         * conversacion desde la lista el panel se monta otra vez, y sin esto la
+         * pagina saltaba a la confirmacion en vez de al hilo (revision del 28/09)
+         */
+        shown?: boolean;
+      }
+    | undefined
+  >(undefined);
+  const ownerChange =
+    ownerChangeRequest !== undefined &&
+    ownerChangeRequest.conversationId === vault.openConversationId
+      ? ownerChangeRequest
+      : undefined;
+  // el acuse del ultimo cambio, en la conversacion en la que se hizo
+  const [ownerAck, setOwnerAck] = useState<{ conversationId: string; text: string } | null>(null);
   // la tarjeta de lo que quedó esperando, que NO depende de `lastImage`: ver
   // `pendingImageCard`
   const pendingCard = pendingImageCard({
@@ -280,7 +327,6 @@ function ConversationPanel({
   // escrito sin enviar
   const { composer } = vault;
   const { message, instructions: draftInstructions, characterId: draftCharacter } = composer;
-  const draftDescription = composer.characterDescription;
   // `null` significa «no ha elegido»: entonces vale el primero de la lista,
   // pero una elección suya se conserva aunque la lista cambie de orden
   const project = composer.project ?? projects[0] ?? '';
@@ -309,8 +355,16 @@ function ConversationPanel({
   const effort =
     composer.effort !== null && efforts.includes(composer.effort) ? composer.effort : null;
 
+  // con la confirmacion del enganche abierta no se envia: un turno en medio
+  // dejaba su texto desfasado —«tambien sus N mensajes anteriores», «no tiene
+  // todavia memoria propia»— y, mientras se enganchaba, main contestaba con un
+  // error evitable (revision del 28/09)
   const canSend =
-    message.trim().length > 0 && project.length > 0 && provider.length > 0 && !vault.sending;
+    message.trim().length > 0 &&
+    project.length > 0 &&
+    provider.length > 0 &&
+    !vault.sending &&
+    ownerChange === undefined;
 
   const submit = (): void => {
     void vault
@@ -321,8 +375,11 @@ function ConversationPanel({
         effort,
         projectAlias: project,
         instructions: draftInstructions,
-        characterId: draftCharacter,
-        characterDescription: draftDescription,
+        // el personaje solo viaja al NACER la conversacion; despues se cambia con
+        // el selector y main rechazaria el envio (`D-103`). La ficha la pone
+        // main desde la boveda, nunca la de aqui
+        characterId: vault.openConversationId === null ? draftCharacter : null,
+        characterDescription: null,
       })
       .then((kept) => {
         // solo si el turno llegó a existir. Si el modelo no contestó, el
@@ -339,14 +396,105 @@ function ConversationPanel({
       });
   };
 
+  /**
+   * UNA sola forma de elegir personaje, venga del selector, de la galeria o del
+   * aviso por nombre: en una conversacion nueva prepara su turno 0; en una sin
+   * dueño abre la confirmacion del enganche; en una que ya es de alguien no
+   * cambia de quien es (la galeria sigue eligiendo para generar imagenes).
+   *
+   * La galeria NO abre el enganche en una conversacion ya empezada (revision
+   * del 28/09): la confirmacion se pinta junto al selector, varias pantallas por
+   * debajo de la lista, y alli donde se pulso «Usar» no cambiaba nada. Ademas,
+   * quien solo queria generar una imagen se encontraba con una pregunta que no
+   * habia hecho. Enganchar se hace desde el selector o desde el boton de arriba.
+   */
+  const chooseCharacter = (characterId: string, from: 'selector' | 'gallery' = 'selector'): void => {
+    if (vault.openConversationId === null) {
+      vault.setComposer({ characterId, characterDescription: null });
+      return;
+    }
+    if (from === 'gallery') return;
+    if ((vault.conversationOwner?.source ?? 'none') === 'none') {
+      setOwnerAck(null);
+      setOwnerChange({ conversationId: vault.openConversationId, characterId });
+    }
+  };
+
+  const draftLabel =
+    draftCharacter === null
+      ? null
+      : (vault.characters.find((entry) => entry.characterId === draftCharacter)?.label ?? null);
+  const owner = vault.openConversationId === null ? null : vault.conversationOwner;
+  const ownerless = vault.openConversationId !== null && (owner?.source ?? 'none') === 'none';
+  const separator = owner === null ? null : linkSeparator(owner);
+
+  // el aviso «¿Es de Lia?»: solo sus mensajes y el borrador, sin dueño y sin
+  // descarte. Se calcula aqui y no se registra en ningun sitio.
+  //
+  // Lo de los turnos va memoizado aparte del borrador: trocear toda la
+  // conversacion en cada render costaba 150-650 ms con una larga sin dueño
+  // —justo el caso del aviso—, y hay un render por tecla y otro por latido
+  // (revision del 28/09). `vault.turns` solo cambia al releer la conversacion
+  const hintOwnerId = vault.openConversationId === null ? draftCharacter : vault.characterId;
+  const hintDismissed = vault.ownerHintDismissed.has(vault.openConversationId ?? '');
+  const namedInHistory = useMemo(
+    () =>
+      hintOwnerId !== null || hintDismissed
+        ? []
+        : charactersNamedIn(userTextsOf(vault.turns), vault.characters),
+    [hintOwnerId, hintDismissed, vault.turns, vault.characters],
+  );
+  const suggested =
+    ownerChange !== undefined
+      ? []
+      : suggestWithHistory({
+          namedInHistory,
+          draft: message,
+          characters: vault.characters,
+          ownerId: hintOwnerId,
+          dismissed: hintDismissed,
+        });
+  const suggestedCharacters = suggested
+    .map((id) => vault.characters.find((entry) => entry.characterId === id))
+    .filter((entry): entry is VaultCharacterView => entry !== undefined);
+
   return (
     <Panel
-      title="Conversación privada"
+      title={ownerTitle(owner, draftLabel)}
       actions={
         vault.openConversationId !== null && (
-          <button className="btn btn--quiet" onClick={() => void vault.openConversation(null)}>
-            Nueva
-          </button>
+          <>
+            {/* sin proyectos la confirmacion no se pinta —vive en la rama que los
+                tiene—, y el boton se quedaba desactivado sin nada a la vista */}
+            {ownerless && vault.characters.length > 0 && projects.length > 0 && (
+              <button
+                className="btn btn--quiet"
+                disabled={vault.sending || ownerChange !== undefined}
+                // desactivado y sin explicacion parecia roto: la confirmacion
+                // puede estar varias pantallas mas abajo (revision del 28/09)
+                title={
+                  ownerChange !== undefined
+                    ? 'Ya hay un cambio de personaje esperando: confírmalo o déjalo estar más abajo, encima del selector de personaje'
+                    : vault.sending
+                      ? 'Espera a que llegue la respuesta'
+                      : undefined
+                }
+                onClick={() => {
+                  if (vault.openConversationId === null) return;
+                  setOwnerAck(null);
+                  setOwnerChange({
+                    conversationId: vault.openConversationId,
+                    characterId: vault.characters[0]!.characterId,
+                  });
+                }}
+              >
+                Enganchar a un personaje
+              </button>
+            )}
+            <button className="btn btn--quiet" onClick={() => void vault.openConversation(null)}>
+              Nueva
+            </button>
+          </>
         )
       }
     >
@@ -361,11 +509,16 @@ function ConversationPanel({
       ) : (
         <div className="vault-thread">
           {vault.turns.map((turn) => (
-            <div key={turn.sequence} className={`vault-turn vault-turn--${turn.role}`}>
-              <span className="vault-turn__who">
-                {turn.role === 'user' ? 'Tú' : 'Respuesta'}
-              </span>
-              <p className="vault-turn__text">{turn.text}</p>
+            <div key={turn.sequence}>
+              <div className={`vault-turn vault-turn--${turn.role}`}>
+                {/* con su nombre solo lo que se escribio con su ficha: desde la
+                    posicion del dueño en adelante (`D-103`) */}
+                <span className="vault-turn__who">{replySpeaker(turn, owner)}</span>
+                <p className="vault-turn__text">{turn.text}</p>
+              </div>
+              {separator !== null && turn.sequence === owner?.signedAfter && (
+                <p className="field__hint">{separator}</p>
+              )}
             </div>
           ))}
         </div>
@@ -431,27 +584,18 @@ function ConversationPanel({
         vault={vault}
         draft={draftInstructions}
         onChange={(value) => vault.setComposer({ instructions: value })}
-        draftCharacter={draftCharacter}
-        onCharacterChange={(value) => vault.setComposer({ characterId: value })}
+        draftCharacter={vault.openConversationId === null ? draftCharacter : null}
       />
 
+      {/* «Usar» pasa por la misma eleccion que el selector, pero solo decide en
+          una conversacion NUEVA: en una empezada elige para generar y el
+          enganche se pide desde el selector. Sus instrucciones ya no las carga
+          la pantalla por su cuenta, las pone main al nacer la conversacion o al
+          engancharla (`D-103`) */}
       <GeneratePanel
         vault={vault}
         activeCharacterId={draftCharacter ?? vault.characterId}
-        onCharacterReady={(id, description) => {
-          // se adopta directamente: copiar un uuid a mano entre dos campos de
-          // la misma pantalla era un paso que no aportaba nada
-          vault.setComposer({ characterId: id, characterDescription: description });
-
-          // y con el vienen sus instrucciones: la personalidad es del personaje,
-          // no del hilo, y reescribirla en cada conversacion nueva produce el
-          // mismo personaje comportandose distinto segun donde se le hable.
-          // No pisa las que ya haya: solo rellena lo que esta vacio
-          if (draftInstructions !== null || (vault.instructions ?? '').length > 0) return;
-          void vault.readCharacterInstructions(id).then((instructions) => {
-            if (instructions !== null) vault.setComposer({ instructions });
-          });
-        }}
+        onCharacterReady={(id) => chooseCharacter(id, 'gallery')}
       />
 
       <MemoryPanel
@@ -492,7 +636,47 @@ function ConversationPanel({
         </Notice>
       ) : (
         <>
+          {ownerChange !== undefined && vault.openConversationId !== null && (
+            <OwnerChangePanel
+              key={`${vault.openConversationId}:${ownerChange.characterId ?? 'soltar'}`}
+              vault={vault}
+              characterId={ownerChange.characterId}
+              project={project}
+              scrollOnMount={ownerChange.shown !== true}
+              onShown={() =>
+                setOwnerChange((previous) =>
+                  previous === undefined || previous.shown === true
+                    ? previous
+                    : { ...previous, shown: true },
+                )
+              }
+              onDone={(text) => {
+                if (text !== null && vault.openConversationId !== null) {
+                  setOwnerAck({ conversationId: vault.openConversationId, text });
+                }
+                setOwnerChange(undefined);
+              }}
+            />
+          )}
+          {ownerAck !== null && ownerAck.conversationId === vault.openConversationId && (
+            <Notice tone="ok">{ownerAck.text}</Notice>
+          )}
+
           <div className="row">
+            <CharacterSelector
+              vault={vault}
+              draftCharacter={draftCharacter}
+              disabled={vault.sending || ownerChange !== undefined}
+              onChoose={(id) => {
+                if (id === null) vault.setComposer({ characterId: null, characterDescription: null });
+                else chooseCharacter(id);
+              }}
+              onUnlink={() => {
+                if (vault.openConversationId === null) return;
+                setOwnerAck(null);
+                setOwnerChange({ conversationId: vault.openConversationId, characterId: null });
+              }}
+            />
             <Field label="Proveedor">
               <select
                 value={provider}
@@ -581,6 +765,38 @@ function ConversationPanel({
             </Field>
           </div>
 
+          {suggestedCharacters.length > 0 && (
+            <Notice tone="idle">
+              {ownerHintQuestion(suggestedCharacters.map((entry) => entry.label))}{' '}
+              {suggestedCharacters.length === 1 ? (
+                <button
+                  className="btn btn--quiet"
+                  disabled={vault.sending}
+                  onClick={() => chooseCharacter(suggestedCharacters[0]!.characterId)}
+                >
+                  Sí, es suya
+                </button>
+              ) : (
+                suggestedCharacters.map((entry) => (
+                  <button
+                    key={entry.characterId}
+                    className="btn btn--quiet"
+                    disabled={vault.sending}
+                    onClick={() => chooseCharacter(entry.characterId)}
+                  >
+                    Es de {entry.label}
+                  </button>
+                ))
+              )}{' '}
+              <button
+                className="btn btn--quiet"
+                onClick={() => vault.dismissOwnerHint(vault.openConversationId)}
+              >
+                No, esta no
+              </button>
+            </Notice>
+          )}
+
           <textarea
             className="vault-composer"
             rows={3}
@@ -593,9 +809,27 @@ function ConversationPanel({
             }}
           />
           <div className="row">
-            <button className="btn btn--primary" disabled={!canSend} onClick={submit}>
+            <button
+              className="btn btn--primary"
+              disabled={!canSend}
+              onClick={submit}
+              title={
+                ownerChange !== undefined
+                  ? 'Confirma o deja estar el cambio de personaje antes de enviar.'
+                  : undefined
+              }
+            >
               {vault.sending ? 'Esperando respuesta…' : 'Enviar'}
             </button>
+            {ownerChange !== undefined && (
+              /* el `title` solo no bastaba: tarda en salir y casi nadie lo ve,
+                 y Enviar parecia roto (revision del 28/09). La confirmacion
+                 esta encima del selector de personaje */
+              <p className="field__hint">
+                Enviar espera a que confirmes o dejes estar el cambio de personaje,
+                encima del selector.
+              </p>
+            )}
             <input
               className="vault-caption"
               value={composer.caption}
@@ -1157,13 +1391,12 @@ function InstructionsPanel({
   draft,
   onChange,
   draftCharacter,
-  onCharacterChange,
 }: {
   vault: VaultController;
   draft: string | null;
   onChange: (value: string | null) => void;
+  /** el elegido para una conversacion NUEVA, antes de su primer mensaje */
   draftCharacter: string | null;
-  onCharacterChange: (value: string | null) => void;
 }): JSX.Element {
   const saved = vault.instructions ?? '';
   const value = draft ?? saved;
@@ -1225,36 +1458,18 @@ function InstructionsPanel({
         </Notice>
       )}
 
-      {/* el hint decía «con uno puesto, puedes pedir imágenes», y eso era
-          falso: hace falta ADEMÁS la clave del proveedor que le haga las fotos.
-          Prometer algo que el prompt no ofrece deja al usuario pidiéndole al
-          personaje una foto que nunca va a llegar */}
-      <Field
-        label="Personaje de esta conversación"
-        hint="Hace falta uno, y además la clave de quien le haga las fotos. Con las dos cosas puedes pedir imágenes dentro de la conversación."
-      >
-        <input
-          value={characterValue}
-          placeholder="identificador del personaje"
-          disabled={vault.sending}
-          onChange={(event) => onCharacterChange(event.target.value)}
-        />
-      </Field>
-      {characterValue.length > 0 && knownCharacter !== undefined && (
-        <p className="field__hint">
-          <Tag tone="ok">
-            {knownCharacter.label.length > 0 ? knownCharacter.label : 'personaje asignado'}
-          </Tag>{' '}
-          es quien responde en esta conversación
-          {characterValue !== (vault.characterId ?? '') && ' · se fija al enviar'}.
-        </p>
-      )}
+      {/* el campo del identificador ya no existe (`D-103`): el personaje se
+          elige con el selector «Personaje», junto al proveedor, y es la unica
+          forma de cambiarlo. Aqui solo quedan los avisos de imagen, que
+          dependen de el */}
       {imageBlock === 'personaje-desconocido' && (
         <Notice tone="warn">
-          Ese identificador no está en la bóveda de este equipo. Mientras siga así,
-          esta conversación no podrá generar ni reenviar imágenes, y no se le
-          ofrecerá hacerlo. Dalo de alta abajo, en «Generar imagen o vídeo», o
-          elige uno de la lista.
+          El personaje de esta conversación no está en la bóveda de este equipo.
+          Mientras siga así, esta conversación no podrá generar ni reenviar
+          imágenes, y no se le ofrecerá hacerlo. Para arreglarlo, dalo de alta
+          abajo, en «Generar imagen o vídeo», con su mismo identificador
+          {characterValue.length === 0 ? '' : ` (${characterValue})`}:
+          cambiarla a otro personaje no está disponible.
         </Notice>
       )}
       {/* faltaba, y su ausencia costó una tarde: el motivo se calculaba y se
@@ -1277,15 +1492,252 @@ function InstructionsPanel({
       {vault.characterDescription !== null && (
         <p className="field__hint">
           El modelo sabe que es: <em>{vault.characterDescription}</em>
-        </p>
-      )}
-      {savedCharacter.length === 0 && characterValue.length === 0 && (
-        <p className="field__hint">
-          Créalo abajo, en «Generar imagen o vídeo», y pégalo aquí. Se guarda con
-          la conversación: no hay que repetirlo en cada mensaje.
+          {/* la sellada no es la vigente si se edito su ficha: main la cambia en
+              el siguiente mensaje y la sella (`D-103`, tercera ronda). Con la
+              misma regla que main —con texto y distinta—, para no decirle que
+              sigue con la vieja (revision del 28/09) */}
+          {draftCharacter === null &&
+          knownCharacter !== undefined &&
+          knownCharacter.description.trim().length > 0 &&
+          knownCharacter.description !== vault.characterDescription
+            ? ' Has cambiado su ficha: desde tu próximo mensaje le llega la nueva, y queda guardada en esta conversación.'
+            : ''}
         </p>
       )}
     </details>
+  );
+}
+
+/**
+ * la pista del selector en una conversacion nueva. Dice lo que cuesta elegir:
+ * se sella en el primer mensaje y la pantalla ya no lo cambia ni lo suelta
+ */
+const FRESH_CHARACTER_HINT =
+  'Elige con quién hablas antes del primer mensaje. Si eliges a alguien, después no se podrá cambiar ni soltar; sus instrucciones se cargan al enviar, salvo que escribas unas propias arriba.';
+
+/**
+ * de quien es la conversacion, siempre a la vista junto al proveedor (`D-103`).
+ *
+ * Cuatro estados y una sola forma de cambiar el dueño: en una conversacion
+ * nueva elige quien responde desde el primer mensaje; en una sin dueño elegir
+ * abre la confirmacion del enganche; en una que nacio con su personaje no se
+ * cambia; y en una enganchada solo se puede soltar.
+ */
+function CharacterSelector({
+  vault,
+  draftCharacter,
+  disabled,
+  onChoose,
+  onUnlink,
+}: {
+  vault: VaultController;
+  draftCharacter: string | null;
+  disabled: boolean;
+  onChoose: (characterId: string | null) => void;
+  onUnlink: () => void;
+}): JSX.Element {
+  const fresh = vault.openConversationId === null;
+  const owner = vault.conversationOwner;
+  const source = fresh ? 'none' : (owner?.source ?? 'none');
+  const ownerId = fresh ? draftCharacter : vault.characterId;
+  const known = vault.characters.find((entry) => entry.characterId === ownerId);
+  const label = owner?.label ?? known?.label ?? 'su personaje';
+
+  let hint: string;
+  // se sella en su primer mensaje y desde la pantalla ya no se cambia ni se
+  // suelta: decirlo aqui, que es donde se decide (revision del 28/09). Sus
+  // instrucciones las pone main al enviar, salvo que escribas unas propias
+  if (fresh) hint = FRESH_CHARACTER_HINT;
+  else if (source === 'none') hint = 'Esta conversación no es de nadie. Elige un personaje para engancharla.';
+  // `turn` no siempre es haber nacido con el: el campo que habia antes lo
+  // fijaba en cualquier mensaje, y decir «nacio con» de esas es falso
+  else if (source === 'turn') {
+    hint = `${
+      owner?.signedAfter === 0 ? `Nació con ${label}` : `Es de ${label} desde uno de sus mensajes`
+    }. Cambiarla de personaje no está disponible.`;
+  }
+  else {
+    hint = `Enganchada a ${label}${
+      owner?.linkedAt == null ? '' : ` el ${shortDate(owner.linkedAt)}`
+    }. Solo en este equipo.`;
+  }
+
+  // con dueño se enseña el suyo, aunque ya no este en la boveda
+  const orphan = ownerId !== null && known === undefined && !fresh && source !== 'none';
+  const value = fresh ? (draftCharacter ?? '') : source === 'none' ? '' : (ownerId ?? '');
+
+  return (
+    <Field label="Personaje" hint={hint}>
+      <select
+        value={value}
+        disabled={disabled || (!fresh && source !== 'none')}
+        onChange={(event) => onChoose(event.target.value === '' ? null : event.target.value)}
+      >
+        <option value="">Nadie</option>
+        {vault.characters.map((entry) => (
+          <option key={entry.characterId} value={entry.characterId}>
+            {entry.label.length > 0 ? entry.label : 'Sin nombre'}
+          </option>
+        ))}
+        {orphan && <option value={ownerId}>{`${label} · ya no está en la bóveda`}</option>}
+      </select>
+      {source === 'link' && (
+        <button className="btn btn--quiet" disabled={disabled} onClick={onUnlink}>
+          Soltar
+        </button>
+      )}
+    </Field>
+  );
+}
+
+/**
+ * la confirmacion de enganchar o soltar, con el patron de «borrar lo que
+ * recuerda»: primero la vista previa que calcula main, despues el texto que
+ * sale de ella y solo entonces el boton. Sin vista previa no hay boton que
+ * pulsar, porque el texto no podria decir la verdad (`D-093`).
+ */
+function OwnerChangePanel({
+  vault,
+  characterId,
+  project,
+  scrollOnMount,
+  onShown,
+  onDone,
+}: {
+  vault: VaultController;
+  /** con un personaje es enganchar; con `null`, soltar */
+  characterId: string | null;
+  project: string;
+  /** llevar la vista aqui al montarse: solo la primera vez de cada peticion */
+  scrollOnMount: boolean;
+  /** avisa de que ya se llevo la vista, para no repetirlo al volver */
+  onShown: () => void;
+  /** con el acuse si se hizo, o `null` si se dejo estar */
+  onDone: (ack: string | null) => void;
+}): JSX.Element {
+  const [target, setTarget] = useState<string | null>(characterId);
+  const [working, setWorking] = useState(false);
+  // la vista previa fallo: sin esto el panel se quedaba en «Comprobando…» para
+  // siempre, con el boton desactivado y sin decir que no iba a llegar
+  const [failed, setFailed] = useState(false);
+  // cada «Volver a comprobar» sube este numero y repite el efecto
+  const [attempt, setAttempt] = useState(0);
+  // `ownerPreviewEpoch` sube cuando se relee la conversacion abierta y con ello
+  // se tira la vista previa: sin volver a pedirla, reabrir la misma o
+  // «Sincronizar» dejaban el panel en «Comprobando…» para siempre
+  const { previewConversationOwner, clearOwnerPreview, ownerPreviewEpoch } = vault;
+  useEffect(() => {
+    let live = true;
+    setFailed(false);
+    void previewConversationOwner(target).then((value) => {
+      if (live && value === null) setFailed(true);
+    });
+    return () => {
+      live = false;
+      clearOwnerPreview();
+    };
+  }, [target, attempt, ownerPreviewEpoch, previewConversationOwner, clearOwnerPreview]);
+
+  // se abre desde el boton de la cabecera, varias pantallas por encima de donde
+  // se pinta: sin llevar la vista, pulsar parecia no hacer nada (revision del
+  // 28/09). Es el mismo fallo que ya se corrigio en la galeria y en el horde.
+  // Solo al montarse, y solo la primera vez de cada peticion: cambiar de
+  // personaje dentro no vuelve a mover la pagina, y volver a esta conversacion
+  // desde la lista tampoco. Se leen del primer render a proposito
+  const box = useRef<HTMLDivElement | null>(null);
+  const firstMount = useRef({ scrollOnMount, onShown });
+  useEffect(() => {
+    if (!firstMount.current.scrollOnMount) return;
+    box.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    firstMount.current.onShown();
+  }, []);
+
+  const preview = vault.ownerPreview;
+  const linking = target !== null;
+  // la ficha, de la lista que ya tiene la pantalla: la vista previa no lo trae.
+  // Con `trim`, como el prompt: una ficha de solo espacios no pone «QUIEN ERES»,
+  // y decir «te responde con su ficha» seria falso (revision del 28/09)
+  const hasDescription =
+    (vault.characters.find((entry) => entry.characterId === target)?.description.trim()
+      .length ?? 0) > 0;
+  const paragraphs =
+    preview === null
+      ? []
+      : linking
+        ? describeCharacterLink(preview, { hasDescription })
+        : describeCharacterUnlink(preview);
+
+  return (
+    <div className="vault-generate" ref={box}>
+      {linking && vault.characters.length > 1 && (
+        <Field label="¿De quién es?">
+          <select
+            value={target}
+            disabled={working}
+            onChange={(event) => setTarget(event.target.value)}
+          >
+            {vault.characters.map((entry) => (
+              <option key={entry.characterId} value={entry.characterId}>
+                {entry.label.length > 0 ? entry.label : 'Sin nombre'}
+              </option>
+            ))}
+          </select>
+        </Field>
+      )}
+      {/* el fallo y su pista, aqui y no en el aviso general: la pista es la
+          mitad que dice que hacer, y alli no salia */}
+      <VaultNotice vault={vault} slots={['enganche']} />
+      {preview === null ? (
+        working ? (
+          // al confirmar, la vista previa se tira antes de que vuelva la lista:
+          // sin esto el panel volvia a decir «Comprobando…» con el cambio ya
+          // hecho, y parecia que algo habia fallado (revision del 28/09)
+          <Notice tone="idle">Aplicando el cambio…</Notice>
+        ) : failed ? (
+          <div className="row">
+            <Notice tone="warn">No se pudo comprobar qué cambiaría, así que no se cambia nada.</Notice>
+            <button
+              className="btn btn--quiet"
+              disabled={working}
+              onClick={() => setAttempt((value) => value + 1)}
+            >
+              Volver a comprobar
+            </button>
+          </div>
+        ) : (
+          <Notice tone="idle">Comprobando qué cambiaría…</Notice>
+        )
+      ) : (
+        paragraphs.map((paragraph) => (
+          <p key={paragraph} className="field__hint">
+            {paragraph}
+          </p>
+        ))
+      )}
+      <div className="row">
+        <button
+          className={linking ? 'btn btn--primary' : 'btn btn--danger'}
+          // con un envio en curso main lo rechazaria: la respuesta que llega
+          // escribiria despues del ancla sin la ficha
+          disabled={preview === null || working || vault.sending || project.length === 0}
+          onClick={() => {
+            if (preview === null) return;
+            const label = preview.characterLabel;
+            setWorking(true);
+            void vault.setConversationOwner(target, project).then((ok) => {
+              setWorking(false);
+              if (!ok) return;
+              onDone(linking ? `Enganchada a ${label}.` : `Soltada. Ya no es de ${label}.`);
+            });
+          }}
+        >
+          {linking ? `Enganchar a ${preview?.characterLabel ?? '…'}` : 'Soltar'}
+        </button>
+        <button className="btn btn--quiet" disabled={working} onClick={() => onDone(null)}>
+          Dejarlo estar
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -1442,23 +1894,28 @@ function TraitField({
  * vivo despues de cerrar la boveda, que es justo lo que la boveda evita.
  */
 function CharacterAvatar({
-  vault,
+  readAvatar,
   characterId,
 }: {
-  vault: VaultController;
+  /**
+   * la funcion, no el controlador entero: el objeto de `useVault` es nuevo en
+   * cada render, y con el en las dependencias este efecto releia la foto cada
+   * 5 s. Eso mantuvo la boveda abierta hora y media sin nadie delante (`D-106`)
+   */
+  readAvatar: VaultController['readCharacterAvatar'];
   characterId: string;
 }): JSX.Element | null {
   const [dataUrl, setDataUrl] = useState<string | null>(null);
 
   useEffect(() => {
     let vivo = true;
-    void vault.readCharacterAvatar(characterId).then((value) => {
+    void readAvatar(characterId).then((value) => {
       if (vivo) setDataUrl(value);
     });
     return () => {
       vivo = false;
     };
-  }, [vault, characterId]);
+  }, [readAvatar, characterId]);
 
   if (dataUrl === null) return null;
   return <img className="vault-character__avatar" src={dataUrl} alt="" />;
@@ -1698,7 +2155,7 @@ function CharacterRow({
       aria-current={active ? 'true' : undefined}
     >
       {character.avatarObjectKey !== null && (
-        <CharacterAvatar vault={vault} characterId={character.characterId} />
+        <CharacterAvatar readAvatar={vault.readCharacterAvatar} characterId={character.characterId} />
       )}
       <button className="vault-character__pick" onClick={onPick}>
         <span className="vault-list__title">{name}</span>
@@ -1789,7 +2246,8 @@ function CharacterRow({
           está medido. La línea «copia de sus respuestas» del registro solo ve
           copias palabra por palabra, así que con la nota de forma encendida puede
           bajar aunque la plantilla siga con otras palabras: hay que leer respuestas.
-          Apagado, el prompt sale byte a byte como antes */}
+          Apagada, ESTA casilla no añade nada; no se dice «el prompt de siempre»
+          porque otras casillas y la ficha editada también lo cambian */}
       <label className="check">
         <input
           type="checkbox"
@@ -1806,7 +2264,60 @@ function CharacterRow({
           <small>
             {character.replyGuidance === 'vary-and-lead'
               ? 'le pide no reutilizar entradas, gestos ni cierres de sus respuestas anteriores y que decida cuando le cedes la decisión; no está medido que funcione, y se apaga aquí'
-              : 'el prompt sale exactamente como siempre'}
+              : 'apagada, esta casilla no añade nada al prompt'}
+          </small>
+        </span>
+      </label>
+
+      {/* D-104. Dice lo que PIDE y cuándo puede llegarle la lista, no que deje de
+          repetirse (D-093): no está medido. «Parece» va a propósito: si tu
+          mensaje nombra un pendiente, y si ella ya sacó uno, lo decide un
+          comparador de palabras que se equivoca en los dos sentidos. Apagada,
+          ESTA casilla no añade nada; decia «exactamente como siempre» y no lo
+          era: con la casilla del resumen (D-105) encendida cambia la
+          regla del bloque de pendientes (revision del 28/09) */}
+      <label className="check">
+        <input
+          type="checkbox"
+          checked={character.pendingPacing === 'sparse'}
+          onChange={(event) =>
+            void vault.setCharacterPendingPacing(
+              character.characterId,
+              event.target.checked ? 'sparse' : 'per-note',
+            )
+          }
+        />
+        <span>
+          Sacar los pendientes solo de vez en cuando
+          <small>
+            {character.pendingPacing === 'sparse'
+              ? 'la lista de pendientes solo puede llegarle en tu primer mensaje de la conversación y luego en uno de cada cuatro, salvo el que tu mensaje parezca nombrar; le pide sacarlos solo si la escena los trae y, si en sus últimas respuestas parece haber sacado uno que no has retomado, se lo recuerda sin decir cuál. No está medido que funcione, y se apaga aquí'
+              : 'apagada, esta casilla no añade nada al prompt'}
+          </small>
+        </span>
+      </label>
+
+      {/* D-105. Dice lo que se le PASA y lo que no está garantizado (D-093): el
+          resumen lo escribió el modelo y puede no llevar lo acordado, y la guía
+          de campos solo mejora las memorias que se escriban a partir de ahora.
+          Apagada, ESTA casilla no añade nada al prompt */}
+      <label className="check">
+        <input
+          type="checkbox"
+          checked={character.recentMemories === 'recent-two'}
+          onChange={(event) =>
+            void vault.setCharacterRecentMemories(
+              character.characterId,
+              event.target.checked ? 'recent-two' : 'off',
+            )
+          }
+        />
+        <span>
+          {RECENT_MEMORIES_CHECKBOX}
+          <small>
+            {character.recentMemories === 'recent-two'
+              ? 'en cada mensaje le llega un resumen corto de sus dos conversaciones más recientes, sin la de ahora; las más antiguas no entran. Solo de las que tengan memoria apuntada o una ficha de «Memoria de lo ya hablado» aprobada y al día: una sin ninguna de las dos se salta y no se cambia por otra, así que puede no llegarle nada. Lo escribió el modelo en cada una y puede no incluir todo lo acordado; las que enganchaste se resumieron sin su ficha. Mientras esté encendida, también le pide apuntar aparte lo acordado en la memoria. Se apaga aquí'
+              : 'apagada, esta casilla no añade nada al prompt'}
           </small>
         </span>
       </label>
@@ -2695,9 +3206,12 @@ function GeneratePanel({
             ))}
           </div>
           <p className="field__hint">
-            Tus personajes guardados. Pulsa <strong>Usar</strong> para que sea
-            quien responda en esta conversación: queda fijado al enviar el
-            próximo mensaje. Cada uno enseña qué sabe hacer —quién puede hacerle
+            Tus personajes guardados. Pulsa <strong>Usar</strong> para elegirlo:
+            en una conversación nueva será quien responda desde el primer
+            mensaje; en una que ya ha empezado, solo lo elige para generar
+            imágenes. Para que una conversación sin personaje pase a ser suya,
+            usa <strong>Enganchar a un personaje</strong>, arriba. Cada
+            uno enseña qué sabe hacer —quién puede hacerle
             fotos, con <strong>Xavira</strong>
             <Explica termino="xavira" /> o con <strong>AI Horde</strong>
             <Explica termino="aiHorde" />— y cuál se las hace ahora mismo.
@@ -3529,9 +4043,12 @@ function MediaViewer({
   // aviso habria contado una historia falsa sobre lo que acababa de pasar
   const [rewriteFailure, setRewriteFailure] = useState<string | null>(null);
 
+  // de la funcion y no del objeto `vault`, que es nuevo en cada render: con el
+  // en las dependencias, el visor volvia a descifrar la imagen cada 5 s (`D-106`)
+  const { openMedia } = vault;
   useEffect(() => {
     let cancelled = false;
-    void vault.openMedia(item.mediaId).then((url) => {
+    void openMedia(item.mediaId).then((url) => {
       if (cancelled) return;
       if (url === null) setTooBig(true);
       else setDataUrl(url);
@@ -3539,7 +4056,7 @@ function MediaViewer({
     return () => {
       cancelled = true;
     };
-  }, [item.mediaId, vault]);
+  }, [item.mediaId, openMedia]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent): void => {
@@ -4331,6 +4848,13 @@ function UnlockedPanel({ vault }: { vault: VaultController }): JSX.Element {
                 para sincronizarlos y se quedan en el equipo donde se crearon.
                 El resto sí ha viajado.
               </Notice>
+            )}
+            {vault.lastSync.conversationsDeferred > 0 && (
+              <p className="field__hint">
+                La conversación a la que se estaba contestando no se ha
+                sincronizado: su último mensaje aún podía retirarse. Irá la próxima
+                vez que pulses «Sincronizar».
+              </p>
             )}
           </>
         )}
@@ -5723,8 +6247,13 @@ function RecapSection({
         <strong>Memoria de lo ya hablado.</strong> Al reabrir una conversación
         antigua, ella no recuerda en qué punto quedó: sólo ve los últimos turnos.
         Esto lo escribe hacia atrás, conversación a conversación, leyéndolas con{' '}
-        {destinoNombre}. Es por conversación: no hace que se acuerde de un hilo
-        estando en otro, que es lo que hacen los momentos y lo pendiente.
+        {destinoNombre}. Es por conversación: por sí sola no hace que se acuerde
+        de un hilo estando en otro, que es lo que hacen los momentos y lo
+        pendiente. <strong>Con una excepción</strong>: si su personaje tiene
+        encendida «{RECENT_MEMORIES_CHECKBOX}», la ficha que
+        apruebes aquí, mientras siga al día, de una conversación sin memoria
+        propia viaja, resumida, a
+        sus otras conversaciones mientras esa siga entre las dos más recientes.
       </p>
 
       <Notice tone="idle">
@@ -6468,6 +6997,15 @@ function PendingDiagnosticsSummary({
         mismas 24 horas y reclamó {relations.inventionGuard.unbacked} cosas que no constan, de{' '}
         {relations.inventionGuard.herClaims}. Si ahora mismo le escribieras, saldrían{' '}
         {relations.nextTurn.linesForLatestConversation}.
+      </p>
+      {/* `D-104`: cuánto dispara la nota de «ya salió» y cuánto pesan las citas
+          largas, donde casi nunca cuenta. Solo cifras */}
+      <p>
+        <strong>«Ya salió»:</strong> de las {r.herMentions} veces que ella sacó un pendiente,{' '}
+        {r.herMentionsClear} habrían contado para la nota.
+        {r.longQuotes > 0
+          ? ` ${r.longQuotes} pendientes tienen una cita larga (nueve palabras con contenido o más); de esos los sacó ${r.herMentionsLong} veces y contaron ${r.herMentionsClearLong}.`
+          : ''}
       </p>
     </>
   );

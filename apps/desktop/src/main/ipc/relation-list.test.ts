@@ -97,7 +97,7 @@ function registrar(notes: RelationNote[], unlocked = true): Huella {
   const context = {
     // `registerIpcHandlers` engancha el trabajo de fondo al cierre de la boveda
     // nada mas registrar
-    vault: { isUnlocked: () => unlocked, onLock: () => () => undefined },
+    vault: { isUnlocked: () => unlocked, onLock: () => () => undefined, beginUserWait: () => () => undefined },
     privateConversations: {
       list: async () => [
         { conversationId: CONV_A, title: '', turns: 2, updatedAt: '', characterId: LIA },

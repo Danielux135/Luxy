@@ -61,7 +61,7 @@ function registrar(
     // `registerIpcHandlers` engancha el trabajo de fondo al cierre de la boveda
     // nada mas registrar: sin estos dos, el registro ni siquiera llegaria a los
     // handlers que esta prueba quiere invocar
-    vault: { isUnlocked: () => true, onLock: () => () => undefined },
+    vault: { isUnlocked: () => true, onLock: () => () => undefined, beginUserWait: () => () => undefined },
     privateMedia: {
       deleteConversation: async (id: string) => {
         huella.deleted.push(`medios:${id}`);
@@ -80,6 +80,12 @@ function registrar(
       removeConversation: async (_vault: unknown, id: string) => {
         if (imageAttempts !== undefined) await imageAttempts.removeConversation();
         huella.deleted.push(`intentos:${id}`);
+      },
+    },
+    // el enganche a personaje lleva copiada su ficha: se va con la conversacion
+    conversationOwners: {
+      removeConversation: async (_vault: unknown, id: string) => {
+        huella.deleted.push(`enganche:${id}`);
       },
     },
     privateMemory: {
@@ -109,6 +115,7 @@ describe('borrar una conversacion privada', () => {
       `archivo:${CONV}`,
       `recap:${CONV}`,
       `intentos:${CONV}`,
+      `enganche:${CONV}`,
     ]);
     expect(huella.invalidated).toBe(1);
   });

@@ -55,6 +55,15 @@ export interface CodexCapabilities {
    * `-c, --config <key=value>` y ningun `--effort` ni `--reasoning`.
    */
   config: boolean;
+  /**
+   * `--ephemeral`: que `codex exec` no guarde la sesion en disco.
+   *
+   * Comprobado contra `codex exec --help` de codex-cli 0.154.0 el 2026-09-28:
+   * «Run without persisting session files to disk». Sin el, cada turno de la
+   * boveda que va por Codex deja la sesion entera, con el prompt, en claro en su
+   * carpeta de sesiones. El app-server ya pedia `ephemeral: true`; `exec` no.
+   */
+  ephemeral: boolean;
 }
 
 export function parseCodexCapabilities(
@@ -70,6 +79,7 @@ export function parseCodexCapabilities(
     skipGitRepoCheck: helpHasFlag(help, '--skip-git-repo-check'),
     config: helpHasFlag(help, '--config') || helpHasFlag(help, '-c'),
     image: helpHasFlag(help, '--image') || helpHasFlag(help, '-i'),
+    ephemeral: helpHasFlag(help, '--ephemeral'),
     // `app-server` es un subcomando, no un flag: se busca en la ayuda general
     appServer: generalHelp !== null && generalHelp.includes('app-server'),
   };
@@ -121,6 +131,13 @@ export function buildCodexArgs(options: CodexArgsOptions): string[] {
     const mode = options.sandboxMode ?? 'workspace-write';
     // barrera dura: danger-full-access no se admite nunca
     args.push('--sandbox', mode === 'read-only' ? 'read-only' : 'workspace-write');
+  }
+
+  // lo de solo lectura —conversaciones de Studio y todo lo de la boveda— sin
+  // sesion en disco. Un trabajo de codigo la conserva. Sin la capacidad no se
+  // pasa: un flag desconocido aborta la invocacion
+  if (options.sandboxMode === 'read-only' && capabilities.ephemeral) {
+    args.push('--ephemeral');
   }
 
   if (capabilities.model && options.model) {

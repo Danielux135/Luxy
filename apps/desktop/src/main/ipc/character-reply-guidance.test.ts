@@ -47,6 +47,8 @@ function personaje(over: Partial<VaultCharacter> = {}): VaultCharacter {
     imageReview: 'siempre',
     imageCast: 'character-only',
     replyGuidance: 'none',
+    pendingPacing: 'per-note',
+    recentMemories: 'off',
     xavira: null,
     horde: {
       recipe: {
@@ -94,7 +96,7 @@ function registrar(characters: VaultCharacter[], unlocked = true): Huella {
   };
 
   const context = {
-    vault: { isUnlocked: () => unlocked, onLock: () => () => undefined },
+    vault: { isUnlocked: () => unlocked, onLock: () => () => undefined, beginUserWait: () => () => undefined },
     characters: {
       list: async () => guardados,
       add: async (_vault: unknown, character: unknown) => {

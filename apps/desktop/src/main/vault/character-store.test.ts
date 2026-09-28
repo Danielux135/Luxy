@@ -77,7 +77,7 @@ describe('personajes guardados', () => {
 
   it('sobrevive a cerrar y volver a abrir la boveda', async () => {
     await store.add(vault, character('per-1'));
-    vault.lock();
+    vault.lock('manual');
     await vault.unlock(PASSWORD);
     // es justo el caso que se perdia: crear el personaje y no volver hasta luego
     expect((await store.list(vault))[0]?.characterId).toBe('per-1');
@@ -93,7 +93,7 @@ describe('personajes guardados', () => {
 
   it('con la boveda cerrada no se puede leer', async () => {
     await store.add(vault, character('per-1'));
-    vault.lock();
+    vault.lock('manual');
     await expect(store.list(vault)).rejects.toThrow(VaultError);
   });
 
@@ -294,7 +294,7 @@ describe('personajes guardados', () => {
 
   it('el ajuste sobrevive a cerrar y volver a abrir la boveda', async () => {
     await store.add(vault, { ...character('per-1'), imageReview: 'nunca' });
-    vault.lock();
+    vault.lock('manual');
     await vault.unlock(PASSWORD);
     expect((await store.list(vault))[0]?.imageReview).toBe('nunca');
   });
@@ -351,7 +351,7 @@ describe('personajes guardados', () => {
 
   it('sobrevive a cerrar y volver a abrir la boveda', async () => {
     await store.add(vault, { ...character('per-1'), imageCast: 'both' });
-    vault.lock();
+    vault.lock('manual');
     await vault.unlock(PASSWORD);
     expect((await store.list(vault))[0]?.imageCast).toBe('both');
   });
@@ -402,9 +402,51 @@ describe('personajes guardados', () => {
 
   it('las notas sobreviven a cerrar y volver a abrir la boveda', async () => {
     await store.add(vault, { ...character('per-1'), replyGuidance: 'vary-and-lead' });
-    vault.lock();
+    vault.lock('manual');
     await vault.unlock(PASSWORD);
     expect((await store.list(vault))[0]?.replyGuidance).toBe('vary-and-lead');
+  });
+
+  // -------------------------------------------------------------------------
+  // el modo esporadico de los pendientes (`D-104`)
+  //
+  // El mismo patron. Nace en `per-note`: apagado, el prompt sale igual.
+  // -------------------------------------------------------------------------
+
+  it('un personaje guardado antes del modo esporadico se lee con el apagado', async () => {
+    await store.add(vault, character('per-1'));
+    expect((await store.list(vault))[0]?.pendingPacing).toBe('per-note');
+  });
+
+  it('encenderlo no toca ni el proveedor ni la receta ni los otros interruptores', async () => {
+    await store.add(vault, {
+      ...character('per-1', 'Nora'),
+      imageProvider: 'horde',
+      imageReview: 'nunca',
+      imageCast: 'both',
+      replyGuidance: 'vary-and-lead',
+      horde: { recipe: { models: ['Modelo Inventado'], appearance: 'short grey hair', seed: '424242' } },
+    });
+    const [antes] = await store.list(vault);
+
+    const despues = await store.add(vault, { ...antes!, pendingPacing: 'sparse' });
+
+    expect(despues[0]?.pendingPacing).toBe('sparse');
+    expect(despues[0]?.replyGuidance).toBe('vary-and-lead');
+    expect(despues[0]?.imageReview).toBe('nunca');
+    expect(despues[0]?.imageCast).toBe('both');
+    expect(despues[0]?.horde?.recipe.seed).toBe('424242');
+  });
+
+  it('el modo esporadico sobrevive a guardar otro personaje y a cerrar la boveda', async () => {
+    await store.add(vault, { ...character('per-1'), pendingPacing: 'sparse' });
+    await store.add(vault, character('per-2'));
+    vault.lock('manual');
+    await vault.unlock(PASSWORD);
+
+    const guardados = await store.list(vault);
+    expect(guardados.find((c) => c.characterId === 'per-1')?.pendingPacing).toBe('sparse');
+    expect(guardados.find((c) => c.characterId === 'per-2')?.pendingPacing).toBe('per-note');
   });
 });
 
@@ -510,6 +552,19 @@ describe('personajes escritos antes de D-068', () => {
       createdAt: '2026-09-04T10:00:00.000Z',
     });
     expect(leido.replyGuidance).toBe('none');
+  });
+
+  it('ni el modo esporadico de los pendientes, y se lee apagado', () => {
+    const leido = storedCharacterSchema.parse({
+      characterId: 'per-1',
+      provider: 'horde',
+      recipe: { models: ['Modelo Inventado'], appearance: 'short grey hair' },
+      description: '',
+      label: 'Nora',
+      avatarObjectKey: null,
+      createdAt: '2026-09-04T10:00:00.000Z',
+    });
+    expect(leido.pendingPacing).toBe('per-note');
   });
 
   it('uno ya escrito en la forma nueva no se vuelve a traducir', () => {

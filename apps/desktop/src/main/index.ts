@@ -3,7 +3,16 @@
 // orden de arranque: instancia unica -> app lista -> CSP -> agente -> ventana y
 // bandeja. Nada de esto abre una consola: cerrar la ventana deja Luxy en la
 // bandeja y solo "Salir completamente" termina de verdad.
-import { app, BrowserWindow, Notification, ipcMain, safeStorage, screen, shell } from 'electron';
+import {
+  app,
+  BrowserWindow,
+  Notification,
+  ipcMain,
+  powerMonitor,
+  safeStorage,
+  screen,
+  shell,
+} from 'electron';
 import { shouldShowDesktopNotification } from './notification-policy.js';
 import { join } from 'node:path';
 import { resolveStoredConfig } from '@luxy/shared';
@@ -12,6 +21,7 @@ import { AgentLogger } from '@luxy/agent/dist/logger.js';
 import { ConfigStore, configFilePathFor } from './config-store.js';
 import { MACHINE_TOKEN_SECRET, SecretStore, createSafeStorageBackend } from './secure-storage.js';
 import { VaultService } from './vault/vault-service.js';
+import { VaultLockCoordinator } from './vault/vault-lock-coordinator.js';
 import { VaultAccountManager } from './vault/account-manager.js';
 import { vaultFilePathFor } from './vault/key-file.js';
 import {
@@ -22,6 +32,10 @@ import { PrivateMemory } from './vault/private-memory.js';
 import { MemoryPreferences, memoryPreferencesPath } from './vault/memory-preferences.js';
 import { CatalogStore, catalogFilePath } from './vault/catalog-store.js';
 import { RelationStore, relationFilePath } from './vault/relation-store.js';
+import {
+  ConversationOwnerStore,
+  conversationOwnersFilePath,
+} from './vault/conversation-owner-store.js';
 import { RecapStore, recapFilePath } from './vault/recap-store.js';
 import { ImageAttemptStore, imageAttemptsDirectory } from './vault/image-attempt-store.js';
 import { PrivateMediaStore, mediaIndexDirectory } from './vault/media-store.js';
@@ -51,6 +65,7 @@ let vault: VaultService | null = null;
 let vaultAccounts: VaultAccountManager | null = null;
 let vaultCharacters: VaultCharacterStore | null = null;
 let privateConversations: PrivateConversationStore | null = null;
+let conversationOwners: ConversationOwnerStore | null = null;
 let privateMemory: PrivateMemory | null = null;
 let memoryPreferences: MemoryPreferences | null = null;
 let catalogs: CatalogStore | null = null;
@@ -58,7 +73,7 @@ let relations: RelationStore | null = null;
 let recaps: RecapStore | null = null;
 let imageAttempts: ImageAttemptStore | null = null;
 let privateMedia: PrivateMediaStore | null = null;
-let autoLockTimer: NodeJS.Timeout | null = null;
+let vaultLocks: VaultLockCoordinator | null = null;
 let captureHost: CaptureHost | null = null;
 const remoteSessions = new SessionHostSlot();
 /** distingue ocultar la ventana de salir de verdad */
@@ -254,20 +269,6 @@ function refreshTray(status: AgentHostStatus): void {
   tray?.update(status);
 }
 
-/** cada cuanto se comprueba la inactividad de la boveda */
-const VAULT_TICK_MS = 15_000;
-
-/**
- * avisa al renderer de que la boveda se cerro sola.
- *
- * viaja el hecho, nunca el motivo detallado ni nada de su contenido: la
- * interfaz solo necesita saber que debe volver a la pantalla de desbloqueo.
- */
-function forwardVaultLock(): void {
-  if (mainWindow === null || mainWindow.isDestroyed()) return;
-  mainWindow.webContents.send(IPC_EVENT.vaultLocked);
-}
-
 async function bootstrap(): Promise<void> {
   // necesario en Windows para que las notificaciones se atribuyan a Luxy
   app.setAppUserModelId('com.luxy.desktop');
@@ -330,7 +331,14 @@ async function bootstrap(): Promise<void> {
     { gatewayUrl: () => configStore?.load()?.gatewayUrl ?? null },
   );
 
-  privateConversations = new PrivateConversationStore(conversationsDirectory(luxyConfigDir()));
+  // los enganches a personaje, cifrados y solo en este equipo (`D-103`). El
+  // almacen de conversaciones los lee para resolver el dueño: sin ellos, una
+  // conversacion enganchada se veria sin personaje
+  conversationOwners = new ConversationOwnerStore(conversationOwnersFilePath(luxyConfigDir()));
+  privateConversations = new PrivateConversationStore(
+    conversationsDirectory(luxyConfigDir()),
+    conversationOwners,
+  );
   vaultCharacters = new VaultCharacterStore(
     charactersFilePath(luxyConfigDir()),
     new LocalBlobStore(mediaDirectory(luxyConfigDir())),
@@ -362,15 +370,20 @@ async function bootstrap(): Promise<void> {
     new LocalBlobStore(mediaDirectory(luxyConfigDir())),
   );
 
-  // el bloqueo automatico se comprueba por reloj, no con un temporizador que
-  // se dispare una vez: asi una suspension larga del equipo aparece bloqueada
-  // al volver, en vez de dejar la boveda abierta toda la noche.
-  autoLockTimer = setInterval(() => {
-    if (vault?.tickAutoLock() === true) {
-      log('boveda bloqueada por inactividad');
-      forwardVaultLock();
-    }
-  }, VAULT_TICK_MS);
+  // quien cierra la boveda sin que nadie pulse el boton: la inactividad, Win+L,
+  // suspender y la X de la ventana (`D-106`). Vive en su propio modulo para que
+  // su temporizador lo cubran pruebas; aqui solo se le dan las piezas de Electron.
+  // Al renderer viaja el motivo, un enumerado cerrado, y nada de su contenido
+  vaultLocks = new VaultLockCoordinator({
+    vault,
+    power: powerMonitor,
+    log,
+    notifyRenderer: (reason) => {
+      if (mainWindow === null || mainWindow.isDestroyed()) return;
+      mainWindow.webContents.send(IPC_EVENT.vaultLocked, reason);
+    },
+  });
+  vaultLocks.start();
 
   controller = new AgentController({
     entryPath: resolveAgentEntry({
@@ -392,6 +405,7 @@ async function bootstrap(): Promise<void> {
     accounts: vaultAccounts,
     characters: vaultCharacters,
     privateConversations,
+    conversationOwners,
     privateMemory,
     memoryPreferences,
     catalogs,
@@ -456,8 +470,14 @@ function openMainWindow(): void {
     isDev,
     rendererUrl,
     startHidden,
-    // cerrar solo oculta, salvo que se este saliendo de verdad
-    onCloseRequested: () => !quitting,
+    // cerrar solo oculta, salvo que se este saliendo de verdad. Pero la boveda
+    // SI se cierra: quien pulsa la X cree que ha cerrado, y desde la bandeja
+    // cualquiera volveria a ver el contenido
+    onCloseRequested: () => {
+      if (quitting) return false;
+      vaultLocks?.windowClosed();
+      return true;
+    },
   });
   mainWindow.on('closed', () => {
     mainWindow = null;
@@ -465,13 +485,9 @@ function openMainWindow(): void {
 }
 
 async function quitCompletely(): Promise<void> {
-  if (autoLockTimer !== null) {
-    clearInterval(autoLockTimer);
-    autoLockTimer = null;
-  }
   // al salir se cierra la boveda explicitamente: no se deja la llave viva en
   // memoria esperando a que el proceso termine de morir
-  vault?.lock();
+  vault?.lock('salida');
   if (quitting) return;
   quitting = true;
   try {
@@ -483,6 +499,11 @@ async function quitCompletely(): Promise<void> {
     captureHost = null;
     await controller?.shutdown();
   } finally {
+    // el temporizador se quita AQUI y no al principio: si uno de los tres await
+    // de arriba no volviera nunca, la aplicacion seguiria viva, y reabrir la
+    // boveda desde esa ventana la dejaba sin cierre automatico para siempre
+    vaultLocks?.stop();
+    vaultLocks = null;
     unregisterIpcHandlers();
     tray?.destroy();
     tray = null;

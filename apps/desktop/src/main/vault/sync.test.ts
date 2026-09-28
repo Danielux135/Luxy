@@ -207,7 +207,7 @@ describe('sincronizacion de la boveda', () => {
   });
 
   it('con la boveda cerrada no sincroniza', async () => {
-    vault.lock();
+    vault.lock('manual');
     const gateway = fakeGateway();
     await expect(syncVault(vault, store, deps(gateway.impl))).rejects.toThrow(VaultError);
     expect(gateway.calls).toHaveLength(0);
@@ -225,6 +225,65 @@ describe('sincronizacion de la boveda', () => {
     });
     // sin olvidarla, la siguiente accion volveria a fallar con el mismo token
     expect(olvidada).toBe(true);
+  });
+
+  it('deja para la proxima la conversacion a la que se esta contestando', async () => {
+    // revision del 28/09: su ultimo mensaje aun puede retirarse, y subido el
+    // servidor lo conservaria y descartaria despues el bueno con ese numero
+    const B = '22222222-2222-4222-8222-222222222222';
+    await store.appendTurn(vault, A, turn('conversacion tranquila'));
+    await store.appendTurn(vault, B, turn('mensaje esperando respuesta'));
+
+    const gateway = fakeGateway({
+      conversations: [{ conversationId: B, turnCount: 2, updatedAt: '2026-09-01T10:00:00Z' }],
+    });
+    const result = await syncVault(vault, store, {
+      ...deps(gateway.impl),
+      isSending: (conversationId) => conversationId === B,
+    });
+
+    expect(result.conversationsDeferred).toBe(1);
+    expect(result.uploaded).toBe(1);
+    // de B no sube nada ni se pide nada, y su archivo queda como estaba
+    const deB = gateway.calls.filter(
+      (call) => call.url.includes(`/conversations/${B}`) || JSON.stringify(call.body).includes(B),
+    );
+    expect(deB).toHaveLength(0);
+    expect((await store.read(vault, B)).map((t) => t.text)).toEqual(['mensaje esperando respuesta']);
+  });
+
+  it('si un envio empieza mientras baja, no escribe nada detras de su mensaje', async () => {
+    await store.appendTurn(vault, A, turn('local'));
+    const ajeno = await store.appendTurn(vault, A, turn('venido de otro equipo'));
+    store.removeLastTurn(A);
+
+    const gateway = fakeGateway({
+      conversations: [{ conversationId: A, turnCount: 2, updatedAt: '2026-09-01T10:00:00Z' }],
+      records: [ajeno],
+    });
+    let enviando = false;
+    const impl = (async (url: string | URL, init?: RequestInit) => {
+      // el envio empieza justo mientras se descarga esta conversacion
+      if (url.toString().includes(`/conversations/${A}`)) enviando = true;
+      return gateway.impl(url, init);
+    }) as unknown as typeof fetch;
+
+    const result = await syncVault(vault, store, {
+      ...deps(impl),
+      isSending: () => enviando,
+    });
+
+    expect(result.downloaded).toBe(0);
+    expect(result.conversationsDeferred).toBe(1);
+    expect((await store.read(vault, A)).map((t) => t.text)).toEqual(['local']);
+  });
+
+  it('sin envio en curso no deja nada para despues', async () => {
+    await store.appendTurn(vault, A, turn('uno'));
+    const gateway = fakeGateway();
+    const result = await syncVault(vault, store, { ...deps(gateway.impl), isSending: () => false });
+    expect(result.conversationsDeferred).toBe(0);
+    expect(result.uploaded).toBe(1);
   });
 
   it('un fallo del servidor no pierde lo local', async () => {

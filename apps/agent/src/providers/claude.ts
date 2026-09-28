@@ -62,6 +62,16 @@ export interface ClaudeCapabilities {
    * Luxy romperia Claude en la maquina de quien no hubiera actualizado el CLI.
    */
   effort: boolean;
+  /**
+   * `--no-session-persistence`: que `--print` no guarde la sesion en disco.
+   *
+   * Sin el, Claude Code escribe la sesion ENTERA —con el prompt dentro— en su
+   * carpeta de proyectos, en claro. Para un turno de la boveda eso es una copia
+   * sin cifrar de lo que la boveda cifra: el hilo, la memoria y, con `D-105`, el
+   * resumen de otras dos conversaciones. Luxy no reanuda nunca una sesion de
+   * Claude, asi que no se pierde nada.
+   */
+  noSessionPersistence: boolean;
 }
 
 /** analiza `claude --help` para saber que se puede usar en esta maquina */
@@ -80,6 +90,7 @@ export function parseClaudeCapabilities(help: string | null): ClaudeCapabilities
     inputFormat: helpHasFlag(help, '--input-format'),
     restricted: helpHasFlag(help, '--restricted'),
     effort: helpHasFlag(help, '--effort'),
+    noSessionPersistence: helpHasFlag(help, '--no-session-persistence'),
   };
 }
 
@@ -125,6 +136,15 @@ export function buildClaudeArgs(options: ClaudeArgsOptions): string[] {
 
   // ejecucion no interactiva
   if (capabilities.print) args.push('--print');
+
+  // todo lo de solo lectura —las conversaciones de Studio y TODO lo de la
+  // boveda, turnos y trabajo de fondo, que van por `studioMode: conversation`—
+  // sin transcripcion en disco. Un trabajo de codigo la conserva: es donde puede
+  // servirle a Daniel reabrirla. Sin la capacidad no se pasa: un flag que la
+  // version no conoce aborta la invocacion entera
+  if (options.readOnly === true && capabilities.noSessionPersistence) {
+    args.push('--no-session-persistence');
+  }
 
   if (capabilities.model && options.model) {
     args.push('--model', options.model);

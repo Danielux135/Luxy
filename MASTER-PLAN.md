@@ -11,6 +11,14 @@
 > Sincronizar esto es trabajo pendiente y con criterio de producto —hay que
 > decidir qué de la fase 9 sigue vivo—, así que se declara en vez de arreglarse a
 > medias.
+>
+> **2026-09-28:** tampoco tienen fila los tres encargos del 25/09 ni su revisión:
+> `SEG-BOVEDA-001` (`D-106`), `F33-ENGANCHE-LOCAL-001` y `F33-RECUERDO-001`
+> (`D-103`, `D-105`), `F33-PROMESAS-001` (`D-104`) y `REV-TRES-ENCARGOS-001`. Los
+> cuatro primeros están en estado `implemented` según la tabla de «Estados»:
+> código presente, **sin revisión independiente de sus arreglos** (cuatro rondas,
+> todas del 28/09, la tercera con su parte de pantalla ya hecha) y sin validar en
+> pantalla (`LA-052`, `LA-053`, `LA-054`). El detalle, en `CURRENT-TASK.md`.
 
 Actualización 2026-08-31 — Kimi K3 experimental corrige el guard SSE: un
 contexto agentic recibe y ejecuta `tool_calls`; una consulta sin contexto sigue
