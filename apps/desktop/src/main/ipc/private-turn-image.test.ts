@@ -104,10 +104,12 @@ vi.mock('@luxy/agent/dist/providers/horde.js', () => {
   };
 });
 
-// el otro proveedor no se toca aqui, pero handlers.ts lo importa al cargarse
+// el de pago: casi no se toca aqui, pero handlers.ts lo importa al cargarse.
+// `xaviraSale.url` hace que su generacion llegue hasta el guardado
+const xaviraSale = vi.hoisted(() => ({ url: null as string | null }));
 vi.mock('@luxy/agent/dist/providers/xavira.js', () => ({
   XaviraError: class XaviraError extends Error {},
-  awaitGeneration: async () => ({ outputUrl: null, costCredits: null }),
+  awaitGeneration: async () => ({ outputUrl: xaviraSale.url, costCredits: null }),
   createCharacter: async () => ({}),
   downloadOutput: async () => ({ bytes: new Uint8Array(), mimeType: 'image/webp' }),
   generateImage: async () => ({}),
@@ -116,6 +118,7 @@ vi.mock('@luxy/agent/dist/providers/xavira.js', () => ({
 
 const { registerIpcHandlers } = await import('./handlers.js');
 const { IPC_INVOKE, VAULT_HORDE_API_SECRET } = await import('../../shared/ipc.js');
+const { SEND_CUT_BY_LOCK } = await import('./handlers.js');
 const { tokenize } = await import('../vault/turn-index.js');
 type HandlerContext = Parameters<typeof registerIpcHandlers>[0];
 
@@ -192,6 +195,13 @@ interface Montaje {
   registroRoto?: boolean;
   /** guardar el medio falla, como cuando la boveda se cierra a mitad */
   medioFalla?: boolean;
+  /** el proveedor de imagenes del personaje; por defecto AI Horde */
+  proveedor?: 'horde' | 'xavira';
+  /**
+   * la boveda se cierra mientras se hace la imagen del turno —el tope de
+   * `D-106`—: guardar el medio falla y, desde ahi, todo lo que descifra
+   */
+  cierreEnLaImagen?: boolean;
 }
 
 function montar(montaje: Montaje = {}): Huella {
@@ -212,10 +222,16 @@ function montar(montaje: Montaje = {}): Huella {
   const respuestas = montaje.respuestas ?? [CON_BLOQUE];
   let turnosPedidos = 0;
   let medios = 0;
+  let abierta = true;
+  // como el almacen de verdad: descifrar exige la llave
+  const llave = (): undefined => {
+    if (!abierta) throw new Error('la boveda esta bloqueada');
+    return undefined;
+  };
 
   const context = {
     vault: {
-      isUnlocked: () => true,
+      isUnlocked: () => abierta,
       onLock: () => () => undefined,
       beginUserWait: (kind: string) => {
         const token = Symbol(kind);
@@ -249,7 +265,7 @@ function montar(montaje: Montaje = {}): Huella {
       removeLastTurn: () => huella.turnos.pop(),
       latestMemory: async () => null,
       // el dueño se lee SOLO por `owner()` (`D-103`)
-      owner: async () => ({
+      owner: async () => llave() ?? ({
         characterId: LIA,
         characterDescription: 'Lia, veinticuatro años',
         instructions: null,
@@ -268,7 +284,7 @@ function montar(montaje: Montaje = {}): Huella {
           characterId: LIA,
           label: 'Lia',
           description: '',
-          imageProvider: 'horde',
+          imageProvider: montaje.proveedor ?? 'horde',
           imageReview: montaje.review ?? 'siempre',
           xavira: null,
           horde: { recipe: RECETA },
@@ -283,12 +299,20 @@ function montar(montaje: Montaje = {}): Huella {
         huella.turnosAlGuardarMedio.push(huella.turnos.length);
         huella.esperasAlGuardarMedio.push([...huella.esperas.values()]);
         if (montaje.medioFalla === true) throw new Error('la boveda esta bloqueada');
+        if (montaje.cierreEnLaImagen === true) {
+          abierta = false;
+          throw new Error('la boveda esta bloqueada');
+        }
         medios += 1;
         return { mediaId: `medio-${medios}`, byteSize: 4, hasThumbnail: false };
       },
     },
     secretStore: {
-      get: (name: string) => (name === VAULT_HORDE_API_SECRET ? 'clave-de-prueba' : undefined),
+      // con el de pago hace falta su clave: aqui cualquiera vale
+      get: (name: string) =>
+        name === VAULT_HORDE_API_SECRET || montaje.proveedor === 'xavira'
+          ? 'clave-de-prueba'
+          : undefined,
       isEncryptionAvailable: () => false,
       listNames: () => [],
     },
@@ -308,6 +332,8 @@ function montar(montaje: Montaje = {}): Huella {
         attemptId: string,
         patch: Partial<ImageAttempt>,
       ) => {
+        // el registro va sellado: como el de verdad, sin la llave no se escribe
+        llave();
         const index = huella.intentos.findIndex((item) => item.attemptId === attemptId);
         if (index === -1) return undefined;
         const siguiente = { ...(huella.intentos[index] as ImageAttempt), ...patch };
@@ -534,17 +560,53 @@ describe('el turno termina sin generar y deja el plan pendiente', () => {
     expect(huella.turnos.map((turno) => turno.role)).toEqual(['user', 'assistant']);
   });
 
-  // tercera revision del 28/09: la imagen del turno se generaba dentro de la
-  // espera `reply`, asi que un Win+L la aplazaba hasta 10 minutos con la
-  // respuesta ya guardada. Con el texto a salvo, la espera pasa a ser `image`,
-  // que no aplaza Win+L pero si sigue frenando la inactividad (`D-106`)
-  it('con su texto guardado, la imagen del turno se espera como imagen y no como envio', async () => {
+  // revisiones del 28/09: la imagen del turno se generaba dentro de la espera
+  // `reply`; despues se paso a `image`, y un Win+L aplazado se cumplia al
+  // guardar el texto y tiraba la imagen ya cobrada. Con el proveedor de PAGO es
+  // `turn-image`: el segundo tramo del envio, que aplaza Win+L con su propio
+  // tope y sigue frenando la inactividad (`D-106`)
+  it('con su texto guardado, la imagen de pago se espera como tramo del envio', async () => {
+    const huella = montar({ review: 'nunca', proveedor: 'xavira' });
+    await enviar('mandame una foto tuya');
+    expect(huella.esperasEmpezadas).toEqual(['reply', 'turn-image']);
+    // y al acabar no queda ninguna abierta
+    expect([...huella.esperas.values()]).toEqual([]);
+  });
+
+  // octava ronda: AI Horde no cobra y su cola pasa del tope de 15 minutos.
+  // Aplazar Win+L dejaba la llave en memoria para perder la imagen igual
+  it('con AI Horde, la imagen del turno se espera como la del panel: no aplaza Win+L', async () => {
     const huella = montar({ review: 'nunca' });
     await enviar('mandame una foto tuya');
     expect(huella.esperasEmpezadas).toEqual(['reply', 'image']);
     expect(huella.esperasAlGuardarMedio).toEqual([['image']]);
-    // y al acabar no queda ninguna abierta
     expect([...huella.esperas.values()]).toEqual([]);
+  });
+
+  // octava ronda: el tope de la imagen cierra la boveda y la imagen termina con
+  // ella cerrada. El aviso decia «justo despues de guardar su respuesta», y al
+  // turno siguiente le llegaba como motivo el error interno de la boveda
+  it('si la boveda se cierra mientras se hace la imagen, lo dice y no retira nada', async () => {
+    const huella = montar({ review: 'nunca', proveedor: 'xavira', cierreEnLaImagen: true });
+    // el de pago no devuelve nada en el simulado: se hace que llegue al guardado
+    xaviraSale.url = 'https://ejemplo.invalid/salida.webp';
+    try {
+      const respuesta = (await enviar('mandame una foto tuya')) as Respuesta & {
+        value?: { error: string | null };
+      };
+      expect(respuesta.ok).toBe(true);
+      expect(respuesta.value?.userTurnKept).toBe(true);
+      expect(respuesta.value?.error).toBe(SEND_CUT_BY_LOCK.imageLost);
+      expect(respuesta.value?.image?.error).toBe(
+        'la bóveda se cerró mientras se hacía y la imagen se perdió',
+      );
+      // ni segunda retirada: su mensaje y la respuesta de ella siguen ahi
+      expect(huella.turnos.map((turno) => turno.role)).toEqual(['user', 'assistant']);
+      // y el intento se queda como se mando: nadie lo cierra con la boveda cerrada
+      expect(huella.intentos[0]?.state).toBe('sent');
+    } finally {
+      xaviraSale.url = null;
+    }
   });
 
   it('un turno sin imagen se espera entero como envio y la suelta al acabar', async () => {

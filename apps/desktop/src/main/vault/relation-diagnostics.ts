@@ -222,8 +222,12 @@ export interface RelationDiagnostics {
     maxRaisesPerNote: number;
     medianDaysToFirstRaise: number;
     /**
-     * de `herMentions`, las que ademas pasan la regla estricta: las que habrian
-     * llevado la nota de «ya salio» (`clearlyRaises`)
+     * de `herMentions`, las que ademas pasan la regla estricta de las raices
+     * (`clearlyRaises`). Es una COTA SUPERIOR de las que habrian llevado la nota
+     * de «ya salio», no esa cifra: `raisedByHer` exige ademas que la nota viniera
+     * de fuera de la ventana, que el no la haya retomado, que su mensaje de
+     * ahora no la toque y la frontera de la apertura anterior, y nada de eso se
+     * mira aqui (`D-104`, quinta ronda)
      */
     herMentionsClear: number;
     /** notas cuya cita tiene `LONG_QUOTE_ROOTS` raices o mas */
@@ -486,9 +490,10 @@ export function diagnoseRelations(input: RelationDiagnosticsInput): RelationDiag
     herMentions += mentions.hers.length;
     maxRaisesPerNote = Math.max(maxRaisesPerNote, mentions.hers.length);
 
-    // cuantas de sus alusiones habrian llevado la nota de «ya salio», y cuanto
-    // pesan las citas largas, donde la regla estricta casi nunca acepta. Solo
-    // cuentas: ni la cita ni sus raices salen de aqui
+    // cuantas de sus alusiones pasan la regla estricta —como mucho, las que
+    // habrian llevado la nota de «ya salio»: las demas condiciones de
+    // `raisedByHer` no se miran—, y cuanto pesan las citas largas, donde la regla
+    // casi nunca acepta. Solo cuentas: ni la cita ni sus raices salen de aqui
     const clear = mentions.hers.filter((turn) => clearlyRaises(turn.stems, note.stems)).length;
     herMentionsClear += clear;
     if (note.stems.length >= LONG_QUOTE_ROOTS) {

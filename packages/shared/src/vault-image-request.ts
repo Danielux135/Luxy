@@ -118,6 +118,31 @@ export function profilePhotoLine(description: string): string {
 }
 
 /**
+ * si un medio es LA FOTO DE PERFIL de ese personaje, y no una imagen suya
+ * cualquiera.
+ *
+ * Se decidia con `characterId` a secas, y ese campo lo llevan tambien las
+ * imagenes GENERADAS de ella (`D-108`): en cualquier conversacion, nacida o
+ * enganchada, todas se anunciaban al modelo como «su foto de perfil — …», y una
+ * imagen de ella generada antes de enganchar impedia que se copiara el avatar.
+ * La foto de perfil es la copia del avatar: no viene de ningun intento y no se
+ * pidio con ningun prompt. Las antiguas guardaban la etiqueta fija en `prompt`,
+ * antes de que existiera `caption`, y por eso ese valor tambien vale. Una
+ * generada lleva siempre su prompt y, desde que existe, su intento.
+ *
+ * No esta comprobado contra los medios reales de la boveda: no se descifran.
+ */
+export function isProfilePhotoOf(
+  metadata: { characterId?: string | null; attemptId?: string | null; prompt?: string | null },
+  characterId: string,
+): boolean {
+  if (metadata.characterId !== characterId) return false;
+  if (metadata.attemptId !== undefined && metadata.attemptId !== null) return false;
+  const prompt = metadata.prompt ?? null;
+  return prompt === null || prompt === PROFILE_PHOTO_LABEL;
+}
+
+/**
  * con que frase se le presenta al modelo una imagen ya guardada.
  *
  * EL ORDEN ES EL ARREGLO. Se leia `prompt` primero, y `prompt` es lo que se

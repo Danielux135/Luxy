@@ -93,6 +93,14 @@ lo pida explícitamente.
   `config.json`; las URLs remotas exigen HTTPS y HTTP sólo se admite en loopback.
 - El catálogo real de una conexión consulta sólo `/v1/models`; no sondea rutas
   tentativas de precios (`D-022`).
+- El razonamiento de una conexión HTTP se elige POR MODELO en su muestreo
+  (`reasoningMode`, `D-107`). Vacío no manda nada. Lo traduce la tabla de
+  `reasoning-control.ts`, con nombres enteros y la fuente de cada regla; un
+  modelo sin regla no recibe nada. A DeepSeek sólo se le ofrece apagarlo:
+  encenderlo rompe los trabajos con herramientas. Todo nombre de campo nuevo del
+  registro se comprueba con `isSecretKeyName` (`redact.ts`): tapa cualquiera que
+  acabe en key, token, secret, password o credential, en singular o plural y en
+  camelCase, snake o kebab (`visiblePorToken` salía como `[REDACTADO]`).
 - El trabajo de fondo de la bóveda —catalogar escenas, apuntar lo que queda
   pendiente entre los dos— va **sólo** por Claude Code o Codex con la sesión
   local, nunca por una API de pago (`D-087`). Lo resuelve
@@ -118,9 +126,31 @@ lo pida explícitamente.
   `vault/conversation-owners.json` y **sólo en este equipo**: «Sincronizar» no lo
   sube. El envío rechaza un personaje en una conversación ya empezada; la ficha
   la sella main desde la bóveda cuando cambia, nunca el renderer, y va dentro
-  del turno: ese sí lo sube «Sincronizar», sellado como cualquier turno. El
-  resumen de las dos últimas conversaciones de un personaje va detrás de su
-  casilla `recentMemories`, apagada por defecto (`D-105`).
+  del turno: ese sí lo sube «Sincronizar», sellado como cualquier turno. La
+  memoria de las dos últimas conversaciones de un personaje —entera, sin
+  `plan` ni `openQuestions` y sin sus mensajes— va detrás de su casilla
+  `recentMemories`, apagada por defecto (`D-105`, quinta ronda). Los textos de
+  una memoria se cortan en palabra con `clipAtWord`, nunca con un `slice` a
+  secas.
+- Una conversación **enganchada** queda como una nacida con su personaje
+  (`D-108`): su memoria sellada la reescribe con la ficha Claude Code o Codex
+  (`MemoryRelink`, nunca una API de pago) en `vault/memory-relink.json`, y el
+  `.jsonl` no se toca. La reescrita solo vale **atada** al enganche que gana y a
+  la última memoria sellada exacta (secuencia y fecha); lo que pierde material
+  (`decideRelink`) no se aplica. Todos los lectores de la memoria —el turno, la
+  sonda, `D-105` y «Lo que recuerda»— pasan por `effectiveSealed`; no leas
+  `latestMemory` para USAR la memoria. Quien USA la reescrita —el turno de su
+  hilo y el resumen de `D-105`— la apunta antes `applied` con
+  `markRelinkApplied` (compare-and-set) y, si no puede, va con la sellada. A la
+  reescritura le llega la memoria con `repairSlicedMemory`. Una enganchada sin
+  memoria sellada que viaja con su ficha retroactiva o su índice queda
+  pendiente, y se reescribe la primera que se selle. Tras cada envío en Privado,
+  `MemoryRelink.sweep` reintenta las pendientes de cualquier conversación.
+  Mientras se borra una conversación o su memoria no arranca ningún envío
+  (`erasingInFlight`). La foto de perfil se reconoce con `isProfilePhotoOf`,
+  nunca por `characterId` a secas. La firma: en una enganchada, todas sus
+  respuestas salvo las escritas con OTRO personaje (`lastForeignSequence`); con
+  dueño por turno, solo lo de después de ese turno.
 - **Leer la bóveda no es actividad** (`D-106`): `subkeyFor()` no llama a
   `touch()`, y no se lo vuelvas a poner, ni a ningún lector. Mantienen abierta la
   bóveda: abrirla; la presencia real en Privado (`vaultPresence`: eventos REALES
@@ -130,10 +160,15 @@ lo pida explícitamente.
   él; los `touch()` de las operaciones de cuenta y del ajuste de minutos, que ya
   existían; y dos que añadió `D-106` y no se tocan sin leerla: el final de una
   espera y volver a Windows con un cierre aplazado (`unlockScreen`). El
-  trabajo de fondo nunca. Win+L solo se aplaza por una espera `reply` (un envío
-  hasta que su respuesta queda guardada), nunca por una imagen: la imagen de un
-  turno se espera como `image` en cuanto su texto está en disco. La cierran la
-  inactividad, Win+L, suspender, la X de la ventana, el botón, salir y cerrar la
+  trabajo de fondo nunca. Win+L solo lo aplaza un envío suyo, en sus dos
+  tramos: la espera `reply` hasta que su respuesta queda guardada (10 minutos
+  como mucho desde Win+L) y, si el turno lleva imagen del proveedor de PAGO, la
+  `turn-image` mientras se genera esa imagen ya pagada (15 minutos como mucho
+  desde que el coordinador ve ese tramo: desde que el texto está en disco si
+  Win+L llegó antes, o desde Win+L si llegó con el texto ya guardado); después
+  cierra, sin cancelar la generación. Una imagen de AI Horde en el turno, que no
+  cobra, se espera como la del panel (`image`), y esa no lo aplaza. La
+  cierran la inactividad, Win+L, suspender, la X de la ventana, el botón, salir y cerrar la
   sesión, y todo cierre pasa por `lock(motivo)`. Un mensaje suyo sin respuesta
   se retira por su `recordId` (`removeLastTurn`), nunca «la última línea», y
   «Sincronizar» no toca los turnos de una conversación con un envío en curso

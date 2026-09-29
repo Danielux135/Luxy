@@ -1,6 +1,13 @@
-import { connectionProfileSchema, httpProviderConfigSchema } from '@luxy/shared';
+import {
+  connectionProfileSchema,
+  httpProviderConfigSchema,
+  REASONING_MODE_SHORT,
+  REASONING_MODES,
+  reasoningOptionsFor,
+} from '@luxy/shared';
 import type {
   ConnectionProfile,
+  ReasoningMode,
   SamplingParameterKey,
   SamplingParameters,
   StoredAgentConfig,
@@ -32,6 +39,19 @@ export interface HttpProviderDraft {
   frequencyPenalty: string;
   presencePenalty: string;
   repetitionPenalty: string;
+  /**
+   * razonamiento elegido (D-107). La cadena vacia es «lo que traiga el
+   * modelo»: no se manda nada, igual que los cuatro de arriba.
+   */
+  reasoningMode: ReasoningModeDraft;
+}
+
+/** el valor de un `<select>` de razonamiento: vacio o uno de los modos */
+export type ReasoningModeDraft = '' | ReasoningMode;
+
+/** convierte el valor del `<select>` sin fiarse de el: lo que no es un modo es vacio */
+export function reasoningModeDraft(value: string): ReasoningModeDraft {
+  return (REASONING_MODES as readonly string[]).includes(value) ? (value as ReasoningMode) : '';
 }
 
 export interface HttpProviderBuildResult {
@@ -109,6 +129,7 @@ export function emptyHttpProviderDraft(): HttpProviderDraft {
     frequencyPenalty: '',
     presencePenalty: '',
     repetitionPenalty: '',
+    reasoningMode: '',
   };
 }
 
@@ -150,10 +171,16 @@ function sampling(key: SamplingParameterKey, value: string): Record<string, numb
  * formulario de proveedor y el de muestreo por modelo de una conexion, para
  * que la coma, el vacio y el NaN a medio escribir se traten igual en los dos.
  */
-export type SamplingDraft = Pick<HttpProviderDraft, SamplingParameterKey>;
+export type SamplingDraft = Pick<HttpProviderDraft, SamplingParameterKey | 'reasoningMode'>;
 
 export function emptySamplingDraft(): SamplingDraft {
-  return { temperature: '', frequencyPenalty: '', presencePenalty: '', repetitionPenalty: '' };
+  return {
+    temperature: '',
+    frequencyPenalty: '',
+    presencePenalty: '',
+    repetitionPenalty: '',
+    reasoningMode: '',
+  };
 }
 
 export function samplingToDraft(parameters: SamplingParameters | undefined): SamplingDraft {
@@ -162,25 +189,60 @@ export function samplingToDraft(parameters: SamplingParameters | undefined): Sam
     frequencyPenalty: numberToDraft(parameters?.frequencyPenalty),
     presencePenalty: numberToDraft(parameters?.presencePenalty),
     repetitionPenalty: numberToDraft(parameters?.repetitionPenalty),
+    reasoningMode: parameters?.reasoningMode ?? '',
   };
 }
 
 /** los campos rellenos, listos para Zod; los vacios se omiten enteros */
-function samplingDraftFields(draft: SamplingDraft): Record<string, number> {
+function samplingDraftFields(draft: SamplingDraft): Record<string, number | string> {
   return {
     ...sampling('temperature', draft.temperature),
     ...sampling('frequencyPenalty', draft.frequencyPenalty),
     ...sampling('presencePenalty', draft.presencePenalty),
     ...sampling('repetitionPenalty', draft.repetitionPenalty),
+    // vacio se OMITE, como los numeros: la clave no llega a config.json
+    ...(draft.reasoningMode === '' ? {} : { reasoningMode: draft.reasoningMode }),
   };
 }
 
-const SAMPLING_FIELD_LABELS: Record<SamplingParameterKey, string> = {
+const SAMPLING_FIELD_LABELS: Record<SamplingParameterKey | 'reasoningMode', string> = {
   temperature: 'Temperatura',
   frequencyPenalty: 'Penalización por frecuencia',
   presencePenalty: 'Penalización por presencia',
   repetitionPenalty: 'Penalización por repetición',
+  reasoningMode: 'Razonamiento',
 };
+
+/**
+ * el host de una URL base, o null si todavia no es una URL.
+ *
+ * Hace falta porque dos reglas de razonamiento —las de Groq— solo valen en su
+ * host: el mismo nombre de modelo en OpenRouter tiene otro dialecto.
+ */
+export function hostOfBaseUrl(baseUrl: string): string | null {
+  try {
+    return new URL(baseUrl.trim()).host;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * el razonamiento elegido, si ESTE modelo en ESTE host lo admite.
+ *
+ * Se comprueba al guardar, y no solo en el `<select>`: si alguien cambia el
+ * modelo despues de elegir, el valor ya no vale para el nuevo. Guardarlo seria
+ * un ajuste que se ve en la lista y que no viaja nunca (`not_sent`).
+ */
+function reasoningModeError(
+  mode: ReasoningModeDraft,
+  model: string,
+  baseUrl: string,
+): string | null {
+  if (mode === '') return null;
+  if (reasoningOptionsFor(model.trim(), hostOfBaseUrl(baseUrl)).includes(mode)) return null;
+  return 'Razonamiento: este modelo no lo admite con ese valor. Déjalo en «Lo que traiga el modelo».';
+}
 
 /**
  * resumen de una entrada para la lista de la conexion, con coma decimal: es lo
@@ -189,11 +251,15 @@ const SAMPLING_FIELD_LABELS: Record<SamplingParameterKey, string> = {
 export function describeSampling(parameters: SamplingParameters): string {
   const partes: string[] = [];
   for (const [key, label] of Object.entries(SAMPLING_FIELD_LABELS) as [
-    SamplingParameterKey,
+    SamplingParameterKey | 'reasoningMode',
     string,
   ][]) {
+    if (key === 'reasoningMode') continue;
     const value = parameters[key];
     if (value !== undefined) partes.push(`${label} ${String(value).replace('.', ',')}`);
+  }
+  if (parameters.reasoningMode !== undefined) {
+    partes.push(`Razonamiento: ${REASONING_MODE_SHORT[parameters.reasoningMode]}`);
   }
   return partes.length === 0 ? 'sin parámetros' : partes.join(' · ');
 }
@@ -222,6 +288,8 @@ export function withModelSampling(
 ): ModelSamplingResult {
   const model = apiModel.trim();
   if (model.length === 0) return { connection: null, error: 'Elige el modelo.' };
+  const razonamiento = reasoningModeError(draft.reasoningMode, model, connection.baseUrl);
+  if (razonamiento !== null) return { connection: null, error: razonamiento };
 
   // se filtra por clave en vez de indexar: un modelo llamado `toString` no
   // puede tocar el prototipo
@@ -246,8 +314,8 @@ export function withModelSampling(
         // castellano para que se sepa cual de los cuatro esta mal
         const field = issue.path[2];
         const label =
-          typeof field === 'string' && field in SAMPLING_FIELD_LABELS
-            ? SAMPLING_FIELD_LABELS[field as SamplingParameterKey]
+          typeof field === 'string' && Object.hasOwn(SAMPLING_FIELD_LABELS, field)
+            ? SAMPLING_FIELD_LABELS[field as SamplingParameterKey | 'reasoningMode']
             : null;
         return label === null ? issue.message : `${label}: ${issue.message}`;
       })
@@ -279,6 +347,8 @@ export function buildHttpProvider(
   existing: HttpProviderConfig | null,
 ): HttpProviderBuildResult {
   const id = draft.id.trim().toLowerCase();
+  const razonamiento = reasoningModeError(draft.reasoningMode, draft.model, draft.baseUrl);
+  if (razonamiento !== null) return { provider: null, error: razonamiento };
   const parsed = httpProviderConfigSchema.safeParse({
     id,
     displayName: draft.displayName.trim(),
@@ -289,9 +359,9 @@ export function buildHttpProvider(
     supportsStreaming: draft.supportsStreaming,
     maxOutputTokens: Number(draft.maxOutputTokens),
     dailyBudget: Number(draft.dailyBudget),
-    // los cuatro de muestreo se OMITEN si el campo esta vacio. Omitir no es lo
-    // mismo que mandar el valor neutro: una conexion sin configurar tiene que
-    // seguir mandando el mismo cuerpo de siempre
+    // los cuatro de muestreo, y el razonamiento, se OMITEN si el campo esta
+    // vacio. Omitir no es lo mismo que mandar el valor neutro: una conexion sin
+    // configurar tiene que seguir mandando el mismo cuerpo de siempre
     ...samplingDraftFields(draft),
     ...(existing?.softTerminalGraceMs === undefined
       ? {}

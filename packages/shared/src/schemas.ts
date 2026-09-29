@@ -233,7 +233,16 @@ export function formatResponseTermination(termination: ResponseTermination): str
   return `diagnostico de la respuesta: ${partes.join(' ')}`;
 }
 
-const conversationMemoryEntrySchema = z.string().trim().min(1).max(240);
+/** tope del resumen de una memoria sellada */
+export const CONVERSATION_MEMORY_SUMMARY_CHARS = 1200;
+/** tope de cada entrada de una lista de una memoria sellada */
+export const CONVERSATION_MEMORY_ENTRY_CHARS = 240;
+
+const conversationMemoryEntrySchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(CONVERSATION_MEMORY_ENTRY_CHARS);
 
 /**
  * resumen acumulativo que un proveedor devuelve junto a una conversacion.
@@ -243,7 +252,7 @@ const conversationMemoryEntrySchema = z.string().trim().min(1).max(240);
  */
 export const conversationMemorySchema = z.object({
   version: z.literal(1),
-  summary: z.string().trim().min(1).max(1200),
+  summary: z.string().trim().min(1).max(CONVERSATION_MEMORY_SUMMARY_CHARS),
   facts: z.array(conversationMemoryEntrySchema).max(12).default([]),
   decisions: z.array(conversationMemoryEntrySchema).max(12).default([]),
   plan: z.array(conversationMemoryEntrySchema).max(12).default([]),
@@ -337,6 +346,122 @@ export function looksLikeCode(value: string): boolean {
   return text.length >= 120 && simbolos / text.length > 0.06;
 }
 
+/** lo que no puede quedar colgando delante de la marca de corte */
+const CLIP_DANGLING = /[\s,;:–—(«"'“‘-]+$/u;
+/** un final que ya cierra una frase: la marca va separada para no pegarse al punto */
+const CLIP_SENTENCE_END = /[.!?…»"”’)]$/u;
+/** la huella de un `slice` que pudo partir una palabra: acaba en letra o cifra */
+const CLIP_WORD_END = /[\p{L}\p{N}]$/u;
+
+/**
+ * corta un texto que no cabe en el ultimo espacio antes del tope, y marca el
+ * corte con «…».
+ *
+ * POR QUE EXISTE: la memoria y las fichas se ajustaban a su tope con un `slice`
+ * a secas, y el corte caia donde caia: «la llevo a la pla». Una palabra partida
+ * se lee como un dato —el modelo la completa como le parece— y ademas vuelve
+ * en cada turno, porque el modelo reescribe su memoria copiando la anterior.
+ * Lo que cabe se devuelve tal cual: nunca se toca un texto entero.
+ */
+export function clipAtWord(text: string, max: number): string {
+  if (text.length <= max) return text;
+  if (max <= 0) return '';
+  if (max === 1) return '…';
+  let room = text.slice(0, max - 1);
+  // un caracter de dos unidades (un emoji) no se parte por la mitad
+  const lastCode = room.charCodeAt(room.length - 1);
+  if (lastCode >= 0xd800 && lastCode <= 0xdbff) room = room.slice(0, -1);
+  let base = room;
+  // si lo primero que se cae es un espacio, la ultima palabra que queda esta entera
+  if (!/\s/u.test(text.charAt(room.length))) {
+    const lastSpace = /\s\S*$/u.exec(room);
+    if (lastSpace !== null && lastSpace.index > 0) base = room.slice(0, lastSpace.index);
+  }
+  base = base.replace(CLIP_DANGLING, '');
+  // un texto sin espacios, o solo de signos: se corta donde toque y se marca igual
+  if (base.length === 0) base = room.trimEnd();
+  return CLIP_SENTENCE_END.test(base) && base.length + 2 <= max ? `${base} …` : `${base}…`;
+}
+
+/**
+ * arregla, AL PRESENTARLO, un texto que se guardo con el `slice` de antes.
+ *
+ * No hay forma de saber si ese `slice` partio una palabra; su huella es medir
+ * EXACTAMENTE el tope y acabar en letra o cifra. Con esa huella se quita la
+ * ultima palabra y se marca con «…». Si en realidad estaba entera, se pierde
+ * una palabra y queda dicho que falta algo: es el lado seguro, porque la
+ * palabra partida es un dato falso y la marca no. Lo que ya se corta con
+ * `clipAtWord` nunca tiene esa huella, asi que esto no lo vuelve a tocar.
+ */
+export function repairSlicedText(text: string, max: number): { text: string; repaired: boolean } {
+  if (max < 2 || text.length !== max || !CLIP_WORD_END.test(text)) {
+    return { text, repaired: false };
+  }
+  return { text: clipAtWord(text, max - 1), repaired: true };
+}
+
+/** los topes con los que se guardo una memoria, segun de donde salio */
+export interface MemoryTextCaps {
+  summary: number;
+  entry: number;
+}
+
+/** los de la memoria sellada de un turno vivo: los del esquema */
+export const SEALED_MEMORY_CAPS: MemoryTextCaps = {
+  summary: CONVERSATION_MEMORY_SUMMARY_CHARS,
+  entry: CONVERSATION_MEMORY_ENTRY_CHARS,
+};
+
+/**
+ * los del relleno de la ficha retroactiva y del indice deducido.
+ *
+ * Viven aqui y no en `vault-recap.ts`, que los reexporta como
+ * `RECAP_SUMMARY_CHARS` y `RECAP_ENTRY_CHARS` y explica por que valen eso:
+ * `vault-prompt.ts` los necesita para presentar la memoria, y no puede importar
+ * valores de `vault-recap.ts` sin crear un ciclo.
+ */
+export const RECAP_MEMORY_CAPS: MemoryTextCaps = { summary: 400, entry: 160 };
+
+/**
+ * con que topes se guardo una memoria, segun de donde sale.
+ *
+ * Una ficha pasa por DOS cortes —el del esquema y el del relleno—, y el que
+ * deja huella es el segundo, el mas corto.
+ */
+export function memoryCapsFor(source: 'turn' | 'recap' | 'index'): MemoryTextCaps {
+  return source === 'turn' ? SEALED_MEMORY_CAPS : RECAP_MEMORY_CAPS;
+}
+
+/**
+ * la memoria con los cortes del `slice` de antes arreglados, y cuantos.
+ *
+ * Sin nada que arreglar devuelve el MISMO objeto: el prompt sale byte a byte
+ * como antes.
+ */
+export function repairSlicedMemory(
+  memory: ConversationMemory,
+  caps: MemoryTextCaps,
+): { memory: ConversationMemory; repaired: number } {
+  let repaired = 0;
+  const fix = (text: string, max: number): string => {
+    const result = repairSlicedText(text, max);
+    if (result.repaired) repaired += 1;
+    return result.text;
+  };
+  const list = (entries: readonly string[]): string[] =>
+    entries.map((entry) => fix(entry, caps.entry));
+  const fixed: ConversationMemory = {
+    ...memory,
+    summary: fix(memory.summary, caps.summary),
+    facts: list(memory.facts),
+    decisions: list(memory.decisions),
+    plan: list(memory.plan),
+    openQuestions: list(memory.openQuestions),
+    lessons: list(memory.lessons),
+  };
+  return { memory: repaired === 0 ? memory : fixed, repaired };
+}
+
 function stripOptionalJsonFence(value: string): string {
   const trimmed = value.trim();
   const match = /^```(?:json)?\s*([\s\S]*?)\s*```$/i.exec(trimmed);
@@ -358,14 +483,17 @@ function normalizeConversationMemory(raw: unknown): unknown {
     Array.isArray(valor)
       ? valor
           .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
-          .map((item) => item.trim().slice(0, 240))
+          .map((item) => clipAtWord(item.trim(), CONVERSATION_MEMORY_ENTRY_CHARS))
           .slice(0, 12)
       : [];
 
   return {
     ...entrada,
     version: 1,
-    summary: typeof entrada.summary === 'string' ? entrada.summary.trim().slice(0, 1200) : '',
+    summary:
+      typeof entrada.summary === 'string'
+        ? clipAtWord(entrada.summary.trim(), CONVERSATION_MEMORY_SUMMARY_CHARS)
+        : '',
     facts: lista(entrada.facts),
     decisions: lista(entrada.decisions),
     plan: lista(entrada.plan),

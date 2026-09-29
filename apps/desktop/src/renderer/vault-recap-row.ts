@@ -16,7 +16,13 @@
 //
 // PURO: recibe la fila tal y como llega del proceso principal y devuelve como se
 // pinta.
-import type { LocalCliProvider, RecapRefusalKind } from '@luxy/shared';
+import type {
+  LocalCliProvider,
+  MemoryRelinkFailure,
+  MemoryRelinkOutcome,
+  MemoryRelinkPhase,
+  RecapRefusalKind,
+} from '@luxy/shared';
 
 export const CLI_LABELS: Record<LocalCliProvider, string> = {
   claude: 'Claude',
@@ -383,6 +389,8 @@ export interface RecapRowStamp {
   /** entra porque cambia lo que dice la confirmacion del boton rojo */
   cardRevivesOnForget: boolean;
   refusedKind: RecapRefusalKind | null;
+  /** la reescritura con su ficha termina en segundo plano: eso tambien es un cambio */
+  relink?: { phase: MemoryRelinkPhase } | null;
 }
 
 /**
@@ -421,7 +429,245 @@ export function recapSignature(rows: readonly RecapRowStamp[]): string {
         row.hasEntry,
         row.cardRevivesOnForget,
         row.refusedKind ?? '-',
+        row.relink?.phase ?? '-',
       ].join('|'),
     )
     .join('\n');
+}
+
+// ---------------------------------------------------------------------------
+// la memoria reescrita con su ficha (`D-108`)
+// ---------------------------------------------------------------------------
+
+/** lo que llega del proceso principal sobre la reescritura de una fila */
+export interface RelinkRowView {
+  phase: MemoryRelinkPhase;
+  provider: LocalCliProvider | null;
+  failure: MemoryRelinkFailure | null;
+  drift: {
+    kept: number;
+    rewritten: number;
+    dropped: number;
+    shortened: number;
+    added: number;
+    /** ausente en las filas de antes de la septima ronda */
+    summaryChanged?: boolean;
+  } | null;
+  /** la memoria de antes; solo llega mientras se puede volver a ella */
+  previousBlock: string;
+  holdsRewrite: boolean;
+  /** si tiene memoria sellada: sin ella viaja su ficha retroactiva o su indice */
+  hasMemory: boolean;
+  /** el ultimo intento no termino y no se repite solo hasta reiniciar */
+  stalled: boolean;
+}
+
+export interface RelinkRowLook {
+  tone: 'ok' | 'busy' | 'warn' | 'idle';
+  text: string;
+  /** «Volver a la de antes» */
+  canKeepOld: boolean;
+  /** «Reescribir con su ficha» */
+  canRetry: boolean;
+  /** «Ver la de antes» */
+  canReadPrevious: boolean;
+}
+
+/**
+ * «4 entradas igual, 1 corregida, 1 quitada y 2 añadidas; el resumen también
+ * cambió».
+ *
+ * Las AÑADIDAS y el resumen van a la vista: la guarda solo rechaza lo que se
+ * pierde, asi que lo que el CLI meta de mas —datos de su ficha que el encargo
+ * le prohibe añadir— se aplica igual, y viaja en cada mensaje y a sus otras
+ * conversaciones. Sin esto, «4 igual y 1 corregida» se leia como «no cambio
+ * nada mas» (septima ronda, `D-093`).
+ */
+function driftWords(drift: NonNullable<RelinkRowView['drift']>): string {
+  // las recortadas son corregidas que perdieron mas de la mitad: van DENTRO de
+  // `rewritten` (`compareMemoryEntries`). Contarlas como otro grupo se leia como
+  // una entrada de mas y dos tocadas (octava ronda)
+  const recortadas =
+    drift.shortened > 0 ? ` (${drift.shortened === 1 ? '1 de ellas recortada' : `${drift.shortened} de ellas recortadas`})` : '';
+  const partes = [
+    `${drift.kept} ${drift.kept === 1 ? 'entrada igual' : 'entradas igual'}`,
+    `${drift.rewritten} ${drift.rewritten === 1 ? 'corregida' : 'corregidas'}${recortadas}`,
+  ];
+  if (drift.dropped > 0) partes.push(`${drift.dropped} ${drift.dropped === 1 ? 'quitada' : 'quitadas'}`);
+  if (drift.added > 0) partes.push(`${drift.added} ${drift.added === 1 ? 'añadida' : 'añadidas'}`);
+  const ultima = partes.pop()!;
+  const entradas = partes.length === 0 ? ultima : `${partes.join(', ')} y ${ultima}`;
+  return drift.summaryChanged === true ? `${entradas}; el resumen también cambió` : entradas;
+}
+
+/**
+ * como se dice en «Lo que recuerda» en que punto esta la reescritura.
+ *
+ * Todo en condicional o en pasado comprobado (`D-093`): lo que se sabe es que
+ * se le PIDIO al CLI corregir solo el nombre y lo que su ficha contradiga, no
+ * que lo haya hecho. Por eso las cifras van a la vista y la de antes se puede
+ * leer mientras se puede volver a ella. Sin nada que decir, `null`.
+ */
+export function describeRelink(
+  relink: RelinkRowView | null | undefined,
+  /** fuera del trabajo de fondo: ahi no se reescribe nada, ni pulsando */
+  excluded: boolean,
+): RelinkRowLook | null {
+  if (relink === null || relink === undefined) return null;
+  const quien = relink.provider === null ? 'el CLI' : CLI_LABELS[relink.provider];
+  const base = { canKeepOld: false, canRetry: false, canReadPrevious: false };
+  switch (relink.phase) {
+    case 'none':
+    case 'not-needed':
+      return null;
+    case 'pending':
+      // sin memoria propia: lo que viaja es su ficha retroactiva o el indice,
+      // que tampoco la llevaban, y no hay nada que reescribir hasta que se
+      // selle la primera. Sin boton: pulsarlo no tendria sobre que trabajar
+      if (!relink.hasMemory) {
+        return {
+          ...base,
+          tone: 'idle',
+          text: excluded
+            ? 'Aquí todavía no tiene memoria propia: lo que le llega es su ficha retroactiva o el índice de sus escenas, escritos sin su ficha. La conversación está fuera del trabajo de fondo, así que no se va a reescribir.'
+            : 'Aquí todavía no tiene memoria propia: lo que le llega es su ficha retroactiva o el índice de sus escenas, escritos sin su ficha. Cuando una respuesta suya aquí guarde memoria, esa se reescribirá con su ficha en segundo plano.',
+        };
+      }
+      if (excluded) {
+        return {
+          ...base,
+          tone: 'idle',
+          text: 'Esta memoria se escribió sin su ficha y no se va a reescribir: la conversación está fuera del trabajo de fondo.',
+        };
+      }
+      // el intento no llego a terminar y con ese CLI no se repite solo hasta
+      // reiniciar: decir «en segundo plano» prometeria un trabajo que no va a
+      // ocurrir (septima ronda, `D-093`)
+      if (relink.stalled) {
+        return {
+          ...base,
+          tone: 'warn',
+          text: 'Esta memoria se escribió sin su ficha. El último intento de reescribirla no llegó a terminar y no se volverá a intentar solo hasta que reinicies Studio; puedes pedirlo tú. Mientras tanto viaja la de antes.',
+          canRetry: true,
+        };
+      }
+      // «en segundo plano» a secas prometia un trabajo que podia no llegar:
+      // la pasada solo se lanza tras un envio (octava ronda, `D-093`)
+      return {
+        ...base,
+        tone: 'busy',
+        text: 'Esta memoria se escribió sin su ficha y está pendiente de reescribirse con ella: se intentará en segundo plano después de tu próximo mensaje en Privado, o ahora si pulsas «Reescribir con su ficha». Mientras tanto viaja la de antes.',
+        canRetry: true,
+      };
+    case 'ready':
+      return {
+        ...base,
+        tone: 'ok',
+        text: `Reescrita con su ficha por ${quien}${
+          relink.drift === null ? '' : `: ${driftWords(relink.drift)}`
+        }. Es la que viaja desde tu próximo mensaje, aquí o, si tiene encendida «Pasarle la memoria de sus dos últimas conversaciones», en sus otras conversaciones; hasta que un mensaje aquí guarde memoria nueva puedes volver a la de antes.`,
+        canKeepOld: true,
+        canReadPrevious: relink.previousBlock.length > 0,
+      };
+    case 'in-use':
+      return {
+        ...base,
+        tone: 'ok',
+        text: 'Reescrita con su ficha, y ya en uso. Hasta que un mensaje aquí guarde memoria nueva todavía puedes volver a la de antes; lo que otra conversación ya se haya llevado de ella se queda allí.',
+        canKeepOld: true,
+        canReadPrevious: relink.previousBlock.length > 0,
+      };
+    case 'done':
+      return {
+        ...base,
+        tone: 'idle',
+        text: 'Reescrita con su ficha: la memoria de ahora ya se escribió a partir de ella.',
+      };
+    case 'discarded':
+      return {
+        ...base,
+        tone: 'idle',
+        text: 'Te quedaste con la de antes: la reescrita con su ficha no se usa.',
+        canRetry: !excluded,
+      };
+    case 'failed':
+      return { ...base, tone: 'warn', text: failureText(relink.failure, quien), canRetry: !excluded };
+  }
+}
+
+function failureText(failure: MemoryRelinkFailure | null, quien: string): string {
+  const sigue = 'sigue valiendo la de antes, escrita sin su ficha.';
+  switch (failure) {
+    case 'refused':
+      return `${quien} no quiso reescribirla con su ficha, así que ${sigue} Puedes pedírselo otra vez o probar con el otro en «Quién hace el trabajo de fondo».`;
+    case 'lossy':
+      return `La reescritura con su ficha quitaba o recortaba demasiado y no se ha aplicado: ${sigue}`;
+    case 'vague':
+      return `La reescritura con su ficha ya no decía qué pasó y no se ha aplicado: ${sigue}`;
+    case 'invalid':
+    case null:
+      return `La reescritura con su ficha no salió bien y no se ha aplicado: ${sigue}`;
+  }
+}
+
+/**
+ * en que acabo «Reescribir con su ficha», en una linea.
+ *
+ * Existe porque el boton no decia nada: un CLI que no arranca, una respuesta
+ * que llega tarde o una conversacion ocupada dejaban la fila exactamente igual,
+ * y la pantalla solo se ponia gris un rato (septima ronda). Solo la
+ * clasificacion: nunca lo que dijo el modelo. `quien` es el CLI al que se le
+ * pidio.
+ */
+export function describeRelinkOutcome(
+  outcome: MemoryRelinkOutcome,
+  quien: string,
+): { tone: 'ok' | 'warn' | 'idle'; text: string } {
+  const nada = 'No ha cambiado nada.';
+  switch (outcome) {
+    case 'ready':
+      return { tone: 'ok', text: `${quien} la ha reescrito: mira las cifras en la fila.` };
+    case 'refused':
+      return { tone: 'warn', text: `${quien} no quiso reescribirla. ${nada}` };
+    case 'invalid':
+      return { tone: 'warn', text: `La respuesta de ${quien} no se pudo usar. ${nada}` };
+    case 'vague':
+      return {
+        tone: 'warn',
+        text: `La reescritura de ${quien} ya no decía qué pasó y no se ha aplicado. ${nada}`,
+      };
+    case 'lossy':
+      return {
+        tone: 'warn',
+        text: `La reescritura de ${quien} quitaba o recortaba demasiado y no se ha aplicado. ${nada}`,
+      };
+    case 'process':
+      return {
+        tone: 'warn',
+        text: `${quien} no llegó a terminar: puede que su sesión haya caducado o que no arranque. ${nada} Puedes volver a intentarlo o cambiar de CLI en «Quién hace el trabajo de fondo».`,
+      };
+    case 'cut':
+      return { tone: 'idle', text: 'La bóveda se cerró a mitad y no se ha guardado nada.' };
+    case 'stale':
+      return {
+        tone: 'idle',
+        text: `Mientras ${quien} la reescribía, la conversación cambió —un mensaje, un enganche o una decisión tuya— y el resultado se ha tirado. Vuelve a intentarlo.`,
+      };
+    case 'busy':
+      return {
+        tone: 'idle',
+        text: `La conversación estaba contestando, cambiando de personaje o borrando algo. ${nada} Vuelve a intentarlo en un momento.`,
+      };
+    case 'excluded':
+      return { tone: 'idle', text: `La conversación está fuera del trabajo de fondo. ${nada}` };
+    case 'locked':
+      return { tone: 'idle', text: `La bóveda está cerrada. ${nada}` };
+    case 'no-memory':
+      return { tone: 'idle', text: `Aquí todavía no tiene memoria propia que reescribir. ${nada}` };
+    case 'skipped':
+      return {
+        tone: 'warn',
+        text: 'No se ha hecho nada: o ya no hacía falta, o no se pudo leer o guardar el registro de memorias reescritas.',
+      };
+  }
 }

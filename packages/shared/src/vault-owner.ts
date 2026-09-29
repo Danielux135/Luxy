@@ -270,6 +270,46 @@ export function resolveConversationOwner(input: {
 }
 
 /**
+ * la ultima secuencia escrita con OTRO personaje en vigor, o `null`.
+ *
+ * Existe para la firma de una enganchada (`D-108`): con dueño se firman todas
+ * sus respuestas, tambien las de antes del ancla, porque se escribieron sin la
+ * ficha de nadie. Pero una conversacion que tuvo turnos con la ficha de Lía,
+ * se solto y se engancho a Nora, tiene respuestas escritas con la ficha de
+ * Lía, y firmarlas «Nora» seria falso (octava ronda, `D-093`). Las de hasta
+ * esta secuencia no se firman.
+ *
+ * Mismo recorrido por posicion que `resolveConversationOwner`: el personaje en
+ * vigor es el del ultimo hecho que lo fijo, turno o evento, y `''` es ninguno.
+ */
+export function lastForeignSequence(
+  input: {
+    turns: readonly OwnerTurnFact[];
+    events: readonly ConversationOwnerEvent[];
+  },
+  characterId: string | null,
+): number | null {
+  if (characterId === null) return null;
+  const facts: Fact[] = [
+    ...input.turns.map((turn): Fact => ({ position: turnPosition(turn), kind: 'turn', turn })),
+    ...input.events.map(
+      (event): Fact => ({ position: eventPosition(event), kind: 'event', event }),
+    ),
+  ].sort((a, b) => comparePositions(a.position, b.position));
+  let current: string | null = null;
+  let last: number | null = null;
+  for (const fact of facts) {
+    if (fact.kind === 'event') {
+      current = orNull(fact.event.characterId);
+      continue;
+    }
+    if (fact.turn.characterId !== null) current = orNull(fact.turn.characterId);
+    if (current !== null && current !== characterId) last = fact.turn.sequence;
+  }
+  return last;
+}
+
+/**
  * la posicion de un evento NUEVO.
  *
  * `lastSequence` es la ultima secuencia de turno que tiene este equipo (-1 si

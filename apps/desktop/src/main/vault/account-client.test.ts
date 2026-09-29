@@ -165,7 +165,12 @@ describe('inicio de sesion', () => {
     expect(gw.calls.some((c) => c.path === '/api/vault/login/finish')).toBe(false);
   });
 
-  it('un correo inexistente falla como una contraseña mala', async () => {
+  // el señuelo lleva parametros de Argon2 de verdad (64 MiB, t=3), no los de
+  // prueba: sola tarda unos 11 s (medido el 29/09), y con la carga de `npm run check`
+  // pasaba del tope global de 20 s (29/09, cae solo en la suite entera y pasa
+  // sola tres veces de tres). Se le da tope propio en vez de abaratar el señuelo,
+  // que es justo lo que esta prueba mira
+  it('un correo inexistente falla como una contraseña mala', { timeout: 90_000 }, async () => {
     const gw = fakeGateway();
     // el señuelo devuelve datos que no abren: mismo error, no se revela nada
     await expect(loginAccount(fast(gw.impl), 'nadie@example.com', PASSWORD)).rejects.toThrow(

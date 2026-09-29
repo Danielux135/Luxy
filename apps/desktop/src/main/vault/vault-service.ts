@@ -62,12 +62,14 @@ export const MAX_USER_WAIT_MS = 35 * 60_000;
 /**
  * que espera el usuario.
  *
- * Las dos mantienen abierta la boveda por inactividad, pero solo `reply` —un
- * envio suyo— aplaza el cierre por Win+L (`D-106`). Generar o aprobar una imagen
- * no: el tope del aplazamiento se midio sobre turnos privados, no sobre el
- * Horde, y la llave no se queda en memoria con Windows bloqueado por una imagen.
+ * Las tres mantienen abierta la boveda por inactividad. Win+L solo lo aplaza un
+ * ENVIO suyo, que tiene dos tramos: `reply` mientras llega la respuesta y
+ * `turn-image` mientras se genera la imagen de ese mismo turno, ya cobrada al
+ * arrancar (`D-106`). Cada tramo con su tope. Generar o aprobar una imagen desde
+ * el panel (`image`) no aplaza nada: la pidio mirando, puede repetirla, y la
+ * llave no se queda en memoria con Windows bloqueado por ella.
  */
-export type UserWaitKind = 'reply' | 'image';
+export type UserWaitKind = 'reply' | 'turn-image' | 'image';
 
 /** lo que reciben quienes escuchan el cierre. Solo el hecho: enteros y un motivo */
 export interface VaultLockEvent {
@@ -703,7 +705,7 @@ export class VaultService {
 
   /**
    * esperas en curso; una de mas de `MAX_USER_WAIT_MS` ya no cuenta. Con `kind`,
-   * solo las de esa clase: Win+L solo se aplaza por un envio
+   * solo las de esa clase: Win+L solo se aplaza por los dos tramos de un envio
    */
   activeUserWaits(kind?: UserWaitKind): number {
     const now = this.now();

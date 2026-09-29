@@ -8,6 +8,7 @@
 // importa models/types.ts, asi que ponerlos en cualquiera de los dos dejaria
 // una importacion circular. Aqui solo hay Zod y logica pura.
 import { z } from 'zod';
+import { reasoningModeSchema } from './reasoning-control.js';
 
 /**
  * forma de un nombre de modelo tal y como viaja en el cuerpo (`model`).
@@ -62,6 +63,20 @@ export const samplingParametersShape = {
    * de fabrica dejaria sin nada contra lo que comparar.
    */
   repetitionPenalty: z.number().gt(0).max(2).optional(),
+  /**
+   * cuanto razona el modelo (D-107). SIN valor por defecto, como los cuatro de
+   * arriba y por lo mismo: vacio no manda NADA y el cuerpo sale igual que hoy.
+   *
+   * NO es un numero ni un campo del cuerpo: es la ELECCION, y
+   * `reasoningRequestFields` la traduce al dialecto de cada modelo. Por eso se
+   * llama `reasoningMode` y no `reasoning` ni `thinking`, que son nombres REALES
+   * de campos del cuerpo: con el mismo nombre, alguien acabaria volcandola cruda.
+   *
+   * Vive aqui para que llegue por los dos caminos: por modelo en una conexion
+   * (`modelSampling`) y en el nivel superior de un proveedor HTTP —Groq y
+   * compañia—, que no tiene `modelSampling` y sirve un solo modelo.
+   */
+  reasoningMode: reasoningModeSchema.optional(),
 };
 
 export const samplingParametersSchema = z.object(samplingParametersShape);
@@ -99,7 +114,11 @@ export const modelSamplingSchema = z
   .record(
     z.string().regex(API_MODEL_NAME_PATTERN, 'modelo no valido'),
     samplingParametersSchema.refine(
-      (value) => SAMPLING_PARAMETER_KEYS.some((key) => value[key] !== undefined),
+      // el razonamiento cuenta como parametro: una entrada con solo
+      // `reasoningMode` es la forma de medir «sin razonar» sin tocar nada mas
+      (value) =>
+        SAMPLING_PARAMETER_KEYS.some((key) => value[key] !== undefined) ||
+        value.reasoningMode !== undefined,
       'una entrada de muestreo por modelo necesita al menos un parametro',
     ),
   )

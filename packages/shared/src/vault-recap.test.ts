@@ -390,6 +390,27 @@ describe('clampRecapMemory', () => {
     expect(clamped.facts[0]?.length).toBe(RECAP_ENTRY_CHARS);
   });
 
+  // quinta ronda de `D-105`: con el `slice` la ficha acababa a media palabra, y
+  // asi viajaba a sus otras conversaciones y a su propio bloque `memoria`
+  it('recorta en palabra y lo marca con «…», nunca a media palabra', () => {
+    const clamped = clampRecapMemory(
+      memoria({
+        summary: 'palabra inventada '.repeat(40),
+        facts: ['hecho inventado '.repeat(20)],
+      }),
+    );
+    for (const [texto, tope] of [
+      [clamped.summary, RECAP_SUMMARY_CHARS],
+      [clamped.facts[0]!, RECAP_ENTRY_CHARS],
+    ] as const) {
+      expect(texto.length).toBeLessThanOrEqual(tope);
+      expect(texto.endsWith('…')).toBe(true);
+      for (const palabra of texto.slice(0, -1).trim().split(' ')) {
+        expect(['palabra', 'inventada', 'hecho', 'inventado']).toContain(palabra);
+      }
+    }
+  });
+
   it('el bloque renderizado nunca pasa de 1.800: se van `lessons` antes que `facts`', () => {
     const llena = (letra: string): string[] =>
       Array.from({ length: RECAP_LIST_MAX }, () => letra.repeat(200));

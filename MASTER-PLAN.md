@@ -16,9 +16,31 @@
 > `SEG-BOVEDA-001` (`D-106`), `F33-ENGANCHE-LOCAL-001` y `F33-RECUERDO-001`
 > (`D-103`, `D-105`), `F33-PROMESAS-001` (`D-104`) y `REV-TRES-ENCARGOS-001`. Los
 > cuatro primeros están en estado `implemented` según la tabla de «Estados»:
-> código presente, **sin revisión independiente de sus arreglos** (cuatro rondas,
-> todas del 28/09, la tercera con su parte de pantalla ya hecha) y sin validar en
-> pantalla (`LA-052`, `LA-053`, `LA-054`). El detalle, en `CURRENT-TASK.md`.
+> código presente y sin validar en pantalla (`LA-052`, `LA-053`, `LA-054`). Sus
+> arreglos del 28/09 van en seis rondas: la tercera, la cuarta y la quinta
+> tuvieron cada una su revisión de cinco revisores y las tres pasaron `npm run
+> check` a solas (222 archivos; 4511, 4520 y 4531 pruebas), commiteado en
+> `a45953b`; la sexta no tiene revisión ni `npm run check` entero. El detalle, en
+> `CURRENT-TASK.md`.
+>
+> **2026-09-28, después:** tampoco tiene fila `F34-RAZONAMIENTO-001` (`D-107`), el
+> control de razonamiento por modelo de las conexiones HTTP: `implemented`, sin
+> `npm run check` entero ni revisión, sin probar contra la pasarela (`LA-055`).
+> Ni `F33-RECUERDO-ENTERO-001` (`D-105`, quinta ronda): la memoria entera de sus
+> dos últimas conversaciones con la casilla de `D-105`, `implemented`, sin
+> `npm run check` entero ni revisión, sin verse en pantalla (`LA-056`).
+> Ni `F33-IGUAL-001` (`D-108`): una conversación enganchada igual que una
+> empezada con su personaje —memoria reescrita con su ficha por el CLI local,
+> foto de perfil, firma y textos—, `implemented`, sin `npm run check` entero ni
+> revisión, sin ninguna reescritura real y sin verse en pantalla (`LA-057`).
+>
+> **2026-09-29:** ocho revisores (aquí decía «cinco») revisaron la sexta ronda y
+> esos tres frentes, y `npm run check` a solas pasó sobre ellos (228 archivos,
+> 4677 pruebas); `REV-CUATRO-FRENTES-001` (séptima ronda) corrigió lo que
+> encontraron. Otros ocho revisores revisaron la séptima, y su check a solas cayó
+> por tiempo en una prueba ajena; la octava ronda lo corrige. Siguen
+> `implemented`: la octava sin revisión ni `npm run check` entero. El detalle, en
+> `CURRENT-TASK.md`.
 
 Actualización 2026-08-31 — Kimi K3 experimental corrige el guard SSE: un
 contexto agentic recibe y ejecuta `tool_calls`; una consulta sin contexto sigue

@@ -301,6 +301,10 @@ export class TurnAssembler {
   private finalUsageReceived = false;
   private streamError: string | null = null;
   private reasoningChars = 0;
+  /** campos por los que llego razonamiento; solo sus NOMBRES */
+  private readonly reasoningSources = new Set<ReasoningSource>();
+  /** `completion_tokens_details.reasoning_tokens`, si el proveedor lo dijo */
+  private reasoningTokens = 0;
 
   /**
    * consume un payload `data:`.
@@ -342,12 +346,18 @@ export class TurnAssembler {
         compatible.completion_tokens ?? compatible.output_tokens ?? this.outputTokens;
     }
 
+    if (typeof usage === 'object' && usage !== null) {
+      // el recuento de razonamiento puede venir en el ultimo bloque o repetido
+      // en cada uno: se queda el mayor, que es el acumulado
+      this.reasoningTokens = Math.max(this.reasoningTokens, usageReasoningTokens(usage));
+    }
+
     const first = choices[0] as
       | {
-          delta?: { content?: unknown; tool_calls?: unknown; reasoning_content?: unknown };
+          delta?: ReasoningCarrier & { content?: unknown; tool_calls?: unknown };
           finish_reason?: unknown;
           // algunos proveedores mandan el mensaje completo en el ultimo evento
-          message?: { content?: unknown; tool_calls?: unknown; reasoning_content?: unknown };
+          message?: ReasoningCarrier & { content?: unknown; tool_calls?: unknown };
         }
       | undefined;
     if (!first) return null;
@@ -361,9 +371,14 @@ export class TurnAssembler {
     // respuesta, y colarlo dentro romperia el JSON que se le pidio al modelo.
     // Se cuenta porque gasta presupuesto de tokens, y saberlo es lo que explica
     // que una respuesta se corte antes de empezar.
-    if (typeof delta.reasoning_content === 'string') {
-      this.reasoningChars += delta.reasoning_content.length;
-    }
+    //
+    // Y se cuenta en LOS DOS campos (D-107): hasta entonces solo se miraba
+    // `reasoning_content`, y vLLM y Groq lo mandan en `reasoning`. Las 9
+    // llamadas a gpt-oss por Groq tenian 0 caracteres de razonamiento con un
+    // cociente de 0,23 a 1,48: no era que no razonara, era que Luxy no lo leia.
+    const visto = reasoningOf(delta);
+    this.reasoningChars += visto.chars;
+    for (const source of visto.sources) this.reasoningSources.add(source);
 
     let nuevo: string | null = null;
     const content = contentText(delta.content);
@@ -433,6 +448,102 @@ export class TurnAssembler {
   reasoningLength(): number {
     return this.reasoningChars;
   }
+
+  /** por que campos llego razonamiento, sin su contenido */
+  reasoningSourcesSeen(): ReadonlySet<ReasoningSource> {
+    return this.reasoningSources;
+  }
+
+  /** tokens de razonamiento que declaro el proveedor; 0 si no lo dijo */
+  reportedReasoningTokens(): number {
+    return this.reasoningTokens;
+  }
+
+  /**
+   * caracteres de nombres y argumentos de las herramientas pedidas.
+   *
+   * son salida del modelo igual que el texto: sin contarlos, una vuelta que
+   * solo pide una herramienta parece haber gastado sus tokens en nada.
+   */
+  toolArgumentLength(): number {
+    let total = 0;
+    for (const call of this.calls.values()) total += call.name.length + call.arguments.length;
+    return total;
+  }
+}
+
+/** campos por los que puede llegar razonamiento visible */
+export type ReasoningSource = 'reasoning_content' | 'reasoning' | 'think';
+
+/** lo que puede traer razonamiento: un `delta` o un `message` */
+export interface ReasoningCarrier {
+  reasoning_content?: unknown;
+  reasoning?: unknown;
+}
+
+/**
+ * cuanto razonamiento visible trae un `delta` o un `message`, y por donde.
+ *
+ * Solo cadenas: OpenRouter manda ademas `reasoning_details` como lista de
+ * objetos, y eso no se cuenta para no contar dos veces lo mismo.
+ */
+export function reasoningOf(carrier: ReasoningCarrier): {
+  chars: number;
+  sources: ReasoningSource[];
+} {
+  const sources: ReasoningSource[] = [];
+  let chars = 0;
+  if (typeof carrier.reasoning_content === 'string' && carrier.reasoning_content.length > 0) {
+    chars += carrier.reasoning_content.length;
+    sources.push('reasoning_content');
+  }
+  if (typeof carrier.reasoning === 'string' && carrier.reasoning.length > 0) {
+    // vLLM, desde que renombro el campo, copia `reasoning` en
+    // `reasoning_content` por compatibilidad y manda los dos con el MISMO
+    // texto: sumarlos contaba dos veces el mismo razonamiento (octava ronda).
+    // Es de memoria, no visto en una respuesta real; con textos distintos se
+    // siguen sumando
+    if (carrier.reasoning !== carrier.reasoning_content) chars += carrier.reasoning.length;
+    sources.push('reasoning');
+  }
+  return { chars, sources };
+}
+
+/**
+ * `completion_tokens_details.reasoning_tokens` (OpenAI, DeepSeek, MiMo, Qwen, y
+ * el DTO de NewAPI), o `output_tokens_details.reasoning_tokens`. 0 si no viene.
+ */
+export function usageReasoningTokens(usage: unknown): number {
+  if (typeof usage !== 'object' || usage === null) return 0;
+  const compatible = usage as {
+    completion_tokens_details?: { reasoning_tokens?: unknown } | null;
+    output_tokens_details?: { reasoning_tokens?: unknown } | null;
+  };
+  const value =
+    compatible.completion_tokens_details?.reasoning_tokens ??
+    compatible.output_tokens_details?.reasoning_tokens;
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0;
+}
+
+/** caracteres de nombres y argumentos de un `tool_calls` sin transmitir */
+export function rawToolCallChars(toolCalls: unknown): number {
+  if (!Array.isArray(toolCalls)) return 0;
+  let total = 0;
+  for (const entry of toolCalls) {
+    if (typeof entry !== 'object' || entry === null) continue;
+    const fn = (entry as { function?: { name?: unknown; arguments?: unknown } }).function;
+    if (typeof fn?.name === 'string') total += fn.name.length;
+    if (typeof fn?.arguments === 'string') total += fn.arguments.length;
+  }
+  return total;
+}
+
+/** los campos vistos, en un orden estable y unidos con «+»; null si ninguno */
+export function reasoningFieldLabel(sources: Iterable<ReasoningSource>): string | null {
+  const vistos = new Set(sources);
+  const orden: ReasoningSource[] = ['reasoning_content', 'reasoning', 'think'];
+  const presentes = orden.filter((source) => vistos.has(source));
+  return presentes.length === 0 ? null : presentes.join('+');
 }
 
 /**

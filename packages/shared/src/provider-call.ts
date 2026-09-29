@@ -24,6 +24,7 @@
 // local del agente; no llega por red ni se parsea de disco.
 import { CALL_ATTENDED_AFTER_MS } from './constants.js';
 import type { ProviderCallEnding, ResponseAbortSource, StreamTransportEnd } from './types.js';
+import type { ReasoningMode, ReasoningVerdict } from './reasoning-control.js';
 
 /**
  * lo observable de una llamada terminada, sin nada del contenido.
@@ -138,6 +139,41 @@ export interface ProviderCallRecord {
   frequencyPenalty?: number;
   presencePenalty?: number;
   repetitionPenalty?: number;
+  /**
+   * razonamiento ELEGIDO para esta llamada (D-107). Como el muestreo, aparece
+   * SOLO si se eligio: sin el, la linea sale como antes.
+   */
+  reasoningMode?: ReasoningMode;
+  /**
+   * las claves de primer nivel que viajaron por ese modo, unidas con «+»
+   * (`thinking`, `enable_thinking+chat_template_kwargs`...), o `not_sent` si el
+   * modelo no tiene regla para ese valor. Solo nombres de campo, nunca valores.
+   */
+  reasoningSent?: string;
+  /**
+   * de donde llego razonamiento visible: `reasoning_content`, `reasoning`,
+   * `think` (etiquetas dentro del texto), varias unidas con «+», o null.
+   *
+   * Es lo que separa «la pasarela oculta el razonamiento» de «Luxy no leia el
+   * campo»: hasta D-107 solo se contaba `reasoning_content`.
+   */
+  reasoningField: string | null;
+  /** caracteres dentro de <think> y compañia en el texto; ya incluidos en `textChars` */
+  reasoningTagChars: number;
+  /** caracteres de nombres y argumentos de las herramientas pedidas */
+  toolArgChars: number;
+  /**
+   * `completion_tokens_details.reasoning_tokens` si el proveedor lo dijo, 0 si
+   * no. Nombre elegido para que `redactDeep` no lo tape (no acaba en `Tokens`).
+   */
+  reasoningTokensReported: number;
+  /**
+   * (textChars + toolArgChars) / tokensOut, con dos decimales; null sin consumo
+   * final. Sin razonar, la prosa da unos 3,1-3,8. Ver `classifyReasoningEvidence`.
+   */
+  charsPerOutput: number | null;
+  /** veredicto de si razono: `counted`, `visible`, `hidden`, `unclear`, `not_seen` o `no_data` */
+  reasoningVerdict: ReasoningVerdict;
 }
 
 /** lo que hace falta para decidir como acabo una llamada */

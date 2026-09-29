@@ -7,7 +7,9 @@ import {
   emptyHttpProviderDraft,
   emptySamplingDraft,
   httpProviderToDraft,
+  hostOfBaseUrl,
   HTTP_PROVIDER_PRESETS,
+  reasoningModeDraft,
   samplingToDraft,
   withModelSampling,
 } from './http-provider-config.js';
@@ -237,6 +239,35 @@ describe('configuracion de proveedores HTTP', () => {
     expect(Object.keys(reconstruido ?? {})).not.toContain('frequencyPenalty');
   });
 
+  it('Groq en providers.http guarda el razonamiento arriba, y vacio no gana la clave', () => {
+    const base = {
+      ...emptyHttpProviderDraft(),
+      id: 'groq',
+      displayName: 'Groq',
+      baseUrl: 'https://api.groq.com/openai/v1',
+      model: 'qwen/qwen3.8-27b',
+    };
+    expect(emptyHttpProviderDraft().reasoningMode).toBe('');
+    expect(Object.keys(buildHttpProvider(base, null).provider ?? {})).not.toContain(
+      'reasoningMode',
+    );
+
+    const guardado = buildHttpProvider({ ...base, reasoningMode: 'low' }, null).provider;
+    expect(guardado?.reasoningMode).toBe('low');
+    // y vuelve al formulario al editar
+    expect(httpProviderToDraft(guardado!).reasoningMode).toBe('low');
+
+    // el mismo modelo en otro host no tiene regla: no se guarda un ajuste muerto
+    const fuera = buildHttpProvider(
+      { ...base, baseUrl: 'https://openrouter.ai/api/v1', reasoningMode: 'low' },
+      null,
+    );
+    expect(fuera.provider).toBeNull();
+    expect(fuera.error).toContain('Razonamiento');
+    expect(hostOfBaseUrl('https://api.groq.com/openai/v1')).toBe('api.groq.com');
+    expect(hostOfBaseUrl('a medio escribir')).toBeNull();
+  });
+
   it('no hay dos proveedores conocidos con el mismo identificador', () => {
     // dos con el mismo id chocarian al guardar, porque el id debe ser unico
     const ids = HTTP_PROVIDER_PRESETS.map((preset) => preset.id);
@@ -325,6 +356,53 @@ describe('muestreo por modelo de una conexion', () => {
         temperature: '1',
       }).connection,
     ).toBeNull();
+  });
+
+  // D-107: el razonamiento va en la misma entrada, vacio no escribe nada, y
+  // solo se guarda un valor que ESE modelo admite
+  it('una entrada con solo el razonamiento se crea, y vaciarla la quita', () => {
+    const con = withModelSampling(conexion, 'DeepSeek-V4-Flash', {
+      ...emptySamplingDraft(),
+      reasoningMode: 'off',
+    });
+    expect(con.error).toBeNull();
+    expect(con.connection?.modelSampling).toEqual({
+      'DeepSeek-V4-Flash': { reasoningMode: 'off' },
+    });
+    const guardada = con.connection?.modelSampling?.['DeepSeek-V4-Flash'];
+    expect(samplingToDraft(guardada).reasoningMode).toBe('off');
+
+    const sin = withModelSampling(con.connection!, 'DeepSeek-V4-Flash', emptySamplingDraft());
+    expect(sin.connection).toEqual(conexion);
+  });
+
+  it('rechaza un valor que el modelo no admite, con el campo nombrado', () => {
+    // encender DeepSeek romperia los trabajos con herramientas; apagar GLM-5.3 da error
+    for (const [model, mode] of [
+      ['DeepSeek-V4-Flash', 'high'],
+      ['glm-5.3', 'off'],
+      ['step-5-preview', 'off'],
+    ] as const) {
+      const result = withModelSampling(conexion, model, {
+        ...emptySamplingDraft(),
+        reasoningMode: mode,
+      });
+      expect(result.connection, `${model} ${mode}`).toBeNull();
+      expect(result.error).toContain('Razonamiento');
+    }
+  });
+
+  it('el valor del selector no se fia de lo que llega', () => {
+    expect(reasoningModeDraft('off')).toBe('off');
+    expect(reasoningModeDraft('medium')).toBe('');
+    expect(reasoningModeDraft('')).toBe('');
+  });
+
+  it('el resumen de la lista nombra el razonamiento', () => {
+    expect(describeSampling({ reasoningMode: 'off' })).toBe('Razonamiento: sin razonar');
+    expect(describeSampling({ temperature: 1.3, reasoningMode: 'low' })).toBe(
+      'Temperatura 1,3 · Razonamiento: poco (low)',
+    );
   });
 
   it('el resumen de la lista usa coma decimal', () => {

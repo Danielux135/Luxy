@@ -25,6 +25,7 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import {
+  lastForeignSequence,
   privateRecordSchema,
   resolveConversationOwner,
   type ConversationMemory,
@@ -111,6 +112,12 @@ export interface PrivateConversationSummary {
   linkedAt?: string | null;
   /** la copia del nombre que lleva el enganche ganador */
   ownerLabel?: string | null;
+  /**
+   * el enganche que gana, si gana uno. La memoria reescrita con la ficha
+   * (`D-108`) solo vale atada a el, y asi «Lo que recuerda» lo sabe sin volver
+   * a descifrar la conversacion entera.
+   */
+  ownerEventId?: string | null;
 }
 
 /** lo que se le pide al almacen de enganches; una interfaz para poder probar */
@@ -173,13 +180,35 @@ export class PrivateConversationStore {
     conversationId: string,
     events?: readonly ConversationOwnerEvent[],
   ): Promise<ConversationOwner> {
+    return resolveConversationOwner(await this.ownerFacts(vault, conversationId, events));
+  }
+
+  /**
+   * el dueño y, para la firma, hasta que secuencia se escribio con OTRO
+   * personaje en vigor (`lastForeignSequence`). Una sola pasada de descifrado:
+   * es para la pantalla, que ya lee la conversacion entera.
+   */
+  async ownerWithAuthorship(
+    vault: VaultService,
+    conversationId: string,
+  ): Promise<{ owner: ConversationOwner; foreignUpTo: number | null }> {
+    const input = await this.ownerFacts(vault, conversationId);
+    const owner = resolveConversationOwner(input);
+    return { owner, foreignUpTo: lastForeignSequence(input, owner.characterId) };
+  }
+
+  private async ownerFacts(
+    vault: VaultService,
+    conversationId: string,
+    events?: readonly ConversationOwnerEvent[],
+  ): Promise<{ turns: OwnerTurnFact[]; events: readonly ConversationOwnerEvent[] }> {
     const known = events ?? (await this.owners?.forConversation(vault, conversationId)) ?? [];
     const facts: OwnerTurnFact[] = [];
     for (const record of this.readRecords(conversationId)) {
       const opened = await openTurn(vault, record);
       facts.push(ownerFact(record.sequence, opened.turn));
     }
-    return resolveConversationOwner({ turns: facts, events: known });
+    return { turns: facts, events: known };
   }
 
   /** lee los registros crudos: siguen cifrados, no hace falta la boveda */
@@ -332,6 +361,7 @@ export class PrivateConversationStore {
         ownerLinked: owner.events > 0,
         linkedAt: owner.linkedAt,
         ownerLabel: owner.characterLabel,
+        ownerEventId: owner.winningEventId,
       });
     }
     return summaries.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
@@ -349,12 +379,28 @@ export class PrivateConversationStore {
     vault: VaultService,
     conversationId: string,
   ): Promise<ConversationMemory | null> {
+    return (await this.latestMemoryRecord(vault, conversationId))?.memory ?? null;
+  }
+
+  /**
+   * la misma memoria que `latestMemory`, con el registro que la sello.
+   *
+   * La reescritura con la ficha (`D-108`) solo vale atada a ESTA memoria
+   * exacta: la secuencia la identifica, y la fecha del registro —que va en
+   * claro— cubre un numero reutilizado al retirar un mensaje sin respuesta.
+   */
+  async latestMemoryRecord(
+    vault: VaultService,
+    conversationId: string,
+  ): Promise<{ memory: ConversationMemory; sequence: number; createdAt: string } | null> {
     const records = this.readRecords(conversationId);
     for (let index = records.length - 1; index >= 0; index -= 1) {
       const record = records[index]!;
       if (record.sealedMemory === null) continue;
       const opened = await openTurn(vault, record);
-      if (opened.memory !== null) return opened.memory.memory;
+      if (opened.memory !== null) {
+        return { memory: opened.memory.memory, sequence: record.sequence, createdAt: record.createdAt };
+      }
     }
     return null;
   }

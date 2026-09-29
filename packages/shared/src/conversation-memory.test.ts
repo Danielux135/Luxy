@@ -142,11 +142,19 @@ describe('memoria estructurada de conversaciones', () => {
 
     expect(result.status).toBe('structured');
     expect(result.memory).not.toBeNull();
-    expect(result.memory!.summary.length).toBe(1200);
-    expect(result.memory!.summary.startsWith('Daniel pidio una pagina web.')).toBe(true);
+    // cortado en palabra y marcado (quinta ronda de `D-105`): con el `slice` de
+    // antes medía 1.200 justos y acababa a media palabra
+    const summary = result.memory!.summary;
+    expect(summary.length).toBeLessThanOrEqual(1200);
+    expect(summary.length).toBeGreaterThan(1150);
+    expect(summary.startsWith('Daniel pidio una pagina web.')).toBe(true);
+    expect(summary).toMatch(/(Detalle|del|encargo\.) ?…$/u);
     // se conservan los primeros hechos, no se pierde la memoria entera
     expect(result.memory!.facts).toHaveLength(12);
-    expect(result.memory!.decisions[0]!.length).toBe(240);
+    const decision = result.memory!.decisions[0]!;
+    expect(decision.length).toBeLessThanOrEqual(240);
+    expect(decision.length).toBeGreaterThan(220);
+    expect(decision).toMatch(/(Motivo|largo\.) ?…$/u);
   });
 
   it('descarta entradas vacias sin invalidar el bloque', () => {

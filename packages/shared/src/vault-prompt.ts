@@ -18,6 +18,8 @@ import {
 import {
   CONVERSATION_MEMORY_INSTRUCTION,
   formatConversationMemory,
+  memoryCapsFor,
+  repairSlicedMemory,
   type ConversationMemory,
 } from './schemas.js';
 import type { RelationParty } from './vault-relation.js';
@@ -340,7 +342,8 @@ export interface VaultPromptInput {
   /** momentos anteriores que puede recordar en este turno */
   recall?: VaultRecall;
   /**
-   * resumen de sus ultimas conversaciones, ya elegido y recortado (`D-105`).
+   * memoria de sus ultimas conversaciones, ya elegida y montada: entera, sin
+   * `plan` ni `openQuestions` (`D-105`, quinta ronda).
    *
    * Ausente o vacio no añade nada: el prompt sale byte a byte como antes de
    * existir el campo.
@@ -589,25 +592,34 @@ const MEMORY_NO_INVENTION = [
 ];
 
 /**
- * el resumen de otras conversaciones suyas (`D-105`).
+ * la memoria de otras conversaciones suyas (`D-105`).
  *
  * Lleva la misma regla contra la invencion que la memoria, porque tambien es un
  * resumen y no la transcripcion (`D-061`). Y una orden que la memoria no
  * necesita: no copiarlo a la memoria de ESTA conversacion. Si lo copia, lo que
  * paso en otra conversacion pasa a figurar como ocurrido aqui y vuelve en cada
  * turno como hecho propio, que es un blanqueo.
+ *
+ * Desde que viaja entera (quinta ronda) lleva tambien los hechos, que mezclan lo
+ * que dura —quien es quien, como la llama el— con el estado de aquella escena
+ * —donde estaban, la hora, la ropa—. No se pueden separar sin otro modelo, asi
+ * que lo separa una regla: lo primero sigue valiendo y lo segundo era de
+ * entonces. Que el modelo la siga no esta medido.
  */
 function formatRecentMemories(entries: readonly RecentMemoryEntry[]): string {
   const una = entries.length === 1;
   return [
     una
-      ? 'Es un resumen corto de otra conversacion tuya con el, anterior a esta.'
+      ? 'Es la memoria que se apunto en otra conversacion tuya con el, anterior a esta.'
       : // sin «la mas reciente primero»: el orden es el del ultimo turno o el
         // enganche, y una vieja recien enganchada va primera con una fecha
         // ANTERIOR a la segunda. Dicho asi, el prompt se contradecia y ella podia
         // hablar de la enganchada como «la ultima vez» (`D-105`)
-        'Es un resumen corto de otras dos conversaciones tuyas con el, cada una con su fecha.',
+        'Es la memoria que se apunto en otras dos conversaciones tuyas con el, cada una con su fecha.',
     'No ocurrio en esta: si lo sacas, que sea como algo de otro momento, no de ahora.',
+    'Lo que diga de quien es quien, de como os llamais o de lo que sabe cada uno del otro sigue',
+    'valiendo. Lo que diga de donde estabais, la hora, la ropa o como estaba la escena era de',
+    'entonces: ahora vale lo que se diga aqui.',
     // una promesa apuntada ahi viaja en CADA turno, tambien con el tope de
     // `D-104` cerrado: sin esta linea era un canal que se lo saltaba (revision del
     // 28/09). Lo pendiente vuelve por su bloque, cuando toca
@@ -616,8 +628,9 @@ function formatRecentMemories(entries: readonly RecentMemoryEntry[]): string {
     ...MEMORY_NO_INVENTION,
     'No lo copies a la memoria de esta conversacion: esa memoria es solo de lo que se diga y se',
     'haga aqui.',
-    '',
-    ...entries.flatMap((entry) => [`- ${entry.date} · «${entry.title}»`, entry.text]),
+    // la cabecera ya no empieza por «- »: ahora las listas de dentro lo usan, y
+    // una linea en blanco separa una conversacion de otra
+    ...entries.flatMap((entry) => ['', `Conversacion del ${entry.date} · «${entry.title}»`, entry.text]),
   ].join('\n');
 }
 
@@ -870,7 +883,13 @@ export function composeVaultPrompt(input: VaultPromptInput): VaultPromptBlock[] 
           ...(memorySource === 'index' ? MEMORY_INDEX_NOTE : []),
           ...(memoryGaps > 0 ? formatMemoryGaps(memoryGaps) : []),
           '',
-          formatConversationMemory(input.memory),
+          // lo guardado con el `slice` de antes, arreglado al presentarlo: el
+          // modelo reescribe su memoria copiando esta, y una palabra partida
+          // volveria en todos los turnos. Sin huella, el mismo objeto y los
+          // mismos bytes que siempre
+          formatConversationMemory(
+            repairSlicedMemory(input.memory, memoryCapsFor(memorySource)).memory,
+          ),
         ].join('\n'),
       ),
     });

@@ -158,8 +158,9 @@ export const vaultCharacterSchema = z.object({
    */
   pendingPacing: z.enum(VAULT_PENDING_PACINGS).default('per-note'),
   /**
-   * si en cada turno le llega un resumen corto de sus dos conversaciones mas
-   * recientes (`D-105`), y con el la guia de que va en cada campo de la memoria.
+   * si en cada turno le llega la memoria de sus dos conversaciones mas
+   * recientes, entera y sin `plan` ni `openQuestions` (`D-105`, quinta ronda),
+   * y con ella la guia de que va en cada campo de la memoria.
    *
    * Del personaje, como los de arriba. Nace en `off`, que no añade nada: esta
    * casilla, apagada, no cambia ni un byte del prompt.

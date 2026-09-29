@@ -14,6 +14,9 @@ import { REPLY_KINDS } from './refusal.js';
 import {
   ACTIVE_RELATION_KINDS,
   LOCAL_CLI_PROVIDERS,
+  MEMORY_RELINK_FAILURES,
+  MEMORY_RELINK_OUTCOMES,
+  MEMORY_RELINK_PHASES,
   REASONING_EFFORTS,
   RECAP_REFUSAL_KINDS,
   RECAP_SOURCES,
@@ -374,6 +377,12 @@ export const vaultConversationOwnerViewSchema = z.object({
   signedAfter: z.number().int().min(-1).nullable(),
   /** cuando se engancho, si se engancho */
   linkedAt: z.string().nullable(),
+  /**
+   * hasta que secuencia se escribio con OTRO personaje en vigor: esas
+   * respuestas no se firman con su nombre (`D-108`, octava ronda). Ausente si
+   * no hay ninguna
+   */
+  foreignUpTo: z.number().int().min(-1).optional(),
 });
 export type VaultConversationOwnerView = z.infer<typeof vaultConversationOwnerViewSchema>;
 
@@ -464,6 +473,11 @@ export const vaultConversationOwnerPreviewSchema = z.object({
   instructionsOutcome: z.enum(['character', 'own', 'none', 'removed', 'kept']),
   /** tiene memoria sellada propia, escrita sin la ficha */
   hasOwnMemory: z.boolean(),
+  /**
+   * sin memoria sellada, tiene ficha retroactiva o indice con memoria: lo que
+   * viaja, tambien escrito sin la ficha (septima ronda)
+   */
+  inheritedMemory: z.boolean(),
   /** el personaje tiene encendido el resumen de sus dos ultimas conversaciones */
   recentMemoriesOn: z.boolean(),
   /** la conversacion esta excluida de lo que recuerda */
@@ -1096,6 +1110,49 @@ export const vaultRecapRowSchema = z.object({
    * porque entonces no hay nada que borrar que pueda destapar nada.
    */
   cardRevivesOnForget: z.boolean(),
+  /**
+   * en que punto esta la reescritura de su memoria con la ficha, si es una
+   * conversacion enganchada (`D-108`). Opcional: `null` o ausente en las que no
+   * lo son. Con ella, `sealedBlock` es la memoria EFECTIVA —la que viaja—, y
+   * `previousBlock` la de antes mientras todavia se puede volver a ella.
+   */
+  relink: z
+    .object({
+      phase: z.enum(MEMORY_RELINK_PHASES),
+      /** con quien se hizo o se intento por ultima vez */
+      provider: z.enum(LOCAL_CLI_PROVIDERS).nullable(),
+      failure: z.enum(MEMORY_RELINK_FAILURES).nullable(),
+      drift: z
+        .object({
+          kept: z.number().int().min(0),
+          rewritten: z.number().int().min(0),
+          dropped: z.number().int().min(0),
+          shortened: z.number().int().min(0),
+          added: z.number().int().min(0),
+          /** si cambio el resumen; ausente en las filas de antes de la septima ronda */
+          summaryChanged: z.boolean().optional(),
+        })
+        .nullable(),
+      at: z.string().nullable(),
+      /** la memoria sellada de antes, solo mientras se puede volver a ella */
+      previousBlock: z.string(),
+      /** hay texto reescrito guardado: «Borrar su memoria» lo borra tambien */
+      holdsRewrite: z.boolean(),
+      /**
+       * si tiene memoria sellada. Una pendiente sin ella viaja con su ficha
+       * retroactiva o su indice, y no hay nada que reescribir hasta que su
+       * primera respuesta guarde memoria (septima ronda)
+       */
+      hasMemory: z.boolean(),
+      /**
+       * el ultimo intento no llego a terminar con el CLI que toca, y con ese no
+       * se vuelve a intentar sola hasta reiniciar: la pantalla no puede decir
+       * «en segundo plano» (septima ronda)
+       */
+      stalled: z.boolean(),
+    })
+    .nullable()
+    .optional(),
 });
 
 /**
@@ -1150,6 +1207,31 @@ export const vaultRecapUpdateArgsSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('forget'), conversationId: conversationIdSchema }).strict(),
   z.object({ action: z.literal('approve-all') }).strict(),
 ]);
+
+/**
+ * lo que Daniel decide sobre la memoria reescrita con la ficha (`D-108`).
+ *
+ * Dos verbos: `keep-old` vuelve a la sellada de antes —solo mientras la
+ * reescrita siga atada a ella, es decir, hasta el siguiente mensaje que selle
+ * memoria—, y `retry` la vuelve a pedir al CLI aunque se hubiera negado.
+ * Estricto, como `vaultRecapUpdateArgsSchema`.
+ */
+export const vaultMemoryRelinkDecideArgsSchema = z
+  .object({
+    conversationId: conversationIdSchema,
+    choice: z.enum(['keep-old', 'retry']),
+    projectAlias: z.string().min(1).max(64),
+  })
+  .strict();
+
+/**
+ * la lista entera y, al reescribir, en que acabo la pasada. Sin eso un CLI que
+ * no arranca o una respuesta que llega tarde dejaban la fila igual y sin una
+ * palabra (septima ronda). `null` al volver a la de antes.
+ */
+export const vaultMemoryRelinkDecideResultSchema = vaultRecapListResultSchema.extend({
+  relinkOutcome: z.enum(MEMORY_RELINK_OUTCOMES).nullable(),
+});
 
 /**
  * lo que deja el borrado de la memoria propia de una conversacion.
@@ -1486,7 +1568,10 @@ export const vaultRelationDiagnosticsSchema = z.object({
     sameNoteWithin24h: diagnosticCount,
     maxRaisesPerNote: diagnosticCount,
     medianDaysToFirstRaise: diagnosticCount,
-    /** de las anteriores, las que habrian llevado la nota de «ya salio» (`D-104`) */
+    /**
+     * de las anteriores, las que pasan la regla estricta: una COTA SUPERIOR de
+     * las que habrian llevado la nota de «ya salio», no esa cifra (`D-104`)
+     */
     herMentionsClear: diagnosticCount,
     /** citas de nueve raices o mas, donde la regla estricta casi nunca acepta */
     longQuotes: diagnosticCount,
@@ -1856,21 +1941,24 @@ export const vaultCharacterSummarySchema = z.object({
    *
    * Viaja por lo mismo que `imageCast`: la casilla vive en su ficha y tiene que
    * pintar el estado real. Con el defecto, una bóveda anterior se lee apagada,
-   * que es el prompt de siempre.
+   * y apagada esta casilla no añade nada al prompt (el prompt entero puede
+   * cambiar por otras vias: la ficha editada se sella sola, `D-104`).
    */
   replyGuidance: z.enum(VAULT_REPLY_GUIDANCES).default('none'),
   /**
    * si sus pendientes van en modo esporádico (`D-104`).
    *
    * Viaja por lo mismo que `replyGuidance`: la casilla vive en su ficha. Con el
-   * defecto, una bóveda anterior se lee apagada, que es el prompt de siempre.
+   * defecto, una bóveda anterior se lee apagada, y apagada esta casilla no
+   * añade nada al prompt.
    */
   pendingPacing: z.enum(VAULT_PENDING_PACINGS).default('per-note'),
   /**
    * si le llega el resumen de sus dos ultimas conversaciones (`D-105`).
    *
    * Viaja por lo mismo que los de arriba: la casilla vive en su ficha. Con el
-   * defecto, una boveda anterior se lee apagada, que es el prompt de siempre.
+   * defecto, una boveda anterior se lee apagada, y apagada esta casilla no
+   * añade nada al prompt.
    */
   recentMemories: z.enum(VAULT_RECENT_MEMORIES).default('off'),
   /** su identidad en Xavira, si la tiene. El identificador es el de SU API */
@@ -2522,6 +2610,13 @@ export interface LuxyBridge {
   forgetVaultSealedMemory(
     args: z.infer<typeof vaultConversationIdArgsSchema>,
   ): Promise<IpcResult<z.infer<typeof vaultSealedMemoryForgetResultSchema>>>;
+  /**
+   * vuelve a la memoria de antes o pide otra vez la reescrita con la ficha
+   * (`D-108`), y devuelve la lista de «Lo que recuerda» ya actualizada.
+   */
+  decideVaultMemoryRelink(
+    args: z.infer<typeof vaultMemoryRelinkDecideArgsSchema>,
+  ): Promise<IpcResult<z.infer<typeof vaultMemoryRelinkDecideResultSchema>>>;
   getVaultAuxiliary(): Promise<IpcResult<z.infer<typeof vaultAuxiliaryChoiceSchema> | null>>;
   setVaultAuxiliary(
     args: z.infer<typeof vaultAuxiliarySetArgsSchema>,

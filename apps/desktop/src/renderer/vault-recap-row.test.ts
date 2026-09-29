@@ -5,16 +5,19 @@
 // clasificacion y nada mas, y una conversacion que nadie ha querido resumir no
 // anuncia de que iba.
 import { describe, it, expect } from 'vitest';
-import { RECAP_REFUSAL_KINDS } from '@luxy/shared';
+import { MEMORY_RELINK_OUTCOMES, RECAP_REFUSAL_KINDS } from '@luxy/shared';
 import {
   CLI_LABELS,
   RECAP_PARTIAL_REFUSAL_LABELS,
   RECAP_REFUSAL_LABELS,
   describeForgetAck,
   describeRecapRow,
+  describeRelink,
+  describeRelinkOutcome,
   otherCli,
   recapSignature,
   type RecapRowView,
+  type RelinkRowView,
 } from './vault-recap-row.js';
 
 /** una ficha escrita, aprobada y viajando en el prompt */
@@ -550,5 +553,112 @@ describe('las clasificaciones', () => {
       expect(label.includes('«')).toBe(false);
       expect(label.includes('"')).toBe(false);
     }
+  });
+});
+
+// la memoria reescrita con su ficha (`D-108`): en que punto esta y que se puede
+// hacer, sin prometer lo que el modelo haga (`D-093`)
+describe('la memoria reescrita con su ficha, en la fila', () => {
+  const lista: RelinkRowView = {
+    phase: 'ready',
+    provider: 'codex',
+    failure: null,
+    drift: { kept: 4, rewritten: 1, dropped: 0, shortened: 0, added: 0 },
+    previousBlock: 'Resumen: lo de antes.',
+    holdsRewrite: true,
+    hasMemory: true,
+    stalled: false,
+  };
+
+  it('lista: con quien, las cifras y que se puede volver a la de antes', () => {
+    const look = describeRelink(lista, false)!;
+    expect(look.text).toContain('Reescrita con su ficha por Codex: 4 entradas igual y 1 corregida.');
+    expect(look.text).toContain('hasta que un mensaje aquí guarde memoria nueva puedes volver a la de antes');
+    // octava ronda: una lista ya viaja tambien a sus otras conversaciones
+    expect(look.text).toContain('en sus otras conversaciones');
+    expect(look).toMatchObject({ canKeepOld: true, canReadPrevious: true, canRetry: false });
+    const enUso = describeRelink({ ...lista, phase: 'in-use' }, false)!;
+    expect(enUso.text).toContain('lo que otra conversación ya se haya llevado de ella se queda allí');
+  });
+
+  it('las perdidas se cuentan, no se esconden', () => {
+    const look = describeRelink({ ...lista, drift: { kept: 3, rewritten: 1, dropped: 1, shortened: 1, added: 0 } }, false)!;
+    // la recortada es UNA de las corregidas, no otra entrada (octava ronda)
+    expect(look.text).toContain('3 entradas igual, 1 corregida (1 de ellas recortada) y 1 quitada');
+    const dos = describeRelink({ ...lista, drift: { kept: 1, rewritten: 3, dropped: 0, shortened: 2, added: 0 } }, false)!;
+    expect(dos.text).toContain('1 entrada igual y 3 corregidas (2 de ellas recortadas)');
+  });
+
+  it('lo añadido y el resumen cambiado tambien se dicen', () => {
+    const look = describeRelink(
+      { ...lista, drift: { kept: 4, rewritten: 1, dropped: 0, shortened: 0, added: 3, summaryChanged: true } },
+      false,
+    )!;
+    expect(look.text).toContain('4 entradas igual, 1 corregida y 3 añadidas; el resumen también cambió');
+    // una fila de antes, sin el dato del resumen, no afirma nada de el
+    const vieja = describeRelink({ ...lista, drift: { kept: 4, rewritten: 1, dropped: 0, shortened: 0, added: 1 } }, false)!;
+    expect(vieja.text).toContain('4 entradas igual, 1 corregida y 1 añadida.');
+    expect(vieja.text).not.toContain('resumen');
+  });
+
+  it('cumplida: ya no hay «de antes» a la que volver', () => {
+    const look = describeRelink({ ...lista, phase: 'done', previousBlock: '' }, false)!;
+    expect(look).toMatchObject({ canKeepOld: false, canRetry: false, canReadPrevious: false });
+    expect(look.text).toContain('la memoria de ahora ya se escribió a partir de ella');
+  });
+
+  it('una negativa dice quien fue y deja pedirla otra vez', () => {
+    const look = describeRelink({ ...lista, phase: 'failed', failure: 'refused', drift: null, holdsRewrite: false }, false)!;
+    expect(look.text).toContain('Codex no quiso reescribirla con su ficha');
+    expect(look.text).toContain('sigue valiendo la de antes');
+    expect(look.canRetry).toBe(true);
+    const perdia = describeRelink({ ...lista, phase: 'failed', failure: 'lossy' }, false)!;
+    expect(perdia.text).toContain('quitaba o recortaba demasiado y no se ha aplicado');
+  });
+
+  it('pendiente, salvo si esta fuera del trabajo de fondo', () => {
+    const pendiente = describeRelink({ ...lista, phase: 'pending' }, false)!;
+    expect(pendiente.text).toContain('Mientras tanto viaja la de antes');
+    // octava ronda: dice CUANDO se intenta, no un «en segundo plano» sin mas
+    expect(pendiente.text).toContain('después de tu próximo mensaje en Privado');
+    expect(pendiente.canRetry).toBe(true);
+    const excluida = describeRelink({ ...lista, phase: 'pending' }, true)!;
+    expect(excluida.text).toContain('no se va a reescribir');
+    expect(excluida.canRetry).toBe(false);
+    expect(describeRelink({ ...lista, phase: 'failed', failure: 'invalid' }, true)!.canRetry).toBe(false);
+  });
+
+  it('pendiente sin memoria propia: dice que viaja la ficha retroactiva y no ofrece boton', () => {
+    const sinMemoria = describeRelink({ ...lista, phase: 'pending', hasMemory: false }, false)!;
+    expect(sinMemoria.text).toContain('todavía no tiene memoria propia');
+    expect(sinMemoria.text).toContain('ficha retroactiva o el índice de sus escenas, escritos sin su ficha');
+    expect(sinMemoria.canRetry).toBe(false);
+    const excluida = describeRelink({ ...lista, phase: 'pending', hasMemory: false }, true)!;
+    expect(excluida.text).toContain('no se va a reescribir');
+  });
+
+  it('un intento que no termino no promete trabajo en segundo plano', () => {
+    const atascada = describeRelink({ ...lista, phase: 'pending', stalled: true }, false)!;
+    expect(atascada.text).not.toContain('en segundo plano');
+    expect(atascada.text).toContain('hasta que reinicies Studio');
+    expect(atascada).toMatchObject({ tone: 'warn', canRetry: true });
+  });
+
+  it('el boton siempre dice en que acabo, sin nada de lo que contesto el modelo', () => {
+    for (const outcome of MEMORY_RELINK_OUTCOMES) {
+      const dicho = describeRelinkOutcome(outcome, 'Codex');
+      expect(dicho.text.length).toBeGreaterThan(10);
+    }
+    expect(describeRelinkOutcome('process', 'Codex').text).toContain('Codex no llegó a terminar');
+    expect(describeRelinkOutcome('process', 'Codex').tone).toBe('warn');
+    expect(describeRelinkOutcome('stale', 'Codex').text).toContain('el resultado se ha tirado');
+    expect(describeRelinkOutcome('ready', 'Claude').tone).toBe('ok');
+  });
+
+  it('sin nada que decir no pinta nada', () => {
+    expect(describeRelink(null, false)).toBeNull();
+    expect(describeRelink(undefined, false)).toBeNull();
+    expect(describeRelink({ ...lista, phase: 'not-needed' }, false)).toBeNull();
+    expect(describeRelink({ ...lista, phase: 'none' }, false)).toBeNull();
   });
 });

@@ -502,6 +502,25 @@ describe('26. desfase: solo el hueco posterior al origen de ESA nota', () => {
     expect(result.lines).toHaveLength(1);
   });
 
+  // `D-108`: al enganchar, el cursor de esa conversacion deja de valer —main lo
+  // pasa aqui con `through: -1`— y hasta releerla bloquea. Si la relectura se
+  // niega, la negativa persistida la saca de la guarda: sus promesas y las de
+  // sus otras conversaciones no se quedan calladas por el enganche
+  it('una enganchada cuya relectura se nego no calla nada', () => {
+    const invalidado = cursor(CONV_C, -1);
+    expect(
+      select({ notes: [VIEJA], turns: CON_HUECO, cursors: [cursor(CONV_A, 2), invalidado] }).counters
+        .blockedStale,
+    ).toBe(1);
+    const negada = select({
+      notes: [VIEJA],
+      turns: CON_HUECO,
+      cursors: [cursor(CONV_A, 2), cursor(CONV_C, -1, RELATION_EXTRACTOR_VERSION)],
+    });
+    expect(negada.counters.blockedStale).toBe(0);
+    expect(negada.lines).toHaveLength(1);
+  });
+
   it('y un hueco de otro personaje tampoco', () => {
     const result = select({
       notes: [VIEJA],

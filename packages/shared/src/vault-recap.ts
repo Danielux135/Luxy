@@ -23,6 +23,10 @@
 //    trabajo empeore las cosas en vez de mejorarlas.
 import { z } from 'zod';
 import {
+  CONVERSATION_MEMORY_ENTRY_CHARS,
+  CONVERSATION_MEMORY_SUMMARY_CHARS,
+  RECAP_MEMORY_CAPS,
+  clipAtWord,
   conversationMemorySchema,
   formatConversationMemory,
   looksLikeCode,
@@ -94,9 +98,14 @@ export const RECAP_SCENE_TAIL = 12;
  * son 342 y 382. Cada caracter de aqui se paga en TODOS los turnos futuros de
  * ese hilo y se reescribe en cada respuesta. Se recorta, no se rechaza: esa es
  * la leccion de LUX-8B8T.
+ *
+ * Se recorta en palabra, con «…» (`clipAtWord`): con un `slice` a secas la
+ * ficha acababa a media palabra y asi viajaba. Los valores viven en
+ * `RECAP_MEMORY_CAPS` (`schemas.ts`) para que el prompt pueda reconocer la
+ * huella de ese corte en las fichas ya guardadas.
  */
-export const RECAP_SUMMARY_CHARS = 400;
-export const RECAP_ENTRY_CHARS = 160;
+export const RECAP_SUMMARY_CHARS = RECAP_MEMORY_CAPS.summary;
+export const RECAP_ENTRY_CHARS = RECAP_MEMORY_CAPS.entry;
 export const RECAP_LIST_MAX = 6;
 
 /**
@@ -344,8 +353,9 @@ export function buildRecapPrompt(input: RecapPromptInput): string {
     '  SIRVE: «El la llama nena cuando esta de buenas».',
     '  NO SIRVE: «Tienen buena quimica».',
     // las promesas, a `plan` y no a `decisions` (revision del 28/09): una ficha
-    // aprobada sin memoria sellada es fuente del resumen de `D-105`, que lleva
-    // "decisions" a CADA turno de sus otras conversaciones, sin el tope de
+    // aprobada sin memoria sellada es fuente de la memoria de `D-105`, que lleva
+    // "decisions" —y desde la quinta ronda tambien "facts" y "lessons"— a CADA
+    // turno de sus otras conversaciones, sin el tope de
     // `D-104`. `plan` no viaja ahi, y en su propia conversacion lo mide `ecoMemoria`.
     // Es la misma regla que `VAULT_MEMORY_FIELD_GUIDE_BODY`; solo cambia las
     // fichas que se escriban a partir de ahora
@@ -558,13 +568,16 @@ function normalizeRecapMemory(body: Record<string, unknown>): unknown {
     Array.isArray(value)
       ? value
           .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
-          .map((item) => flattenTurnText(item).slice(0, 240))
+          .map((item) => clipAtWord(flattenTurnText(item), CONVERSATION_MEMORY_ENTRY_CHARS))
           .slice(0, 12)
       : [];
 
   return {
     version: 1,
-    summary: typeof body.summary === 'string' ? flattenTurnText(body.summary).slice(0, 1200) : '',
+    summary:
+      typeof body.summary === 'string'
+        ? clipAtWord(flattenTurnText(body.summary), CONVERSATION_MEMORY_SUMMARY_CHARS)
+        : '',
     facts: lista(body.facts),
     decisions: lista(body.decisions),
     plan: lista(body.plan),
@@ -790,14 +803,14 @@ export function clampRecapMemory(
   const chained = options.chained === true;
   const lista = (entries: readonly string[]): string[] => {
     const cleaned = entries
-      .map((entry) => flattenTurnText(entry).slice(0, RECAP_ENTRY_CHARS).trim())
+      .map((entry) => clipAtWord(flattenTurnText(entry).trim(), RECAP_ENTRY_CHARS))
       .filter((entry) => entry.length > 0);
     return cleaned.length <= RECAP_LIST_MAX ? cleaned : trimRecapList(cleaned, chained);
   };
 
   const clamped: ConversationMemory = {
     version: 1,
-    summary: flattenTurnText(memory.summary).slice(0, RECAP_SUMMARY_CHARS).trim(),
+    summary: clipAtWord(flattenTurnText(memory.summary).trim(), RECAP_SUMMARY_CHARS),
     facts: lista(memory.facts),
     decisions: lista(memory.decisions),
     plan: lista(memory.plan),
@@ -862,7 +875,7 @@ export function restoreRecapAnchor(
   // ultima es lo que acaba de ver esta ventana, y tirarlo para hacerle sitio al
   // ancla dejaria la ventana sin aportar nada
   const facts = [
-    flattenTurnText(anchor).slice(0, RECAP_ENTRY_CHARS),
+    clipAtWord(flattenTurnText(anchor), RECAP_ENTRY_CHARS),
     ...memory.facts.slice(-(RECAP_LIST_MAX - 1)),
   ];
   return { ...memory, facts };
@@ -1118,9 +1131,44 @@ export function countKeptEntries(
   previous: ConversationMemory | null,
   next: ConversationMemory,
 ): RecapDrift {
+  // los cuatro campos de siempre y ninguno mas: quien la registra o la compara
+  // con `toEqual` no tiene por que enterarse de `shortened`
+  const compared = compareMemoryEntries(previous, next);
+  return {
+    kept: compared.kept,
+    rewritten: compared.rewritten,
+    dropped: compared.dropped,
+    added: compared.added,
+  };
+}
+
+/** la deriva, mas las entradas que siguen ahi pero MAS CORTAS */
+export interface MemoryEntryComparison extends RecapDrift {
+  /**
+   * de las `rewritten`, cuantas perdieron mas de la mitad de su texto.
+   *
+   * `similarity` mide cuanto de la entrada MAS CORTA esta en la otra, a
+   * proposito —corregir suele ser ampliar—, y por eso una entrada recortada a la
+   * mitad puntua 1 y cuenta como reescrita, no como perdida. Quien necesita saber
+   * si se perdio material (la reescritura con la ficha, `D-108`) mira esto.
+   */
+  shortened: number;
+}
+
+/** por debajo de esta fraccion de su largo anterior, una entrada reescrita se cuenta como recortada */
+const SHORTENED_RATIO = 0.5;
+
+/**
+ * `countKeptEntries` con el recorte a la vista. Es el mismo emparejamiento: lo
+ * unico que añade es mirar el largo de cada pareja reescrita.
+ */
+export function compareMemoryEntries(
+  previous: ConversationMemory | null,
+  next: ConversationMemory,
+): MemoryEntryComparison {
   // sin ficha anterior no hay nada que comparar, y todo lo de la nueva es nuevo
   // por definicion: contarlo como aportado seria ruido
-  const drift: RecapDrift = { kept: 0, rewritten: 0, dropped: 0, added: 0 };
+  const drift: MemoryEntryComparison = { kept: 0, rewritten: 0, dropped: 0, added: 0, shortened: 0 };
   if (previous === null) return drift;
 
   const lists = ['facts', 'decisions', 'plan', 'openQuestions', 'lessons'] as const;
@@ -1147,6 +1195,9 @@ export function countKeptEntries(
       if (best !== null && best.score >= REWRITE_SIMILARITY) {
         best.slot.taken = true;
         drift.rewritten += 1;
+        if (normalizeEntry(best.slot.entry).length < normalized.length * SHORTENED_RATIO) {
+          drift.shortened += 1;
+        }
         continue;
       }
       drift.dropped += 1;
@@ -1163,6 +1214,44 @@ function normalizeEntry(entry: string): string {
     .replace(/[^a-z0-9 ]+/g, ' ')
     .replace(/ +/g, ' ')
     .trim();
+}
+
+/**
+ * que parte de las palabras de `before` sigue en `after`, de 0 a 1.
+ *
+ * Al reves que `similarity`, aqui SI importa la direccion: sirve para saber si
+ * un resumen reescrito sigue contando lo mismo o cuenta otra cosa del mismo
+ * largo, y una ampliacion no pierde nada. Sin palabras que contar devuelve 1:
+ * no hay nada que perder. Las de menos de tres letras no cuentan, por lo mismo
+ * que en `similarity`.
+ */
+export function wordsKeptShare(before: string, after: string): number {
+  const words = (text: string): Set<string> =>
+    new Set(
+      normalizeEntry(text)
+        .split(' ')
+        .filter((word) => word.length >= 3),
+    );
+  const a = words(before);
+  if (a.size === 0) return 1;
+  const b = words(after);
+  let kept = 0;
+  for (const word of a) if (b.has(word)) kept += 1;
+  return kept / a.size;
+}
+
+/** el mismo texto salvo acentos, mayusculas y signos: un punto de mas no es un cambio */
+export function sameEntryText(left: string, right: string): boolean {
+  return normalizeEntry(left) === normalizeEntry(right);
+}
+
+/** cuantas palabras cuenta `wordsKeptShare` en un texto */
+export function countedWords(text: string): number {
+  return new Set(
+    normalizeEntry(text)
+      .split(' ')
+      .filter((word) => word.length >= 3),
+  ).size;
 }
 
 /**
@@ -1235,8 +1324,8 @@ export function deduceRecap(input: DeduceRecapInput): RecapEntry | null {
 
   const chosen = pickScenes(usable);
   const facts = chosen.map((scene) =>
-    `«${flattenTurnText(scene.title)}»: ${flattenTurnText(scene.summary)}`.slice(
-      0,
+    clipAtWord(
+      `«${flattenTurnText(scene.title)}»: ${flattenTurnText(scene.summary)}`,
       RECAP_ENTRY_CHARS,
     ),
   );
@@ -1260,7 +1349,7 @@ export function deduceRecap(input: DeduceRecapInput): RecapEntry | null {
 
   const memory = clampRecapMemory({
     version: 1,
-    summary: summary.slice(0, RECAP_SUMMARY_CHARS),
+    summary: clipAtWord(summary, RECAP_SUMMARY_CHARS),
     facts,
     decisions: [],
     plan: [],

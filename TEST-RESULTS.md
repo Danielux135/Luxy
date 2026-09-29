@@ -1,5 +1,221 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-29 — REV-CUATRO-FRENTES-001 (octava ronda) — pruebas de lo tocado y typecheck
+
+**No es un `npm run check` completo**: ni `npm run lint` de todo ni `npm run
+build`. Se pasa al final, a solas.
+
+- `npm run typecheck`: **salida 0**, con todo lo de esta ronda escrito (el
+  `tsc -b` de construcción incluye las pruebas de `apps/desktop`).
+- `eslint` sobre los 26 archivos de código y pruebas tocados: **salida 0.**
+- `vitest run packages/shared apps/agent/src/providers apps/desktop/src/renderer`:
+  **95 archivos, 2286 en verde y 12 omitidas.**
+- `vitest run apps/desktop/src/main/vault apps/desktop/src/shared`: **46
+  archivos, 1080 en verde.**
+- `vitest run apps/desktop/src/main/ipc`: **19 archivos, 285 en verde**, a solas.
+- El resto de `apps/desktop/src/main` (19 archivos): **226 en verde.**
+- `account-client.test.ts` a solas: 8 de 8; la prueba del señuelo tarda unos
+  11 s sola, y ahora tiene tope de 90 s.
+- Pruebas nuevas vistas fallar sin su arreglo, cada mutación sola y el archivo
+  restaurado: el suelo de 64 tokens y las etiquetas citadas
+  (`reasoning-control`), los nombres en `ecoRecientes`, la firma con dueño por
+  turno, las frases de medir, la cumplida que suelta su texto, la espera de AI
+  Horde y el aviso de la imagen perdida. Las demás cambian una aserción que con
+  el código de antes no se cumple (la reescrita `ready` en `recientes`, los
+  textos de la fila y de la confirmación) o prueban una función nueva
+  (`sweep`, `lastForeignSequence`).
+- Finales de línea: `Config.tsx`, `sse.ts`, `sse.test.ts`,
+  `account-client.test.ts` y los documentos siguen en CRLF; los demás `.ts`
+  tocados siguen en LF.
+- `prettier --check` avisa en 9 de los 10 archivos de código tocados que se
+  miraron; casi todo es formato que ya había. No se ha reformateado.
+
+No ejecutado: `npm run check` completo, `npm run build`, nada en Electron,
+nada contra la pasarela ni contra una conversación real. Sin prueba: la carrera
+de «Volver a la de antes» con un envío que arranca (se cierra por
+compare-and-set, no se ha reproducido) y el cableado de la pasada general en
+`handlers.ts` (`relinkCandidates`); `sweep` sí tiene la suya.
+
+### 2026-09-29 — los dos `npm run check` a solas de la revisión de los cuatro frentes (anotados en la octava ronda)
+
+Faltaban aquí, y los documentos decían que no se habían hecho. Los pasó quien
+coordina, a solas, sobre el worktree sin commitear; los datos salen de su
+diario (`r1:check`, `r2:check` del flujo `wf_db3de991-06e`):
+
+- **Sobre la sexta ronda y los tres frentes** (`F34-RAZONAMIENTO-001`,
+  `F33-RECUERDO-ENTERO-001`, `F33-IGUAL-001`), después de su revisión de ocho
+  revisores y antes de la séptima ronda: lint, typecheck, test y build con
+  salida 0; **228 archivos, 4677 pruebas en verde y 12 omitidas (4689).**
+- **Sobre la séptima ronda**, después de su revisión de ocho revisores:
+  **salida 1**. 228 archivos, 1 caído; **4699 en verde, 1 caída y 12
+  omitidas (4712)**, 440 s. La caída: `account-client.test.ts` › «un correo
+  inexistente falla como una contraseña mala», `Test timed out in 20000ms`, sin
+  llegar a afirmar nada. A solas pasó tres veces de tres (8 de 8). Como vitest
+  falló, el build no llegó a correr. La octava ronda le da a esa prueba tope
+  propio (arriba).
+
+### 2026-09-29 — REV-CUATRO-FRENTES-001 (séptima ronda) — typecheck, lint y pruebas por partes
+
+**No es un `npm run check` completo**: ni `npm run lint` de todo ni `npm run
+build`. Se pasa al final, a solas.
+
+- `npm run typecheck`: **salida 0** (con todo lo de esta ronda escrito).
+- `eslint` sobre los 24 archivos de código y pruebas tocados: **salida 0.**
+- `vitest run apps/desktop/src/main/ipc`: **19 archivos, 281 pruebas en verde.**
+- `vitest run apps/desktop/src/renderer apps/desktop/src/main/vault
+  apps/desktop/src/shared packages/shared apps/agent/src/providers`: **141
+  archivos, 3354 en verde y 12 omitidas.**
+- Integración de la reescritura (`memory-relink-store`, `memory-relink`,
+  `conversation-relink`): **3 archivos, 33 en verde**, a solas.
+- Mutaciones, cada una aplicada sola, con su prueba y el archivo restaurado
+  byte a byte (`scratchpad/r7/mutate.py`): **21 de 21 fallan su prueba** —las
+  tres reglas nuevas de la guarda, el encargo, la vuelta con herramientas, el
+  bloque vacío, el cierre sin apertura, `DeepSeek-V4.1-Pro`, `repairSlicedMemory`
+  antes del CLI, la ficha retroactiva al enganchar, `stalledThisSession`, borrar
+  sin fila, el control en los dos lados, `erasingInFlight` en el envío, la
+  reescrita solo `applied` en `recientes`, `relinkOutcome`, `pending` al olvidar
+  con índice, `ecoRecientesControl` solo con la casilla, y en pantalla las
+  añadidas, la pendiente sin memoria y la atascada. Las dos primeras reglas de
+  la guarda no las distinguía la primera prueba (cada una tapaba a la otra): se
+  añadieron dos pruebas que las separan, y entonces fallaron.
+- Finales de línea, por bytes y con `git ls-files --eol`: `Config.tsx`,
+  `vault-recap.ts`, `ipc.test.ts`, `sync.ts` y los documentos siguen en CRLF;
+  `handlers.ts`, `Vault.tsx`, `useVault.ts`, `ipc.ts` y los demás `.ts` tocados
+  siguen en LF.
+
+No ejecutado: `npm run check` completo, `npm run build`, nada en Electron, nada
+contra la pasarela ni contra una conversación real.
+
+### 2026-09-29 — F33-IGUAL-001 — pruebas de lo tocado, `npm run typecheck` y lint
+
+**No es un `npm run check` completo**: ni `npm run lint` de todo ni
+`npm run build`. Se pasa al final, a solas. La máquina estaba cargada (varios
+procesos ajenos con mucha CPU): `npm run typecheck` tardó más de 10 minutos.
+
+- `vitest run` de `vault-relink`, `vault-image-request`, `memory-relink-store`,
+  `memory-relink`, `vault-character-link`, `vault-recap-row` y
+  `relation-selection`: **7 archivos, 319 pruebas en verde.** Después de los
+  últimos cambios, `vault-character-link`, `relation-selection`,
+  `conversation-relink` y `memory-relink` en serie: **4 archivos, 116 en verde.**
+- `conversation-relink.test.ts` (integración, almacenes de verdad): **7 en
+  verde** a solas. En paralelo con otros tres archivos, su primera prueba cayó
+  por tiempo (20 s); ahora lleva tope propio de 90 s.
+- `ipc.test.ts` (86) y `private-turn-image.test.ts` (17): **en verde.**
+- Guardas y vecinos: `renderer-effect-deps` (4), `owner-single-source` (4),
+  `vault-recap` (57), `conversation-recap` (50) y `docs.test.ts` (64): **en
+  verde.**
+- `conversation-owner.test.ts`, **no tocado por este frente** (su montaje no pasa
+  `memoryRelinks`): **30 en verde y 1 caída por tiempo** («apagado: el prompt es
+  el de un personaje sin el campo…», 23,5 s contra el tope de 20 s), también a
+  solas. Monta dos bóvedas y envía dos turnos; es tiempo, no una aserción. Queda
+  para el `npm run check` a solas.
+- `npm run typecheck`: **salida 0**, dos veces; la segunda, con todo lo de este
+  turno ya escrito.
+- `eslint` sobre los 22 archivos tocados: **salida 0.**
+- Mutaciones, cada una falla su prueba y se restaura el archivo: `replySpeaker`
+  con la firma de antes; `isProfilePhotoOf` aceptando cualquier imagen con su
+  `characterId`; `decideRelink` sin contar las recortadas; sin la guarda del
+  resumen; `relinkBound` sin comparar la fecha; el resumen de `D-105` y la sonda
+  leyendo `latestMemory` a secas; y el enganche sin copiar la foto.
+- La prueba nueva de `relation-selection.test.ts` («una enganchada cuya
+  relectura se negó no calla nada») **pasa sin cambio de código**: fija un
+  comportamiento que ya existía y que el diseño describía mal.
+
+### 2026-09-28 — F33-RECUERDO-ENTERO-001 — pruebas de lo tocado, `npm run typecheck` y lint
+
+**No es un `npm run check` completo**: ni `npm run lint` de todo ni
+`npm run build`. Se pasa al final, a solas.
+
+- `vitest run packages/shared`: **54 archivos, 1459 pruebas en verde.**
+- `vitest run apps/desktop/src/main/ipc`: **18 archivos, 270 pruebas en verde.**
+- `vitest run apps/desktop/src/main/vault apps/desktop/src/renderer`: 65
+  archivos, 1207 en verde y **2 fallos por tiempo** (`account-client.test.ts` y
+  `account-manager.test.ts`, «Test timed out in 20000ms», argon2 con la máquina
+  cargada). Esos dos archivos a solas: **34 pruebas en verde.**
+- `npm run typecheck`: **salida 0.**
+- `eslint` sobre los archivos tocados: **salida 0.** Prettier sobre los dos
+  archivos de prueba escritos enteros: aplicado.
+- Mutaciones: las pruebas nuevas de `vault-prompt-recent.test.ts` (5) y la de
+  `clampRecapMemory` fallan con `vault-prompt.ts` y `vault-recap.ts` de `HEAD`;
+  la de `conversation-memory.test.ts` falla con el `slice` devuelto a
+  `normalizeConversationMemory`; las dos de la salvaguarda fallan quitando por el
+  final (`pop`) en vez de por lo más viejo. La del control fijado a mitad de turno
+  no se ha comprobado contra una versión que eligiera la tercera al final.
+
+### 2026-09-28 — F34-RAZONAMIENTO-001 — pruebas de lo tocado, `npm run typecheck` y lint
+
+**No es un `npm run check` completo**: ni `apps/desktop` entero, ni
+`npm run lint` de todo, ni `npm run build`. Se pasa al final, a solas.
+
+- `vitest run packages/shared apps/agent/src/providers
+  apps/desktop/src/renderer/http-provider-config.test.ts`: **63 archivos, 1857
+  pruebas en verde y 12 omitidas.**
+- `vitest run apps/agent`: **29 archivos, 773 pruebas en verde y 12 omitidas.**
+- `npm run typecheck`: **salida 0.**
+- `eslint` sobre los 14 archivos tocados: **salida 0.** Prettier sobre los
+  bloques nuevos: sin cambios pendientes en lo escrito hoy.
+- Mutaciones: las siete pruebas clave fallan con el cambio quitado (ver
+  `CHANGELOG-WORK.md`).
+- **No probado contra la pasarela real ni visto en pantalla** (`LA-055`).
+
+### 2026-09-28 — REV-TRES-ENCARGOS-001, sexta ronda — pruebas de `apps/desktop` enteras, `npm run typecheck` y lint de lo tocado
+
+**No es un `npm run check` completo**: ni las pruebas de los demás paquetes, ni
+`npm run lint` de todo, ni `npm run build`. Se pasa al final, a solas.
+
+- `vitest run apps/desktop packages/shared/src/docs.test.ts`: **113 archivos,
+  1973 pruebas en verde, salida 0** (236 s). Son 11 más que en la quinta ronda
+  (1962): las nuevas de esta.
+- `npm run typecheck` (`tsc -b tsconfig.build.json` y `typecheck:tests`):
+  **salida 0**, pasado dos veces, la segunda con todo el código ya escrito.
+- `eslint` de los 16 archivos `.ts`/`.tsx` tocados: salida 0. `prettier --check`
+  avisa en diez, pero nueve ya avisaban en `HEAD` y el décimo, `ipc.test.ts`, es
+  por el CRLF de la copia de trabajo: solo se tocaron dos comentarios.
+- Comprobadas FALLANDO sin el arreglo, quitándolo a mano y volviéndolo a poner
+  (`scratchpad/mutar.py`):
+  - sin el tramo `turn-image` en el coordinador: las tres nuevas de
+    `vault-lock-coordinator.test.ts` fallan (3 de 23);
+  - el envío esperando la imagen como `image`: falla la de
+    `private-turn-image.test.ts` (1 de 17);
+  - sin la guarda del borrado: falla «borrar una conversacion que esta
+    contestando» (1 de 18);
+  - sin la retirada del `catch` del envío: fallan «si la llamada LANZA…» y «si
+    LANZA en el primer mensaje…» (2 de 18). La de «LANZA con otra línea
+    detrás» pasa igual, como debe: afirma que no se toca nada;
+  - sin `spellingRoot`, sin «leer» en la tabla, con el prefijo en los verbos de
+    la tabla o con «page» en vez de «pague»: falla en cada caso su prueba de
+    `raise-roots.test.ts` (1 de 16);
+  - con `trimEnd()` otra vez en `vault-character-link.ts`: falla la nueva (1 de
+    35).
+- «Ya salió», con el texto inventado del revisor de la quinta
+  (`scratchpad/lente2/medir.ts` y `adversarias.ts`; orientación, no medida):
+  paráfrasis **40 de 48** (antes 38; con la regla exacta, 25); neutras 0 de 480
+  pares y 0 de 40 turnos; mismo tema sin sacarla 0 de 24; cruzadas 0 de 792;
+  adversarias **3 de 45** (antes 4: el falso de «cuéntame» ya no pasa).
+- Finales de línea comprobados por bytes: `ipc.test.ts`, `sync.ts` y todos los
+  documentos siguen en CRLF; los demás `.ts` tocados siguen en LF. (Corregido el
+  29/09: aquí decía que también `handlers.ts`, `Vault.tsx`, `useVault.ts` e
+  `ipc.ts` estaban en CRLF, y `git ls-files --eol` da `w/lf` en los cuatro; todo
+  apunta a que nunca lo estuvieron. Cada archivo es coherente por dentro.)
+
+No ejecutado: `npm run check` completo, `npm run build`, nada en Electron, nada
+contra una conversación real.
+
+### 2026-09-28 — REV-TRES-ENCARGOS-001 — los `npm run check` a solas tras la cuarta y la quinta ronda (anotados en la sexta)
+
+Faltaban aquí, aunque tres documentos ya los daban por hechos. Los pasó quien
+coordina, cada uno a solas y después de la revisión de cinco revisores de su
+ronda; los datos salen de su diario (`r2:check`, `r3:check`):
+
+- **Tras la cuarta ronda:** lint, typecheck, test y build con salida 0; **222
+  archivos, 4520 pruebas en verde y 12 omitidas (4532)**, 235 s.
+- **Tras la quinta ronda:** lint, typecheck, test y build con salida 0; **222
+  archivos, 4531 pruebas en verde y 12 omitidas (4543)**. Es el estado
+  commiteado en `a45953b`.
+
+Con el de tras la tercera (abajo, 4511), son las tres rondas de cinco revisores
+con su `npm run check` a solas en verde.
+
 ### 2026-09-28 — REV-TRES-ENCARGOS-001, quinta ronda — pruebas de `apps/desktop` enteras, typecheck y lint de lo tocado
 
 **No es un `npm run check` completo**: ni las pruebas de los demás paquetes, ni
@@ -23,10 +239,13 @@
   136, las mismas que antes. Regla vieja frente a nueva sobre 274 palabras
   inventadas elegidas para romperla (`diff-roots.ts`): 89 pares nuevos, todos del
   mismo verbo o su sustantivo salvo «sentarnos»~«sentir»; ninguno perdido.
-- Finales de línea comprobados por bytes: `handlers.ts`, `Vault.tsx`,
-  `useVault.ts` y los documentos siguen en CRLF; `raise-roots*.ts`,
-  `relation-selection.test.ts`, `private-turn-vault-lock.test.ts` y
-  `conversation-owner.test.ts` siguen en LF.
+- Finales de línea comprobados por bytes: los documentos siguen en CRLF;
+  `raise-roots*.ts`, `relation-selection.test.ts`,
+  `private-turn-vault-lock.test.ts` y `conversation-owner.test.ts` siguen en LF.
+  (Corregido el 29/09, octava ronda: aquí decía que también `handlers.ts`,
+  `Vault.tsx` y `useVault.ts` estaban en CRLF; por bytes son LF y `git ls-files
+  --eol` da `w/lf` en los tres, lo mismo que se corrigió en el bloque de la
+  sexta.)
 
 ### 2026-09-28 — REV-TRES-ENCARGOS-001, cuarta ronda — pruebas de `apps/desktop` enteras, typecheck y lint de lo tocado
 
@@ -57,8 +276,9 @@ coordina, con la parte de pantalla ya hecha): lint, typecheck, test y build con
 salida 0; **222 archivos, 4511 pruebas en verde y 12 omitidas (4523)**, 266 s;
 `account-manager.test.ts` pasó sin caducar.
 
-No ejecutado: `npm run check` tras la cuarta ronda, nada en Electron, nada contra
-una conversación real.
+No ejecutado en esta ronda: `npm run check` tras la cuarta (lo pasó después quien
+coordina: ver la entrada de la sexta ronda, arriba), nada en Electron, nada
+contra una conversación real.
 
 ### 2026-09-28 — REV-TRES-ENCARGOS-001, tercera ronda (main, shared y documentos) — pruebas de lo tocado y `npm run typecheck`
 

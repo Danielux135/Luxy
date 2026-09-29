@@ -39,14 +39,24 @@ import {
   samplingForModel,
   samplingLogFields,
   samplingRequestFields,
+  classifyReasoningEvidence,
+  countReasoningTagChars,
+  reasoningLogFields,
+  reasoningRequestFields,
 } from '@luxy/shared';
 import { runAgenticLoop, type LoopMessage, type LoopTurnResult } from './agentic-loop.js';
 import { isSilenceTimeout, silenceTransport } from './http-dispatcher.js';
 import {
+  rawToolCallChars,
+  reasoningFieldLabel,
+  reasoningOf,
   sseData,
   TurnAssembler,
+  usageReasoningTokens,
   wasTruncated,
   type AssembledTurn,
+  type ReasoningCarrier,
+  type ReasoningSource,
   type SseTransportReport,
 } from './sse.js';
 import { parseNativeToolCalls } from './tool-protocol.js';
@@ -82,6 +92,14 @@ interface RequestDiagnostics {
   longestSilenceMs: number | null;
   /** caracteres de razonamiento: gastan presupuesto sin producir respuesta */
   reasoningChars: number;
+  /** campos por los que llego razonamiento visible (D-107); solo nombres */
+  reasoningSources: ReasoningSource[];
+  /** caracteres dentro de <think> y compañia en el texto */
+  reasoningTagChars: number;
+  /** caracteres de nombres y argumentos de herramientas pedidas */
+  toolArgChars: number;
+  /** `reasoning_tokens` declarados por el proveedor; 0 si no lo dijo */
+  reasoningTokensReported: number;
   /** el proveedor mando un error DENTRO del flujo, con HTTP 200 */
   streamError: boolean;
   /** agoto el tope de salida antes de escribir nada visible */
@@ -101,6 +119,10 @@ function newDiagnostics(): RequestDiagnostics {
     tailSilenceMs: null,
     longestSilenceMs: null,
     reasoningChars: 0,
+    reasoningSources: [],
+    reasoningTagChars: 0,
+    toolArgChars: 0,
+    reasoningTokensReported: 0,
     streamError: false,
     outputBudgetExhausted: false,
   };
@@ -1149,6 +1171,28 @@ export class HttpApiProvider implements ProviderExecution {
         // lo que viajo en el cuerpo, sacado de la misma funcion que lo compuso.
         // Sin muestreo no añade ninguna clave: la linea sale como antes
         ...samplingLogFields(this.samplingFor(request)),
+        // lo elegido y las claves que viajaron; sin elegir, ninguna clave
+        ...reasoningLogFields(
+          this.modelFor(request),
+          this.endpointHost(),
+          this.samplingFor(request).reasoningMode,
+        ),
+        // y si razono, con cifras: SIEMPRE, porque la pregunta abierta —¿oculta
+        // la pasarela el razonamiento de Qwen o es Luxy la que no lo ve?— se
+        // contesta tambien con las llamadas en las que no se eligio nada
+        reasoningField: reasoningFieldLabel(diagnostics.reasoningSources),
+        reasoningTagChars: diagnostics.reasoningTagChars,
+        toolArgChars: diagnostics.toolArgChars,
+        reasoningTokensReported: diagnostics.reasoningTokensReported,
+        ...classifyReasoningEvidence({
+          outputTokens: tokensOut,
+          finalUsageReceived: termination?.finalUsageReceived ?? false,
+          textChars: termination?.textLength ?? 0,
+          toolArgChars: diagnostics.toolArgChars,
+          reasoningChars: diagnostics.reasoningChars,
+          reasoningTagChars: diagnostics.reasoningTagChars,
+          reasoningTokensReported: diagnostics.reasoningTokensReported,
+        }),
       });
     } catch {
       /* contabilizar o registrar no puede costar la respuesta */
@@ -1278,6 +1322,8 @@ export class HttpApiProvider implements ProviderExecution {
           // vacio salvo que la conexion los tenga puestos: sin configurar, el
           // cuerpo sale identico al de antes de que existiera este campo
           ...samplingRequestFields(this.samplingFor(request)),
+          // lo mismo con el razonamiento (D-107): sin elegir, ni una clave
+          ...this.reasoningFieldsFor(request),
           ...(tools === null ? {} : { tools, tool_choice: 'auto' }),
           ...(transmitir ? { stream: true, stream_options: { include_usage: true } } : {}),
         }),
@@ -1304,7 +1350,10 @@ export class HttpApiProvider implements ProviderExecution {
       }
 
       const body = (await response.json()) as {
-        choices?: { message?: { content?: unknown }; finish_reason?: string }[];
+        choices?: {
+          message?: ReasoningCarrier & { content?: unknown; tool_calls?: unknown };
+          finish_reason?: string;
+        }[];
         usage?: { prompt_tokens?: number; completion_tokens?: number };
       };
       const message = body.choices?.[0]?.message ?? {};
@@ -1313,6 +1362,7 @@ export class HttpApiProvider implements ProviderExecution {
       const outputTokens = body.usage?.completion_tokens ?? 0;
 
       diagnostics.streamed = false;
+      this.observeWholeMessage(diagnostics, message, text, body.usage);
       if (text.length > 0) diagnostics.firstTokenMs = Date.now() - diagnostics.startedAt;
       diagnostics.termination = this.buildTermination(diagnostics, request, {
         transport: emptyTransportReport('no_stream', Date.now() - diagnostics.startedAt),
@@ -1436,13 +1486,52 @@ export class HttpApiProvider implements ProviderExecution {
    * (ver `samplingRequestFields`); hay una prueba que lo fija.
    */
   private samplingFor(request: ProviderRunRequest): SamplingParameters {
-    const { temperature, frequencyPenalty, presencePenalty, repetitionPenalty } = this.config;
+    const { temperature, frequencyPenalty, presencePenalty, repetitionPenalty, reasoningMode } =
+      this.config;
     return samplingForModel(this.modelFor(request), this.config.modelSampling, {
       ...(temperature === undefined ? {} : { temperature }),
       ...(frequencyPenalty === undefined ? {} : { frequencyPenalty }),
       ...(presencePenalty === undefined ? {} : { presencePenalty }),
       ...(repetitionPenalty === undefined ? {} : { repetitionPenalty }),
+      ...(reasoningMode === undefined ? {} : { reasoningMode }),
     });
+  }
+
+  /**
+   * los campos de razonamiento de ESTA peticion (D-107), o `{}`.
+   *
+   * Sale de `samplingFor`, asi que sigue su misma precedencia: la entrada del
+   * modelo sustituye entera al nivel superior. Depende del host porque las
+   * reglas de Groq no valen para otro servidor que use el mismo nombre.
+   */
+  private reasoningFieldsFor(request: ProviderRunRequest): Record<string, unknown> {
+    return reasoningRequestFields(
+      this.modelFor(request),
+      this.endpointHost(),
+      this.samplingFor(request).reasoningMode,
+    );
+  }
+
+  /**
+   * apunta lo que se ve del razonamiento en una respuesta SIN transmitir.
+   *
+   * Las dos ramas sin flujo no contaban ningun campo de razonamiento: con el
+   * streaming apagado todo salia como «0 caracteres» aunque llegara entero.
+   * Solo CUENTA; no guarda ni un caracter.
+   */
+  private observeWholeMessage(
+    diagnostics: RequestDiagnostics,
+    message: ReasoningCarrier & { tool_calls?: unknown },
+    text: string,
+    usage: unknown,
+  ): void {
+    const visto = reasoningOf(message);
+    const tagChars = countReasoningTagChars(text);
+    diagnostics.reasoningChars = visto.chars;
+    diagnostics.reasoningTagChars = tagChars;
+    diagnostics.reasoningSources = tagChars > 0 ? [...visto.sources, 'think'] : visto.sources;
+    diagnostics.toolArgChars = rawToolCallChars(message.tool_calls);
+    diagnostics.reasoningTokensReported = usageReasoningTokens(usage);
   }
 
   private async callApi(
@@ -1495,6 +1584,8 @@ export class HttpApiProvider implements ProviderExecution {
           // vacio salvo que la conexion los tenga puestos: sin configurar, el
           // cuerpo sale identico al de antes de que existiera este campo
           ...samplingRequestFields(this.samplingFor(request)),
+          // lo mismo con el razonamiento (D-107): sin elegir, ni una clave
+          ...this.reasoningFieldsFor(request),
           stream: this.config.supportsStreaming,
           // algunos proveedores solo devuelven usage si se pide explicitamente
           ...(this.config.supportsStreaming ? { stream_options: { include_usage: true } } : {}),
@@ -1516,7 +1607,7 @@ export class HttpApiProvider implements ProviderExecution {
       if (!this.config.supportsStreaming || !response.body) {
         const payload = (await response.json()) as {
           choices?: Array<{
-            message?: { content?: string; tool_calls?: unknown };
+            message?: ReasoningCarrier & { content?: string; tool_calls?: unknown };
             finish_reason?: string;
           }>;
           usage?: { prompt_tokens?: number; completion_tokens?: number };
@@ -1528,6 +1619,7 @@ export class HttpApiProvider implements ProviderExecution {
         const inputTokens = payload.usage?.prompt_tokens ?? 0;
         const outputTokens = payload.usage?.completion_tokens ?? 0;
         diagnostics.streamed = false;
+        this.observeWholeMessage(diagnostics, message, text, payload.usage);
         // sin transmision la primera palabra llega con el cuerpo entero: el
         // tiempo hasta las cabeceras y el tiempo hasta la primera palabra son
         // practicamente el mismo, y decirlo asi es mas honesto que dejarlo nulo
@@ -1723,6 +1815,15 @@ export class HttpApiProvider implements ProviderExecution {
         diagnostics.tailSilenceMs =
           transporte.lastChunkMs === null ? null : transporte.durationMs - transporte.lastChunkMs;
         diagnostics.reasoningChars = assembler.reasoningLength();
+        // solo CUENTA caracteres del texto entre etiquetas; no guarda nada
+        const tagChars = countReasoningTagChars(observadoTurno.text);
+        diagnostics.reasoningTagChars = tagChars;
+        diagnostics.reasoningSources = [
+          ...assembler.reasoningSourcesSeen(),
+          ...(tagChars > 0 ? (['think'] as const) : []),
+        ];
+        diagnostics.toolArgChars = assembler.toolArgumentLength();
+        diagnostics.reasoningTokensReported = assembler.reportedReasoningTokens();
         diagnostics.streamError = observadoTurno.streamError !== null;
         diagnostics.termination = this.buildTermination(diagnostics, request, {
           transport: transporte,
@@ -1773,8 +1874,18 @@ export class HttpApiProvider implements ProviderExecution {
           reasoningChars > 0
             ? 'durante el razonamiento antes de producir texto visible o pedir una herramienta'
             : 'antes de producir texto visible o pedir una herramienta';
+        // sin razonamiento VISIBLE y con tokens gastados, lo mas probable es
+        // que razonara sin enseñarlo: el 2026-09-28 Qwen3.8-Flash-Next gasto
+        // 8192 de 8192 sin un caracter. Se dice «probablemente» porque tambien
+        // cabe un formato de respuesta que Luxy no lee (D-093)
+        const oculto =
+          reasoningChars === 0 && turno.outputTokens > 0
+            ? '. Probablemente razono sin enseñarlo: ninguno de esos tokens llego como texto. ' +
+              'Si el modelo lo admite, prueba «Sin razonar» en su muestreo'
+            : '';
         const error = new Error(
-          `el modelo agoto el limite de salida ${fase}${consumo}. Acota la tarea o aumenta max_tokens`,
+          `el modelo agoto el limite de salida ${fase}${consumo}${oculto}. ` +
+            'Acota la tarea o aumenta max_tokens',
         );
         // repetir no cambia el presupuesto de salida y solo vuelve a cobrar el
         // mismo prompt; el usuario tiene que cambiar la tarea o el limite.

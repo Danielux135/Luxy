@@ -17,17 +17,44 @@ export const VAULT_TICK_MS = 15_000;
 
 /**
  * cuanto se aplaza, como mucho, el cierre por bloquear Windows con una
- * respuesta en camino. Solo un ENVIO suyo lo aplaza, y solo hasta que su
- * respuesta queda guardada: una imagen que se este generando o aprobando no,
- * tampoco la de un turno (con el texto en disco el envio la espera como
- * `image`), porque este tope se midio sobre turnos privados.
+ * respuesta en camino, contado desde Win+L. Solo un ENVIO suyo lo aplaza, y lo
+ * aplaza hasta que termina entero: su respuesta y, si el turno lleva imagen, esa
+ * imagen (con su propio tope, `LOCK_SCREEN_TURN_IMAGE_GRACE_MS`). Una imagen
+ * generada o aprobada desde el panel no aplaza nada.
  *
  * Con la pantalla bloqueada Windows ya impide usar la interfaz; lo que queda
- * expuesto es la llave en memoria unos minutos. A cambio no se tira una
- * respuesta ya pagada. Diez minutos cubren el p99 medido de un turno privado
- * (616 s sobre 151). A 0, Win+L cierra siempre en el acto.
+ * expuesto es la llave en memoria unos minutos. A cambio no se tira algo ya
+ * pagado. Diez minutos cubren el p99 medido de un turno privado (616 s sobre
+ * 151). A 0, Win+L cierra siempre en el acto.
  */
 export const LOCK_SCREEN_GRACE_MS = 10 * 60_000;
+
+/**
+ * cuanto mas se espera, como mucho, a la imagen de ese mismo turno, contado
+ * desde que su texto queda guardado (o desde Win+L, si se pulso ya con el texto
+ * guardado).
+ *
+ * El envio arranca la generacion en cuanto guarda el texto, y una generacion
+ * arrancada se hace —y en el de pago se cobra— aunque aqui ya no se pueda
+ * guardar: cerrar entonces tiraba una imagen pagada, que al terminar no se podia
+ * cifrar ni apuntar (que cobra al arrancar se da por hecho, no se ha mirado en
+ * una factura). Quince minutos cubren el presupuesto NOMINAL del proveedor de
+ * pago —dos de arranque, diez de sondeo y un margen de descarga—, NO su peor
+ * caso: `awaitGeneration` mira su plazo antes de una espera de hasta unos 20 s
+ * y de una lectura que puede tardar 120 s, asi que el sondeo puede pasarse de
+ * los diez minutos, y `downloadOutput` no tiene tope propio. Una imagen muy
+ * lenta todavia puede cortarse; lo que el tope si garantiza es que la llave no
+ * se queda en memoria sin limite (septima ronda: decia que no cortaba nunca una
+ * imagen que el proveedor aun iba a entregar, y el codigo no lo asegura). Una
+ * cola del Horde mas larga que eso se pierde: sus kudos no son dinero. En el
+ * peor caso la llave queda en memoria 25 minutos con Windows bloqueado.
+ *
+ * Y cortar no la CANCELA: nada aborta la generacion al cerrar la boveda, asi
+ * que el envio sigue en vuelo hasta que acaba. Si acaba con la boveda cerrada
+ * se pierde; si Daniel la ha vuelto a abrir antes, se guarda. Mientras tanto la
+ * pantalla sigue en «Esperando respuesta…».
+ */
+export const LOCK_SCREEN_TURN_IMAGE_GRACE_MS = 15 * 60_000;
 
 /** los avisos del sistema que se escuchan; los nombres son los de Electron */
 export type VaultPowerEvent = 'lock-screen' | 'unlock-screen' | 'suspend';
@@ -50,16 +77,28 @@ export interface VaultLockCoordinatorOptions {
   notifyRenderer: (reason: VaultLockReason) => void;
   tickMs?: number;
   lockScreenGraceMs?: number;
+  turnImageGraceMs?: number;
   now?: () => number;
+}
+
+/**
+ * un cierre que espera a que termine el envio que el estaba esperando.
+ * `imageSince`: desde cuando solo queda la imagen del turno; `null` mientras
+ * siga llegando alguna respuesta
+ */
+interface PendingLock {
+  reason: VaultLockReason;
+  since: number;
+  imageSince: number | null;
 }
 
 export class VaultLockCoordinator {
   private timer: ReturnType<typeof setInterval> | null = null;
   private readonly unsubscribe: (() => void)[] = [];
-  /** un cierre que espera a que llegue la respuesta que el estaba esperando */
-  private pending: { reason: VaultLockReason; since: number } | null = null;
+  private pending: PendingLock | null = null;
   private readonly tickMs: number;
   private readonly graceMs: number;
+  private readonly turnImageGraceMs: number;
   private readonly now: () => number;
 
   private readonly onLockScreen = (): void => this.guard(() => this.lockScreen());
@@ -74,6 +113,7 @@ export class VaultLockCoordinator {
   constructor(private readonly options: VaultLockCoordinatorOptions) {
     this.tickMs = options.tickMs ?? VAULT_TICK_MS;
     this.graceMs = options.lockScreenGraceMs ?? LOCK_SCREEN_GRACE_MS;
+    this.turnImageGraceMs = options.turnImageGraceMs ?? LOCK_SCREEN_TURN_IMAGE_GRACE_MS;
     this.now = options.now ?? (() => Date.now());
   }
 
@@ -118,10 +158,8 @@ export class VaultLockCoordinator {
           this.pending = null;
           return;
         }
-        const waited = this.now() - this.pending.since;
-        if (vault.activeUserWaits('reply') === 0 || waited >= this.graceMs) {
-          vault.lock(this.pending.reason);
-        }
+        if (this.stillDeferred(this.pending)) return;
+        vault.lock(this.pending.reason);
         return;
       }
       vault.tickAutoLock();
@@ -140,22 +178,49 @@ export class VaultLockCoordinator {
     });
   }
 
+  /**
+   * si el cierre aplazado tiene que seguir esperando.
+   *
+   * Dos tramos, cada uno con su tope: mientras llega alguna respuesta, el de
+   * Win+L; cuando ya solo queda la imagen de un turno, el suyo, que empieza a
+   * contar al verlo (con el reloj de 15 s, como mucho una vuelta tarde). Asi un
+   * envio no puede sostenerla mas de la suma de los dos, aunque una espera no
+   * se suelte nunca.
+   */
+  private stillDeferred(pending: PendingLock): boolean {
+    const { vault } = this.options;
+    const now = this.now();
+    if (vault.activeUserWaits('reply') > 0) return now - pending.since < this.graceMs;
+    if (vault.activeUserWaits('turn-image') === 0 || this.turnImageGraceMs <= 0) return false;
+    pending.imageSince ??= now;
+    return now - pending.imageSince < this.turnImageGraceMs;
+  }
+
   private lockScreen(): void {
     const { vault } = this.options;
     if (!vault.isUnlocked()) return;
-    // solo un envio suyo: generar o aprobar una imagen no deja la llave en
-    // memoria con Windows bloqueado (`D-106`)
-    const waits = vault.activeUserWaits('reply');
-    if (waits === 0 || this.graceMs <= 0) {
+    // solo un envio suyo, en cualquiera de sus dos tramos: generar o aprobar
+    // una imagen desde el panel no deja la llave en memoria con Windows
+    // bloqueado (`D-106`)
+    const replies = vault.activeUserWaits('reply');
+    const turnImages = vault.activeUserWaits('turn-image');
+    const pending: PendingLock = {
+      reason: 'pantalla-bloqueada',
+      since: this.now(),
+      imageSince: null,
+    };
+    if (this.graceMs <= 0 || !this.stillDeferred(pending)) {
       vault.lock('pantalla-bloqueada');
       return;
     }
     // pulsar Win+L justo mientras espera una respuesta es lo normal: se deja
-    // que llegue y se guarde, y se cierra en la vuelta siguiente del reloj
-    this.pending = { reason: 'pantalla-bloqueada', since: this.now() };
+    // que llegue y se guarde, con la imagen del turno si la lleva, y se cierra
+    // en la vuelta siguiente del reloj
+    this.pending = pending;
     this.options.log('cierre de la boveda aplazado', {
       motivo: 'pantalla-bloqueada',
-      envios: waits,
+      envios: replies,
+      imagenesDelTurno: turnImages,
     });
   }
 

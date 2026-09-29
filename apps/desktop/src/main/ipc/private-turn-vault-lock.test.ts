@@ -54,6 +54,8 @@ interface Huella {
   boveda: { abierta: boolean };
   /** veces que se llamo al modelo */
   llamadas: number;
+  /** lo que llego a borrarse: medios y archivo de la conversacion */
+  borrados: string[];
 }
 
 interface Montaje {
@@ -89,6 +91,7 @@ function montar(montaje: Montaje): Huella {
     toques: 0,
     boveda: { abierta: montaje.cierre !== 'antes-de-empezar' },
     llamadas: 0,
+    borrados: [],
   };
   // como el almacen de verdad: todo lo que descifra o sella exige la llave
   const llave = (): void => {
@@ -155,6 +158,10 @@ function montar(montaje: Montaje): Huella {
         huella.turnos.pop();
         return true;
       },
+      delete: (conversationId: string) => {
+        huella.borrados.push(`archivo:${conversationId}`);
+        huella.turnos = [];
+      },
       latestMemory: async () => {
         llave();
         return null;
@@ -181,7 +188,12 @@ function montar(montaje: Montaje): Huella {
         return [];
       },
     },
-    privateMedia: { list: async () => [] },
+    privateMedia: {
+      list: async () => [],
+      deleteConversation: async (conversationId: string) => {
+        huella.borrados.push(`medios:${conversationId}`);
+      },
+    },
     secretStore: { get: () => undefined },
     relations: {
       read: async () => ({
@@ -241,7 +253,8 @@ function montar(montaje: Montaje): Huella {
         }
         return {
           outcome: 'completed',
-          text: llamada === 'vacia' ? '' : 'RESPUESTA_INVENTADA_TESTIGO con unas cuantas palabras mas',
+          text:
+            llamada === 'vacia' ? '' : 'RESPUESTA_INVENTADA_TESTIGO con unas cuantas palabras mas',
           executedModel: 'deepseek-v4-flash',
           inputTokens: 10,
           outputTokens: 20,
@@ -432,6 +445,35 @@ describe('un envio que falla con la boveda abierta', () => {
     expect(huella.esperas).toEqual({ empezadas: 1, soltadas: 1 });
   });
 
+  it('si LANZA en el primer mensaje, la conversacion queda vacia y se retira una vez', async () => {
+    const huella = montar({ cierre: 'nunca', llamada: 'lanza' });
+    const respuesta = await enviar('MENSAJE_INVENTADO_TESTIGO');
+
+    expect(respuesta.ok).toBe(false);
+    expect(huella.turnos).toEqual([]);
+    expect(huella.llamadas).toBe(1);
+  });
+
+  it('si LANZA con otra linea detras de su mensaje, no toca ninguna de las dos', async () => {
+    // la retirada va por `recordId`: si su mensaje ya no es la ultima linea, no
+    // se retira nada, ni una segunda vez en otro sitio
+    const huella = montar({
+      cierre: 'nunca',
+      llamada: 'lanza',
+      intrusa: true,
+      historial: HISTORIAL,
+    });
+    const respuesta = await enviar('MENSAJE_INVENTADO_TESTIGO');
+
+    expect(respuesta.ok).toBe(false);
+    expect(huella.turnos.map((turno) => turno.text)).toEqual([
+      'hola inventado',
+      'RESPUESTA_ANTERIOR_INVENTADA',
+      'MENSAJE_INVENTADO_TESTIGO',
+      'LINEA_INTRUSA_INVENTADA',
+    ]);
+  });
+
   it('si detras de su mensaje entro otra linea, no se lleva esa en su lugar', async () => {
     // retirar «la ultima linea» se habria llevado la intrusa y dejado el mensaje
     // huerfano. Con el `recordId` no casa, y no se toca nada
@@ -455,9 +497,10 @@ describe('un envio que falla con la boveda abierta', () => {
 
 describe('un envio por conversacion', () => {
   it('rechaza otro envio a la misma conversacion mientras el primero sigue en vuelo', async () => {
-    // revision del 28/09: al salir de Privado y volver, la pantalla deja enviar
-    // otra vez. Los dos turnos se intercalaban y el primero en terminar quitaba
-    // la marca de «enviando» con el segundo aun en vuelo
+    // revision del 28/09: con la ventana recargada a mitad (Ctrl+R o un
+    // cuelgue), la pantalla deja enviar otra vez. Los dos turnos se intercalaban
+    // y el primero en terminar quitaba la marca de «enviando» con el segundo aun
+    // en vuelo
     let soltar: () => void = () => undefined;
     const pausa = new Promise<void>((resolve) => {
       soltar = resolve;
@@ -485,6 +528,46 @@ describe('un envio por conversacion', () => {
     // terminado el primero, se puede volver a enviar
     expect((await enviar('CUARTO_MENSAJE_INVENTADO')).ok).toBe(true);
     expect(huella.turnos).toHaveLength(4);
+  });
+});
+
+describe('borrar una conversacion que esta contestando', () => {
+  it('se rechaza: al volver, su respuesta resucitaba la conversacion borrada', async () => {
+    // revision del 28/09: el borrado no miraba el envio en vuelo. `appendTurn`
+    // sellaba la respuesta en el archivo ya borrado y la conversacion volvia
+    // con solo esa linea
+    let soltar: () => void = () => undefined;
+    const pausa = new Promise<void>((resolve) => {
+      soltar = resolve;
+    });
+    const huella = montar({
+      cierre: 'nunca',
+      pausa,
+      historial: [
+        { role: 'user', text: 'hola inventado' },
+        { role: 'assistant', text: 'RESPUESTA_ANTERIOR_INVENTADA' },
+      ],
+    });
+    const envio = enviar('MENSAJE_INVENTADO_TESTIGO');
+    while (huella.llamadas === 0) await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const borrado = (await invocar(IPC_INVOKE.vaultConversationDelete, {
+      conversationId: CONV,
+    })) as Respuesta;
+    expect(borrado.ok).toBe(false);
+    if (borrado.ok) return;
+    expect(borrado.error).toBe('esa conversacion esta contestando ahora mismo');
+    // no se toco nada: ni medios ni archivo
+    expect(huella.borrados).toEqual([]);
+
+    soltar();
+    expect((await envio).ok).toBe(true);
+    expect(huella.turnos.map((turno) => turno.role)).toEqual([
+      'user',
+      'assistant',
+      'user',
+      'assistant',
+    ]);
   });
 });
 

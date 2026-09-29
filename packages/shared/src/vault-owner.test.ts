@@ -2,6 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   conversationOwnerEventSchema,
+  lastForeignSequence,
   nextOwnerEventPosition,
   resolveConversationOwner,
   type ConversationOwnerEvent,
@@ -377,5 +378,47 @@ describe('el cursor de pendientes con dueño', () => {
   it('y uno con dueño null o con dueño tambien', () => {
     expect(relationCursorSchema.parse({ ...cursor, owner: null }).owner).toBeNull();
     expect(relationCursorSchema.parse({ ...cursor, owner: NORA }).owner).toBe(NORA);
+  });
+});
+
+// octava ronda: la firma de una enganchada no pone su nombre en lo que se
+// escribio con la ficha de OTRO personaje
+describe('lastForeignSequence', () => {
+  it('lo escrito con otro personaje antes del enganche queda marcado', () => {
+    // turnos 0-3 con OTRA, soltada en el 4 y enganchada a Nora con ancla 5
+    const turns = [
+      turn(0, { characterId: OTRA }),
+      turn(1),
+      turn(2),
+      turn(3),
+      turn(4, { characterId: '' }),
+      turn(5),
+      turn(6),
+    ];
+    const events = [evento({ anchorSequence: 5 })];
+    const owner = resolveConversationOwner({ turns, events });
+    expect(owner.source).toBe('link');
+    expect(lastForeignSequence({ turns, events }, owner.characterId)).toBe(3);
+  });
+
+  it('sin otro personaje en vigor no hay nada que marcar', () => {
+    const turns = [turn(0), turn(1), turn(2)];
+    const events = [evento({ anchorSequence: 2 })];
+    expect(lastForeignSequence({ turns, events }, NORA)).toBeNull();
+    // lo escrito con ella misma tampoco es ajeno
+    const suyas = [turn(0, { characterId: NORA }), turn(1), turn(2, { characterId: '' }), turn(3)];
+    expect(lastForeignSequence({ turns: suyas, events: [evento({ anchorSequence: 3 })] }, NORA)).toBeNull();
+    expect(lastForeignSequence({ turns, events }, null)).toBeNull();
+  });
+
+  it('un enganche anterior a otro personaje tambien cuenta', () => {
+    const turns = [turn(0), turn(1), turn(2), turn(3), turn(4), turn(5)];
+    const events = [
+      evento({ anchorSequence: 1, generation: 1, characterId: OTRA, characterLabel: 'Otra' }),
+      evento({ anchorSequence: 4, generation: 2 }),
+    ];
+    expect(resolveConversationOwner({ turns, events }).characterId).toBe(NORA);
+    // 2, 3 y 4 se escribieron con OTRA; el 4 es el ancla, anterior al evento
+    expect(lastForeignSequence({ turns, events }, NORA)).toBe(4);
   });
 });

@@ -30,14 +30,15 @@ pantalla; la bóveda sigue sin copia**
 > por el cierre de la bóveda, con la llamada sin respuesta, podía borrar la
 > respuesta anterior de Lía (el turno se retiraba dos veces): corregido. La imagen
 > de un turno ya no aplaza Win+L una vez guardado el texto, que es lo que decían
-> los documentos. La nota de «ya salió» reconoce las formas de un mismo verbo
+> los documentos (la sexta ronda lo cambia: ver abajo). La nota de «ya salió» reconoce las formas de un mismo verbo
 > («traigo» y «traer») sin tocar sus umbrales. Y queda escrito que la ficha
 > editada que sella main cambia el prompt de conversaciones empezadas aunque
 > todas las casillas estén apagadas, a propósito. La parte de pantalla de esta
 > ronda también está hecha: la confirmación del enganche lleva la vista a sí
 > misma, el aviso «¿Es de…?» ya no trocea la conversación en cada tecla y los
-> textos de las casillas ya no prometen de más. **Tampoco esta ronda ha tenido
-> revisión independiente, y nada de la pantalla se ha visto en Electron.**
+> textos de las casillas ya no prometen de más. Revisada después por cinco
+> revisores, y `npm run check` a solas en verde tras ella (222 archivos, 4511
+> pruebas). **Nada de la pantalla se ha visto en Electron.**
 >
 > **Cuarta ronda (28/09).** «Sincronizar» durante un envío podía subir el mensaje
 > de Daniel que luego se retiraba, y el servidor se quedaba con ese en vez del
@@ -54,8 +55,51 @@ pantalla; la bóveda sigue sin copia**
 > a «traigo», «prepararte» frente a «preparo» y el gerundio con pronombre: con el
 > texto inventado de la revisión, 29 de 32 paráfrasis (antes 25), sin falsos
 > nuevos. No se puede enviar dos veces a la misma conversación a la vez, y una
-> ficha de solo espacios ya no sustituye a la buena. **Sin revisión
-> independiente, sin `npm run check` completo y nada visto en Electron.**
+> ficha de solo espacios ya no sustituye a la buena. Revisada después por cinco
+> revisores y `npm run check` a solas en verde (222 archivos, 4531 pruebas);
+> commiteada en `a45953b`. **Nada visto en Electron.**
+>
+> **Resumen de la verificación de `REV-TRES-ENCARGOS-001`:** tres rondas de cinco
+> revisores, una tras cada ronda de arreglos de la tercera a la quinta, y las
+> tres pasaron `npm run check` a solas: 222 archivos y 4511, 4520 y 4531 pruebas
+> (12 omitidas); la última quedó commiteada en `a45953b`.
+>
+> **Octava ronda (29/09, `REV-CUATRO-FRENTES-001`).** Ocho revisores sobre la
+> séptima dejaron siete defectos importantes, y su `npm run check` a solas cayó
+> por una prueba que pasó del tope de tiempo (`account-client.test.ts`, que sola
+> pasa). Corregidos: la reescrita lista llega ya a sus otras conversaciones
+> (antes solo tras un mensaje en la enganchada); una pendiente se reintenta tras
+> cualquier envío en Privado, no solo en ella; una salida corta no sale «oculto»;
+> el eco no casa por los nombres; la firma vuelve a la de `a45953b` en las
+> conversaciones del Studio anterior y no pone su nombre en lo que escribió otro
+> personaje; la confirmación dice qué memoria viaja; y los documentos recogen el
+> `npm run check` en verde de la sexta (4677). La imagen del turno solo aplaza
+> Win+L con el proveedor de pago. **Sin revisión de esta ronda, sin `npm run
+> check` entero y nada visto en Electron.**
+>
+> **Séptima ronda (29/09, `REV-CUATRO-FRENTES-001`).** Ocho revisores (aquí
+> decía «cinco») sobre la sexta y los tres frentes sin commitear, con un `npm run
+> check` a solas en verde sobre ellos (228 archivos, 4677 pruebas), dejaron diez
+> defectos importantes, todos
+> corregidos: la reescritura del enganche ya no puede vaciar una memoria corta y
+> también cubre las enganchadas que viajan con su ficha retroactiva; su botón
+> dice en qué acabó; la confirmación no promete que los mensajes de antes dejen
+> de leerse; el razonamiento no da un falso «oculto» en una vuelta con
+> herramientas; el control del eco mide igual los dos lados; la pista manda a
+> «Registros». Revisada después por ocho revisores; su `npm run check` a solas
+> cayó por tiempo en una prueba ajena (lo cierra la octava). **Nada visto en
+> Electron.**
+>
+> **Sexta ronda (28/09).** Un Win+L aplazado tiraba la imagen del turno, ya
+> pagada, en cuanto se guardaba el texto: ahora el aplazamiento la espera también,
+> como mucho 15 minutos más desde que Luxy ve ese tramo (desde el texto o desde
+> Win+L, lo que llegue después), y después cierra sin cancelarla. Borrar una conversación mientras
+> contesta se rechaza (la resucitaba). La cifra «Ya salió» de la pantalla dice
+> que es una cota superior. «llegué», «busqué», «empecé», «pagué» y «leer» se
+> unen con su verbo, y «te cuento» ya no casa con «cuéntame». Los documentos
+> dejan de contradecirse sobre qué se verificó. Revisada después por ocho
+> revisores, con `npm run check` a solas en verde (4677; aquí decía «sin
+> revisión, sin check»). **Nada visto en Electron.**
 
 > **Construido (25/09, corregido el 28/09): la bóveda se cierra sola
 > (`SEG-BOVEDA-001`, `D-106`).** Leer ya no cuenta como actividad: solo abrirla,
@@ -78,6 +122,38 @@ pantalla; la bóveda sigue sin copia**
 > pendientes va como mucho en uno de cada cuatro mensajes, el permiso pide que la
 > escena la traiga y una nota le dice que ya sacó una sin decir cuál (`D-104`).
 > Sin medir contra una conversación real: `LA-054`.
+
+> **`F33-IGUAL-001` (`D-108`, 2026-09-29): una conversación enganchada queda
+> como una empezada con su personaje.** Su memoria sellada, escrita sin la
+> ficha, la reescribe con ella Claude Code o Codex en segundo plano, fuera del
+> `.jsonl` y solo mientras siga atada a la última sellada; lo que pierde
+> material no se aplica. Sus respuestas firman con su nombre —salvo las que se
+> escribieron con la ficha de otro personaje—, su foto de
+> perfil se copia al enganchar y una imagen generada ya no cuenta como foto de
+> perfil. Lo que no se iguala: los últimos ocho mensajes viajan tal cual.
+> **Implementado; revisado (ocho revisores, check a solas en verde con 4677) y
+> corregido en la séptima y la octava ronda, esta sin revisión ni check. Sin
+> ninguna reescritura real y sin verse en pantalla**: `LA-057`.
+
+> **`F34-RAZONAMIENTO-001` (`D-107`, 2026-09-28): el razonamiento de una
+> conexión HTTP se elige por modelo**, junto a la temperatura, y sólo con los
+> valores que la documentación de ese modelo admite; vacío no manda nada. Luxy lee
+> ahora el razonamiento en `reasoning`, en `<think>` y sin transmisión, y cada
+> llamada apunta `reasoningVerdict` y `charsPerOutput`. **Implementado; revisado
+> (ocho revisores, check a solas en verde con 4677) y corregido en la séptima y
+> la octava ronda, esta sin revisión ni check. Sin saber si la pasarela deja
+> pasar el campo**: lo dirá `LA-055`.
+
+> **`F33-RECUERDO-ENTERO-001` (`D-105`, quinta ronda, 2026-09-28): con la
+> casilla «Pasarle la memoria de sus dos últimas conversaciones» le llega la
+> memoria entera de cada una** —resumen, hechos, decisiones y lecciones, sin
+> `plan` ni `openQuestions` y sin los mensajes—, con una salvaguarda de 6.000 por
+> conversación que quita lo más viejo primero. La palabra cortada a mitad se
+> arregla donde nacía (el `slice` al guardar memorias y fichas) y, en lo ya
+> guardado, al presentarlo. `ecoRecientes` gana un control con la tercera
+> conversación. **Implementado; revisado (ocho revisores, check a solas en verde
+> con 4677) y corregido en la séptima y la octava ronda, esta sin revisión ni
+> check. Sin verse en pantalla**: `LA-056`.
 
 > **Lo segundo: `F33-VARIEDAD-001`.** Cuatro cambios contra la autocopia de Lía,
 > con interruptor y sin verse en pantalla. Se prueban con `LA-050`.

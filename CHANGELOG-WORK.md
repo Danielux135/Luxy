@@ -1,11 +1,325 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-09-29 — Claude — `REV-CUATRO-FRENTES-001`: octava ronda, lo que encontró la revisión de la séptima
+
+- Estado anterior: la séptima ronda sin commitear. Ocho revisores
+  (equivalencia, razonamiento, resumen, bóveda, regresión, privacidad, pantalla
+  y documentación) sobre ella: siete defectos importantes y veintisiete menores.
+  Su `npm run check` a solas: **salida 1**, una prueba caída por tiempo
+  (`account-client.test.ts`, 4699 en verde, 1 caída, 12 omitidas).
+- Objetivo: corregirlos, comprobando cada uno en el código antes de tocarlo. Sin
+  commit, sin push, sin desplegar.
+- Archivos (código): `packages/shared/src/reasoning-control.ts` (suelo de 64
+  tokens, etiquetas citadas, comentarios), `vault-recent-memories.ts` (frases
+  de medir), `vault-owner.ts` (`lastForeignSequence`);
+  `apps/agent/src/providers/sse.ts` (`reasoningOf`);
+  `apps/desktop/src/main/vault/memory-relink.ts` (`sweep`, el atajo de `applied`,
+  la cumplida suelta su texto), `recent-echo.ts` (nombres fuera,
+  `raicesComunes`), `conversation-store.ts` (`ownerWithAuthorship`);
+  `apps/desktop/src/main/ipc/handlers.ts` (`markRelinkApplied` en el turno y en
+  `recientes`, fuera `appliedOnly`, `relinkCandidates` y la pasada tras cada
+  envío, «Volver a la de antes», `ownerForView`, `turn-image` solo de pago,
+  `SEND_CUT_BY_LOCK.imageLost`, el motivo de la imagen perdida, `ignoreWords` en
+  `ecoRecientes`); `apps/desktop/src/shared/ipc.ts` (`foreignUpTo`);
+  `apps/desktop/src/renderer/vault-character-link.ts` (firma, confirmación),
+  `vault-recap-row.ts` (textos de la fila, recortadas),
+  `pages/Vault.tsx` (acuse, tooltip, pie de la casilla), `pages/Config.tsx`
+  (pista de razonamiento, aviso de DeepSeek).
+- Archivos (pruebas): `reasoning-control.test.ts`, `sse.test.ts`,
+  `vault-recent-memories.test.ts`, `vault-owner.test.ts`, `recent-echo.test.ts`,
+  `memory-relink.test.ts`, `conversation-relink.test.ts`,
+  `conversation-owner.test.ts`, `private-turn-image.test.ts`,
+  `vault-lock-coordinator.test.ts`, `vault-character-link.test.ts`,
+  `vault-recap-row.test.ts`, `account-client.test.ts` (tope propio).
+- Archivos (documentos): `DECISIONS.md` (`D-105` a `D-108`), `CLAUDE.md` y
+  `AGENTS.md` (la regla de `turn-image`), `LOCAL-ACTIONS.md` (`LA-053`, `LA-055`,
+  `LA-057`), este archivo, `CURRENT-TASK.md`, `PROJECT-STATE.md`,
+  `MASTER-PLAN.md` y `TEST-RESULTS.md`.
+- Cambios de criterio que se deshacen: la séptima no llevaba la reescrita `ready`
+  a sus otras conversaciones (ahora sí, apuntándola antes) y firmaba todas las
+  respuestas con dueño (ahora, las de dueño por turno como en `a45953b`).
+- Resultado: ver `TEST-RESULTS.md`. **Sin `npm run check` entero, sin revisión y
+  nada visto en Electron.**
+- Siguiente paso: la revisión de esta ronda y `npm run check` a solas.
+
+### 2026-09-29 — Claude — `REV-CUATRO-FRENTES-001`: séptima ronda, lo que encontró la revisión de los cuatro frentes
+
+- Estado anterior: `a45953b` con `npm run check` en verde; sin commitear, la
+  sexta ronda de `REV-TRES-ENCARGOS-001`, `F34-RAZONAMIENTO-001`,
+  `F33-RECUERDO-ENTERO-001` y `F33-IGUAL-001`. Ocho revisores sobre los cuatro
+  (aquí decía «cinco»), con un `npm run check` a solas en verde sobre ellos (228
+  archivos, 4677 pruebas y 12 omitidas; aquí faltaba): diez defectos importantes
+  y veintitrés menores (decía «veinticuatro»).
+- Objetivo: corregirlos, comprobando cada uno en el código antes de tocarlo. Sin
+  commit, sin push, sin desplegar.
+- Archivos (código): `packages/shared/src/vault-relink.ts` (guarda, `summaryChanged`,
+  `MEMORY_RELINK_OUTCOMES`, el encargo), `vault-recap.ts` (`wordsKeptShare`,
+  `countedWords`, `sameEntryText`), `reasoning-control.ts` (vuelta con
+  herramientas, etiquetas, DeepSeek); `apps/desktop/src/main/vault/memory-relink.ts`
+  (ficha retroactiva, `repairSlicedMemory`, `stalledThisSession`),
+  `memory-relink-store.ts` (borrar sin fila), `recent-echo.ts` (control en los dos
+  lados), `vault-lock-coordinator.ts` (comentario);
+  `apps/desktop/src/main/ipc/handlers.ts` (`erasingInFlight`, `forgetRelink`,
+  `relinkOutcome`, `inheritedMemory`, `appliedOnly`, `formatPresented`, motivos de
+  rechazo, `sin-limpiar`, `ecoRecientesControl`); `apps/desktop/src/shared/ipc.ts`;
+  `apps/desktop/src/renderer/vault-recap-row.ts` (`describeRelinkOutcome`,
+  añadidas, sin memoria propia, atascada), `vault-character-link.ts`
+  (confirmación), `useVault.ts`, `pages/Vault.tsx`, `pages/Config.tsx`.
+- Archivos (pruebas): `vault-relink.test.ts`, `reasoning-control.test.ts`,
+  `providers.test.ts`, `memory-relink.test.ts`, `memory-relink-store.test.ts`,
+  `recent-echo.test.ts`, `conversation-relink.test.ts`,
+  `conversation-owner.test.ts`, `vault-recap-row.test.ts`,
+  `vault-character-link.test.ts`.
+- Documentos: `CLAUDE.md` y `AGENTS.md` (mismas tres frases), `D-105`, `D-106`,
+  `D-107` y `D-108` (séptima ronda), `LA-053`, `LA-055`, `LA-056`, `LA-057`,
+  `CURRENT-TASK.md`, `PROJECT-STATE.md`, `MASTER-PLAN.md`, `TEST-RESULTS.md`.
+- Comandos ejecutados y resultado real: ver `TEST-RESULTS.md`, entrada del 29/09
+  de esta ronda.
+- Decisiones: la reescritura de una enganchada sin memoria sellada espera a la
+  primera que se selle, en vez de reescribir la ficha retroactiva (se saltaría la
+  aprobación y la cobertura de `D-101`); una vuelta con herramientas y poca prosa
+  sale `unclear`; cortar la bóveda NO cancela la imagen del turno (lo decide
+  Daniel).
+- No hecho: `npm run check` completo y `npm run build` (se pasan al final, a
+  solas); revisión de esta ronda; nada visto en Electron; nada medido contra la
+  pasarela ni contra conversaciones reales; la sonda sin `recientes`; la ficha
+  retroactiva encadenada con la palabra partida.
+- Siguiente paso: revisión de esta ronda y `npm run check` a solas.
+
+### 2026-09-29 — Claude — `F33-IGUAL-001`: una conversación enganchada, igual que una empezada con su personaje (`D-108`)
+
+- Estado anterior: `a45953b` con `npm run check` en verde; el worktree traía sin
+  commitear la sexta ronda de `REV-TRES-ENCARGOS-001`, `F34-RAZONAMIENTO-001` y
+  `F33-RECUERDO-ENTERO-001`, y **la construcción a medias de este mismo frente**:
+  un agente del flujo `wf_db3de991-06e` la empezó el 28/09 y se cortó al lanzar
+  la prueba de integración (la máquina se suspendió con la prueba en marcha). Se
+  ha conservado todo lo que dejó y se ha revisado contra el diseño y la
+  refutación.
+- Objetivo: el criterio de Daniel —«que en resumen no hubiese diferencia con si
+  hubiese empezado la conversacion con ella»— con el diseño
+  `disenar:equivalencia` y su refutación `refutar:equivalencia` (flujo
+  `wf_b1411ff7-0ef`). Sin commit, sin push.
+- Archivos (nuevos): `packages/shared/src/vault-relink.ts` y su prueba;
+  `apps/desktop/src/main/vault/memory-relink-store.ts`, `memory-relink.ts` y sus
+  pruebas; `apps/desktop/src/main/ipc/conversation-relink.test.ts`.
+- Archivos (cambiados): `packages/shared/src/vault-recap.ts`
+  (`compareMemoryEntries` con `shortened`), `vault-image-request.ts`
+  (`isProfilePhotoOf`), `index.ts`; `apps/desktop/src/main/ipc/handlers.ts`
+  (`effectiveSealed`, `forgetRelink`, `ensureProfilePhoto`, IPC
+  `vaultMemoryRelinkDecide`, disparos al enganchar y tras cada envío,
+  `memoriaReescrita`), `main/vault/conversation-store.ts` (`latestMemoryRecord`,
+  `ownerEventId`), `main/index.ts`, `shared/ipc.ts`, `shared/channels.ts`,
+  `preload/index.ts`, `renderer/vault-character-link.ts` (firma, separador,
+  confirmación, `syncParagraph`, `linkedOwnerHint`), `renderer/vault-recap-row.ts`
+  (`describeRelink`), `renderer/pages/Vault.tsx`, `renderer/useVault.ts`; pruebas
+  `vault-character-link.test.ts`, `vault-recap-row.test.ts`,
+  `vault-image-request.test.ts`, `relation-selection.test.ts`.
+- Lo que hizo este turno sobre lo heredado: arreglar la prueba de integración (un
+  `avatarObjectKey` inválido tiraba el montaje) y darle a ella y a
+  `memory-relink.test.ts` topes de tiempo propios; la confirmación dice ahora
+  cuánto puede perderse («Si quita o recorta una o dos, se aplica igual»), no
+  promete «con su ficha» cuando la ficha está vacía y ya no dice «detrás» de los
+  pendientes sino «en la misma cola» (la pasada puede colarse entre dos tandas);
+  una prueba que fija que una negativa en la relectura no calla los pendientes
+  (diferencia 5, que el diseño describía mal); y los documentos.
+- Los ocho fallos de la refutación: cerrados, uno por uno, en `D-108`.
+- Resultado: pruebas de lo tocado, `npm run typecheck` y eslint de lo tocado en
+  verde; mutaciones comprobadas (`TEST-RESULTS.md`). `conversation-owner.test.ts`
+  (no tocado) cae por tiempo con la máquina cargada, también a solas. **No se ha
+  ejecutado `npm run check` entero** ni nada en pantalla, y ningún CLI ha hecho
+  todavía una reescritura real.
+- Siguiente paso: `npm run check` a solas; después `LA-057`.
+
+### 2026-09-28 — Claude — `F33-RECUERDO-ENTERO-001`: la memoria entera de sus dos últimas conversaciones (`D-105`, quinta ronda)
+
+- Estado anterior: `a45953b` con `npm run check` en verde; el worktree traía sin
+  commitear la sexta ronda de `REV-TRES-ENCARGOS-001` y `F34-RAZONAMIENTO-001`,
+  que no se han tocado salvo en los archivos compartidos, leídos antes.
+- Objetivo: la decisión de Daniel —con la casilla de `D-105` le llega la memoria
+  entera de cada una, y solo la memoria— con el diseño `disenar:resumen-entero`
+  y su refutación `refutar:resumen-entero` (flujo `wf_b1411ff7-0ef`). Sin commit,
+  sin push.
+- Archivos:
+  - `packages/shared/src/schemas.ts`: `clipAtWord`, `repairSlicedText`,
+    `repairSlicedMemory`, `memoryCapsFor`, `SEALED_MEMORY_CAPS`,
+    `RECAP_MEMORY_CAPS` y los topes con nombre; `normalizeConversationMemory`
+    corta en palabra;
+  - `packages/shared/src/vault-recap.ts`: `clipAtWord` en
+    `normalizeRecapMemory`, `clampRecapMemory` (el corte que queda en disco),
+    `restoreRecapAnchor` y `deduceRecap`; `RECAP_SUMMARY_CHARS` y
+    `RECAP_ENTRY_CHARS` salen de `RECAP_MEMORY_CAPS`;
+  - `packages/shared/src/vault-recent-memories.ts`: reescrito. Memoria entera
+    sin `plan`/`openQuestions`, salvaguarda de 6.000 que quita lo más viejo por
+    posición relativa, aviso de tramos, arreglo de la huella del `slice`,
+    `RecentPhrase` con su parte y `RECENT_MEMORIES_FORMAT = 2`;
+  - `packages/shared/src/vault-prompt.ts`: cabecera y regla de lo que dura / lo
+    que era de entonces en `recientes`; el bloque `memoria` presenta arreglado lo
+    guardado con el `slice`;
+  - `apps/desktop/src/main/vault/recent-echo.ts`: formato 2 (`frases`,
+    `frasesDeUnaRaiz`, `porCampo`, control con exclusión e igualación);
+  - `apps/desktop/src/main/ipc/handlers.ts`: `usableRecentMemory` (con los
+    `gaps` de la ficha), la tercera fijada al montar el prompt, `recientes` con
+    `formato`, `hechos`, `lecciones`, `cortadasAlGuardar` y `huecos`,
+    `memoriaCortadasAlGuardar`, el control leído al final en su propio `try` y
+    `ecoRecientesControl`;
+  - textos: `vault-character-link.ts` (casilla, confirmación, soltar),
+    `Vault.tsx` (pie y «Memoria de lo ya hablado»), comentario de
+    `character-store.ts`;
+  - pruebas: `memory-clip.test.ts` (nueva), `vault-recent-memories.test.ts`
+    (reescrita: fijaba los topes que desaparecen), `vault-prompt-recent.test.ts`,
+    `conversation-memory.test.ts` (1.200/240 justos pasan a «≤ y acaba en
+    palabra con …»), `vault-recap.test.ts`, `recent-echo.test.ts`,
+    `conversation-owner.test.ts` (recaps configurables; tres pruebas nuevas),
+    `vault-character-link.test.ts`;
+  - documentos: `DECISIONS.md` (`D-105`, quinta ronda y notas de sustitución),
+    `CLAUDE.md` y `AGENTS.md` (misma frase), `LOCAL-ACTIONS.md` (`LA-056`;
+    `LA-052` y `LA-054` con el nombre nuevo), `CURRENT-TASK.md`,
+    `PROJECT-STATE.md`, `MASTER-PLAN.md`, `TEST-RESULTS.md`.
+- Los once fallos de la refutación, cerrados: fichas cortadas a 400/160 en
+  `clampRecapMemory` (y su huella propia al presentar); tercera fijada al montar
+  el prompt; exclusión del control por copia encadenada; igualación del número
+  de frases y `frasesDeUnaRaiz`; `gaps` de la ficha en `recientes`; salvaguarda
+  por lo más viejo y con el orden de `clampRecapMemory`; «Hechos» sin «de
+  entonces» y una regla que separa lo que dura; el pie ya no dice que lo
+  pendiente «vuelve por su lado»; la limpieza también en el bloque `memoria`;
+  textos de la rama sin memoria propia, de soltar y comentarios con «resumen
+  corto»; la cifra del prompt es n=203 (p50 18.576, máx 23.947), comprobada
+  leyendo solo enteros de `studio.log`.
+- Resultado: pruebas de lo tocado y `npm run typecheck` en verde (ver
+  `TEST-RESULTS.md`). **No se ha ejecutado `npm run check` entero** ni nada en
+  pantalla.
+- Siguiente paso: `npm run check` a solas; después `LA-056`.
+
+### 2026-09-28 — Claude — `F34-RAZONAMIENTO-001`: el razonamiento por modelo (`D-107`)
+
+- Estado anterior: `a45953b` con `npm run check` en verde; el worktree traía los
+  cambios sin commitear de la sexta ronda de `REV-TRES-ENCARGOS-001`, que no se
+  han tocado.
+- Objetivo: el control de razonamiento por modelo que Daniel aprobó para
+  probarlo, con el diseño `disenar:razonamiento` y su refutación
+  `refutar:razonamiento` (flujo `wf_b1411ff7-0ef`). Sin commit, sin push.
+- Archivos:
+  - nuevo `packages/shared/src/reasoning-control.ts` (+ prueba): tabla por
+    modelo con la fuente de cada regla, `reasoningRequestFields`,
+    `reasoningLogFields`, `countReasoningTagChars`, `classifyReasoningEvidence`;
+  - `packages/shared/src/sampling.ts`: `reasoningMode` en
+    `samplingParametersShape`; la entrada por modelo lo cuenta como parámetro;
+  - `packages/shared/src/types.ts` y `provider-call.ts`: el campo en
+    `HttpProviderConfig` y seis campos nuevos en `ProviderCallRecord`;
+  - `apps/agent/src/providers/sse.ts`: lee `reasoning`, `reasoning_tokens` y los
+    argumentos de herramientas;
+  - `apps/agent/src/providers/http-provider.ts`: el razonamiento en los dos
+    cuerpos, las ramas sin transmisión leen el razonamiento, el registro lleva
+    el veredicto y el aviso de límite agotado sugiere «Sin razonar»;
+  - `apps/desktop/src/renderer/http-provider-config.ts` y `pages/Config.tsx`:
+    selector «Razonamiento» junto a la temperatura, en los dos formularios;
+  - `DECISIONS.md` (`D-107` y nota en `D-082`), `CLAUDE.md`, `AGENTS.md`,
+    `LOCAL-ACTIONS.md` (`LA-055`), `CURRENT-TASK.md`, `PROJECT-STATE.md`,
+    `MASTER-PLAN.md`, `TEST-RESULTS.md`.
+- Los ocho fallos de la refutación, cerrados:
+  1. `visiblePorToken` salía `[REDACTADO]` (comprobado con `isSecretKeyName`):
+     se llama `charsPerOutput`, y una prueba escribe la línea de verdad y la
+     compara campo a campo.
+  2. Groq no podía usarlo: `reasoningMode` vive en `samplingParametersShape`, así
+     que el nivel superior de `providers.http` lo admite; las reglas de Groq
+     exigen el host `api.groq.com`.
+  3. `<think>` dentro del texto: se cuenta (`reasoningTagChars`) y da veredicto
+     `visible`; Qwen en Groq con low/high pide `reasoning_format:'parsed'`.
+  4. Falso «oculto» con herramientas: el cociente suma nombres y argumentos.
+  5. DeepSeek con low/high sería un fallo nuevo (400 con `tools`, medido que hoy
+     no razona): solo se ofrece `off`.
+  6. La expresión de «otros glm» atrapaba variantes de la 5.3: anclada con `$`;
+     prueba con `glm-5.3-air`, `glm-5.4` y sufijos.
+  7. qwen3.8-max: la documentación leída se contradice; solo `off`, que vale con
+     las dos lecturas.
+  8. Número de decisión: comprobado libre al escribir (`D-106` era la última).
+- Comprobado que las pruebas nuevas FALLAN sin el cambio: siete mutaciones
+  (quitar el campo de cada cuerpo, no sumar los argumentos, no leer `reasoning`,
+  no leer las ramas sin flujo, la expresión de GLM antigua, el refine sin el
+  razonamiento); las siete fallan.
+- Resultado: ver `TEST-RESULTS.md`. **Sin `npm run check` entero, sin revisión y
+  sin probar contra la pasarela.**
+- Siguiente paso: `npm run check` a solas; luego `LA-055`.
+
+### 2026-09-28 — Claude — `REV-TRES-ENCARGOS-001`, sexta ronda: Win+L espera la imagen del turno, la verdad de la verificación y los menores de «ya salió»
+
+- Estado anterior: quinta ronda revisada por cinco revisores (`r3:*`) y
+  `npm run check` a solas en verde (222 archivos, 4531 pruebas y 12 omitidas),
+  commiteada en `a45953b`. La corrección del 28/09 hizo tres rondas de cinco
+  revisores, una tras cada ronda de arreglos de la tercera a la quinta, y las
+  tres pasaron `npm run check` a solas (4511, 4520 y 4531 pruebas). La revisión
+  de la quinta dejó tres defectos importantes y menores.
+- Objetivo: cerrar los tres importantes, los menores baratos y seguros, y
+  comprobar si un turno que lanza con la bóveda abierta deja el mensaje escrito
+  sin respuesta. Sin commit, sin push, sin desplegar.
+- Causa demostrada:
+  - Win+L: `onReplySaved` soltaba la espera `reply` y abría una `image`, y el
+    coordinador solo aplazaba por `reply`: el cierre pendiente se cumplía en la
+    vuelta siguiente del reloj con la imagen del turno ya arrancada.
+  - «llegué», «busqué», «empecé», «pagué»: `stem()` los deja en «llegu»,
+    «busqu», «empec», «pagu» (comprobado con un script en el scratchpad); la
+    tabla de pagar generaba «page».
+  - «cuéntame» casaba con «te cuento» por la regla del prefijo (5 letras, dos de
+    sobra), no por la tabla.
+  - El turno que lanza con la bóveda abierta: ya lo retiraba el `catch` del
+    envío (`retireUnansweredTurn`) desde la cuarta ronda. No había defecto.
+- Archivos leídos: el diario de la revisión (`r3:*`), `CLAUDE.md`, `D-098`,
+  `D-102`…`D-106`, `vault-lock-coordinator.ts`, `vault-service.ts`,
+  `handlers.ts` (envío, espera, borrado, retirada), `raise-roots.ts`,
+  `turn-index.ts`, `relation-diagnostics.ts`, `Vault.tsx`, `ipc.ts`,
+  `useVault.ts`, `sync.ts`, `vault-character-link.ts`, `xavira.ts` y `horde.ts`
+  (plazos de la generación), `redact.ts` y las pruebas de todos ellos.
+- Archivos modificados:
+  - `apps/desktop/src/main/vault/vault-service.ts`: `UserWaitKind` gana
+    `turn-image`.
+  - `apps/desktop/src/main/vault/vault-lock-coordinator.ts`:
+    `LOCK_SCREEN_TURN_IMAGE_GRACE_MS` (15 min) y `stillDeferred`, dos tramos con
+    su tope; el registro del aplazamiento lleva `imagenesDelTurno`.
+  - `apps/desktop/src/main/ipc/handlers.ts`: el envío espera la imagen de su
+    turno como `turn-image`; borrar una conversación con un envío en vuelo se
+    rechaza; comentarios de `whileUserWaits`, de `PrivateTurnProgress`, del
+    rechazo del segundo envío y de las tres casillas.
+  - `apps/desktop/src/main/vault/raise-roots.ts`: `spellingRoot` (qu→c, gu→g,
+    z→c), `spelled` para la tabla de raíz corta, «leer» en la tabla, y el prefijo
+    no vale en un verbo de la tabla.
+  - `apps/desktop/src/main/vault/relation-diagnostics.ts`,
+    `apps/desktop/src/shared/ipc.ts` y `apps/desktop/src/renderer/pages/Vault.tsx`:
+    `herMentionsClear` es una cota superior, en el JSDoc y en pantalla.
+  - `apps/desktop/src/renderer/vault-character-link.ts`: el salto de línea y la
+    raya empiezan frase.
+  - Comentarios: `useVault.ts`, `ipc.ts`, `ipc.test.ts`, `sync.ts`.
+  - Pruebas: `vault-lock-coordinator.test.ts` (tres nuevas y el campo nuevo en
+    dos), `private-turn-image.test.ts` (la clase de espera),
+    `private-turn-vault-lock.test.ts` (borrar en vuelo; lanza en el primer
+    mensaje; lanza con una línea detrás), `raise-roots.test.ts` (cuatro nuevas y
+    cuatro pares más en la simétrica), `vault-character-link.test.ts` (una).
+  - Documentos: `CLAUDE.md` y `AGENTS.md` (la regla de Win+L, iguales),
+    `D-102` (nota), `D-104` (sexta ronda y el «QUIÉN ERES»), `D-106` (Estado, la
+    quinta como bloque propio, sexta ronda), `LA-053`, `LA-054`,
+    `CURRENT-TASK.md`, `PROJECT-STATE.md`, `MASTER-PLAN.md`, este registro y
+    `TEST-RESULTS.md`.
+- Comandos ejecutados: ver `TEST-RESULTS.md`, entrada de la sexta ronda; y los
+  scripts de medida del revisor (`lente2/medir.ts` y `adversarias.ts`, con
+  `vite-node`).
+- Resultado real: ver `TEST-RESULTS.md`.
+- Decisiones: el tope de la imagen del turno, 15 minutos desde que el
+  coordinador ve ese tramo —desde el texto guardado o, si Win+L llega después,
+  desde Win+L— (corregido en la séptima ronda: aquí decía «desde que el texto
+  queda guardado»; lo decidió quien coordina que hubiera tope; la cifra cubre el
+  presupuesto nominal del proveedor de pago, no su peor caso); no se tocan
+  umbrales ni `stem()`.
+- No hecho: `npm run check` completo (se pasa al final, a solas); ninguna
+  revisión de esta ronda; nada visto en Electron; nada medido con conversaciones
+  reales; que el proveedor de pago cobre al arrancar no se ha mirado en una
+  factura.
+- Siguiente paso: `npm run check` a solas y la revisión de la sexta ronda.
+
 ### 2026-09-28 — Claude — `REV-TRES-ENCARGOS-001`, quinta ronda: «traerme», «prepararte» y un envío por conversación
 
 - Estado anterior: cuarta ronda cerrada; según el registro del flujo, `npm run
   check` completo en verde tras ella (222 archivos, 4520 pruebas y 12 omitidas).
-  Seis revisores sobre ella: nada que rompa, dos defectos importantes de «ya
-  salió» y catorce menores.
+  Cinco revisores sobre ella (el «seis» contaba el check): nada que rompa, dos
+  defectos importantes de «ya salió» y catorce menores.
 - Objetivo: cerrar los dos importantes y los menores baratos y seguros,
   verificando cada uno en el código antes. Sin commit, sin push, sin desplegar.
 - Hipótesis o causa demostrada (las dos, reproducidas con el script de medida
@@ -40,7 +354,9 @@
 - Comandos ejecutados: los dos scripts de medida del revisor
   (`medir-ya-salio*.ts`, con `vite-node`, antes y después); uno propio que
   compara la regla vieja con la nueva sobre 274 palabras inventadas; `vitest run`
-  de 13 archivos tocados o vecinos; `tsc -p apps/desktop/tsconfig.renderer.json`
+  de 13 archivos tocados o vecinos (y, según `TEST-RESULTS.md`, `apps/desktop`
+  entero, 113 archivos: esta línea solo nombraba una de las dos pasadas; nota de
+  la sexta ronda); `tsc -p apps/desktop/tsconfig.renderer.json`
   y `tsconfig.node.json` con `--noEmit`; `eslint` de los archivos tocados.
 - Resultado real: ver `TEST-RESULTS.md`, entrada de la quinta ronda.
 - Decisiones: no se tocan umbrales ni `stem()`; la bolsa exacta sigue primero
@@ -49,14 +365,16 @@
   con conversaciones reales. El texto «tu mensaje no se ha guardado» cuando la
   retirada no casa, y la ficha vigente que llega sin aviso a una conversación sin
   ficha sellada, quedan anotados sin arreglar.
-- Siguiente paso: `npm run check` completo y la revisión independiente.
+- Siguiente paso: `npm run check` completo y la revisión independiente. (Hecho
+  después: cinco revisores y `npm run check` a solas en verde, 222 archivos y
+  4531 pruebas; commiteado en `a45953b`.)
 
 ### 2026-09-28 — Claude — `REV-TRES-ENCARGOS-001`, cuarta ronda: sincronizar a mitad de un envío, citas largas y lo que faltaba registrar
 
 - Estado anterior: tercera ronda cerrada en main y en pantalla (dos agentes a la
   vez), `npm run check` completo en verde tras ella (222 archivos, 4511 pruebas y
-  12 omitidas). Seis revisores sobre ella dejaron tres defectos importantes y
-  once menores.
+  12 omitidas). Cinco revisores sobre ella (el «seis» contaba el check) dejaron
+  tres defectos importantes y once menores.
 - Objetivo: cerrarlos, verificando cada uno en el código antes. Sin commit, sin
   push, sin desplegar.
 - Hipótesis o causa demostrada:

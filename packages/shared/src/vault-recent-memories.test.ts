@@ -1,14 +1,12 @@
-// el resumen de las ultimas conversaciones (`D-105`). Todo el texto es inventado.
+// la memoria de las ultimas conversaciones (`D-105`). Todo el texto es inventado.
 import { describe, expect, it } from 'vitest';
 import type { ConversationMemory } from './schemas.js';
 import {
-  RECENT_DECISIONS_CHARS,
-  RECENT_SUMMARY_GAP,
-  RECENT_DECISIONS_LABEL,
-  RECENT_MEMORIES_BLOCK_CHARS,
   RECENT_MEMORY_ENTRY_CHARS,
+  RECENT_SECTION_LABELS,
   condenseRecentMemories,
   pickRecentConversations,
+  type RecentMemoryItem,
 } from './vault-recent-memories.js';
 
 function memoria(over: Partial<ConversationMemory> = {}): ConversationMemory {
@@ -22,6 +20,21 @@ function memoria(over: Partial<ConversationMemory> = {}): ConversationMemory {
     lessons: [],
     ...over,
   };
+}
+
+function item(memory: ConversationMemory, over: Partial<RecentMemoryItem> = {}): RecentMemoryItem {
+  return { date: '2026-09-20', title: 'El puerto', memory, source: 'turn', ...over };
+}
+
+/**
+ * un texto cortado a `n` como lo cortaba el `slice` de antes: a media palabra.
+ * La prueba comprueba que de verdad queda partida antes de usarlo
+ */
+function cortadoA(n: number, base = 'Frase inventada larga '): string {
+  const texto = base.repeat(Math.ceil(n / base.length) + 2);
+  const cortado = texto.slice(0, n);
+  expect(/[a-z]$/.test(cortado) && /[a-z]/.test(texto.charAt(n))).toBe(true);
+  return cortado;
 }
 
 describe('pickRecentConversations', () => {
@@ -47,147 +60,256 @@ describe('pickRecentConversations', () => {
   it('son dos por defecto', () => {
     expect(pickRecentConversations([a, b, c], null)).toHaveLength(2);
   });
+
+  it('con tres se ve la tercera, que es el control de la medida', () => {
+    const elegidas = pickRecentConversations([a, b, c], null, 3);
+    expect(elegidas.map((each) => each.conversationId)).toEqual(['c', 'b', 'a']);
+  });
 });
 
-describe('condenseRecentMemories', () => {
-  it('nunca lleva plan, preguntas abiertas, hechos ni lecciones', () => {
+describe('condenseRecentMemories: la memoria entera (quinta ronda)', () => {
+  it('nunca lleva plan ni preguntas abiertas: son el canal de eco de las promesas', () => {
     const resultado = condenseRecentMemories([
-      {
-        date: 'ayer',
-        title: 'El puerto',
-        memory: memoria({
+      item(
+        memoria({
           decisions: ['Quedaron en escribirse por las mañanas.'],
           plan: ['MARCA-PLAN-UNICA'],
           openQuestions: ['MARCA-PREGUNTA-UNICA'],
-          facts: ['MARCA-HECHO-UNICO'],
-          lessons: ['MARCA-LECCION-UNICA'],
+          facts: ['Hecho inventado del puerto.'],
+          lessons: ['Leccion inventada del puerto.'],
         }),
-      },
+      ),
     ]);
     const todo = JSON.stringify(resultado);
-    for (const marca of ['MARCA-PLAN', 'MARCA-PREGUNTA', 'MARCA-HECHO', 'MARCA-LECCION']) {
-      expect(todo).not.toContain(marca);
-    }
-    expect(resultado.entries[0]?.text).toContain('Quedaron en escribirse por las mañanas.');
-    expect(resultado.stats.decisiones).toBe(1);
-  });
-
-  it('las decisiones van enteras, desde la ultima, sin pasar del tope', () => {
-    const decisiones = Array.from(
-      { length: 8 },
-      (_, index) => `Decision inventada numero ${index} con algo de texto de relleno.`,
-    );
-    const resultado = condenseRecentMemories([
-      { date: 'hoy', title: 't', memory: memoria({ decisions: decisiones }) },
-    ]);
+    expect(todo).not.toContain('MARCA-PLAN');
+    expect(todo).not.toContain('MARCA-PREGUNTA');
     const texto = resultado.entries[0]!.text;
-    const linea = texto.split('\n').find((each) => each.startsWith(RECENT_DECISIONS_LABEL))!;
-    expect(linea.length).toBeLessThanOrEqual(RECENT_DECISIONS_CHARS);
-    // la ultima entra y ninguna va cortada
-    expect(linea).toContain(decisiones[7]);
-    const puestas = linea.slice(RECENT_DECISIONS_LABEL.length).split('; ');
-    for (const puesta of puestas) expect(decisiones).toContain(puesta);
-    expect(puestas.length).toBeLessThan(decisiones.length);
-    expect(resultado.stats.recortadas).toBe(1);
+    expect(texto).toContain('Quedaron en escribirse por las mañanas.');
+    expect(texto).toContain('Hecho inventado del puerto.');
+    expect(texto).toContain('Leccion inventada del puerto.');
   });
 
-  it('el resumen se corta en final de frase', () => {
-    const frase = 'Una frase inventada que ocupa bastante espacio en el resumen. ';
-    const resultado = condenseRecentMemories([
-      { date: 'hoy', title: 't', memory: memoria({ summary: frase.repeat(20).trim() }) },
-    ]);
-    const texto = resultado.entries[0]!.text;
-    expect(texto.length).toBeLessThanOrEqual(RECENT_MEMORY_ENTRY_CHARS);
-    expect(texto.endsWith('resumen.')).toBe(true);
-    expect(resultado.stats.recortadas).toBe(1);
-  });
-
-  // revision del 28/09: antes viajaba el PRINCIPIO y lo ultimo que paso, que en
-  // un resumen acumulativo suele ir al final, se caia siempre
-  it('de un resumen largo viajan la primera frase y las ULTIMAS, con el hueco marcado', () => {
+  it('lo lleva todo entero y en su orden, sin recortar', () => {
     const frases = Array.from(
-      { length: 8 },
-      (_, index) => `Frase inventada numero ${index} con relleno suficiente para ocupar sitio de verdad.`,
+      { length: 12 },
+      (_, i) => `Frase inventada numero ${i} con relleno suficiente para ocupar sitio.`,
     );
+    const hechos = Array.from({ length: 5 }, (_, i) => `Hecho inventado ${i}.`);
+    const decisiones = Array.from({ length: 3 }, (_, i) => `Decision inventada ${i}.`);
+    const lecciones = ['Leccion inventada A.', 'Leccion inventada B.'];
     const resultado = condenseRecentMemories([
-      {
-        date: 'hoy',
-        title: 't',
-        memory: memoria({
+      item(
+        memoria({
           summary: frases.join(' '),
-          decisions: Array.from({ length: 4 }, (_, i) => `Decision inventada ${i} con algo de relleno.`),
+          facts: hechos,
+          decisions: decisiones,
+          lessons: lecciones,
         }),
-      },
+      ),
     ]);
     const texto = resultado.entries[0]!.text;
-    expect(texto.length).toBeLessThanOrEqual(RECENT_MEMORY_ENTRY_CHARS);
-    expect(texto.startsWith(frases[0]!)).toBe(true);
-    expect(texto).toContain(frases[7]);
-    expect(texto).toContain(RECENT_SUMMARY_GAP);
-    expect(texto).not.toContain(frases[1]);
-    // el hueco no es una frase: no se mide como copiada
-    expect(resultado.phrases).toContain(frases[0]);
-    expect(resultado.phrases).toContain(frases[7]);
-    expect(resultado.phrases.some((frase) => frase.includes('…'))).toBe(false);
-    // y cuanto se quedo fuera, en caracteres
-    expect(resultado.stats.fuera).toBeGreaterThan(0);
-    // al resumen le queda sitio para algo mas que una frase
-    expect(texto.split('\n')[0]!.length).toBeGreaterThan(200);
-  });
-
-  it('si la primera no deja sitio, viaja lo del final', () => {
-    const primera = `Una primera frase inventada ${'larguisima '.repeat(40).trim()}.`;
-    const resultado = condenseRecentMemories([
-      {
-        date: 'hoy',
-        title: 't',
-        memory: memoria({ summary: `${primera} La ultima inventada.` }),
-      },
-    ]);
-    expect(resultado.entries[0]!.text).toBe('La ultima inventada.');
-  });
-
-  it('un resumen que cabe entero no se toca ni suma nada a fuera', () => {
-    const resultado = condenseRecentMemories([
-      { date: 'hoy', title: 't', memory: memoria({ summary: 'Corta e inventada. Otra.' }) },
-    ]);
-    expect(resultado.entries[0]!.text).toBe('Corta e inventada. Otra.');
-    expect(resultado.stats.fuera).toBe(0);
-  });
-
-  it('sin final de frase a mano, corta en un espacio y lo marca', () => {
-    const resultado = condenseRecentMemories([
-      { date: 'hoy', title: 't', memory: memoria({ summary: 'palabra '.repeat(150).trim() }) },
-    ]);
-    const texto = resultado.entries[0]!.text;
-    expect(texto.length).toBeLessThanOrEqual(RECENT_MEMORY_ENTRY_CHARS);
-    expect(texto.endsWith('…')).toBe(true);
-  });
-
-  it('respeta 400 por conversacion y 800 en el bloque', () => {
-    const larga = memoria({
-      summary: 'Algo inventado. '.repeat(80).trim(),
-      decisions: Array.from({ length: 12 }, (_, i) => `Acuerdo inventado ${i}.`),
+    expect(texto).toBe(
+      [
+        `${RECENT_SECTION_LABELS.resumen}: ${frases.join(' ')}`,
+        `${RECENT_SECTION_LABELS.hechos}:`,
+        ...hechos.map((h) => `- ${h}`),
+        `${RECENT_SECTION_LABELS.decisiones}:`,
+        ...decisiones.map((d) => `- ${d}`),
+        `${RECENT_SECTION_LABELS.lecciones}:`,
+        ...lecciones.map((l) => `- ${l}`),
+      ].join('\n'),
+    );
+    // el hueco de la version corta ya no existe
+    expect(texto).not.toContain(' … ');
+    expect(resultado.stats).toMatchObject({
+      hechos: 5,
+      decisiones: 3,
+      lecciones: 2,
+      recortadas: 0,
+      fuera: 0,
+      cortadasAlGuardar: 0,
+      huecos: 0,
+      caracteres: texto.length,
     });
-    const resultado = condenseRecentMemories([
-      { date: 'a', title: 'a', memory: larga },
-      { date: 'b', title: 'b', memory: larga },
-      { date: 'c', title: 'c', memory: larga },
-    ]);
-    for (const entry of resultado.entries) {
-      expect(entry.text.length).toBeLessThanOrEqual(RECENT_MEMORY_ENTRY_CHARS);
-    }
-    expect(resultado.stats.caracteres).toBeLessThanOrEqual(RECENT_MEMORIES_BLOCK_CHARS);
   });
 
-  it('las frases para medir salen de lo que viajo', () => {
+  it('las secciones vacias no salen', () => {
+    const texto = condenseRecentMemories([item(memoria({ decisions: ['Una inventada.'] }))])
+      .entries[0]!.text;
+    expect(texto).not.toContain(`${RECENT_SECTION_LABELS.hechos}:`);
+    expect(texto).not.toContain(`${RECENT_SECTION_LABELS.lecciones}:`);
+    expect(texto).toContain(`${RECENT_SECTION_LABELS.decisiones}:\n- Una inventada.`);
+  });
+
+  it('los hechos no se rotulan como caducados: la regla que los separa va en el bloque', () => {
+    const texto = condenseRecentMemories([item(memoria({ facts: ['El la llama capitana.'] }))])
+      .entries[0]!.text;
+    expect(texto).toContain('Hechos:\n- El la llama capitana.');
+    expect(texto).not.toContain('de entonces');
+  });
+
+  it('la memoria mas grande que admite el esquema no pasa de la salvaguarda y el resumen va entero', () => {
+    const lista = (letra: string): string[] =>
+      Array.from({ length: 12 }, (_, i) =>
+        `${letra}${i} ${'relleno inventado '.repeat(13)}`.slice(0, 240).trim(),
+      );
+    const hechos = lista('H');
+    const decisiones = lista('D');
+    const lecciones = lista('L');
+    // 1.168 caracteres: cerca del tope del esquema y sin la huella del `slice`
+    const resumen = `Principio inventado. ${'Relleno del medio inventado. '.repeat(39)}Final inventado.`;
     const resultado = condenseRecentMemories([
-      {
-        date: 'hoy',
-        title: 't',
-        memory: memoria({ summary: 'Primera inventada. Segunda inventada.', decisions: ['Uno.'] }),
-      },
+      item(memoria({ summary: resumen, facts: hechos, decisions: decisiones, lessons: lecciones })),
     ]);
-    expect(resultado.phrases).toEqual(['Primera inventada.', 'Segunda inventada.', 'Uno.']);
+    const texto = resultado.entries[0]!.text;
+    expect(texto.length).toBeLessThanOrEqual(RECENT_MEMORY_ENTRY_CHARS);
+    expect(texto).toContain(resumen);
+    // se va lo MAS VIEJO de cada lista, y lo ultimo que paso se queda
+    for (const listaEntera of [hechos, decisiones, lecciones]) {
+      expect(texto).toContain(`- ${listaEntera[11]!}`);
+    }
+    expect(texto).not.toContain(`- ${lecciones[0]!}`);
+    // ninguna entrada va partida: cada linea de lista es una entrada entera
+    const puestas = texto
+      .split('\n')
+      .filter((l) => l.startsWith('- '))
+      .map((l) => l.slice(2));
+    for (const puesta of puestas) {
+      expect([...hechos, ...decisiones, ...lecciones]).toContain(puesta);
+    }
+    expect(resultado.stats.recortadas).toBe(1);
+    expect(resultado.stats.fuera).toBeGreaterThan(0);
+    expect(resultado.stats.hechos + resultado.stats.decisiones + resultado.stats.lecciones).toBe(
+      puestas.length,
+    );
+  });
+
+  it('a igual antiguedad se quitan antes las lecciones que las decisiones y los hechos', () => {
+    const larga = (letra: string, i: number): string =>
+      `${letra}${i} ${'relleno inventado '.repeat(13)}`.slice(0, 240).trim();
+    const resultado = condenseRecentMemories([
+      item(
+        memoria({
+          summary: 'Corto e inventado.',
+          facts: Array.from({ length: 9 }, (_, i) => larga('H', i)),
+          decisions: Array.from({ length: 9 }, (_, i) => larga('D', i)),
+          lessons: Array.from({ length: 9 }, (_, i) => larga('L', i)),
+        }),
+      ),
+    ]);
+    const texto = resultado.entries[0]!.text;
+    // 27 × ~240 no cabe en 6.000: sale la primera leccion y la primera decision
+    // antes que el primer hecho
+    expect(texto).not.toContain(larga('L', 0));
+    expect(resultado.stats.lecciones).toBeLessThanOrEqual(resultado.stats.hechos);
+  });
+
+  it('el aviso de los tramos sin resumir viaja primero y la salvaguarda no lo quita', () => {
+    const larga = (letra: string, i: number): string =>
+      `${letra}${i} ${'relleno inventado '.repeat(13)}`.slice(0, 240).trim();
+    const resultado = condenseRecentMemories([
+      item(
+        memoria({
+          summary: 'Resumen inventado.',
+          facts: Array.from({ length: 12 }, (_, i) => larga('H', i)),
+          decisions: Array.from({ length: 12 }, (_, i) => larga('D', i)),
+          lessons: Array.from({ length: 12 }, (_, i) => larga('L', i)),
+        }),
+        { source: 'recap', gaps: 2 },
+      ),
+    ]);
+    const texto = resultado.entries[0]!.text;
+    expect(resultado.stats.recortadas).toBe(1);
+    expect(texto.startsWith('De esa conversacion hay 2 tramos que no se pudieron resumir')).toBe(
+      true,
+    );
+    expect(texto).toContain('preguntalo en vez de suponerlo');
+    expect(resultado.stats.huecos).toBe(2);
+    // y el aviso no es una frase de la memoria: no se mide como copiada
+    expect(resultado.phrases.some((f) => f.text.includes('tramos'))).toBe(false);
+  });
+
+  it('un tramo, en singular; sin tramos, sin aviso', () => {
+    const uno = condenseRecentMemories([item(memoria(), { source: 'recap', gaps: 1 })]);
+    expect(uno.entries[0]!.text).toContain('hay 1 tramo que no se pudo resumir');
+    const ninguno = condenseRecentMemories([item(memoria(), { source: 'recap', gaps: 0 })]);
+    expect(ninguno.entries[0]!.text).not.toContain('tramo');
+  });
+
+  it('las frases para medir salen de lo que viajo, con su parte', () => {
+    const resultado = condenseRecentMemories([
+      item(
+        memoria({
+          summary: 'Primera inventada. Segunda inventada.',
+          facts: ['Hecho.'],
+          decisions: ['Uno.'],
+          lessons: ['Leccion.'],
+          plan: ['Plan que no viaja.'],
+        }),
+      ),
+    ]);
+    expect(resultado.phrases).toEqual([
+      { text: 'Primera inventada.', field: 'resumen' },
+      { text: 'Segunda inventada.', field: 'resumen' },
+      { text: 'Hecho.', field: 'hechos' },
+      { text: 'Uno.', field: 'decisiones' },
+      { text: 'Leccion.', field: 'lecciones' },
+    ]);
+  });
+
+  // octava ronda: partia en cada punto y fabricaba frases de medir que no eran
+  it('un punto sin espacio detras, o tras un tratamiento, no cierra frase', () => {
+    const resultado = condenseRecentMemories([
+      item(memoria({ summary: 'Quedaron a las 3.30 en el bar. Sr. Pérez vino. ¡Qué noche!Y ya.' })),
+    ]);
+    expect(resultado.phrases.map((frase) => frase.text)).toEqual([
+      'Quedaron a las 3.30 en el bar.',
+      'Sr. Pérez vino.',
+      '¡Qué noche!Y ya.',
+    ]);
+  });
+});
+
+describe('condenseRecentMemories: la palabra cortada de lo ya guardado', () => {
+  it('un resumen sellado de 1.200 justos que acaba a media palabra se presenta cortado en palabra', () => {
+    const resumen = cortadoA(1200);
+    const resultado = condenseRecentMemories([item(memoria({ summary: resumen }))]);
+    const linea = resultado.entries[0]!.text.split('\n')[0]!;
+    expect(linea.endsWith('…')).toBe(true);
+    // lo de delante del «…» es una palabra entera del texto
+    expect(linea).toMatch(/(Frase|inventada|larga)…$/u);
+    expect(resultado.stats.cortadasAlGuardar).toBe(1);
+    // y la frase partida no se mide como una frase
+    expect(resultado.phrases.some((f) => f.text.endsWith('Frase invent'))).toBe(false);
+  });
+
+  it('uno de 1.200 que acaba en punto no se toca', () => {
+    const resumen = `${cortadoA(1199)}.`;
+    const resultado = condenseRecentMemories([item(memoria({ summary: resumen }))]);
+    expect(resultado.entries[0]!.text).toContain(resumen);
+    expect(resultado.stats.cortadasAlGuardar).toBe(0);
+  });
+
+  it('una entrada sellada de 240 justos, igual', () => {
+    const hecho = cortadoA(240);
+    const resultado = condenseRecentMemories([item(memoria({ facts: [hecho] }))]);
+    expect(resultado.entries[0]!.text).not.toContain(hecho);
+    expect(resultado.stats.cortadasAlGuardar).toBe(1);
+  });
+
+  it('una ficha se guardaba a 160: esa es su huella, no la de 240', () => {
+    const hecho = cortadoA(160, 'Hecho inventado aqui ');
+    const ficha = condenseRecentMemories([item(memoria({ facts: [hecho] }), { source: 'recap' })]);
+    expect(ficha.entries[0]!.text).not.toContain(hecho);
+    expect(ficha.stats.cortadasAlGuardar).toBe(1);
+    // en una memoria sellada 160 no es un tope: se deja como esta
+    const sellada = condenseRecentMemories([item(memoria({ facts: [hecho] }))]);
+    expect(sellada.entries[0]!.text).toContain(hecho);
+    expect(sellada.stats.cortadasAlGuardar).toBe(0);
+  });
+
+  it('lo que no viaja tampoco cuenta como arreglado', () => {
+    const resultado = condenseRecentMemories([item(memoria({ plan: [cortadoA(240)] }))]);
+    expect(resultado.stats.cortadasAlGuardar).toBe(0);
   });
 });

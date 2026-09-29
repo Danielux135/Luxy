@@ -8,11 +8,19 @@
 >    enganche con resumen y promesas— se construyeron en un flujo cuya revisión
 >    independiente NO se hizo** (la autenticación caducó y los siete revisores se
 >    cayeron). Rondas de revisión posteriores encontraron defectos y se
->    corrigieron el 28/09 en cuatro rondas de arreglos, la tercera con su parte
->    de pantalla hecha; **esos arreglos tampoco han tenido revisión
->    independiente**, y la cuarta no ha pasado `npm run check` entero. Antes
->    de pedirle a Daniel `LA-052`, `LA-053` y `LA-054`, lo que toca es esa
->    revisión. Bloque justo debajo.
+>    corrigieron el 28/09 en seis rondas de arreglos. **La tercera, la cuarta y
+>    la quinta tuvieron cada una su revisión de cinco revisores, y las tres
+>    pasaron `npm run check` a solas** (222 archivos; 4511, 4520 y 4531
+>    pruebas); la quinta quedó commiteada en `a45953b`. La sexta cerró lo que
+>    dejó la última revisión; ocho revisores la revisaron junto con 2f, 2g y
+>    2h, y `npm run check` a solas pasó sobre todo ello (29/09: 228 archivos,
+>    4677 pruebas y 12 omitidas). La **séptima** (`REV-CUATRO-FRENTES-001`,
+>    29/09) cerró lo que encontraron; otros ocho revisores la revisaron y su
+>    `npm run check` a solas falló por UNA prueba que pasó del tope de tiempo
+>    (`account-client.test.ts`, que sola pasa). La **octava** (29/09) cierra
+>    eso. **La octava no ha tenido revisión ni `npm run check` entero.** Antes
+>    de pedirle a Daniel `LA-052` a `LA-057`, lo que toca es esa revisión y el
+>    check a solas. Bloques justo debajo.
 > 0. **`SEG-BOVEDA-001`: la bóveda no se cerraba sola. Construido el 25/09
 >    (`D-106`) y corregido el 28/09, SIN verse en pantalla.** Leer ya no cuenta
 >    como actividad, y Win+L, suspender y la X la cierran. Falta `LA-053`, de
@@ -43,6 +51,22 @@
 > 2e. **`F33-PROMESAS-001`: las promesas de vez en cuando (`D-104`), construido
 >    el 25/09 y corregido el 28/09, SIN verse en pantalla ni medirse.** Se prueba
 >    con `LA-054`, y con `LA-045` abierto el tope parecerá no hacer nada.
+> 2f. **`F34-RAZONAMIENTO-001`: el razonamiento por modelo (`D-107`), construido
+>    el 28/09 y corregido el 29/09 en la séptima y la octava ronda. La séptima
+>    tuvo revisión; la octava, NI revisión NI `npm run check` entero. SIN probar
+>    contra la pasarela ni verse en pantalla.** Se prueba con `LA-055`. Bloque
+>    justo debajo del índice.
+> 2g. **`F33-RECUERDO-ENTERO-001`: con la casilla de `D-105` le llega la memoria
+>    entera de sus dos últimas conversaciones (quinta ronda de `D-105`),
+>    construido el 28/09 y corregido el 29/09 en la séptima y la octava ronda;
+>    la octava SIN revisión NI `npm run check` entero, y nada visto en
+>    pantalla.** Se prueba con `LA-056`. Bloque justo debajo del índice.
+> 2h. **`F33-IGUAL-001`: una conversación enganchada queda como una empezada
+>    con su personaje (`D-108`): memoria reescrita con su ficha por el CLI
+>    local, foto de perfil, firma y textos. Construido el 28-29/09 y corregido
+>    el 29/09 en la séptima y la octava ronda; la octava SIN revisión NI `npm
+>    run check` entero, SIN ninguna reescritura real y SIN verse en
+>    pantalla.** Se prueba con `LA-057`. Bloque justo debajo del índice.
 > 3. **Comprobaciones de pantalla de Daniel** de F28, F29-POSTURA-001 y F30. El
 >    índice está en `LOCAL-ACTIONS.md`, `LA-048`; el detalle, en cada bloque.
 > 4. Lo demás. `PROVEEDORES-005`, más abajo, tiene una prueba de diez minutos
@@ -51,9 +75,241 @@
 > `KIMI-K3-EXPERIMENT-001`, al final del archivo, está **abandonado**, no en
 > curso. No lo retomes sin que Daniel lo pida.
 
+## REV-CUATRO-FRENTES-001 — octava ronda: lo que encontró la revisión de la séptima (2026-09-29)
+
+Estado: **corregido el 29/09, sin revisión de esta ronda, sin `npm run check`
+entero, sin `npm run build` y nada visto en pantalla.** Pasados: las pruebas de
+lo tocado y `npm run typecheck` (`TEST-RESULTS.md`).
+
+Ocho revisores (equivalencia, razonamiento, resumen, bóveda, regresión,
+privacidad, pantalla y documentación) sobre la séptima, y un `npm run check` a
+solas que falló por una prueba que pasó del tope de 20 s con la suite cargada.
+Siete defectos importantes. Cada uno se comprobó en el código antes de tocarlo,
+y cada prueba nueva se vio fallar sin su arreglo.
+
+Corregido:
+
+1. **[equivalencia] Una reescrita `ready` no llegaba nunca a sus otras
+   conversaciones** si Daniel no escribía en la enganchada: el resumen de
+   `D-105` solo llevaba la `applied`. Ahora quien la lleva fuera la apunta
+   `applied` antes, por compare-and-set, igual que el turno de su hilo; si no
+   puede, lleva la sellada. El control de `ecoRecientes` no apunta nada.
+2. **[equivalencia] Una pendiente solo se reintentaba con un envío en ella.**
+   Una pasada cortada por un cierre, un reinicio o un fallo local la dejaba
+   «pendiente… en segundo plano» para siempre. Ahora, tras cada envío en
+   Privado, `MemoryRelink.sweep` mira las filas que pueden tener algo pendiente
+   y, una vez por apertura de la bóveda, las enganchadas sin fila. La fila dice
+   cuándo se intenta.
+3. **[razonamiento] Una salida corta salía `hidden`**: por debajo de 64 tokens
+   (`REASONING_JUDGE_MIN_OUTPUT`) sale `unclear`. Es un criterio.
+4. **[resumen] `ecoRecientes` contaba los nombres como raíces**: fuera el de
+   ella (ficha) y los nombres propios que salen en el 30 % de las frases o más
+   (`raicesComunes`, nuevo en el registro). Y las frases de medir ya no se
+   parten en «3.30» ni en «Sr.».
+5. **[regresión] La firma**: con dueño por un turno se firma otra vez como en
+   `a45953b`; en una enganchada, lo escrito con la ficha de OTRO personaje no
+   lleva su nombre (`lastForeignSequence`, `foreignUpTo` en la vista).
+6. **[pantalla] La confirmación del enganche** dice cuál de las dos memorias
+   viaja y que por encima de 6.000 caracteres se quitan las entradas viejas.
+7. **[documentación] El check de la sexta y los tres frentes** (4677, en verde)
+   faltaba en los documentos, y este mismo archivo decía que no se había hecho.
+   Ahora está en `TEST-RESULTS.md`, junto con el de la séptima.
+
+Menores corregidos: «Volver a la de antes» mira otra vez el envío y el turno
+apunta también sobre una `applied`, así que el compare-and-set ve el choque; el
+atajo de `run()` ya no salta una `applied` que aún guarda su texto, y una
+cumplida lo suelta; `reasoningOf` no cuenta dos veces el mismo texto en los dos
+campos; una etiqueta citada entre acentos graves no es razonamiento; la espera
+`turn-image` solo con el proveedor de pago (AI Horde espera como `image`); el
+aviso cuando el tope corta la imagen del turno y lo que le llega a Lía como
+motivo; la prueba del tramo que empieza en Win+L y la de integración del cierre
+durante la imagen; el acuse de «Reescribir» tras «Volver a la de antes»; las
+recortadas dentro de las corregidas; el tooltip «detrás»; el aviso de DeepSeek y
+la pista de razonamiento (más corta, con «Actualizar»); el pie de la casilla de
+`D-105`; `account-client.test.ts` con tope propio; y en los documentos: los
+revisores contados, «sin revisión» donde ya la hubo, «casi 30» minutos, la
+«regla 3» de `D-107`, los umbrales de `D-108` y la quinta ronda de
+`TEST-RESULTS.md` sobre los finales de línea.
+
+No se cambia, con el motivo: la huella del corte con los topes de la ficha
+dentro de una memoria `turn` (deducción sin datos); la ficha vacía en la fila
+(«con su ficha»); `normalizeConversationMemory` se queda con las 12 primeras
+(anterior a esto; cambiarlo cambia qué se sella); `forgetRelink` en una no
+enganchada sigue sin avisar si no puede quitar un resto; las enganchadas con
+`a45953b` se reescriben tras el siguiente mensaje sin haber visto la
+confirmación nueva (lo decide Daniel; anotado en `D-108`).
+
+**Siguiente paso exacto:** la revisión de esta ronda y `npm run check` a solas;
+después `LA-052` a `LA-057`, de Daniel.
+
+## REV-CUATRO-FRENTES-001 — séptima ronda: lo que encontró la revisión de los cuatro frentes (2026-09-29)
+
+Estado: **corregido el 29/09. Después la revisaron ocho revisores y su `npm run
+check` a solas falló por una prueba que pasó del tope de tiempo (4699 en verde,
+1 caída, 12 omitidas); lo que encontraron lo cierra la octava ronda, arriba.**
+Nada visto en pantalla. Pasados entonces: `npm run typecheck`, `eslint` de lo
+tocado y `vitest` de todo `apps/desktop`, `packages/shared` y
+`apps/agent/src/providers` por partes (`TEST-RESULTS.md`).
+
+Ocho revisores (equivalencia, razonamiento, resumen, bóveda, regresión,
+privacidad, pantalla y documentación; aquí decía «cinco») sobre los cuatro
+frentes sin commitear —la sexta ronda de `REV-TRES-ENCARGOS-001`,
+`F34-RAZONAMIENTO-001`, `F33-RECUERDO-ENTERO-001` y `F33-IGUAL-001`—, con un
+`npm run check` a solas en verde sobre ellos (228 archivos, 4677 pruebas y 12
+omitidas), dejaron diez defectos importantes y veintitrés menores (aquí decía
+«veinticuatro»). Cada uno se comprobó en el código antes de tocarlo, y cada
+prueba nueva se comprobó fallando sin su arreglo (21 mutaciones).
+
+Corregido:
+
+1. **[enganche] La guarda dejaba vaciar una memoria corta.** Tres reglas nuevas
+   en `decideRelink`: no más de la mitad de las entradas, ni el resumen ni las
+   entradas por debajo de la mitad, y al menos la mitad de las palabras del
+   resumen. La confirmación lo dice con esas cifras, atadas a `RELINK_LIMITS`.
+2. **[enganche] La ficha retroactiva y el índice no se reescribían.** Una
+   enganchada sin memoria sellada queda `pending`, y se reescribe la primera que
+   se selle. La confirmación y «Lo que recuerda» dicen que mientras tanto viaja
+   la ficha retroactiva. Queda la diferencia de la primera respuesta (`D-108`).
+3. **[enganche] La confirmación prometía que los mensajes de antes dejaban de
+   leerse**: ahora dice que pueden volver transcritos como recuerdos, aquí y en
+   sus otras conversaciones.
+4. **[razonamiento] Falso `hidden` en una vuelta que solo pide herramientas**:
+   ahora `unclear` con menos de 400 caracteres de prosa. No medido.
+5. **[resumen] El control de `ecoRecientes`** quita lo compartido de los dos
+   lados (`excluidasEnviadas`).
+6. **[resumen/enganche] La reescritura recibía la palabra partida**: ahora
+   `repairSlicedMemory`, y el encargo le dice que no complete lo cortado.
+7. **[pantalla] «Reescribir con su ficha» no decía nada**: devuelve en qué acabó,
+   el botón dice «Reescribiendo…», y una pendiente atascada en la sesión ya no
+   promete trabajo en segundo plano.
+8. **[pantalla] Lo añadido y el resumen cambiado** se cuentan en la fila.
+9. **[pantalla] «En Sistema»** era «Registros»; la pista explica los seis
+   veredictos y `hidden` como deducción. También en `LA-055`.
+10. **[documentación] «15 minutos desde el texto»** era falso: cuentan desde que
+    el coordinador ve el tramo. `CLAUDE.md`, `AGENTS.md`, `LA-053`, `D-106`, este
+    archivo y `CHANGELOG-WORK.md`.
+
+Menores corregidos: `<think>` vacío y cierre sin apertura; `DeepSeek-V4.1-Pro`
+fuera de la regla; la nota de DeepSeek y su aviso en Conexiones; el error del
+valor huérfano; el resumen de `D-105` solo lleva la reescrita `applied`; «Lo que
+recuerda» presenta la memoria arreglada; `erasingInFlight` (borrar con un envío
+arrancando en medio, conversación y memoria); `forgetRelink` en una no
+enganchada ya no bloquea el borrado; `removeConversation` sin fila no resella;
+`Soltar` apunta `sin-limpiar`; los motivos de rechazo de las decisiones;
+`ecoRecientesControl` solo con la casilla; `recent-echo.test.ts` vuelve a fijar
+la forma exacta; el pie de la casilla de `D-105`; la cuenta del proveedor de
+pago en el coordinador y `D-106`; que cortar no cancela la imagen; que
+`clipAtWord` cambia también la memoria de las Conversaciones normales;
+`TEST-RESULTS.md` (los finales de línea); `D-107` y la entrada 2f con su estado;
+la regla de `redact()` en `CLAUDE.md` y `AGENTS.md`.
+
+No se cambia, con el motivo (en `D-108` y `D-106`): una `applied` cumplida
+conserva su texto cifrado; `failed`/`discarded` no caducan; la sonda no monta
+`recientes`; cortar la bóveda no cancela la imagen del turno (decisión de
+Daniel); la ficha retroactiva encadenada sigue sin arreglar la palabra.
+
+**Siguiente paso exacto:** hecho —la revisión y el check—; siguió la octava
+ronda, arriba.
+
+## F33-IGUAL-001 — una conversación enganchada, igual que una empezada con su personaje (2026-09-28/29)
+
+Estado: **implementado; revisado por ocho revisores con `npm run check` a solas
+en verde (4677), corregido en la séptima ronda —revisada, y su check cayó por
+tiempo en una prueba ajena— y en la octava, sin revisión ni check. Sin ninguna
+reescritura real hecha por Claude o Codex y sin verse en pantalla.** Decisión:
+`D-108`. Se prueba con `LA-057`.
+
+El criterio es de Daniel: que una conversación que pasa a ser de Lía quede «como
+si hubiese empezado con ella». Diseño y refutación: flujo `wf_b1411ff7-0ef`
+(`disenar:equivalencia`, `refutar:equivalencia`). La construcción la empezó un
+agente el 28/09, que se cortó antes de terminar (flujo `wf_db3de991-06e`), y la
+terminó otro el 29/09 conservando todo lo hecho.
+
+- **La memoria sellada se reescribe con su ficha**, con Claude Code o Codex y la
+  sesión local, en `vault/memory-relink.json`. El `.jsonl` no se toca. Solo vale
+  atada al enganche y a la última memoria sellada exacta; lo que pierde material
+  no se aplica. «Lo que recuerda» enseña en qué quedó, la de antes y los botones
+  «Volver a la de antes» y «Reescribir con su ficha».
+- **La foto de perfil** se copia al enganchar, y se reconoce con
+  `isProfilePhotoOf` (arregla que cualquier imagen generada de ella contara como
+  foto de perfil, también en las nacidas).
+- **La firma**: con dueño, todas las respuestas llevan su nombre (modifica
+  `D-103`).
+- **Un único lector de memoria** (`effectiveSealed`): el turno, la sonda, el
+  resumen de `D-105` y «Lo que recuerda».
+- **Los pendientes si el CLI se niega**: comprobado que no se quedan callados; se
+  fija con una prueba, sin cambiar código.
+- **Los textos**: la pista «Solo en este equipo» y la confirmación, sin sugerir que
+  el resto de la bóveda viaja (`SEG-SYNC-001`).
+- **La sincronización**, fuera de alcance: anotada en `D-108` para
+  `F33-ENGANCHE-001`.
+- **Lo que no se puede igualar** y la confirmación dice: los últimos mensajes
+  viajan literales y se escribieron sin la ficha.
+
+Siguiente paso exacto: `npm run check` **a solas** (con carga, pruebas de
+bóveda caen por tiempo; hoy `conversation-owner.test.ts` pasó de 20 s sola con
+la máquina cargada), y después `LA-057` con Daniel. Hasta verla, nada de esto
+está verificado (`D-093`).
+
+## F33-RECUERDO-ENTERO-001 — la memoria entera de sus dos últimas conversaciones (2026-09-28)
+
+Estado: **implementado el 28/09; revisado por ocho revisores con `npm run
+check` a solas en verde (4677), corregido en la séptima ronda —revisada— y en la
+octava, sin revisión ni check. Sin verse en pantalla** (`TEST-RESULTS.md`).
+
+Daniel decidió que con «Pasarle la memoria de sus dos últimas conversaciones»
+le llegue la memoria entera de cada una, y solo la memoria, no los mensajes.
+Diseño y refutación: flujo `wf_b1411ff7-0ef` (`disenar:resumen-entero`,
+`refutar:resumen-entero`); los once fallos de la refutación quedaron cerrados
+(ver `D-105`, quinta ronda, y `CHANGELOG-WORK.md`).
+
+- Viajan `summary`, `facts`, `decisions` y `lessons` enteros; `plan` y
+  `openQuestions` siguen fuera. Sin los topes de 400/800/160: queda una
+  salvaguarda de 6.000 por conversación que quita lo más viejo primero.
+- Una regla del bloque separa lo que dura (quién es quién, cómo la llama) de lo
+  que era de aquella escena (sitio, hora, ropa).
+- El aviso de tramos sin resumir de una ficha viaja con ella.
+- La palabra cortada: `clipAtWord` en los cinco sitios que la cortaban
+  (incluido `clampRecapMemory`), y `repairSlicedMemory` arregla lo ya guardado
+  al presentarlo, en `recientes` y en el bloque `memoria`.
+- `ecoRecientes` formato 2: `frases`, `porCampo`, `frasesDeUnaRaiz` y un control
+  con la tercera conversación, fijada al montar el prompt, sin lo que también
+  viajó y con el mismo número de frases.
+- Textos de la casilla, la confirmación del enganche, soltar y «Memoria de lo ya
+  hablado».
+
+**Siguiente paso exacto:** `npm run check` a solas junto con lo demás del 28/09;
+luego `LA-056`.
+
+## F34-RAZONAMIENTO-001 — el razonamiento se elige por modelo, y el registro dice si razonó (2026-09-28)
+
+Estado: **implementado el 28/09; revisado por ocho revisores con `npm run
+check` a solas en verde (4677), corregido en la séptima ronda —revisada— y en la
+octava, sin revisión ni check. Sin probar contra la pasarela real**
+(`TEST-RESULTS.md`).
+
+Daniel lo aprobó **para probarlo**: «no estoy seguro de que pueda cambiarse el
+razonamiento de los modelos». Diseño y refutación: flujo `wf_b1411ff7-0ef`
+(`disenar:razonamiento`, `refutar:razonamiento`); los ocho fallos de la
+refutación quedaron cerrados (ver `D-107` y `CHANGELOG-WORK.md`).
+
+- `reasoningMode` (`off`/`low`/`high`) en el muestreo; vacío no manda nada. Por
+  modelo en una conexión y en el nivel superior de un proveedor HTTP (Groq).
+- Tabla en `packages/shared/src/reasoning-control.ts`, nombres enteros y host
+  para Groq. DeepSeek solo se apaga (encenderlo rompe los trabajos con
+  herramientas); GLM-5.3 y kimi-k3 no se apagan; Qwen de la pasarela manda dos
+  formas; Qwen3.8-Flash-Next queda sin regla.
+- Luxy lee ahora `reasoning`, `reasoning_content`, `<think>` en el texto y
+  `reasoning_tokens`, también sin transmisión. La línea «llamada al proveedor»
+  lleva `reasoningVerdict` y `charsPerOutput` siempre.
+- Selector «Razonamiento» en Conexiones, junto a la temperatura.
+
+**Siguiente paso exacto:** `npm run check` a solas junto con lo demás del 28/09;
+luego `LA-055`.
+
 ## REV-TRES-ENCARGOS-001 — revisión de los tres encargos del 25/09, y sus arreglos (2026-09-28)
 
-Estado: **cuatro rondas de arreglos el 28/09. Tras la tercera (main, shared, documentos y pantalla), `npm run check` completo en verde: 222 archivos, 4511 pruebas y 12 omitidas, salida 0. La cuarta (bloque «Cuarta ronda», abajo) solo con las pruebas de lo tocado, el typecheck y el lint de esos archivos.** Sobre las dos primeras: **dos rondas de arreglos hechas el 28/09. `npm run check` en verde tras la segunda (220 archivos, 4489 pruebas en verde y 12 omitidas, 4501; salida 0); el verde de la primera ronda (4475) no se reprodujo: una prueba con un temporizador fijo fallaba con la suite entera. Ninguna de las dos rondas ha
+Estado: **seis rondas de arreglos el 28/09. La corrección hizo tres rondas de cinco revisores, una tras cada ronda de arreglos de la tercera a la quinta, y las tres pasaron `npm run check` a solas: 222 archivos y 4511, 4520 y 4531 pruebas (12 omitidas); la última quedó commiteada en `a45953b`. La sexta (bloque «Sexta ronda», abajo) solo con las pruebas de lo tocado, el typecheck y el lint de esos archivos; sin revisión.** (Hasta la sexta ronda esta línea decía «cuatro rondas» y que la cuarta no había pasado el check: estaba desfasada.) Sobre las dos primeras: **dos rondas de arreglos hechas el 28/09. `npm run check` en verde tras la segunda (220 archivos, 4489 pruebas en verde y 12 omitidas, 4501; salida 0); el verde de la primera ronda (4475) no se reprodujo: una prueba con un temporizador fijo fallaba con la suite entera. Ninguna de las dos rondas ha
 tenido revisión independiente, y nada se ha visto en pantalla.**
 
 **Qué pasó.** Un flujo construyó `SEG-BOVEDA-001` (`D-106`),
@@ -284,9 +540,10 @@ entre esa y `vault-character-link.test.ts`, y `tsc` del renderer sin errores.
 
 ### Cuarta ronda del 28/09
 
-Seis revisores sobre la tercera. Un agente comprobó cada defecto en el código
-antes de tocarlo. **Sin revisión independiente, sin `npm run check` entero y nada
-visto en Electron.**
+Cinco revisores sobre la tercera, y un `npm run check` a solas (el «seis» de
+antes contaba el check). Un agente comprobó cada defecto en el código antes de
+tocarlo. Después la revisaron otros cinco revisores y pasó `npm run check` a
+solas (222 archivos, 4520 pruebas y 12 omitidas). **Nada visto en Electron.**
 
 Corregido, con prueba (de las seis nuevas de los puntos 1 y 2, cuatro comprobadas
 FALLANDO sin el arreglo: dos de `sync.test.ts` y las dos de
@@ -332,15 +589,18 @@ palabra (mirar, tocar, pasar, bañar, beber, comer) no se unen.
 
 **Siguiente paso exacto:** `npm run check` completo y la revisión independiente
 de las cuatro rondas; después, `LA-052`, `LA-053` y `LA-054`, de Daniel.
-(Hecho después: la revisión de la cuarta ronda y un `npm run check` en verde,
-4520 pruebas y 12 omitidas, los pasó quien coordina; de ahí sale la quinta.)
+(Hecho después: la revisión de la cuarta ronda, cinco revisores, y un `npm run
+check` a solas en verde, 222 archivos, 4520 pruebas y 12 omitidas, los pasó quien
+coordina; de ahí sale la quinta.)
 
 ### Quinta ronda del 28/09
 
-Seis revisores sobre la cuarta: ninguno encontró nada que rompa. Dos defectos
+Cinco revisores sobre la cuarta, y un `npm run check` a solas (el «seis» de
+antes contaba el check): ninguno encontró nada que rompa. Dos defectos
 importantes, los dos en «ya salió», y menores. Un agente los comprobó en el
-código antes de tocarlos. **Sin revisión independiente, sin `npm run check`
-entero y nada visto en Electron.**
+código antes de tocarlos. Después la revisaron otros cinco revisores y pasó
+`npm run check` a solas (222 archivos, 4531 pruebas y 12 omitidas); commiteada en
+`a45953b`. **Nada visto en Electron.**
 
 Corregido, con prueba:
 
@@ -373,8 +633,72 @@ precio~preciosa, por la regla del prefijo); la ficha vigente que llega sin aviso
 una conversación sin ficha sellada, y el texto «tu mensaje no se ha guardado»
 cuando la retirada no casa (ya ningún camino conocido lo alcanza).
 
-**Siguiente paso exacto:** `npm run check` completo y la revisión independiente
-de la quinta ronda; después, `LA-052`, `LA-053` y `LA-054`, de Daniel.
+**Siguiente paso exacto:** hecho —la revisión (cinco revisores) y el `npm run
+check` a solas, 4531 pruebas—; de ahí sale la sexta.
+
+### Sexta ronda del 28/09
+
+Lo que dejó la revisión de la quinta (`r3:*`): dos defectos importantes y
+menores. Un agente los comprobó en el código antes de tocarlos. **Revisada
+después por ocho revisores junto con 2f, 2g y 2h, con `npm run check` a solas en
+verde (29/09: 228 archivos, 4677 pruebas y 12 omitidas; aquí decía «sin
+revisión, sin check»). Nada visto en Electron.**
+
+Corregido, con prueba comprobada fallando sin el arreglo:
+
+1. **[importante] Win+L tiraba la imagen del turno, ya pagada.** Tras guardar el
+   texto, el envío soltaba `reply` y arrancaba la imagen; el cierre aplazado se
+   cumplía en la vuelta siguiente del reloj y la imagen, cobrada, no se podía
+   guardar. Decisión de quien coordina, con el propósito de `D-106`: el
+   aplazamiento cubre también esa imagen, como tercera clase de espera
+   (`turn-image`), con tope de 15 minutos desde que el coordinador ve ese tramo
+   (desde el texto guardado o, si Win+L llega después, desde Win+L; corregido
+   en la séptima ronda, aquí decía «desde que el texto queda guardado»), y
+   después cierra. La `image` del panel sigue sin aplazar nada. Código en
+   `vault-lock-coordinator.ts`, `vault-service.ts` y `handlers.ts`; pruebas en
+   `vault-lock-coordinator.test.ts` (tres) y `private-turn-image.test.ts`; la
+   regla, igual en `CLAUDE.md`, `AGENTS.md`, `D-106`, `LA-053` y el comentario
+   del coordinador.
+2. **[importante] Los documentos se contradecían sobre la verificación.** Este
+   bloque, la entrada del archivo, `CHANGELOG-WORK.md`, `PROJECT-STATE.md`,
+   `MASTER-PLAN.md`, `TEST-RESULTS.md` y `D-106` dicen ahora lo mismo: la corrección hizo tres rondas de cinco revisores, una tras cada ronda de
+arreglos de la tercera a la quinta, y las tres pasaron `npm run check` a solas:
+222 archivos y 4511, 4520 y 4531 pruebas (12 omitidas); la última quedó
+commiteada en `a45953b`.
+3. **[importante] La cifra de `LA-054`.** `herMentionsClear` es una COTA
+   SUPERIOR, no «cuántas habrían llevado la nota»: lo dicen `LA-054`, el JSDoc
+   del campo (y el del esquema) y el texto de pantalla («lo dijeron lo bastante
+   claro para la nota; como mucho»).
+4. **Borrar una conversación con un envío en vuelo** la resucitaba con solo la
+   respuesta de ella; ahora se rechaza, como olvidar la memoria. Prueba en
+   `private-turn-vault-lock.test.ts`.
+5. **Comprobado, ya estaba**: si `runLocalTurn` LANZA con la bóveda abierta, el
+   envío retira el mensaje una sola vez (`retireUnansweredTurn`, desde la cuarta
+   ronda). Dos pruebas más: el primer mensaje, y una línea ajena detrás, que no
+   se toca.
+6. **«Ya salió», menores** (`raise-roots.ts`): «llegué», «busqué», «empecé» y
+   «pagué» se unen con su verbo; la tabla de pagar genera «pague» y no «page»;
+   «leer» entra en la tabla; en un verbo de la tabla no vale el prefijo, que unía
+   «te cuento» con «cuéntame». Con el texto inventado del revisor: paráfrasis 40
+   de 48 (antes 38), adversarias 3 de 45 (antes 4), neutras y cruzadas 0.
+7. **Textos que decían «el prompt de siempre» con todo apagado**: `ipc.ts`,
+   `useVault.ts`, `handlers.ts`, `ipc.test.ts` y una nota en `D-102` dicen ahora
+   que la casilla apagada no añade nada, no que el prompt sea el de antes.
+8. **Menores de documentos y comentarios**: el motivo falso del rechazo del
+   segundo envío (salir de Privado no reinicia `sending`; recargar la ventana
+   sí); `D-106` con su quinta ronda como bloque propio; `D-104` sobre quién
+   pierde el «QUIÉN ERES»; los comentarios de `sync.ts` sobre lo que se aplaza;
+   el de `whileUserWaits`; el título de `F33-RECUERDO-001`.
+9. **«¿Es de Rosa?» al principio de una línea**: el troceo de
+   `vault-character-link.ts` quitaba el salto de línea antes de mirarlo; ahora
+   solo quita espacios y tabuladores, y la raya de diálogo también empieza frase.
+   Prueba en `vault-character-link.test.ts`.
+
+**No se cambia, con el motivo:** `docs/PENDIENTES-DISENO.md` en LF
+(`core.autocrlf` lo normaliza al guardar en git).
+
+**Siguiente paso exacto:** `npm run check` a solas y la revisión de la sexta
+ronda; después, `LA-052`, `LA-053` y `LA-054`, de Daniel.
 
 ## F33-PROMESAS-001 — las promesas, de vez en cuando (2026-09-25; corregido el 2026-09-28)
 
@@ -418,13 +742,15 @@ sigue siendo la línea base).
 **Siguiente paso exacto:** la revisión de `REV-TRES-ENCARGOS-001`; después,
 `LA-054`, de Daniel.
 
-## F33-ENGANCHE-LOCAL-001 y F33-RECUERDO-001 — enganchar en este equipo, y que Lía recuerde desde las demás (2026-09-25)
+## F33-ENGANCHE-LOCAL-001 y F33-RECUERDO-001 — enganchar en este equipo, y un resumen corto de sus dos últimas conversaciones (2026-09-25)
 
 Estado: **construido, sin revisión independiente del flujo y corregido el 28/09
-en cuatro rondas (`REV-TRES-ENCARGOS-001`), NADA visto en pantalla.** El «`npm
+en seis rondas (`REV-TRES-ENCARGOS-001`), NADA visto en pantalla.** El «`npm
 run check` en verde (213 archivos, 4396 pruebas)» que decía esta línea era el del
-25/09 y no cubre los arreglos; el último completo es el de tras la tercera ronda
-(222 archivos, 4511 pruebas y 12 omitidas), y la cuarta no lo ha pasado entero. Relevan la parte local de `F33-ENGANCHE-001`;
+25/09 y no cubre los arreglos. La corrección hizo tres rondas de cinco revisores, una tras cada ronda de
+arreglos de la tercera a la quinta, y las tres pasaron `npm run check` a solas:
+222 archivos y 4511, 4520 y 4531 pruebas (12 omitidas); la última quedó
+commiteada en `a45953b`. La sexta no lo ha pasado entero. Relevan la parte local de `F33-ENGANCHE-001`;
 la del servidor sigue sin construir. Decisiones `D-103` (el dueño) y `D-105` (el
 resumen). Prueba de Daniel: `LA-052`.
 

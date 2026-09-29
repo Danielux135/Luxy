@@ -39,6 +39,7 @@ import {
   PROVIDER_SILENCE_TIMEOUT_MS,
   SOFT_TERMINAL_GRACE_MS,
   TERMINAL_GRACE_MS,
+  type HttpProviderConfig,
   type ProviderRunRequest,
   type ProviderCallRecord,
 } from '@luxy/shared';
@@ -2940,6 +2941,390 @@ describe('HttpApiProvider: parametros de muestreo', () => {
       expect(suyo.body()?.['temperature']).toBe(1.3);
     });
   });
+});
+
+// D-107: el razonamiento por modelo. Se añadio PARA PROBARLO: lo que se fija
+// aqui es que vacio no cambie ni una clave del cuerpo, que solo viaje lo que la
+// tabla traduce, que Luxy LEA el razonamiento venga por donde venga, y que el
+// veredicto de si razono llegue a disco con cifras y sin tapar.
+describe('HttpApiProvider: control del razonamiento', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const base = { ...EXAMPLE_HTTP_PROVIDERS[0]!, enabled: true, supportsStreaming: false };
+
+  const peticion = (overrides: Partial<ProviderRunRequest> = {}): ProviderRunRequest => ({
+    prompt: 'hola',
+    workingDirectory: 'C:/wt',
+    timeoutMs: 30_000,
+    signal: new AbortController().signal,
+    readOnly: true,
+    onEvent: () => undefined,
+    ...overrides,
+  });
+
+  /** responde siempre con un mensaje entero y guarda el ultimo cuerpo enviado */
+  function espiar(
+    respuesta: Record<string, unknown> = {
+      choices: [{ message: { content: 'listo' }, finish_reason: 'stop' }],
+      usage: { prompt_tokens: 4, completion_tokens: 2 },
+    },
+  ): { body: () => Record<string, unknown> | null } {
+    let sent: Record<string, unknown> | null = null;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (_url, init) => {
+      sent = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      return new Response(JSON.stringify(respuesta), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    });
+    return { body: () => sent };
+  }
+
+  /** un flujo SSE cerrado con `[DONE]` */
+  function flujo(lineas: string[]): Response {
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (const linea of lineas) controller.enqueue(new TextEncoder().encode(`${linea}\n`));
+        controller.enqueue(new TextEncoder().encode('data: [DONE]\n'));
+        controller.close();
+      },
+    });
+    return new Response(body, { status: 200 });
+  }
+
+  function registrar(config: HttpProviderConfig): {
+    provider: HttpApiProvider;
+    lineas: ProviderCallRecord[];
+  } {
+    const lineas: ProviderCallRecord[] = [];
+    const provider = new HttpApiProvider(
+      config,
+      'una-clave',
+      new MemoryBudgetStore(),
+      undefined,
+      (record) => lineas.push(record),
+    );
+    return { provider, lineas };
+  }
+
+  it('apagar DeepSeek-V4-Flash añade exactamente `thinking`, y a otro modelo nada', async () => {
+    const porModelo = {
+      ...base,
+      modelSampling: { 'DeepSeek-V4-Flash': { reasoningMode: 'off' as const } },
+    };
+
+    const suyo = espiar();
+    expect(
+      (
+        await new HttpApiProvider(porModelo, 'una-clave').run(
+          peticion({ model: 'DeepSeek-V4-Flash' }),
+        )
+      ).ok,
+    ).toBe(true);
+    expect(Object.keys(suyo.body() ?? {}).sort()).toEqual([
+      'max_tokens',
+      'messages',
+      'model',
+      'stream',
+      'thinking',
+    ]);
+    expect(suyo.body()?.['thinking']).toEqual({ type: 'disabled' });
+
+    const otro = espiar();
+    expect(
+      (
+        await new HttpApiProvider(porModelo, 'una-clave').run(
+          peticion({ model: 'DeepSeek-V4-Pro' }),
+        )
+      ).ok,
+    ).toBe(true);
+    expect(Object.keys(otro.body() ?? {}).sort()).toEqual([
+      'max_tokens',
+      'messages',
+      'model',
+      'stream',
+    ]);
+  });
+
+  it('tambien por el camino con herramientas', async () => {
+    const espia = espiar();
+    const provider = new HttpApiProvider(
+      { ...base, modelSampling: { 'DeepSeek-V4-Flash': { reasoningMode: 'off' } } },
+      'una-clave',
+    );
+    const result = await provider.run({
+      ...peticion({ readOnly: false, model: 'DeepSeek-V4-Flash' }),
+      agentic: {
+        runner: { execute: vi.fn(async () => ({ ok: true, content: 'ok' })) },
+        allowedTools: ['write_file'],
+        limits: modelLimitsSchema.parse({}),
+        useNativeTools: true,
+      },
+    });
+    expect(result.ok).toBe(true);
+    expect(espia.body()?.['thinking']).toEqual({ type: 'disabled' });
+  });
+
+  it('un modelo sin regla no recibe nada aunque el valor este guardado, y el registro lo dice', async () => {
+    const espia = espiar();
+    const { provider, lineas } = registrar({
+      ...base,
+      modelSampling: { 'step-5-preview': { reasoningMode: 'off' } },
+    });
+    expect((await provider.run(peticion({ model: 'step-5-preview' }))).ok).toBe(true);
+    expect(Object.keys(espia.body() ?? {}).sort()).toEqual([
+      'max_tokens',
+      'messages',
+      'model',
+      'stream',
+    ]);
+    expect(lineas[0]).toMatchObject({ reasoningMode: 'off', reasoningSent: 'not_sent' });
+  });
+
+  it('Groq en providers.http: el nivel superior llega, y solo en su host', async () => {
+    const groq = {
+      ...base,
+      id: 'groq',
+      baseUrl: 'https://api.groq.com/openai/v1',
+      model: 'qwen/qwen3.8-27b',
+      reasoningMode: 'low' as const,
+    };
+    const espia = espiar();
+    const { provider, lineas } = registrar(groq);
+    expect((await provider.run(peticion())).ok).toBe(true);
+    expect(espia.body()).toMatchObject({ reasoning_effort: 'low', reasoning_format: 'parsed' });
+    expect(lineas[0]).toMatchObject({
+      reasoningMode: 'low',
+      reasoningSent: 'reasoning_effort+reasoning_format',
+    });
+
+    // el mismo nombre en otro servidor no recibe el dialecto de Groq
+    const fuera = espiar();
+    const otro = new HttpApiProvider(
+      { ...groq, baseUrl: 'https://openrouter.ai/api/v1' },
+      'una-clave',
+    );
+    expect((await otro.run(peticion())).ok).toBe(true);
+    expect('reasoning_effort' in (fuera.body() ?? {})).toBe(false);
+  });
+
+  it('sin elegir nada la linea no gana claves de configuracion, pero SI el veredicto', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
+      flujo([
+        'data: {"choices":[{"delta":{"content":"Hola"}}]}',
+        'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}',
+        'data: {"choices":[],"usage":{"prompt_tokens":10,"completion_tokens":120}}',
+      ]),
+    );
+    const { provider, lineas } = registrar({ ...base, supportsStreaming: true });
+    expect((await provider.run(peticion())).ok).toBe(true);
+
+    const linea = lineas[0]!;
+    expect('reasoningMode' in linea).toBe(false);
+    expect('reasoningSent' in linea).toBe(false);
+    // 4 caracteres para 120 tokens: lo que no se vio es casi todo
+    expect(linea).toMatchObject({
+      reasoningField: null,
+      reasoningTagChars: 0,
+      toolArgChars: 0,
+      reasoningTokensReported: 0,
+      charsPerOutput: 0.03,
+      reasoningVerdict: 'hidden',
+    });
+  });
+
+  it('lee el razonamiento que llega en `reasoning` (vLLM, Groq)', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
+      flujo([
+        'data: {"choices":[{"delta":{"reasoning":"privado que no sale"}}]}',
+        'data: {"choices":[{"delta":{"content":"Hola"},"finish_reason":"stop"}]}',
+        'data: {"choices":[],"usage":{"prompt_tokens":10,"completion_tokens":12}}',
+      ]),
+    );
+    const { provider, lineas } = registrar({ ...base, supportsStreaming: true });
+    const result = await provider.run(peticion());
+    expect(result.finalText).toBe('Hola');
+    expect(lineas[0]).toMatchObject({
+      reasoningChars: 'privado que no sale'.length,
+      reasoningField: 'reasoning',
+      reasoningVerdict: 'visible',
+    });
+  });
+
+  it('cuenta el razonamiento entre <think> dentro del texto', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
+      flujo([
+        'data: {"choices":[{"delta":{"content":"<think>abcdef</think>Hola"},"finish_reason":"stop"}]}',
+        'data: {"choices":[],"usage":{"prompt_tokens":10,"completion_tokens":8}}',
+      ]),
+    );
+    const { provider, lineas } = registrar({ ...base, supportsStreaming: true });
+    expect((await provider.run(peticion())).ok).toBe(true);
+    expect(lineas[0]).toMatchObject({
+      reasoningTagChars: 6,
+      reasoningField: 'think',
+      reasoningVerdict: 'visible',
+    });
+  });
+
+  it('sin transmision tambien se lee el razonamiento y lo que declara el consumo', async () => {
+    // antes las dos ramas sin flujo no contaban ningun campo de razonamiento
+    espiar({
+      choices: [{ message: { content: 'listo', reasoning_content: 'abc' }, finish_reason: 'stop' }],
+      usage: {
+        prompt_tokens: 4,
+        completion_tokens: 30,
+        completion_tokens_details: { reasoning_tokens: 25 },
+      },
+    });
+    const { provider, lineas } = registrar(base);
+    expect((await provider.run(peticion())).ok).toBe(true);
+    expect(lineas[0]).toMatchObject({
+      reasoningChars: 3,
+      reasoningField: 'reasoning_content',
+      reasoningTokensReported: 25,
+      reasoningVerdict: 'counted',
+    });
+  });
+
+  it('una vuelta que solo pide una herramienta no sale como «oculto»', async () => {
+    // dos: la de antes, con un cociente alto puesto a mano, y una corta de
+    // verdad —`read_file` con `{"path":"src/a.ts"}`—, donde la envoltura de la
+    // llamada gasta tokens que no llegan como texto y el cociente cae a 1,12
+    // (septima ronda). Las dos salen `unclear`: con tan poca prosa no se puede
+    // decir
+    for (const caso of [
+      {
+        name: 'write_file',
+        argumentos: JSON.stringify({ path: 'notas/archivo-de-prueba.txt', content: 'x'.repeat(120) }),
+        tokens: 60,
+      },
+      { name: 'read_file', argumentos: JSON.stringify({ path: 'src/a.ts' }), tokens: 25 },
+    ]) {
+      await unaVueltaDeHerramienta(caso);
+    }
+  });
+
+  async function unaVueltaDeHerramienta(caso: {
+    name: string;
+    argumentos: string;
+    tokens: number;
+  }): Promise<void> {
+    vi.restoreAllMocks();
+    const argumentos = caso.argumentos;
+    let vuelta = 0;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+      vuelta += 1;
+      const cuerpo =
+        vuelta === 1
+          ? {
+              choices: [
+                {
+                  message: {
+                    content: '',
+                    tool_calls: [
+                      {
+                        id: 'c1',
+                        type: 'function',
+                        function: { name: caso.name, arguments: argumentos },
+                      },
+                    ],
+                  },
+                  finish_reason: 'tool_calls',
+                },
+              ],
+              usage: { prompt_tokens: 50, completion_tokens: caso.tokens },
+            }
+          : {
+              choices: [{ message: { content: 'hecho' }, finish_reason: 'stop' }],
+              usage: { prompt_tokens: 60, completion_tokens: 2 },
+            };
+      return new Response(JSON.stringify(cuerpo), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    });
+    const { provider, lineas } = registrar(base);
+    const result = await provider.run({
+      ...peticion({ readOnly: false }),
+      agentic: {
+        runner: { execute: vi.fn(async () => ({ ok: true, content: 'ok' })) },
+        allowedTools: [caso.name as 'write_file' | 'read_file'],
+        limits: modelLimitsSchema.parse({}),
+        useNativeTools: true,
+      },
+    });
+    expect(result.ok).toBe(true);
+    const primera = lineas[0]!;
+    expect(primera.toolArgChars).toBe(caso.name.length + argumentos.length);
+    expect(primera.reasoningVerdict).toBe('unclear');
+    expect(primera.charsPerOutput).toBe(
+      Math.round(((caso.name.length + argumentos.length) / caso.tokens) * 100) / 100,
+    );
+  }
+
+  it('agotar la salida sin un caracter visible sugiere «Sin razonar»', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
+      flujo([
+        'data: {"choices":[{"delta":{},"finish_reason":"length"}]}',
+        'data: {"choices":[],"usage":{"prompt_tokens":321,"completion_tokens":8192}}',
+      ]),
+    );
+    const provider = new HttpApiProvider({ ...base, supportsStreaming: true }, 'una-clave');
+    const result = await provider.run(peticion({ maxOutputTokens: 8192 }));
+    expect(result.ok).toBe(false);
+    expect(result.errorMessage).toContain('Probablemente razono sin enseñarlo');
+    expect(result.errorMessage).toContain('Sin razonar');
+  });
+
+  it('la linea ESCRITA conserva los campos de razonamiento sin redactar', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
+      flujo([
+        'data: {"choices":[{"delta":{"reasoning_content":"x"}}]}',
+        'data: {"choices":[{"delta":{"content":"Hola"},"finish_reason":"stop"}]}',
+        'data: {"choices":[],"usage":{"prompt_tokens":10,"completion_tokens":5,"completion_tokens_details":{"reasoning_tokens":1}}}',
+      ]),
+    );
+    const carpeta = mkdtempSync(join(tmpdir(), 'luxy-razonamiento-'));
+    try {
+      const logger = new AgentLogger('info', carpeta, false);
+      const lineas: ProviderCallRecord[] = [];
+      const provider = new HttpApiProvider(
+        {
+          ...base,
+          supportsStreaming: true,
+          modelSampling: { 'Qwen3.8-27B': { reasoningMode: 'off' } },
+        },
+        'una-clave',
+        new MemoryBudgetStore(),
+        undefined,
+        (record) => {
+          lineas.push(record);
+          logger.info(PROVIDER_CALL_LOG_MESSAGE, { ...record });
+        },
+      );
+      await provider.run(peticion({ model: 'Qwen3.8-27B' }));
+
+      const contenido = readFileSync(join(carpeta, 'luxy.log'), 'utf8').trim();
+      const escrita = JSON.parse(contenido.split('\n')[0]!) as Record<string, unknown>;
+      const registro = lineas[0]! as unknown as Record<string, unknown>;
+      for (const clave of Object.keys(registro)) {
+        expect(escrita[clave], clave).toBe(registro[clave]);
+      }
+      expect(escrita).toMatchObject({
+        reasoningMode: 'off',
+        reasoningSent: 'enable_thinking+chat_template_kwargs',
+        reasoningField: 'reasoning_content',
+        reasoningTokensReported: 1,
+        charsPerOutput: 0.8,
+        reasoningVerdict: 'counted',
+      });
+    } finally {
+      rmSync(carpeta, { recursive: true, force: true });
+    }
+  }, 15_000);
 });
 
 // los cuatro rangos son DISTINTOS, y confundirlos manda a la pasarela un valor

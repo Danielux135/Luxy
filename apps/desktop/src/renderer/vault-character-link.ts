@@ -8,6 +8,7 @@
 //
 // El aviso «¿Es de Lia?» se calcula aqui y NO se registra en ningun sitio: mira
 // solo los mensajes de Daniel y el borrador, y su descarte vive en memoria.
+import { RECENT_MEMORY_ENTRY_CHARS, VAULT_RECENT_TURNS } from '@luxy/shared';
 
 /** lo que el proceso principal dice del dueño de la conversacion abierta */
 export interface OwnerView {
@@ -15,6 +16,8 @@ export interface OwnerView {
   label: string | null;
   signedAfter: number | null;
   linkedAt: string | null;
+  /** hasta que secuencia se escribio con OTRO personaje: esas no se firman */
+  foreignUpTo?: number;
 }
 
 /** lo que la confirmacion necesita, calculado en main antes de enseñarla */
@@ -23,6 +26,8 @@ export interface OwnerChangePreview {
   turns: number;
   instructionsOutcome: 'character' | 'own' | 'none' | 'removed' | 'kept';
   hasOwnMemory: boolean;
+  /** sin memoria propia, viaja su ficha retroactiva o su indice, escritos sin la ficha */
+  inheritedMemory: boolean;
   recentMemoriesOn: boolean;
   excluded: boolean;
   backgroundCli: 'claude' | 'codex';
@@ -153,9 +158,12 @@ function tokenize(text: string): Token[] {
   let previousEnd = 0;
   for (const match of clean.matchAll(/\p{L}+/gu)) {
     const index = match.index;
-    const gap = clean.slice(previousEnd, index).trimEnd();
+    // solo espacios y tabuladores: `trimEnd()` quitaba tambien el salto de
+    // linea, y una linea nueva sin punto delante no contaba como inicio de
+    // frase. La raya abre una intervencion de dialogo (revision del 28/09)
+    const gap = clean.slice(previousEnd, index).replace(/[ \t]+$/u, '');
     const sentenceStart =
-      gap.length === 0 ? tokens.length === 0 : '.!?¡¿:\n'.includes(gap.slice(-1));
+      gap.length === 0 ? tokens.length === 0 : '.!?¡¿:\n—'.includes(gap.slice(-1));
     tokens.push({
       raw: match[0],
       norm: normalizeToken(match[0]),
@@ -311,9 +319,11 @@ const CLI_NAMES: Record<OwnerChangePreview['backgroundCli'], string> = {
  * la frase de la casilla, tal y como sale en la ficha.
  *
  * Decia «Recordar sus dos últimas conversaciones», y no las recuerda: le llega
- * un resumen corto de cada una (`D-105`, `D-093`; revision del 28/09)
+ * lo que se apuntó de cada una (`D-105`, `D-093`). Fue «un resumen corto»
+ * mientras viajaban 400 caracteres; desde la quinta ronda le llega la memoria
+ * entera, sin el plan ni las preguntas en el aire
  */
-export const RECENT_MEMORIES_CHECKBOX = 'Pasarle un resumen corto de sus dos últimas conversaciones';
+export const RECENT_MEMORIES_CHECKBOX = 'Pasarle la memoria de sus dos últimas conversaciones';
 
 /**
  * lo que pasa al enganchar, un parrafo por elemento.
@@ -348,27 +358,68 @@ export function describeCharacterLink(
         `Desde ya, esta conversación es de ${label}, entera: también sus ${preview.turns} mensajes anteriores. Sale en su grupo, pero su ficha está vacía: desde tu próximo mensaje aquí se responde sin ninguna descripción de quién es${instructions} Si rellenas su ficha, le llega desde el mensaje siguiente.`,
   );
 
-  if (preview.hasOwnMemory) {
+  // la memoria sellada se escribio sin la ficha: es la diferencia que la
+  // reescritura cierra (`D-108`). Lo que se le PIDE al CLI y lo que hace el
+  // codigo si no sale bien, no lo que el modelo vaya a hacer (`D-093`)
+  if (preview.hasOwnMemory && !preview.excluded) {
+    // con la ficha vacia el encargo no lleva descripcion (`buildMemoryRelinkPrompt`):
+    // solo se puede corregir el nombre, y decir «con su ficha» seria prometer mas
+    const encargo = character.hasDescription
+      ? 'Se va a reescribir con su ficha'
+      : 'Se va a reescribir con su nombre (su ficha está vacía)';
+    const cambios = character.hasDescription
+      ? 'que solo cambie cómo se la nombra y lo que su ficha contradiga'
+      : 'que solo cambie cómo se la nombra';
     paragraphs.push(
-      `La memoria que se fue escribiendo en esta conversación la escribió el modelo sin su ficha: no tenía la descripción de ${label}. Puedes verla y borrarla en «Lo que recuerda»; borrarla solo afecta a este equipo.`,
+      `La memoria que se fue escribiendo en esta conversación la escribió el modelo sin la ficha de ${label}. ${encargo}, en segundo plano, con ${CLI_NAMES[preview.backgroundCli]} y tu sesión: una llamada más, en la misma cola que los pendientes. Se le pide ${cambios}, y que deje igual lo que pasó entre vosotros. Si ${CLI_NAMES[preview.backgroundCli]} se niega, o la reescrita quita o recorta más de dos entradas o más de la mitad de las que había, o deja el resumen o el resto en menos de la mitad, o acorta mucho el resumen o el resto, o cambia la mayor parte de las palabras del resumen, no se aplica y sigue valiendo la de ahora. Si quita o recorta una o dos, sin pasar de la mitad, se aplica igual: eso deja de viajar. Lo que añada también se aplica, y en «Lo que recuerda» se cuenta. Hasta que esté lista, sigue valiendo la de ahora. En «Lo que recuerda» verás en qué quedó, y podrás volver a la de antes hasta que un mensaje tuyo aquí guarde memoria nueva.`,
+    );
+  } else if (preview.hasOwnMemory) {
+    paragraphs.push(
+      `La memoria que se fue escribiendo en esta conversación la escribió el modelo sin la ficha de ${label}, y no se va a reescribir con ella: esta conversación está fuera del trabajo de fondo. Puedes verla y borrarla en «Lo que recuerda»; borrarla solo afecta a este ordenador.`,
+    );
+  } else if (preview.inheritedMemory && !preview.excluded) {
+    // sin memoria sellada viaja la ficha retroactiva o el indice, escritos por
+    // un CLI que no veia la ficha de nadie, y no hay nada que reescribir hasta
+    // que se selle la primera: esa es la que se reescribe (septima ronda)
+    paragraphs.push(
+      `Esta conversación no tiene todavía memoria propia: lo que le llega de ella es su ficha retroactiva o el índice de sus escenas, que escribió un CLI sin la ficha de ${label}, y así será también en tu próximo mensaje aquí. La memoria que guarde esa respuesta sale de ahí, y es esa la que se reescribirá con su ficha después, en segundo plano, con ${CLI_NAMES[preview.backgroundCli]} y tu sesión: una llamada más.`,
     );
   }
 
+  // lo que NO se puede igualar: la cola literal viaja tal cual en cada prompt, y
+  // esos mensajes se escribieron sin la ficha. Con `VAULT_RECENT_TURNS` turnos,
+  // el primero de los de antes sale de la ventana en el mensaje numero
+  // `VAULT_RECENT_TURNS / 2 + 1` de el.
+  //
+  // Y salir de la ventana no es dejar de leerlos: `buildRecall` transcribe
+  // momentos enteros cuando el mensaje evoca uno —«¿te acuerdas de…?», una
+  // fecha—, y el indice pasa a ser suyo, asi que tambien desde sus otras
+  // conversaciones; lo mismo el titulo y el «de que fue» de sus escenas.
+  // Decia que los dejaria de leer, y era falso (septima ronda, `D-093`)
+  paragraphs.push(
+    `Lo que no cambia: sus últimos mensajes de aquí (hasta ${VAULT_RECENT_TURNS}, tuyos y suyos) le siguen llegando tal cual en cada respuesta, y se escribieron sin su ficha. Si en ellos se la llamaba de otra forma o hablaba como otra, lo leerá tal cual hasta que tus próximos ${VAULT_RECENT_TURNS / 2} mensajes los dejen atrás. Y aun después pueden volver: cuando algo que escribas le recuerde un momento de antes del enganche —«¿te acuerdas de cuando…?», una fecha—, se le pueden transcribir trozos de esos mensajes, aquí y en sus otras conversaciones, igual que el título de esas escenas y lo que el catálogo apuntó de ellas. Eso no se reescribe.`,
+  );
+
   if (preview.excluded) {
     paragraphs.push(
-      'Esta conversación está excluida de lo que recuerda: aunque pase a ser suya, desde sus otras conversaciones no la verá ni le llegará su resumen.',
+      'Esta conversación está excluida de lo que recuerda: aunque pase a ser suya, desde sus otras conversaciones no la verá ni le llegará su memoria.',
     );
   } else if (preview.recentMemoriesOn && preview.hasOwnMemory) {
     paragraphs.push(
-      // «le llegará», no «la recordará»: lo comprobado es que el resumen viaja,
-      // y el propio bloque le pide no sacarlo por su cuenta (`D-093`)
-      `Desde sus otras conversaciones le llegará un resumen corto de esa memoria, porque tiene encendida «${RECENT_MEMORIES_CHECKBOX}», y solo mientras esta sea una de sus dos conversaciones más recientes: engancharla cuenta como reciente, pero en cuanto haya dos más nuevas sale del resumen. El resumen puede no incluir todo lo que acordasteis.`,
+      // «le llegará», no «la recordará»: lo comprobado es que la memoria viaja,
+      // y el propio bloque le pide no sacarla por su cuenta (`D-093`).
+      //
+      // CUAL de las dos: la reescrita se lleva fuera en cuanto esta lista (se
+      // apunta como usada antes, octava ronda); hasta entonces, la de ahora. Y
+      // «entera» con su salvedad: la salvaguarda quita entradas viejas por
+      // encima de `RECENT_MEMORY_ENTRY_CHARS`, y el esquema admite mas
+      `Desde sus otras conversaciones le llegará esa memoria entera —la de ahora mientras la reescrita no esté lista, y la reescrita cuando lo esté—, salvo el plan y las preguntas que quedaron en el aire, porque tiene encendida «${RECENT_MEMORIES_CHECKBOX}», y solo mientras esta sea una de sus dos conversaciones más recientes: engancharla cuenta como reciente, pero en cuanto haya dos más nuevas deja de llegarle. Si pasara de ${thousands(RECENT_MEMORY_ENTRY_CHARS)} caracteres, se le quitarían primero las entradas más viejas. No le llegan los mensajes por esta vía, solo lo que apuntó el modelo, que puede no incluir todo lo que acordasteis; los trozos que se le pueden transcribir van aparte, como dice arriba.`,
     );
   } else if (preview.recentMemoriesOn) {
     // «si la aprobaste» no bastaba: `chooseConversationMemory` exige ademas que
     // la ficha sea de la version actual y llegue hasta los ultimos mensajes
     paragraphs.push(
-      `Esta conversación no tiene todavía memoria propia apuntada. Su resumen solo puede salir de su ficha retroactiva, y solo si está aprobada y al día con los últimos mensajes; si no, de momento no hay resumen que llevarle a sus otras conversaciones. Y aunque lo haya, solo mientras esta sea una de sus dos conversaciones más recientes: en cuanto haya dos más nuevas sale del resumen.`,
+      `Esta conversación no tiene todavía memoria propia apuntada. Lo que le llegue de ella a sus otras conversaciones solo puede salir de su ficha retroactiva, y solo si está aprobada y al día con los últimos mensajes; si no, de momento no hay nada que llevarle. Y aunque lo haya, solo mientras esta sea una de sus dos conversaciones más recientes: en cuanto haya dos más nuevas deja de llegarle.`,
     );
   } else {
     // nada de «la vera entre sus momentos»: el indice lleva como mucho 40, los
@@ -376,7 +427,7 @@ export function describeCharacterLink(
     // fecha, asi que pueden quedarse fuera. Y leer un trozo depende de que la
     // busqueda acierte (`D-093`)
     paragraphs.push(
-      `Desde sus otras conversaciones no le llegará ningún resumen de esta: su casilla «${RECENT_MEMORIES_CHECKBOX}» está apagada. Lo que el catálogo haya sacado de aquí pasa a ser suyo, pero su índice solo enseña los momentos más recientes, así que si esta conversación es antigua puede que no la vea; si le preguntas por algo concreto de aquí, puede que lo encuentre. La casilla está en su fila de la lista de personajes, dentro de «Generar imagen o vídeo».`,
+      `Desde sus otras conversaciones no le llegará la memoria de esta: su casilla «${RECENT_MEMORIES_CHECKBOX}» está apagada. Lo que el catálogo haya sacado de aquí pasa a ser suyo, pero su índice solo enseña los momentos más recientes, así que si esta conversación es antigua puede que no la vea; si le preguntas por algo concreto de aquí, puede que lo encuentre. La casilla está en su fila de la lista de personajes, dentro de «Generar imagen o vídeo».`,
     );
   }
 
@@ -388,18 +439,41 @@ export function describeCharacterLink(
         // TODAS sus conversaciones: es el lado seguro, pero hay que decirlo
         `Lo prometido aquí se volverá a revisar como suyo, en segundo plano, con ${CLI_NAMES[preview.backgroundCli]} y tu sesión: ${preview.reviewCalls <= 1 ? 'una llamada' : `unas ${preview.reviewCalls} llamadas`}. Hasta que termine, puede que sus pendientes anteriores no le lleguen en ninguna de sus conversaciones.`,
   );
-  paragraphs.push(
-    'De momento solo vale en este equipo: el enganche se guarda cifrado aquí y «Sincronizar» no lo sube.',
-  );
+  // «solo en este equipo» no se entendia. Y no puede dar a entender que lo
+  // demas si viaja: la sincronizacion no se ha usado nunca y tiene fallos
+  // abiertos (`SEG-SYNC-001`). Cuando se arregle, esta frase cambia
+  paragraphs.push(syncParagraph(label));
   paragraphs.push('Se deshace con «Soltar», junto al selector de personaje. No se borra nada.');
   return paragraphs;
+}
+
+/**
+ * lo que se dice del enganche y la sincronizacion, en la confirmacion.
+ *
+ * Verdad de hoy en el codigo: el enganche y la memoria reescrita viven en
+ * archivos de este ordenador que «Sincronizar» no sube, y «Sincronizar» tiene
+ * fallos sin arreglar (`SEG-SYNC-001`).
+ */
+export function syncParagraph(label: string): string {
+  return `El enganche, y la memoria reescrita con su ficha, se guardan solo en este ordenador: «Sincronizar» no los sube, así que en otro ordenador esta conversación seguiría sin ser de ${label}. Y no cuentes con «Sincronizar» como copia de nada de la bóveda: hoy tiene fallos sin arreglar.`;
+}
+
+/**
+ * la pista del selector en una conversacion enganchada.
+ *
+ * Sustituye a «Solo en este equipo», que Daniel no entendio. Dice lo mismo sin
+ * abreviar y sin sugerir que el resto de la boveda si viaja (`SEG-SYNC-001`).
+ */
+export function linkedOwnerHint(label: string, linkedAt: string | null): string {
+  const cuando = linkedAt === null ? '' : ` el ${shortDate(linkedAt)}`;
+  return `Enganchada a ${label}${cuando}. El enganche se guarda solo en este ordenador: «Sincronizar» no lo sube, y hoy no sirve de copia de nada de la bóveda.`;
 }
 
 /** lo que pasa al soltar un enganche propio */
 export function describeCharacterUnlink(preview: OwnerChangePreview): string[] {
   const label = preview.characterLabel;
   const paragraphs = [
-    `Esta conversación deja de ser de ${label}: sale de su grupo, de sus momentos y de su resumen, y desde tu próximo mensaje aquí se responde sin su ficha${
+    `Esta conversación deja de ser de ${label}: sale de su grupo, de sus momentos y de la memoria que les llega a sus otras conversaciones, y desde tu próximo mensaje aquí se responde sin su ficha${
       preview.instructionsOutcome === 'removed'
         ? ', y sin las instrucciones que se cargaron al engancharla.'
         : '; las instrucciones se quedan como están.'
@@ -407,6 +481,20 @@ export function describeCharacterUnlink(preview: OwnerChangePreview): string[] {
   ];
   if (!preview.excluded) {
     paragraphs.push('Lo prometido aquí se revisará otra vez como de nadie.');
+  }
+  if (preview.recentMemoriesOn && !preview.excluded) {
+    // lo sabido y no arreglado de `D-105`: la memoria de otra conversacion es de
+    // aquella, y soltar esta no la toca. Con la memoria entera pesa mas
+    paragraphs.push(
+      'Si alguna de sus otras conversaciones ya apuntó en su propia memoria algo de lo que le llegó de aquí, eso se queda: esa memoria es de aquella conversación.',
+    );
+  }
+  if (preview.hasOwnMemory) {
+    // la reescrita era de ESE enganche y se va con el (`D-108`); lo que ya se
+    // sello a partir de ella es memoria de la conversacion y se queda
+    paragraphs.push(
+      'Si su memoria se había reescrito con su ficha, la reescrita se quita: vuelve a valer la última guardada en la conversación, que será la de antes si ningún mensaje la ha sustituido todavía.',
+    );
   }
   if (preview.profilePhotoStays) {
     paragraphs.push('Su foto de perfil, que se copió a esta conversación, se queda entre sus imágenes.');
@@ -431,16 +519,36 @@ export function ownerTitle(owner: OwnerView | null, draftLabel: string | null): 
 /**
  * quien firma un turno.
  *
- * Una respuesta solo lleva el nombre si se escribio con su ficha: desde la
- * posicion del dueño en adelante. Lo de antes de un enganche dice «Respuesta».
+ * En una ENGANCHADA, sus respuestas llevan su nombre tambien antes del ancla
+ * (`D-108`): el criterio de Daniel es que una conversacion que pasa a ser suya
+ * quede como si hubiera empezado con ella, y lo de antes se escribio sin la
+ * ficha de nadie. Salvo lo escrito con la ficha de OTRO personaje
+ * (`foreignUpTo`): una conversacion de Lía que se solto y se engancho a Nora
+ * no firma «Nora» lo que escribio Lía (octava ronda, `D-093`).
+ *
+ * Con dueño por un turno —las del Studio anterior, que fijaba el personaje en
+ * cualquier mensaje— se firma como en `a45953b`: solo lo de despues de ese
+ * turno. Nadie las engancho, y lo de antes pudo escribirse con otra ficha.
+ * Sin dueño, «Respuesta».
  */
 export function replySpeaker(
   turn: { role: 'user' | 'assistant'; sequence: number },
   owner: OwnerView | null,
 ): string {
   if (turn.role === 'user') return 'Tú';
-  if (owner === null || owner.label === null || owner.signedAfter === null) return 'Respuesta';
+  if (owner === null || owner.label === null) return 'Respuesta';
+  if (owner.source === 'link') {
+    return owner.foreignUpTo !== undefined && turn.sequence <= owner.foreignUpTo
+      ? 'Respuesta'
+      : owner.label;
+  }
+  if (owner.signedAfter === null) return 'Respuesta';
   return turn.sequence > owner.signedAfter ? owner.label : 'Respuesta';
+}
+
+/** «6.000»: con punto de miles desde el millar, como se escribe en la pantalla */
+function thousands(value: number): string {
+  return String(Math.trunc(value)).replace(/(?<=[0-9])(?=(?:[0-9]{3})+$)/g, '.');
 }
 
 /** una fecha corta y local: «25/09, 10:30» */
@@ -455,8 +563,15 @@ export function shortDate(iso: string): string {
   });
 }
 
-/** el separador que se pinta despues del turno del ancla de un enganche */
+/**
+ * el separador que se pinta despues del turno del ancla de un enganche.
+ *
+ * Solo la fecha: ya no dice «lo de arriba se escribio sin su ficha», porque la
+ * conversacion entera es suya y firma con su nombre (`D-108`). Lo que si sigue
+ * siendo distinto —que esos mensajes viajan tal cual— lo dice la confirmacion
+ * antes de enganchar.
+ */
 export function linkSeparator(owner: OwnerView): string | null {
   if (owner.source !== 'link' || owner.label === null || owner.linkedAt === null) return null;
-  return `Enganchada a ${owner.label} el ${shortDate(owner.linkedAt)}. Lo de arriba se escribió sin su ficha.`;
+  return `Enganchada a ${owner.label} el ${shortDate(owner.linkedAt)}.`;
 }

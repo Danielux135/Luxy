@@ -9,7 +9,16 @@
 // suelto no es JSON valido. Si eso se ensambla mal, el modelo parece pedir una
 // herramienta con argumentos corruptos y el fallo es dificil de leer.
 import { describe, it, expect } from 'vitest';
-import { sseData, TurnAssembler, wasTruncated, type SseTransportReport } from './sse.js';
+import {
+  rawToolCallChars,
+  reasoningFieldLabel,
+  reasoningOf,
+  sseData,
+  TurnAssembler,
+  usageReasoningTokens,
+  wasTruncated,
+  type SseTransportReport,
+} from './sse.js';
 
 /** convierte lineas en un ReadableStream, troceado como se pida */
 function flujo(texto: string, tamanoChunk = 1024): ReadableStream<Uint8Array> {
@@ -538,6 +547,71 @@ describe('truncamiento y razonamiento', () => {
   it('un delta de solo razonamiento no cuenta como texto nuevo', () => {
     const a = new TurnAssembler();
     expect(a.push('{"choices":[{"delta":{"reasoning_content":"pensando"}}]}')).toBeNull();
+  });
+
+  // D-107: vLLM y Groq mandan el razonamiento en `reasoning`, no en
+  // `reasoning_content`. Sin leerlo, 9 llamadas a gpt-oss por Groq salian con
+  // 0 caracteres razonados y parecia que la pasarela lo ocultaba
+  it('cuenta tambien el campo `reasoning`, y dice por donde llego', () => {
+    const a = new TurnAssembler();
+    expect(a.push('{"choices":[{"delta":{"reasoning":"pienso"}}]}')).toBeNull();
+    a.push('{"choices":[{"delta":{"reasoning_content":"ab"}}]}');
+    a.push('{"choices":[{"delta":{"content":"hola"}}]}');
+
+    expect(a.result().text).toBe('hola');
+    expect(a.reasoningLength()).toBe('pienso'.length + 2);
+    expect([...a.reasoningSourcesSeen()].sort()).toEqual(['reasoning', 'reasoning_content']);
+    expect(reasoningFieldLabel(a.reasoningSourcesSeen())).toBe('reasoning_content+reasoning');
+  });
+
+  it('un `reasoning` que no es cadena no se cuenta', () => {
+    const a = new TurnAssembler();
+    a.push('{"choices":[{"delta":{"reasoning":{"effort":"low"},"content":"x"}}]}');
+    expect(a.reasoningLength()).toBe(0);
+    expect(reasoningFieldLabel(a.reasoningSourcesSeen())).toBeNull();
+  });
+
+  it('lee los tokens de razonamiento que declara el consumo', () => {
+    const a = new TurnAssembler();
+    a.push('{"choices":[{"delta":{"content":"hola"}}]}');
+    a.push(
+      '{"choices":[],"usage":{"prompt_tokens":5,"completion_tokens":900,"completion_tokens_details":{"reasoning_tokens":880}}}',
+    );
+    expect(a.reportedReasoningTokens()).toBe(880);
+    expect(usageReasoningTokens({ output_tokens_details: { reasoning_tokens: 7 } })).toBe(7);
+    expect(usageReasoningTokens({ completion_tokens: 3 })).toBe(0);
+    expect(usageReasoningTokens(null)).toBe(0);
+  });
+
+  it('cuenta los caracteres de las herramientas pedidas, sin guardarlos', () => {
+    const a = new TurnAssembler();
+    a.push(
+      '{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1","function":{"name":"read_file","arguments":"{\\"pa"}}]}}]}',
+    );
+    a.push(
+      '{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"th\\":1}"}}]}}]}',
+    );
+    expect(a.toolArgumentLength()).toBe('read_file'.length + '{"path":1}'.length);
+    expect(
+      rawToolCallChars([{ function: { name: 'ab', arguments: '{}' } }, null, { function: {} }]),
+    ).toBe(4);
+    expect(rawToolCallChars(undefined)).toBe(0);
+  });
+
+  it('reasoningOf mira los dos campos de un mensaje entero', () => {
+    expect(reasoningOf({ reasoning_content: 'abc', reasoning: 'de' })).toEqual({
+      chars: 5,
+      sources: ['reasoning_content', 'reasoning'],
+    });
+    expect(reasoningOf({})).toEqual({ chars: 0, sources: [] });
+  });
+
+  // octava ronda: el mismo texto en los dos campos es UN razonamiento
+  it('reasoningOf no cuenta dos veces el mismo texto copiado en los dos campos', () => {
+    expect(reasoningOf({ reasoning_content: 'abc', reasoning: 'abc' })).toEqual({
+      chars: 3,
+      sources: ['reasoning_content', 'reasoning'],
+    });
   });
 });
 

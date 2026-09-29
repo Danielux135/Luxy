@@ -1,6 +1,7 @@
 // tipos derivados de las constantes y modelos de dominio
 import type { ModelLimits } from './models/types.js';
 import type { SamplingParameters } from './sampling.js';
+import type { ReasoningMode } from './reasoning-control.js';
 import type { ResponseTermination } from './schemas.js';
 import type {
   JOB_STATUSES,
@@ -224,6 +225,13 @@ export interface HttpProviderConfig {
   frequencyPenalty?: number;
   presencePenalty?: number;
   repetitionPenalty?: number;
+  /**
+   * cuanto razona el modelo (D-107), en el nivel superior: es el camino de
+   * `providers.http` —Groq y compañia—, que no tiene `modelSampling`. Vacio no
+   * manda nada. Lo que viaja lo decide `reasoningRequestFields` segun el
+   * modelo y el host; un modelo sin regla no recibe nada.
+   */
+  reasoningMode?: ReasoningMode;
   /**
    * muestreo POR MODELO, con el `model` que viaja en el cuerpo como clave.
    *

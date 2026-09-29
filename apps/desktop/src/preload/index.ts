@@ -121,6 +121,8 @@ const bridge: LuxyBridge = {
   updateVaultRecap: (args: unknown) => ipcRenderer.invoke(IPC_INVOKE.vaultRecapUpdate, args),
   forgetVaultSealedMemory: (args: unknown) =>
     ipcRenderer.invoke(IPC_INVOKE.vaultConversationMemoryForget, args),
+  decideVaultMemoryRelink: (args: unknown) =>
+    ipcRenderer.invoke(IPC_INVOKE.vaultMemoryRelinkDecide, args),
   getVaultAuxiliary: () => ipcRenderer.invoke(IPC_INVOKE.vaultAuxiliaryGet, {}),
   setVaultAuxiliary: (args: unknown) => ipcRenderer.invoke(IPC_INVOKE.vaultAuxiliarySet, args),
   readVaultCharacterInstructions: (args: unknown) =>

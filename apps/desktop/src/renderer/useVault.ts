@@ -15,6 +15,7 @@ import type {
   ConversationMemoryStatus,
   HordeRecipe,
   ImageAttempt,
+  MemoryRelinkOutcome,
   ReasoningEffort,
   RelationStatus,
   VaultImagePlanEdit,
@@ -162,14 +163,16 @@ export interface VaultCharacterView {
   /**
    * si su prompt lleva las notas de dirección contra la autocopia (`D-102`).
    *
-   * Con `none` —lo de siempre— el prompt no cambia. Con `vary-and-lead` le pide
+   * Con `none` —el defecto— esta casilla no añade nada al prompt, lo que no
+   * quiere decir que el prompt sea el de antes (la ficha editada se sella sola,
+   * `D-104`). Con `vary-and-lead` le pide
    * no reutilizar la forma de sus respuestas anteriores y poner su parte.
    */
   replyGuidance: VaultReplyGuidance;
   /**
    * si sus pendientes van en modo esporádico (`D-104`).
    *
-   * Con `per-note` —lo de siempre— el prompt no cambia. Con `sparse` la lista
+   * Con `per-note` —el defecto— esta casilla no añade nada al prompt. Con `sparse` la lista
    * entra en menos mensajes, se le pide sacarlos sólo si la escena los trae y
    * se le avisa, sin decir cuál, cuando ya sacó uno.
    */
@@ -177,7 +180,7 @@ export interface VaultCharacterView {
   /**
    * si le llega el resumen de sus dos ultimas conversaciones (`D-105`).
    *
-   * Con `off` —lo de siempre— el prompt no cambia.
+   * Con `off` —el defecto— esta casilla no añade nada al prompt.
    */
   recentMemories: VaultRecentMemories;
   /** su identidad en Xavira, si la tiene. El identificador es el de SU API */
@@ -882,6 +885,17 @@ export interface VaultController {
    * botón— y quien pulsa tiene derecho a saber qué se llevó por delante.
    */
   forgetSealedMemory: (conversationId: string) => Promise<number | null>;
+  /**
+   * la memoria reescrita con su ficha (`D-108`): volver a la de antes, o
+   * pedirla otra vez. Devuelve `null` si falló y, si no, en qué acabó la
+   * pasada —`null` al volver a la de antes—: sin eso, un CLI que no arranca
+   * dejaba la fila igual y el botón parecía no hacer nada (séptima ronda).
+   */
+  decideMemoryRelink: (args: {
+    conversationId: string;
+    choice: 'keep-old' | 'retry';
+    projectAlias: string;
+  }) => Promise<{ outcome: MemoryRelinkOutcome | null } | null>;
   /** hay una decisión escribiéndose: los botones se apagan mientras tanto */
   decidingRecap: boolean;
   readMemoryEpisode: (
@@ -1793,6 +1807,39 @@ export function useVault(): VaultController {
       if (mounted.current) setDecidingRecap(false);
     }
   }, []);
+
+  /**
+   * vuelve a la memoria de antes o pide otra vez la reescrita con su ficha.
+   *
+   * Comparte `decidingRecap` con las otras dos por lo mismo: escriben sobre la
+   * misma fila, y una bandera nueva dejaría pulsar «Borrar su memoria» mientras
+   * se reescribe.
+   */
+  const decideMemoryRelink = useCallback(
+    async (args: {
+      conversationId: string;
+      choice: 'keep-old' | 'retry';
+      projectAlias: string;
+    }): Promise<{ outcome: MemoryRelinkOutcome | null } | null> => {
+      setDecidingRecap(true);
+      try {
+        const result = await callBridge(() => window.luxy.decideVaultMemoryRelink(args));
+        if (!mounted.current) return null;
+        if (!result.ok) {
+          setError(result.error, 'memoria');
+          setHint(result.hint);
+          return null;
+        }
+        setRecaps(result.value.rows);
+        setRecapCoverage(result.value.coverage);
+        recapSignatureRef.current = recapSignature(result.value.rows);
+        return { outcome: result.value.relinkOutcome };
+      } finally {
+        if (mounted.current) setDecidingRecap(false);
+      }
+    },
+    [],
+  );
 
   const readMemoryTurns = useCallback(
     async (input: {
@@ -2916,6 +2963,7 @@ export function useVault(): VaultController {
     loadRecaps,
     decideRecap,
     forgetSealedMemory,
+    decideMemoryRelink,
     decidingRecap,
     readMemoryEpisode,
     readMemoryTurns,

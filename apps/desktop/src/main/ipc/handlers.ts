@@ -19,6 +19,7 @@ import {
   type SelfCopyMeasure,
   parseConversationMemoryResponse,
   PROFILE_PHOTO_LABEL,
+  isProfilePhotoOf,
   imageDescriptionFor,
   imageTransportProblem,
   profilePhotoLine,
@@ -61,19 +62,27 @@ import {
   imagePromptStyleFor,
   resolveAuxiliaryTarget,
   chooseConversationMemory,
+  effectiveSealedMemory,
+  relinkPhase,
   recapCoverage,
   formatConversationMemory,
   civilDayLabel,
   condenseRecentMemories,
+  memoryCapsFor,
+  repairSlicedMemory,
   DEFAULT_AUXILIARY_PROVIDER,
   isLocalCliProvider,
   RECENT_MEMORIES_COUNT,
+  RECENT_MEMORIES_FORMAT,
   RELATION_WINDOW_TURNS,
   type ConversationMemory,
   type ConversationOwner,
   type LocalCliProvider,
   type RecentMemoryEntry,
+  type RecentMemoryItem,
+  type RecentPhrase,
   type ChosenMemory,
+  type MemoryRelinkEntry,
   type RecapCoverage,
   type RecapTurnRef,
   type RelationNote,
@@ -156,6 +165,7 @@ import {
   vaultCharacterRecentMemoriesArgsSchema,
   vaultConversationOwnerPreviewArgsSchema,
   vaultConversationOwnerSetArgsSchema,
+  vaultMemoryRelinkDecideArgsSchema,
   type VaultConversationOwnerPreview,
   type VaultConversationOwnerView,
   vaultDeviceUnlockSetArgsSchema,
@@ -178,6 +188,8 @@ import type { VaultAccountManager } from '../vault/account-manager.js';
 import type { VaultCharacter, VaultCharacterStore } from '../vault/character-store.js';
 import type { PrivateConversationStore } from '../vault/conversation-store.js';
 import type { ConversationOwnerStore } from '../vault/conversation-owner-store.js';
+import type { MemoryRelinkStore } from '../vault/memory-relink-store.js';
+import { MemoryRelink } from '../vault/memory-relink.js';
 import { measureRecentEcho, type RecentEcho } from '../vault/recent-echo.js';
 import type { PrivateMediaStore } from '../vault/media-store.js';
 import { syncVault } from '../vault/sync.js';
@@ -358,6 +370,13 @@ export interface HandlerContext {
    */
   conversationOwners: Pick<ConversationOwnerStore, 'append' | 'removeConversation'>;
   /**
+   * la memoria de las conversaciones enganchadas, reescrita con la ficha de su
+   * personaje (`D-108`), cifrada y solo en este equipo. Opcional: sin el, la
+   * memoria efectiva es la sellada de siempre y nada se reescribe, que es lo que
+   * habia antes.
+   */
+  memoryRelinks?: Pick<MemoryRelinkStore, 'all' | 'forConversation' | 'replace' | 'removeConversation'>;
+  /**
    * memoria episodica: indice de busqueda y episodios sobre esos turnos.
    *
    * Se construye sola en la primera busqueda y se vacia sola al cerrar la
@@ -404,6 +423,7 @@ export interface HandlerContext {
 }
 
 type VaultConversationSendResult = z.infer<typeof vaultConversationSendResultSchema>;
+type RecapListRow = z.infer<typeof vaultRecapListResultSchema>['rows'][number];
 
 /**
  * hasta donde llego un turno privado.
@@ -426,12 +446,23 @@ interface PrivateTurnProgress {
   /**
    * su texto ya esta guardado y lo que queda es la imagen del turno.
    *
-   * La pone el envio: cambia su espera `reply` por una `image`. Win+L se aplaza
-   * para no tirar una respuesta ya pagada (`D-106`); con el texto a salvo, lo
-   * que queda es una imagen, y una imagen nunca aplaza Win+L. La inactividad
-   * sigue sin cerrarla mientras se genera, como desde el panel
+   * La pone el envio: cambia su espera `reply` por una `turn-image` si la
+   * imagen es del proveedor de PAGO. Win+L se aplaza para no tirar lo ya
+   * pagado (`D-106`), y la generacion arranca en cuanto el texto esta en disco:
+   * cerrar ahi tiraba una imagen cobrada. Por eso ese tramo tambien aplaza
+   * Win+L, con su propio tope.
+   *
+   * Con AI Horde, `paid` es `false` y se espera como `image`, la del panel,
+   * que frena la inactividad y no aplaza Win+L: la imagen no cuesta nada, y su
+   * cola puede pasar de los 15 minutos del tope, asi que aplazar dejaba la
+   * llave en memoria con Windows bloqueado para perderla igual (octava ronda)
    */
-  onReplySaved: () => void;
+  onReplySaved: (paid: boolean) => void;
+  /**
+   * la imagen del turno se perdio porque la boveda se cerro mientras se hacia:
+   * el aviso lo dice, en vez de «justo despues de guardar su respuesta»
+   */
+  imageLostToLock?: boolean;
   reply: {
     outcome: VaultConversationSendResult['outcome'];
     model: string | null;
@@ -446,6 +477,8 @@ export const SEND_CUT_BY_LOCK = {
   lostHint:
     'tu mensaje no se ha guardado en la conversación, pero sigue escrito en el cuadro de texto. Cópialo antes de abrir esa conversación: al abrirla, el cuadro se vacía, y si lo envías sin abrirla empieza una conversación nueva.',
   savedReply: 'la bóveda se cerró justo después de guardar su respuesta: ábrela para leerla',
+  imageLost:
+    'la bóveda se cerró mientras se hacía la imagen de su respuesta: la respuesta está guardada, pero la imagen se ha perdido. Ábrela para leerla',
 } as const;
 
 /** convierte cualquier fallo en algo que se puede enseñar sin filtrar nada */
@@ -1210,10 +1243,11 @@ export function registerIpcHandlers(context: HandlerContext): void {
 
   /**
    * una imagen que el usuario pidio y esta esperando: la boveda no se cierra
-   * por inactividad mientras dure. La usan generar una imagen y aprobarla; el
-   * envio lleva la suya aparte (`reply`). El trabajo de fondo nunca, aunque se
-   * pulse con un boton. Una espera de imagen NO aplaza el cierre por Win+L: eso
-   * solo lo hace un envio (`D-106`)
+   * por inactividad mientras dure. La usan generar una imagen y aprobarla desde
+   * el panel; el envio lleva las suyas aparte (`reply` y, para la imagen de su
+   * turno, `turn-image`). El trabajo de fondo nunca, aunque se pulse con un
+   * boton. Esta espera NO aplaza el cierre por Win+L: eso solo lo hace un envio
+   * (`D-106`)
    */
   const whileUserWaits = async <T>(work: () => Promise<T>): Promise<T> => {
     const release = context.vault.beginUserWait('image');
@@ -1282,7 +1316,11 @@ export function registerIpcHandlers(context: HandlerContext): void {
    * el dueño, como lo pinta la pantalla. El nombre sale de la boveda si el
    * personaje sigue en ella; si no, de la copia que guardo el enganche.
    */
-  const ownerView = async (owner: ConversationOwner): Promise<VaultConversationOwnerView> => {
+  const ownerView = async (
+    owner: ConversationOwner,
+    /** hasta que secuencia se escribio con OTRO personaje: esas no se firman */
+    foreignUpTo: number | null = null,
+  ): Promise<VaultConversationOwnerView> => {
     // un nombre vacio no es «sin nombre»: con `''` las respuestas salian
     // firmadas con nada y el titulo acababa en «· ». La pantalla ya llama «Sin
     // nombre» a un personaje asi, y aqui se dice lo mismo
@@ -1307,13 +1345,34 @@ export function registerIpcHandlers(context: HandlerContext): void {
       label,
       signedAfter: owner.signedAfter,
       linkedAt: owner.linkedAt,
+      // solo si hay algo que decir: la forma de siempre no cambia
+      ...(foreignUpTo === null ? {} : { foreignUpTo }),
     };
+  };
+
+  /**
+   * el dueño con lo que hace falta para firmar (`D-108`, octava ronda).
+   *
+   * Si no se puede saber quien escribio lo de antes del ancla, se firma como en
+   * `a45953b`: solo lo de despues. Es el lado que no pone un nombre en lo que
+   * escribio otro.
+   */
+  const ownerForView = async (
+    conversationId: string,
+  ): Promise<{ owner: ConversationOwner; foreignUpTo: number | null }> => {
+    const store = context.privateConversations;
+    try {
+      return await store.ownerWithAuthorship(context.vault, conversationId);
+    } catch {
+      const owner = await store.owner(context.vault, conversationId);
+      return { owner, foreignUpTo: owner.source === 'link' ? owner.signedAfter : null };
+    }
   };
 
   /** una conversacion leida, con el dueño resuelto por la unica funcion que lo hace */
   const readConversation = async (conversationId: string) => {
     const store = context.privateConversations;
-    const owner = await store.owner(context.vault, conversationId);
+    const { owner, foreignUpTo } = await ownerForView(conversationId);
     return {
       instructions: owner.instructions,
       characterId: owner.characterId,
@@ -1322,7 +1381,7 @@ export function registerIpcHandlers(context: HandlerContext): void {
       turns: await store.read(context.vault, conversationId),
       provider: await store.latestProvider(context.vault, conversationId),
       model: await store.latestModel(context.vault, conversationId),
-      owner: await ownerView(owner),
+      owner: await ownerView(owner, foreignUpTo),
     };
   };
 
@@ -1349,6 +1408,32 @@ export function registerIpcHandlers(context: HandlerContext): void {
   };
 
   handle(IPC_INVOKE.vaultConversationDelete, vaultConversationIdArgsSchema, async (args) => {
+    // con un envio en vuelo no: al volver, `appendTurn` sellaba la respuesta de
+    // ella en un archivo ya borrado y la conversacion reaparecia con solo esa
+    // linea, justo lo que Daniel mando borrar. La pantalla ya desactiva el boton
+    // mientras contesta; esto cubre la ventana recargada a mitad (revision del
+    // 28/09, como olvidar la memoria y el enganche)
+    if (sendInFlight.has(args.conversationId)) {
+      throw new VaultError(
+        'esa conversacion esta contestando ahora mismo',
+        'espera a que llegue la respuesta y vuelve a borrar',
+      );
+    }
+    // y mientras dure el borrado no arranca ningun envio: mirar `sendInFlight`
+    // una vez no basta, porque en el `await` de los medios cabia el arranque de
+    // uno que escribia su mensaje, veia el archivo borrarse debajo y resucitaba
+    // la conversacion con la respuesta de ella (septima ronda)
+    if (erasingInFlight.has(args.conversationId)) throw erasingNow();
+    erasingInFlight.add(args.conversationId);
+    try {
+      return await deleteConversationNow(args.conversationId);
+    } finally {
+      erasingInFlight.delete(args.conversationId);
+    }
+  });
+
+  const deleteConversationNow = async (conversationId: string): Promise<{ deleted: true }> => {
+    const args = { conversationId };
     // los medios primero: si solo se borrara la conversacion, sus archivos
     // cifrados quedarian ocupando disco sin nada que los referenciara
     await context.privateMedia.deleteConversation(args.conversationId);
@@ -1406,6 +1491,11 @@ export function registerIpcHandlers(context: HandlerContext): void {
       await intentar(() =>
         context.conversationOwners.removeConversation(context.vault, args.conversationId),
       );
+      // y su memoria reescrita con la ficha (`D-108`), que es memoria de ESTA
+      // conversacion: sin ella no la usa nadie
+      await intentar(async () => {
+        await memoryRelinks?.removeConversation(context.vault, args.conversationId);
+      });
     } finally {
       // pase lo que pase con los cuatro almacenes. El indice guarda los turnos ya
       // DESCIFRADOS: si un almacen se para en seco —el de pendientes lo hace a
@@ -1420,7 +1510,7 @@ export function registerIpcHandlers(context: HandlerContext): void {
     // cifrado puede traer dentro lo que no validaba
     if (fallos.length > 0) throw fallos[0];
     return { deleted: true };
-  });
+  };
 
   // ---------------------------------------------------------------------------
   // medios privados
@@ -1502,7 +1592,8 @@ export function registerIpcHandlers(context: HandlerContext): void {
     // sonda que midiera sobre un prompt sin el bloque de memoria estaria midiendo
     // otra cosa. Tambien dentro de un `try`: aqui no hay turno que perder, pero
     // un almacen ilegible no puede dejar sin comprobacion a los demas modelos
-    const sealedMemory = await store.latestMemory(context.vault, args.conversationId);
+    // la EFECTIVA, la misma que leera el turno de verdad (`D-108`)
+    const sealedMemory = (await effectiveSealed(args.conversationId)).memory;
     let memoria: ChosenMemory = { memory: sealedMemory, source: 'turn', gaps: 0 };
     try {
       memoria = chooseConversationMemory({
@@ -1752,6 +1843,24 @@ export function registerIpcHandlers(context: HandlerContext): void {
    */
   const sendInFlight = new Set<string>();
 
+  /**
+   * conversaciones a las que se les esta borrando algo ahora mismo: la
+   * conversacion entera o su memoria.
+   *
+   * La otra mitad de `sendInFlight`, como `ownerChangeInFlight`: los dos
+   * borrados miraban que no hubiera un envio al empezar, pero entre sus `await`
+   * cabia el arranque de uno. Borrando la conversacion, su respuesta la
+   * resucitaba con solo esa linea; borrando la memoria, la reescrita ya se
+   * habia quitado y el borrado se rechazaba despues, dejando la conversacion
+   * sin reescribir para siempre (septima ronda). Mientras este aqui, no se envia.
+   */
+  const erasingInFlight = new Set<string>();
+  const erasingNow = (): VaultError =>
+    new VaultError(
+      'se esta borrando algo de esta conversacion',
+      'espera a que termine el borrado y vuelve a intentarlo',
+    );
+
   handle(IPC_INVOKE.vaultCatalogSync, vaultCatalogSyncArgsSchema, async (args) => {
     if (!context.vault.isUnlocked()) throw new VaultError('la boveda esta bloqueada');
     return runOnAuxiliaryLane(() => catalogOnce(args));
@@ -1824,6 +1933,203 @@ export function registerIpcHandlers(context: HandlerContext): void {
   // la pasada se mira entre VENTANA y ventana, no solo entre conversaciones: una
   // ventana tarda un minuto y la boveda puede cerrarse dentro
   context.vault.onLock(() => recapSync.cancel());
+
+  /**
+   * la memoria de una conversacion enganchada, reescrita con la ficha de su
+   * personaje (`D-108`). Mismo carril y mismo `isSending` que el resto del
+   * trabajo de fondo, y ademas el cambio de dueño en curso: un resultado que
+   * llega con otro enganche ya no describe lo que hay.
+   *
+   * Se dispara al enganchar, al terminar cada envio de una enganchada y desde
+   * «Lo que recuerda». Casi siempre vuelve enseguida: solo llama al CLI si falta.
+   */
+  const memoryRelinks = context.memoryRelinks;
+  const memoryRelink =
+    memoryRelinks === undefined
+      ? null
+      : new MemoryRelink({
+          vault: context.vault,
+          conversations: context.privateConversations,
+          relinks: memoryRelinks,
+          recaps: context.recaps,
+          characters: context.characters,
+          preferences: context.memoryPreferences,
+          controller: context.controller,
+          lane: runOnAuxiliaryLane,
+          isBusy: (conversationId) =>
+            sendInFlight.has(conversationId) ||
+            ownerChangeInFlight.has(conversationId) ||
+            erasingInFlight.has(conversationId),
+          now: () => new Date().toISOString(),
+          log: context.log,
+        });
+  context.vault.onLock(() => memoryRelink?.cancel());
+
+  /**
+   * las enganchadas que la pasada general tiene que mirar (octava ronda).
+   *
+   * Las filas que pueden tener algo pendiente —`pending`, una `ready` que se
+   * desato, una `failed` que otro CLI puede intentar, una `applied` que aun
+   * guarda su texto— salen de `memory-relink.json`, que es un archivo pequeño.
+   * Las enganchadas antes de `D-108` no tienen fila: esas se buscan en la lista
+   * de conversaciones UNA vez por apertura de la boveda, porque la lista
+   * descifra un poco de cada una.
+   */
+  let legacyRelinksSeen = false;
+  context.vault.onLock(() => {
+    legacyRelinksSeen = false;
+  });
+  const relinkCandidates = async (exceptId: string): Promise<string[]> => {
+    if (memoryRelinks === undefined) return [];
+    const rows = await memoryRelinks.all(context.vault);
+    const ids = new Set<string>();
+    for (const [id, row] of rows) {
+      if (row.status === 'pending' || row.status === 'ready' || row.status === 'failed') ids.add(id);
+      else if (row.status === 'applied' && row.memory !== null) ids.add(id);
+    }
+    if (!legacyRelinksSeen) {
+      legacyRelinksSeen = true;
+      for (const summary of await context.privateConversations.list(context.vault)) {
+        if (summary.ownerSource === 'link' && !rows.has(summary.conversationId)) {
+          ids.add(summary.conversationId);
+        }
+      }
+    }
+    // la de este envio ya se ha mirado justo antes
+    ids.delete(exceptId);
+    return [...ids];
+  };
+
+  /**
+   * la memoria sellada EFECTIVA de una conversacion: la reescrita con su ficha
+   * mientras siga atada a la ultima sellada y al enganche que gana; si no, la
+   * sellada de siempre (`D-108`).
+   *
+   * UN sitio para todos los lectores —el turno, la sonda, el resumen de sus
+   * otras conversaciones (`D-105`) y «Lo que recuerda»—: si uno leyera la sellada
+   * a secas, el panel enseñaria una memoria y el prompt llevaria otra. El dueño
+   * solo se descifra cuando hay una reescritura que podria valer.
+   *
+   * Un almacen de reescrituras que no abre no cuesta nada: se usa la sellada,
+   * que es el lado seguro (`D-088`). El motivo no se registra.
+   *
+   * Quien la USA —el turno de su hilo y el resumen de sus otras conversaciones
+   * (`D-105`)— apunta antes `applied` con `markRelinkApplied`, y si no puede,
+   * va con la sellada. Llevar una `ready` fuera sin apuntarlo se saltaba esa
+   * regla (septima ronda); no llevarla nunca dejaba la de antes viajando para
+   * siempre en una enganchada que Daniel no sigue (octava ronda).
+   */
+  const effectiveSealed = async (
+    conversationId: string,
+    knownOwner?: ConversationOwner,
+  ): Promise<{
+    memory: ConversationMemory | null;
+    rewritten: boolean;
+    record: { memory: ConversationMemory; sequence: number; createdAt: string } | null;
+    relink: MemoryRelinkEntry | undefined;
+  }> => {
+    const store = context.privateConversations;
+    // sin almacen no hay nada a lo que atar una reescritura
+    if (memoryRelinks === undefined) {
+      return {
+        memory: await store.latestMemory(context.vault, conversationId),
+        rewritten: false,
+        record: null,
+        relink: undefined,
+      };
+    }
+    const record = await store.latestMemoryRecord(context.vault, conversationId);
+    if (record === null) return { memory: null, rewritten: false, record, relink: undefined };
+    let relink: MemoryRelinkEntry | undefined;
+    try {
+      relink = await memoryRelinks.forConversation(context.vault, conversationId);
+    } catch {
+      relink = undefined;
+    }
+    if (relink === undefined || (relink.status !== 'ready' && relink.status !== 'applied')) {
+      return { memory: record.memory, rewritten: false, record, relink };
+    }
+    const owner = knownOwner ?? (await store.owner(context.vault, conversationId));
+    return { ...effectiveSealedMemory({ sealed: record, relink, owner }), record, relink };
+  };
+
+  /**
+   * apunta que un mensaje va a usar la reescrita, por compare-and-set: `true`
+   * si quedo apuntado. Sobre una `ready` la pasa a `applied`; sobre una
+   * `applied` solo cambia la fecha, para que una decision de Daniel leida antes
+   * choque. No lanza: si falla, quien la iba a usar va con la sellada.
+   */
+  const markRelinkApplied = async (
+    conversationId: string,
+    relink: MemoryRelinkEntry,
+  ): Promise<boolean> => {
+    if (memoryRelinks === undefined) return false;
+    try {
+      return await memoryRelinks.replace(context.vault, conversationId, relink, {
+        ...relink,
+        status: 'applied',
+        updatedAt: new Date().toISOString(),
+      });
+    } catch {
+      return false;
+    }
+  };
+
+  /**
+   * quita la reescrita de una conversacion al borrar su memoria (`D-108`).
+   *
+   * En una enganchada no se borra la fila: se deja sin texto, en «no hace
+   * falta» si lo que viajara despues parte de cero —la memoria que se selle
+   * nace ya con la ficha delante, y sin esa marca pareceria pendiente y se
+   * reescribiria gastando una llamada para nada— o en «pendiente» si lo que
+   * viajara es su ficha retroactiva o el indice, que no la llevaban. Lanza si
+   * no puede: quien la llama aun no ha destruido nada.
+   */
+  const forgetRelink = async (conversationId: string): Promise<void> => {
+    if (memoryRelinks === undefined) return;
+    const owner = await context.privateConversations.owner(context.vault, conversationId);
+    if (owner.source !== 'link' || owner.winningEventId === null || owner.characterId === null) {
+      // una que no esta enganchada solo puede tener aqui un resto —un «Soltar»
+      // que no pudo quitarla—. Si el archivo no abre, eso no puede impedir
+      // borrar la memoria, que en `a45953b` no dependia de el: se apunta y sigue
+      try {
+        await memoryRelinks.removeConversation(context.vault, conversationId);
+      } catch {
+        context.log('memoria reescrita con su ficha', { resultado: 'sin-limpiar', paso: 'borrar-memoria' });
+      }
+      return;
+    }
+    // sin memoria sellada, lo que viaja es la ficha retroactiva o el indice, y
+    // tambien se escribieron sin su ficha: la primera que se selle despues sale
+    // de ahi y hay que reescribirla (septima ronda)
+    const inherits =
+      memoryRelink !== null && (await memoryRelink.inheritsUnsheetedMemory(conversationId));
+    const current = await memoryRelinks.forConversation(context.vault, conversationId);
+    const now = new Date().toISOString();
+    const written = await memoryRelinks.replace(context.vault, conversationId, current, {
+      v: 1,
+      conversationId,
+      ownerEventId: owner.winningEventId,
+      characterId: owner.characterId,
+      status: inherits ? 'pending' : 'not-needed',
+      basedOn: null,
+      memory: null,
+      drift: null,
+      provider: null,
+      model: null,
+      failure: null,
+      createdAt: now,
+      updatedAt: now,
+    });
+    if (!written) {
+      // solo si otro paso escribio justo en medio: mejor no borrar nada que
+      // dejar su texto en disco
+      throw new VaultError(
+        'la memoria reescrita de esta conversacion estaba cambiando',
+        'vuelve a borrar en un momento',
+      );
+    }
+  };
 
   handle(IPC_INVOKE.vaultRelationSync, vaultRelationSyncArgsSchema, async (args) => {
     if (!context.vault.isUnlocked()) throw new VaultError('la boveda esta bloqueada');
@@ -2007,15 +2313,90 @@ export function registerIpcHandlers(context: HandlerContext): void {
     // entera y antes se tiraba para quedarse solo con «la hay o no la hay», asi
     // que no habia forma de leer en pantalla lo unico que de verdad viaja en
     // esos hilos. Lo que va al renderer es lo mismo que ya va en `block`.
+    //
+    // Y es la memoria EFECTIVA (`D-108`): en una enganchada con la reescritura
+    // atada, la reescrita, que es la que viaja. Leer aqui la sellada a secas
+    // enseñaba una memoria y mandaba otra.
+    // como la lee ella: con la palabra partida del `slice` de antes arreglada,
+    // igual que en el bloque `memoria` y en `recientes`. Sin esto, el panel que
+    // existe para que las dos cosas coincidan enseñaba una palabra partida que
+    // ella ya no recibe (septima ronda)
+    const formatPresented = (
+      memory: ConversationMemory,
+      source: 'turn' | 'recap' | 'index',
+    ): string => formatConversationMemory(repairSlicedMemory(memory, memoryCapsFor(source)).memory);
     const sealed = new Map<string, string>();
+    const relinkOf = new Map<string, NonNullable<RecapListRow['relink']>>();
+    let relinks = new Map<string, MemoryRelinkEntry>();
+    if (memoryRelinks !== undefined) {
+      try {
+        relinks = await memoryRelinks.all(context.vault);
+      } catch {
+        // sin almacen legible, lo que viaja es la sellada: el panel dice eso
+        relinks = new Map();
+      }
+    }
     for (const summary of summaries) {
-      const memory = await context.privateConversations.latestMemory(
+      if (memoryRelinks === undefined) {
+        const memory = await context.privateConversations.latestMemory(
+          context.vault,
+          summary.conversationId,
+        );
+        if (memory !== null) sealed.set(summary.conversationId, formatPresented(memory, 'turn'));
+        continue;
+      }
+      const record = await context.privateConversations.latestMemoryRecord(
         context.vault,
         summary.conversationId,
       );
-      if (memory !== null) {
-        sealed.set(summary.conversationId, formatConversationMemory(memory));
+      const relink = relinks.get(summary.conversationId);
+      const owner = {
+        source: summary.ownerSource ?? 'none',
+        characterId: summary.characterId,
+        winningEventId: summary.ownerEventId ?? null,
+      };
+      const effective = effectiveSealedMemory({ sealed: record, relink, owner });
+      if (effective.memory !== null) {
+        sealed.set(summary.conversationId, formatPresented(effective.memory, 'turn'));
       }
+      const phase = relinkPhase(
+        relink,
+        owner,
+        record === null ? null : { sequence: record.sequence, createdAt: record.createdAt },
+      );
+      if (phase === 'none') continue;
+      // lo de una fila de OTRO enganche no dice nada de este
+      const own = relink !== undefined && relink.ownerEventId === owner.winningEventId ? relink : undefined;
+      relinkOf.set(summary.conversationId, {
+        phase,
+        provider: own?.provider ?? null,
+        failure: own?.failure ?? null,
+        drift:
+          own?.drift === null || own?.drift === undefined
+            ? null
+            : {
+                kept: own.drift.kept,
+                rewritten: own.drift.rewritten,
+                dropped: own.drift.dropped,
+                shortened: own.drift.shortened,
+                added: own.drift.added,
+                ...(own.drift.summaryChanged === undefined
+                  ? {}
+                  : { summaryChanged: own.drift.summaryChanged }),
+              },
+        at: own?.updatedAt ?? null,
+        // la de antes, solo mientras se puede volver a ella
+        previousBlock:
+          (phase === 'ready' || phase === 'in-use') && record !== null
+            ? formatPresented(record.memory, 'turn')
+            : '',
+        holdsRewrite: relink !== undefined && relink.memory !== null,
+        hasMemory: record !== null,
+        stalled:
+          phase === 'pending' &&
+          memoryRelink !== null &&
+          memoryRelink.stalledThisSession(summary.conversationId),
+      });
     }
 
     const byEntry = new Map(snapshot.entries.map((entry) => [entry.conversationId, entry]));
@@ -2097,7 +2478,7 @@ export function registerIpcHandlers(context: HandlerContext): void {
         block:
           entry === undefined || entry.memory === null
             ? ''
-            : formatConversationMemory(entry.memory),
+            : formatPresented(entry.memory, entry.source === 'index' ? 'index' : 'recap'),
         // lo que de verdad lee ella en ese hilo, cuando lo hay. Va aparte de
         // `block` a proposito: son dos textos distintos y confundirlos es
         // exactamente lo que hacia el panel
@@ -2123,6 +2504,7 @@ export function registerIpcHandlers(context: HandlerContext): void {
         // y justo por eso, la misma cuenta del otro lado: lo que hoy tapa la
         // sellada es lo que se destapa al borrarla
         cardRevivesOnForget: esSellada && fichaViajaria,
+        relink: relinkOf.get(summary.conversationId) ?? null,
       });
     }
 
@@ -2258,7 +2640,23 @@ export function registerIpcHandlers(context: HandlerContext): void {
         'espera a que llegue la respuesta y vuelve a borrar: ese turno todavia puede sellar lo que quites',
       );
     if (sendInFlight.has(args.conversationId)) throw contestandoAhora();
+    // y desde aqui no arranca ningun envio hasta terminar: la reescrita se quita
+    // antes que la sellada, y un envio que arrancara en medio hacia rechazar el
+    // borrado DESPUES de haberla quitado (septima ronda)
+    if (erasingInFlight.has(args.conversationId)) throw erasingNow();
+    erasingInFlight.add(args.conversationId);
+    try {
+      return await forgetSealedMemoryNow(args.conversationId, contestandoAhora);
+    } finally {
+      erasingInFlight.delete(args.conversationId);
+    }
+  });
 
+  const forgetSealedMemoryNow = async (
+    conversationId: string,
+    contestandoAhora: () => VaultError,
+  ): Promise<z.infer<typeof vaultRecapListResultSchema> & { cleared: number }> => {
+    const args = { conversationId };
     /**
      * ORDEN: primero la marca, despues la memoria. Los dos pasos pueden fallar
      * por separado —`clearSuperseded` descifra y reescribe `recap.json` entero—
@@ -2282,6 +2680,12 @@ export function registerIpcHandlers(context: HandlerContext): void {
      * tenia nada que tocar ahi y aun asi su borrado dependia de poder reescribir
      * `recap.json`, que en ese caso ni siquiera existe.
      */
+    // y ANTES que las dos, la reescrita con su ficha (`D-108`): tambien es
+    // memoria de esta conversacion, y si quitarla falla aqui no se ha destruido
+    // nada todavia. Al reves, la sellada ya no estaria y la reescrita, desatada
+    // pero en disco, seguiria guardando lo que Daniel mando borrar
+    await forgetRelink(args.conversationId);
+
     await context.recaps.clearSuperseded(context.vault, args.conversationId);
 
     // y se vuelve a mirar: en ese `await` cabe el arranque de un envio, y a
@@ -2302,6 +2706,103 @@ export function registerIpcHandlers(context: HandlerContext): void {
     });
 
     return { ...(await readRecapList()), cleared };
+  };
+
+  /**
+   * la ultima palabra de Daniel sobre la memoria reescrita con su ficha (`D-108`).
+   *
+   * «Volver a la de antes» solo mientras la reescrita siga atada a la ultima
+   * sellada: en cuanto un mensaje sella memoria nueva a partir de ella, la de
+   * antes ya no es «la de ahora» y volver no deshace nada. «Reescribir» vuelve a
+   * pedirsela al CLI aunque se hubiera negado, que es lo que promete el boton.
+   * Ninguna de las dos con un envio o un enganche en curso: la conversacion esta
+   * cambiando debajo.
+   */
+  handle(IPC_INVOKE.vaultMemoryRelinkDecide, vaultMemoryRelinkDecideArgsSchema, async (args) => {
+    if (!context.vault.isUnlocked()) throw new VaultError('la boveda esta bloqueada');
+    if (memoryRelinks === undefined || memoryRelink === null) {
+      throw new VaultError('la reescritura de la memoria no esta disponible');
+    }
+    const id = args.conversationId;
+    // cada motivo con su frase: «contestando ahora mismo» durante un enganche
+    // describia algo que no estaba pasando (septima ronda)
+    if (sendInFlight.has(id)) {
+      throw new VaultError(
+        'esa conversacion esta contestando ahora mismo',
+        'espera a que llegue la respuesta y vuelve a intentarlo',
+      );
+    }
+    if (ownerChangeInFlight.has(id)) {
+      throw new VaultError(
+        'se esta cambiando el personaje de esta conversacion',
+        'espera un momento y vuelve a intentarlo',
+      );
+    }
+    if (erasingInFlight.has(id)) throw erasingNow();
+    const store = context.privateConversations;
+    const owner = await store.owner(context.vault, id);
+    const record = await store.latestMemoryRecord(context.vault, id);
+    const entry = await memoryRelinks.forConversation(context.vault, id);
+    const phase = relinkPhase(
+      entry,
+      owner,
+      record === null ? null : { sequence: record.sequence, createdAt: record.createdAt },
+    );
+
+    if (args.choice === 'keep-old') {
+      if ((phase !== 'ready' && phase !== 'in-use') || entry === undefined) {
+        throw new VaultError(
+          'ya no se puede volver a la memoria de antes',
+          'desde tu último mensaje aquí, la memoria se escribió a partir de la reescrita',
+        );
+      }
+      // otra vez: entre la primera mirada y aqui hay tres descifrados, y un envio
+      // que empiece en medio usa la reescrita. Lo que quede de hueco lo cierra
+      // el compare-and-set: el envio apunta la fila antes de usarla
+      if (sendInFlight.has(id)) {
+        throw new VaultError(
+          'esa conversacion esta contestando ahora mismo',
+          'espera a que llegue la respuesta y vuelve a intentarlo',
+        );
+      }
+      const written = await memoryRelinks.replace(context.vault, id, entry, {
+        ...entry,
+        status: 'discarded',
+        // el texto reescrito no sirve para nada ya: no se guarda
+        memory: null,
+        updatedAt: new Date().toISOString(),
+      });
+      if (!written) {
+        throw new VaultError('la memoria reescrita estaba cambiando', 'vuelve a intentarlo');
+      }
+      context.log('memoria reescrita con su ficha', { resultado: 'descartada', decidido: 'daniel' });
+      return { ...(await readRecapList()), relinkOutcome: null };
+    }
+
+    if (phase !== 'pending' && phase !== 'failed' && phase !== 'discarded') {
+      throw new VaultError('esta memoria no hace falta reescribirla ahora');
+    }
+    if (record === null) {
+      throw new VaultError(
+        'esta conversacion todavia no tiene memoria propia que reescribir',
+        'se reescribira sola cuando su primera respuesta aqui guarde memoria',
+      );
+    }
+    if (context.memoryPreferences.excluded().has(id)) {
+      throw new VaultError(
+        'esta conversacion esta fuera del trabajo de fondo',
+        'quitala de las excluidas para poder reescribir su memoria',
+      );
+    }
+    // el resultado VUELVE a la pantalla: sin el, un CLI que no arranca, una
+    // respuesta que llega tarde o una conversacion ocupada dejaban la fila igual
+    // y sin una palabra, y el boton parecia no hacer nada (septima ronda)
+    const relinkOutcome = await memoryRelink.run({
+      conversationId: id,
+      projectAlias: args.projectAlias,
+      force: true,
+    });
+    return { ...(await readRecapList()), relinkOutcome };
   });
 
   // ---------------------------------------------------------------------------
@@ -2317,6 +2818,59 @@ export function registerIpcHandlers(context: HandlerContext): void {
    * un enganche en curso.
    */
   const ownerChangeInFlight = new Set<string>();
+
+  /**
+   * copia el avatar del personaje a la conversacion, si su foto de perfil aun no
+   * esta entre sus medios.
+   *
+   * Vive en la ficha del personaje, que es de otro sitio: sin esta copia,
+   * «pasame tu foto de perfil» no tenia NADA que reenviar, y el modelo respondia
+   * —con razon— que no podia recuperar ninguna. Se llama en cada turno y, desde
+   * `D-108`, tambien al enganchar: una enganchada tiene que tenerla en su galeria
+   * desde ya, como una nacida con ella, y no a partir del siguiente mensaje.
+   *
+   * «Ya esta» lo decide `isProfilePhotoOf`, no el `characterId` a secas: ese
+   * campo lo llevan tambien las imagenes generadas de ella, y una generada antes
+   * de enganchar impedia copiar el avatar para siempre.
+   *
+   * No lanza: sin avatar se sigue, y una foto no vale ni un turno ni un enganche.
+   */
+  const ensureProfilePhoto = async (
+    conversationId: string,
+    character: VaultCharacter,
+  ): Promise<void> => {
+    const avatarKey = character.avatarObjectKey;
+    if (avatarKey === null) return;
+    try {
+      const known = await context.privateMedia.list(context.vault, conversationId);
+      if (known.some((item) => isProfilePhotoOf(item.metadata, character.characterId))) return;
+      const bytes = await context.characters.readAvatar(context.vault, avatarKey);
+      await context.privateMedia.add(context.vault, conversationId, bytes, {
+        // el tipo REAL, leido de los bytes. Estaba escrito 'image/webp' a
+        // pelo, fuera lo que fuera: eso derrota la guarda de AI Horde para
+        // img2img, que mira el tipo declarado, y convierte un rechazo claro
+        // en un fallo dentro del worker. Si no se reconoce la firma se dice
+        // que no se sabe, en vez de inventarlo
+        mimeType: sniffImageType(bytes) ?? 'application/octet-stream',
+        displayName: 'foto de perfil',
+        // el avatar no se genero aqui, asi que no tiene `prompt`. Y «su
+        // foto de perfil» es un marcador, no una descripcion: no dice nada
+        // de lo que se ve, asi que el modelo elige a ciegas si le piden
+        // «una foto». Va en `caption` para que describirla con un modelo
+        // con vista lo SUSTITUYA por algo util
+        prompt: null,
+        caption: PROFILE_PHOTO_LABEL,
+        width: null,
+        height: null,
+        durationMs: null,
+        characterId: character.characterId,
+        provider: 'xavira',
+        model: null,
+      });
+    } catch {
+      // sin avatar se sigue: no vale perder el turno por una foto
+    }
+  };
 
   /**
    * lo que decide el enganche o el soltar, calculado en main y nunca en el
@@ -2401,7 +2955,8 @@ export function registerIpcHandlers(context: HandlerContext): void {
       instructionsOutcome = fromThisLink ? 'removed' : 'kept';
       eventInstructions = fromThisLink ? '' : null;
       const media = await context.privateMedia.list(context.vault, args.conversationId);
-      profilePhotoStays = media.some((item) => item.metadata.characterId === linkedId);
+      // la foto de perfil, no cualquier imagen suya (`D-108`)
+      profilePhotoStays = media.some((item) => isProfilePhotoOf(item.metadata, linkedId));
     }
 
     const target = resolveAuxiliaryTarget(null, context.memoryPreferences.auxiliary());
@@ -2409,13 +2964,20 @@ export function registerIpcHandlers(context: HandlerContext): void {
       ? target.provider
       : DEFAULT_AUXILIARY_PROVIDER;
 
+    const hasOwnMemory = (await store.latestMemory(context.vault, args.conversationId)) !== null;
+    // sin memoria propia viaja su ficha retroactiva o el indice, que tampoco
+    // llevaban la ficha: la confirmacion tiene que decirlo (septima ronda)
+    const inheritedMemory =
+      !hasOwnMemory &&
+      memoryRelink !== null &&
+      (await memoryRelink.inheritsUnsheetedMemory(args.conversationId));
     return {
       preview: {
         characterLabel: label,
         turns: records.length,
         instructionsOutcome,
-        hasOwnMemory:
-          (await store.latestMemory(context.vault, args.conversationId)) !== null,
+        hasOwnMemory,
+        inheritedMemory,
         recentMemoriesOn: character?.recentMemories === 'recent-two',
         excluded,
         backgroundCli,
@@ -2453,6 +3015,9 @@ export function registerIpcHandlers(context: HandlerContext): void {
     // antes del primer `await`: desde aqui ningun envio de esta conversacion
     // puede empezar hasta que el evento este escrito
     ownerChangeInFlight.add(args.conversationId);
+    // la reescritura de su memoria se lanza DESPUES de soltar la marca de arriba:
+    // con ella puesta, la pasada veria la conversacion ocupada y no haria nada
+    let relinkAfter = false;
     try {
       const plan = await planOwnerChange(args);
       const linking = args.characterId !== null;
@@ -2476,6 +3041,28 @@ export function registerIpcHandlers(context: HandlerContext): void {
       // que vuelva a ser candidata si la tenia
       catalogFailures.delete(args.conversationId);
 
+      // `D-108`: lo que la deja igual que una conversacion nacida con ella. Su
+      // foto de perfil en la galeria desde ya, no desde el siguiente mensaje, y
+      // la reescritura de su memoria apuntada. Ninguna de las dos lanza: el
+      // enganche ya esta hecho y no se deshace por una foto o una fila
+      if (linking && plan.character !== undefined) {
+        await ensureProfilePhoto(args.conversationId, plan.character);
+      }
+      if (linking && memoryRelink !== null) await memoryRelink.noteLink(args.conversationId);
+      // soltar se lleva la reescrita: era de ESE enganche. Si falla se queda
+      // inerte, porque su enganche ya no gana y solo vale atada a el
+      if (!linking && memoryRelinks !== undefined) {
+        try {
+          await memoryRelinks.removeConversation(context.vault, args.conversationId);
+        } catch {
+          // el motivo no se registra: podria traer dentro lo que no valido. Pero
+          // SI que paso: la fila se queda en disco con su texto y la pantalla ya
+          // no la enseña, porque la conversacion deja de estar enganchada. La
+          // quitan «Borrar su memoria» y borrar la conversacion (septima ronda)
+          context.log('memoria reescrita con su ficha', { resultado: 'sin-limpiar', paso: 'soltar' });
+        }
+      }
+
       // la relectura de pendientes, en segundo plano y sin esperar. El cursor ya
       // no vale por si solo —guarda con que dueño se reviso—, asi que esto solo
       // la adelanta. Una conversacion excluida no se revisa nunca
@@ -2487,6 +3074,9 @@ export function registerIpcHandlers(context: HandlerContext): void {
           rounds: plan.preview.reviewCalls + 1,
         });
       }
+      // la memoria, por el mismo carril y detras de los pendientes. Una
+      // excluida no se reescribe: esta fuera de todo el trabajo de fondo
+      relinkAfter = linking && revision && memoryRelink !== null;
 
       // el verbo y cifras. Ni la conversacion, ni el personaje, ni su nombre
       context.log('personaje de una conversacion', {
@@ -2499,6 +3089,12 @@ export function registerIpcHandlers(context: HandlerContext): void {
       return readConversation(args.conversationId);
     } finally {
       ownerChangeInFlight.delete(args.conversationId);
+      if (relinkAfter) {
+        void memoryRelink?.run({
+          conversationId: args.conversationId,
+          projectAlias: args.projectAlias,
+        });
+      }
     }
   });
 
@@ -3616,8 +4212,9 @@ export function registerIpcHandlers(context: HandlerContext): void {
    * enciende o apaga las notas de direccion contra la autocopia (`D-102`).
    *
    * Igual que los otros verbos: parte de lo que ya estaba y cambia un solo
-   * campo. Mientras valga `none` no cambia ni un byte del prompt: ese es el
-   * valor por defecto y lo que se mandaba antes de existir.
+   * campo. Mientras valga `none` esta casilla no añade ni un byte al prompt: ese
+   * es el valor por defecto y lo que se mandaba antes de existir. El prompt
+   * entero puede cambiar por otras vias (la ficha editada, `D-104`).
    */
   handle(
     IPC_INVOKE.vaultCharacterReplyGuidance,
@@ -3644,7 +4241,8 @@ export function registerIpcHandlers(context: HandlerContext): void {
    * enciende o apaga el resumen de sus dos ultimas conversaciones (`D-105`).
    *
    * El mismo molde que los demas: parte de lo que ya estaba y cambia un solo
-   * campo. Con `off`, el valor por defecto, el prompt no cambia ni un byte.
+   * campo. Con `off`, el valor por defecto, esta casilla no añade ni un byte al
+   * prompt.
    */
   handle(
     IPC_INVOKE.vaultCharacterRecentMemories,
@@ -3671,8 +4269,8 @@ export function registerIpcHandlers(context: HandlerContext): void {
    * enciende o apaga el modo esporadico de los pendientes (`D-104`).
    *
    * El mismo molde que las notas de direccion: parte de lo que ya estaba y
-   * cambia un solo campo. Con `per-note`, que es el valor por defecto, el prompt
-   * no cambia ni un byte.
+   * cambia un solo campo. Con `per-note`, que es el valor por defecto, esta
+   * casilla no añade ni un byte al prompt.
    */
   handle(
     IPC_INVOKE.vaultCharacterPendingPacing,
@@ -4839,42 +5437,7 @@ export function registerIpcHandlers(context: HandlerContext): void {
       }
     }
 
-    if (character !== undefined && character.avatarObjectKey !== null) {
-      const known = await context.privateMedia.list(context.vault, conversationId);
-      const yaEsta = known.some((item) => item.metadata.characterId === character.characterId);
-      if (!yaEsta) {
-        try {
-          const bytes = await context.characters.readAvatar(
-            context.vault,
-            character.avatarObjectKey,
-          );
-          await context.privateMedia.add(context.vault, conversationId, bytes, {
-            // el tipo REAL, leido de los bytes. Estaba escrito 'image/webp' a
-            // pelo, fuera lo que fuera: eso derrota la guarda de AI Horde para
-            // img2img, que mira el tipo declarado, y convierte un rechazo claro
-            // en un fallo dentro del worker. Si no se reconoce la firma se dice
-            // que no se sabe, en vez de inventarlo
-            mimeType: sniffImageType(bytes) ?? 'application/octet-stream',
-            displayName: 'foto de perfil',
-            // el avatar no se genero aqui, asi que no tiene `prompt`. Y «su
-            // foto de perfil» es un marcador, no una descripcion: no dice nada
-            // de lo que se ve, asi que el modelo elige a ciegas si le piden
-            // «una foto». Va en `caption` para que describirla con un modelo
-            // con vista lo SUSTITUYA por algo util
-            prompt: null,
-            caption: PROFILE_PHOTO_LABEL,
-            width: null,
-            height: null,
-            durationMs: null,
-            characterId: character.characterId,
-            provider: 'xavira',
-            model: null,
-          });
-        } catch {
-          // sin avatar se sigue: no vale perder el turno por una foto
-        }
-      }
-    }
+    if (character !== undefined) await ensureProfilePhoto(conversationId, character);
 
     // la clave que hace falta es la del proveedor de ESTE personaje. Preguntar
     // siempre por la de pago dejaba sin imagenes a un personaje del horde que
@@ -4920,7 +5483,26 @@ export function registerIpcHandlers(context: HandlerContext): void {
     // a enviarlo todo y el coste y la latencia crecerian sin techo hasta chocar
     // con el limite de contexto del modelo.
     const history = await store.read(context.vault, conversationId);
-    const sealedMemory = await store.latestMemory(context.vault, conversationId);
+    // la EFECTIVA: en una enganchada, la reescrita con su ficha mientras siga
+    // atada (`D-108`). Se usa solo si antes se ha podido apuntar que la usa un
+    // mensaje: asi, la memoria que selle este turno sale de ella y la reescritura
+    // queda cumplida, y si apuntarlo falla este turno va con la sellada y la
+    // reescrita sigue lista para el siguiente. Nada de esto cuesta el turno
+    //
+    // Tambien sobre una ya `applied`: apuntarlo otra vez cambia su `updatedAt`,
+    // y asi un «Volver a la de antes» que la leyo antes de este envio choca en
+    // su compare-and-set en vez de dejar la fila en «descartada» con la memoria
+    // que selle este turno ya salida de la reescrita (octava ronda). Solo pasa
+    // mientras esta atada: en cuanto este turno sella, deja de valer
+    const efectiva = await effectiveSealed(conversationId, owner);
+    let sealedMemory = efectiva.memory;
+    let memoriaReescrita = efectiva.rewritten;
+    if (efectiva.rewritten && efectiva.relink !== undefined && memoryRelinks !== undefined) {
+      if (!(await markRelinkApplied(conversationId, efectiva.relink))) {
+        sealedMemory = efectiva.record?.memory ?? null;
+        memoriaReescrita = false;
+      }
+    }
 
     // LA PUERTA: si en este turno se le OFRECE generar una imagen nueva.
     //
@@ -5034,8 +5616,10 @@ export function registerIpcHandlers(context: HandlerContext): void {
         // la foto de perfil se anuncia COMO TAL, y ademas con lo que se ve en
         // ella. El personaje tiene que saber que ese retrato suyo existe aunque
         // ya no se enseñe siempre en pantalla
+        // `isProfilePhotoOf` y no el `characterId` a secas: con eso, TODA imagen
+        // generada de ella salia anunciada como su foto de perfil (`D-108`)
         const esAvatar =
-          character !== undefined && item.metadata.characterId === character.characterId;
+          character !== undefined && isProfilePhotoOf(item.metadata, character.characterId);
         return {
           mediaId: item.mediaId,
           description: esAvatar ? profilePhotoLine(description) : description,
@@ -5077,21 +5661,79 @@ export function registerIpcHandlers(context: HandlerContext): void {
         : { alreadyInPrompt: { conversationId, fromSequence: oldestRecent } }),
     });
 
-    // el resumen de sus dos ultimas conversaciones (`D-105`), solo con la casilla
-    // de su ficha encendida. Entero dentro de un `try`: lee memorias selladas y
-    // fichas del disco, y un fallo suyo no vale un turno de pago (`D-088`). Sin
-    // bloque, el prompt queda como sin la casilla. El motivo NO se registra: un
-    // error de validacion trae dentro el texto que no valido
+    // la memoria de sus dos ultimas conversaciones (`D-105`), solo con la casilla
+    // de su ficha encendida: entera, sin `plan` ni `openQuestions` (quinta
+    // ronda). Entero dentro de un `try`: lee memorias selladas y fichas del
+    // disco, y un fallo suyo no vale un turno de pago (`D-088`). Sin bloque, el
+    // prompt queda como sin la casilla. El motivo NO se registra: un error de
+    // validacion trae dentro el texto que no valido
     const recentOn = character?.recentMemories === 'recent-two' && characterId !== null;
     let recentEntries: RecentMemoryEntry[] = [];
-    let recentPhrases: string[] = [];
+    let recentPhrases: RecentPhrase[] = [];
+    // la memoria usable de una conversacion de las recientes: la sellada o, si
+    // no hay, la ficha retroactiva APROBADA y al dia. El indice deducido del
+    // catalogo entra sin que nadie lo apruebe y no vale aqui. Los tramos sin
+    // resumir de la ficha viajan con ella: sin ellos, una ficha que se salto
+    // escenas se presentaria como si lo contara todo
+    const usableRecentMemory = async (
+      recentId: string,
+      turns: readonly { sequence: number; createdAt: string }[],
+      /**
+       * `false` para el control de `ecoRecientes`, que se mide y NO viaja: no
+       * la usa ningun mensaje, asi que no se apunta nada
+       */
+      travels = true,
+    ): Promise<{ memory: ConversationMemory; source: 'turn' | 'recap'; gaps: number } | null> => {
+      // la EFECTIVA, la misma que viaja en su propio hilo (`D-108`): si se leyera
+      // la sellada a secas, una enganchada llevaria a sus otras conversaciones
+      // la memoria escrita sin su ficha. Una LISTA se apunta como usada antes
+      // de llevarla fuera, igual que hace el turno de su hilo: si no, una
+      // enganchada que Daniel no sigue se quedaba en «lista» para siempre y sus
+      // otras conversaciones recibian la de antes (octava ronda). Si apuntarlo
+      // falla, viaja la sellada
+      const efectiva = await effectiveSealed(recentId);
+      let sellada = efectiva.memory;
+      if (
+        travels &&
+        efectiva.rewritten &&
+        efectiva.relink?.status === 'ready' &&
+        !(await markRelinkApplied(recentId, efectiva.relink))
+      ) {
+        sellada = efectiva.record?.memory ?? null;
+      }
+      if (sellada !== null) return { memory: sellada, source: 'turn', gaps: 0 };
+      const elegido = chooseConversationMemory({
+        sealed: null,
+        entry: await context.recaps.entryFor(context.vault, recentId),
+        turns,
+      });
+      return elegido.source === 'recap' && elegido.memory !== null
+        ? { memory: elegido.memory, source: 'recap', gaps: elegido.gaps }
+        : null;
+    };
+    // la tercera mas reciente, que NO viaja: el control de `ecoRecientes`. Se
+    // fija AQUI, en la misma eleccion que las dos que viajan, y su memoria se lee
+    // al final del turno. Elegirla al final podia dar otra cosa: un turno dura
+    // minutos, y un enganche en medio cambia la recencia y convertia en «tercera»
+    // una de las que si viajaron. Solo lleva posiciones y fechas, nunca texto
+    let recentControl: {
+      conversationId: string;
+      date: string;
+      title: string;
+      turns: { sequence: number; createdAt: string }[];
+    } | null = null;
     let recientes: {
+      formato: number;
       conversaciones: number;
       sinMemoria: number;
       caracteres: number;
+      hechos: number;
       decisiones: number;
+      lecciones: number;
       recortadas: number;
       fuera: number;
+      cortadasAlGuardar: number;
+      huecos: number;
       sinIndice: boolean;
     } | null = null;
     let recientesError = false;
@@ -5100,29 +5742,34 @@ export function registerIpcHandlers(context: HandlerContext): void {
         // la linea temporal construye el indice si aun no esta; `recentFor` lee
         // lo construido
         const linea = await context.privateMemory.timeline(context.vault);
-        const elegidas = context.privateMemory.recentFor(
+        const turnosDe = (recentId: string): { sequence: number; createdAt: string }[] =>
+          linea
+            .filter((turno) => turno.conversationId === recentId)
+            .map((turno) => ({ sequence: turno.sequence, createdAt: turno.createdAt }));
+        const candidatas = context.privateMemory.recentFor(
           characterId,
           conversationId,
-          RECENT_MEMORIES_COUNT,
+          RECENT_MEMORIES_COUNT + 1,
         );
-        const items = [];
+        const elegidas = candidatas.slice(0, RECENT_MEMORIES_COUNT);
+        const tercera = candidatas[RECENT_MEMORIES_COUNT];
+        recentControl =
+          tercera === undefined
+            ? null
+            : {
+                conversationId: tercera.conversationId,
+                date: civilDayLabel(tercera.updatedAt, anchor),
+                title: tercera.title,
+                turns: turnosDe(tercera.conversationId),
+              };
+        const items: RecentMemoryItem[] = [];
         let sinMemoria = 0;
         for (const elegida of elegidas) {
-          const sellada = await store.latestMemory(context.vault, elegida.conversationId);
-          let usable = sellada;
-          if (usable === null) {
-            // la ficha retroactiva, solo APROBADA: el indice deducido del
-            // catalogo entra sin que nadie lo apruebe y no vale aqui
-            const elegido = chooseConversationMemory({
-              sealed: null,
-              entry: await context.recaps.entryFor(context.vault, elegida.conversationId),
-              turns: linea
-                .filter((turno) => turno.conversationId === elegida.conversationId)
-                .map((turno) => ({ sequence: turno.sequence, createdAt: turno.createdAt })),
-            });
-            usable = elegido.source === 'recap' ? elegido.memory : null;
-          }
-          // sin memoria usable se salta y NO se rellena con una tercera: la
+          const usable = await usableRecentMemory(
+            elegida.conversationId,
+            turnosDe(elegida.conversationId),
+          );
+          // sin memoria usable se salta y NO se rellena con la tercera: la
           // pantalla dice «sus dos mas recientes»
           if (usable === null) {
             sinMemoria += 1;
@@ -5131,21 +5778,32 @@ export function registerIpcHandlers(context: HandlerContext): void {
           items.push({
             date: civilDayLabel(elegida.updatedAt, anchor),
             title: elegida.title,
-            memory: usable,
+            memory: usable.memory,
+            source: usable.source,
+            gaps: usable.gaps,
           });
         }
         const condensado = condenseRecentMemories(items);
         recentEntries = condensado.entries;
         recentPhrases = condensado.phrases;
         recientes = {
+          // 1, o sin el campo, es la version corta: separa los turnos de antes y
+          // de despues de la quinta ronda en cualquier comparacion
+          formato: RECENT_MEMORIES_FORMAT,
           conversaciones: condensado.entries.length,
           sinMemoria,
           caracteres: condensado.stats.caracteres,
+          hechos: condensado.stats.hechos,
           decisiones: condensado.stats.decisiones,
+          lecciones: condensado.stats.lecciones,
+          // la salvaguarda de 6.000 por conversacion: cuantas toco y cuantos
+          // caracteres de entradas enteras quito. Con lo medido, cero
           recortadas: condensado.stats.recortadas,
-          // cuanto de los resumenes se quedo fuera, en caracteres: `recortadas`
-          // dice que se corto, no cuanto
           fuera: condensado.stats.fuera,
+          // textos guardados con el `slice` de antes, arreglados al presentarlos
+          cortadasAlGuardar: condensado.stats.cortadasAlGuardar,
+          // tramos sin resumir de las fichas que viajaron, que van avisados
+          huecos: condensado.stats.huecos,
           // el indice se invalido a mitad de construirlo: `conversaciones: 0`
           // no es «no tiene otras», es que este turno no pudo mirar
           sinIndice: !context.privateMemory.isBuilt(),
@@ -5153,6 +5811,7 @@ export function registerIpcHandlers(context: HandlerContext): void {
       } catch {
         recentEntries = [];
         recentPhrases = [];
+        recentControl = null;
         recientes = null;
         recientesError = true;
       }
@@ -5280,13 +5939,13 @@ export function registerIpcHandlers(context: HandlerContext): void {
           respuestas: respuestas.length,
           enNotas: respuestas.filter((turn) => enAlgunaNota(turn.text)).length,
         };
-        // el resumen de otras conversaciones (`D-105`) es el tercer canal: sus
+        // la memoria de otras conversaciones (`D-105`) es el tercer canal: sus
         // frases viajan en cada turno, tambien con el tope de `D-104` cerrado.
         // Solo con la casilla y con bloque; sin el, `null`
         if (recientes !== null) {
           ecoOtras = {
             frases: recentPhrases.length,
-            enNotas: recentPhrases.filter((frase) => enAlgunaNota(frase)).length,
+            enNotas: recentPhrases.filter((frase) => enAlgunaNota(frase.text)).length,
           };
         }
       } catch {
@@ -5343,7 +6002,7 @@ export function registerIpcHandlers(context: HandlerContext): void {
       // siempre, y apagado no puede cambiar nada
       pendingPacing: esporadicos ? 'sparse' : 'per-note',
       pendingAlreadyRaised: (pendientes?.counters.raisedByHer ?? 0) > 0,
-      // el resumen de otras conversaciones y la guia de campos (`D-105`). Con la
+      // la memoria de otras conversaciones y la guia de campos (`D-105`). Con la
       // casilla apagada, lista vacia y `false`: ningun push
       recentMemories: recentEntries,
       memoryFieldGuide: recentOn,
@@ -5397,6 +6056,17 @@ export function registerIpcHandlers(context: HandlerContext): void {
       // ficha que vivio la conversacion de un indice que solo sabe los titulos
       memoriaOrigen: memoriaElegida.memory === null ? 'ninguna' : memoriaElegida.source,
       memoriaHuecos: memoriaElegida.gaps,
+      // la memoria que viajo es la reescrita con su ficha (`D-108`). Sin esto,
+      // una enganchada y una nacida salen iguales en el registro y no se puede
+      // saber si la reescritura llego a usarse
+      memoriaReescrita,
+      // textos de esa memoria con la huella del `slice` de antes, que el bloque
+      // `memoria` presenta ya arreglados. Un entero: dice si el arreglo actua
+      memoriaCortadasAlGuardar:
+        memoriaElegida.memory === null
+          ? 0
+          : repairSlicedMemory(memoriaElegida.memory, memoryCapsFor(memoriaElegida.source))
+              .repaired,
       // si en este turno se le ofrecio generar, y por que. Es una CLASIFICACION
       // —una de cuatro— y no contenido: ni el mensaje ni una palabra suya.
       //
@@ -5439,7 +6109,7 @@ export function registerIpcHandlers(context: HandlerContext): void {
       // promesa viva. Enteros y nada mas; `null` si no se pudo leer lo apuntado
       ecoMemoria,
       ecoHistorial,
-      // el tercero, con `D-105`: frases del resumen de otras conversaciones que
+      // el tercero, con `D-105`: frases de la memoria de otras conversaciones que
       // hablan de una promesa viva. Viajan en cada turno, con el tope cerrado
       // tambien. `null` sin la casilla o sin bloque
       ecoOtras,
@@ -5451,7 +6121,7 @@ export function registerIpcHandlers(context: HandlerContext): void {
       // Siempre presentes, igual que las dos de arriba
       pendientesEsporadicos: esporadicos,
       notaYaSalio,
-      // el resumen de sus ultimas conversaciones (`D-105`): `null` con la casilla
+      // la memoria de sus ultimas conversaciones (`D-105`): `null` con la casilla
       // apagada; con ella, cuantas viajaron y cuantas se saltaron por no tener
       // memoria. Enteros, nunca de que iban
       recientes,
@@ -5535,7 +6205,7 @@ export function registerIpcHandlers(context: HandlerContext): void {
       result.outcome === 'failed' ? null : 'absent';
 
     let wroteReply = false;
-    // la memoria que selle este turno, para medir si copia el resumen de otras
+    // la memoria que selle este turno, para medir si copia la memoria de otras
     // conversaciones. Nunca va al registro
     let memoriaNueva: ConversationMemory | null = null;
     // lo que de verdad leyo el usuario, sin el bloque de memoria ni la peticion
@@ -5795,7 +6465,7 @@ export function registerIpcHandlers(context: HandlerContext): void {
       // el turno sale con su texto
       const aplazada = generacionAplazada;
       if (aplazada !== null) {
-        progress.onReplySaved();
+        progress.onReplySaved(aplazada.plan.provider !== 'horde');
         try {
           const generated = await generatePrivateMedia({ conversationId, ...aplazada });
           image = {
@@ -5809,16 +6479,22 @@ export function registerIpcHandlers(context: HandlerContext): void {
           };
         } catch (error) {
           // lo mismo que el `catch` de arriba: el fallo, redactado, para la
-          // pantalla y para el turno siguiente, que si no cree que la mando
-          ultimaImagenFallida.set(
-            conversationId,
-            redact(error instanceof Error ? error.message : String(error)),
-          );
+          // pantalla y para el turno siguiente, que si no cree que la mando.
+          //
+          // Con la boveda ya cerrada, el error es el de la boveda bloqueada: al
+          // turno siguiente le llegaba como motivo un error interno. Se le dice
+          // lo que paso, y el aviso del envio lo cuenta (octava ronda)
+          const perdidaPorCierre = !context.vault.isUnlocked();
+          if (perdidaPorCierre) progress.imageLostToLock = true;
+          const motivo = perdidaPorCierre
+            ? 'la bóveda se cerró mientras se hacía y la imagen se perdió'
+            : redact(error instanceof Error ? error.message : String(error));
+          ultimaImagenFallida.set(conversationId, motivo);
           image = {
             mediaId: null,
             costCredits: null,
             costUnit: null,
-            error: redact(error instanceof Error ? error.message : String(error)),
+            error: motivo,
             state: 'done',
             attemptId: aplazada.attemptId,
             plan: null,
@@ -5994,17 +6670,57 @@ export function registerIpcHandlers(context: HandlerContext): void {
     // cuanto tardo el turno de pago y si habia una extraccion corriendo por
     // detras. Son las dos cifras con las que se decide si el disparo inmediato
     // se queda o se deja solo el de inactividad: sin medirlo seria una opinion
-    // si la memoria nueva copia frases del resumen de otras conversaciones, y
+    // si la memoria nueva copia frases de la memoria de otras conversaciones, y
     // cuantas sin que nada de ESTA conversacion las respalde: el blanqueo
     // (`D-105`). La respuesta nueva no cuenta como respaldo: puede ser justo la
     // que lo copio. Mudo si falla, como toda medida
     let ecoRecientes: RecentEcho | null = null;
+    // que paso con el control: una CLASIFICACION, nunca el motivo. Sin esto,
+    // `control: null` no distingue «no tiene tercera» de «no se pudo leer»
+    let ecoRecientesControl: 'sin-medida' | 'sin-tercera' | 'sin-memoria' | 'medido' | 'error' =
+      'sin-medida';
     if (recentOn && memoriaNueva !== null && recentPhrases.length > 0) {
+      // la memoria de la tercera, que se eligio al montar el prompt. Se lee
+      // despues de la llamada de pago y en su propio `try`: un fallo aqui quita
+      // el control, no la medida
+      let controlPhrases: RecentPhrase[] | null = null;
+      if (recentControl === null) {
+        ecoRecientesControl = 'sin-tercera';
+      } else {
+        try {
+          const usable = await usableRecentMemory(
+            recentControl.conversationId,
+            recentControl.turns,
+            false,
+          );
+          if (usable === null) {
+            ecoRecientesControl = 'sin-memoria';
+          } else {
+            controlPhrases = condenseRecentMemories([
+              {
+                date: recentControl.date,
+                title: recentControl.title,
+                memory: usable.memory,
+                source: usable.source,
+                gaps: usable.gaps,
+              },
+            ]).phrases;
+            ecoRecientesControl = 'medido';
+          }
+        } catch {
+          controlPhrases = null;
+          ecoRecientesControl = 'error';
+        }
+      }
       try {
         ecoRecientes = measureRecentEcho({
           memory: memoriaNueva,
           phrases: recentPhrases,
           turns: history,
+          control: controlPhrases,
+          // su nombre sale en casi todas las frases y hacia casar cualquier
+          // par que la nombrara (octava ronda), como en el recuerdo de arriba
+          ignoreWords: character === undefined ? [] : [character.label],
         });
       } catch {
         ecoRecientes = null;
@@ -6013,6 +6729,10 @@ export function registerIpcHandlers(context: HandlerContext): void {
 
     context.log('turno privado terminado', {
       ecoRecientes,
+      // solo con la casilla encendida: con todo apagado la linea queda como
+      // estaba, sin un campo nuevo que nadie documento (septima ronda).
+      // Encendida, `sin-medida` es que no hubo memoria nueva o frases que medir
+      ...(recentOn ? { ecoRecientesControl } : {}),
       duracionMs: result.durationMs,
       extraccionEnCurso: relationSync.busy,
       final: result.outcome,
@@ -6023,7 +6743,7 @@ export function registerIpcHandlers(context: HandlerContext): void {
       imagenIntento: image?.attemptId ?? null,
     });
 
-    const ownerAfter = await store.owner(context.vault, conversationId);
+    const { owner: ownerAfter, foreignUpTo: foreignAfter } = await ownerForView(conversationId);
     return {
       conversationId,
       outcome: result.outcome,
@@ -6031,7 +6751,7 @@ export function registerIpcHandlers(context: HandlerContext): void {
       instructions: ownerAfter.instructions,
       characterId: ownerAfter.characterId,
       characterDescription: ownerAfter.characterDescription,
-      owner: await ownerView(ownerAfter),
+      owner: await ownerView(ownerAfter, foreignAfter),
       provider: args.provider,
       model: result.executedModel ?? args.model,
       memoryStatus,
@@ -6104,7 +6824,7 @@ export function registerIpcHandlers(context: HandlerContext): void {
       // el plan es el texto que saldria hacia el proveedor: contenido, y la
       // pantalla que lo recibe ya esta cerrada
       image: reply.image === null ? null : { ...reply.image, plan: null },
-      error: SEND_CUT_BY_LOCK.savedReply,
+      error: progress.imageLostToLock === true ? SEND_CUT_BY_LOCK.imageLost : SEND_CUT_BY_LOCK.savedReply,
     };
   };
 
@@ -6118,10 +6838,14 @@ export function registerIpcHandlers(context: HandlerContext): void {
         'espera un momento y vuelve a enviar',
       );
     }
+    // con un borrado a medias, este turno escribiria en lo que se esta borrando
+    if (erasingInFlight.has(conversationId)) throw erasingNow();
     // un envio por conversacion. La pantalla desactiva Enviar mientras contesta,
-    // pero al salir de Privado y volver su estado empieza de cero y dejaba
-    // mandar otro: los dos turnos se intercalaban, el primero en terminar
-    // quitaba la marca de abajo con el segundo aun en vuelo y, si el primero se
+    // pero si la ventana se recarga a mitad (Ctrl+R, o un cuelgue del renderer)
+    // su estado empieza de cero y dejaba mandar otro —salir de Privado y volver
+    // no lo reinicia: `useVault` vive en `App`—: los dos turnos se
+    // intercalaban, el primero en terminar quitaba la marca de abajo con el
+    // segundo aun en vuelo y, si el primero se
     // quedaba sin respuesta, su mensaje ya no era la ultima linea y quedaba
     // huerfano (revision del 28/09)
     if (sendInFlight.has(conversationId)) {
@@ -6145,10 +6869,10 @@ export function registerIpcHandlers(context: HandlerContext): void {
       userRecordId: null,
       userTurnRetired: false,
       reply: null,
-      onReplySaved: () => {
+      onReplySaved: (paid) => {
         // la nueva antes de soltar la vieja: sin un instante en que no haya
-        // ninguna y la inactividad pueda cerrarla
-        releaseImage = context.vault.beginUserWait('image');
+        // ninguna y la inactividad —o un Win+L aplazado— pueda cerrarla
+        releaseImage = context.vault.beginUserWait(paid ? 'turn-image' : 'image');
         releaseReply();
       },
     };
@@ -6186,6 +6910,25 @@ export function registerIpcHandlers(context: HandlerContext): void {
       // ahora: el suyo y el de ella
       firstTurn: turn.turns.length <= 2,
     });
+
+    // y la memoria de una enganchada, si aun falta reescribirla con su ficha
+    // (`D-108`): la de esta, si es una, y despues las demas que se quedaron a
+    // medias —cortadas por un cierre, un reinicio o un fallo local—, que antes
+    // solo se reintentaban con un envio EN ELLAS (octava ronda). Casi siempre
+    // vuelve sin llamar a nadie
+    if (memoryRelink !== null) {
+      const relinker = memoryRelink;
+      const linkedHere = turn.owner.source === 'link';
+      void (async () => {
+        try {
+          if (linkedHere) await relinker.run({ conversationId, projectAlias: args.projectAlias });
+          await relinker.sweep(args.projectAlias, await relinkCandidates(conversationId));
+        } catch {
+          // el motivo no se registra: podria traer dentro lo que no valido
+          context.log('memoria reescrita con su ficha', { resultado: 'sin-pasada' });
+        }
+      })();
+    }
 
     return turn;
   });

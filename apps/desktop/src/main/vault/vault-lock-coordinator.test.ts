@@ -15,6 +15,7 @@ import { VaultService } from './vault-service.js';
 import { vaultFilePathFor } from './key-file.js';
 import {
   LOCK_SCREEN_GRACE_MS,
+  LOCK_SCREEN_TURN_IMAGE_GRACE_MS,
   VAULT_TICK_MS,
   VaultLockCoordinator,
   type VaultPowerSource,
@@ -138,6 +139,7 @@ describe('VaultLockCoordinator', () => {
     expect(lines('cierre de la boveda aplazado')[0]!.fields).toEqual({
       motivo: 'pantalla-bloqueada',
       envios: 1,
+      imagenesDelTurno: 0,
     });
 
     vi.advanceTimersByTime(60_000);
@@ -168,10 +170,74 @@ describe('VaultLockCoordinator', () => {
     expect(lines('cierre de la boveda aplazado')[0]!.fields).toEqual({
       motivo: 'pantalla-bloqueada',
       envios: 1,
+      imagenesDelTurno: 0,
     });
     // la imagen sigue en marcha, pero en cuanto llega la respuesta se cierra
     release();
     vi.advanceTimersByTime(VAULT_TICK_MS);
+    expect(vault.isUnlocked()).toBe(false);
+  });
+
+  // revision del 28/09: al guardar el texto, el envio soltaba `reply` y
+  // arrancaba la imagen del turno, ya cobrada; el Win+L aplazado se cumplia en la
+  // vuelta siguiente y la tiraba, en TODOS los turnos con imagen
+  it('con el texto guardado, el cierre aplazado espera tambien a la imagen del turno', () => {
+    const releaseReply = vault.beginUserWait('reply');
+    power.emit('lock-screen');
+    // lo que hace el envio al guardar el texto: la nueva antes de soltar la vieja
+    const releaseImage = vault.beginUserWait('turn-image');
+    releaseReply();
+    vi.advanceTimersByTime(5 * 60_000);
+    expect(vault.isUnlocked()).toBe(true);
+
+    releaseImage();
+    vi.advanceTimersByTime(VAULT_TICK_MS);
+    expect(vault.isUnlocked()).toBe(false);
+    expect(lines('boveda cerrada')[0]!.fields['motivo']).toBe('pantalla-bloqueada');
+  });
+
+  it('Win+L con solo la imagen de un envio en marcha tambien se aplaza', () => {
+    const release = vault.beginUserWait('turn-image');
+    power.emit('lock-screen');
+    expect(vault.isUnlocked()).toBe(true);
+    expect(lines('cierre de la boveda aplazado')[0]!.fields).toEqual({
+      motivo: 'pantalla-bloqueada',
+      envios: 0,
+      imagenesDelTurno: 1,
+    });
+    release();
+    vi.advanceTimersByTime(VAULT_TICK_MS);
+    expect(vault.isUnlocked()).toBe(false);
+  });
+
+  // octava ronda: faltaba fijar que, con Win+L pulsado ya en ese tramo, el tope
+  // cuenta desde Win+L y no desde que empezo la imagen
+  it('Win+L con solo la imagen del turno: su tope cuenta desde Win+L y corta a los 15 minutos', () => {
+    vault.beginUserWait('turn-image');
+    // la imagen lleva ya diez minutos: su espera no se toca
+    vi.advanceTimersByTime(10 * 60_000);
+    power.emit('lock-screen');
+    expect(vault.isUnlocked()).toBe(true);
+    vi.advanceTimersByTime(LOCK_SCREEN_TURN_IMAGE_GRACE_MS - VAULT_TICK_MS);
+    expect(vault.isUnlocked()).toBe(true);
+    vi.advanceTimersByTime(2 * VAULT_TICK_MS);
+    expect(vault.isUnlocked()).toBe(false);
+    expect(lines('boveda cerrada')[0]!.fields['motivo']).toBe('pantalla-bloqueada');
+    expect(LOCK_SCREEN_TURN_IMAGE_GRACE_MS).toBe(15 * 60_000);
+  });
+
+  it('la imagen del turno tiene su propio tope, contado desde que se guardo el texto', () => {
+    const releaseReply = vault.beginUserWait('reply');
+    power.emit('lock-screen');
+    // la respuesta tarda casi todo el tope de Win+L
+    vi.advanceTimersByTime(LOCK_SCREEN_GRACE_MS - 2 * VAULT_TICK_MS);
+    vault.beginUserWait('turn-image');
+    releaseReply();
+    // la imagen no se ve cortada por lo que tardo el texto...
+    vi.advanceTimersByTime(LOCK_SCREEN_TURN_IMAGE_GRACE_MS - 2 * VAULT_TICK_MS);
+    expect(vault.isUnlocked()).toBe(true);
+    // ...pero una que no termina nunca no la sostiene mas de su tope
+    vi.advanceTimersByTime(3 * VAULT_TICK_MS);
     expect(vault.isUnlocked()).toBe(false);
   });
 

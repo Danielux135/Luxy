@@ -3,6 +3,9 @@ import { useEffect, useRef, useState, type JSX } from 'react';
 import {
   ALLOWED_TEST_EXECUTABLES,
   ModelRegistry,
+  REASONING_MODE_LABELS,
+  reasoningNoteFor,
+  reasoningOptionsFor,
   buildCatalogReport,
   buildDefaultCatalog,
   connectionProfileSchema,
@@ -34,12 +37,15 @@ import {
   describeSampling,
   emptyHttpProviderDraft,
   emptySamplingDraft,
+  hostOfBaseUrl,
   httpProviderToDraft,
   HTTP_PROVIDER_PRESETS,
+  reasoningModeDraft,
   samplingToDraft,
   withModelSampling,
   type HttpProviderConfig,
   type HttpProviderDraft,
+  type ReasoningModeDraft,
   type SamplingDraft,
 } from '../http-provider-config.js';
 import { Empty, Explica, Field, Notice, Panel, Tag } from '../ui/primitives.js';
@@ -806,6 +812,76 @@ function defaultProject(): NonNullable<StoredAgentConfig['projects']>[string] {
  * Los cuatro campos son los mismos, con el mismo aviso y las mismas reglas, que
  * los de un proveedor HTTP: vacio = no se envia.
  */
+/**
+ * el selector de razonamiento de un modelo (D-107), junto a la temperatura.
+ *
+ * Solo ofrece los valores que la documentacion de ESE modelo admite, y la
+ * primera opcion es siempre «no enviar nada». Un modelo sin regla ve el selector
+ * apagado: ofrecerle algo seria prometer un efecto que no llega (D-093).
+ *
+ * Si el valor guardado ya no vale —porque se cambio el modelo o la URL—, se
+ * sigue ENSEÑANDO con su aviso en vez de borrarse solo: borrarlo en silencio
+ * cambiaria la configuracion sin que nadie lo decidiera. Al guardar se rechaza.
+ */
+function ReasoningField({
+  model,
+  baseUrl,
+  value,
+  onChange,
+}: {
+  model: string;
+  baseUrl: string;
+  value: ReasoningModeDraft;
+  onChange: (next: ReasoningModeDraft) => void;
+}): JSX.Element {
+  const host = hostOfBaseUrl(baseUrl);
+  const options = reasoningOptionsFor(model.trim(), host);
+  const note = reasoningNoteFor(model.trim(), host);
+  const huerfano = value !== '' && !options.includes(value);
+  // la seccion se llama «Registros»: «Sistema» no existe en la barra lateral, y
+  // es el unico sitio donde Daniel puede comprobar si el ajuste llega (LA-055).
+  // Los seis veredictos, y «hidden» como lo que es, una deduccion (`D-093`)
+  const hint =
+    options.length === 0
+      ? 'Luxy no sabe cómo pedírselo a este modelo: no enviará nada. Sólo se ofrece donde la ' +
+        'documentación del modelo dice qué valores admite.'
+      : // mas corta y con los pasos: Registros solo carga las ultimas lineas, asi
+        // que hay que mirarlo nada mas enviar (octava ronda). Los veredictos
+        // vienen en ingles porque asi salen en el registro
+        `${note ?? ''} No se sabe si tu pasarela deja pasar este ajuste. Para saberlo: envía un ` +
+        'mensaje, ve a Registros, pulsa «Actualizar» y busca «llamada al proveedor». Si ' +
+        'reasoningSent dice not_sent, no se envió nada. reasoningVerdict dice qué se le notó: ' +
+        'visible o counted, razonó; hidden, probablemente razonó sin enseñarlo; not_seen, no se ' +
+        'le notó; unclear o no_data, no se puede decir.';
+  return (
+    <Field
+      label="Razonamiento"
+      hint={hint}
+      // el error SUSTITUYE a la pista: la nota del modelo va dentro, o se perdia
+      error={
+        huerfano
+          ? 'Este modelo no admite ese valor: elige otro o «Lo que traiga el modelo (no se envía ' +
+            `nada)». ${note ?? 'Luxy no sabe cómo pedírselo a este modelo.'}`
+          : null
+      }
+    >
+      <select
+        value={value}
+        disabled={options.length === 0 && !huerfano}
+        onChange={(event) => onChange(reasoningModeDraft(event.target.value))}
+      >
+        <option value="">Lo que traiga el modelo (no se envía nada)</option>
+        {options.map((mode) => (
+          <option key={mode} value={mode}>
+            {REASONING_MODE_LABELS[mode]}
+          </option>
+        ))}
+        {huerfano && <option value={value}>{REASONING_MODE_LABELS[value]} (no admitido)</option>}
+      </select>
+    </Field>
+  );
+}
+
 function ConnectionSamplingSection({
   connection,
   onSave,
@@ -840,7 +916,7 @@ function ConnectionSamplingSection({
     }
   };
 
-  const campo = (key: keyof SamplingDraft, value: string): void => {
+  const campo = (key: Exclude<keyof SamplingDraft, 'reasoningMode'>, value: string): void => {
     if (editing === null) return;
     setEditing({ ...editing, draft: { ...editing.draft, [key]: value } });
   };
@@ -908,8 +984,15 @@ function ConnectionSamplingSection({
           {/deepseek/i.test(editing.apiModel) && (
             <Notice tone="idle">
               DeepSeek documenta que, cuando el modelo razona, ni la temperatura ni las
-              penalizaciones de frecuencia y de presencia hacen efecto. Para medir, toca sólo la
-              temperatura y mira en el registro si esa llamada razonó.
+              penalizaciones de frecuencia y de presencia hacen efecto.{' '}
+              {/* «Con Sin razonar, si» solo donde Luxy sabe pedirlo: con otro
+                  nombre el selector de abajo sale apagado */}
+              {reasoningOptionsFor(editing.apiModel.trim(), hostOfBaseUrl(connection.baseUrl)).includes(
+                'off',
+              )
+                ? 'Con «Sin razonar» sí, si tu pasarela deja pasar el ajuste: el registro lo dirá.'
+                : 'Luxy sólo sabe apagarle el razonamiento a DeepSeek-V4-Flash, V4-Pro y V4.1-Flash; con este nombre no puede.'}{' '}
+              Para medir, cambia una sola cosa cada vez y mira en Registros si esa llamada razonó.
             </Notice>
           )}
           <Field
@@ -955,6 +1038,14 @@ function ConnectionSamplingSection({
               />
             </Field>
           </div>
+          <ReasoningField
+            model={editing.apiModel}
+            baseUrl={connection.baseUrl}
+            value={editing.draft.reasoningMode}
+            onChange={(next) =>
+              setEditing({ ...editing, draft: { ...editing.draft, reasoningMode: next } })
+            }
+          />
           <div className="row">
             <Field
               label="Penalización por presencia"
@@ -1483,6 +1574,12 @@ export function ConnectionsPage({
               />
             </Field>
           </div>
+          <ReasoningField
+            model={providerDraft.model}
+            baseUrl={providerDraft.baseUrl}
+            value={providerDraft.reasoningMode}
+            onChange={(next) => setProviderDraft({ ...providerDraft, reasoningMode: next })}
+          />
           <div className="row">
             <Field
               label="Penalización por presencia"

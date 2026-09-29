@@ -37,6 +37,7 @@ import {
   conversationOwnersFilePath,
 } from './vault/conversation-owner-store.js';
 import { RecapStore, recapFilePath } from './vault/recap-store.js';
+import { MemoryRelinkStore, memoryRelinkFilePath } from './vault/memory-relink-store.js';
 import { ImageAttemptStore, imageAttemptsDirectory } from './vault/image-attempt-store.js';
 import { PrivateMediaStore, mediaIndexDirectory } from './vault/media-store.js';
 import { VaultCharacterStore, charactersFilePath } from './vault/character-store.js';
@@ -339,6 +340,9 @@ async function bootstrap(): Promise<void> {
     conversationsDirectory(luxyConfigDir()),
     conversationOwners,
   );
+  // la memoria de las enganchadas, reescrita con la ficha (`D-108`), tambien
+  // cifrada y solo en este equipo. El `.jsonl` no se toca
+  const memoryRelinks = new MemoryRelinkStore(memoryRelinkFilePath(luxyConfigDir()));
   vaultCharacters = new VaultCharacterStore(
     charactersFilePath(luxyConfigDir()),
     new LocalBlobStore(mediaDirectory(luxyConfigDir())),
@@ -406,6 +410,7 @@ async function bootstrap(): Promise<void> {
     characters: vaultCharacters,
     privateConversations,
     conversationOwners,
+    memoryRelinks,
     privateMemory,
     memoryPreferences,
     catalogs,

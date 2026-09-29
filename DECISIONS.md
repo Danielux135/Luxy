@@ -2388,6 +2388,12 @@ arriba cuesta una llamada; hacia abajo, solo una opcion sin ofrecer.
 Una conexion HTTP no ve el selector. El contrato `chat completions` no tiene
 donde poner esto, y un mando que no mueve nada es peor que no tenerlo.
 
+> **Corregido en parte por `D-107` (2026-09-28).** El contrato no tiene un campo
+> comun, pero cada proveedor documenta el suyo. Las conexiones HTTP tienen ahora
+> un control de razonamiento POR MODELO y guardado, dentro del muestreo, que solo
+> ofrece lo que la documentacion de cada modelo admite. Este selector por turno
+> sigue siendo solo de Claude y Codex.
+
 **Y no se persiste**, al contrario que casi todo lo demas. El esfuerzo se paga
 por turno: una eleccion cara que sobreviviera a cerrar la ventana volveria a
 cobrarse sin que nadie la hubiera vuelto a elegir.
@@ -4074,6 +4080,11 @@ instrumento; y porque los sintomas se solapan -el cierre que le devuelve el turn
 es a la vez forma e iniciativa-. El texto va en dos constantes y en dos
 etiquetas, asi que se pueden separar sin reescribir nada.
 
+*Nota del 28/09:* «byte a byte como antes» vale al nivel del compositor: con
+`none` esta casilla no añade nada. No dice que el prompt de una conversacion
+salga igual que antes de `D-103`/`D-104`: la ficha editada se sella sola y la
+ficha retroactiva mueve la linea base, sin casilla (`D-104`, `D-105`).
+
 **Regla para separarlos algun dia: con un CAMPO nuevo, nunca con valores nuevos
 del enum.** `VaultCharacterStore.list()` devuelve `[]` si el contenido no pasa el
 esquema, y `add()` escribe `[...list(), nuevo]`: un Studio anterior que lea un
@@ -4429,14 +4440,40 @@ historial. Ahí `D-104` solo resuelve la mitad.
 - **`herMentionsClear` es una cota superior**, no «las que habrían llevado la
   nota»: solo aplica `clearlyRaises`, sin las otras condiciones de `raisedByHer`
   (origen fuera de la ventana, que él no la retome, que el mensaje de ahora no la
-  toque, la frontera de la apertura anterior). Léase así en `LA-054`.
+  toque, la frontera de la apertura anterior). Léase así en `LA-054` (hecho en
+  la sexta ronda: `LA-054`, el JSDoc del campo y el texto de pantalla lo dicen).
 - **El tercer cambio sin casilla**, que faltaba en la lista de arriba y en
   `D-105`: `resolveConversationOwner` ya no hereda una ficha sellada con otro
-  dueño ni la de una conversación soltada con `''` (`D-103`). Una conversación
-  con ese caso pierde su «QUIÉN ERES» con todo apagado. Y la ficha vigente llega
+  dueño ni la de una conversación soltada con `''` (`D-103`). Con todo apagado,
+  una conversación soltada, o cuyo dueño ya no está en la bóveda o tiene la
+  ficha vacía, pierde su «QUIÉN ERES»; una con dueño y ficha no se queda sin
+  ella: pasa a llevar la de su dueño en vez de la heredada (corregido el 28/09:
+  antes decía que la perdía en todos los casos). Y la ficha vigente llega
   también a conversaciones empezadas **sin** ficha sellada: en esas el prompt
   gana una ficha entera y la pista de pantalla no avisa, porque solo sale con
   una ficha sellada. Sabido, no arreglado.
+
+**Sexta ronda del 28/09 (`REV-TRES-ENCARGOS-001`).** Menores de la revisión de la
+quinta, en `raise-roots.ts`; umbrales y `stem()` sin tocar. Revisada después por
+ocho revisores, con `npm run check` a solas en verde (29/09, 4677 pruebas; aquí
+decía «sin revisión propia»).
+
+- **La letra que cambia al escribirse.** «llegué», «busqué», «empecé» y «pagué»
+  —justo como ella diría que cumplió— no se unían con «llego», «busco»,
+  «empezar» o «pago»: el recorte los deja en «llegu», «busqu», «empec». Ahora
+  `regularRoot` lleva «qu» a «c», «gu» a «g» y la «z» final a «c», con el suelo
+  de cuatro letras («sigue» no se toca) y una más para la «z» («cruz» tampoco).
+  La tabla de raíz corta generaba «page» y «pages» para pagar; ahora «pague» y
+  «pagues».
+- **«leer»**, con cuatro letras de raíz y la «y» de «leyó» o «leyendo», va en la
+  tabla de irregulares.
+- **El prefijo ya no vale en un verbo de la tabla**: unía «cuent» (te cuento) con
+  «cuentam» (cuéntame), que es ella pidiéndole a él que cuente. En esos verbos
+  decide la tabla. El caso «contar~cuento» de los falsos por tema, arriba, sigue
+  igual: va por la tabla.
+- Con el texto inventado del revisor (`lente2`, orientación, no medida):
+  paráfrasis 40 de 48 (antes 38), adversarias 3 de 45 (antes 4: el de cuéntame
+  ya no pasa), neutras 0 de 480, cruzadas 0 de 792.
 
 ## D-103 — el dueño de una conversacion se resuelve en un sitio, por posicion; el enganche vive en este equipo en un formato ya subible
 
@@ -4512,6 +4549,11 @@ y soltar pierden la firma al soltar. `list()` y `owner()` descifran como antes o
 mas: no esta medido. Un Studio anterior ignora el archivo nuevo y ve las
 enganchadas sin dueño; al reescribir `relation.json` quita `owner` y, al volver, las
 enganchadas se releen.
+
+**Modificada por `D-108` (29/09): la firma.** Con dueño, TODAS las respuestas
+llevan su nombre, también las de antes del ancla, y el separador ya no dice
+«Lo de arriba se escribió sin su ficha». Al soltar, todas vuelven a «Respuesta».
+El resto de esta decisión sigue igual.
 
 **Revisión del 28/09 (`REV-TRES-ENCARGOS-001`).** La revisión independiente del
 flujo no se hizo; una ronda posterior encontró, y se corrigió:
@@ -4641,7 +4683,8 @@ pulsa. Si una no tiene memoria usable se salta y NO se rellena con una tercera.
 === 'recap'` de `chooseConversationMemory`). El indice deducido del catalogo no:
 entra sin aprobacion.
 
-**Que campos.** Solo `summary` y `decisions`: decisiones enteras desde la ultima
+**Que campos.** *(Sustituido por la quinta ronda, abajo: ahora viaja la memoria
+entera sin `plan` ni `openQuestions`.)* Solo `summary` y `decisions`: decisiones enteras desde la ultima
 hasta 240 caracteres (160 desde la segunda ronda, abajo), el resumen cortado en fin de frase hasta 400 por conversacion,
 800 el bloque. Nunca `plan` ni `openQuestions` (el canal de eco de las promesas, que
 ya cubren los pendientes) ni `facts` ni `lessons`. Se etiquetan «Decisiones
@@ -4737,7 +4780,8 @@ borrar, excluir o soltar B: esa memoria es de A. Los textos de borrar y soltar
   caracteres en doce frases, un revisor midió con texto inventado que se cae el
   86 %. Es la consecuencia de los topes elegidos, y `fuera` lo mide en cada turno.
   Todo texto de pantalla sobre esto tiene que decir que **le llega un resumen
-  corto**, no que «la recordará».
+  corto**, no que «la recordará». *(Sustituido por la quinta ronda: le llega la
+  memoria entera; sigue valiendo «le llega», no «la recordará».)*
 - **«Apagado sale byte a byte igual» se refiere a lo que añade esta casilla.**
   Con ella apagada, el prompt de una conversación empezada puede cambiar igual por
   la ficha editada (`D-103`, tercera ronda), por la ficha retroactiva nueva
@@ -4751,25 +4795,187 @@ borrar, excluir o soltar B: esa memoria es de A. Los textos de borrar y soltar
 - **Sabido y no arreglado:** si el resumen de origen no acaba en un signo de
   final, su último trozo viaja como si fuera una frase entera. `cutText` no lo
   corta: es el texto tal y como está sellado, y marcarlo con «…» diría que se
-  cortó algo que puede estar completo.
+  cortó algo que puede estar completo. *(Cerrado en la quinta ronda: el corte
+  nacía en el `slice` al guardar, y ahora se corta en palabra al guardar y se
+  arregla al presentar lo ya guardado con esa huella.)*
 
 **Cuarta ronda del 28/09 (`REV-TRES-ENCARGOS-001`).**
 
 - **El nombre de la casilla prometía más de lo que hace.** «Recordar sus dos
   últimas conversaciones» pasa a «Pasarle un resumen corto de sus dos últimas
   conversaciones» (`RECENT_MEMORIES_CHECKBOX`), que es lo que viaja. Los topes no
-  se tocan.
+  se tocan. *(Sustituido por la quinta ronda: ahora «Pasarle la memoria de sus
+  dos últimas conversaciones».)*
+
+**Quinta ronda del 28/09 (`F33-RECUERDO-ENTERO-001`): la memoria entera.**
+
+Daniel decide que con la casilla le llegue **la memoria entera** de cada una de
+sus dos conversaciones más recientes, y **solo la memoria, no los últimos mensajes
+literales**. Sustituye «Que campos» y los topes de la segunda y la tercera ronda.
+Diseño, refutación (11 fallos) y construcción en el flujo `wf_b1411ff7-0ef`.
+
+- **Qué viaja.** `summary`, `facts`, `decisions` y `lessons`, enteros y en su
+  orden, con sus rótulos (`Resumen`, `Hechos`, `Decisiones apuntadas`,
+  `Lecciones`), cada conversación con su cabecera «Conversacion del {fecha} ·
+  «{titulo}»» y una línea en blanco entre ellas. `plan` y `openQuestions` siguen
+  fuera: son el canal de eco de las promesas. Los mensajes no viajan. El bloque
+  sigue siendo DATOS y en el mismo sitio, y **con la casilla apagada no se añade
+  nada** (la prueba byte a byte no se ha tocado).
+- **Sin los cortes de antes.** Desaparecen los 400 por conversación, los 800 del
+  bloque, la reserva de 160 para decisiones y el corte primera frase + « … » +
+  últimas. Queda `RECENT_MEMORY_ENTRY_CHARS = 6000` por conversación como
+  **salvaguarda**: el bloque `memoria` más grande de `studio.log` mide 4.772
+  caracteres (n=172, comprobado el 28/09 leyendo solo los enteros del registro), y
+  eso incluye la regla contra la invención, `plan` y `openQuestions`. El máximo
+  del esquema con los cuatro campos es 1.200 + 36 × 240 = 9.840. Si alguna vez
+  salta, quita **entradas enteras empezando por lo más viejo**: la primera de cada
+  lista, por posición relativa, y a igualdad lecciones antes que decisiones y
+  hechos (el orden de `clampRecapMemory`). Es la lección de la segunda ronda:
+  recortar por el final tiraba lo último que pasó. El resumen no se toca salvo en
+  un caso que el esquema no deja que ocurra, y entonces se queda su final. Que el
+  modelo escriba en orden no está medido.
+- **Lo que dura y lo que era de aquella escena.** Los hechos mezclan las dos cosas
+  («quién es quién, cómo la llama él» y «dónde están, qué hora es, cómo va
+  vestida», según la guía de la ficha retroactiva). El diseño los rotulaba todos
+  «de entonces», y eso daba por caducado un apodo; la refutación lo tumbó. Se
+  rotulan «Hechos» y una regla del bloque dice que lo de quién es quién, cómo os
+  llamáis y qué sabe cada uno del otro **sigue valiendo**, y que el sitio, la
+  hora, la ropa y cómo estaba la escena **era de entonces**. Separarlos por
+  entrada exigiría otro modelo. Que el modelo siga la regla no está medido.
+- **Los tramos sin resumir no se pierden.** Una ficha aprobada con `gaps` viajaba
+  como si lo contara todo: `recientes` tiraba `elegido.gaps`. Ahora la entrada
+  empieza por «De esa conversacion hay N tramos que no se pudieron resumir… de ahí
+  no sabes nada; pregúntalo», la salvaguarda no lo quita y `recientes.huecos` lo
+  cuenta.
+- **La palabra cortada, donde nace.** El `slice` a secas cortaba a media palabra
+  en cinco sitios: la memoria sellada (`normalizeConversationMemory`, 1.200/240),
+  la ficha al validarla (`normalizeRecapMemory`, 1.200/240), **la ficha al
+  recortarla al relleno** (`clampRecapMemory`, 400/160: es el corte que queda en
+  disco, y el diseño no lo había visto), el ancla restaurada y el índice deducido.
+  Todos pasan a `clipAtWord`: corta en el último espacio, no deja una coma
+  colgando y marca con «…». **Lo ya guardado se arregla al presentarlo**, en
+  `recientes` **y** en el bloque `memoria` de su propia conversación
+  (`repairSlicedMemory`): un texto que mide exactamente su tope (1.200/240 si es
+  memoria sellada, 400/160 si es ficha o índice) y acaba en letra o cifra pierde
+  su última palabra y lleva «…». Si en realidad estaba entera, se pierde una
+  palabra y queda dicho que falta algo; la palabra partida era un dato falso.
+  `recientes.cortadasAlGuardar` y `memoriaCortadasAlGuardar` cuentan cuántos. No
+  se arregla en el prompt de la ficha retroactiva encadenada (la ficha anterior
+  que se le enseña al CLI): cambiaría lo que mide `countKeptEntries`. Cuántos
+  textos guardados tienen la huella no se sabe sin descifrar la bóveda.
+  Sustituye el «Sabido y no arreglado» de la tercera ronda.
+- **La medida, comparable y con control.** `recientes.formato: 2` (sin campo o 1
+  es la versión corta) y `ecoRecientes.formato: 2` separan los turnos de antes y
+  de después. `ecoRecientes` gana `frases` (cuántas viajaron; en la versión corta
+  la cifra está en `ecoOtras.frases` del mismo turno), `frasesDeUnaRaiz` (el
+  comparador casa una frase de una sola raíz con **una** palabra; el diseño decía
+  que siempre pide dos) y `porCampo` (la versión corta solo llevaba `resumen` y
+  `decisiones`: esas dos son las comparables). Y un **control**: la tercera
+  conversación más reciente, que no viaja, **fijada al montar el prompt** en la
+  misma elección que las dos que viajan (elegirla al final podía dar una de las
+  que viajaron si la recencia cambiaba durante el turno) y leída al final, en su
+  propio `try`. De sus frases se quitan las que casan con alguna que viajó
+  (`excluidas`): la memoria de la primera o la segunda pudo copiarlas cuando la
+  tercera estaba entre sus recientes, y entonces viajaron. Se mide con **el mismo
+  número de frases en los dos lados** (`igualadas`, repartidas por toda la
+  lista), porque el comparador casa más cuantas más frases hay. Se lee
+  `control.enviadas.sinApoyo` frente a `control.control.sinApoyo` por bloques de
+  turnos, nunca restando turno a turno (`D-102`). `ecoRecientesControl` dice si
+  hubo tercera, si tenía memoria o si falló. Todo enteros y clasificaciones; los
+  nombres se han comprobado contra `redact.ts`.
+- **Textos (`D-093`).** La casilla pasa a «Pasarle la memoria de sus dos últimas
+  conversaciones». El pie dice que le llega entera la memoria apuntada, que no le
+  llegan los mensajes, ni el plan, ni las preguntas en el aire, **y que eso no
+  vuelve por ningún otro sitio**: lo prometido solo vuelve aparte si el trabajo de
+  fondo lo apuntó como pendiente (el diseño decía «vuelve por su lado», y las
+  preguntas en el aire no vuelven nunca). La confirmación del enganche dice «le
+  llegará esa memoria entera», no «la recordará»; la rama sin memoria propia y la
+  de la casilla apagada dejan de hablar de «resumen»; soltar dice que sale de «la
+  memoria que les llega a sus otras conversaciones» y, con la casilla encendida,
+  que lo que otra ya apuntó de aquí en su memoria se queda. El prompt dice «Es la
+  memoria que se apunto…», no «un resumen corto».
+- **Coste y riesgo.** Lo paga la atención del modelo, no el dinero: la pasarela
+  cobra por mensaje. El prompt medido son 18.576 caracteres de mediana y 23.947
+  de máximo (n=203); cada turno con la casilla puede llevar unos miles más, una
+  estimación a partir del bloque `memoria`, no una medida del bloque nuevo. Con
+  cuatro campos enteros hay más texto que copiar a la memoria en curso: la orden
+  de no copiarlo no lo garantiza, solo se mide. Lo que la memoria de A copie de B
+  sigue sin irse al borrar, excluir o soltar B.
+- **Comparaciones abiertas.** `LA-054` pide no cambiar esta casilla mientras se
+  mide. Esto cambia su contenido sin tocar el ajuste: los turnos que crucen el
+  cambio se separan por `recientes.formato`.
+
+**Nada de esto está medido contra una conversación real** ni visto en pantalla.
+
+**Séptima ronda (29/09).** Revisada después por ocho revisores; su `npm run
+check` a solas cayó por tiempo en una prueba ajena (aquí decía «sin revisión ni
+check»). Lo que encontraron, en la octava, al final de este bloque.
+
+- **El control no era justo.** Lo que comparten la tercera y las que viajaron
+  (un apodo, un sitio de siempre) se quitaba solo del control, y seguía contando
+  del lado enviado: `control.enviadas` salía siempre más alto sin que hubiera
+  copia. Ahora se quita **de los dos lados** y se cuenta en `excluidas` (del
+  control) y `excluidasEnviadas` (de las que viajaron). Las dos cifras miden lo
+  mismo: frases que solo tiene su lado. Las medidas de antes del 29/09 no se
+  comparan con las de después.
+- **`ecoRecientesControl` con todo apagado.** La línea «turno privado terminado»
+  lo llevaba siempre, con `sin-medida`, que no estaba dicho en ninguna parte.
+  Ahora solo sale con la casilla encendida, y `sin-medida` quiere decir que ese
+  turno no guardó memoria nueva o no viajó ninguna frase. Con la casilla apagada
+  la línea queda como antes.
+- **`clipAtWord` no es solo de la bóveda.** `parseConversationMemoryResponse`
+  también la usan las Conversaciones normales de Studio —en el agente,
+  `job-runner.ts`— y la comparación de modelos: su memoria también se corta
+  ahora en palabra y con «…». No cambia nada más de ellas, y el agente hay que
+  recompilarlo para que lo haga (`npm run build`).
+- **La memoria reescrita del enganche (`D-108`)** solo viaja a sus otras
+  conversaciones cuando ya la ha usado un mensaje de su hilo (`applied`): una
+  `ready` todavía se puede descartar, y otra conversación podía copiarla antes.
+  **Sustituido en la octava ronda**, abajo.
+
+**Octava ronda (29/09).** Lo que dejó la revisión de la séptima; sin revisión
+propia ni `npm run check` entero.
+
+- **Una reescrita lista no llegaba nunca.** Solo pasaba a `applied` con un
+  mensaje en la enganchada, y el caso del criterio de Daniel es enganchar una
+  vieja para que Lía la recuerde, sin seguirla: sus otras conversaciones
+  recibían para siempre la escrita sin su ficha, justo cuando engancharla la
+  hace reciente. Ahora quien la lleva fuera la apunta `applied` antes, por
+  compare-and-set, igual que el turno de su hilo (`markRelinkApplied`); si no
+  puede, lleva la sellada. Lo que otra conversación se lleve de ella se queda
+  aunque después se vuelva a la de antes, y la fila lo dice. El control de
+  `ecoRecientes` la lee sin apuntar nada: no viaja.
+- **El eco casaba por los nombres.** Las memorias van en tercera persona y casi
+  todas sus frases nombran a los dos: con dos raíces y el 40 %, una frase de
+  cuatro o cinco casaba con cualquier otra que los nombrara, y el control se
+  vaciaba por solapamientos que no lo eran. Fuera el nombre de ella (su ficha) y
+  los nombres propios —mayúscula en mitad de frase— que salen en el 30 % de las
+  frases o más, contando juntas las enviadas y las del control; `raicesComunes`
+  dice cuántas raíces se quitaron. Criterio, no medida. Las medidas de antes no
+  se comparan con las de después.
+- **Las frases de medir se partían en «3.30» o «Sr.»**: un signo solo cierra
+  frase con un espacio detrás, y los tratamientos no la cierran. Solo cambia la
+  medida; el bloque que se envía no pasa por ahí.
+- **La confirmación del enganche** dice cuál de las dos memorias viaja —la de
+  ahora hasta que la reescrita esté lista— y que por encima de 6.000 caracteres
+  se quitan primero las entradas viejas. El pie de la casilla ya no dice que los
+  mensajes no vuelven «por ningún otro sitio»: pueden llegarle trozos
+  transcritos (`buildRecall`).
 
 ## D-106 — leer la boveda no es actividad; la cierran la inactividad, Win+L, suspender y la X
 
 Fecha: 2026-09-25. Autor: Claude. Contexto: `SEG-BOVEDA-001`. Daniel dejo la boveda
 abierta hora y media con el ajuste en 15 minutos y no se cerro.
 
-Estado: aceptada y construida; corregida en cuatro rondas el 28/09. El `npm run
-check` en verde de esta línea era el del 25/09; el último completo es el de tras
-la tercera ronda, y la cuarta no lo ha pasado entero (`TEST-RESULTS.md`). **Nada
-visto en pantalla**, y que Windows 11 entregue `lock-screen` a Electron 43 **no
-esta comprobado** (`LA-053`).
+Estado: aceptada y construida; corregida el 28/09 en seis rondas de arreglos.
+La tercera, la cuarta y la quinta tuvieron cada una su revisión, de cinco
+revisores, y las tres pasaron después `npm run check` a solas: 222 archivos y
+4511, 4520 y 4531 pruebas (12 omitidas). La quinta quedó commiteada en
+`a45953b`. La sexta, abajo, cierra lo que dejó la última revisión, y la
+revisión de la sexta dejó una séptima, también abajo; **ninguna de las dos ha
+tenido revisión ni `npm run check` entero** (`TEST-RESULTS.md`). **Nada visto
+en pantalla**, y que Windows 11 entregue `lock-screen` a Electron 43 **no esta
+comprobado** (`LA-053`).
 
 **La causa, medida el 23/09.** `touch()` —lo unico que reinicia el contador— lo
 llamaba `subkeyFor()` sin condicion, y `subkeyFor` es la unica puerta a cualquier
@@ -4791,8 +4997,8 @@ EXIGIA ese comportamiento.
    cierra por inactividad y la cuenta atras se queda en el limite; al soltarla
    empieza el limite. Tope de 35 minutos por espera (30 del turno local mas 5).
    Por espera, no por envio: desde la tercera ronda un envio con imagen cambia su
-   espera `reply` por una `image` nueva al guardar el texto, y esa empieza su
-   propio tope, asi que un turno lento seguido de una imagen del Horde puede
+   espera `reply` por otra nueva al guardar el texto (`turn-image` desde la
+   sexta ronda), y esa empieza su propio tope, asi que un turno lento seguido de una imagen del Horde puede
    tener la inactividad parada unos 50-60 minutos (cuarta ronda).
 4. las operaciones de cuenta y el ajuste de minutos, que ya lo marcaban.
 
@@ -4811,8 +5017,14 @@ Electron para poder probarlo, con el reloj de 15 s y el `powerMonitor`:
   pantalla de Windows que proteja y desde la bandeja cualquiera veria el
   contenido;
 - **Win+L**: en el acto si no hay nada en camino. Con un envio suyo en curso se
-  aplaza hasta que su respuesta quede guardada, con tope de 10 minutos
-  (`LOCK_SCREEN_GRACE_MS`, el p99 medido de un turno privado son 616 s sobre 151).
+  aplaza hasta que termina: su respuesta, con tope de 10 minutos desde Win+L
+  (`LOCK_SCREEN_GRACE_MS`, el p99 medido de un turno privado son 616 s sobre 151),
+  y, si el turno lleva imagen del proveedor de PAGO, esa imagen ya pagada, con
+  tope de 15 minutos desde que el coordinador ve ese tramo
+  (`LOCK_SCREEN_TURN_IMAGE_GRACE_MS`; sexta ronda; aquí decía «desde que el
+  texto queda guardado», que la séptima ya declaró falso). Una imagen de AI Horde
+  en el turno (octava ronda) o una generada o aprobada desde el panel no lo
+  aplazan.
   Desbloquear Windows antes lo anula. Es una decision de producto que Daniel no ha
   confirmado: con la constante a 0, Win+L cierra siempre en el acto;
 - salir de Luxy y cerrar la sesion de la cuenta, como antes.
@@ -4908,8 +5120,9 @@ panel (espera `image`, que no aplaza Win+L) y a la que le llega Win+L, suspender
 la X **ya está cobrada y descargada** cuando `privateMedia.add` falla por la llave;
 el `noteAttempt('failed')` también necesita la llave, así que el intento se queda
 para siempre en `sent`. Se pierde una imagen pagada y el registro dice «enviada».
-Lo mismo vale ahora para la imagen de un turno si el cierre llega durante su
-generación, aunque su texto ya esté a salvo.
+Lo mismo vale para la imagen de un turno si el cierre llega durante su
+generación, aunque su texto ya esté a salvo: con suspender, la X, el botón o la
+inactividad, y con Win+L solo si la imagen pasa de su tope (sexta ronda).
 
 **Tercera ronda del 28/09 (`REV-TRES-ENCARGOS-001`).**
 
@@ -4934,7 +5147,8 @@ generación, aunque su texto ya esté a salvo.
   para que la inactividad no encuentre un hueco). La inactividad sigue sin
   cerrarla mientras se genera, como desde el panel. Un Win+L aplazado se cumple en
   la siguiente vuelta del reloj y tira la imagen, que ya estaba en «Sabido y no
-  arreglado». Prueba en `private-turn-image.test.ts`, comprobada fallando sin el
+  arreglado». (Sexta ronda: eso tiraba una imagen pagada en TODOS los turnos con
+  imagen y un Win+L aplazado; ahora el aplazamiento cubre también esa imagen.) Prueba en `private-turn-image.test.ts`, comprobada fallando sin el
   arreglo.
 - **La prueba de `account-manager.test.ts` que caducó con la suite entera** no
   tenía ningún fallo de aserción: son cuatro derivaciones de clave reales. Sola,
@@ -4959,15 +5173,6 @@ generación, aunque su texto ya esté a salvo.
   (`syncMedia`) sí viajan en la misma pasada: no dependen de la secuencia
   (quinta ronda: antes decía «entera»). Sigue siendo trabajo de fondo, como
   arriba.
-- **Quinta ronda: un envío por conversación.** El envío no rechazaba un segundo
-  a la misma conversación con otro en curso —la pantalla pierde su `sending` al
-  salir de Privado y volver—, y `sendInFlight` es un `Set`: el primero en
-  terminar quitaba la marca con el segundo aún en vuelo. Ahora el segundo se
-  rechaza antes de escribir nada («esa conversacion esta contestando ahora
-  mismo»), y el texto sigue en el cuadro. Con eso, la retirada por `recordId`
-  que no casa por una línea ajena detrás ya no la alcanza ningún camino conocido.
-  Y si `userRecordId` faltara, el turno no retira nada en vez de caer a «la
-  última línea».
 - **Un turno que lanza con la bóveda abierta** (el agente parado) dejaba el
   mensaje de Daniel sin respuesta en el historial, con su texto también en el
   cuadro: al reenviar salía dos veces. Se retira igual que cuando la llamada
@@ -4975,3 +5180,653 @@ generación, aunque su texto ya esté a salvo.
 - **El tope por envío** queda escrito arriba: 35 minutos por espera, y un envío
   con imagen tiene dos. No se cambia: acortar la de la imagen haría que la
   inactividad la tirase a mitad.
+
+**Quinta ronda del 28/09 (`REV-TRES-ENCARGOS-001`).** Hasta la sexta ronda esta
+viñeta estaba dentro del bloque de la cuarta.
+
+- **Un envío por conversación.** El envío no rechazaba un segundo a la misma
+  conversación con otro en curso —la pantalla pierde su `sending` si la ventana
+  se recarga a mitad (Ctrl+R o un cuelgue); salir de Privado y volver no lo
+  reinicia, porque `useVault` vive en `App` (corregido en la sexta ronda: antes
+  decía que sí)—, y `sendInFlight` es un `Set`: el primero en terminar quitaba
+  la marca con el segundo aún en vuelo. Ahora el segundo se rechaza antes de
+  escribir nada («esa conversacion esta contestando ahora mismo»), y el texto
+  sigue en el cuadro. Con eso, la retirada por `recordId` que no casa por una
+  línea ajena detrás ya no la alcanza ningún camino conocido. Y si
+  `userRecordId` faltara, el turno no retira nada en vez de caer a «la última
+  línea».
+
+**Sexta ronda del 28/09 (`REV-TRES-ENCARGOS-001`).** Lo que dejó la revisión de
+la quinta. Revisada después por ocho revisores, con `npm run check` a solas en
+verde (29/09, 4677 pruebas; aquí decía «sin revisión propia ni check»).
+
+- **Win+L tiraba la imagen del turno, ya pagada, casi siempre.** Tras guardar el
+  texto, el envío soltaba `reply` y arrancaba la imagen; el cierre aplazado se
+  cumplía en la vuelta siguiente del reloj (15 s como mucho), antes de que
+  terminara ninguna generación, y `privateMedia.add` y `noteAttempt` fallaban
+  por la llave: imagen cobrada, no guardada, intento para siempre en `sent`. Es
+  justo lo que el aplazamiento existe para evitar. Decisión de quien coordina:
+  la imagen del turno es una tercera clase de espera, `turn-image`, que aplaza
+  Win+L como `reply`, con su propio tope: **15 minutos desde que el coordinador
+  ve ese tramo**, que es cuando el texto queda guardado si Win+L llegó antes, o
+  Win+L si llegó con el texto ya guardado; desde el texto pueden pasar hasta 35,
+  el tope de toda espera (`MAX_USER_WAIT_MS`; aquí decía «casi 30», octava ronda).
+  Cubren el presupuesto nominal del proveedor de pago —dos de arranque, diez de
+  sondeo y un margen de descarga—, **no su peor caso**, que no tiene tope
+  (séptima ronda, abajo); después cierra.
+  Una cola del Horde más larga se pierde: sus kudos no son dinero. En el peor
+  caso la llave queda en memoria 25 minutos con Windows bloqueado; nadie ve nada
+  mientras. La `image` del panel sigue sin aplazar nada. La línea «cierre de la
+  boveda aplazado» lleva ahora `imagenesDelTurno` junto a `envios`. Que el
+  proveedor cobre al arrancar se da por hecho, no se ha mirado en una factura.
+  Pruebas en `vault-lock-coordinator.test.ts` (tres) y `private-turn-image.test.ts`,
+  comprobadas fallando sin el arreglo.
+- **Borrar una conversación con un envío en vuelo la resucitaba** con solo la
+  respuesta de ella (`appendTurn` sobre un archivo ya borrado). Venía de antes de
+  `D-106` y solo se alcanza con la ventana recargada a mitad. Ahora se rechaza,
+  como olvidar la memoria y el enganche. Prueba en
+  `private-turn-vault-lock.test.ts`, comprobada fallando sin el arreglo.
+- **Un turno que lanza con la bóveda abierta** ya retiraba el mensaje una sola vez
+  desde la cuarta ronda; comprobado de nuevo en el código y con dos pruebas más
+  (el primer mensaje de la conversación, y con una línea ajena detrás, que no se
+  toca).
+
+**Séptima ronda (29/09), lo que dejó la revisión de la sexta.** Revisada después
+por ocho revisores; su `npm run check` a solas cayó por tiempo en una prueba
+ajena (aquí decía «sin revisión ni check»).
+
+- **«15 minutos desde el texto» era falso.** El tope de la imagen del turno
+  cuenta desde que el coordinador ve ese tramo (`imageSince` se pone en la
+  primera vuelta que lo ve, nunca antes de Win+L). Con Win+L llegando a los doce
+  minutos del texto, cierra hacia los veintisiete, y es lo esperado. Lo decían
+  mal `CLAUDE.md`, `AGENTS.md`, `LA-053`, `CURRENT-TASK.md` y `CHANGELOG-WORK.md`;
+  el código no cambia.
+- **«El tope no corta una imagen que él aún iba a entregar» no sale del
+  código.** `awaitGeneration` mira su plazo antes de una espera de hasta unos
+  20 s y de una lectura que puede tardar 120 s, y `downloadOutput` no tiene tope
+  propio: el peor caso del proveedor pasa de los quince minutos. Queda escrito
+  como presupuesto nominal. La llave sigue sin quedarse en memoria sin límite.
+- **Cortar no cancela.** Nada aborta la generación al cerrar la bóveda: el envío
+  sigue en vuelo, la pantalla en «Esperando respuesta…» y Enviar apagado en
+  todas las conversaciones hasta que termina; si termina con la bóveda ya
+  reabierta, la imagen se guarda. No se cambia en esta ronda: cancelarla tira
+  una imagen que todavía se podía guardar, y es una decisión de Daniel.
+- **Borrar con un envío en vuelo, otra vez.** El rechazo de la sexta miraba
+  `sendInFlight` una sola vez, antes del primer `await`; un envío que arrancara
+  en ese hueco resucitaba la conversación igual. Borrar la conversación y
+  borrar su memoria apuntan ahora la conversación en `erasingInFlight` mientras
+  duran, y el envío (y «Reescribir con su ficha») se rechaza con «se esta
+  borrando algo de esta conversacion». Prueba en `conversation-relink.test.ts`,
+  comprobada fallando sin el arreglo.
+
+**Octava ronda (29/09), lo que dejó la revisión de la séptima.** Sin revisión
+propia ni `npm run check` entero.
+
+- **La imagen de AI Horde ya no aplaza Win+L.** La regla decía «esa imagen ya
+  pagada», y el Horde no cobra; además su cola puede pasar de los 23 minutos,
+  así que el tope solía llegar antes: la llave quedaba 15 minutos en memoria
+  con Windows bloqueado para perder la imagen igual. Con el Horde, la imagen del
+  turno se espera como `image` (frena la inactividad, no aplaza Win+L). Prueba
+  en `private-turn-image.test.ts`, comprobada fallando sin el arreglo.
+- **El aviso del corte decía algo falso.** Si el tope cierra la bóveda y la
+  imagen termina con ella cerrada, el envío salía con «se cerró justo después
+  de guardar su respuesta», y al turno siguiente le llegaba como motivo el error
+  interno de la bóveda bloqueada. Ahora el aviso dice que la respuesta está
+  guardada y la imagen se ha perdido (`SEND_CUT_BY_LOCK.imageLost`), y el motivo
+  es «la bóveda se cerró mientras se hacía y la imagen se perdió». Prueba de
+  integración del cierre durante la imagen: aviso, sin segunda retirada y el
+  intento en `sent`.
+- **Faltaba una prueba**: con Win+L pulsado ya en el tramo de la imagen, el tope
+  cuenta desde Win+L y corta a los 15 minutos.
+- **La cifra**: desde el texto guardado pueden pasar hasta 35 minutos, no «casi
+  30» (arriba y en `LA-053`).
+
+## D-107 — el razonamiento se elige por modelo, solo con lo que su documentación admite, y el registro dice si razonó
+
+Fecha: 2026-09-28. Autor: Claude. Contexto: `F34-RAZONAMIENTO-001`. Daniel lo
+aprobó **para probarlo**, con sus palabras: «no estoy seguro de que pueda
+cambiarse el razonamiento de los modelos».
+
+Estado: aceptada, implementada, **sin revisión de la octava ronda ni `npm run
+check` entero después de ella, sin probar contra la pasarela real y sin verse
+en pantalla**. Revisada por ocho revisores (aquí decía «cinco») con `npm run
+check` a solas en verde (4677) y corregida el 29/09 en la séptima ronda; otros
+ocho revisaron la séptima y la octava lo corrige (abajo).
+
+Corrige en parte el párrafo de `D-082` que dice que una conexión HTTP no ve el
+selector porque `chat completions` «no tiene dónde ponerlo». El contrato de
+OpenAI no tiene un campo común, pero cada proveedor documenta el suyo. `D-082`
+sigue igual para Claude y Codex, y este control es otra cosa: es **por modelo y
+se guarda**, como el muestreo de `D-102`, porque su propósito es medir.
+
+### Qué es
+
+Un campo más en el muestreo, `reasoningMode`, con tres valores: `off` («Sin
+razonar»), `low` («Razonar poco») y `high` («Razonar más»). **Vacío por defecto,
+y vacío no manda nada**: el cuerpo sale igual que hoy, clave por clave (`D-098`).
+Vive en `samplingParametersShape`, así que llega por los dos caminos: por modelo
+en una conexión (`modelSampling`) y en el nivel superior de un proveedor HTTP,
+que es como se configura Groq. Una entrada por modelo con solo el razonamiento
+es válida; `{}` se sigue rechazando.
+
+Se llama `reasoningMode` y no `reasoning` ni `thinking` porque esos dos son
+nombres reales de campos del cuerpo: con el mismo nombre, alguien acabaría
+volcándolo crudo.
+
+### Qué viaja, y a quién (`packages/shared/src/reasoning-control.ts`)
+
+Una tabla traduce la elección al dialecto de cada modelo. Los nombres casan
+**enteros** y sin distinguir mayúsculas: un nombre con sufijo de agregador
+(`-promo`, `-free`, `-alibaba`) se queda sin regla. **A un modelo sin regla no se
+le manda nada**, ni con un valor escrito a mano en `config.json`: mejor eso que
+un 400.
+
+| Modelo | Valores | Qué viaja | Fuente |
+|---|---|---|---|
+| DeepSeek-V4-Flash, V4-Pro, V4.1-Flash | solo `off` | `thinking:{type:'disabled'}` | api-docs.deepseek.com/guides/thinking_mode |
+| glm-5.3, glm-5.3-flash | `low`, `high` | `reasoning_effort` | docs.z.ai/guides/capabilities/thinking |
+| glm-5.2 | `off`, `high` | `thinking` / `reasoning_effort` | ídem |
+| glm-5.1, glm-5, glm-4.6, glm-4.5 | solo `off` | `thinking` | ídem |
+| kimi-k3 | `low`, `high` | `reasoning_effort` | platform.kimi.ai |
+| mimo-v2.5, v2.5-pro, v2.6-flash, v2.6-pro, v2.6-pro-ultraspeed | solo `off` | `thinking` | mimo.mi.com |
+| MiniMax-M3 | solo `off` | `thinking` | platform.minimax.io |
+| Qwen3.8-27B, qwen3.8-flash, qwen3.8-max | solo `off` | `enable_thinking:false` **y** `chat_template_kwargs.enable_thinking:false` | docs.qwencloud.com; docs.vllm.ai |
+| `qwen/qwen3.8-27b`, **solo en api.groq.com** | `off`, `low`, `high` | `reasoning_effort` (`none` para `off`); `low`/`high` añaden `reasoning_format:'parsed'` | console.groq.com/docs/reasoning |
+| `openai/gpt-oss-20b` y `-120b`, **solo en api.groq.com** | `low`, `high` | `reasoning_effort` | ídem |
+
+Decisiones dentro de la tabla, cada una por un motivo concreto:
+
+1. **DeepSeek solo se apaga.** Medido en `luxy.log`: por la pasarela, 38 de 39
+   llamadas de DeepSeek-V4 **no razonaron** (3,07-3,61 caracteres por token, 0
+   de razonamiento). La documentación dice que viene encendido, pero lo medido
+   manda. Ofrecer «razonar» lo encendería, y la misma página dice que con
+   `tools` hay que devolverle `reasoning_content` en cada petición siguiente o
+   contesta 400: Luxy no lo devuelve. Sería un fallo nuevo en los trabajos con
+   herramientas, además de anular la temperatura que `D-102` está midiendo.
+2. **GLM-5.3 y kimi-k3 no se pueden apagar.** Z.AI dice que en la serie 5.3
+   `disabled` da error; Kimi dice que no se mande `thinking`. De fábrica los dos
+   razonan al máximo, así que «Razonar más (high)» también es menos que lo de
+   siempre, y la pantalla lo dice.
+3. **La regla de los GLM que sí se apagan va anclada con `$`.** La primera versión
+   usaba un límite de palabra tras el número y `glm-5.3-air` caía en ella por el
+   «5»: se le habría ofrecido justo lo que en la 5.3 da error.
+4. **Qwen lleva las dos formas.** La pasarela no dice qué motor hay detrás.
+   QwenCloud lee `enable_thinking` en la raíz; vLLM, `chat_template_kwargs`.
+   Pedir una sola y equivocarse da un «apagado» que no apaga y que nadie ve. Un
+   servidor estricto que rechace la otra contesta un 4xx, que no se reintenta
+   ni se cobra, y el registro lo dice.
+5. **Qwen3.8-Flash-Next no tiene regla**: no aparece en la documentación que se
+   pudo leer, aunque es el modelo del caso de 8192 de 8192 tokens sin un
+   carácter. **qwen3.8-max solo se apaga**: dos lecturas de la misma página se
+   contradicen sobre si viene encendido, y su `reasoning_effort` (low, medium,
+   xhigh) no tiene `high`; apagarlo vale con las dos lecturas.
+6. **Groq depende del host.** `openai/gpt-oss-20b` es también un nombre de
+   OpenRouter, con otro dialecto. Y Qwen en Groq devuelve el razonamiento
+   **dentro** de la respuesta (`reasoning_format` `raw` por defecto): por eso
+   `low` y `high` piden `parsed`, que lo manda aparte.
+
+### Que Luxy lea el razonamiento venga por donde venga
+
+Hasta hoy solo se contaba `delta.reasoning_content`, y solo con transmisión.
+Ahora se cuentan también `delta.reasoning` y `message.reasoning` (vLLM y Groq),
+las ramas sin transmisión, lo que va entre `<think>`, `<thinking>` o
+`<reasoning>` dentro del propio texto, y `completion_tokens_details.reasoning_tokens`.
+Medido: las 9 llamadas a gpt-oss por Groq tenían 0 caracteres razonados con un
+cociente de 0,23 a 1,48. **No era que Groq lo ocultara: era que Luxy no leía el
+campo.** Así que «la pasarela oculta el razonamiento de Qwen» sigue sin estar
+demostrado: con esto, la próxima llamada lo dirá.
+
+Las etiquetas `<think>` **se cuentan, no se quitan** del texto que ve Daniel. Eso
+ya pasaba y no se toca aquí.
+
+### Cómo se sabe si razonó
+
+Cada línea «llamada al proveedor» lleva ahora, **siempre** y solo con cifras o
+códigos: `reasoningField` (por dónde llegó razonamiento visible),
+`reasoningTagChars`, `toolArgChars`, `reasoningTokensReported`, `charsPerOutput`
+y `reasoningVerdict`. Con un modo elegido, además `reasoningMode` y
+`reasoningSent` (las claves que viajaron, o `not_sent`).
+
+`charsPerOutput` = (caracteres de texto + nombres y argumentos de herramientas) /
+tokens de salida. Los argumentos cuentan porque también son salida: sin ellos,
+una vuelta que solo pide una herramienta daba un falso «oculto». El veredicto:
+`counted` si el proveedor declaró tokens de razonamiento; `visible` si llegó
+razonamiento que se ve; `no_data` sin consumo final; `unclear` en una vuelta que
+pide herramientas con menos de 400 caracteres de prosa (séptima ronda, abajo);
+`hidden` con un cociente de 2,0 o menos; `not_seen` con 2,8 o más; `unclear`
+entre medias. Los umbrales
+salen de lo medido: sin razonar, 3,07-3,77; con razonamiento que no llega,
+0,10-1,68 (Qwen3.8-27B por la pasarela) y 0,23-1,48 (gpt-oss por Groq).
+**`not_seen` no significa «no razonó»**: un razonamiento de menos del 15-20 % de
+la salida no se distingue.
+
+Los nombres están elegidos contra `redact()`. El del diseño, `visiblePorToken`,
+acababa en «Token» y **salía a disco como `[REDACTADO]`**: la única cifra de la
+prueba. Hay una prueba que escribe la línea de verdad y compara campo a campo.
+
+El aviso de «agotó el límite de salida» añade, cuando no hubo razonamiento
+visible y sí tokens gastados, que probablemente razonó sin enseñarlo y que pruebe
+«Sin razonar». Dice «probablemente» porque también cabe un formato que Luxy no
+lee (`D-093`).
+
+### En pantalla
+
+Conexiones, junto a la temperatura: en el muestreo por modelo de una conexión y
+en el formulario de un proveedor HTTP. La primera opción es siempre «Lo que
+traiga el modelo (no se envía nada)». Un modelo sin regla ve el selector
+apagado. El texto dice que **no se sabe si la pasarela lo deja pasar y que el
+registro lo dirá**. Guardar un valor que ese modelo no admite se rechaza con el
+campo nombrado; si el valor guardado deja de valer al cambiar el modelo, se
+sigue enseñando con su aviso en vez de borrarse solo.
+
+### Lo que queda sin saber
+
+- Qué versión de NewAPI y qué ajustes de canal tiene la pasarela: un canal con
+  `param_override` o con «thinking to content» puede tirar o transformar el campo.
+- Los textos de la documentación se leyeron con WebFetch, que resume con un
+  modelo pequeño; las frases decisivas (DeepSeek y el 400 con `tools`; GLM-5.3 y
+  el error al apagar; los valores de Groq) se pidieron literales.
+- Volver a un Studio anterior con una entrada que solo tenga `reasoningMode`
+  deja esa entrada vacía al leerla, el esquema la rechaza y la configuración no
+  abre hasta quitarla a mano.
+
+### Séptima ronda (29/09)
+
+- **Contar los argumentos no evitaba el falso «oculto».** Los tokens de una
+  llamada a herramienta incluyen su envoltura —en DeepSeek
+  `<｜tool▁calls▁begin｜>…`, en gpt-oss el canal `commentary`—, que no llega en
+  `name + arguments`, y la pasarela suele volver a serializar los argumentos más
+  compactos. Un `read_file` con `{"path":"src/a.ts"}` daba 1,12 y `hidden` sin
+  razonar. Ahora una vuelta con herramientas y menos de 400 caracteres de prosa
+  (`TOOL_TURN_PROSE_MIN_CHARS`) sale `unclear`. **No está medido**: `luxy.log` no
+  tenía ninguna llamada con `tool_calls`.
+- **Las etiquetas.** Un `<think>` vacío o solo con espacios —lo que deja un Qwen3
+  híbrido con el razonamiento apagado si el servidor no aparta el bloque— ya no
+  cuenta como razonamiento (daba `visible` en la prueba de «Sin razonar»). Y una
+  respuesta con el cierre `</think>` sin la apertura, porque la plantilla la
+  puso en el prompt (R1, QwQ, variantes «Thinking»), cuenta como razonamiento lo
+  de antes del cierre (daba `not_seen`). Depende del servidor; no se ha visto en
+  los registros reales.
+- **`DeepSeek-V4.1-Pro`** casaba con la expresión y no está en la tabla ni en la
+  documentación comprobada: fuera, por el principio del título de esta decisión,
+  solo lo que la documentación admite (aquí decía «regla 3», que es la de los
+  GLM; octava ronda). La nota de DeepSeek decía «Medido:
+  por tu pasarela…» en cualquier host; ahora dice que es de la pasarela de
+  entonces y que en otra conexión no se ha medido. El aviso de DeepSeek de
+  Conexiones solo dice «Con «Sin razonar», sí» donde Luxy sabe pedirlo.
+- **La pantalla.** La pista mandaba a «Sistema», que no existe: es «Registros»
+  (también en `LA-055`). Explica los seis veredictos y presenta `hidden` como lo
+  que es, una deducción. El error de un valor que el modelo no admite nombra la
+  opción de verdad —«Lo que traiga el modelo»— y lleva dentro la nota del
+  modelo, que antes desaparecía.
+
+### Octava ronda (29/09)
+
+Lo que dejó la revisión de la séptima; sin revisión propia ni `npm run check`
+entero.
+
+- **Una salida corta salía `hidden`.** Con 2 a 5 tokens —«Hecho.», «Listo», un
+  JSON breve— el token de fin y el troceo pesan más que la prosa: 6 caracteres
+  en 4 tokens daban 1,5. Por debajo de **64 tokens de salida**
+  (`REASONING_JUDGE_MIN_OUTPUT`) sale `unclear`. Es un criterio, no una medida:
+  un razonamiento oculto de verdad gasta cientos de tokens y por encima se sigue
+  viendo. La pista ya no dice «casi seguro», dice «probablemente».
+- **Una etiqueta citada no es razonamiento.** Un trabajo sobre el propio
+  repositorio, o una respuesta que explica el formato, nombra `<think>` entre
+  acentos graves y salía `visible`. Lo que va en un bloque de código o entre
+  acentos graves ya no se mira. Una etiqueta escrita a pelo en la prosa sigue
+  contando: no se distingue.
+- **`reasoning` y `reasoning_content` con el mismo texto** se sumaban. vLLM,
+  según lo que se recuerda de su código y sin verlo en una respuesta real, copia
+  uno en otro por compatibilidad. Con el mismo texto se cuenta una vez.
+- **La pantalla.** La pista es más corta y dice los pasos (enviar, Registros,
+  «Actualizar», buscar «llamada al proveedor»): Registros solo carga las últimas
+  líneas. El aviso de DeepSeek ya no afirma sin condición que «Sin razonar»
+  devuelva la temperatura: solo si la pasarela deja pasar el ajuste.
+
+### Cómo se prueba con Daniel
+
+Qwen3.8-27B por la pasarela, «Sin razonar», bloques de ocho turnos o más y **sin
+tocar la temperatura a la vez** (`D-102`). Éxito: `reasoningVerdict` `not_seen`,
+`charsPerOutput` de 2,8 o más y la primera palabra en segundos, no en minutos. Si
+sigue `hidden` con `reasoningSent` `enable_thinking+chat_template_kwargs`, el
+motor o la pasarela lo ignoran. Si aparece `reasoningField` `reasoning`, la
+pasarela nunca lo ocultaba.
+
+## D-108 — una conversación enganchada queda como una empezada con su personaje: memoria reescrita con su ficha, atada a la sellada, y firma entera
+
+Fecha: 2026-09-29. Autor: Claude. Contexto: `F33-IGUAL-001`. El criterio es de
+Daniel, literal: «si quiero que una conver que pensaba que era con Lia pase a ser
+de Lia, quiero que se actualice en todas partes, que recuerde la conversacion,
+que en resumen no hubiese diferencia con si hubiese empezado la conversacion con
+ella».
+
+Estado: aceptada e implementada; revisada por ocho revisores (aquí decía
+«cinco») con `npm run check` a solas en verde (4677) y corregida el 29/09 en la
+séptima ronda; otros ocho revisaron la séptima y la octava lo corrige (abajo).
+**Sin revisión de la octava ni `npm run check` entero después de ella, sin
+ninguna reescritura real hecha por un CLI y sin verse en pantalla**.
+Pasan las pruebas de lo tocado y `npm run typecheck` (`TEST-RESULTS.md`). Se
+prueba con `LA-057`.
+
+Diseño y refutación: flujo `wf_b1411ff7-0ef` (`disenar:equivalencia`,
+`refutar:equivalencia`). La refutación encontró ocho fallos en el diseño; los ocho
+quedan cerrados o explicados abajo. Modifica una parte de `D-103` (la firma) y
+completa `D-087`/`D-088` con un trabajo de fondo nuevo.
+
+### Qué ya era igual al enganchar, comprobado en el código
+
+La ficha, las instrucciones, el grupo y el título, el índice de recuerdos, el
+catálogo, la ficha retroactiva, la receta y las imágenes, las exclusiones y las
+tres casillas por personaje salen de `owner()`/`list()` o no miran al dueño. No se
+tocan.
+
+### Las siete diferencias, y qué se hizo con cada una
+
+1. **La memoria sellada, escrita sin la ficha.** Es la grave: la instrucción de
+   cada turno pide conservar lo válido de la anterior, así que «la IA», otro
+   nombre o rasgos que contradicen la ficha se arrastraban para siempre. Se
+   **reescribe con la ficha** (ver «La reescritura», abajo).
+2. **La foto de perfil.** Se copia **al enganchar**, no en el mensaje siguiente
+   (`ensureProfilePhoto`, el mismo helper que el turno). Y se arregla un defecto
+   que tenían también las nacidas: la foto de perfil se reconocía solo por
+   `characterId`, que llevan también las imágenes generadas de ella. Toda imagen
+   generada se anunciaba al modelo como «su foto de perfil — …», y una generada
+   antes de enganchar impedía copiar el avatar. Ahora decide `isProfilePhotoOf`
+   (`packages/shared/src/vault-image-request.ts`): mismo `characterId`, sin
+   `attemptId` y `prompt` nulo o igual a `PROFILE_PHOTO_LABEL` (los avatares
+   viejos guardaban ahí la etiqueta). Se usa en los tres sitios: la copia, el
+   anuncio al modelo y el aviso de «Soltar». **No está comprobado contra los
+   medios reales**: no se descifra la bóveda.
+3. **La firma** (cambiada en la octava ronda, abajo: con dueño por turno se
+   firma como en `a45953b`, y lo escrito con otro personaje no se firma). Con
+   dueño, **todas** las respuestas llevan su nombre, también las
+   de antes del ancla (`replySpeaker`). Esto **modifica `D-103`**, que firmaba
+   solo lo escrito con su ficha. La firma dice de quién es la conversación, no con
+   qué ficha se escribió cada mensaje, así que no promete nada falso (`D-093`). El
+   separador del hilo se queda en «Enganchada a Lía el …», sin «Lo de arriba se
+   escribió sin su ficha». `signedAfter` sigue existiendo: lo usan el separador y
+   «Nació con».
+4. **Un único lector de memoria.** `effectiveSealed` en `handlers.ts` (sobre la
+   pura `effectiveSealedMemory` de shared) lo usan el turno, la sonda de
+   compatibilidad, el resumen de sus otras conversaciones (`D-105`) y «Lo que
+   recuerda». Si uno leyera la sellada a secas, el panel enseñaría una memoria y
+   el prompt llevaría otra. Los que solo preguntan si existe memoria sellada
+   (`planOwnerChange.hasOwnMemory`, el diagnóstico, `recap-sync`) no cambian.
+5. **El cursor de pendientes si el CLI se niega.** Comprobado en el código, el
+   diseño lo describía mal: una negativa **no** deja bloqueadas las promesas. Al
+   enganchar, el cursor deja de valer y la guarda de desfase bloquea hasta la
+   relectura; si esa relectura se niega, la negativa se persiste
+   (`persistRefusal`) y `selectPendingForTurn` saca esa conversación de la
+   guarda. Lo mismo con un proceso que falla (`failedConversations`). No se
+   cambia código; se fija con una prueba (`relation-selection.test.ts`, «una
+   enganchada cuya relectura se negó no calla nada»). **Diferencia residual**: las
+   notas de esa conversación siguen siendo las extraídas antes de enganchar, sin
+   las abiertas del personaje delante, hasta que otro CLI o un mensaje nuevo
+   permitan releerla.
+6. **Los textos.** La pista «Solo en este equipo», que Daniel no entendió, pasa a
+   «Enganchada a Lía el …. El enganche se guarda solo en este ordenador:
+   «Sincronizar» no lo sube, y hoy no sirve de copia de nada de la bóveda.» La
+   confirmación dice lo mismo sin sugerir que el resto de la bóveda sí viaja
+   (`SEG-SYNC-001`), explica la reescritura con sus límites en cifras y dice lo que
+   no se puede igualar (abajo).
+7. **La sincronización**: fuera de alcance. En una nacida el dueño va en el turno
+   0, que sube con «Sincronizar»; en una enganchada no suben ni el evento
+   (`conversation-owners.json`) ni la reescrita (`memory-relink.json`). La foto
+   copiada sí subiría, como medio, con el `characterId` de ella en una
+   conversación que allí no tiene dueño. Cuando exista `F33-ENGANCHE-001` (detrás
+   de `SEG-SYNC-001`), la reescrita debe viajar como un registro nuevo sellado con
+   la subclave de la conversación, con `basedOn` y `ownerEventId`, que es la forma
+   que `D-099` ya llamó honesta; que cada ordenador reescribiera por su cuenta
+   daría dos memorias distintas.
+
+### Lo que no se puede cerrar, y la confirmación lo dice
+
+**Los últimos mensajes viajan literales y se escribieron sin la ficha.** El prompt
+lleva los `VAULT_RECENT_TURNS` (8) últimos turnos tal cual. Si en ellos se la
+llamaba de otra forma o hablaba como otra, lo lee hasta que cuatro mensajes nuevos
+de Daniel los dejan atrás, junto a una memoria reescrita que dice lo contrario.
+Una nacida no tiene esa contradicción. Igualarlo exigiría tocar el historial, y el
+`.jsonl` no se toca. Tampoco se igualan las notas de pendientes del punto 5 hasta
+releerlas.
+
+**Y salir de la ventana no es dejar de leerlos** (séptima ronda: la confirmación
+decía que sí). `buildRecall` transcribe momentos enteros de texto real cuando el
+mensaje evoca uno —«¿te acuerdas de…?», una fecha—, e `isAlreadyInPrompt` solo
+quita los que empiezan dentro de la ventana de ESTA conversación; como el índice
+pasa a ser suyo al enganchar, esos turnos de antes vuelven también en sus otras
+conversaciones. Lo mismo el título y el «de qué fue» de esas escenas en el
+catálogo. La confirmación lo dice ahora.
+
+### La reescritura
+
+- **Quién.** Claude Code o Codex con la sesión local, por el carril compartido
+  (`runOnAuxiliaryLane`), con `resolveAuxiliaryTarget` e `isLocalCliProvider`
+  comprobados dos veces: **nunca una API de pago** (`D-087`). Turno `technical`,
+  que no deja sesión en disco. Es la primera vez que un trabajo de fondo le lleva
+  al CLI la ficha del personaje. Clase `MemoryRelink`
+  (`apps/desktop/src/main/vault/memory-relink.ts`).
+- **Dónde.** `vault/memory-relink.json`, sellado con la subclave
+  `identity|memory-relink`, calcado de `conversation-owner-store.ts`: carril,
+  temporal sellado, `fsync` y `rename`; un archivo que no abre no se sobrescribe y
+  las filas que no validan se conservan. Una fila por conversación. **El `.jsonl`
+  no se toca nunca** (prueba byte a byte).
+- **Cuándo vale.** Solo **atada**: mismo `winningEventId`, mismo personaje y la
+  misma última memoria sellada, en secuencia **y** fecha (la fecha cubre un número
+  reutilizado). En cuanto algo cambia, vuelve a valer la sellada. Sale con
+  `source: 'turn'`, así que el prompt es byte a byte el de una nacida con esa
+  memoria (prueba).
+- **El encargo.** Sin turnos: alinear la identidad, no resumir otra vez. Pide
+  cambiar solo cómo se la nombra y lo que su ficha contradiga, dejar lo que pasó,
+  no quitar ni acortar ni añadir. La memoria va en JSON y se devuelve dentro de
+  **`<LUXY_RELINK>`**, no de `<LUXY_MEMORY>` (fallo 1 de la refutación, abajo). Se
+  aceptan los topes de la sellada (1.200 y 240, doce por lista), no los de la ficha
+  retroactiva.
+- **La guarda.** `decideRelink`, pura. No se aplica, y sigue la de antes, si: no hay
+  bloque válido (negativa o inválida), sale vaga siendo la de antes concreta, quita
+  o recorta a menos de la mitad **más de dos** entradas, el resumen cae por debajo
+  del 80 % y pierde más de 60 caracteres, o el total de las entradas cae por
+  debajo del 80 % y pierde más de 120. **Son criterios, no medidas**: nadie ha visto
+  aún una reescritura real. Con una o dos entradas quitadas o recortadas **se
+  aplica**, y la confirmación lo dice. Desde la séptima ronda, además, no se
+  aplica si pierde **más de la mitad** de las entradas que había, si el resumen o
+  el total de las entradas cae **por debajo de la mitad** aunque quepa en la
+  holgura, o si del resumen no sigue **al menos la mitad de sus palabras** (con
+  cuatro o más). **Lo añadido no se rechaza**: se aplica y se cuenta en pantalla.
+- **Automática, sin aprobación.** A diferencia de la ficha retroactiva (`D-101`):
+  una nacida no pide aprobar su memoria. La red es que el `.jsonl` no se toca, que
+  lo que pierde material no se aplica, y que se puede volver a la de antes
+  («Volver a la de antes») mientras siga atada, es decir, hasta que un mensaje
+  selle memoria nueva.
+- **Estados.** `pending`, `not-needed` (al enganchar no había memoria: la siguiente
+  nace con la ficha), `ready`, `applied` (un mensaje ya la usa), `discarded` y
+  `failed` (`refused`, `invalid`, `vague`, `lossy`). Para la pantalla,
+  `relinkPhase` añade dos lecturas: `ready` desatada vuelve a `pending`, y
+  `applied` desatada es `done` (la sellada nueva salió de ella). **No hay estado
+  «a revisar».**
+- **Cuándo se dispara.** Al enganchar (`noteLink` apunta la fila; la pasada entra
+  en la misma cola que la relectura de pendientes, después de soltar la marca de
+  «cambiando dueño», porque con ella puesta vería la conversación ocupada), al
+  terminar cada envío de una enganchada (vuelve enseguida si no hace falta) y con el
+  botón «Reescribir con su ficha» de «Lo que recuerda». Las enganchadas antes de
+  esto se tratan como pendientes y se reescriben tras su siguiente mensaje.
+- **`D-088`.** No cuesta un turno: se lanza sin esperar y no lanza. Una negativa o
+  una reescritura que pierde material pertenece al CLI que la dio: se reintenta con
+  el otro o con el botón. Un proceso caído no se persiste y no se repite con el mismo
+  CLI en la sesión. Un cierre de la bóveda a mitad no marca nada (`D-106`). Lo que
+  llega tarde se tira: otra memoria sellada, otro enganche, un envío en curso o una
+  decisión de Daniel entre medias (compare-and-set sobre la fila).
+- **El turno.** Antes de componer el prompt apunta `applied`; solo si eso se
+  escribe, usa la reescrita. Si no, va con la sellada y la reescrita sigue lista.
+  Así nunca se reescribe una memoria que ya salió de una reescrita.
+- **Borrar.** «Borrar su memoria» quita la reescrita **antes** que nada (si falla,
+  no se ha destruido nada) y la deja sin texto, en `not-needed` o, si detrás
+  viaja su ficha retroactiva o su índice, en `pending`. Borrar la conversación y
+  «Soltar» se la llevan.
+- **Registro.** Una línea «memoria reescrita con su ficha» con el resultado, el
+  CLI, si fue forzada, cuántas entradas se conservaron, corrigieron, quitaron,
+  recortaron y añadieron, los caracteres antes y después y la duración. Nunca la
+  conversación, el personaje ni una palabra de ninguna memoria. «prompt privado
+  compuesto» gana `memoriaReescrita`. Los nombres se han mirado contra `redact()`.
+
+### Los fallos de la refutación, uno por uno
+
+1. **La etiqueta chocaba con el `system` del turno técnico**, que prohíbe escribir
+   un bloque de memoria, y `<LUXY_MEMORY>` se busca con `lastIndexOf`. Cerrado:
+   etiqueta propia `<LUXY_RELINK>`, parseada en main, y se rechaza toda memoria con
+   `<luxy_` dentro o con aspecto de código.
+2. **La guarda no veía el resumen ni los recortes.** Cerrado: `compareMemoryEntries`
+   cuenta `shortened` (entradas reescritas que perdieron más de la mitad), y
+   `decideRelink` mide el resumen y el total de las entradas. `countKeptEntries`
+   sigue devolviendo sus cuatro campos.
+3. **La confirmación prometía «no se pierde nada».** Cerrado: dice que con más de dos
+   entradas quitadas o recortadas no se aplica, y que con una o dos sí.
+4. **Un «a revisar» caducado era un callejón sin salida.** Cerrado: no existe. Lo
+   que pierde material es `failed/lossy`, con «Reescribir con su ficha», y una
+   `ready` desatada vuelve a `pending` sola.
+5. **`decideRelink` no podía ser pura en shared** (`classifyReply` vive en
+   `apps/desktop`). Cerrado: main clasifica solo el texto de FUERA del bloque y
+   pasa `refused` ya decidido.
+6. **El inventario se dejaba la cola literal.** Cerrado en el texto: la confirmación
+   lo dice, y esta decisión también.
+7. **El texto de sincronización sugería que lo demás sí viaja.** Cerrado: «no
+   cuentes con «Sincronizar» como copia de nada de la bóveda».
+8. **Un `markDone` fallido reescribiría otra vez lo ya reescrito.** Cerrado de otra
+   forma: el uso se apunta ANTES de usarla y, si no se puede apuntar, el turno va
+   con la sellada; la nueva reescritura, si llega, parte de una memoria que no salió
+   de una reescrita.
+
+### Lo que queda sin saber
+
+- Cuántas veces se niegan los CLI con este encargo, y si respetan «no quites ni
+  acortes». La nota «Los CLI no se niegan» es de otros encargos.
+- Si los umbrales de la guarda dejan pasar lo que deben: 2 entradas, 80 %, 60 y
+  120 caracteres, y los tres de la séptima ronda —no perder más de la mitad de
+  las entradas (`maxLostShare` 0,5), no bajar de la mitad (`hardMinRatio` 0,5) y
+  conservar la mitad de las palabras del resumen si tiene cuatro o más
+  (`minSummaryWordsKept`)—. Son criterios: ninguno se ha medido contra una
+  reescritura real.
+- `isProfilePhotoOf` contra los medios reales.
+- Volver a la de antes solo se puede hasta que un mensaje selle memoria nueva.
+  Después la de antes sigue en los registros anteriores del `.jsonl`, pero no hay
+  pantalla para recuperarla.
+- Un Studio anterior ignora `memory-relink.json` y usa la sellada: no hace daño, pero
+  allí la diferencia sigue.
+
+### Séptima ronda (29/09): lo que encontró la revisión
+
+Ocho revisores (aquí decía «cinco»), con un `npm run check` a solas en verde
+(4677). Lo que se arregló, cada cosa con su prueba comprobada fallando sin el
+arreglo:
+
+- **La guarda dejaba vaciar una memoria corta.** Con una memoria de menos de 150
+  caracteres la de antes ya contaba como vaga, las «dos permitidas» eran todas, y
+  las holguras de 60 y 120 caracteres llevaban un resumen de 53 a 4. Tres reglas
+  nuevas (arriba, en «La guarda»), y el resumen se mide también por sus palabras:
+  uno con otro contenido del mismo largo pasaba.
+- **La ficha retroactiva y el índice también se escribieron sin su ficha.** Una
+  enganchada sin memoria sellada viaja con ellos, se los lleva a sus otras
+  conversaciones (`D-105`) y la primera memoria que se selle sale de ahí. Antes
+  quedaba en `not-needed` y no se reescribía nunca. Ahora `noteLink` la deja
+  `pending` sin memoria sellada; no hay nada que reescribir hasta que se selle la
+  primera, y esa es la que se reescribe, en la pasada que sigue al envío.
+  **Diferencia residual**: la primera respuesta tras enganchar todavía parte de
+  la ficha retroactiva. Reescribir la ficha misma exigiría atar la reescrita a
+  su versión y saltarse la aprobación y la cobertura de `D-101`. La confirmación
+  y «Lo que recuerda» lo dicen.
+- **La reescritura recibía la palabra partida.** Le llegaba la sellada tal como
+  está en disco; completaba la palabra a su manera y lo inventado quedaba sin
+  huella. Ahora recibe `repairSlicedMemory` y el encargo le dice que no complete
+  lo que acaba en «…».
+- **El botón no decía nada.** «Reescribir con su ficha» tiraba el resultado:
+  con el CLI caído, una respuesta tardía o la conversación ocupada, la fila se
+  quedaba igual. Ahora el resultado vuelve (`relinkOutcome`) y se dice debajo
+  de la fila; el botón pasa a «Reescribiendo…». Y una pendiente cuyo proceso
+  falló en la sesión con el CLI que toca ya no dice «en segundo plano»: dice que
+  no se volverá a intentar sola hasta reiniciar (`stalled`).
+- **El resumen de la fila escondía lo añadido y el resumen.** Ahora cuenta las
+  entradas añadidas y dice si cambió el resumen (`summaryChanged`, opcional en
+  la fila: las de antes no lo tienen y ahí no se dice nada).
+- **La confirmación prometía que los mensajes de antes dejaban de leerse**
+  (arriba, en «Lo que no se puede cerrar»).
+- **El resumen de `D-105` llevaba la reescrita en `ready`**, sin apuntar antes
+  `applied`: ahora solo la `applied`.
+- **Menores.** «Lo que recuerda» enseña la memoria como la lee ella, con la
+  palabra partida arreglada. Borrar la memoria de una conversación no enganchada
+  ya no depende de poder leer `memory-relink.json`, y quitar una conversación que
+  no tiene fila ya no vuelve a sellar el archivo. Un «Soltar» que no puede
+  quitar la reescrita lo apunta en el registro (`sin-limpiar`). Borrar mientras
+  arranca un envío (ver `D-106`, séptima ronda). Cada rechazo de «Volver a la de
+  antes» y «Reescribir» dice su motivo real.
+
+Lo que **no** se ha cambiado, y por qué:
+
+- **Una `applied` ya cumplida conserva su texto** en `memory-relink.json`, cifrado,
+  hasta que se borra la memoria, la conversación o se suelta. Es retención sin
+  uso, no una fuga.
+- **`failed` y `discarded` no caducan** al sellarse memoria nueva: la memoria de
+  ahora sigue saliendo de la escrita sin su ficha, así que reescribirla sigue
+  teniendo sentido y el texto de la fila sigue siendo cierto en lo esencial.
+- **La sonda de modelos no monta el bloque `recientes`**: un modelo que pasa la
+  sonda puede negarse en el turno con la casilla de `D-105` encendida. Ya pasaba
+  antes; no se ha medido contra un proveedor.
+
+### Octava ronda (29/09): lo que encontró la revisión de la séptima
+
+Ocho revisores y un `npm run check` a solas que cayó por tiempo en una prueba
+ajena. Sin revisión propia ni `npm run check` entero. Cada arreglo con su prueba
+vista fallando sin él.
+
+- **Una reescrita lista no llegaba a sus otras conversaciones** mientras Daniel
+  no escribiera en la enganchada (ver `D-105`, octava ronda). Quien la lleva fuera
+  la apunta `applied` antes, por compare-and-set, como el turno. Deshace la
+  decisión de la séptima ronda de llevar solo la `applied`.
+- **Una pendiente se quedaba pendiente.** Solo había tres disparadores: al
+  enganchar, tras un envío en ESA conversación y el botón. Un cierre de la
+  bóveda a mitad —lo normal con `D-106`—, un reinicio de Studio o un fallo local
+  la dejaban «pendiente… en segundo plano» para siempre en una enganchada que no
+  se sigue. Ahora, tras cada envío en Privado, `MemoryRelink.sweep` recorre las
+  filas que pueden tener algo pendiente (`pending`, `ready`, `failed` y una
+  `applied` con texto) y, una vez por apertura de la bóveda, las enganchadas sin
+  fila (las de antes de esta decisión). Lo que ya se miró sin nada que hacer no
+  se vuelve a mirar hasta que se cierre la bóveda. La fila dice cuándo se
+  intenta: «después de tu próximo mensaje en Privado, o ahora si pulsas…».
+- **La firma** (punto 3, arriba) **cambia otra vez.** Firmar todo con el dueño
+  cambiaba sin tocar nada las conversaciones del Studio anterior con dueño por
+  turno, donde lo de antes pudo escribirse con otra ficha, y en una enganchada
+  firmaba «Nora» lo que Lía escribió antes de soltarla. Ahora: con dueño por
+  turno, como en `a45953b` (solo lo de después del turno que lo fijó); en una
+  enganchada, todo salvo lo escrito con OTRO personaje en vigor
+  (`lastForeignSequence` en `vault-owner.ts`, `foreignUpTo` en la vista). Si no
+  se puede saber, se firma como en `a45953b`.
+- **La cumplida suelta su texto.** Una `applied` que dejó de estar atada guardaba
+  la memoria reescrita sin que nada la leyera. La pasada siguiente la mira
+  entera y la deja sin texto. (En la séptima se dejó así a propósito; la
+  revisión recordó que el propio almacén dice que conservarla es dejarla en
+  disco sin nada que la use.)
+- **«Volver a la de antes» con un envío arrancando.** Miraba el envío solo al
+  entrar, y en fase `in-use` el turno no escribía la fila, así que el
+  compare-and-set no veía el choque. Ahora vuelve a mirar justo antes de
+  escribir, y el turno apunta también sobre una `applied` (cambia su fecha): el
+  que llegue segundo choca.
+- **El atajo del disparo** saltaba una `applied` sin mirar si era de este
+  enganche. Ya no la salta mientras guarde texto; una de otro enganche sin texto
+  la sigue saltando, y solo aparece si `noteLink` falló (queda en el registro
+  como `sin-apuntar`).
+- **Pantalla**: la fila `ready` dice que viaja también a sus otras
+  conversaciones; la `in-use`, que lo que otra conversación se llevó se queda;
+  las recortadas van dentro de las corregidas («1 corregida (1 de ellas
+  recortada)»); tras «Volver a la de antes» desaparece el acuse de «Reescribir»;
+  el tooltip ya no dice «detrás del resto».
+
+Lo que **no** se ha cambiado, y por qué:
+
+- **Las enganchadas con `a45953b` se reescriben** tras el siguiente envío (y
+  ahora tras cualquier envío en Privado) sin haber visto la confirmación que lo
+  explica, y es el primer trabajo de fondo que lleva la ficha al CLI. Apagarlo
+  solo se puede excluyendo la conversación del trabajo de fondo. Es de Daniel
+  decidir si quiere un aviso o una casilla.
+- **«Borrar su memoria» en una no enganchada** con un resto que no se puede
+  quitar lo apunta en el registro (`sin-limpiar`) y borra igual, sin decírselo
+  a Daniel. Avisarle exige un campo nuevo en la respuesta y en la pantalla.
+- **La ficha vacía**: la fila sigue diciendo «con su ficha» aunque esté vacía.

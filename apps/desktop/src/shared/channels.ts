@@ -69,6 +69,11 @@ export const IPC_INVOKE = {
    */
   vaultConversationMemoryForget: 'luxy:vault:conversation:memory:forget',
   /**
+   * la memoria de una enganchada, reescrita con la ficha (`D-108`): volver a la
+   * de antes, o pedirla otra vez.
+   */
+  vaultMemoryRelinkDecide: 'luxy:vault:conversation:memory:relink',
+  /**
    * lo que pasaria al enganchar o soltar esa conversacion, SIN hacerlo.
    *
    * La confirmacion no se enseña hasta tenerlo: su texto sale de aqui (`D-093`).

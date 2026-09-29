@@ -10,8 +10,10 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
+  RECAP_VERSION,
   RELATION_CLOSE,
   RELATION_OPEN,
+  recapEntrySchema,
   relationCountersSchema,
   type ConversationMemory,
 } from '@luxy/shared';
@@ -60,6 +62,8 @@ const HUERFANA = '11111111-1111-4111-8111-111111111111';
 const NACIDA = '22222222-2222-4222-8222-222222222222';
 const OTRA_DE_NORA = '33333333-3333-4333-8333-333333333333';
 const EXCLUIDA = '44444444-4444-4444-8444-444444444444';
+const TERCERA = '66666666-6666-4666-8666-666666666666';
+const FICHADA = '77777777-7777-4777-8777-777777777777';
 const NORA = 'e0000000-5555-4555-8555-555555555555';
 const FICHA = 'Te llamas Nora y eres una pintora inventada.';
 const RELACION_VACIA = `${RELATION_OPEN}${JSON.stringify({ new: [], closed: [] })}${RELATION_CLOSE}`;
@@ -121,6 +125,8 @@ interface Montaje {
   puerta: { abierta: Promise<void> | null; bloqueados: number };
   /** para bloquear la llamada al modelo a mitad de un envio */
   modelo: { puerta: Promise<void> | null; memoria: ConversationMemory | null };
+  /** fichas retroactivas por conversacion, para `recaps.entryFor` */
+  fichas: Map<string, unknown>;
   campos: (mensaje: string) => Record<string, unknown> | undefined;
 }
 
@@ -152,6 +158,7 @@ async function montar(personajes: unknown[] = [personaje()]): Promise<Montaje> {
     excluidas,
     puerta: { abierta: null, bloqueados: 0 },
     modelo: { puerta: null, memoria: null },
+    fichas: new Map(),
     campos: (mensaje) => [...registros].reverse().find((r) => r.mensaje === mensaje)?.campos,
   };
 
@@ -173,7 +180,7 @@ async function montar(personajes: unknown[] = [personaje()]): Promise<Montaje> {
     privateMedia: { list: async () => [], add: async () => undefined },
     secretStore: { get: () => undefined },
     imageAttempts: { pending: async () => undefined },
-    recaps: { entryFor: async () => undefined },
+    recaps: { entryFor: async (_vault: unknown, id: string) => m.fichas.get(id) },
     relations: {
       read: async () => ({ ...relations, droppedOnRead: 0, unreadable: { notes: [], cursors: [] } }),
       apply: async () => undefined,
@@ -371,6 +378,7 @@ describe('enganchar', () => {
         backgroundCli: 'codex',
         reviewCalls: 1,
         profilePhotoStays: false,
+        inheritedMemory: false,
       },
     });
     expect((await montaje.store.owner(montaje.vault, HUERFANA)).characterId).toBeNull();
@@ -584,7 +592,19 @@ describe('el resumen de sus ultimas conversaciones en el turno', () => {
     expect(prompt.indexOf('de la huerfana')).toBeLessThan(prompt.indexOf('de la otra'));
     expect(prompt).toContain('QUE VA EN CADA CAMPO DE LA MEMORIA');
     expect(montaje.campos('prompt privado compuesto')).toMatchObject({
-      recientes: { conversaciones: 2, sinMemoria: 0, decisiones: 1, fuera: 0, sinIndice: false },
+      recientes: {
+        formato: 2,
+        conversaciones: 2,
+        sinMemoria: 0,
+        hechos: 0,
+        decisiones: 1,
+        lecciones: 0,
+        recortadas: 0,
+        fuera: 0,
+        cortadasAlGuardar: 0,
+        huecos: 0,
+        sinIndice: false,
+      },
       recientesError: false,
     });
     // el canal de las promesas por el resumen se mide; aqui no hay notas vivas
@@ -598,6 +618,10 @@ describe('el resumen de sus ultimas conversaciones en el turno', () => {
     await escena('off');
     expect((await enviar(NACIDA)).ok).toBe(true);
     expect(montaje.campos('prompt privado compuesto')).toMatchObject({ ecoOtras: null });
+    // y la linea del final no gana ningun campo con la casilla apagada
+    const terminado = montaje.campos('turno privado terminado');
+    expect(terminado).toMatchObject({ ecoRecientes: null });
+    expect(terminado).not.toHaveProperty('ecoRecientesControl');
   });
 
   it('si leer una memoria falla, el turno sale sin bloque y el motivo no se registra', async () => {
@@ -624,8 +648,155 @@ describe('el resumen de sus ultimas conversaciones en el turno', () => {
     expect((await enviar(NACIDA)).ok).toBe(true);
     const eco = montaje.campos('turno privado terminado')?.ecoRecientes as Record<string, unknown>;
     expect(eco).not.toBeNull();
-    for (const value of Object.values(eco)) expect(Number.isInteger(value)).toBe(true);
+    // a cualquier profundidad: `porCampo` y `control` son objetos. Aqui no hay
+    // tercera, asi que el control es la unica hoja que no es un entero
+    const hojas = (value: unknown): unknown[] =>
+      value === null || typeof value !== 'object'
+        ? [value]
+        : Object.values(value).flatMap((each) => hojas(each));
+    expect(eco.control).toBeNull();
+    const enteros = hojas({ ...eco, control: undefined }).filter((v) => v !== undefined);
+    expect(enteros.length).toBeGreaterThan(10);
+    for (const value of enteros) expect(Number.isInteger(value)).toBe(true);
     expect(eco.conFrasesDeRecientes).toBeGreaterThanOrEqual(1);
+    expect(eco).toMatchObject({ formato: 2 });
+    expect(montaje.campos('turno privado terminado')).toMatchObject({
+      ecoRecientesControl: 'sin-tercera',
+    });
+  });
+
+  // quinta ronda: la memoria entera, sin `plan` ni `openQuestions`
+  it('viajan los hechos y las lecciones enteros, y nunca el plan ni las preguntas', async () => {
+    await escena('recent-two');
+    await montaje.store.appendTurn(montaje.vault, OTRA_DE_NORA, {
+      ...turno('otra vez', 'user', '2026-09-22T11:00:00.000Z'),
+      characterId: NORA,
+    });
+    await montaje.store.appendTurn(
+      montaje.vault,
+      OTRA_DE_NORA,
+      turno('r2', 'assistant', '2026-09-22T11:01:00.000Z'),
+      {
+        memory: memoria('Resumen inventado de la otra. Pintaron un mural.', {
+          facts: ['Ella le llama pintor de murales inventado.'],
+          lessons: ['A el le gusta que ella empiece despacio, inventado.'],
+          plan: ['MARCA-PLAN-NO-DEBE-SALIR'],
+          openQuestions: ['MARCA-PREGUNTA-NO-DEBE-SALIR'],
+        }),
+      },
+    );
+    expect((await enviar(NACIDA)).ok).toBe(true);
+    const prompt = montaje.prompts.at(-1)!;
+    expect(prompt).toContain('- Ella le llama pintor de murales inventado.');
+    expect(prompt).toContain('- A el le gusta que ella empiece despacio, inventado.');
+    expect(prompt).not.toContain('MARCA-PLAN');
+    expect(prompt).not.toContain('MARCA-PREGUNTA');
+    expect(montaje.campos('prompt privado compuesto')).toMatchObject({
+      recientes: { formato: 2, hechos: 1, lecciones: 1 },
+    });
+  });
+
+  // la tercera de Nora: se escribe ANTES que las demas porque la recencia es la
+  // hora a la que se sello su ultimo turno, y asi queda la mas vieja de las tres
+  async function tercera(summary: string): Promise<void> {
+    await montaje.store.appendTurn(montaje.vault, TERCERA, {
+      ...turno('hola tercera', 'user', '2026-09-15T10:00:00.000Z'),
+      characterId: NORA,
+    });
+    await montaje.store.appendTurn(
+      montaje.vault,
+      TERCERA,
+      turno('r', 'assistant', '2026-09-15T10:01:00.000Z'),
+      { memory: memoria(summary) },
+    );
+  }
+
+  it('con tres, viajan dos y la tercera solo sirve de control', async () => {
+    await tercera('MARCA-TERCERA inventada. Compraron un gato naranja en el mercado.');
+    await escena('recent-two');
+    montaje.modelo.memoria = memoria('Pintaron un mural y volvieron al mural inventado.');
+    expect((await enviar(NACIDA)).ok).toBe(true);
+    expect(montaje.prompts.at(-1)).not.toContain('MARCA-TERCERA');
+    expect(montaje.campos('prompt privado compuesto')).toMatchObject({
+      recientes: { conversaciones: 2 },
+    });
+    const terminado = montaje.campos('turno privado terminado');
+    expect(terminado).toMatchObject({ ecoRecientesControl: 'medido' });
+    const eco = terminado?.ecoRecientes as { control: Record<string, number> | null };
+    expect(eco.control).not.toBeNull();
+    expect(eco.control!.frases).toBeGreaterThan(0);
+    // el texto de la tercera no sale al registro
+    expect(JSON.stringify(montaje.registros)).not.toContain('MARCA-TERCERA');
+  });
+
+  // la refutacion: un turno dura minutos, y elegir la tercera AL FINAL podia
+  // dar una de las que si viajaron
+  it('la tercera se fija al montar el prompt, aunque la recencia cambie a mitad del turno', async () => {
+    await tercera('Compraron un gato naranja en el mercado inventado.');
+    await escena('recent-two');
+    let abrir: () => void = () => undefined;
+    montaje.modelo.puerta = new Promise<void>((resolve) => {
+      abrir = resolve;
+    });
+    montaje.modelo.memoria = memoria('Pintaron un mural y volvieron al mural inventado.');
+    const envio = enviar(NACIDA);
+    await vi.waitFor(() => expect(montaje.prompts).toHaveLength(1), { timeout: 20000 });
+    expect(montaje.prompts[0]).not.toContain('gato naranja');
+    // mientras el modelo contesta, la tercera pasa a ser la mas reciente, y la
+    // app tira el indice como cuando cambia el historial
+    await montaje.store.appendTurn(montaje.vault, TERCERA, {
+      ...turno('sigo aqui', 'user', '2026-09-26T10:00:00.000Z'),
+      characterId: NORA,
+    });
+    montaje.memory.invalidate();
+    abrir();
+    expect((await envio).ok).toBe(true);
+    const eco = montaje.campos('turno privado terminado')?.ecoRecientes as {
+      control: { frases: number; excluidas: number } | null;
+    };
+    // si la «tercera» fuera una de las que viajaron, todas sus frases saldrian
+    // excluidas y el control se quedaria vacio
+    expect(eco.control).toMatchObject({ excluidas: 0 });
+    expect(eco.control!.frases).toBeGreaterThan(0);
+  });
+
+  it('una ficha con tramos sin resumir viaja con su aviso', async () => {
+    montaje.personajes = [personaje({ recentMemories: 'recent-two' })];
+    await nacida();
+    await montaje.store.appendTurn(montaje.vault, FICHADA, {
+      ...turno('hola fichada', 'user', '2026-09-23T10:00:00.000Z'),
+      characterId: NORA,
+    });
+    await montaje.store.appendTurn(
+      montaje.vault,
+      FICHADA,
+      turno('r', 'assistant', '2026-09-23T10:01:00.000Z'),
+    );
+    montaje.fichas.set(
+      FICHADA,
+      recapEntrySchema.parse({
+        conversationId: FICHADA,
+        memory: memoria('Resumen inventado de la ficha. Pasearon por el rio.'),
+        source: 'cli',
+        covered: { from: 0, to: 1 },
+        coveredAt: '2026-09-23T10:01:00.000Z',
+        gaps: [{ from: 0, to: 0, why: 'otro' }],
+        turnsAtRecap: 2,
+        version: RECAP_VERSION,
+        provider: 'claude',
+        model: null,
+        at: '2026-09-24T10:00:00.000Z',
+        chars: 60,
+        approved: true,
+      }),
+    );
+    expect((await enviar(NACIDA)).ok).toBe(true);
+    const prompt = montaje.prompts.at(-1)!;
+    expect(prompt).toContain('Resumen inventado de la ficha.');
+    expect(prompt).toContain('De esa conversacion hay 1 tramo que no se pudo resumir');
+    expect(montaje.campos('prompt privado compuesto')).toMatchObject({
+      recientes: { huecos: 1 },
+    });
   });
 });
 
@@ -640,6 +811,44 @@ describe('lo que arreglo la revision del 28/09', () => {
     expect(montaje.prompts.at(-1)).not.toContain('LA DEL RENDERER');
     const owner = await montaje.store.owner(montaje.vault, r.value.conversationId);
     expect(owner.characterDescription).toBeNull();
+  });
+
+  // octava ronda: la firma de una enganchada no pone su nombre en lo que se
+  // escribio con la ficha de OTRO personaje
+  it('al enganchar, la vista dice hasta donde se escribio con otro personaje', async () => {
+    await montaje.store.appendTurn(montaje.vault, HUERFANA, {
+      ...turno('hola otra', 'user', '2026-09-10T10:00:00.000Z'),
+      characterId: 'otra-inventada',
+      characterDescription: 'Otra, una persona inventada.',
+    });
+    await montaje.store.appendTurn(montaje.vault, HUERFANA, turno('soy otra', 'assistant', '2026-09-10T10:01:00.000Z'));
+    await montaje.store.appendTurn(montaje.vault, HUERFANA, {
+      ...turno('sin nadie', 'user', '2026-09-10T10:02:00.000Z'),
+      characterId: '',
+    });
+    await montaje.store.appendTurn(montaje.vault, HUERFANA, turno('vale', 'assistant', '2026-09-10T10:03:00.000Z'));
+
+    const r = await cambiar(HUERFANA, NORA);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.value.owner).toMatchObject({ source: 'link', label: 'Nora', signedAfter: 3, foreignUpTo: 1 });
+    // y abrirla despues dice lo mismo
+    const leida = await invocar<{ owner: Record<string, unknown> }>(IPC_INVOKE.vaultConversationRead, {
+      conversationId: HUERFANA,
+    });
+    expect(leida.ok).toBe(true);
+    if (leida.ok) expect(leida.value.owner['foreignUpTo']).toBe(1);
+  });
+
+  it('una conversacion enganchada sin otro personaje antes no marca nada ajeno', async () => {
+    await huerfana();
+    const r = await invocar<{ owner: Record<string, unknown> }>(IPC_INVOKE.vaultConversationOwnerSet, {
+      conversationId: HUERFANA,
+      characterId: NORA,
+      projectAlias: 'luxy',
+    });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect('foreignUpTo' in r.value.owner).toBe(false);
   });
 
   it('una conversacion del Studio anterior que solto y volvio a elegir a Nora sigue con su ficha', async () => {

@@ -42,7 +42,9 @@ export interface VaultSyncDeps {
   /**
    * conversaciones a las que se les esta contestando ahora mismo.
    *
-   * Esas se dejan para la proxima vez, enteras (revision del 28/09). Su ultimo
+   * Sus turnos se dejan para la proxima vez (revision del 28/09); sus medios
+   * viajan igual, y si el envio empieza a mitad de la bajada, lo ya subido y
+   * bajado de esa conversacion se queda hecho. Su ultimo
    * mensaje puede estar esperando respuesta y retirarse si no llega: subido, el
    * servidor lo conservaria —la subida es idempotente por secuencia— y el
    * mensaje bueno que ocupara despues ese numero se descartaria en silencio. Y
@@ -61,7 +63,10 @@ export interface VaultSyncResult {
   mediaDownloaded: number;
   /** medios que no caben en una peticion y se quedan en su equipo */
   mediaSkipped: number;
-  /** conversaciones con un envio en curso: no se tocaron y van la proxima vez */
+  /**
+   * conversaciones con un envio en curso: sus turnos pendientes van la proxima
+   * vez. Si el envio empezo a mitad, lo que ya se subio o bajo se queda hecho
+   */
   conversationsDeferred: number;
 }
 

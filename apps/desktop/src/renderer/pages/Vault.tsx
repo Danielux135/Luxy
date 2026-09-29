@@ -29,6 +29,8 @@ import {
   RECAP_REFUSAL_LABELS,
   describeForgetAck,
   describeRecapRow,
+  describeRelink,
+  describeRelinkOutcome,
 } from '../vault-recap-row.js';
 import { describeKudosBreakdown } from '../vault-kudos-breakdown.js';
 import { vaultNoticeFor } from '../vault-notice.js';
@@ -38,11 +40,11 @@ import {
   charactersNamedIn,
   describeCharacterLink,
   describeCharacterUnlink,
+  linkedOwnerHint,
   linkSeparator,
   ownerHintQuestion,
   ownerTitle,
   replySpeaker,
-  shortDate,
   suggestWithHistory,
   userTextsOf,
 } from '../vault-character-link.js';
@@ -511,8 +513,8 @@ function ConversationPanel({
           {vault.turns.map((turn) => (
             <div key={turn.sequence}>
               <div className={`vault-turn vault-turn--${turn.role}`}>
-                {/* con su nombre solo lo que se escribio con su ficha: desde la
-                    posicion del dueño en adelante (`D-103`) */}
+                {/* con dueño, todas sus respuestas con su nombre, tambien las
+                    de antes de engancharla (`D-108`) */}
                 <span className="vault-turn__who">{replySpeaker(turn, owner)}</span>
                 <p className="vault-turn__text">{turn.text}</p>
               </div>
@@ -1556,11 +1558,9 @@ function CharacterSelector({
       owner?.signedAfter === 0 ? `Nació con ${label}` : `Es de ${label} desde uno de sus mensajes`
     }. Cambiarla de personaje no está disponible.`;
   }
-  else {
-    hint = `Enganchada a ${label}${
-      owner?.linkedAt == null ? '' : ` el ${shortDate(owner.linkedAt)}`
-    }. Solo en este equipo.`;
-  }
+  // «Solo en este equipo» no se entendia: la frase entera vive en un modulo
+  // puro con pruebas, y no sugiere que el resto de la boveda si viaje (`D-108`)
+  else hint = linkedOwnerHint(label, owner?.linkedAt ?? null);
 
   // con dueño se enseña el suyo, aunque ya no este en la boveda
   const orphan = ownerId !== null && known === undefined && !fresh && source !== 'none';
@@ -2297,9 +2297,11 @@ function CharacterRow({
         </span>
       </label>
 
-      {/* D-105. Dice lo que se le PASA y lo que no está garantizado (D-093): el
-          resumen lo escribió el modelo y puede no llevar lo acordado, y la guía
-          de campos solo mejora las memorias que se escriban a partir de ahora.
+      {/* D-105. Dice lo que se le PASA y lo que no está garantizado (D-093): la
+          memoria la escribió el modelo y puede no llevar lo acordado, el plan y
+          las preguntas en el aire no viajan ni vuelven por otro sitio —lo
+          prometido, solo si el trabajo de fondo lo apuntó como pendiente—, y la
+          guía de campos solo mejora las memorias que se escriban desde ahora.
           Apagada, ESTA casilla no añade nada al prompt */}
       <label className="check">
         <input
@@ -2316,7 +2318,7 @@ function CharacterRow({
           {RECENT_MEMORIES_CHECKBOX}
           <small>
             {character.recentMemories === 'recent-two'
-              ? 'en cada mensaje le llega un resumen corto de sus dos conversaciones más recientes, sin la de ahora; las más antiguas no entran. Solo de las que tengan memoria apuntada o una ficha de «Memoria de lo ya hablado» aprobada y al día: una sin ninguna de las dos se salta y no se cambia por otra, así que puede no llegarle nada. Lo escribió el modelo en cada una y puede no incluir todo lo acordado; las que enganchaste se resumieron sin su ficha. Mientras esté encendida, también le pide apuntar aparte lo acordado en la memoria. Se apaga aquí'
+              ? 'en cada mensaje le llega entera la memoria que se apuntó en sus dos conversaciones más recientes, sin la de ahora: el resumen, los hechos, las decisiones y las lecciones. Por aquí no le llegan los mensajes, ni el plan, ni las preguntas que quedaron en el aire: lo prometido solo le vuelve aparte si el trabajo de fondo lo apuntó como pendiente, y cuando toca, y trozos de los mensajes pueden llegarle transcritos cuando algo que escribas le recuerde un momento de cualquiera de sus conversaciones. Las más antiguas no entran. Solo de las que tengan memoria apuntada o una ficha de «Memoria de lo ya hablado» aprobada y al día: una sin ninguna de las dos se salta y no se cambia por otra, así que puede no llegarle nada. Lo apuntó el modelo, no es la conversación: puede faltar algo de lo acordado, y las que enganchaste se apuntaron sin su ficha: de esas le llega la reescrita con su ficha en cuanto está lista, y hasta entonces la de antes. Hace más largo cada mensaje; si alguna fuera enorme, se quitan primero sus entradas más antiguas. Mientras esté encendida, también le pide apuntar aparte lo acordado en la memoria. Se apaga aquí'
               : 'apagada, esta casilla no añade nada al prompt'}
           </small>
         </span>
@@ -5973,7 +5975,8 @@ function RecapSection({
    */
   const [open, setOpen] = useState<{
     conversationId: string;
-    kind: 'card' | 'sealed';
+    // `previous`: la memoria de antes de reescribirla con su ficha (`D-108`)
+    kind: 'card' | 'sealed' | 'previous';
   } | null>(null);
   /**
    * qué dejó el último repaso, para que se vea que se ha ejecutado.
@@ -6057,6 +6060,21 @@ function RecapSection({
     conversationId: string;
     turnos: number;
     fichaEnUso: boolean;
+  } | null>(null);
+  /**
+   * qué fila se está reescribiendo con su ficha AHORA, y en qué acabó la última.
+   *
+   * Local por lo mismo que `borrandoAhora`: `decidingRecap` apaga todos los
+   * botones de la sección, pero no dice cuál se pulsó. Y el acuse existe porque
+   * sin él un CLI que no arranca, una respuesta que llega tarde o una
+   * conversación ocupada dejaban la fila exactamente igual y el botón parecía
+   * no hacer nada (séptima ronda).
+   */
+  const [reescribiendo, setReescribiendo] = useState<string | null>(null);
+  const [reescrito, setReescrito] = useState<{
+    conversationId: string;
+    tone: 'ok' | 'warn' | 'idle';
+    text: string;
   } | null>(null);
 
   const rows = vault.recaps;
@@ -6252,7 +6270,7 @@ function RecapSection({
         pendiente. <strong>Con una excepción</strong>: si su personaje tiene
         encendida «{RECENT_MEMORIES_CHECKBOX}», la ficha que
         apruebes aquí, mientras siga al día, de una conversación sin memoria
-        propia viaja, resumida, a
+        propia viaja entera, salvo el plan y las preguntas en el aire, a
         sus otras conversaciones mientras esa siga entre las dos más recientes.
       </p>
 
@@ -6475,6 +6493,8 @@ function RecapSection({
         // con pruebas porque una de las dos cosas que decide es la regla de que
         // una negativa no anuncia de que iba la conversacion
         const look = describeRecapRow(row, destino);
+        // la memoria reescrita con su ficha, si es una enganchada (`D-108`)
+        const relinkLook = describeRelink(row.relink, row.excluded);
         /** cuál de los dos bloques de ESTA fila está abierto, si alguno */
         const abierto =
           open !== null && open.conversationId === row.conversationId ? open.kind : null;
@@ -6524,6 +6544,90 @@ function RecapSection({
                 que nadie había mirado nunca. El disparador más probable es haber
                 borrado la memoria propia de ese hilo, que lo devuelve a la
                 pasada */}
+            {relinkLook !== null && (
+              <Notice tone={relinkLook.tone}>
+                {relinkLook.text}
+                {(relinkLook.canKeepOld || relinkLook.canRetry || relinkLook.canReadPrevious) && (
+                  <span className="row">
+                    {relinkLook.canReadPrevious && (
+                      <button
+                        className="btn btn--quiet"
+                        title="La memoria que había antes de reescribirla con su ficha. Es la que volvería a viajar"
+                        onClick={() =>
+                          setOpen(
+                            abierto === 'previous'
+                              ? null
+                              : { conversationId: row.conversationId, kind: 'previous' },
+                          )
+                        }
+                      >
+                        {abierto === 'previous' ? 'Cerrar la de antes' : 'Ver la de antes'}
+                      </button>
+                    )}
+                    {relinkLook.canKeepOld && (
+                      <button
+                        className="btn btn--quiet"
+                        disabled={ocupado}
+                        title="Deja de usar la reescrita: desde tu próximo mensaje aquí viaja la de antes"
+                        onClick={() => {
+                          setOpen((actual) =>
+                            actual?.conversationId === row.conversationId ? null : actual,
+                          );
+                          // el acuse de «Reescribir» hablaba de unas cifras que
+                          // dejan de estar en la fila (octava ronda)
+                          setReescrito((actual) =>
+                            actual?.conversationId === row.conversationId ? null : actual,
+                          );
+                          void vault.decideMemoryRelink({
+                            conversationId: row.conversationId,
+                            choice: 'keep-old',
+                            projectAlias: project,
+                          });
+                        }}
+                      >
+                        Volver a la de antes
+                      </button>
+                    )}
+                    {relinkLook.canRetry && (
+                      <button
+                        className="btn btn--quiet"
+                        disabled={ocupado || project.length === 0}
+                        title={`Vuelve a pedírselo a ${CLI_LABELS[destino]} con tu sesión: una llamada, que entra en la misma cola que el resto del trabajo de fondo. Si no sale bien, sigue valiendo la de antes`}
+                        onClick={() => {
+                          const id = row.conversationId;
+                          const quien = CLI_LABELS[destino];
+                          setReescrito(null);
+                          setReescribiendo(id);
+                          void vault
+                            .decideMemoryRelink({
+                              conversationId: id,
+                              choice: 'retry',
+                              projectAlias: project,
+                            })
+                            .then((hecho) => {
+                              // en el fallo el error ya está puesto arriba
+                              if (hecho?.outcome === null || hecho?.outcome === undefined) return;
+                              setReescrito({
+                                conversationId: id,
+                                ...describeRelinkOutcome(hecho.outcome, quien),
+                              });
+                            })
+                            .finally(() => setReescribiendo(null));
+                        }}
+                      >
+                        {reescribiendo === row.conversationId
+                          ? 'Reescribiendo…'
+                          : 'Reescribir con su ficha'}
+                      </button>
+                    )}
+                  </span>
+                )}
+              </Notice>
+            )}
+            {reescrito !== null && reescrito.conversationId === row.conversationId && (
+              <Notice tone={reescrito.tone}>{reescrito.text}</Notice>
+            )}
+
             {look.approvalLost && (
               <Notice tone="warn">
                 <strong>Esta ficha la habías aprobado y ya no lo está.</strong> El
@@ -6700,6 +6804,11 @@ function RecapSection({
                   {/* el alcance, que no es un detalle: `D-099` decide no propagar
                       el borrado —el registro ya subido conserva su memoria porque
                       la subida es inmutable— y a cambio obliga a decirlo aquí */}
+                  {/* la reescrita con su ficha tambien es memoria de este hilo, y
+                      el borrado se la lleva (`D-108`) */}
+                  {row.relink?.holdsRewrite === true && (
+                    <>También se borra la versión reescrita con su ficha. </>
+                  )}
                   <strong>Y borra en este equipo:</strong> lo que ya se había
                   sincronizado sigue en el servidor, así que en otro ordenador tuyo ella
                   lo seguirá recordando, y si esta conversación se descarga otra vez
@@ -6803,6 +6912,10 @@ function RecapSection({
 
             {abierto === 'sealed' && (
               <p className="vault-recap__block">{row.sealedBlock}</p>
+            )}
+
+            {abierto === 'previous' && (row.relink?.previousBlock ?? '').length > 0 && (
+              <p className="vault-recap__block">{row.relink?.previousBlock}</p>
             )}
 
             {abierto === 'card' && (
@@ -7002,9 +7115,10 @@ function PendingDiagnosticsSummary({
           largas, donde casi nunca cuenta. Solo cifras */}
       <p>
         <strong>«Ya salió»:</strong> de las {r.herMentions} veces que ella sacó un pendiente,{' '}
-        {r.herMentionsClear} habrían contado para la nota.
+        {r.herMentionsClear} lo dijeron lo bastante claro para la nota; como mucho, porque la nota
+        pide además otras condiciones que esta cifra no mira.
         {r.longQuotes > 0
-          ? ` ${r.longQuotes} pendientes tienen una cita larga (nueve palabras con contenido o más); de esos los sacó ${r.herMentionsLong} veces y contaron ${r.herMentionsClearLong}.`
+          ? ` ${r.longQuotes} pendientes tienen una cita larga (nueve palabras con contenido o más); de esos los sacó ${r.herMentionsLong} veces y lo bastante claro ${r.herMentionsClearLong}.`
           : ''}
       </p>
     </>

@@ -144,6 +144,47 @@ describe('raices equivalentes para la regla estricta', () => {
     expect(iguales('bebe', 'beber')).toBe(false);
   });
 
+  it('une la primera persona del preterito de los verbos en -car, -gar y -zar', () => {
+    // la letra cambia delante de «e» y el recorte las dejaba en «llegu», «busqu»
+    // y «empec»: justo como ella diria que lo cumplio (revision del 28/09)
+    expect(iguales('llegué', 'llego')).toBe(true);
+    expect(iguales('llegué', 'llegar')).toBe(true);
+    expect(iguales('busqué', 'busco')).toBe(true);
+    expect(iguales('expliqué', 'explicarte')).toBe(true);
+    expect(iguales('empecé', 'empezar')).toBe(true);
+    expect(iguales('almorcé', 'almorzaremos')).toBe(true);
+    // «pagar» va en la tabla de raiz corta: «pague» y «pagué», no «page»
+    expect(iguales('pagué', 'pago')).toBe(true);
+    expect(iguales('pague', 'pagar')).toBe(true);
+    expect(iguales('pagues', 'pagaras')).toBe(true);
+  });
+
+  it('el cambio de letra no une palabras cortas ni distintas', () => {
+    // el suelo de cuatro letras: «sigue» y «cruz» no se tocan
+    expect(regularRoot(raiz('sigue'))).toBe(raiz('sigue'));
+    expect(regularRoot(raiz('cruz'))).toBe(raiz('cruz'));
+    expect(iguales('llegué', 'lleno')).toBe(false);
+    expect(iguales('busqué', 'bus')).toBe(false);
+  });
+
+  it('une las formas de «leer»', () => {
+    // cuatro letras de raiz y una «y» en medio: sin tabla no se unia ninguna
+    expect(iguales('leo', 'leeré')).toBe(true);
+    expect(iguales('leo', 'leyéndote')).toBe(true);
+    expect(iguales('leí', 'leerte')).toBe(true);
+    expect(iguales('leo', 'ley')).toBe(false);
+  });
+
+  it('en un verbo de la tabla no vale el prefijo: «te cuento» no es «cuentame»', () => {
+    // el prefijo unia «cuent» con «cuentam»: ella pidiendole a el que cuente
+    // salia como que ella habia cumplido (revision del 28/09)
+    expect(iguales('cuento', 'cuéntame')).toBe(false);
+    // la tabla sigue uniendo lo suyo
+    expect(iguales('cuento', 'contármelo')).toBe(true);
+    // y fuera de la tabla el prefijo sigue igual
+    expect(iguales('prometo', 'prométeme')).toBe(true);
+  });
+
   it('es simetrica', () => {
     const pares: [string, string][] = [
       ['traigo', 'traer'],
@@ -152,6 +193,10 @@ describe('raices equivalentes para la regla estricta', () => {
       ['llevo', 'llevarla'],
       ['mar', 'martes'],
       ['traigo', 'traje'],
+      ['llegué', 'llego'],
+      ['empecé', 'empezar'],
+      ['cuento', 'cuéntame'],
+      ['leo', 'leyéndote'],
     ];
     for (const [a, b] of pares) {
       expect(sameRoot(raiz(a), raiz(b))).toBe(sameRoot(raiz(b), raiz(a)));

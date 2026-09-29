@@ -15,6 +15,7 @@ import {
   imageTransportProblem,
   MAX_IMAGE_LINE_CHARS,
   imageDescriptionFor,
+  isProfilePhotoOf,
   profilePhotoLine,
   parseVaultImageRequest,
 } from './vault-image-request.js';
@@ -539,6 +540,30 @@ describe('la linea de la foto de perfil', () => {
     // con solo la descripcion se pierde que ese retrato es SUYO, que es lo que
     // lo distingue de cualquier otra foto de ella
     expect(profilePhotoLine('desnuda, pelo castaño, ojos azules')).toContain(PROFILE_PHOTO_LABEL);
+  });
+});
+
+// `D-108`: con `characterId` a secas, TODA imagen generada de ella contaba como
+// su foto de perfil, y una generada antes de enganchar impedia copiar el avatar
+describe('cual es la foto de perfil', () => {
+  const NORA = 'e0000000-5555-4555-8555-555555555555';
+
+  it('la copia del avatar, nueva o de antes de existir `caption`', () => {
+    expect(isProfilePhotoOf({ characterId: NORA, prompt: null, attemptId: null }, NORA)).toBe(true);
+    expect(isProfilePhotoOf({ characterId: NORA, prompt: PROFILE_PHOTO_LABEL }, NORA)).toBe(true);
+  });
+
+  it('no una imagen generada de ella, ni un adjunto, ni la de otra', () => {
+    expect(
+      isProfilePhotoOf({ characterId: NORA, prompt: 'retrato inventado en la playa', attemptId: 'a1' }, NORA),
+    ).toBe(false);
+    // generada antes de que existiera el intento: su prompt la delata
+    expect(isProfilePhotoOf({ characterId: NORA, prompt: 'escena inventada', attemptId: null }, NORA)).toBe(
+      false,
+    );
+    expect(isProfilePhotoOf({ characterId: NORA, prompt: null, attemptId: 'a2' }, NORA)).toBe(false);
+    expect(isProfilePhotoOf({ characterId: null, prompt: null, attemptId: null }, NORA)).toBe(false);
+    expect(isProfilePhotoOf({ characterId: 'otra', prompt: null, attemptId: null }, NORA)).toBe(false);
   });
 });
 

@@ -19,9 +19,11 @@
 // 1. formas de unos pocos verbos irregulares, y de cuatro regulares de raiz
 //    corta, sacadas con el mismo `stem()`;
 // 2. terminaciones regulares que el recorte no alcanza (uno o dos pronombres
-//    pegados al infinitivo o al gerundio, el condicional);
+//    pegados al infinitivo o al gerundio, el condicional) y la letra que
+//    cambian al escribirse los verbos en -car, -gar y -zar («llegue», «lleg»);
 // 3. una raiz de cinco letras o mas que es el principio de otra a la que le
-//    sobran como mucho dos («promet» y «prometi»).
+//    sobran como mucho dos («promet» y «prometi»), salvo en los verbos de la
+//    tabla, donde manda la tabla.
 import { normalizeTerm, stem } from './turn-index.js';
 
 /**
@@ -86,6 +88,14 @@ const IRREGULAR_VERBS: readonly (readonly string[])[] = [
     'ver', 'veo', 'ves', 'vere', 'veras', 'vera', 'veria', 'vemos', 'verte', 'verla', 'verlo',
     'verme', 'vernos',
   ],
+  // regular en la escritura, pero con cuatro letras de raiz —«leer»— el recorte
+  // no la toca y la «y» de «leyo» o «leyendo» no la une ninguna regla
+  // (revision del 28/09: «esta noche te leo...» no casaba con «leyendote»)
+  [
+    'leer', 'leo', 'lees', 'lee', 'leemos', 'lei', 'leiste', 'leyo', 'leere', 'leeras',
+    'leera', 'leeria', 'leerias', 'leyera', 'leyendo', 'leyendote', 'leerte', 'leerla',
+    'leerlo', 'leerme',
+  ],
 ];
 
 /**
@@ -107,9 +117,19 @@ const AR_ENDINGS = [
   'arias', 'aste', 'are', 'aras', 'ara', 'aremos', 'ado', 'ada',
 ] as const;
 
+/**
+ * una forma escrita como se escribe: delante de «e», la «g» de «pagar» pasa a
+ * «gu» («pague», «pagues»). Sin esto la tabla generaba «page» y «pages», que no
+ * son nada, y dejaba fuera el subjuntivo (revision del 28/09)
+ */
+function spelled(root: string, ending: string): string {
+  if (ending.startsWith('e') && root.endsWith('g')) return `${root}u${ending}`;
+  return `${root}${ending}`;
+}
+
 const VERB_FORMS: readonly (readonly string[])[] = [
   ...IRREGULAR_VERBS,
-  ...SHORT_REGULAR_ROOTS.map((root) => AR_ENDINGS.map((ending) => `${root}${ending}`)),
+  ...SHORT_REGULAR_ROOTS.map((root) => AR_ENDINGS.map((ending) => spelled(root, ending))),
 ];
 
 /** raiz, tal y como la deja `stem()`, a su verbo */
@@ -183,6 +203,27 @@ function withoutClitic(root: string): string {
 }
 
 /**
+ * la raiz con la letra que el verbo cambia al escribirse.
+ *
+ * Los verbos en -car, -gar y -zar cambian la letra delante de «e» para que
+ * suene igual: «llegue», «busque», «empece». Es justo como ella diria que lo
+ * cumplio —«llegue tarde», «busque el sitio»—, y el recorte los dejaba en
+ * «llegu», «busqu» y «empec», que no casaban con «lleg», «busc» y «empez»
+ * (revision del 28/09). Se lleva todo a una sola forma: «qu» a «c», «gu» a «g»
+ * y la «z» final a «c». Con el suelo de siempre: lo que queda tiene que tener
+ * cuatro letras, y asi «sigue» no se toca. La «z» pide una mas, porque no
+ * quita ninguna: «cruz» o «pez» no son un verbo que se conjugue.
+ */
+function spellingRoot(root: string): string {
+  if (root.endsWith('qu') || root.endsWith('gu')) {
+    const base = root.endsWith('qu') ? `${root.slice(0, -2)}c` : root.slice(0, -1);
+    return base.length >= MIN_REGULAR_ROOT ? base : root;
+  }
+  if (root.endsWith('z') && root.length > MIN_REGULAR_ROOT) return `${root.slice(0, -1)}c`;
+  return root;
+}
+
+/**
  * la raiz sin lo regular que el recorte no quita.
  *
  * «llevarla» deja «llevarl» y «llevarias» deja «llevar» o «llevari»; los tres
@@ -202,8 +243,9 @@ export function regularRoot(root: string): string {
     if (endsWithInfinitive(withoutI)) current = withoutI;
   }
   // un infinitivo o un gerundio a la vista se recorta como la palabra suelta
-  if (endsWithInfinitive(current) || endsWithGerund(current)) return stem(current);
-  return current;
+  if (endsWithInfinitive(current) || endsWithGerund(current)) current = stem(current);
+  // y la letra que cambia al escribirse: «llegu» y «lleg» son lo mismo
+  return spellingRoot(current);
 }
 
 /**
@@ -226,7 +268,8 @@ export function sameRoot(a: string, b: string): boolean {
   if (a === b) return true;
 
   const verbA = verbOf(a);
-  if (verbA !== undefined && verbA >= 0 && verbA === verbOf(b)) return true;
+  const verbB = verbOf(b);
+  if (verbA !== undefined && verbA >= 0 && verbA === verbB) return true;
 
   const ra = regularRoot(a);
   const rb = regularRoot(b);
@@ -237,7 +280,12 @@ export function sameRoot(a: string, b: string): boolean {
   // (revision del 28/09). Los verbos que la necesitaban van en las tablas
 
   // «promet» y «prometi», «prometem». Con cinco letras y dos de sobra como
-  // mucho: «compr» no es «compromis»
+  // mucho: «compr» no es «compromis».
+  //
+  // Pero no para un verbo de la tabla: ahi la tabla dice que formas valen, y
+  // el prefijo unia «cuent» (te cuento) con «cuentam» (cuentame), que es ella
+  // pidiendole a el que cuente, no ella cumpliendo (revision del 28/09)
+  if (verbA !== undefined || verbB !== undefined) return false;
   const [short, long] = ra.length <= rb.length ? [ra, rb] : [rb, ra];
   return (
     short.length >= MIN_PREFIX_ROOT &&

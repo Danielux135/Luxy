@@ -296,7 +296,7 @@ describe('validacion de argumentos', () => {
   });
 
   it('un personaje sin las notas de direccion se lee con ellas apagadas', () => {
-    // apagadas es el prompt de siempre (`D-102`)
+    // apagadas no añaden nada al prompt (`D-102`)
     const leido = vaultCharacterSummarySchema.parse({
       characterId: 'e0000000-5555-4555-8555-555555555555',
       description: '',
@@ -319,7 +319,7 @@ describe('validacion de argumentos', () => {
   });
 
   it('un personaje sin el modo esporadico se lee con el apagado', () => {
-    // apagado es el prompt de siempre (`D-104`)
+    // apagado no añade nada al prompt (`D-104`)
     const leido = vaultCharacterSummarySchema.parse({
       characterId: 'e0000000-5555-4555-8555-555555555555',
       description: '',

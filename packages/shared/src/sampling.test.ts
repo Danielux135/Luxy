@@ -170,6 +170,47 @@ describe('muestreo por modelo en una conexion', () => {
     ]);
   });
 
+  // D-107: el razonamiento viaja en la misma entrada, pero NO por
+  // `samplingRequestFields`: lo traduce su propia tabla, por modelo
+  it('una entrada con solo el razonamiento vale, y vacia se sigue rechazando', () => {
+    expect(modelSamplingSchema.safeParse({ 'Qwen3.8-27B': { reasoningMode: 'off' } }).success).toBe(
+      true,
+    );
+    expect(modelSamplingSchema.safeParse({ 'Qwen3.8-27B': {} }).success).toBe(false);
+    // solo los tres valores de la pantalla: ni los del cuerpo ni otros niveles
+    for (const valor of ['medium', 'none', 'max', 'disabled', '']) {
+      expect(
+        modelSamplingSchema.safeParse({ 'Qwen3.8-27B': { reasoningMode: valor } }).success,
+        valor,
+      ).toBe(false);
+    }
+  });
+
+  it('el razonamiento no sale nunca por los campos de muestreo', () => {
+    expect(samplingRequestFields({ reasoningMode: 'off' })).toEqual({});
+    expect(samplingRequestFields({ temperature: 1, reasoningMode: 'high' })).toEqual({
+      temperature: 1,
+    });
+    expect(samplingLogFields({ reasoningMode: 'off' })).toEqual({});
+  });
+
+  it('el proveedor HTTP lo admite en el nivel superior, y sin el no gana la clave', () => {
+    const proveedor = {
+      id: 'groq',
+      displayName: 'Groq',
+      baseUrl: 'https://api.groq.com/openai/v1',
+      model: 'qwen/qwen3.8-27b',
+      apiKeyEnv: 'LUXY_HTTP_GROQ_API_KEY',
+    };
+    expect(
+      httpProviderConfigSchema.parse({ ...proveedor, reasoningMode: 'off' }).reasoningMode,
+    ).toBe('off');
+    expect('reasoningMode' in httpProviderConfigSchema.parse(proveedor)).toBe(false);
+    expect(httpProviderConfigSchema.safeParse({ ...proveedor, reasoningMode: 'x' }).success).toBe(
+      false,
+    );
+  });
+
   it('pone un tope al numero de modelos', () => {
     const lleno = Object.fromEntries(
       Array.from({ length: MAX_MODEL_SAMPLING_ENTRIES }, (_, i) => [
