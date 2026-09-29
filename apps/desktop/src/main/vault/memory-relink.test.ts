@@ -216,8 +216,11 @@ describe('MemoryRelink', { timeout: 90_000 }, () => {
   });
 
   // septima ronda: sin memoria sellada viaja la ficha retroactiva o el indice,
-  // escritos sin su ficha, y la primera que se selle sale de ahi
-  it('sin sellada pero con ficha retroactiva, queda pendiente y reescribe la primera que se selle', async () => {
+  // escritos sin su ficha, y la primera que se selle sale de ahi. Decima: lo
+  // decide el turno que de verdad parte de ellos, no el enganche, porque una
+  // ficha retroactiva sin aprobar no viaja y la memoria siguiente nace con su
+  // ficha
+  it('sin sellada pero con ficha retroactiva, el enganche no decide: la reescribe el turno que parte de ella', async () => {
     const otra = '33333333-3333-4333-8333-333333333333';
     await store.appendTurn(vault, otra, turno('hola', 'user', '2026-09-10T10:00:00.000Z'));
     await store.appendTurn(vault, otra, turno('r', 'assistant', '2026-09-10T10:01:00.000Z'));
@@ -231,6 +234,12 @@ describe('MemoryRelink', { timeout: 90_000 }, () => {
       now: '2026-09-25T10:00:00.000Z',
     });
     await relink.noteLink(otra);
+    expect(await relinks.forConversation(vault, otra)).toMatchObject({
+      status: 'not-needed',
+      basedOn: null,
+    });
+    // el turno parte del indice
+    await relink.noteInheritedMemoryUsed(otra, await store.owner(vault, otra));
     expect(await relinks.forConversation(vault, otra)).toMatchObject({ status: 'pending', basedOn: null });
     // nada que reescribir todavia: no se llama a nadie
     expect(await relink.run({ conversationId: otra, projectAlias: 'luxy' })).toBe('no-memory');
@@ -241,6 +250,226 @@ describe('MemoryRelink', { timeout: 90_000 }, () => {
     expect(await relink.run({ conversationId: otra, projectAlias: 'luxy' })).toBe('ready');
     expect(llamadas).toHaveLength(1);
     expect(await relinks.forConversation(vault, otra)).toMatchObject({ status: 'ready', basedOn: { sequence: 3 } });
+  });
+
+  // `noteLink` solo ve lo que hay al enganchar: una ficha retroactiva o un
+  // indice que aparecen DESPUES dejaban la fila en «no hace falta», que la
+  // pasada salta siempre, y la memoria que salia de ellos no se reescribia nunca
+  it('una ficha retroactiva que aparece despues de enganchar vuelve la fila a pendiente al usarse', async () => {
+    const otra = '55555555-5555-4555-8555-555555555555';
+    await store.appendTurn(vault, otra, turno('hola', 'user', '2026-09-10T10:00:00.000Z'));
+    await owners.append(vault, otra, {
+      lastSequence: 0,
+      characterId: NORA,
+      characterLabel: 'Nora',
+      characterDescription: null,
+      instructions: null,
+      now: '2026-09-25T10:00:00.000Z',
+    });
+    await relink.noteLink(otra);
+    expect((await relinks.forConversation(vault, otra))?.status).toBe('not-needed');
+
+    // se resume despues de enganchar, y el turno parte de ahi
+    fichas.set(otra, { conversationId: otra, memory: vieja, source: 'index' } as RecapEntry);
+    await relink.noteInheritedMemoryUsed(otra, await store.owner(vault, otra));
+    expect(await relinks.forConversation(vault, otra)).toMatchObject({ status: 'pending', basedOn: null, memory: null });
+
+    // y la memoria que sella ese turno se reescribe
+    await store.appendTurn(vault, otra, turno('r', 'assistant', '2026-09-26T10:01:00.000Z'), { memory: vieja });
+    expect(await relink.run({ conversationId: otra, projectAlias: 'luxy' })).toBe('ready');
+    expect(llamadas).toHaveLength(1);
+  });
+
+  // decima ronda: un «Borrar su memoria» que no pudo apuntar la fila al final
+  // la dejaba `applied` atada a una sellada que ya no esta, que se lee
+  // «cumplida»; si despues viajaba lo heredado, esa memoria no se reescribia
+  it('usar lo heredado vuelve a pendiente una fila de una sellada que ya no esta', async () => {
+    await enganchar();
+    expect(await relink.run({ conversationId: CONV, projectAlias: 'luxy' })).toBe('ready');
+    const lista = (await relinks.forConversation(vault, CONV))!;
+    for (const [vuelta, estado] of (['applied', 'discarded', 'failed'] as const).entries()) {
+      const antes = (await relinks.forConversation(vault, CONV))!;
+      await relinks.replace(vault, CONV, antes, {
+        ...lista,
+        status: estado,
+        memory: estado === 'applied' ? lista.memory : null,
+        // la sellada a la que se ataba se borro
+        basedOn: { sequence: 99, createdAt: '2026-09-01T00:00:00.000Z' },
+        provider: 'codex',
+        failure: estado === 'failed' ? 'refused' : null,
+        updatedAt: `2026-09-2${vuelta}T00:00:00.000Z`,
+      });
+      await relink.noteInheritedMemoryUsed(CONV, await store.owner(vault, CONV));
+      expect(await relinks.forConversation(vault, CONV)).toMatchObject({
+        status: 'pending',
+        basedOn: null,
+        memory: null,
+        failure: null,
+      });
+    }
+  });
+
+  // si el apunte fallaba, los turnos siguientes ya iban con la sellada y no lo
+  // volvian a intentar: la memoria salida de lo heredado no se reescribia nunca
+  it('si no pudo apuntar que partio de lo heredado, la pasada lo apunta antes de decidir', async () => {
+    const otra = '77777777-7777-4777-8777-777777777777';
+    await store.appendTurn(vault, otra, turno('hola', 'user', '2026-09-10T10:00:00.000Z'));
+    await owners.append(vault, otra, {
+      lastSequence: 0,
+      characterId: NORA,
+      characterLabel: 'Nora',
+      characterDescription: null,
+      instructions: null,
+      now: '2026-09-25T10:00:00.000Z',
+    });
+    let romper = false;
+    const conFallo = new MemoryRelink({
+      vault,
+      conversations: store,
+      relinks: {
+        forConversation: (v, id) => relinks.forConversation(v, id),
+        replace: (...args) => {
+          if (romper) throw new Error('no escribe');
+          return relinks.replace(...args);
+        },
+      },
+      recaps: { entryFor: async (_vault, id) => fichas.get(id) },
+      characters: { list: async () => [] as never },
+      preferences: { auxiliary: () => null as never, excluded: () => excluidas },
+      controller: {
+        runLocalTurn: async (input) => {
+          llamadas.push({ provider: input.provider, kind: input.kind, prompt: input.prompt });
+          return { outcome: 'completed', text: bloque(corregida), error: null, executedModel: 'cli' };
+        },
+      },
+      lane: createAuxiliaryLane(),
+      isBusy: () => false,
+      now: () => new Date().toISOString(),
+      log: (mensaje, campos) => registros.push({ mensaje, campos }),
+    });
+    await conFallo.noteLink(otra);
+    expect((await relinks.forConversation(vault, otra))?.status).toBe('not-needed');
+
+    romper = true;
+    await conFallo.noteInheritedMemoryUsed(otra, await store.owner(vault, otra));
+    romper = false;
+    expect(registros.at(-1)).toEqual({
+      mensaje: 'memoria reescrita con su ficha',
+      campos: { resultado: 'sin-apuntar', paso: 'heredada' },
+    });
+    expect((await relinks.forConversation(vault, otra))?.status).toBe('not-needed');
+
+    // el turno sella la memoria que salio de lo heredado, y la pasada la reescribe
+    await store.appendTurn(vault, otra, turno('r', 'assistant', '2026-09-26T10:01:00.000Z'), { memory: vieja });
+    expect(await conFallo.run({ conversationId: otra, projectAlias: 'luxy' })).toBe('ready');
+    expect(llamadas).toHaveLength(1);
+  });
+
+  // un «Soltar» que no pudo quitar la fila, en una conversacion excluida: la
+  // pasada devolvia `excluded` antes de soltar, y el texto se quedaba en disco
+  // mientras siguiera excluida
+  it('excluida, la pasada suelta igual el texto de una reescrita que ya no vale, sin llamar a nadie', async () => {
+    await enganchar();
+    expect(await relink.run({ conversationId: CONV, projectAlias: 'luxy' })).toBe('ready');
+    await owners.append(vault, CONV, {
+      lastSequence: 1,
+      characterId: null,
+      characterLabel: null,
+      characterDescription: null,
+      instructions: null,
+      now: '2026-09-26T10:00:00.000Z',
+    });
+    excluidas.add(CONV);
+    await relink.sweep('luxy', [CONV]);
+    await relink.sweep('luxy', [CONV]);
+    expect((await relinks.forConversation(vault, CONV))?.memory).toBeNull();
+    expect(llamadas).toHaveLength(1);
+
+    // y una atada que vale no se toca: sigue siendo la que viaja aqui
+    const segunda = '88888888-8888-4888-8888-888888888888';
+    await store.appendTurn(vault, segunda, turno('hola', 'user', '2026-09-10T10:00:00.000Z'));
+    await store.appendTurn(vault, segunda, turno('r', 'assistant', '2026-09-10T10:01:00.000Z'), { memory: vieja });
+    await owners.append(vault, segunda, {
+      lastSequence: 1,
+      characterId: NORA,
+      characterLabel: 'Nora',
+      characterDescription: null,
+      instructions: null,
+      now: '2026-09-25T10:00:00.000Z',
+    });
+    await relink.noteLink(segunda);
+    expect(await relink.run({ conversationId: segunda, projectAlias: 'luxy' })).toBe('ready');
+    excluidas.add(segunda);
+    expect(await relink.run({ conversationId: segunda, projectAlias: 'luxy' })).toBe('excluded');
+    expect((await relinks.forConversation(vault, segunda))?.memory).toEqual(corregida);
+  });
+
+  it('usar lo heredado no toca una reescrita atada a la sellada de ahora, ni una de otro enganche', async () => {
+    await enganchar();
+    expect(await relink.run({ conversationId: CONV, projectAlias: 'luxy' })).toBe('ready');
+    const lista = await relinks.forConversation(vault, CONV);
+    await relink.noteInheritedMemoryUsed(CONV, await store.owner(vault, CONV));
+    expect(await relinks.forConversation(vault, CONV)).toEqual(lista);
+    // sin enganche no hace nada
+    const suelta = '66666666-6666-4666-8666-666666666666';
+    await store.appendTurn(vault, suelta, turno('hola', 'user', '2026-09-10T10:00:00.000Z'));
+    await relink.noteInheritedMemoryUsed(suelta, await store.owner(vault, suelta));
+    expect(await relinks.forConversation(vault, suelta)).toBeUndefined();
+  });
+
+  // un «Soltar» que no pudo quitar la fila dejaba el texto reescrito en disco
+  // para siempre: la pasada lo veia en fase `none` y no lo tocaba
+  it('la pasada suelta el texto de una reescrita cuyo enganche ya no gana', async () => {
+    await enganchar();
+    expect(await relink.run({ conversationId: CONV, projectAlias: 'luxy' })).toBe('ready');
+    // soltar, sin poder quitar la fila
+    await owners.append(vault, CONV, {
+      lastSequence: 1,
+      characterId: null,
+      characterLabel: null,
+      characterDescription: null,
+      instructions: null,
+      now: '2026-09-26T10:00:00.000Z',
+    });
+    expect((await relinks.forConversation(vault, CONV))?.memory).not.toBeNull();
+
+    expect(await relink.run({ conversationId: CONV, projectAlias: 'luxy' })).toBe('skipped');
+    expect((await relinks.forConversation(vault, CONV))?.memory).toBeNull();
+    expect(llamadas).toHaveLength(1);
+    // y en disco no queda ni una palabra de la reescrita
+    expect(await store.latestMemory(vault, CONV)).toEqual(vieja);
+  });
+
+  // lo visto sin nada que hacer se saltaba hasta cerrar la boveda, aunque Daniel
+  // quitara la conversacion de las excluidas o cambiara de CLI
+  it('recheck vuelve a mirar en la pasada lo que se dio por visto', async () => {
+    await enganchar();
+    excluidas.add(CONV);
+    await relink.sweep('luxy', [CONV]);
+    excluidas.clear();
+    await relink.sweep('luxy', [CONV]);
+    expect(llamadas).toHaveLength(0);
+    relink.recheck(CONV);
+    await relink.sweep('luxy', [CONV]);
+    expect(llamadas).toHaveLength(1);
+    expect((await relinks.forConversation(vault, CONV))?.status).toBe('ready');
+  });
+
+  it('recheck sin argumento: tras cambiar de CLI, el otro intenta la negativa del primero', async () => {
+    await enganchar();
+    auxiliar = { provider: 'claude', model: null };
+    respuesta = async () => ({ outcome: 'completed', text: 'Lo siento, no puedo ayudar con eso.' });
+    expect(await relink.run({ conversationId: CONV, projectAlias: 'luxy' })).toBe('refused');
+    await relink.sweep('luxy', [CONV]);
+    expect(llamadas).toHaveLength(1);
+    auxiliar = { provider: 'codex', model: null };
+    respuesta = async () => ({ outcome: 'completed', text: bloque(corregida) });
+    await relink.sweep('luxy', [CONV]);
+    expect(llamadas).toHaveLength(1);
+    relink.recheck();
+    await relink.sweep('luxy', [CONV]);
+    expect(llamadas).toHaveLength(2);
+    expect((await relinks.forConversation(vault, CONV))?.status).toBe('ready');
   });
 
   it('sin sellada y sin ficha, no hace falta; si la ficha no se puede leer, pendiente', async () => {

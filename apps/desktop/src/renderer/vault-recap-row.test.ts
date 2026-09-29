@@ -612,8 +612,39 @@ describe('la memoria reescrita con su ficha, en la fila', () => {
     expect(look.text).toContain('Codex no quiso reescribirla con su ficha');
     expect(look.text).toContain('sigue valiendo la de antes');
     expect(look.canRetry).toBe(true);
-    const perdia = describeRelink({ ...lista, phase: 'failed', failure: 'lossy' }, false)!;
+    const perdia = describeRelink({ ...lista, phase: 'failed', failure: 'lossy', drift: null }, false)!;
     expect(perdia.text).toContain('quitaba o recortaba demasiado y no se ha aplicado');
+  });
+
+  // decima ronda: la confirmacion promete que aqui se ve cuantas entradas tocó
+  // tambien si no se aplico, y la fila solo lo decia de una aplicada
+  it('lo que la guarda rechazo enseña sus cifras', () => {
+    const perdia = describeRelink({ ...lista, phase: 'failed', failure: 'lossy' }, false)!;
+    expect(perdia.text).toContain(
+      'quitaba o recortaba demasiado (4 entradas igual y 1 corregida) y no se ha aplicado',
+    );
+    const vaga = describeRelink({ ...lista, phase: 'failed', failure: 'vague' }, false)!;
+    expect(vaga.text).toContain('ya no decía qué pasó (4 entradas igual y 1 corregida)');
+  });
+
+  // excluida no hay boton ni pasada: ofrecer pedirla otra vez o el otro CLI eran
+  // salidas que no existian (`D-093`)
+  it('excluida, una negativa no ofrece pedirla otra vez ni cambiar de CLI', () => {
+    const look = describeRelink({ ...lista, phase: 'failed', failure: 'refused', drift: null, holdsRewrite: false }, true)!;
+    expect(look.canRetry).toBe(false);
+    expect(look.text).not.toContain('Puedes pedírselo otra vez');
+    expect(look.text).not.toContain('Quién hace el trabajo de fondo');
+    expect(look.text).toContain('fuera del trabajo de fondo, así que no se vuelve a intentar');
+    expect(
+      describeRelink({ ...lista, phase: 'failed', failure: 'refused', drift: null, holdsRewrite: false }, false)!.text,
+    ).toContain('Puedes pedírselo otra vez');
+  });
+
+  it('excluida, la lista no promete viajar a sus otras conversaciones', () => {
+    const look = describeRelink(lista, true)!;
+    expect(look.text).not.toContain('en sus otras conversaciones;');
+    expect(look.text).toContain('a sus otras conversaciones no');
+    expect(describeRelink(lista, false)!.text).toContain('en sus otras conversaciones;');
   });
 
   it('pendiente, salvo si esta fuera del trabajo de fondo', () => {
@@ -628,10 +659,14 @@ describe('la memoria reescrita con su ficha, en la fila', () => {
     expect(describeRelink({ ...lista, phase: 'failed', failure: 'invalid' }, true)!.canRetry).toBe(false);
   });
 
-  it('pendiente sin memoria propia: dice que viaja la ficha retroactiva y no ofrece boton', () => {
+  it('pendiente sin memoria propia: dice lo que PUEDE viajar y no ofrece boton', () => {
     const sinMemoria = describeRelink({ ...lista, phase: 'pending', hasMemory: false }, false)!;
     expect(sinMemoria.text).toContain('todavía no tiene memoria propia');
-    expect(sinMemoria.text).toContain('ficha retroactiva o el índice de sus escenas, escritos sin su ficha');
+    // una ficha retroactiva sin aprobar no viaja: la fila no puede afirmar que
+    // le llega (`D-093`), y lo decia sin condiciones
+    expect(sinMemoria.text).not.toContain('lo que le llega es su ficha retroactiva');
+    expect(sinMemoria.text).toContain('su ficha retroactiva, esta solo si está aprobada y al día con los últimos mensajes');
+    expect(sinMemoria.text).toContain('los dos se escribieron sin su ficha');
     expect(sinMemoria.canRetry).toBe(false);
     const excluida = describeRelink({ ...lista, phase: 'pending', hasMemory: false }, true)!;
     expect(excluida.text).toContain('no se va a reescribir');

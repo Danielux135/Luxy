@@ -1,5 +1,64 @@
 # Luxy — resultados de comprobación
 
+### 2026-09-29 — REV-CUATRO-FRENTES-001 (octava, novena y décima ronda) — los tres `npm run check` a solas y las pruebas de lo tocado
+
+Los `npm run check` los pasó quien coordina, a solas, cada uno después de la
+revisión de su ronda; las cifras salen de los diarios (`r3:check` del flujo
+`wf_db3de991-06e`; `r1:check` y `r2:check` del flujo `wf_8a121503-c1f`). En los
+tres, lint, typecheck (paquetes y pruebas), test y build con **salida 0**:
+
+- **Sobre la octava**, lo que se commiteó en `f77efb6`: **228 archivos, 4716
+  pruebas en verde y 12 omitidas (4728).**
+- **Sobre la novena**: **229 archivos, 4741 en verde y 12 omitidas (4753).**
+  Más de 10 minutos.
+- **Sobre la décima**, `f77efb6` más lo que está sin commitear, que es el
+  estado de hoy: **229 archivos, 4751 en verde y 12 omitidas (4763).** Más de
+  10 minutos.
+
+Pruebas de lo tocado, según el informe de cada agente (no repetidas aquí):
+
+- **Novena, medida.** `recent-echo.test.ts` con el código de `f77efb6`: 4
+  fallan y 12 pasan; con el cambio, 16 de 16. `conversation-owner`,
+  `vault-recent-memories`, `recent-echo` y `redact`: 4 archivos, 93 en verde.
+  `tsc -b apps/desktop/tsconfig.node.json` y `tsc -p
+  packages/shared/tsconfig.tests.json`: salida 0. `eslint` de los tres
+  archivos: sin avisos. El `dist` de shared se reconstruyó con `tsc -b
+  packages/shared`.
+- **Novena, razonamiento.** `reasoning-control` y `providers`: 2 archivos, 207
+  en verde; `http-provider-config.test.ts`, 24 de 24. Con `reasoning-control.ts`
+  de `HEAD` fallan exactamente las 3 pruebas nuevas de shared. Las dos
+  expectativas cambiadas de `providers.test.ts` **no se vieron fallar** sin el
+  cambio: el agente importa el `dist`, que ya estaba reconstruido. `tsc` de las
+  pruebas de shared y del agente: salida 0.
+- **Novena, enganche y pantalla.** `memory-relink` 21, `conversation-relink`
+  16, `vault-recap-row` 57, `vault-character-link` 42, `Config.test.ts` 3
+  (nuevo) y `conversation-owner` 33, en verde. Con los archivos de `HEAD`, las
+  17 pruebas nuevas o cambiadas fallan y ninguna más. `npm run typecheck`:
+  salida 0. La suite de `apps/desktop` entera, con la máquina cargada por otros
+  agentes: 1997 en verde y 6 caídas por el tope de 20 s en archivos no tocados
+  (`account-manager`, `recap-store` y una de `conversation-owner`); a solas
+  pasaron las dos últimas y `account-manager` siguió cayendo por tiempo. Los
+  checks a solas de arriba sí pasaron enteros.
+- **Décima.** `recent-echo`, 18 de 18 (3 fallaban antes del arreglo);
+  `memory-relink`, 24 de 24, y `conversation-relink`, 20 de 20, revirtiendo cada
+  arreglo por separado: cae 1 prueba con cada uno de los tres de
+  `memory-relink`, y 1, 2, 3 y 3 con los cuatro de `conversation-relink`;
+  `vault-recap-row`: la prueba nueva de las cifras de `lossy` y `vague` falla
+  sin el cambio. `apps/desktop` entera: 116 archivos, 2013 en verde. `tsc` de
+  `tsconfig.node` y `tsconfig.renderer` de desktop y `eslint` de lo tocado:
+  salida 0.
+- Finales de línea: `Config.tsx` sigue en CRLF y los demás `.ts` tocados en LF;
+  los documentos, en CRLF.
+- `prettier --check` sigue avisando en líneas que ya avisaban en `HEAD`; lo
+  añadido se ajusta. `format:check` no entra en `check`.
+
+**La documentación de esta pasada no toca código.** Después de escribirla solo
+se ha pasado `vitest run packages/shared/src/docs.test.ts`: **64 de 64 en
+verde.** No ejecutado: nada en Electron, ninguna reescritura real por un
+CLI, nada contra la pasarela ni contra la API de Z.AI y nada contra una
+conversación real. Sin prueba propia: las carreras de una reescritura y del
+apunte de `D-105` con el borrado.
+
 ### 2026-09-29 — REV-CUATRO-FRENTES-001 (octava ronda) — pruebas de lo tocado y typecheck
 
 **No es un `npm run check` completo**: ni `npm run lint` de todo ni `npm run
@@ -30,7 +89,8 @@ build`. Se pasa al final, a solas.
 - `prettier --check` avisa en 9 de los 10 archivos de código tocados que se
   miraron; casi todo es formato que ya había. No se ha reformateado.
 
-No ejecutado: `npm run check` completo, `npm run build`, nada en Electron,
+No ejecutado entonces: `npm run check` completo (después, a solas, en verde con
+4716: entrada de arriba), `npm run build`, nada en Electron,
 nada contra la pasarela ni contra una conversación real. Sin prueba: la carrera
 de «Volver a la de antes» con un envío que arranca (se cierra por
 compare-and-set, no se ha reproducido) y el cableado de la pasada general en
@@ -343,7 +403,9 @@ anterior.
 **No probado:** nada en pantalla ni con Electron de verdad; que los CLI de
 verdad dejen de escribir la sesión con esos flags (solo se comprobó que la ayuda
 los anuncia; no se miraron sus carpetas de sesiones, a propósito); nada medido
-contra una conversación real. **Sin revisión independiente.**
+contra una conversación real. **Sin revisión independiente** entonces; después
+la revisaron siete revisores junto con la primera, y de ahí salió la tercera
+ronda.
 
 ### 2026-09-28 — REV-TRES-ENCARGOS-001 — `npm run check`
 
@@ -363,7 +425,8 @@ tras el arreglo, `ambos: 0` en 16 mensajes.
 
 **No probado:** nada en pantalla ni con Electron de verdad; que Windows entregue
 `lock-screen` (`LA-053`); nada medido contra una conversación real (`LA-054`,
-`LA-052`). **Sin revisión independiente de estos arreglos.**
+`LA-052`). **Sin revisión independiente de estos arreglos** entonces; después
+los revisó una segunda ronda de revisores, y de ahí salió la segunda ronda.
 
 ### 2026-09-25 — SEG-BOVEDA-001 — `npm run check`
 

@@ -100,7 +100,9 @@ lo pida explícitamente.
   encenderlo rompe los trabajos con herramientas. Todo nombre de campo nuevo del
   registro se comprueba con `isSecretKeyName` (`redact.ts`): tapa cualquiera que
   acabe en key, token, secret, password o credential, en singular o plural y en
-  camelCase, snake o kebab (`visiblePorToken` salía como `[REDACTADO]`).
+  camelCase, snake o kebab (`visiblePorToken` salía como `[REDACTADO]`). El
+  veredicto `reasoningVerdict` mira primero lo visible y después el recuento:
+  `counted` es que el proveedor declaró razonamiento y no llegó nada que se vea.
 - El trabajo de fondo de la bóveda —catalogar escenas, apuntar lo que queda
   pendiente entre los dos— va **sólo** por Claude Code o Codex con la sesión
   local, nunca por una API de pago (`D-087`). Lo resuelve
@@ -143,11 +145,15 @@ lo pida explícitamente.
   hilo y el resumen de `D-105`— la apunta antes `applied` con
   `markRelinkApplied` (compare-and-set) y, si no puede, va con la sellada. A la
   reescritura le llega la memoria con `repairSlicedMemory`. Una enganchada sin
-  memoria sellada que viaja con su ficha retroactiva o su índice queda
-  pendiente, y se reescribe la primera que se selle. Tras cada envío en Privado,
-  `MemoryRelink.sweep` reintenta las pendientes de cualquier conversación.
-  Mientras se borra una conversación o su memoria no arranca ningún envío
-  (`erasingInFlight`). La foto de perfil se reconoce con `isProfilePhotoOf`,
+  memoria sellada queda `not-needed` aunque tenga ficha retroactiva o índice:
+  pasa a pendiente solo cuando un turno parte de verdad de ellos
+  (`noteInheritedMemoryUsed`), y entonces se reescribe la memoria que selle ese
+  turno. Tras cada envío en Privado, `MemoryRelink.sweep` reintenta las
+  pendientes de cualquier conversación. «Borrar su memoria» en una enganchada
+  quita el texto de la reescrita ANTES de borrar la sellada y, si no puede, no
+  borra nada. Mientras se borra una conversación o su memoria no arranca ningún
+  envío a ESA conversación (`erasingInFlight` va por conversación). La foto de
+  perfil se reconoce con `isProfilePhotoOf`,
   nunca por `characterId` a secas. La firma: en una enganchada, todas sus
   respuestas salvo las escritas con OTRO personaje (`lastForeignSequence`); con
   dueño por turno, solo lo de después de ese turno.

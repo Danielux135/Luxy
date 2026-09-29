@@ -478,6 +478,13 @@ export const vaultConversationOwnerPreviewSchema = z.object({
    * viaja, tambien escrito sin la ficha (septima ronda)
    */
   inheritedMemory: z.boolean(),
+  /**
+   * y eso viaja YA en el proximo mensaje: el indice siempre, la ficha
+   * retroactiva solo aprobada, de la version actual y al dia con la cola
+   * (`chooseConversationMemory`). Sin esto la confirmacion afirmaba que le
+   * llegaba una ficha sin aprobar (`D-093`)
+   */
+  inheritedTravels: z.boolean(),
   /** el personaje tiene encendido el resumen de sus dos ultimas conversaciones */
   recentMemoriesOn: z.boolean(),
   /** la conversacion esta excluida de lo que recuerda */

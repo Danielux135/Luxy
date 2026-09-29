@@ -1,14 +1,35 @@
 # Luxy — estado canónico del proyecto
 
-Última actualización: **2026-09-28 — tres encargos construidos (la bóveda se
-cierra sola, el enganche local con el resumen de sus conversaciones y las
-promesas de vez en cuando), revisados después y corregidos, sin verse en
-pantalla; la bóveda sigue sin copia**
+Última actualización: **2026-09-29 — los tres encargos del 25/09 y los tres
+frentes del 28/09 (el razonamiento por modelo, la memoria entera de sus dos
+últimas conversaciones y la enganchada igual que una empezada), corregidos en
+diez rondas, cada una revisada después; la novena y la décima sin
+commitear, y la revisión de la décima con dieciséis defectos
+abiertos, dos importantes. Nada visto en pantalla; la bóveda sigue sin copia**
 
 > **Lo primero: la bóveda no tiene ninguna copia de seguridad.** Existe sólo en
 > este disco, no se ha sincronizado nunca, y la sincronización de hoy no serviría:
 > tres fallos en el código y, por diseño, no sube ni a Lía ni las fichas de
 > memoria. Copia a mano en `LA-049`; el detalle, en `SEG-SYNC-001`.
+
+> **Novena y décima ronda (29/09, `REV-CUATRO-FRENTES-001`), sin commitear.**
+> La octava, commiteada en `f77efb6`, la revisaron ocho revisores con `npm run
+> check` a solas en verde (228 archivos, 4716 pruebas). La novena corrigió lo
+> que encontraron: la medida del eco ya no depende de la tercera conversación
+> ni casa por un nombre; la nota de GLM-5.2 y la contradicción de Z.AI sobre
+> apagar los GLM, escritas; `visible` se decide antes que `counted`; una ficha
+> retroactiva o un índice que aparecen después de enganchar ya se reescriben;
+> la pantalla no afirma que viaja una ficha sin aprobar. La revisaron seis
+> revisores (13 defectos, 3 importantes) con el check a solas en verde (229
+> archivos, 4741), y la décima lo corrigió todo: el apoyo del eco, lo heredado
+> solo pasa a pendiente cuando un turno lo usa, y «Borrar su memoria» vuelve a
+> quitar la reescrita antes que la sellada. Otros seis revisores sobre la
+> décima, con el check a solas en verde (229 archivos, 4751), dejaron
+> **dieciséis defectos, dos importantes y los dos en la medida del eco**: el
+> control detecta menos solapamientos que en `f77efb6`, y una frase corta con
+> un nombre sigue inflando `sinApoyoAqui`. **Sin corregir.** Detalle en
+> `CURRENT-TASK.md`; lo que Daniel prueba, en `LA-058`. **Nada visto en
+> Electron ni ninguna reescritura real.**
 
 > **Cómo se revisaron los tres encargos del 25/09 (`REV-TRES-ENCARGOS-001`).** El
 > flujo que los construyó se cortó al caducar la autenticación y **su revisión
@@ -23,8 +44,9 @@ pantalla; la bóveda sigue sin copia**
 > de cada turno de la bóveda (ahora van sin sesión en disco; lo ya escrito sigue
 > ahí); un turno con imagen del Horde podía perder la respuesta de Lía al cerrarse
 > la bóveda; y la regla de pendientes negaba promesas que el mismo prompt le
-> daba. **Ninguna de las dos rondas de arreglos ha tenido revisión
-> independiente.** Detalle en `CURRENT-TASK.md`.
+> daba. Las dos rondas tuvieron después su revisión: la de la primera dejó la
+> segunda, y siete revisores sobre las dos dejaron la tercera. Detalle en
+> `CURRENT-TASK.md`.
 >
 > **Tercera ronda (28/09), parte de main, shared y documentos.** Un envío cortado
 > por el cierre de la bóveda, con la llamada sin respuesta, podía borrar la
@@ -74,8 +96,9 @@ pantalla; la bóveda sigue sin copia**
 > conversaciones del Studio anterior y no pone su nombre en lo que escribió otro
 > personaje; la confirmación dice qué memoria viaja; y los documentos recogen el
 > `npm run check` en verde de la sexta (4677). La imagen del turno solo aplaza
-> Win+L con el proveedor de pago. **Sin revisión de esta ronda, sin `npm run
-> check` entero y nada visto en Electron.**
+> Win+L con el proveedor de pago. Commiteada en `f77efb6`; revisada después por
+> ocho revisores, con `npm run check` a solas en verde (228 archivos, 4716
+> pruebas). **Nada visto en Electron.**
 >
 > **Séptima ronda (29/09, `REV-CUATRO-FRENTES-001`).** Ocho revisores (aquí
 > decía «cinco») sobre la sexta y los tres frentes sin commitear, con un `npm run
@@ -106,7 +129,10 @@ pantalla; la bóveda sigue sin copia**
 > teclado y ratón reales en Privado con la ventana visible y con el foco, esperar
 > una respuesta o una imagen que pidió él, y las operaciones de cuenta. Win+L,
 > suspender y la X de la ventana la cierran; Win+L solo se aplaza por un envío
-> suyo hasta que su respuesta queda guardada, no por una imagen. Cada apertura y
+> suyo: hasta que su respuesta queda guardada (10 minutos como mucho desde
+> Win+L) y, si el turno lleva imagen del proveedor de pago, hasta que esa
+> imagen termina (15 minutos como mucho desde que Luxy ve ese tramo). Una
+> imagen de AI Horde o del panel no lo aplaza. Cada apertura y
 > cada cierre dejan una línea en
 > `studio.log` con el motivo. **Nada visto en pantalla**, y que Windows avise de
 > Win+L a Luxy no está comprobado: `LA-053`.
@@ -114,8 +140,9 @@ pantalla; la bóveda sigue sin copia**
 > **Construido (25/09, corregido el 28/09): `F33-ENGANCHE-LOCAL-001` y
 > `F33-RECUERDO-001`.** Se puede enganchar una conversación sin personaje a Lía
 > **en este equipo** (no sube al servidor), el dueño se resuelve en un solo sitio
-> (`D-103`) y, con una casilla en su ficha, Lía recibe un resumen de sus dos
-> últimas conversaciones (`D-105`). Sin verse en pantalla: `LA-052`.
+> (`D-103`) y, con una casilla en su ficha, Lía recibe la memoria de sus dos
+> últimas conversaciones (`D-105`; entera desde el 28/09, abajo). Sin verse en
+> pantalla: `LA-052`.
 
 > **Construido (25/09, corregido el 28/09): `F33-PROMESAS-001`.** Con la casilla
 > «Sacar los pendientes solo de vez en cuando» de su ficha, el bloque de
@@ -131,18 +158,18 @@ pantalla; la bóveda sigue sin copia**
 > escribieron con la ficha de otro personaje—, su foto de
 > perfil se copia al enganchar y una imagen generada ya no cuenta como foto de
 > perfil. Lo que no se iguala: los últimos ocho mensajes viajan tal cual.
-> **Implementado; revisado (ocho revisores, check a solas en verde con 4677) y
-> corregido en la séptima y la octava ronda, esta sin revisión ni check. Sin
+> **Implementado; corregido de la séptima a la décima ronda, cada una revisada
+> y con su `npm run check` a solas; quedan menores abiertos (`D-108`). Sin
 > ninguna reescritura real y sin verse en pantalla**: `LA-057`.
 
 > **`F34-RAZONAMIENTO-001` (`D-107`, 2026-09-28): el razonamiento de una
 > conexión HTTP se elige por modelo**, junto a la temperatura, y sólo con los
 > valores que la documentación de ese modelo admite; vacío no manda nada. Luxy lee
 > ahora el razonamiento en `reasoning`, en `<think>` y sin transmisión, y cada
-> llamada apunta `reasoningVerdict` y `charsPerOutput`. **Implementado; revisado
-> (ocho revisores, check a solas en verde con 4677) y corregido en la séptima y
-> la octava ronda, esta sin revisión ni check. Sin saber si la pasarela deja
-> pasar el campo**: lo dirá `LA-055`.
+> llamada apunta `reasoningVerdict` y `charsPerOutput`. **Implementado;
+> corregido de la séptima a la novena ronda, cada una revisada y con su `npm
+> run check` a solas. La regla de los GLM que se apagan espera a Daniel
+> (`D-107`). Sin saber si la pasarela deja pasar el campo**: lo dirá `LA-055`.
 
 > **`F33-RECUERDO-ENTERO-001` (`D-105`, quinta ronda, 2026-09-28): con la
 > casilla «Pasarle la memoria de sus dos últimas conversaciones» le llega la
@@ -151,9 +178,9 @@ pantalla; la bóveda sigue sin copia**
 > conversación que quita lo más viejo primero. La palabra cortada a mitad se
 > arregla donde nacía (el `slice` al guardar memorias y fichas) y, en lo ya
 > guardado, al presentarlo. `ecoRecientes` gana un control con la tercera
-> conversación. **Implementado; revisado (ocho revisores, check a solas en verde
-> con 4677) y corregido en la séptima y la octava ronda, esta sin revisión ni
-> check. Sin verse en pantalla**: `LA-056`.
+> conversación. **Implementado; corregido de la séptima a la décima ronda, cada
+> una revisada y con su `npm run check` a solas; la medida del eco tiene dos
+> defectos importantes abiertos (`D-105`). Sin verse en pantalla**: `LA-056`.
 
 > **Lo segundo: `F33-VARIEDAD-001`.** Cuatro cambios contra la autocopia de Lía,
 > con interruptor y sin verse en pantalla. Se prueban con `LA-050`.

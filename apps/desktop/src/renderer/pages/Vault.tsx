@@ -2318,7 +2318,9 @@ function CharacterRow({
           {RECENT_MEMORIES_CHECKBOX}
           <small>
             {character.recentMemories === 'recent-two'
-              ? 'en cada mensaje le llega entera la memoria que se apuntó en sus dos conversaciones más recientes, sin la de ahora: el resumen, los hechos, las decisiones y las lecciones. Por aquí no le llegan los mensajes, ni el plan, ni las preguntas que quedaron en el aire: lo prometido solo le vuelve aparte si el trabajo de fondo lo apuntó como pendiente, y cuando toca, y trozos de los mensajes pueden llegarle transcritos cuando algo que escribas le recuerde un momento de cualquiera de sus conversaciones. Las más antiguas no entran. Solo de las que tengan memoria apuntada o una ficha de «Memoria de lo ya hablado» aprobada y al día: una sin ninguna de las dos se salta y no se cambia por otra, así que puede no llegarle nada. Lo apuntó el modelo, no es la conversación: puede faltar algo de lo acordado, y las que enganchaste se apuntaron sin su ficha: de esas le llega la reescrita con su ficha en cuanto está lista, y hasta entonces la de antes. Hace más largo cada mensaje; si alguna fuera enorme, se quitan primero sus entradas más antiguas. Mientras esté encendida, también le pide apuntar aparte lo acordado en la memoria. Se apaga aquí'
+              ? // lo mismo que antes, en frases cortas y sin repetir: 1.140
+                // caracteres encadenados en un <small> no se entendian
+                'En cada mensaje le llega entera la memoria apuntada de sus dos conversaciones más recientes, sin la de ahora: resumen, hechos, decisiones y lecciones. Solo de las que tengan memoria apuntada o una ficha de «Memoria de lo ya hablado» aprobada y al día; una sin ninguna de las dos se salta sin cambiarla por otra, así que puede no llegarle nada. No le llegan por aquí los mensajes, el plan ni las preguntas en el aire. Lo prometido vuelve aparte solo si el trabajo de fondo lo apuntó como pendiente, y cuando toca. Trozos de mensajes pueden llegarle transcritos si algo que escribas le recuerda un momento de cualquiera de sus conversaciones. La memoria la apuntó el modelo: puede faltar algo de lo acordado. De las que enganchaste le llega la reescrita con su ficha en cuanto está lista, y hasta entonces la de antes. Alarga cada mensaje; si una fuera enorme, se quitan primero sus entradas más antiguas. Encendida, también le pide apuntar aparte lo acordado. Se apaga aquí'
               : 'apagada, esta casilla no añade nada al prompt'}
           </small>
         </span>
@@ -6808,6 +6810,19 @@ function RecapSection({
                       el borrado se la lleva (`D-108`) */}
                   {row.relink?.holdsRewrite === true && (
                     <>También se borra la versión reescrita con su ficha. </>
+                  )}
+                  {/* en una enganchada, la memoria nueva que salga de su ficha
+                      retroactiva o de su indice se manda a reescribir: una
+                      llamada mas al CLI, que el aviso no decia (`D-108`). Sin
+                      fila de reescritura no esta enganchada; excluida no se
+                      reescribe nada */}
+                  {row.relink !== null && row.relink !== undefined && !row.excluded && (
+                    <>
+                      Como está enganchada, si la memoria nueva sale de su ficha
+                      retroactiva o del índice de sus escenas —escritos sin su
+                      ficha—, después se reescribirá con su ficha en segundo plano:
+                      una llamada más al CLI de «Quién hace el trabajo de fondo».{' '}
+                    </>
                   )}
                   <strong>Y borra en este equipo:</strong> lo que ya se había
                   sincronizado sigue en el servidor, así que en otro ordenador tuyo ella

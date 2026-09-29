@@ -63,6 +63,7 @@ import {
   resolveAuxiliaryTarget,
   chooseConversationMemory,
   effectiveSealedMemory,
+  relinkApplies,
   relinkPhase,
   recapCoverage,
   formatConversationMemory,
@@ -1780,6 +1781,9 @@ export function registerIpcHandlers(context: HandlerContext): void {
     const excluded = context.memoryPreferences.set(args.conversationId, args.excluded);
     // el indice se construyo con la lista anterior
     context.privateMemory.invalidate();
+    // la pasada general la dio por vista mientras estaba excluida: sin esto no
+    // la volvia a mirar hasta cerrar la boveda (`D-108`)
+    memoryRelink?.recheck(args.conversationId);
 
     const episodes = await context.privateMemory.listEpisodes(context.vault);
     context.log('banco de recuerdos actualizado', { excluidas: excluded.length });
@@ -1850,9 +1854,9 @@ export function registerIpcHandlers(context: HandlerContext): void {
    * La otra mitad de `sendInFlight`, como `ownerChangeInFlight`: los dos
    * borrados miraban que no hubiera un envio al empezar, pero entre sus `await`
    * cabia el arranque de uno. Borrando la conversacion, su respuesta la
-   * resucitaba con solo esa linea; borrando la memoria, la reescrita ya se
-   * habia quitado y el borrado se rechazaba despues, dejando la conversacion
-   * sin reescribir para siempre (septima ronda). Mientras este aqui, no se envia.
+   * resucitaba con solo esa linea; borrando la memoria, el texto de la
+   * reescrita —se quita antes que la sellada— ya no estaba y el borrado se
+   * rechazaba despues (septima ronda). Mientras este aqui, no se envia.
    */
   const erasingInFlight = new Set<string>();
   const erasingNow = (): VaultError =>
@@ -1979,7 +1983,7 @@ export function registerIpcHandlers(context: HandlerContext): void {
   context.vault.onLock(() => {
     legacyRelinksSeen = false;
   });
-  const relinkCandidates = async (exceptId: string): Promise<string[]> => {
+  const relinkCandidates = async (exceptId: string | null): Promise<string[]> => {
     if (memoryRelinks === undefined) return [];
     const rows = await memoryRelinks.all(context.vault);
     const ids = new Set<string>();
@@ -1995,8 +1999,10 @@ export function registerIpcHandlers(context: HandlerContext): void {
         }
       }
     }
-    // la de este envio ya se ha mirado justo antes
-    ids.delete(exceptId);
+    // la de este envio ya se ha mirado justo antes, si esta enganchada. Si no
+    // lo esta, se queda: puede guardar el resto de un «Soltar» que no pudo
+    // quitar su fila, y la pasada lo suelta
+    if (exceptId !== null) ids.delete(exceptId);
     return [...ids];
   };
 
@@ -2076,59 +2082,167 @@ export function registerIpcHandlers(context: HandlerContext): void {
   };
 
   /**
-   * quita la reescrita de una conversacion al borrar su memoria (`D-108`).
+   * si una reescrita que ya estaba `applied` sigue en uso aunque volver a
+   * apuntarla haya fallado.
    *
-   * En una enganchada no se borra la fila: se deja sin texto, en «no hace
-   * falta» si lo que viajara despues parte de cero —la memoria que se selle
-   * nace ya con la ficha delante, y sin esa marca pareceria pendiente y se
-   * reescribiria gastando una llamada para nada— o en «pendiente» si lo que
-   * viajara es su ficha retroactiva o el indice, que no la llevaban. Lanza si
-   * no puede: quien la llama aun no ha destruido nada.
+   * Sobre una `ready`, no poder apuntarla deja al turno con la sellada, y la
+   * reescrita sigue lista. Sobre una `applied` —la apunto antes el resumen de
+   * sus otras conversaciones (`D-105`)— eso era peor: el turno sellaba memoria
+   * nueva a partir de la vieja, la fila quedaba `applied` y desatada, y se leia
+   * «la memoria de ahora ya se escribió a partir de ella», que era falso, sin
+   * que se volviera a reescribir nunca. Ya esta apuntada como usada, que es lo
+   * que la regla pide; solo se deja si Daniel la descarto entre medias, y eso
+   * se ve releyendo. Si releer falla tambien, vale lo ultimo que se leyo.
    */
-  const forgetRelink = async (conversationId: string): Promise<void> => {
-    if (memoryRelinks === undefined) return;
-    const owner = await context.privateConversations.owner(context.vault, conversationId);
+  const relinkStillInUse = async (
+    conversationId: string,
+    owner: ConversationOwner,
+    record: { sequence: number; createdAt: string } | null,
+    relink: MemoryRelinkEntry,
+  ): Promise<boolean> => {
+    if (relink.status !== 'applied' || record === null || memoryRelinks === undefined) return false;
+    try {
+      const now = await memoryRelinks.forConversation(context.vault, conversationId);
+      return (
+        now !== undefined &&
+        now.status === 'applied' &&
+        relinkApplies(now, owner, { sequence: record.sequence, createdAt: record.createdAt })
+      );
+    } catch {
+      return true;
+    }
+  };
+
+  /**
+   * lo que «Borrar su memoria» tiene que hacer con la reescrita (`D-108`), en
+   * dos tiempos: ANTES de borrar nada se quita su texto, y DESPUES se apunta que
+   * no hace falta.
+   *
+   * La septima ronda escribia al principio «no hace falta», que la pasada salta
+   * siempre: si luego fallaba `clearSuperseded` o se cerraba la boveda, la
+   * sellada vieja seguia viajando sin reescribir para siempre. La novena solo
+   * LEIA al principio y lo escribia todo al final, y entonces un fallo de ese
+   * ultimo paso dejaba en disco la reescrita de lo que Daniel mando borrar,
+   * aunque la confirmacion dice que tambien se borra (decima ronda).
+   *
+   * Ahora el primer tiempo quita el texto y, si la reescrita estaba en uso, la
+   * deja PENDIENTE, que se reintenta sola: si un paso de despues falla, sigue la
+   * sellada de antes, como antes de reescribirla, y la pasada la vuelve a
+   * reescribir —una llamada de mas, nada perdido que no se recupere solo—. Si
+   * el texto no era el que vale, conserva su estado: una «Volver a la de antes»
+   * sigue siendolo. Siempre cambia la fecha, para que una reescritura que
+   * termine en medio choque en su compare-and-set y no escriba texto.
+   *
+   * Lanza si no puede: entonces no se ha borrado nada. Una que no esta
+   * enganchada solo puede tener aqui un resto —un «Soltar» que no pudo
+   * quitarla—: se quita ya y, si el archivo no abre, eso no puede impedir
+   * borrar la memoria, que en `a45953b` no dependia de el. Se apunta y sigue;
+   * la pasada lo suelta despues, tambien si esta excluida.
+   */
+  const releaseRelinkBeforeForget = async (
+    conversationId: string,
+  ): Promise<ConversationOwner | null> => {
+    if (memoryRelinks === undefined) return null;
+    const vault = context.vault;
+    const owner = await context.privateConversations.owner(vault, conversationId);
     if (owner.source !== 'link' || owner.winningEventId === null || owner.characterId === null) {
-      // una que no esta enganchada solo puede tener aqui un resto —un «Soltar»
-      // que no pudo quitarla—. Si el archivo no abre, eso no puede impedir
-      // borrar la memoria, que en `a45953b` no dependia de el: se apunta y sigue
       try {
-        await memoryRelinks.removeConversation(context.vault, conversationId);
+        await memoryRelinks.removeConversation(vault, conversationId);
       } catch {
         context.log('memoria reescrita con su ficha', { resultado: 'sin-limpiar', paso: 'borrar-memoria' });
       }
-      return;
+      return null;
     }
-    // sin memoria sellada, lo que viaja es la ficha retroactiva o el indice, y
-    // tambien se escribieron sin su ficha: la primera que se selle despues sale
-    // de ahi y hay que reescribirla (septima ronda)
-    const inherits =
-      memoryRelink !== null && (await memoryRelink.inheritsUnsheetedMemory(conversationId));
-    const current = await memoryRelinks.forConversation(context.vault, conversationId);
-    const now = new Date().toISOString();
-    const written = await memoryRelinks.replace(context.vault, conversationId, current, {
-      v: 1,
-      conversationId,
-      ownerEventId: owner.winningEventId,
-      characterId: owner.characterId,
-      status: inherits ? 'pending' : 'not-needed',
-      basedOn: null,
-      memory: null,
-      drift: null,
-      provider: null,
-      model: null,
-      failure: null,
-      createdAt: now,
-      updatedAt: now,
-    });
+    const record = await context.privateConversations.latestMemoryRecord(vault, conversationId);
+    const sealed = record === null ? null : { sequence: record.sequence, createdAt: record.createdAt };
+    const written = await replaceRelinkFresh(conversationId, (current) =>
+      current === undefined
+        ? null
+        : {
+            ...current,
+            memory: null,
+            status: relinkApplies(current, owner, sealed) ? 'pending' : current.status,
+            updatedAt: new Date().toISOString(),
+          },
+    );
     if (!written) {
-      // solo si otro paso escribio justo en medio: mejor no borrar nada que
-      // dejar su texto en disco
       throw new VaultError(
-        'la memoria reescrita de esta conversacion estaba cambiando',
-        'vuelve a borrar en un momento',
+        'no se ha podido quitar la versión reescrita con su ficha',
+        'no se ha borrado nada; vuelve a intentarlo en un momento',
       );
     }
+    return owner;
+  };
+
+  /**
+   * cambia la fila releyendola justo antes, y reintenta si otro la cambio entre
+   * medias: mientras dura un borrado no hay envio, enganche ni decision de
+   * Daniel, pero si puede terminar una reescritura que ya estaba en marcha o
+   * apuntarla el resumen de sus otras conversaciones (`D-105`). Con la fila
+   * leida antes del primer `await`, cualquiera de los dos hacia chocar el
+   * apunte y la dejaba como ellos la escribieron. `true` si escribio o no habia
+   * nada que escribir (`next` devuelve `null`). Lanza si no puede leer o
+   * escribir.
+   */
+  const replaceRelinkFresh = async (
+    conversationId: string,
+    next: (current: MemoryRelinkEntry | undefined) => MemoryRelinkEntry | null,
+  ): Promise<boolean> => {
+    if (memoryRelinks === undefined) return true;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const current = await memoryRelinks.forConversation(context.vault, conversationId);
+      const wanted = next(current);
+      if (wanted === null) return true;
+      if (await memoryRelinks.replace(context.vault, conversationId, current, wanted)) return true;
+    }
+    return false;
+  };
+
+  /**
+   * el segundo tiempo, con la sellada ya borrada: «no hace falta», sin texto.
+   * La memoria que se selle despues nace ya con la ficha delante. Si en cambio
+   * sale de su ficha retroactiva o del indice, escritos sin ella, el turno la
+   * pasa a pendiente justo cuando los usa (`noteInheritedMemoryUsed`): decidirlo
+   * aqui daba por viajera una ficha retroactiva sin aprobar, que no viaja, y
+   * mandaba reescribir una memoria escrita ya con su ficha (decima ronda).
+   *
+   * No lanza: la memoria ya esta borrada y Daniel no tiene nada que repetir. El
+   * texto ya se quito en el primer tiempo; si esto no se puede apuntar, la fila
+   * se queda como la dejo aquel —pendiente, como mucho una llamada de mas— y se
+   * registra.
+   */
+  const settleRelinkAfterForget = async (
+    conversationId: string,
+    owner: ConversationOwner,
+  ): Promise<void> => {
+    if (owner.winningEventId === null || owner.characterId === null) return;
+    const ownerEventId = owner.winningEventId;
+    const characterId = owner.characterId;
+    try {
+      const written = await replaceRelinkFresh(conversationId, (current) => {
+        const now = new Date().toISOString();
+        return {
+          v: 1,
+          conversationId,
+          ownerEventId,
+          characterId,
+          status: 'not-needed',
+          basedOn: null,
+          memory: null,
+          drift: null,
+          provider: null,
+          model: null,
+          failure: null,
+          createdAt:
+            current !== undefined && current.ownerEventId === ownerEventId ? current.createdAt : now,
+          updatedAt: now,
+        };
+      });
+      if (written) return;
+    } catch {
+      // el motivo no se registra: podria traer dentro lo que no valido
+    }
+    context.log('memoria reescrita con su ficha', { resultado: 'sin-apuntar', paso: 'borrar-memoria' });
   };
 
   handle(IPC_INVOKE.vaultRelationSync, vaultRelationSyncArgsSchema, async (args) => {
@@ -2640,9 +2754,9 @@ export function registerIpcHandlers(context: HandlerContext): void {
         'espera a que llegue la respuesta y vuelve a borrar: ese turno todavia puede sellar lo que quites',
       );
     if (sendInFlight.has(args.conversationId)) throw contestandoAhora();
-    // y desde aqui no arranca ningun envio hasta terminar: la reescrita se quita
-    // antes que la sellada, y un envio que arrancara en medio hacia rechazar el
-    // borrado DESPUES de haberla quitado (septima ronda)
+    // y desde aqui no arranca ningun envio hasta terminar: el texto de la
+    // reescrita se quita antes que la sellada, y un envio que arrancara en medio
+    // hacia rechazar el borrado DESPUES de haberlo quitado (septima ronda)
     if (erasingInFlight.has(args.conversationId)) throw erasingNow();
     erasingInFlight.add(args.conversationId);
     try {
@@ -2680,11 +2794,11 @@ export function registerIpcHandlers(context: HandlerContext): void {
      * tenia nada que tocar ahi y aun asi su borrado dependia de poder reescribir
      * `recap.json`, que en ese caso ni siquiera existe.
      */
-    // y ANTES que las dos, la reescrita con su ficha (`D-108`): tambien es
-    // memoria de esta conversacion, y si quitarla falla aqui no se ha destruido
-    // nada todavia. Al reves, la sellada ya no estaria y la reescrita, desatada
-    // pero en disco, seguiria guardando lo que Daniel mando borrar
-    await forgetRelink(args.conversationId);
+    // y ANTES que las dos se quita el texto de la reescrita con su ficha
+    // (`D-108`): si no se puede, se para aqui sin haber borrado nada. Si la que
+    // estaba en uso era ella, queda pendiente, que se reintenta sola: un fallo de
+    // los pasos de abajo deja la sellada vieja viajando, pero no para siempre
+    const relinkOwner = await releaseRelinkBeforeForget(args.conversationId);
 
     await context.recaps.clearSuperseded(context.vault, args.conversationId);
 
@@ -2693,6 +2807,9 @@ export function registerIpcHandlers(context: HandlerContext): void {
     if (sendInFlight.has(args.conversationId)) throw contestandoAhora();
 
     const cleared = context.privateConversations.clearMemory(args.conversationId);
+    // la sellada ya no esta: la memoria que venga nace con su ficha, salvo que
+    // salga de lo heredado, y eso lo apunta el turno que lo use
+    if (relinkOwner !== null) await settleRelinkAfterForget(args.conversationId, relinkOwner);
     // el indice episodico guarda turnos ya descifrados, no memorias, asi que
     // esto no lo cambia; se invalida igual porque lo que compone el prompt lee
     // de los dos y dejarlos discrepando es la clase de fallo que no se ve
@@ -2971,6 +3088,34 @@ export function registerIpcHandlers(context: HandlerContext): void {
       !hasOwnMemory &&
       memoryRelink !== null &&
       (await memoryRelink.inheritsUnsheetedMemory(args.conversationId));
+    // y si viaja en el PROXIMO mensaje, por la misma funcion que el turno: una
+    // ficha retroactiva sin aprobar, de otra version o que no llega a la cola no
+    // viaja, y la confirmacion decia que si (`D-093`).
+    //
+    // Con un turno mas al final, el del mensaje que se va a escribir: el turno
+    // elige memoria con el historial que YA lo incluye, y la cola que avanza es
+    // justo lo que hace caducar la cobertura. Con los de ahora, una ficha que
+    // llegaba justo al borde salia «le llega» y en ese mensaje ya no viajaba
+    // (decima ronda). Si viaja entonces, tambien viaja ahora: con menos turnos
+    // la cola empieza antes. Y con los turnos DESCIFRADOS, como el turno: la
+    // fecha que casa con `coveredAt` es la del turno, no la del registro
+    let inheritedTravels = false;
+    if (inheritedMemory) {
+      try {
+        const turns = await store.read(context.vault, args.conversationId);
+        const last = turns.reduce((max, each) => Math.max(max, each.sequence), -1);
+        inheritedTravels =
+          chooseConversationMemory({
+            sealed: null,
+            entry: await context.recaps.entryFor(context.vault, args.conversationId),
+            turns: [...turns, { sequence: last + 1, createdAt: '' }],
+          }).memory !== null;
+      } catch {
+        // el motivo no se registra: traeria dentro la ficha que no valido. Y el
+        // turno, con el mismo fallo, tampoco la llevaria
+        inheritedTravels = false;
+      }
+    }
     return {
       preview: {
         characterLabel: label,
@@ -2978,6 +3123,7 @@ export function registerIpcHandlers(context: HandlerContext): void {
         instructionsOutcome,
         hasOwnMemory,
         inheritedMemory,
+        inheritedTravels,
         recentMemoriesOn: character?.recentMemories === 'recent-two',
         excluded,
         backgroundCli,
@@ -3058,7 +3204,10 @@ export function registerIpcHandlers(context: HandlerContext): void {
           // el motivo no se registra: podria traer dentro lo que no valido. Pero
           // SI que paso: la fila se queda en disco con su texto y la pantalla ya
           // no la enseña, porque la conversacion deja de estar enganchada. La
-          // quitan «Borrar su memoria» y borrar la conversacion (septima ronda)
+          // quitan «Borrar su memoria» y borrar la conversacion (septima ronda),
+          // y su texto lo suelta la pasada general tras el siguiente envio en
+          // Privado, tambien si esta excluida (decima ronda): desatado de su
+          // enganche, ya no lo lee nadie
           context.log('memoria reescrita con su ficha', { resultado: 'sin-limpiar', paso: 'soltar' });
         }
       }
@@ -3109,6 +3258,9 @@ export function registerIpcHandlers(context: HandlerContext): void {
 
   handle(IPC_INVOKE.vaultAuxiliarySet, vaultAuxiliarySetArgsSchema, async (args) => {
     const elegido = context.memoryPreferences.setAuxiliary(args.choice);
+    // lo que un CLI nego o no pudo, el otro lo puede intentar: la pasada general
+    // lo tenia por visto hasta cerrar la boveda (`D-108`)
+    memoryRelink?.recheck();
     context.log('trabajo de fondo elegido', { proveedor: elegido?.provider ?? 'automatico' });
     return elegido;
   });
@@ -5498,7 +5650,10 @@ export function registerIpcHandlers(context: HandlerContext): void {
     let sealedMemory = efectiva.memory;
     let memoriaReescrita = efectiva.rewritten;
     if (efectiva.rewritten && efectiva.relink !== undefined && memoryRelinks !== undefined) {
-      if (!(await markRelinkApplied(conversationId, efectiva.relink))) {
+      if (
+        !(await markRelinkApplied(conversationId, efectiva.relink)) &&
+        !(await relinkStillInUse(conversationId, owner, efectiva.record, efectiva.relink))
+      ) {
         sealedMemory = efectiva.record?.memory ?? null;
         memoriaReescrita = false;
       }
@@ -5603,6 +5758,12 @@ export function registerIpcHandlers(context: HandlerContext): void {
       // no valido, y ese dato es la ficha de la conversacion: contarlo aqui seria
       // sacar al log justo lo que este archivo nunca escribe
       memoriaElegida = { memory: sealedMemory, source: 'turn', gaps: 0 };
+    }
+    // en una enganchada, partir de la ficha retroactiva o del indice —escritos
+    // sin su ficha— deja la memoria que selle este turno por reescribir, aunque
+    // al enganchar no los hubiera (`D-108`). No lanza
+    if (memoriaElegida.source !== 'turn' && memoriaElegida.memory !== null && memoryRelink !== null) {
+      await memoryRelink.noteInheritedMemoryUsed(conversationId, owner);
     }
 
     // sin esta lista el modelo no puede reenviar nada: no sabe que hay, asi que
@@ -6922,7 +7083,10 @@ export function registerIpcHandlers(context: HandlerContext): void {
       void (async () => {
         try {
           if (linkedHere) await relinker.run({ conversationId, projectAlias: args.projectAlias });
-          await relinker.sweep(args.projectAlias, await relinkCandidates(conversationId));
+          await relinker.sweep(
+            args.projectAlias,
+            await relinkCandidates(linkedHere ? conversationId : null),
+          );
         } catch {
           // el motivo no se registra: podria traer dentro lo que no valido
           context.log('memoria reescrita con su ficha', { resultado: 'sin-pasada' });

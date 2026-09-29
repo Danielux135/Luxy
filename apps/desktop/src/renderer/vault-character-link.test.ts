@@ -189,6 +189,7 @@ function base(over: Partial<OwnerChangePreview> = {}): OwnerChangePreview {
     instructionsOutcome: 'character',
     hasOwnMemory: true,
     inheritedMemory: false,
+    inheritedTravels: false,
     recentMemoriesOn: false,
     excluded: false,
     backgroundCli: 'codex',
@@ -330,7 +331,7 @@ describe('describeCharacterLink', () => {
     expect(texto).not.toContain('sin saber que hablaba');
     // `D-108`: se reescribe con el CLI local, y lo que pasa si no sale
     expect(texto).toContain('Se va a reescribir con su ficha, en segundo plano, con Codex y tu sesión');
-    expect(texto).toContain('no se aplica y sigue valiendo la de ahora');
+    expect(texto).toContain('No se aplica, y sigue valiendo la de ahora');
     expect(texto).toContain('podrás volver a la de antes hasta que un mensaje tuyo aquí guarde memoria nueva');
     // lo que la refutacion tumbo: quitar entradas es posible, «no se pierde nada» no
     expect(texto).not.toContain('no se pierde nada');
@@ -347,6 +348,15 @@ describe('describeCharacterLink', () => {
     expect(RELINK_LIMITS.maxLostShare).toBe(0.5);
     expect(RELINK_LIMITS.hardMinRatio).toBe(0.5);
     expect(RELINK_LIMITS.minSummaryWordsKept).toBe(0.5);
+    // «acorta mucho» no decia cuanto: ahora van las cifras, las de la guarda.
+    // El texto da un solo porcentaje para los dos: si se separan, esto avisa
+    expect(texto).not.toContain('acorta mucho');
+    expect(texto).toContain('si los acorta más de un 20 % (el resumen, perdiendo más de 60 caracteres; el resto, más de 120)');
+    expect(RELINK_LIMITS.minEntriesRatio).toBe(RELINK_LIMITS.minSummaryRatio);
+    // decima ronda: prometia ver en la fila «esas cifras» —los umbrales—, que
+    // la fila no enseña; enseña cuantas entradas tocó, tambien si no se aplicó
+    expect(texto).not.toContain('con esas cifras');
+    expect(texto).toContain('cuántas entradas dejó igual, corrigió, quitó o añadió, también si no se aplicó');
     // se dice lo que se le PIDE, no lo que el modelo vaya a hacer
     expect(texto).toContain('Se le pide que solo cambie cómo se la nombra');
 
@@ -361,7 +371,9 @@ describe('describeCharacterLink', () => {
   });
 
   it('sin memoria propia pero con ficha retroactiva, dice que viaja esa y que se reescribe la siguiente', () => {
-    const heredada = unido(describeCharacterLink(base({ hasOwnMemory: false, inheritedMemory: true })));
+    const heredada = unido(
+      describeCharacterLink(base({ hasOwnMemory: false, inheritedMemory: true, inheritedTravels: true })),
+    );
     expect(heredada).toContain('lo que le llega de ella es su ficha retroactiva o el índice de sus escenas');
     expect(heredada).toContain('que escribió un CLI sin la ficha de Lía');
     expect(heredada).toContain('así será también en tu próximo mensaje aquí');
@@ -371,6 +383,28 @@ describe('describeCharacterLink', () => {
       describeCharacterLink(base({ hasOwnMemory: false, inheritedMemory: true, excluded: true })),
     );
     expect(excluida).not.toContain('se reescribirá');
+  });
+
+  // `chooseConversationMemory` solo lleva una ficha retroactiva aprobada, de la
+  // version actual y al dia: la confirmacion afirmaba que le llegaba igual
+  it('con la ficha retroactiva sin aprobar no dice que le llegue', () => {
+    const sinAprobar = unido(
+      describeCharacterLink(base({ hasOwnMemory: false, inheritedMemory: true, inheritedTravels: false })),
+    );
+    expect(sinAprobar).not.toContain('lo que le llega de ella es su ficha retroactiva');
+    expect(sinAprobar).toContain('ahora mismo tampoco le llega su ficha retroactiva');
+    expect(sinAprobar).toContain('solo viaja si está aprobada y al día con los últimos mensajes');
+    expect(sinAprobar).toContain('esa se reescribirá con su ficha después');
+  });
+
+  it('sin memoria propia y con la ficha vacia, la reescritura solo lleva su nombre', () => {
+    const vacia = unido(
+      describeLinkWith(base({ hasOwnMemory: false, inheritedMemory: true, inheritedTravels: true }), {
+        hasDescription: false,
+      }),
+    );
+    expect(vacia).toContain('se reescribirá con su nombre (su ficha está vacía) después');
+    expect(vacia).not.toContain('se reescribirá con su ficha');
   });
 
   it('las llamadas se cuentan: una, o unas N', () => {

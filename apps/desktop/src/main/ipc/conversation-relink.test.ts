@@ -11,10 +11,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   PROFILE_PHOTO_LABEL,
+  RECAP_VERSION,
   RELATION_CLOSE,
   RELATION_OPEN,
   RELINK_CLOSE,
   RELINK_OPEN,
+  VAULT_RECENT_TURNS,
   relationCountersSchema,
   type ConversationMemory,
 } from '@luxy/shared';
@@ -130,6 +132,13 @@ interface Montaje {
   respuestaReescritura: string;
   /** para simular un almacen de reescrituras que no escribe */
   romperReescrituras: boolean;
+  /**
+   * cuantas escrituras de reescrituras salen bien antes de empezar a fallar;
+   * `null`, todas. Para romper solo el segundo tiempo de un borrado
+   */
+  escriturasSinRomper: number | null;
+  /** para simular un «Soltar» que no puede quitar la fila */
+  romperQuitar: boolean;
   /** la ficha retroactiva o el indice de cada conversacion */
   fichas: Map<string, unknown>;
   /**
@@ -170,6 +179,8 @@ async function montar(): Promise<Montaje> {
     modelo: { memoria: null },
     respuestaReescritura: `${RELINK_OPEN}${JSON.stringify(corregida)}${RELINK_CLOSE}`,
     romperReescrituras: false,
+    escriturasSinRomper: null,
+    romperQuitar: false,
     fichas: new Map(),
     puerta: null,
     campos: (mensaje) => [...registros].reverse().find((r) => r.mensaje === mensaje)?.campos,
@@ -183,9 +194,16 @@ async function montar(): Promise<Montaje> {
     memoryRelinks: {
       all: (v: Vault) => relinks.all(v),
       forConversation: (v: Vault, id: string) => relinks.forConversation(v, id),
-      removeConversation: (v: Vault, id: string) => relinks.removeConversation(v, id),
+      removeConversation: (v: Vault, id: string) => {
+        if (m.romperQuitar) throw new Error('no quita');
+        return relinks.removeConversation(v, id);
+      },
       replace: (...args: Parameters<Relinks['replace']>) => {
         if (m.romperReescrituras) throw new Error('no escribe');
+        if (m.escriturasSinRomper !== null) {
+          if (m.escriturasSinRomper <= 0) throw new Error('no escribe');
+          m.escriturasSinRomper -= 1;
+        }
         return relinks.replace(...args);
       },
     },
@@ -313,6 +331,29 @@ async function huerfana(): Promise<void> {
   );
 }
 
+/** una ficha retroactiva de HUERFANA escrita por un CLI, sin aprobar salvo que se diga */
+const fichaCli = (over: Record<string, unknown> = {}) => ({
+  conversationId: HUERFANA,
+  memory: vieja,
+  source: 'cli',
+  covered: { from: 0, to: 1 },
+  coveredAt: '2026-09-10T10:01:00.000Z',
+  gaps: [],
+  turnsAtRecap: 2,
+  version: RECAP_VERSION,
+  provider: 'codex',
+  model: null,
+  at: '2026-09-20T10:00:00.000Z',
+  chars: 100,
+  approved: false,
+  approvalReset: false,
+  refusedKind: null,
+  refusedAtTurns: null,
+  refusedProvider: null,
+  supersededAt: null,
+  ...over,
+});
+
 /**
  * espera a lo que corre en segundo plano, con tope de TIEMPO y no de intentos:
  * con `npm run check` en paralelo cada vuelta tarda mucho mas que 20 ms
@@ -403,8 +444,9 @@ describe('la memoria de una enganchada, reescrita con su ficha', LENTA, () => {
   });
 
   // septima ronda: sin memoria sellada viaja la ficha retroactiva o el indice,
-  // tambien escritos sin su ficha
-  it('sin memoria propia y con indice, queda pendiente y reescribe la primera que se selle', async () => {
+  // tambien escritos sin su ficha. Decima: lo apunta el turno que parte de
+  // ellos, no el enganche
+  it('sin memoria propia y con indice, la primera que se selle a partir de el se reescribe', async () => {
     await montaje.store.appendTurn(montaje.vault, HUERFANA, turno('hola sin nadie', 'user', '2026-09-10T10:00:00.000Z'));
     await montaje.store.appendTurn(montaje.vault, HUERFANA, turno('respuesta', 'assistant', '2026-09-10T10:01:00.000Z'));
     montaje.fichas.set(HUERFANA, {
@@ -431,24 +473,49 @@ describe('la memoria de una enganchada, reescrita con su ficha', LENTA, () => {
       IPC_INVOKE.vaultConversationOwnerPreview,
       { conversationId: HUERFANA, characterId: NORA },
     );
-    expect(vista).toMatchObject({ ok: true, value: { hasOwnMemory: false, inheritedMemory: true } });
+    expect(vista).toMatchObject({
+      ok: true,
+      value: { hasOwnMemory: false, inheritedMemory: true, inheritedTravels: true },
+    });
     expect((await cambiar(HUERFANA, NORA)).ok).toBe(true);
-    expect(await estado()).toBe('pending');
-    let fila = (await recuerdos()).find((each) => each.conversationId === HUERFANA);
-    expect(fila?.relink).toMatchObject({ phase: 'pending', hasMemory: false });
+    // todavia no se ha usado: el enganche no lo da por hecho
+    expect(await estado()).toBe('not-needed');
     // no hay nada sobre lo que trabajar: se dice, sin llamar a nadie
     const pronto = await decidir('retry');
     expect(pronto.ok).toBe(false);
     expect(montaje.reescrituras).toBe(0);
 
-    // la primera respuesta sella memoria: esa es la que se reescribe
+    // la primera respuesta parte del indice y sella memoria: esa se reescribe
     montaje.modelo.memoria = vieja;
     expect((await enviar(HUERFANA)).ok).toBe(true);
     montaje.modelo.memoria = null;
+    expect(montaje.prompts.at(-1)).toContain('La IA vive en un faro inventado');
     await hasta(async () => (await estado()) === 'ready');
     expect(montaje.reescrituras).toBe(1);
-    fila = (await recuerdos()).find((each) => each.conversationId === HUERFANA);
+    const fila = (await recuerdos()).find((each) => each.conversationId === HUERFANA);
     expect(fila?.relink).toMatchObject({ phase: 'ready', hasMemory: true });
+  });
+
+  // decima ronda: el enganche la dejaba pendiente con CUALQUIER ficha
+  // retroactiva, aprobada o no. Sin aprobar no viaja, la memoria siguiente nace
+  // con su ficha, y aun asi se mandaba reescribir: una llamada que la
+  // confirmacion decia que no habria, y una fila que afirmaba lo contrario
+  it('con una ficha retroactiva sin aprobar, la memoria siguiente nace con su ficha y no se reescribe', async () => {
+    await montaje.store.appendTurn(montaje.vault, HUERFANA, turno('hola sin nadie', 'user', '2026-09-10T10:00:00.000Z'));
+    await montaje.store.appendTurn(montaje.vault, HUERFANA, turno('respuesta', 'assistant', '2026-09-10T10:01:00.000Z'));
+    montaje.fichas.set(HUERFANA, fichaCli());
+    expect((await cambiar(HUERFANA, NORA)).ok).toBe(true);
+    expect(await estado()).toBe('not-needed');
+    montaje.modelo.memoria = vieja;
+    expect((await enviar(HUERFANA)).ok).toBe(true);
+    montaje.modelo.memoria = null;
+    // no viajo: el prompt no la lleva
+    expect(montaje.prompts.at(-1)).not.toContain('La IA vive en un faro inventado');
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    expect(montaje.reescrituras).toBe(0);
+    expect(await estado()).toBe('not-needed');
+    const fila = (await recuerdos()).find((each) => each.conversationId === HUERFANA);
+    expect(fila?.relink?.phase).toBe('not-needed');
   });
 
   it('la sonda y el resumen de sus otras conversaciones leen la misma memoria', async () => {
@@ -488,6 +555,127 @@ describe('la memoria de una enganchada, reescrita con su ficha', LENTA, () => {
     expect(montaje.prompts.at(-1)).not.toContain('La IA vive en un faro inventado');
   });
 
+  // `not-needed` se decidia una vez, al enganchar, y era terminal: una ficha
+  // retroactiva o un indice creados DESPUES colaban su memoria sin ficha
+  it('un indice que aparece despues de enganchar: la memoria que sale de el se reescribe', async () => {
+    await montaje.store.appendTurn(montaje.vault, HUERFANA, turno('hola sin nadie', 'user', '2026-09-10T10:00:00.000Z'));
+    await montaje.store.appendTurn(montaje.vault, HUERFANA, turno('respuesta', 'assistant', '2026-09-10T10:01:00.000Z'));
+    expect((await cambiar(HUERFANA, NORA)).ok).toBe(true);
+    expect(await estado()).toBe('not-needed');
+
+    montaje.fichas.set(HUERFANA, {
+      conversationId: HUERFANA,
+      memory: vieja,
+      source: 'index',
+      covered: { from: 0, to: 1 },
+      coveredAt: '2026-09-10T10:01:00.000Z',
+      gaps: [],
+      turnsAtRecap: 2,
+      version: 1,
+      provider: null,
+      model: null,
+      at: '2026-09-20T10:00:00.000Z',
+      chars: 100,
+      approved: false,
+      approvalReset: false,
+      refusedKind: null,
+      refusedAtTurns: null,
+      refusedProvider: null,
+      supersededAt: null,
+    });
+    montaje.modelo.memoria = vieja;
+    expect((await enviar(HUERFANA)).ok).toBe(true);
+    montaje.modelo.memoria = null;
+    // el turno partio del indice: lo lleva el prompt
+    expect(montaje.prompts.at(-1)).toContain('La IA vive en un faro inventado');
+    await hasta(async () => (await estado()) === 'ready');
+    expect(montaje.reescrituras).toBe(1);
+  });
+
+  // `chooseConversationMemory` solo lleva una ficha retroactiva aprobada: la
+  // confirmacion decia que le llegaba igual
+  it('la vista previa distingue la ficha retroactiva que viaja de la que no', async () => {
+    await montaje.store.appendTurn(montaje.vault, HUERFANA, turno('hola sin nadie', 'user', '2026-09-10T10:00:00.000Z'));
+    await montaje.store.appendTurn(montaje.vault, HUERFANA, turno('respuesta', 'assistant', '2026-09-10T10:01:00.000Z'));
+    const ficha = {
+      conversationId: HUERFANA,
+      memory: vieja,
+      source: 'cli',
+      covered: { from: 0, to: 1 },
+      coveredAt: '2026-09-10T10:01:00.000Z',
+      gaps: [],
+      turnsAtRecap: 2,
+      version: RECAP_VERSION,
+      provider: 'codex',
+      model: null,
+      at: '2026-09-20T10:00:00.000Z',
+      chars: 100,
+      approved: false,
+      approvalReset: false,
+      refusedKind: null,
+      refusedAtTurns: null,
+      refusedProvider: null,
+      supersededAt: null,
+    };
+    const vista = () =>
+      invocar<{ inheritedMemory: boolean; inheritedTravels: boolean }>(
+        IPC_INVOKE.vaultConversationOwnerPreview,
+        { conversationId: HUERFANA, characterId: NORA },
+      );
+    montaje.fichas.set(HUERFANA, ficha);
+    expect(await vista()).toMatchObject({ ok: true, value: { inheritedMemory: true, inheritedTravels: false } });
+    montaje.fichas.set(HUERFANA, { ...ficha, approved: true });
+    expect(await vista()).toMatchObject({ ok: true, value: { inheritedMemory: true, inheritedTravels: true } });
+  });
+
+  // decima ronda: la vista previa miraba los turnos de ahora y el envio elige con
+  // el historial que ya lleva el mensaje nuevo. Una ficha que llega justo al
+  // borde de la cola viajaba hoy y no en ese mensaje, y la confirmacion decia
+  // «así será también en tu próximo mensaje aquí»
+  it('la vista previa mira la cola del proximo mensaje, no la de ahora', async () => {
+    // VAULT_RECENT_TURNS + 2 turnos: hoy la cola empieza en el 2 y la ficha,
+    // que llega al 1, la toca; con el mensaje nuevo empieza en el 3
+    const total = VAULT_RECENT_TURNS + 2;
+    for (let i = 0; i < total; i += 1) {
+      const minuto = String(i).padStart(2, '0');
+      await montaje.store.appendTurn(
+        montaje.vault,
+        HUERFANA,
+        turno(`mensaje inventado ${i}`, i % 2 === 0 ? 'user' : 'assistant', `2026-09-10T10:${minuto}:00.000Z`),
+      );
+    }
+    montaje.fichas.set(
+      HUERFANA,
+      fichaCli({ approved: true, covered: { from: 0, to: 1 }, coveredAt: '2026-09-10T10:01:00.000Z' }),
+    );
+    const vista = await invocar<{ inheritedTravels: boolean }>(IPC_INVOKE.vaultConversationOwnerPreview, {
+      conversationId: HUERFANA,
+      characterId: NORA,
+    });
+    expect(vista).toMatchObject({ ok: true, value: { inheritedTravels: false } });
+    // y lo que dice es lo que pasa: el mensaje siguiente no la lleva
+    expect((await cambiar(HUERFANA, NORA)).ok).toBe(true);
+    expect((await enviar(HUERFANA)).ok).toBe(true);
+    expect(montaje.prompts.at(-1)).not.toContain('La IA vive en un faro inventado');
+  });
+
+  // si volver a apuntar una `applied` falla, el turno iba con la sellada vieja y
+  // la fila quedaba en «la memoria de ahora ya se escribió a partir de ella»
+  it('una reescrita ya apuntada como usada sigue en uso aunque apuntarla otra vez falle', async () => {
+    await engancharYEsperar();
+    const lista = await montaje.relinks.forConversation(montaje.vault, HUERFANA);
+    // la apunto el resumen de sus otras conversaciones (`D-105`)
+    await montaje.relinks.replace(montaje.vault, HUERFANA, lista, { ...lista!, status: 'applied' });
+    montaje.romperReescrituras = true;
+    montaje.modelo.memoria = { ...corregida, summary: `${corregida.summary} MEMORIA-NUEVA.` };
+    expect((await enviar(HUERFANA)).ok).toBe(true);
+    montaje.modelo.memoria = null;
+    montaje.romperReescrituras = false;
+    expect(montaje.prompts.at(-1)).toContain('Nora vive en un faro inventado');
+    expect(montaje.prompts.at(-1)).not.toContain('La IA vive en un faro inventado');
+    expect(montaje.campos('prompt privado compuesto')).toMatchObject({ memoriaReescrita: true });
+  });
+
   it('excluida no se reescribe, ni pidiendolo', async () => {
     await huerfana();
     montaje.excluidas.add(HUERFANA);
@@ -499,33 +687,101 @@ describe('la memoria de una enganchada, reescrita con su ficha', LENTA, () => {
 });
 
 describe('lo que se borra se lleva la reescrita', LENTA, () => {
-  it('«Borrar su memoria» la quita ANTES que la sellada, y si no puede no toca nada', async () => {
+  // `D-101`: si falla un paso, no se ha destruido nada que no se recupere solo.
+  // La septima ronda escribia PRIMERO «no hace falta», que no se reintenta
+  // nunca. Ahora el primer paso quita el texto y la deja PENDIENTE: si falla
+  // `clearSuperseded`, la sellada vieja sigue y la pasada la vuelve a reescribir
+  it('«Borrar su memoria» que falla a mitad deja la sellada y la reescritura pendiente', async () => {
     await engancharYEsperar();
-    montaje.romperReescrituras = true;
+    const roto = Promise.reject(new Error('recap.json no se escribe'));
+    roto.catch(() => undefined);
+    montaje.puerta = roto;
     const fallo = await invocar(IPC_INVOKE.vaultConversationMemoryForget, { conversationId: HUERFANA });
     expect(fallo.ok).toBe(false);
+    montaje.puerta = null;
     expect(await montaje.store.latestMemory(montaje.vault, HUERFANA)).toEqual(vieja);
-    expect(await estado()).toBe('ready');
+    // sin texto, y pendiente: no «no hace falta», que no se reintenta
+    expect(await montaje.relinks.forConversation(montaje.vault, HUERFANA)).toMatchObject({
+      status: 'pending',
+      memory: null,
+    });
+    const fila = (await recuerdos()).find((each) => each.conversationId === HUERFANA);
+    expect(fila?.relink?.phase).toBe('pending');
+    // y la pasada la vuelve a reescribir sola
+    expect((await enviar(NACIDA)).ok).toBe(true);
+    await hasta(async () => (await estado()) === 'ready');
+    expect(montaje.reescrituras).toBe(2);
 
-    montaje.romperReescrituras = false;
+    // y repetido sin fallos, queda apuntado que no hace falta, sin texto
     expect((await invocar(IPC_INVOKE.vaultConversationMemoryForget, { conversationId: HUERFANA })).ok).toBe(true);
     expect(await montaje.store.latestMemory(montaje.vault, HUERFANA)).toBeNull();
-    // queda apuntado que no hace falta, sin texto: la siguiente nace con la ficha
     expect(await montaje.relinks.forConversation(montaje.vault, HUERFANA)).toMatchObject({
       status: 'not-needed',
       memory: null,
     });
   });
 
-  it('«Borrar su memoria» con un indice detras la deja pendiente, no «no hace falta»', async () => {
+  // decima ronda: la novena borraba la sellada aunque no pudiera quitar el texto
+  // de la reescrita, y la confirmacion dice que tambien se borra. Si no se
+  // puede quitar, no se borra nada
+  it('«Borrar su memoria» que no puede quitar la reescrita no borra nada', async () => {
+    await engancharYEsperar();
+    montaje.romperReescrituras = true;
+    const fallo = await invocar(IPC_INVOKE.vaultConversationMemoryForget, { conversationId: HUERFANA });
+    montaje.romperReescrituras = false;
+    expect(fallo.ok).toBe(false);
+    expect(await montaje.store.latestMemory(montaje.vault, HUERFANA)).toEqual(vieja);
+    expect(await montaje.relinks.forConversation(montaje.vault, HUERFANA)).toMatchObject({
+      status: 'ready',
+      memory: corregida,
+    });
+  });
+
+  // y si lo que falla es el ultimo apunte, en disco ya no queda ni una palabra
+  // de la reescrita: se quito antes que la sellada
+  it('«Borrar su memoria» que no puede apuntar la fila al final no deja texto', async () => {
+    await engancharYEsperar();
+    montaje.excluidas.add(HUERFANA);
+    montaje.escriturasSinRomper = 1;
+    const hecho = await invocar(IPC_INVOKE.vaultConversationMemoryForget, { conversationId: HUERFANA });
+    montaje.escriturasSinRomper = null;
+    expect(hecho.ok).toBe(true);
+    expect(await montaje.store.latestMemory(montaje.vault, HUERFANA)).toBeNull();
+    expect(montaje.campos('memoria reescrita con su ficha')).toEqual({
+      resultado: 'sin-apuntar',
+      paso: 'borrar-memoria',
+    });
+    expect((await montaje.relinks.forConversation(montaje.vault, HUERFANA))?.memory).toBeNull();
+  });
+
+  // decima ronda: se decidia aqui con cualquier ficha retroactiva, aprobada o
+  // no. Ahora lo apunta el turno que de verdad parte del indice
+  it('«Borrar su memoria» con un indice detras: la memoria que salga de el se reescribe', async () => {
     await engancharYEsperar();
     montaje.fichas.set(HUERFANA, { conversationId: HUERFANA, memory: vieja, source: 'index' });
     expect((await invocar(IPC_INVOKE.vaultConversationMemoryForget, { conversationId: HUERFANA })).ok).toBe(true);
     expect(await montaje.relinks.forConversation(montaje.vault, HUERFANA)).toMatchObject({
-      status: 'pending',
+      status: 'not-needed',
       memory: null,
       basedOn: null,
     });
+    montaje.modelo.memoria = vieja;
+    expect((await enviar(HUERFANA)).ok).toBe(true);
+    montaje.modelo.memoria = null;
+    await hasta(async () => (await estado()) === 'ready');
+    expect(montaje.reescrituras).toBe(2);
+  });
+
+  it('«Borrar su memoria» con una ficha retroactiva sin aprobar detras no manda reescribir', async () => {
+    await engancharYEsperar();
+    montaje.fichas.set(HUERFANA, fichaCli());
+    expect((await invocar(IPC_INVOKE.vaultConversationMemoryForget, { conversationId: HUERFANA })).ok).toBe(true);
+    montaje.modelo.memoria = vieja;
+    expect((await enviar(HUERFANA)).ok).toBe(true);
+    montaje.modelo.memoria = null;
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    expect(montaje.reescrituras).toBe(1);
+    expect(await estado()).toBe('not-needed');
   });
 
   // septima ronda: mirar `sendInFlight` al empezar no bastaba; en el primer
@@ -561,6 +817,22 @@ describe('lo que se borra se lleva la reescrita', LENTA, () => {
     expect(await montaje.store.read(montaje.vault, HUERFANA)).toEqual([]);
     // y al terminar se puede volver a enviar
     expect((await enviar(HUERFANA)).ok).toBe(true);
+  });
+
+  // un «Soltar» que no pudo quitar la fila dejaba el texto reescrito en disco,
+  // y la conversacion de ese envio se quedaba fuera de la pasada
+  it('un «Soltar» que no pudo quitar la reescrita: la pasada suelta su texto', async () => {
+    await engancharYEsperar();
+    montaje.romperQuitar = true;
+    expect((await cambiar(HUERFANA, null)).ok).toBe(true);
+    montaje.romperQuitar = false;
+    expect(montaje.campos('memoria reescrita con su ficha')).toEqual({ resultado: 'sin-limpiar', paso: 'soltar' });
+    expect((await montaje.relinks.forConversation(montaje.vault, HUERFANA))?.memory).not.toBeNull();
+
+    expect((await enviar(HUERFANA)).ok).toBe(true);
+    expect(montaje.prompts.at(-1)).toContain('La IA vive en un faro inventado');
+    await hasta(async () => (await montaje.relinks.forConversation(montaje.vault, HUERFANA))?.memory === null);
+    expect(montaje.reescrituras).toBe(1);
   });
 
   it('soltar y borrar la conversacion se la llevan', async () => {

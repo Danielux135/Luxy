@@ -67,7 +67,10 @@ otros dos.
 
 Estado: **`pending` — abierta el 2026-09-25.** Es de Daniel, no de un agente: hasta
 hacerlo, nada del enganche está «verificado» (`D-093`). Requiere reconstruir Studio
-con los cambios de `F33-ENGANCHE-LOCAL-001` y `F33-RECUERDO-001`.
+con los cambios de `F33-ENGANCHE-LOCAL-001` y `F33-RECUERDO-001`. **Antes,
+`LA-049`** (la copia a mano): desde `D-108`, enganchar una conversación con
+memoria lanza sola su reescritura con Claude o Codex y escribe un archivo nuevo
+en la bóveda (`vault/memory-relink.json`).
 
 **Con una conversación desechable** (una nueva sin personaje, dos o tres mensajes):
 
@@ -100,9 +103,10 @@ fallo: quiere decir que a sus dos más recientes les falta memoria. Avisar si
 sale `recientesError: true` o `sinIndice: true` a menudo. `fuera` dice cuántos
 caracteres quitó la salvaguarda (con la memoria entera, lo esperado es 0).
 
-**Después, la 3657a284**, la que empezó sin personaje. Engancharla leyendo antes la
-confirmación: su memoria se escribió sin la ficha de Lía, y el resumen solo la
-llevará mientras sea una de sus dos conversaciones más recientes.
+**La 3657a284**, la que empezó sin personaje, no se engancha aquí: se hace al
+final de `LA-057`, que prueba antes la reescritura de su memoria con una
+desechable (corregido el 29/09: aquí se pedía engancharla sin `LA-049` ni la
+prueba de la reescritura).
 
 **Qué no hace todavía:** no llega al otro ordenador («Sincronizar» no lo sube) y no
 se puede soltar ni cambiar una conversación que ya tenía personaje antes de este
@@ -244,8 +248,12 @@ pasarela deja pasar el campo. Requiere reconstruir Studio.
    - si sigue `hidden` (probablemente razonó sin enseñarlo: es una deducción
      del cociente, no algo que diga el proveedor), la pasarela o el motor
      ignoran el campo;
-   - los otros veredictos: `counted`, el proveedor contó tokens de razonamiento;
-     `visible`, llegó razonamiento a la vista; `unclear`, no se puede decir, y
+   - los otros veredictos: `visible`, llegó razonamiento a la vista, aunque
+     además se cuenten tokens; `counted`, el proveedor dice que razonó —cuánto,
+     en `reasoningTokensReported`— y no llegó nada a la vista, es decir, razonó
+     sin enseñarlo (desde el 29/09 se mira primero lo visible). Con «Sin
+     razonar», un `counted` de pocos tokens no se sabe qué quiere decir: apunta
+     la cifra y avisa; `unclear`, no se puede decir, y
      es lo que sale en una vuelta que solo pide una herramienta o en una
      respuesta de menos de 64 tokens (octava ronda); `no_data`, faltó el
      consumo para medirlo. `reasoningSent: not_sent` es que no viajó nada;
@@ -291,6 +299,12 @@ Requiere reconstruir Studio (ha cambiado `packages/shared`).
    (corregido el 29/09: antes solo se quitaba del control, y eso inflaba lo
    enviado). Las mediciones de antes del 29/09 no se comparan con las de
    después.
+   **Aviso, 29/09: esta comparación con el control todavía NO es fiable.** La
+   última revisión encontró que el control detecta menos solapamientos de los
+   que debería, porque exige casar también con los nombres, y que una frase
+   corta con un nombre («Trabaja con Daniel») aún puede contar como copiada. Las
+   dos cifras de este paso pueden salir movidas en cualquier sentido. Hasta que
+   se arregle, **no decidas nada por este paso**: manda el 5.
 5. **Leer las respuestas**, que es lo que manda: si se acuerda de lo de las otras
    conversaciones como de otro momento, si toma por actual la ropa, el sitio o la
    hora de entonces, y si mantiene cómo la llama él.
@@ -314,10 +328,18 @@ otro nombre o como «una IA».
    resumen, no se aplica, y que con una o dos sí; que lo que añada también se
    aplica; que los últimos mensajes de aquí le siguen llegando tal cual y que
    aun después pueden volver trozos de ellos cuando algo le recuerde un momento
-   de entonces; y que el enganche se guarda solo en este ordenador. Si la
-   conversación no tiene memoria propia pero sí una ficha de «Memoria de lo ya
-   hablado» o un índice, tiene que decir que eso es lo que le llega y que se
-   reescribirá la memoria que guarde su primera respuesta.
+   de entonces; y que el enganche se guarda solo en este ordenador. Con los
+   límites en cifras: «más de un 20 % (el resumen, perdiendo más de 60
+   caracteres; el resto, más de 120)», y que en «Lo que recuerda» verás cuántas
+   entradas dejó igual, corrigió, quitó o añadió. Si la conversación no tiene
+   memoria propia pero sí una ficha de «Memoria de lo ya hablado» o un índice,
+   tiene que decir si eso le llega ahora —el índice siempre; la ficha, solo
+   aprobada, de la versión actual y al día— y que, si viaja, la memoria que
+   guarde esa respuesta se reescribirá con su ficha. Con una ficha sin aprobar
+   tiene que decir que ahora no le llega (corregido el 29/09: antes lo afirmaba
+   siempre). En ese caso, en «Lo que recuerda» la fila no sale como pendiente
+   al enganchar: pasa a pendiente cuando un mensaje usa de verdad esa ficha o
+   ese índice.
 2. Nada más enganchar: su foto de perfil ya está entre las imágenes de la
    conversación, y **todas** las respuestas de antes dicen «Lía», no «Respuesta»
    (salvo las que se escribieron con la ficha de OTRO personaje, que dicen
@@ -361,6 +383,83 @@ mensaje de esta), y desde entonces la fila dice «ya en uso».
 —por ejemplo, pulsando Win+L justo después de enganchar—, al volver y escribir en
 **otra** conversación de Privado tiene que intentarse sola: en `studio.log`, una
 línea «memoria reescrita con su ficha» poco después de ese envío.
+
+**«Borrar su memoria» en una enganchada (décima ronda):** en otra desechable
+enganchada con la reescrita ya lista, pulsar «Borrar su memoria». La
+confirmación dice que también se borra la versión reescrita. Después, en «Lo que
+recuerda», la fila ya no enseña la reescrita.
+
+## LA-058 — probar las tres casillas de Lía y el razonamiento, de una en una
+
+Estado: **`pending` — abierta el 2026-09-29.** Es de Daniel: hasta hacerlo, nada
+de esto está «verificado» (`D-093`). Sirve para saber **qué cambio hizo qué**:
+si se encienden varias cosas a la vez, no hay forma de saber cuál cambió a Lía.
+Pone en un solo orden lo que piden por separado `LA-050`, `LA-054`, `LA-056` y
+`LA-055`; el detalle de qué mirar en cada una sigue allí.
+
+**Antes de empezar**
+
+1. `LA-049`, la copia de la bóveda a mano.
+2. Reconstruir y abrir Luxy. Lo de hoy no está en ningún commit: se abre desde
+   esta carpeta tal como está.
+3. Mirar con qué modelo habla Lía y **no cambiarlo en toda la prueba**. El 25/09
+   era DeepSeek-V4-Pro, según el registro.
+4. **No tocar la temperatura** en toda la prueba.
+5. Las tres casillas están en la fila de Lía de la lista de personajes, dentro de
+   «Generar imagen o vídeo». Al empezar, **las tres apagadas**.
+6. En cada paso, apuntar la hora a la que empieza y acaba la tanda. `studio.log`
+   y `luxy.log` van en hora UTC: en verano, dos horas menos que el reloj de
+   Windows.
+
+**Cómo es cada tanda:** en una conversación de Lía, 8 mensajes o más, y los 4
+primeros no cuentan, porque cada respuesta sigue llegándole tal cual durante los
+cuatro mensajes siguientes. **Lo que manda es leer las respuestas**; las cifras
+del registro ayudan a entender por qué. Cada paso se compara con la tanda
+justo anterior.
+
+**Paso 0 — todo apagado.** Una tanda para tener con qué comparar. Apunta cómo
+está Lía: si repite frases o el mismo orden, si saca una promesa en casi cada
+respuesta y si se acuerda de lo de otras conversaciones.
+
+**Paso 1 — «Pedirle que varíe la forma y ponga su parte».** Enciende solo esta.
+Una tanda. Mira si cambia el orden de sus respuestas, si decide cuando le cedes
+la decisión y si aporta algo suyo (`LA-050`). Antes del paso siguiente, decide
+si la dejas encendida o apagada, y ya no la toques.
+
+**Paso 2 — «Sacar los pendientes solo de vez en cuando».** Solo si `LA-045` ya
+está hecha: si no, esta casilla parecerá no hacer nada. Enciende solo esta. Una
+tanda. Mira si deja de repetir la misma promesa y si, cuando la escena la trae,
+la sigue sacando. En `studio.log`, en cada «prompt privado compuesto»,
+`pendientesEsporadicos: true` y `pendientes.topeCerrado` en tres de cada cuatro
+mensajes (`LA-054`). Decide si la dejas encendida y ya no la toques.
+
+**Paso 3 — «Pasarle la memoria de sus dos últimas conversaciones».** Enciende
+solo esta, y escribe en una conversación de Lía que tenga al menos otras dos con
+memoria. Una tanda. Mira si se acuerda de lo de las otras como de otro momento,
+si toma por actual la ropa, el sitio o la hora de entonces, y si mantiene cómo
+la llamas. En «prompt privado compuesto», `recientes.formato: 2` y
+`conversaciones` en 1 o 2 (`LA-056`). **Ojo:** la cifra que compara con una
+tercera conversación (`ecoRecientes`, el control) tiene un fallo conocido sin
+arreglar, así que de ese número no saques nada todavía: lee las respuestas.
+
+**Paso 4 — el razonamiento, lo último**, porque cambia cómo piensa el modelo en
+todas las respuestas. En Conexiones, en la conexión de la pasarela, «Muestreo
+por modelo», el modelo de Lía (o «Añadir modelo» con su nombre exacto), campo
+«Razonamiento». Si sale apagado, ese modelo no tiene regla y no se le puede
+cambiar: haz entonces `LA-055` aparte, con Qwen3.8-27B. Si sale, elige una
+opción y haz una tanda. Mira si contesta antes y si cambia su forma. En
+Registros, con «Actualizar», cada línea «llamada al proveedor»:
+`reasoningSent` dice qué se envió (`not_sent` es que no se envió nada) y
+`reasoningVerdict` si razonó —`visible`, razonó y se ve; `counted`, el
+proveedor dice que razonó sin enseñarlo; `not_seen`, no se vio razonamiento;
+`hidden`, probablemente razonó sin enseñarlo, que es una deducción; `unclear` y
+`no_data`, que no se puede decir—. Si sale un error, vuelve a «Lo que traiga el
+modelo» y avisa. Con DeepSeek solo se ofrece «Sin razonar», y por la pasarela
+casi nunca razonaba ya: es normal no notar nada.
+
+**Al terminar**, dile a Claude qué dejaste encendido y las horas de cada tanda.
+Esta prueba no toca el enganche (`LA-057`) ni el cierre de la bóveda
+(`LA-053`).
 
 ## LA-048 — comprobaciones de pantalla pendientes: F28, F29-POSTURA-001 y F30
 

@@ -23,6 +23,8 @@ import {
   isLocalCliProvider,
   memoryRelinkEntrySchema,
   parseMemoryRelinkResponse,
+  relinkApplies,
+  relinkBound,
   relinkNeedsRun,
   relinkPhase,
   repairSlicedMemory,
@@ -32,6 +34,7 @@ import {
   type LocalCliProvider,
   type MemoryRelinkEntry,
   type MemoryRelinkOutcome,
+  type RelinkOwnerRef,
   type SealedMemoryRef,
 } from '@luxy/shared';
 import { classifyReply } from '../../shared/refusal.js';
@@ -98,6 +101,16 @@ export class MemoryRelink {
    * se mira todo otra vez una vez
    */
   private readonly idle = new Set<string>();
+  /**
+   * conversaciones cuyo turno partio de lo heredado y no pudo apuntarlo, con el
+   * enganche de entonces.
+   *
+   * Si el apunte fallaba, la fila se quedaba en «no hace falta»; los turnos
+   * siguientes ya van con la sellada y no lo vuelven a intentar, asi que la
+   * memoria que salio de lo heredado no se reescribia nunca. La pasada lo
+   * reintenta antes de decidir. Se olvida al reiniciar, como `failures`.
+   */
+  private readonly inheritedUnnoted = new Map<string, string>();
   private cancelled = false;
 
   constructor(private readonly deps: MemoryRelinkDeps) {}
@@ -106,6 +119,93 @@ export class MemoryRelink {
   cancel(): void {
     this.cancelled = true;
     this.idle.clear();
+  }
+
+  /**
+   * vuelve a mirar en la pasada general lo que se dio por visto: una
+   * conversacion, o todas sin argumento.
+   *
+   * Lo visto sin nada que hacer se saltaba hasta cerrar la boveda, y dos cosas
+   * de Daniel lo cambian antes: quitar una conversacion de las excluidas y
+   * cambiar de CLI en «Quién hace el trabajo de fondo» —una negativa de uno
+   * la puede intentar el otro—. Mientras tanto la fila ya decia «después de tu
+   * próximo mensaje en Privado», y no era verdad (`D-093`).
+   */
+  recheck(conversationId?: string): void {
+    if (conversationId === undefined) this.idle.clear();
+    else this.idle.delete(conversationId);
+  }
+
+  /**
+   * el turno de una enganchada va a partir de su ficha retroactiva o de su
+   * indice: la memoria que selle saldra de ahi, escrita sin su ficha, y hay que
+   * reescribirla.
+   *
+   * `noteLink` solo ve lo que hay AL ENGANCHAR. Si la ficha retroactiva o el
+   * indice aparecen despues —se resume, se cataloga o se aprueba luego—, la fila
+   * se quedaba en «no hace falta», que la pasada salta siempre, y esa memoria
+   * no se reescribia nunca ni habia boton para pedirlo. Aqui se mira en el
+   * momento en que de verdad se usa, que es el unico que importa. Es tambien
+   * lo UNICO que la pone pendiente sin memoria sellada: `noteLink` y el borrado
+   * de la memoria la dejan en «no hace falta», porque una ficha retroactiva sin
+   * aprobar o que no llega a los ultimos mensajes no viaja, y la memoria que se
+   * selle entonces nace ya con su ficha (decima ronda).
+   *
+   * Lo heredado solo viaja SIN memoria sellada (`chooseConversationMemory`), asi
+   * que cualquier otro estado de la fila habla de una sellada que ya no esta
+   * —un «Borrar su memoria» que no pudo apuntarla al final— y tambien pasa a
+   * pendiente: si no, una `applied` desatada se leia «cumplida» y la memoria
+   * que saliera de lo heredado no se reescribia nunca. No lanza: si falla, el
+   * turno sigue igual y la pasada lo reintenta.
+   */
+  async noteInheritedMemoryUsed(conversationId: string, owner: RelinkOwnerRef): Promise<void> {
+    if (owner.source !== 'link' || owner.winningEventId === null || owner.characterId === null) return;
+    try {
+      if (await this.markInheritedPending(conversationId, owner)) {
+        this.inheritedUnnoted.delete(conversationId);
+        return;
+      }
+    } catch {
+      // el motivo no se registra: podria traer dentro lo que no valido
+    }
+    this.inheritedUnnoted.set(conversationId, owner.winningEventId);
+    this.deps.log('memoria reescrita con su ficha', { resultado: 'sin-apuntar', paso: 'heredada' });
+  }
+
+  /**
+   * la fila de ESE enganche, pendiente y sin texto. `true` si ya lo estaba, si
+   * no hay fila de ese enganche —sin ella, `relinkPhase` ya lee pendiente en
+   * cuanto hay sellada—, si esta atada a la sellada de ahora —esa vale y no se
+   * toca— o si se escribio. Relee y reintenta si otro la cambio entre medias.
+   * Lanza si no puede leer o escribir.
+   */
+  private async markInheritedPending(
+    conversationId: string,
+    owner: RelinkOwnerRef,
+  ): Promise<boolean> {
+    const sealed = refOf(
+      await this.deps.conversations.latestMemoryRecord(this.deps.vault, conversationId),
+    );
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const current = await this.deps.relinks.forConversation(this.deps.vault, conversationId);
+      if (current === undefined || current.ownerEventId !== owner.winningEventId) return true;
+      if (current.status === 'pending' && current.memory === null) return true;
+      if (relinkBound(current, owner, sealed)) return true;
+      const written = await this.deps.relinks.replace(this.deps.vault, conversationId, current, {
+        ...current,
+        status: 'pending',
+        basedOn: null,
+        memory: null,
+        drift: null,
+        failure: null,
+        updatedAt: this.deps.now(),
+      });
+      if (written) {
+        this.idle.delete(conversationId);
+        return true;
+      }
+    }
+    return false;
   }
 
   /**
@@ -130,8 +230,8 @@ export class MemoryRelink {
   }
 
   /**
-   * apunta el enganche nuevo: pendiente si hay memoria que reescribir y, si no,
-   * que no hace falta.
+   * apunta el enganche nuevo: pendiente si hay memoria sellada que reescribir
+   * y, si no, que no hace falta.
    *
    * Lo segundo importa: sin la fila, la primera memoria que se sellara DESPUES
    * de enganchar —escrita ya con la ficha— pareceria pendiente y se reescribiria
@@ -139,12 +239,14 @@ export class MemoryRelink {
    * y NO lanza: si falla, `relinkPhase` trata a una enganchada con memoria y sin
    * fila como pendiente, que es lo seguro.
    *
-   * «Hay memoria» no es solo la sellada: sin ella, lo que viaja es la ficha
-   * retroactiva o el indice del catalogo, escritos por un CLI que no veia la
-   * ficha de nadie, y la primera memoria que se selle despues sale de ahi y
-   * arrastra lo improvisado. Entonces se queda pendiente SIN memoria sellada:
-   * no hay nada que reescribir todavia, y la primera que se selle es la que se
-   * reescribe (septima ronda).
+   * Sin memoria sellada puede viajar la ficha retroactiva o el indice, escritos
+   * por un CLI que no veia la ficha de nadie, y la memoria que se selle despues
+   * sale de ahi. La septima ronda la dejaba pendiente ya aqui si habia cualquiera
+   * de los dos, y una ficha retroactiva sin aprobar no viaja: la memoria
+   * siguiente nacia con su ficha, se reescribia igual —una llamada que la
+   * confirmacion decia que no habria— y la fila afirmaba que se escribio sin
+   * ella (`D-093`). Ahora lo decide el turno, cuando de verdad parte de lo
+   * heredado (`noteInheritedMemoryUsed`, decima ronda).
    */
   async noteLink(conversationId: string): Promise<void> {
     const vault = this.deps.vault;
@@ -154,7 +256,6 @@ export class MemoryRelink {
         return;
       }
       const sealed = refOf(await this.deps.conversations.latestMemoryRecord(vault, conversationId));
-      const inherits = sealed !== null || (await this.inheritsUnsheetedMemory(conversationId));
       const current = await this.deps.relinks.forConversation(vault, conversationId);
       const now = this.deps.now();
       await this.deps.relinks.replace(
@@ -166,7 +267,7 @@ export class MemoryRelink {
           conversationId,
           ownerEventId: owner.winningEventId,
           characterId: owner.characterId,
-          status: inherits ? 'pending' : 'not-needed',
+          status: sealed !== null ? 'pending' : 'not-needed',
           basedOn: sealed,
           memory: null,
           drift: null,
@@ -185,10 +286,11 @@ export class MemoryRelink {
 
   /**
    * si la conversacion tiene ficha retroactiva o indice con memoria: lo que
-   * viajaria sin memoria sellada. Sin poder leerlo se contesta que si: lo peor
-   * es una llamada de mas, y lo otro es dejar lo improvisado sin reescribir.
+   * PODRIA viajar sin memoria sellada. Solo para la confirmacion del enganche;
+   * no decide el estado de la fila, que lo apunta el turno si de verdad viaja.
    *
    * No mira si la ficha esta aprobada: una sin aprobar puede aprobarse despues.
+   * Si viaja ya lo dice `inheritedTravels`, en la vista previa.
    */
   async inheritsUnsheetedMemory(conversationId: string): Promise<boolean> {
     try {
@@ -259,11 +361,18 @@ export class MemoryRelink {
     const { vault, conversations, relinks } = this.deps;
     const id = options.conversationId;
     if (!vault.isUnlocked()) return 'locked';
-    // fuera del trabajo de fondo, como la ficha retroactiva y los pendientes
-    if (this.deps.preferences.excluded().has(id)) return 'excluded';
+    const openVault = vault;
+    // fuera del trabajo de fondo, como la ficha retroactiva y los pendientes: no
+    // se llama a ningun CLI. Pero un texto reescrito que ya no vale se suelta
+    // igual (abajo), que no llama a nadie: con el `return` delante, el resto de
+    // un «Soltar» que no pudo quitar la fila se quedaba en disco mientras la
+    // conversacion siguiera excluida (decima ronda)
+    const excluded = this.deps.preferences.excluded().has(id);
+    const unnoted = this.inheritedUnnoted.has(id);
+    const early = await relinks.forConversation(openVault, id);
+    if (excluded && !unnoted && (early === undefined || early.memory === null)) return 'excluded';
     if (this.deps.isBusy(id)) return 'busy';
 
-    const openVault = vault;
     const target = this.auxiliary();
     const force = options.force === true;
     // lo barato primero: se dispara tras CADA envio de una enganchada, y sin esto
@@ -271,9 +380,10 @@ export class MemoryRelink {
     //
     // Una `applied` que aun guarda su texto NO se salta: puede haber cumplido
     // ya —la memoria sellada despues salio de ella— y entonces ese texto esta
-    // en disco sin que nada lo lea. Se mira una vez y se borra (octava ronda)
-    const early = await relinks.forConversation(openVault, id);
-    if (!force && early !== undefined) {
+    // en disco sin que nada lo lea. Se mira una vez y se borra (octava ronda).
+    // Una `ready` tampoco se salta nunca, y por lo mismo puede ser un resto
+    // (abajo). Ni una fila cuyo turno partio de lo heredado sin poder apuntarlo
+    if (!force && !excluded && !unnoted && early !== undefined) {
       if (
         (early.status === 'applied' && early.memory === null) ||
         early.status === 'not-needed' ||
@@ -285,18 +395,35 @@ export class MemoryRelink {
     }
     const owner: ConversationOwner = await conversations.owner(openVault, id);
     const sealed = await conversations.latestMemoryRecord(openVault, id);
-    const entry = await relinks.forConversation(openVault, id);
-    const phase = relinkPhase(entry, owner, refOf(sealed));
-    if (phase === 'done' && entry !== undefined && entry.memory !== null) {
-      // compare-and-set: si algo la cambio entre medias, se deja y ya se
-      // mirara otra vez
-      await relinks.replace(openVault, id, entry, {
-        ...entry,
-        memory: null,
-        updatedAt: this.deps.now(),
-      });
-      return 'skipped';
+    // el turno partio de lo heredado y no pudo apuntarlo: se apunta ahora, antes
+    // de decidir. Con otro enganche ya no dice nada de este
+    const unnotedFor = this.inheritedUnnoted.get(id);
+    if (unnotedFor !== undefined) {
+      try {
+        if (unnotedFor !== owner.winningEventId || (await this.markInheritedPending(id, owner))) {
+          this.inheritedUnnoted.delete(id);
+        }
+      } catch {
+        // se queda apuntado para la pasada siguiente; lo demas sigue igual
+      }
     }
+    let entry = await relinks.forConversation(openVault, id);
+    // un texto reescrito que ya no puede valer —desatado de la sellada o de un
+    // enganche que ya no gana— esta en disco sin que nada lo lea. Tres caminos
+    // llegan aqui: una `applied` ya cumplida (octava ronda), un «Soltar» que no
+    // pudo quitar la fila y un «Borrar su memoria» que choco con una reescritura
+    // recien terminada y no pudo apuntar la fila al final. Tambien en una
+    // excluida: soltar no llama a nadie (decima ronda). Atado otra vez ya no puede quedar: la sellada solo avanza y el
+    // enganche no vuelve. Se suelta y se sigue, porque una `ready` desatada aun
+    // puede tener que reescribirse sobre la sellada nueva
+    if (entry !== undefined && entry.memory !== null && !relinkApplies(entry, owner, refOf(sealed))) {
+      const cleared: MemoryRelinkEntry = { ...entry, memory: null, updatedAt: this.deps.now() };
+      // compare-and-set: si algo la cambio entre medias, ya se mirara otra vez
+      if (!(await relinks.replace(openVault, id, entry, cleared))) return 'stale';
+      entry = cleared;
+    }
+    if (excluded) return 'excluded';
+    const phase = relinkPhase(entry, owner, refOf(sealed));
     if (
       !relinkNeedsRun({
         phase,

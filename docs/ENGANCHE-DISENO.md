@@ -37,13 +37,17 @@ del servidor está escrito, probado ni desplegado.
 >   `legacyCharacterId`.
 > - **§7**: «Soltar» solo deshace un enganche propio; no se puede soltar ni
 >   cambiar una conversación que nació con personaje. Las respuestas se firman
->   por posición y hay un solo separador, el del enganche en vigor.
+>   por posición y hay un solo separador, el del enganche en vigor. *(Sustituido
+>   por `D-108`, punto 3: en una enganchada se firman todas salvo las escritas
+>   con otro personaje, y con dueño por turno como en `a45953b`.)*
 > - **§8 (R1)**: va detrás de la casilla `recentMemories` del personaje, apagada
 >   por defecto, con 240/400/800 caracteres (160/400/800 desde la segunda
 >   revisión del 28/09, con la primera frase y las últimas del resumen), la ficha
 >   retroactiva solo si está
 >   APROBADA y la guía de campos detrás de la misma casilla. M1 y M2 no se
->   construyeron.
+>   construyeron. *(Los topes y el corte por frases los sustituye `D-105`,
+>   quinta ronda: viaja la memoria entera sin `plan` ni `openQuestions`, con una
+>   salvaguarda de 6.000 caracteres por conversación.)*
 >
 > Lo de §3.3, §3.4, §5.2, §5.3, §6.4, §6.5 (salvo lo dicho), §6.6 y las fases C y
 > H sigue sin construir.

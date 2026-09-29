@@ -8,7 +8,7 @@
 //
 // El aviso «¿Es de Lia?» se calcula aqui y NO se registra en ningun sitio: mira
 // solo los mensajes de Daniel y el borrador, y su descarte vive en memoria.
-import { RECENT_MEMORY_ENTRY_CHARS, VAULT_RECENT_TURNS } from '@luxy/shared';
+import { RECENT_MEMORY_ENTRY_CHARS, RELINK_LIMITS, VAULT_RECENT_TURNS } from '@luxy/shared';
 
 /** lo que el proceso principal dice del dueño de la conversacion abierta */
 export interface OwnerView {
@@ -28,6 +28,8 @@ export interface OwnerChangePreview {
   hasOwnMemory: boolean;
   /** sin memoria propia, viaja su ficha retroactiva o su indice, escritos sin la ficha */
   inheritedMemory: boolean;
+  /** y viaja ya en el proximo mensaje: sin aprobar o sin llegar a la cola, no */
+  inheritedTravels: boolean;
   recentMemoriesOn: boolean;
   excluded: boolean;
   backgroundCli: 'claude' | 'codex';
@@ -370,8 +372,14 @@ export function describeCharacterLink(
     const cambios = character.hasDescription
       ? 'que solo cambie cómo se la nombra y lo que su ficha contradiga'
       : 'que solo cambie cómo se la nombra';
+    // en dos parrafos y con las cifras: seis condiciones encadenadas con «o» en
+    // uno solo no se entendian, y «acorta mucho» no decia cuanto. Las cifras
+    // salen de la guarda; «dos» y «la mitad» van escritos y los vigila la prueba
+    const cli = CLI_NAMES[preview.backgroundCli];
+    const acorta = Math.round((1 - RELINK_LIMITS.minSummaryRatio) * 100);
     paragraphs.push(
-      `La memoria que se fue escribiendo en esta conversación la escribió el modelo sin la ficha de ${label}. ${encargo}, en segundo plano, con ${CLI_NAMES[preview.backgroundCli]} y tu sesión: una llamada más, en la misma cola que los pendientes. Se le pide ${cambios}, y que deje igual lo que pasó entre vosotros. Si ${CLI_NAMES[preview.backgroundCli]} se niega, o la reescrita quita o recorta más de dos entradas o más de la mitad de las que había, o deja el resumen o el resto en menos de la mitad, o acorta mucho el resumen o el resto, o cambia la mayor parte de las palabras del resumen, no se aplica y sigue valiendo la de ahora. Si quita o recorta una o dos, sin pasar de la mitad, se aplica igual: eso deja de viajar. Lo que añada también se aplica, y en «Lo que recuerda» se cuenta. Hasta que esté lista, sigue valiendo la de ahora. En «Lo que recuerda» verás en qué quedó, y podrás volver a la de antes hasta que un mensaje tuyo aquí guarde memoria nueva.`,
+      `La memoria que se fue escribiendo en esta conversación la escribió el modelo sin la ficha de ${label}. ${encargo}, en segundo plano, con ${cli} y tu sesión: una llamada más, en la misma cola que los pendientes. Se le pide ${cambios}, y que deje igual lo que pasó entre vosotros. Hasta que esté lista, sigue valiendo la de ahora.`,
+      `No se aplica, y sigue valiendo la de ahora, si ${cli} se niega o si la reescrita pierde demasiado: si quita o recorta más de dos entradas o más de la mitad de las que había, si deja el resumen o el resto en menos de la mitad, si los acorta más de un ${acorta} % (el resumen, perdiendo más de ${RELINK_LIMITS.summarySlackChars} caracteres; el resto, más de ${RELINK_LIMITS.entriesSlackChars}), o si cambia la mayor parte de las palabras del resumen. Si quita o recorta una o dos, sin pasar de la mitad, se aplica igual: eso deja de viajar. Lo que añada también se aplica. En «Lo que recuerda» verás en qué quedó y cuántas entradas dejó igual, corrigió, quitó o añadió, también si no se aplicó, y podrás volver a la de antes hasta que un mensaje tuyo aquí guarde memoria nueva.`,
     );
   } else if (preview.hasOwnMemory) {
     paragraphs.push(
@@ -380,9 +388,20 @@ export function describeCharacterLink(
   } else if (preview.inheritedMemory && !preview.excluded) {
     // sin memoria sellada viaja la ficha retroactiva o el indice, escritos por
     // un CLI que no veia la ficha de nadie, y no hay nada que reescribir hasta
-    // que se selle la primera: esa es la que se reescribe (septima ronda)
+    // que se selle la primera: esa es la que se reescribe (septima ronda).
+    //
+    // «le llega» solo si main lo ha comprobado (`inheritedTravels`): una ficha
+    // sin aprobar o que no llega a los ultimos mensajes no viaja, y esto lo
+    // afirmaba igual (`D-093`). Y con la ficha vacia el encargo solo lleva su
+    // nombre, como en la rama de arriba
+    const conSuFicha = character.hasDescription
+      ? 'con su ficha'
+      : 'con su nombre (su ficha está vacía)';
+    const despues = `en segundo plano, con ${CLI_NAMES[preview.backgroundCli]} y tu sesión: una llamada más.`;
     paragraphs.push(
-      `Esta conversación no tiene todavía memoria propia: lo que le llega de ella es su ficha retroactiva o el índice de sus escenas, que escribió un CLI sin la ficha de ${label}, y así será también en tu próximo mensaje aquí. La memoria que guarde esa respuesta sale de ahí, y es esa la que se reescribirá con su ficha después, en segundo plano, con ${CLI_NAMES[preview.backgroundCli]} y tu sesión: una llamada más.`,
+      preview.inheritedTravels
+        ? `Esta conversación no tiene todavía memoria propia: lo que le llega de ella es su ficha retroactiva o el índice de sus escenas, que escribió un CLI sin la ficha de ${label}, y así será también en tu próximo mensaje aquí si antes no cambia. La memoria que guarde esa respuesta sale de ahí, y es esa la que se reescribirá ${conSuFicha} después, ${despues}`
+        : `Esta conversación no tiene todavía memoria propia, y ahora mismo tampoco le llega su ficha retroactiva: solo viaja si está aprobada y al día con los últimos mensajes. Si llega a viajar, la escribió un CLI sin la ficha de ${label}: la memoria que guarde la respuesta a ese mensaje saldrá de ahí, y esa se reescribirá ${conSuFicha} después, ${despues}`,
     );
   }
 

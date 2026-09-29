@@ -62,6 +62,7 @@ describe('measureRecentEcho', () => {
       entradas: 1,
       frases: 1,
       frasesDeUnaRaiz: 0,
+      frasesSinMedir: 0,
       raicesComunes: 0,
       conFrasesDeRecientes: 0,
       sinApoyoAqui: 0,
@@ -227,6 +228,150 @@ describe('measureRecentEcho', () => {
       ignoreWords: ['Lía'],
     });
     expect(toledo.conFrasesDeRecientes).toBe(1);
+  });
+
+  // novena ronda: las raices que no cuentan se decidian con las frases enviadas
+  // Y las del control juntas, y con eso se media tambien la cifra principal
+  it('la medida principal no depende de que haya tercera ni de lo que diga', () => {
+    const base = {
+      memory: memoria({ summary: '', facts: ['Lía trabaja de camarera por las noches.'] }),
+      phrases: [
+        { text: 'Trabaja con Daniel.', field: 'hechos' },
+        { text: 'Ella conoce a Daniel desde el verano.', field: 'hechos' },
+        { text: 'Le gusta que Daniel cocine.', field: 'hechos' },
+      ] satisfies RecentPhrase[],
+      turns: [],
+      ignoreWords: ['Lía'],
+    };
+    const principal = ({ control: _control, ...resto }: ReturnType<typeof measureRecentEcho>) =>
+      resto;
+    const sinTercera = measureRecentEcho(base);
+    const conTercera = measureRecentEcho({
+      ...base,
+      control: [{ text: 'Fueron al cine con Daniel.', field: 'hechos' }],
+    });
+    const otraTercera = measureRecentEcho({
+      ...base,
+      control: [
+        { text: 'Daniel le enseñó a nadar.', field: 'hechos' },
+        { text: 'Daniel perdió las llaves.', field: 'hechos' },
+      ],
+    });
+    expect(principal(conTercera)).toEqual(principal(sinTercera));
+    expect(principal(otraTercera)).toEqual(principal(sinTercera));
+    expect(sinTercera.conFrasesDeRecientes).toBe(0);
+  });
+
+  // novena ronda: con `matchesStems` una frase de n raices pide min(2, n) en
+  // comun. Quitar el nombre de «Trabaja con Daniel» la dejaba en una sola raiz,
+  // que casaba con cualquier entrada que dijera «trabaja»
+  it('quitar un nombre nunca hace casar lo que sin quitarlo no casaba', () => {
+    const eco = measureRecentEcho({
+      memory: memoria({ summary: '', facts: ['Lía trabaja de camarera por las noches.'] }),
+      phrases: [
+        { text: 'Trabaja con Daniel.', field: 'hechos' },
+        { text: 'Ella conoce a Daniel desde el verano.', field: 'hechos' },
+        { text: 'Le gusta que Daniel cocine.', field: 'hechos' },
+        { text: 'Lía llama gordo a Daniel.', field: 'hechos' },
+      ],
+      turns: [],
+      ignoreWords: ['Lía'],
+    });
+    expect(eco.raicesComunes).toBe(2);
+    expect(eco.conFrasesDeRecientes).toBe(0);
+    expect(eco.sinApoyoAqui).toBe(0);
+    expect(eco.porCampo.hechos).toEqual({ frases: 4, con: 0, sinApoyo: 0 });
+    // y no se cuenta como frase de una raiz: ya no casa con una sola palabra
+    expect(eco.frasesDeUnaRaiz).toBe(0);
+  });
+
+  it('quitar los nombres tampoco sube la proporcion hasta casar', () => {
+    const frase: RecentPhrase = {
+      text: 'Lía y Daniel pintaron la verja verde del jardín trasero.',
+      field: 'resumen',
+    };
+    // dos raices de siete sin los nombres no llegan al 40 %; de cinco, si
+    const entrada = 'Pintaron la verja del vecino.';
+    const eco = measureRecentEcho({
+      memory: memoria({ summary: entrada }),
+      phrases: [frase],
+      turns: [],
+      ignoreWords: ['Lía', 'Daniel'],
+    });
+    expect(eco.conFrasesDeRecientes).toBe(0);
+    // con los nombres en la entrada si casa: es la misma verja
+    const conNombres = measureRecentEcho({
+      memory: memoria({ summary: 'Lía y Daniel pintaron la verja del vecino.' }),
+      phrases: [frase],
+      turns: [],
+      ignoreWords: ['Lía', 'Daniel'],
+    });
+    expect(conNombres.conFrasesDeRecientes).toBe(1);
+  });
+
+  // decima ronda: pedir tambien el comparador con los nombres es prudente para
+  // `con`, pero en el APOYO va al reves. Los turnos de aqui son dialogo y casi
+  // nunca nombran a los dos, asi que un turno que habla del tema de verdad dejaba
+  // de respaldar la frase, y eso fabricaba un blanqueo
+  it('los nombres de la frase no le quitan el apoyo a un turno que habla del tema', () => {
+    const verja: RecentPhrase = {
+      text: 'Lía y Daniel pintaron la verja verde del jardín trasero.',
+      field: 'resumen',
+    };
+    const base = {
+      memory: memoria({
+        summary: '',
+        facts: ['Lía y Daniel pintaron la verja verde del jardín trasero.'],
+      }),
+      phrases: [
+        verja,
+        { text: 'Ella conoce a Daniel desde el verano.', field: 'hechos' },
+        { text: 'Le gusta que Daniel cante.', field: 'hechos' },
+        { text: 'Lía llama gordo a Daniel.', field: 'hechos' },
+      ] satisfies RecentPhrase[],
+      ignoreWords: ['Lía'],
+    };
+    const eco = measureRecentEcho({
+      ...base,
+      turns: [{ text: 'Esta tarde pintamos la verja, ¿te acuerdas?' }],
+    });
+    expect(eco.conFrasesDeRecientes).toBe(1);
+    expect(eco.sinApoyoAqui).toBe(0);
+    expect(eco.porCampo.resumen).toEqual({ frases: 1, con: 1, sinApoyo: 0 });
+    // y un turno que no habla de ella sigue sin respaldarla
+    const sinTema = measureRecentEcho({ ...base, turns: [{ text: 'Hoy hace frío, Daniel.' }] });
+    expect(sinTema.sinApoyoAqui).toBe(1);
+  });
+
+  // las que se quedan en una raiz al quitar los nombres viajaron y no se miden:
+  // sin esta cifra, `con` sobre `frases` aparentaba cubrir tambien esas
+  it('cuenta las frases que viajaron y no se pueden medir', () => {
+    const eco = measureRecentEcho({
+      memory: memoria(),
+      phrases: [
+        { text: 'Trabaja con Daniel.', field: 'hechos' },
+        { text: 'Ella conoce a Daniel desde el verano.', field: 'hechos' },
+        { text: 'Le gusta que Daniel cocine.', field: 'hechos' },
+        { text: 'Lía llama gordo a Daniel.', field: 'hechos' },
+        FRASE,
+      ],
+      turns: [],
+      ignoreWords: ['Lía'],
+    });
+    expect(eco.frases).toBe(5);
+    // «Trabaja con Daniel» se queda en «trabaj»
+    expect(eco.frasesSinMedir).toBe(1);
+    expect(eco.frasesDeUnaRaiz).toBe(0);
+  });
+
+  // el resumen se parte con el mismo criterio que las frases enviadas
+  it('«Sr. Pérez» no parte una entrada en dos', () => {
+    const eco = measureRecentEcho({
+      memory: memoria({ summary: 'El Sr. Pérez llegó tarde a la cena.' }),
+      phrases: [FRASE],
+      turns: [],
+    });
+    expect(eco.entradas).toBe(1);
   });
 
   it('sin tercera, el control es null', () => {

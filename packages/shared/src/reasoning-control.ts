@@ -106,7 +106,9 @@ const RULES: readonly ReasoningRule[] = [
   {
     // https://docs.z.ai/guides/capabilities/thinking — «GLM-5.3 and
     // GLM-5.3-FLASH no longer support disabling thinking (an error will
-    // occur...)»; `reasoning_effort` max (defecto), high y low.
+    // occur...)»; y https://docs.z.ai/api-reference/llm/chat-completion: en
+    // `GLM-5.3` y `GLM-5.3-FLASH` «only the `low` / `high` / `max` levels are
+    // supported», con `max` de fabrica. Releido el 29/09.
     family: 'glm-5.3',
     pattern: /^glm-5\.3(-flash)?$/i,
     modes: { low: { reasoning_effort: 'low' }, high: { reasoning_effort: 'high' } },
@@ -115,23 +117,52 @@ const RULES: readonly ReasoningRule[] = [
       'que «Razonar más (high)» también es menos que lo de siempre.',
   },
   {
-    // misma pagina: GLM-5.2 si se puede apagar, y admite `reasoning_effort`
-    // max (defecto), xhigh, high, medium, minimal y none —`low` NO—.
+    // las dos paginas de arriba: GLM-5.2 se puede apagar —el ejemplo de
+    // «Disable deep thinking» de la guia es justo `glm-5.2` con
+    // `thinking:{type:'disabled'}`— y su `reasoning_effort` acepta max
+    // (defecto), xhigh, high, medium, low, minimal y none, pero «`low` and
+    // `medium` will be mapped to `high`; `xhigh` will be mapped to `max`». Asi
+    // que `low` SI se acepta y no se ofrece: «Razonar poco» prometeria menos de
+    // lo que hace, que es lo mismo que «high» (`D-093`, novena ronda; antes la
+    // nota decia que no lo admitia, y es falso).
     family: 'glm-5.2',
     pattern: /^glm-5\.2$/i,
     modes: { off: THINKING_OFF, high: { reasoning_effort: 'high' } },
     note:
-      'Se puede apagar o fijar en «high». No admite «low». De fábrica razona al máximo, así que ' +
-      '«high» también es menos que lo de siempre.',
+      'Se puede apagar o fijar en «high». «Razonar poco (low)» no se ofrece porque Z.AI lo trata ' +
+      'igual que «high». De fábrica razona al máximo, así que «high» también es menos que lo ' +
+      'de siempre.',
   },
   {
-    // misma pagina: GLM-5.1, GLM-5, GLM-4.6 y GLM-4.5 se pueden apagar con
-    // `thinking`, y `reasoning_effort` es solo de la 5.2 en adelante. El `$`
-    // es lo que impide que `glm-5.3-lo-que-sea` caiga aqui por el `5`.
+    // La documentacion de Z.AI SE CONTRADICE aqui, y la regla se queda por lo
+    // que dice la de ESE modelo (el principio de `D-107`), con la contradiccion
+    // escrita en la nota (novena ronda):
+    //
+    //  - en contra: el encabezado de https://docs.z.ai/guides/capabilities/thinking
+    //    es «Disable deep thinking (GLM-5.3 is no longer supported, only GLM-5.2
+    //    supports it)», y de estos cuatro solo dice que deciden solos si razonan;
+    //  - a favor, la pagina de cada modelo: https://docs.z.ai/guides/llm/glm-4.5
+    //    dice que el modo de razonamiento se puede «enable or disable by setting
+    //    the `thinking.type` parameter»; https://docs.z.ai/guides/llm/glm-4.6,
+    //    https://docs.z.ai/guides/llm/glm-5 y https://docs.z.ai/guides/llm/glm-5.1
+    //    llevan, con su propio nombre de modelo, `thinking` con el comentario
+    //    «Optional: "disabled" or "enabled", default is "enabled"»;
+    //  - y https://docs.z.ai/api-reference/llm/chat-completion: `thinking.type`
+    //    es `enabled` o `disabled`, y la unica serie que «can only be enabled»
+    //    es la 5.3.
+    //
+    // Tres fuentes, dos de ellas del propio modelo, contra un encabezado que
+    // parece hablar de la ultima generacion. Si aun asi la pasarela contesta un
+    // 4xx, no se reintenta ni se cobra, el registro lo dice y la nota dice como
+    // volver. `reasoning_effort` es solo de la 5.2 en adelante. El `$` es lo que
+    // impide que `glm-5.3-lo-que-sea` caiga aqui por el `5`.
     family: 'glm',
     pattern: /^glm-(4\.5|4\.6|5|5\.1)$/i,
     modes: { off: THINKING_OFF },
-    note: 'Sólo se puede apagar.',
+    note:
+      'Sólo se puede apagar. La página de este modelo en Z.AI lo admite, aunque su guía de ' +
+      'razonamiento solo lo nombra para GLM-5.2. Si la pasarela contesta con un error, vuelve a ' +
+      '«Lo que traiga el modelo».',
   },
   {
     // https://platform.kimi.ai/docs/guide/use-kimi-k2-thinking-model — en
@@ -393,9 +424,18 @@ export const TOOL_TURN_PROSE_MIN_CHARS = 400;
 export const REASONING_JUDGE_MIN_OUTPUT = 64;
 
 export type ReasoningVerdict =
-  /** el proveedor dijo cuantos tokens razono */
+  /**
+   * el proveedor declaro tokens de razonamiento y NO llego ninguno que se vea:
+   * razono sin enseñarlo, y no es deduccion. Cuantos, en
+   * `reasoningTokensReported`: la pantalla manda a mirar la cifra porque un
+   * recuento minimo no es lo mismo que cientos de tokens, y no hay umbral medido
+   * para separarlos
+   */
   | 'counted'
-  /** llego razonamiento que se ve: en un campo aparte o entre etiquetas */
+  /**
+   * llego razonamiento que se ve: en un campo aparte o entre etiquetas. Gana a
+   * `counted`: si ademas vino el recuento, sigue en `reasoningTokensReported`
+   */
   | 'visible'
   /** sin consumo final o sin tokens de salida: no hay contra que medir */
   | 'no_data'
@@ -457,11 +497,14 @@ export function classifyReasoningEvidence(input: ReasoningEvidenceInput): Reason
     input.finalUsageReceived && tokens > 0
       ? Math.round(((input.textChars + input.toolArgChars) / tokens) * 100) / 100
       : null;
-  if (input.reasoningTokensReported > 0)
-    return { reasoningVerdict: 'counted', charsPerOutput: ratio };
+  // lo VISIBLE va antes que lo declarado: con el recuento primero, «razono y se
+  // ve» y «razono y la pasarela no lo deja pasar» salian los dos `counted`, y
+  // eso es justo lo que `D-107` quiere averiguar de la pasarela (novena ronda)
   if (input.reasoningChars > 0 || input.reasoningTagChars > 0) {
     return { reasoningVerdict: 'visible', charsPerOutput: ratio };
   }
+  if (input.reasoningTokensReported > 0)
+    return { reasoningVerdict: 'counted', charsPerOutput: ratio };
   if (ratio === null) return { reasoningVerdict: 'no_data', charsPerOutput: null };
   if (input.toolArgChars > 0 && input.textChars < TOOL_TURN_PROSE_MIN_CHARS) {
     return { reasoningVerdict: 'unclear', charsPerOutput: ratio };

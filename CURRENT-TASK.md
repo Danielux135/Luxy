@@ -4,23 +4,20 @@
 > tiene varios «siguiente paso exacto» abiertos a la vez, con dueños distintos.
 > El orden que manda es éste:
 >
-> 00. **`REV-TRES-ENCARGOS-001` (28/09): los tres encargos del 25/09 —bóveda,
->    enganche con resumen y promesas— se construyeron en un flujo cuya revisión
->    independiente NO se hizo** (la autenticación caducó y los siete revisores se
->    cayeron). Rondas de revisión posteriores encontraron defectos y se
->    corrigieron el 28/09 en seis rondas de arreglos. **La tercera, la cuarta y
->    la quinta tuvieron cada una su revisión de cinco revisores, y las tres
->    pasaron `npm run check` a solas** (222 archivos; 4511, 4520 y 4531
->    pruebas); la quinta quedó commiteada en `a45953b`. La sexta cerró lo que
->    dejó la última revisión; ocho revisores la revisaron junto con 2f, 2g y
->    2h, y `npm run check` a solas pasó sobre todo ello (29/09: 228 archivos,
->    4677 pruebas y 12 omitidas). La **séptima** (`REV-CUATRO-FRENTES-001`,
->    29/09) cerró lo que encontraron; otros ocho revisores la revisaron y su
->    `npm run check` a solas falló por UNA prueba que pasó del tope de tiempo
->    (`account-client.test.ts`, que sola pasa). La **octava** (29/09) cierra
->    eso. **La octava no ha tenido revisión ni `npm run check` entero.** Antes
->    de pedirle a Daniel `LA-052` a `LA-057`, lo que toca es esa revisión y el
->    check a solas. Bloques justo debajo.
+> 00. **`REV-TRES-ENCARGOS-001` y `REV-CUATRO-FRENTES-001` (28-29/09).** Los
+>    tres encargos del 25/09 —bóveda, enganche con resumen y promesas— se
+>    construyeron en un flujo cuya revisión independiente NO se hizo (la
+>    autenticación caducó y los siete revisores se cayeron). Desde entonces
+>    **cada ronda de arreglos tuvo su revisión y su `npm run check` a solas**:
+>    la tercera, la cuarta y la quinta, cinco revisores cada una (222 archivos;
+>    4511, 4520 y 4531 pruebas), commiteado en `a45953b`; la sexta junto con
+>    2f, 2g y 2h, ocho revisores (228 archivos, 4677); la séptima, ocho
+>    revisores, con un check que cayó por UNA prueba que pasó del tope de tiempo
+>    (`account-client.test.ts`, que sola pasa); la octava, ocho revisores (228
+>    archivos, 4716), commiteada en `f77efb6`; y la novena y la décima, seis
+>    revisores cada una (229 archivos; 4741 y 4751), **sin commitear**. **La
+>    revisión de la décima dejó dieciséis defectos, dos importantes, sin
+>    corregir.** Bloque justo debajo.
 > 0. **`SEG-BOVEDA-001`: la bóveda no se cerraba sola. Construido el 25/09
 >    (`D-106`) y corregido el 28/09, SIN verse en pantalla.** Leer ya no cuenta
 >    como actividad, y Win+L, suspender y la X la cierran. Falta `LA-053`, de
@@ -52,21 +49,22 @@
 >    el 25/09 y corregido el 28/09, SIN verse en pantalla ni medirse.** Se prueba
 >    con `LA-054`, y con `LA-045` abierto el tope parecerá no hacer nada.
 > 2f. **`F34-RAZONAMIENTO-001`: el razonamiento por modelo (`D-107`), construido
->    el 28/09 y corregido el 29/09 en la séptima y la octava ronda. La séptima
->    tuvo revisión; la octava, NI revisión NI `npm run check` entero. SIN probar
->    contra la pasarela ni verse en pantalla.** Se prueba con `LA-055`. Bloque
->    justo debajo del índice.
+>    el 28/09 y corregido el 29/09 de la séptima a la novena ronda, cada una
+>    revisada y con su `npm run check` a solas. SIN probar contra la pasarela
+>    ni verse en pantalla.** Se prueba con `LA-055` y `LA-058`. Bloque más
+>    abajo.
 > 2g. **`F33-RECUERDO-ENTERO-001`: con la casilla de `D-105` le llega la memoria
 >    entera de sus dos últimas conversaciones (quinta ronda de `D-105`),
->    construido el 28/09 y corregido el 29/09 en la séptima y la octava ronda;
->    la octava SIN revisión NI `npm run check` entero, y nada visto en
->    pantalla.** Se prueba con `LA-056`. Bloque justo debajo del índice.
+>    construido el 28/09 y corregido el 29/09 de la séptima a la décima ronda,
+>    cada una revisada y con su check a solas. La revisión de la décima dejó
+>    dos defectos importantes en la medida `ecoRecientes`, sin corregir. Nada
+>    visto en pantalla.** Se prueba con `LA-056` y `LA-058`. Bloque más abajo.
 > 2h. **`F33-IGUAL-001`: una conversación enganchada queda como una empezada
 >    con su personaje (`D-108`): memoria reescrita con su ficha por el CLI
 >    local, foto de perfil, firma y textos. Construido el 28-29/09 y corregido
->    el 29/09 en la séptima y la octava ronda; la octava SIN revisión NI `npm
->    run check` entero, SIN ninguna reescritura real y SIN verse en
->    pantalla.** Se prueba con `LA-057`. Bloque justo debajo del índice.
+>    el 29/09 de la séptima a la décima ronda, cada una revisada y con su check
+>    a solas; quedan menores abiertos. SIN ninguna reescritura real y SIN verse
+>    en pantalla.** Se prueba con `LA-057`. Bloque más abajo.
 > 3. **Comprobaciones de pantalla de Daniel** de F28, F29-POSTURA-001 y F30. El
 >    índice está en `LOCAL-ACTIONS.md`, `LA-048`; el detalle, en cada bloque.
 > 4. Lo demás. `PROVEEDORES-005`, más abajo, tiene una prueba de diez minutos
@@ -75,11 +73,119 @@
 > `KIMI-K3-EXPERIMENT-001`, al final del archivo, está **abandonado**, no en
 > curso. No lo retomes sin que Daniel lo pida.
 
+## REV-CUATRO-FRENTES-001 — novena y décima ronda: lo que encontraron las revisiones de la octava y de la novena (2026-09-29)
+
+Estado: **corregido el 29/09 en dos rondas, sin commitear. Las dos tuvieron
+después su revisión, de seis revisores cada una, y su `npm run check` a solas
+en verde: la novena, 229 archivos, 4741 pruebas y 12 omitidas; la décima, 229
+archivos, 4751 pruebas y 12 omitidas. Lo que encontró la revisión de la décima
+—dieciséis defectos, dos importantes— está SIN corregir (abajo). Nada visto en
+Electron, ninguna reescritura real hecha por un CLI y nada probado contra la
+pasarela ni contra la API de Z.AI.** Flujo `wf_8a121503-c1f`.
+
+**De dónde viene.** La octava ronda, commiteada en `f77efb6`, la revisaron
+ocho revisores (privacidad, resumen, razonamiento, bóveda, equivalencia,
+regresión, pantalla y documentación; `r3:*` del flujo `wf_db3de991-06e`), con
+`npm run check` a solas en verde sobre ella (228 archivos, 4716 pruebas y 12
+omitidas). Su diario lista ocho defectos importantes —dos de la medida del eco,
+uno de razonamiento, uno de equivalencia, uno de pantalla y tres de
+documentación— y veintiún menores. Los documentos decían hasta hoy que la
+octava no tenía revisión ni check.
+
+**Novena ronda**, tres frentes a la vez, cada defecto comprobado en el código
+antes de tocarlo (detalle en `D-105`, `D-107` y `D-108`, «Novena ronda»):
+
+- **Medida** (`recent-echo.ts`, `vault-recent-memories.ts`): la cifra principal
+  de `ecoRecientes` ya no depende del control; una entrada casa con una frase
+  solo si casa con todas sus raíces y con las que cuentan (`casa`); el resumen
+  se parte con `sentencesOf`. Cuatro pruebas nuevas que fallaban con el código
+  de `f77efb6` (4 de 16) y pasan con el cambio.
+- **Razonamiento** (`reasoning-control.ts`, `Config.tsx`, `providers.test.ts`):
+  la nota de GLM-5.2 ya no dice «No admite low»; la contradicción de Z.AI en
+  los GLM que se apagan queda escrita y la regla se queda, pendiente de
+  Daniel; `visible` se decide antes que `counted`. Las tres pruebas nuevas de
+  shared fallan sin el cambio.
+- **Enganche y pantalla** (`memory-relink.ts`, `handlers.ts`, `ipc.ts`,
+  `vault-character-link.ts`, `vault-recap-row.ts`, `Vault.tsx`, `Config.tsx` y
+  `Config.test.ts`, nuevo): `noteInheritedMemoryUsed`, `inheritedTravels`,
+  soltar el texto reescrito que ya no vale, `recheck`, `relinkStillInUse`, la
+  pista del proveedor HTTP y los textos. Las 17 pruebas nuevas o cambiadas
+  fallan con los archivos de `f77efb6`.
+
+No se sostuvieron, y queda escrito dónde: que una nacida reciba ahora la foto
+de perfil es lo correcto (`D-108`, punto 2); la recencia de `D-105` contada
+desde el enganche es una decisión, no un arreglo; y «la página de Z.AI no lo
+dice» de los GLM que se apagan vale para su guía de razonamiento, no para la
+página de cada modelo.
+
+**Décima ronda**: la revisión de la novena (seis revisores: medida,
+razonamiento, equivalencia, pantalla, regresión y privacidad) dejó trece
+defectos, tres importantes, y se corrigieron todos (detalle en `D-105` y
+`D-108`, «Décima ronda»). El apoyo del eco vuelve a las raíces que cuentan, y
+`frasesSinMedir` entra en el registro; `noteLink` y el borrado dejan
+`not-needed`, y pasa a pendiente solo el turno que usa lo heredado; una
+excluida suelta el texto; «Borrar su memoria» vuelve a quitar el texto antes
+que la sellada (`releaseRelinkBeforeForget`, `settleRelinkAfterForget`,
+`replaceRelinkFresh`); `inheritedUnnoted`; el turno fantasma de la vista
+previa; y la confirmación ya no promete «con esas cifras». Las pruebas nuevas
+se vieron fallar sin su arreglo, cada uno revertido por separado.
+
+**Lo que sigue abierto.** De la revisión de la décima, dieciséis defectos
+(detalle en «Lo que queda abierto» de `D-105`, `D-107` y `D-108`):
+
+- **[importante]** el control de `ecoRecientes` detecta menos solapamientos que
+  en `f77efb6` (`overlaps` con `casa`): una regresión de la medida;
+- **[importante]** una frase corta con un nombre que no se ignora sigue
+  fabricando blanqueos en `sinApoyoAqui` (no es regresión: el formato 1 casa
+  igual);
+- doce menores de código y de texto: la fila de otro enganche que el atajo
+  salta; «Sincronizar» y el estado terminal; la ficha retroactiva que viaja
+  por `D-105` sin reescribir; filas que la pantalla describe mal tras un
+  fallo; la salida `stale` sin CLI; «Soltar» fallido con la conversación en
+  `idle`; la ficha vacía en el borrado y en la fila; cifras prometidas que no
+  hay tras una negativa; `recap.json` ilegible en la vista previa; la pista
+  «si no tiene su propio ajuste»; la regla de DeepSeek sin fuente que nombre
+  sus modelos; y un nombre que solo abre frase;
+- dos menores de documentación —`raicesComunes` y `frasesSinMedir` en `D-105`,
+  y el orden del veredicto en `D-107` y `LA-055`—, **cerrados en esta
+  documentación**.
+
+Y de antes, también abiertos: de la revisión de la octava, los tres
+comentarios de `vault-lock-coordinator.ts` sobre el Horde y la pasada de
+reescritura con un cierre por Win+L ya aplazado (`D-106`), y
+`cortadasAlGuardar` contado antes de la salvaguarda (`D-105`); de quien
+corrigió la décima, las carreras del borrado sin prueba propia y el «desde
+cero» de «Borrar su memoria» con un índice detrás.
+
+**Esperan a Daniel:** la regla `glm` (lectura estricta del encabezado o la
+página de cada modelo, `D-107`); la recencia de `D-105` desde el enganche; las
+enganchadas de `a45953b` que se reescriben sin haber visto la confirmación
+(`D-108`); y commitear la novena y la décima.
+
+**Documentación (29/09).** Escrita una sola vez, desde los diarios de los dos
+flujos, sin tocar código: `DECISIONS.md` (`D-105` a `D-108`, sus líneas de
+Estado y lo que queda abierto), `CLAUDE.md` y `AGENTS.md` (la regla de lo
+heredado, el borrado, `erasingInFlight` por conversación y el orden del
+veredicto), `docs/ENGANCHE-DISENO.md` (la firma y los topes, sustituidos) y
+los archivos de continuidad, con `LA-058` nueva. Cierra los siete defectos de
+documentación de la revisión de la octava: el Estado de `D-106`,
+`MASTER-PLAN.md`, «no por una imagen» en `PROJECT-STATE.md`, la firma de
+`F33-IGUAL-001`, «Cuándo se dispara» de `D-108`, `erasingInFlight`, el diseño
+del enganche, la cabecera de `PROJECT-STATE.md` y `LA-052` sin `LA-049`.
+
+**Siguiente paso exacto:** una ronda que corrija los dos importantes de
+`ecoRecientes` —el del control primero, porque empeora lo que había en
+`f77efb6`— y los menores de código que se puedan, con su revisión y su `npm run
+check` a solas. Lo de Daniel puede empezar ya: `LA-049` y después `LA-058`;
+hasta ese arreglo, la comparación del control de `ecoRecientes` (`LA-056`,
+paso 4) no es fiable.
+
 ## REV-CUATRO-FRENTES-001 — octava ronda: lo que encontró la revisión de la séptima (2026-09-29)
 
-Estado: **corregido el 29/09, sin revisión de esta ronda, sin `npm run check`
-entero, sin `npm run build` y nada visto en pantalla.** Pasados: las pruebas de
-lo tocado y `npm run typecheck` (`TEST-RESULTS.md`).
+Estado: **corregido el 29/09 y commiteado en `f77efb6`. Después la revisaron
+ocho revisores, con `npm run check` a solas en verde (228 archivos, 4716
+pruebas y 12 omitidas); lo que encontraron lo cierran la novena y la décima
+ronda, arriba. Nada visto en pantalla.**
 
 Ocho revisores (equivalencia, razonamiento, resumen, bóveda, regresión,
 privacidad, pantalla y documentación) sobre la séptima, y un `npm run check` a
@@ -139,8 +245,8 @@ enganchada sigue sin avisar si no puede quitar un resto; las enganchadas con
 `a45953b` se reescriben tras el siguiente mensaje sin haber visto la
 confirmación nueva (lo decide Daniel; anotado en `D-108`).
 
-**Siguiente paso exacto:** la revisión de esta ronda y `npm run check` a solas;
-después `LA-052` a `LA-057`, de Daniel.
+**Siguiente paso exacto:** hecho —la revisión y el check—; siguieron la novena
+y la décima ronda, arriba.
 
 ## REV-CUATRO-FRENTES-001 — séptima ronda: lo que encontró la revisión de los cuatro frentes (2026-09-29)
 
@@ -170,6 +276,9 @@ Corregido:
    enganchada sin memoria sellada queda `pending`, y se reescribe la primera que
    se selle. La confirmación y «Lo que recuerda» dicen que mientras tanto viaja
    la ficha retroactiva. Queda la diferencia de la primera respuesta (`D-108`).
+   *(Sustituido en la novena y la décima ronda: la fila queda `not-needed` y pasa
+   a `pending` solo cuando un turno usa de verdad la ficha retroactiva o el
+   índice, y la pantalla dice si viaja.)*
 3. **[enganche] La confirmación prometía que los mensajes de antes dejaban de
    leerse**: ahora dice que pueden volver transcritos como recuerdos, aquí y en
    sus otras conversaciones.
@@ -213,9 +322,11 @@ ronda, arriba.
 
 ## F33-IGUAL-001 — una conversación enganchada, igual que una empezada con su personaje (2026-09-28/29)
 
-Estado: **implementado; revisado por ocho revisores con `npm run check` a solas
-en verde (4677), corregido en la séptima ronda —revisada, y su check cayó por
-tiempo en una prueba ajena— y en la octava, sin revisión ni check. Sin ninguna
+Estado: **implementado; revisado tras la construcción y tras cada ronda de
+arreglos —de la séptima a la décima—, cada vez con su `npm run check` a solas,
+en verde salvo el de la séptima, que cayó por tiempo en una prueba ajena. La
+octava está commiteada en `f77efb6`; la novena y la décima, sin commitear.
+Quedan abiertos los menores de la revisión de la décima (`D-108`). Sin ninguna
 reescritura real hecha por Claude o Codex y sin verse en pantalla.** Decisión:
 `D-108`. Se prueba con `LA-057`.
 
@@ -233,8 +344,9 @@ terminó otro el 29/09 conservando todo lo hecho.
 - **La foto de perfil** se copia al enganchar, y se reconoce con
   `isProfilePhotoOf` (arregla que cualquier imagen generada de ella contara como
   foto de perfil, también en las nacidas).
-- **La firma**: con dueño, todas las respuestas llevan su nombre (modifica
-  `D-103`).
+- **La firma**: en una enganchada, todas sus respuestas salvo las escritas con
+  la ficha de otro personaje; con dueño por turno, como en `a45953b` (modifica
+  `D-103`; octava ronda).
 - **Un único lector de memoria** (`effectiveSealed`): el turno, la sonda, el
   resumen de `D-105` y «Lo que recuerda».
 - **Los pendientes si el CLI se niega**: comprobado que no se quedan callados; se
@@ -246,16 +358,16 @@ terminó otro el 29/09 conservando todo lo hecho.
 - **Lo que no se puede igualar** y la confirmación dice: los últimos mensajes
   viajan literales y se escribieron sin la ficha.
 
-Siguiente paso exacto: `npm run check` **a solas** (con carga, pruebas de
-bóveda caen por tiempo; hoy `conversation-owner.test.ts` pasó de 20 s sola con
-la máquina cargada), y después `LA-057` con Daniel. Hasta verla, nada de esto
-está verificado (`D-093`).
+Siguiente paso exacto: el del bloque de la novena y la décima ronda, arriba, y
+`LA-057` con Daniel. Hasta verla, nada de esto está verificado (`D-093`).
 
 ## F33-RECUERDO-ENTERO-001 — la memoria entera de sus dos últimas conversaciones (2026-09-28)
 
-Estado: **implementado el 28/09; revisado por ocho revisores con `npm run
-check` a solas en verde (4677), corregido en la séptima ronda —revisada— y en la
-octava, sin revisión ni check. Sin verse en pantalla** (`TEST-RESULTS.md`).
+Estado: **implementado el 28/09; revisado tras la construcción y tras cada
+ronda de arreglos —de la séptima a la décima—, cada vez con su `npm run check`
+a solas (`TEST-RESULTS.md`). La medida `ecoRecientes` cambió en la novena y la
+décima, y la revisión de la décima dejó en ella dos defectos importantes, sin
+corregir (`D-105`). Sin verse en pantalla.**
 
 Daniel decidió que con «Pasarle la memoria de sus dos últimas conversaciones»
 le llegue la memoria entera de cada una, y solo la memoria, no los mensajes.
@@ -278,15 +390,16 @@ Diseño y refutación: flujo `wf_b1411ff7-0ef` (`disenar:resumen-entero`,
 - Textos de la casilla, la confirmación del enganche, soltar y «Memoria de lo ya
   hablado».
 
-**Siguiente paso exacto:** `npm run check` a solas junto con lo demás del 28/09;
-luego `LA-056`.
+**Siguiente paso exacto:** corregir los dos importantes de `ecoRecientes`
+(bloque de la novena y la décima ronda, arriba); luego `LA-056`.
 
 ## F34-RAZONAMIENTO-001 — el razonamiento se elige por modelo, y el registro dice si razonó (2026-09-28)
 
-Estado: **implementado el 28/09; revisado por ocho revisores con `npm run
-check` a solas en verde (4677), corregido en la séptima ronda —revisada— y en la
-octava, sin revisión ni check. Sin probar contra la pasarela real**
-(`TEST-RESULTS.md`).
+Estado: **implementado el 28/09; revisado tras la construcción y tras la
+séptima, la octava y la novena ronda, cada vez con su `npm run check` a solas
+(`TEST-RESULTS.md`); la revisión de la décima no dejó nada importante. La regla
+de los GLM que se apagan espera la decisión de Daniel (`D-107`). Sin probar
+contra la pasarela real.**
 
 Daniel lo aprobó **para probarlo**: «no estoy seguro de que pueda cambiarse el
 razonamiento de los modelos». Diseño y refutación: flujo `wf_b1411ff7-0ef`
@@ -304,13 +417,13 @@ refutación quedaron cerrados (ver `D-107` y `CHANGELOG-WORK.md`).
   lleva `reasoningVerdict` y `charsPerOutput` siempre.
 - Selector «Razonamiento» en Conexiones, junto a la temperatura.
 
-**Siguiente paso exacto:** `npm run check` a solas junto con lo demás del 28/09;
-luego `LA-055`.
+**Siguiente paso exacto:** `LA-055` (o el paso 4 de `LA-058`), de Daniel, y
+que Daniel decida la regla `glm`.
 
 ## REV-TRES-ENCARGOS-001 — revisión de los tres encargos del 25/09, y sus arreglos (2026-09-28)
 
-Estado: **seis rondas de arreglos el 28/09. La corrección hizo tres rondas de cinco revisores, una tras cada ronda de arreglos de la tercera a la quinta, y las tres pasaron `npm run check` a solas: 222 archivos y 4511, 4520 y 4531 pruebas (12 omitidas); la última quedó commiteada en `a45953b`. La sexta (bloque «Sexta ronda», abajo) solo con las pruebas de lo tocado, el typecheck y el lint de esos archivos; sin revisión.** (Hasta la sexta ronda esta línea decía «cuatro rondas» y que la cuarta no había pasado el check: estaba desfasada.) Sobre las dos primeras: **dos rondas de arreglos hechas el 28/09. `npm run check` en verde tras la segunda (220 archivos, 4489 pruebas en verde y 12 omitidas, 4501; salida 0); el verde de la primera ronda (4475) no se reprodujo: una prueba con un temporizador fijo fallaba con la suite entera. Ninguna de las dos rondas ha
-tenido revisión independiente, y nada se ha visto en pantalla.**
+Estado: **seis rondas de arreglos el 28/09. La corrección hizo tres rondas de cinco revisores, una tras cada ronda de arreglos de la tercera a la quinta, y las tres pasaron `npm run check` a solas: 222 archivos y 4511, 4520 y 4531 pruebas (12 omitidas); la última quedó commiteada en `a45953b`. La sexta (bloque «Sexta ronda», abajo) la revisaron después ocho revisores, junto con los tres frentes nuevos, con `npm run check` a solas en verde (228 archivos, 4677).** Sobre las dos primeras: **dos rondas de arreglos hechas el 28/09. `npm run check` en verde tras la segunda (220 archivos, 4489 pruebas en verde y 12 omitidas, 4501; salida 0); el verde de la primera ronda (4475) no se reprodujo: una prueba con un temporizador fijo fallaba con la suite entera. Las dos tuvieron después su
+revisión —la de la primera dejó la segunda, y siete revisores sobre las dos dejaron la tercera—, y nada se ha visto en pantalla.**
 
 **Qué pasó.** Un flujo construyó `SEG-BOVEDA-001` (`D-106`),
 `F33-ENGANCHE-LOCAL-001` con `F33-RECUERDO-001` (`D-103`, `D-105`) y
@@ -393,8 +506,8 @@ antes de tocarlos y los corrigió el 28/09.
 ### Segunda ronda del 28/09
 
 Otra ronda de revisores sobre lo anterior. Un agente comprobó cada defecto en el
-código antes de tocarlo; todos los importantes se sostenían. **Tampoco esta ronda
-ha tenido revisión independiente.**
+código antes de tocarlo; todos los importantes se sostenían. La revisaron
+después siete revisores, junto con la primera: de ahí la tercera ronda.
 
 Corregido, con prueba:
 
@@ -451,15 +564,16 @@ dura el turno.
 
 **Siguiente paso exacto:** una revisión independiente de las dos rondas de
 arreglos y de los tres encargos. Después, `LA-052`, `LA-053` y `LA-054`, de
-Daniel.
+Daniel. (Hecho después: siete revisores, y la tercera ronda.)
 
 ### Tercera ronda del 28/09 (main, shared y documentos)
 
 Siete revisores sobre las dos rondas anteriores. Este bloque es la parte de
 main, `packages/shared` y documentación; **la pantalla (`apps/desktop/src/renderer/`)
 la hizo otro agente a la vez**, registrada al final del bloque. Cada defecto se comprobó en
-el código antes de tocarlo. **Esta ronda tampoco ha tenido revisión
-independiente**, y nada se ha visto en pantalla.
+el código antes de tocarlo. La revisaron después cinco revisores, con `npm run
+check` a solas en verde (222 archivos, 4511); de ahí la cuarta ronda. Nada se
+ha visto en pantalla.
 
 Corregido, con prueba (las tres primeras comprobadas FALLANDO sin el arreglo):
 
@@ -698,7 +812,8 @@ commiteada en `a45953b`.
 (`core.autocrlf` lo normaliza al guardar en git).
 
 **Siguiente paso exacto:** `npm run check` a solas y la revisión de la sexta
-ronda; después, `LA-052`, `LA-053` y `LA-054`, de Daniel.
+ronda; después, `LA-052`, `LA-053` y `LA-054`, de Daniel. (Hecho después: ocho
+revisores y el check en verde, 4677; siguió la séptima ronda.)
 
 ## F33-PROMESAS-001 — las promesas, de vez en cuando (2026-09-25; corregido el 2026-09-28)
 

@@ -9,7 +9,7 @@
 // con una frase que viajo cuando ninguna de esas frases aparece en un turno de
 // esta conversacion. Si el tema salio aqui de verdad, no es blanqueo.
 //
-// Mismo comparador que los pendientes (`quoteStems` y `matchesNote`), para que
+// Mismo comparador que los pendientes (`quoteStems` y `matchesStems`), para que
 // las cifras se puedan leer con el mismo criterio que `ecoMemoria`. Ojo con el:
 // pide dos raices en comun y el 40 %, SALVO con una frase de una sola raiz, que
 // casa con una sola palabra. Por eso se cuentan aparte (`frasesDeUnaRaiz`).
@@ -34,10 +34,32 @@
 //
 // Y los nombres no cuentan (octava ronda): su nombre por la ficha y, como el
 // de Daniel no esta guardado, el nombre propio que sale en el 30 % de las
-// frases o mas (`raicesComunes`). Con ellos, dos frases cualesquiera que nombraran a los dos
-// casaban, y el control se vaciaba por «solapamientos» que no lo eran.
-import type { ConversationMemory, RecentPhrase, RecentPhraseField } from '@luxy/shared';
-import { matchesNote, matchesStems, quoteStems } from './relation.js';
+// frases o mas (`raicesComunes`). Con ellos, dos frases cualesquiera que
+// nombraran a los dos casaban, y el control se vaciaba por «solapamientos» que
+// no lo eran.
+//
+// Novena ronda, dos arreglos de eso mismo:
+//
+//   - los nombres de la cifra principal se buscan SOLO en las frases que
+//     viajaron. Se buscaban tambien en las del control, y la cifra que importa
+//     cambiaba segun hubiera tercera o no, y segun lo que dijera, aunque la
+//     tercera no viaja. El control usa su propia lista, de los dos lados;
+//   - quitar un nombre nunca hace casar lo que sin quitarlo no casaba (`casa`).
+//     El comparador pide min(2, n) raices: «Trabaja con Daniel» sin el nombre
+//     se quedaba en una y casaba con cualquier entrada que dijera «trabaja».
+//
+// Decima ronda: `casa` es el lado prudente SOLO para decir que una entrada
+// copia. Para el apoyo en los turnos de aqui va al reves (`supportedHere`), asi
+// que el apoyo mira solo las raices que cuentan. Por eso el formato 2 da como
+// mucho las coincidencias que daria el 1, pero no como mucho sus `sinApoyo`.
+// Y las frases que viajaron y no se pueden medir se cuentan (`frasesSinMedir`).
+import {
+  sentencesOf,
+  type ConversationMemory,
+  type RecentPhrase,
+  type RecentPhraseField,
+} from '@luxy/shared';
+import { MENTION_MIN_SHARED, matchesStems, quoteStems } from './relation.js';
 
 /** version de esta medida; el formato 1, sin campo, es el de la version corta */
 export const RECENT_ECHO_FORMAT = 2;
@@ -78,12 +100,24 @@ export interface RecentEcho {
   entradas: number;
   /** frases que viajaron */
   frases: number;
-  /** de ellas, las de una sola raiz: casan con una sola palabra en comun */
+  /**
+   * de ellas, las de una sola raiz: casan con una sola palabra en comun. Una
+   * que se queda en una raiz al quitarle un nombre no cuenta: ya no casa
+   */
   frasesDeUnaRaiz: number;
   /**
-   * raices que no cuentan para casar: el nombre del personaje y los nombres
-   * propios que salen en al menos el 30 % de las frases (el de Daniel, casi
-   * siempre). Solo la cifra, nunca cuales
+   * frases que viajaron y no se miden: se quedan en menos de min(2, n) raices
+   * que cuenten al quitar los nombres, o no tenian ninguna. Estan en `frases`
+   * y no pueden casar, asi que `conFrasesDeRecientes` no dice nada de ellas: una
+   * copia literal de un hecho corto con nombre sale a cero. Sin esta cifra, la
+   * medida aparentaba cubrir mas de lo que cubre
+   */
+  frasesSinMedir: number;
+  /**
+   * raices que no cuentan para casar en la medida principal: el nombre del
+   * personaje y los nombres propios que salen en al menos el 30 % de las frases
+   * que viajaron (el de Daniel, casi siempre). No depende del control. Solo la
+   * cifra, nunca cuales
    */
   raicesComunes: number;
   /** cuantas unidades casan con alguna frase que viajo */
@@ -99,29 +133,48 @@ export interface RecentEcho {
   control: RecentEchoControl | null;
 }
 
-/** frases de un resumen, por signos de final */
-function sentences(text: string): string[] {
-  return text
-    .split(/(?<=[.!?…])\s+/u)
-    .map((each) => each.trim())
-    .filter((each) => each.length > 0);
-}
-
 interface StemmedPhrase {
+  /** todas sus raices, nombres incluidos: lo que miraba el formato 1 */
+  all: string[];
+  /** las que cuentan: sin las raices que se ignoran */
   stems: string[];
   field: RecentPhraseField;
 }
 
-function stemmed(
-  phrases: readonly RecentPhrase[],
-  ignored: ReadonlySet<string> = new Set(),
-): StemmedPhrase[] {
+/**
+ * las frases con sus raices, sin las que ya no pueden casar.
+ *
+ * Una frase que tenia dos raices o mas y se queda con menos de dos al quitar
+ * los nombres no puede casar por lo que dice —`casa` le pide dos que cuenten—,
+ * asi que se deja fuera, como antes las que se quedaban sin ninguna. Y como
+ * sale de la lista, tampoco cuenta en `frasesDeUnaRaiz`: esas son solo las que
+ * de verdad casan con una palabra. Las que se dejan fuera van a `frasesSinMedir`.
+ */
+function stemmed(phrases: readonly RecentPhrase[], ignored: ReadonlySet<string>): StemmedPhrase[] {
   return phrases
-    .map((phrase) => ({
-      stems: quoteStems(phrase.text).filter((stem) => !ignored.has(stem)),
-      field: phrase.field,
-    }))
-    .filter((phrase) => phrase.stems.length > 0);
+    .map((phrase) => {
+      const all = quoteStems(phrase.text);
+      return { all, stems: all.filter((stem) => !ignored.has(stem)), field: phrase.field };
+    })
+    .filter(
+      (phrase) =>
+        phrase.stems.length > 0 &&
+        phrase.stems.length >= Math.min(MENTION_MIN_SHARED, phrase.all.length),
+    );
+}
+
+/**
+ * si un texto, con sus raices ya calculadas, habla de la frase.
+ *
+ * Tiene que casar con las raices que cuentan Y con todas. Solo con las que
+ * cuentan, quitar un nombre podia hacer casar de mas por dos caminos: la frase
+ * pasaba a pedir una raiz en comun en vez de dos, o el 40 % se calculaba sobre
+ * menos raices. Con las dos condiciones, quitar nombres solo puede hacer que
+ * casen MENOS que con el comparador sin quitar nada, el del formato 1. Es para
+ * decir que una entrada casa con una frase, no para el apoyo aqui.
+ */
+function casa(textStems: ReadonlySet<string>, phrase: StemmedPhrase): boolean {
+  return matchesStems(textStems, phrase.all) && matchesStems(textStems, phrase.stems);
 }
 
 /**
@@ -135,8 +188,10 @@ function stemmed(
  * esta guardado en ningun sitio, asi que se quita el NOMBRE PROPIO —una palabra
  * con mayuscula en mitad de una frase— que sale en al menos esa parte de las
  * frases. Un sitio nombrado de pasada («Madrid» en una de veinte) no llega y
- * sigue contando. Quitar una raiz solo puede hacer que casen MENOS: es el lado
- * prudente. Los dos numeros son un criterio, no una medida.
+ * sigue contando. Para casar, quitar una raiz solo puede hacer que casen MENOS
+ * porque `casa` pide tambien el comparador sin quitar nada; para el apoyo aqui
+ * se miran solo las raices que cuentan (`supportedHere`). Los dos numeros son
+ * un criterio, no una medida.
  */
 export const RECENT_ECHO_COMMON_MIN_PHRASES = 4;
 export const RECENT_ECHO_COMMON_SHARE = 0.3;
@@ -190,23 +245,35 @@ function evenly<T>(items: readonly T[], k: number): T[] {
   return out;
 }
 
+/**
+ * si algun turno de aqui habla de la frase.
+ *
+ * Aqui NO vale `casa`: pedir tambien las raices con nombres es prudente para
+ * decir que una entrada copia (casan menos), pero en el apoyo va al reves. Los
+ * turnos de aqui son dialogo («pintamos la verja») y casi nunca nombran a los
+ * dos; con los nombres en el 40 %, un turno que hablaba del tema de verdad
+ * dejaba de respaldar la frase y la entrada pasaba a `sinApoyoAqui`: un
+ * blanqueo que no existe. Solo con las raices que cuentan, que `stemmed` ya
+ * deja en min(2, n) o mas, no se vuelve a casar con una sola palabra.
+ */
+function supportedHere(phrase: StemmedPhrase, turns: readonly ReadonlySet<string>[]): boolean {
+  return turns.some((turn) => matchesStems(turn, phrase.stems));
+}
+
 function countEcho(
-  units: readonly string[],
+  units: readonly ReadonlySet<string>[],
   phrases: readonly StemmedPhrase[],
-  turns: readonly { text: string }[],
+  turns: readonly ReadonlySet<string>[],
 ): EchoCount & { matchedBy: StemmedPhrase[][] } {
   let con = 0;
   let sinApoyo = 0;
   const matchedBy: StemmedPhrase[][] = [];
   for (const unit of units) {
-    const matched = phrases.filter((phrase) => matchesNote(unit, phrase.stems));
+    const matched = phrases.filter((phrase) => casa(unit, phrase));
     matchedBy.push(matched);
     if (matched.length === 0) continue;
     con += 1;
-    const supported = matched.some((phrase) =>
-      turns.some((turn) => matchesNote(turn.text, phrase.stems)),
-    );
-    if (!supported) sinApoyo += 1;
+    if (!matched.some((phrase) => supportedHere(phrase, turns))) sinApoyo += 1;
   }
   return { con, sinApoyo, matchedBy };
 }
@@ -224,21 +291,20 @@ export function measureRecentEcho(input: {
   ignoreWords?: readonly string[];
 }): RecentEcho {
   const units = [
-    ...sentences(input.memory.summary),
+    ...sentencesOf(input.memory.summary),
     ...input.memory.facts,
     ...input.memory.decisions,
     ...input.memory.plan,
     ...input.memory.openQuestions,
     ...input.memory.lessons,
-  ];
-  // lo que sale en casi todas se mira en las dos listas juntas: si se decidiera
-  // por separado, una raiz podria contar en un lado y no en el otro
-  const ignored = ubiquitousStems(
-    [input.phrases, input.control ?? []],
-    input.ignoreWords ?? [],
-  );
+  ].map((unit) => new Set(quoteStems(unit)));
+  const turns = input.turns.map((turn) => new Set(quoteStems(turn.text)));
+  const ignoreWords = input.ignoreWords ?? [];
+  // la cifra principal solo mira lo que viajo: con el control dentro, cambiaba
+  // segun hubiera tercera y segun lo que dijera, y la tercera no viaja
+  const ignored = ubiquitousStems([input.phrases], ignoreWords);
   const phrases = stemmed(input.phrases, ignored);
-  const main = countEcho(units, phrases, input.turns);
+  const main = countEcho(units, phrases, turns);
 
   const porCampo = {
     resumen: { frases: 0, con: 0, sinApoyo: 0 },
@@ -253,28 +319,33 @@ export function measureRecentEcho(input: {
       porCampo[field].con += 1;
       const supported = matched
         .filter((phrase) => phrase.field === field)
-        .some((phrase) => input.turns.some((turn) => matchesNote(turn.text, phrase.stems)));
+        .some((phrase) => supportedHere(phrase, turns));
       if (!supported) porCampo[field].sinApoyo += 1;
     }
   });
 
   let control: RecentEchoControl | null = null;
   if (input.control !== undefined && input.control !== null) {
-    const all = stemmed(input.control, ignored);
+    // aqui los nombres si se buscan en las dos listas juntas: si se decidiera
+    // por separado, una raiz podria contar en un lado y no en el otro. Por eso
+    // el lado enviado del control se vuelve a montar con esta lista
+    const shared = ubiquitousStems([input.phrases, input.control], ignoreWords);
+    const sent = stemmed(input.phrases, shared);
+    const all = stemmed(input.control, shared);
     // una frase del control que habla de una que viajo, o al reves, viajo de
     // hecho: por la memoria de otra que la copio. Y el mismo solapamiento se
     // quita tambien del lado enviado, o solo contaria en uno
     const overlaps = (a: StemmedPhrase, b: StemmedPhrase): boolean =>
-      matchesStems(new Set(a.stems), b.stems) || matchesStems(new Set(b.stems), a.stems);
-    const clean = all.filter((candidate) => !phrases.some((sent) => overlaps(sent, candidate)));
-    const sentClean = phrases.filter((sent) => !all.some((candidate) => overlaps(sent, candidate)));
+      casa(new Set(a.all), b) || casa(new Set(b.all), a);
+    const clean = all.filter((candidate) => !sent.some((each) => overlaps(each, candidate)));
+    const sentClean = sent.filter((each) => !all.some((candidate) => overlaps(each, candidate)));
     const igualadas = Math.min(clean.length, sentClean.length);
-    const enviadas = countEcho(units, evenly(sentClean, igualadas), input.turns);
-    const delControl = countEcho(units, evenly(clean, igualadas), input.turns);
+    const enviadas = countEcho(units, evenly(sentClean, igualadas), turns);
+    const delControl = countEcho(units, evenly(clean, igualadas), turns);
     control = {
       frases: clean.length,
       excluidas: all.length - clean.length,
-      excluidasEnviadas: phrases.length - sentClean.length,
+      excluidasEnviadas: sent.length - sentClean.length,
       igualadas,
       enviadas: { con: enviadas.con, sinApoyo: enviadas.sinApoyo },
       control: { con: delControl.con, sinApoyo: delControl.sinApoyo },
@@ -286,6 +357,7 @@ export function measureRecentEcho(input: {
     entradas: units.length,
     frases: input.phrases.length,
     frasesDeUnaRaiz: phrases.filter((phrase) => phrase.stems.length === 1).length,
+    frasesSinMedir: input.phrases.length - phrases.length,
     raicesComunes: ignored.size,
     conFrasesDeRecientes: main.con,
     sinApoyoAqui: main.sinApoyo,

@@ -1,5 +1,82 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-09-29 — Claude — `REV-CUATRO-FRENTES-001`: la documentación de la novena y la décima ronda, escrita una sola vez
+
+- Estado anterior: `f77efb6` (la octava ronda) con `npm run check` a solas en
+  verde (4716) y, sin commitear, la novena y la décima ronda de código. Los
+  documentos se habían ido parcheando ronda a ronda y se contradecían sobre qué
+  estaba revisado: tres de los ocho defectos importantes que el diario de la
+  revisión de la octava (`r3:*` de `wf_db3de991-06e`) lista eran eso, y decían
+  que la octava no tenía revisión ni check.
+- Objetivo: una sola versión, escrita desde los diarios de los dos flujos
+  (`wf_db3de991-06e` y `wf_8a121503-c1f`), de qué se hizo, qué se revisó, con
+  qué `npm run check` y qué queda abierto. Sin tocar código, sin commit, sin
+  push.
+- Archivos: `DECISIONS.md` (líneas de Estado de `D-105` a `D-108`; novena y
+  décima ronda y «Lo que queda abierto» en `D-105`, `D-106`, `D-107` y `D-108`;
+  el orden del veredicto y la tabla de GLM y DeepSeek en `D-107`; la firma, los
+  estados, «Cuándo se dispara», «El turno», «Borrar» y el registro en `D-108`),
+  `CLAUDE.md` y `AGENTS.md` (la misma redacción: lo heredado pasa a pendiente
+  solo cuando un turno lo usa, el borrado quita la reescrita antes,
+  `erasingInFlight` por conversación y el orden del veredicto),
+  `docs/ENGANCHE-DISENO.md` (la firma y los topes, marcados como sustituidos),
+  `CURRENT-TASK.md` (bloque nuevo arriba, índice, estados de los tres frentes y
+  las rondas viejas que decían «sin revisión»), `PROJECT-STATE.md`,
+  `MASTER-PLAN.md` (el bloque que se contradecía, reescrito entero),
+  `TEST-RESULTS.md` (los tres checks a solas y las pruebas de lo tocado), este
+  archivo y `LOCAL-ACTIONS.md` (`LA-052` pide antes `LA-049`, `LA-055` con el
+  orden del veredicto, `LA-057` con los textos nuevos y `LA-058`, nueva).
+- Cierra los siete defectos de documentación de la revisión de la octava y los
+  dos de la revisión de la décima (`raicesComunes` y `frasesSinMedir` en
+  `D-105`; el orden del veredicto en `D-107` y `LA-055`).
+- Finales de línea: todos los documentos tocados siguen en CRLF, comprobado por
+  bytes; las sustituciones se hicieron con un script que normaliza y vuelve a
+  CRLF (`scratchpad/apply.py`), porque la herramienta de edición no casa texto
+  de varias líneas en archivos CRLF.
+- Resultado: `packages/shared/src/docs.test.ts` (ver `TEST-RESULTS.md`). No se ha
+  ejecutado `npm run check` entero después: va a solas al final.
+- Siguiente paso: una ronda que corrija los dos importantes de `ecoRecientes`
+  (`CURRENT-TASK.md`, bloque de arriba); y de Daniel, `LA-049` y `LA-058`.
+
+### 2026-09-29 — Claude — `REV-CUATRO-FRENTES-001`: décima ronda, lo que encontró la revisión de la novena
+
+- Estado anterior: la novena ronda sin commitear, revisada por seis revisores
+  (medida, razonamiento, equivalencia, pantalla, regresión y privacidad):
+  trece defectos, tres importantes. Su `npm run check` a solas: salida 0, 229
+  archivos, 4741 en verde y 12 omitidas.
+- Archivos: `apps/desktop/src/main/vault/recent-echo.ts` (`supportedHere` con
+  las raíces que cuentan, `frasesSinMedir`), `memory-relink.ts` (`noteLink` con
+  `not-needed`, `noteInheritedMemoryUsed` generalizado, `inheritedUnnoted`,
+  soltar antes de `excluded`), `apps/desktop/src/main/ipc/handlers.ts`
+  (`releaseRelinkBeforeForget`, `settleRelinkAfterForget`, `replaceRelinkFresh`,
+  el turno fantasma de `inheritedTravels`, comentarios),
+  `apps/desktop/src/renderer/vault-recap-row.ts` y `vault-character-link.ts`
+  (las cifras de `lossy` y `vague`, sin «con esas cifras»), y sus pruebas.
+- Cada prueba nueva se vio fallar con su arreglo revertido por separado.
+- Resultado: revisada por otros seis revisores, con `npm run check` a solas en
+  verde (229 archivos, 4751 y 12 omitidas). Dejaron dieciséis defectos, dos
+  importantes, **sin corregir** (`CURRENT-TASK.md`).
+
+### 2026-09-29 — Claude — `REV-CUATRO-FRENTES-001`: novena ronda, lo que encontró la revisión de la octava
+
+- Estado anterior: `f77efb6`, la octava ronda, revisada por ocho revisores con
+  `npm run check` a solas en verde (228 archivos, 4716 y 12 omitidas). Su diario
+  lista ocho defectos importantes y veintiún menores.
+- Tres agentes a la vez, cada defecto comprobado en el código antes de tocarlo:
+  - medida: `recent-echo.ts`, `recent-echo.test.ts` y
+    `packages/shared/src/vault-recent-memories.ts` (`sentencesOf` exportada);
+  - razonamiento: `packages/shared/src/reasoning-control.ts` y su prueba,
+    `apps/agent/src/providers/providers.test.ts` y la pista de `Config.tsx`;
+  - enganche y pantalla: `memory-relink.ts`, `handlers.ts`, `ipc.ts`,
+    `vault-character-link.ts`, `vault-recap-row.ts`, `Vault.tsx`, `Config.tsx`,
+    `Config.test.ts` (nuevo) y sus pruebas.
+- No se sostuvieron: la foto de perfil en una nacida (es lo correcto), la
+  recencia de `D-105` desde el enganche (decisión) y «la página de Z.AI no lo
+  dice» (vale para su guía, no para la página de cada modelo).
+- Resultado: revisada por seis revisores, con `npm run check` a solas en verde
+  (229 archivos, 4741 y 12 omitidas); lo que encontraron lo corrige la décima.
+  El detalle de las pruebas, en `TEST-RESULTS.md`.
+
 ### 2026-09-29 — Claude — `REV-CUATRO-FRENTES-001`: octava ronda, lo que encontró la revisión de la séptima
 
 - Estado anterior: la séptima ronda sin commitear. Ocho revisores
@@ -39,8 +116,10 @@
   a sus otras conversaciones (ahora sí, apuntándola antes) y firmaba todas las
   respuestas con dueño (ahora, las de dueño por turno como en `a45953b`).
 - Resultado: ver `TEST-RESULTS.md`. **Sin `npm run check` entero, sin revisión y
-  nada visto en Electron.**
-- Siguiente paso: la revisión de esta ronda y `npm run check` a solas.
+  nada visto en Electron** entonces; después, commiteada en `f77efb6`, la
+  revisaron ocho revisores con el check a solas en verde (4716).
+- Siguiente paso: la revisión de esta ronda y `npm run check` a solas (hecho;
+  siguió la novena ronda, arriba).
 
 ### 2026-09-29 — Claude — `REV-CUATRO-FRENTES-001`: séptima ronda, lo que encontró la revisión de los cuatro frentes
 
@@ -238,7 +317,8 @@
   no leer las ramas sin flujo, la expresión de GLM antigua, el refine sin el
   razonamiento); las siete fallan.
 - Resultado: ver `TEST-RESULTS.md`. **Sin `npm run check` entero, sin revisión y
-  sin probar contra la pasarela.**
+  sin probar contra la pasarela** entonces; después lo revisaron ocho
+  revisores, con el check a solas en verde (4677).
 - Siguiente paso: `npm run check` a solas; luego `LA-055`.
 
 ### 2026-09-28 — Claude — `REV-TRES-ENCARGOS-001`, sexta ronda: Win+L espera la imagen del turno, la verdad de la verificación y los menores de «ya salió»

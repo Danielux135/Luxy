@@ -56,10 +56,41 @@ describe('razonamiento: que se ofrece a cada modelo', () => {
     }
   });
 
-  it('GLM-5.2 se apaga o va a high; low no existe en su documentacion', () => {
+  it('GLM-5.2 se apaga o va a high; low no se ofrece porque es high', () => {
     expect(reasoningOptionsFor('glm-5.2', PASARELA)).toEqual(['off', 'high']);
     expect(reasoningOptionsFor('glm-5', PASARELA)).toEqual(['off']);
     expect(reasoningOptionsFor('glm-4.6', PASARELA)).toEqual(['off']);
+  });
+
+  it('la nota de GLM-5.2 no dice que falte «low»: Z.AI lo acepta y lo trata como high', () => {
+    // la documentacion dice «`low` and `medium` will be mapped to `high`». No se
+    // ofrece porque prometeria menos razonamiento del que da, pero la pantalla
+    // no puede afirmar que no lo admite (novena ronda)
+    const nota = reasoningNoteFor('glm-5.2', PASARELA) ?? '';
+    expect(nota).not.toContain('No admite');
+    expect(nota).toContain('igual que «high»');
+    expect(reasoningRequestFields('glm-5.2', PASARELA, 'low')).toEqual({});
+    expect(reasoningRequestFields('glm-5.2', PASARELA, 'off')).toEqual({
+      thinking: { type: 'disabled' },
+    });
+  });
+
+  it('los GLM que se apagan avisan de que la guia de Z.AI se contradice', () => {
+    // la pagina de cada modelo admite `disabled`; la guia de razonamiento solo
+    // lo nombra para GLM-5.2. La nota no puede prometer que funciona sin mas
+    for (const model of ['glm-5.1', 'glm-5', 'glm-4.6', 'glm-4.5']) {
+      expect(reasoningOptionsFor(model, PASARELA), model).toEqual(['off']);
+      expect(reasoningRequestFields(model, PASARELA, 'off'), model).toEqual({
+        thinking: { type: 'disabled' },
+      });
+      const nota = reasoningNoteFor(model, PASARELA) ?? '';
+      expect(nota, model).toContain('solo lo nombra para GLM-5.2');
+      expect(nota, model).toContain('«Lo que traiga el modelo»');
+    }
+    // y ninguno pide un esfuerzo: `reasoning_effort` es de la 5.2 en adelante
+    for (const mode of ['low', 'high'] as const) {
+      expect(reasoningRequestFields('glm-5.1', PASARELA, mode)).toEqual({});
+    }
   });
 
   it('kimi-k3 razona siempre: solo bajar, sin mandar `thinking`', () => {
@@ -310,6 +341,25 @@ describe('razonamiento: veredicto por el cociente', () => {
         reasoningTagChars: 2000,
       }).reasoningVerdict,
     ).toBe('visible');
+  });
+
+  it('razono y se ve no sale igual que razono y la pasarela no lo deja pasar', () => {
+    // con el recuento decidido primero, los dos salian `counted` y el veredicto
+    // no decia lo que `D-107` quiere saber de la pasarela (novena ronda)
+    const declarado = {
+      ...base,
+      outputTokens: 1000,
+      textChars: 3300,
+      reasoningTokensReported: 400,
+    };
+    expect(classifyReasoningEvidence({ ...declarado, reasoningChars: 1200 })).toEqual({
+      reasoningVerdict: 'visible',
+      charsPerOutput: 3.3,
+    });
+    const conEtiquetas = classifyReasoningEvidence({ ...declarado, reasoningTagChars: 900 });
+    expect(conEtiquetas.reasoningVerdict).toBe('visible');
+    // declarado y sin nada que se vea: razono sin enseñarlo, y no es deduccion
+    expect(classifyReasoningEvidence(declarado).reasoningVerdict).toBe('counted');
   });
 
   it('sin consumo final o sin tokens no hay contra que medir', () => {

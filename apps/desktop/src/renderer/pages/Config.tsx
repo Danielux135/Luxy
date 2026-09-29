@@ -6,6 +6,7 @@ import {
   REASONING_MODE_LABELS,
   reasoningNoteFor,
   reasoningOptionsFor,
+  type ReasoningMode,
   buildCatalogReport,
   buildDefaultCatalog,
   connectionProfileSchema,
@@ -813,6 +814,41 @@ function defaultProject(): NonNullable<StoredAgentConfig['projects']>[string] {
  * los de un proveedor HTTP: vacio = no se envia.
  */
 /**
+ * la pista del selector de razonamiento, aparte para poder probarla.
+ *
+ * `providerWide`: en el formulario del proveedor HTTP el valor va al nivel
+ * superior, y `samplingFor` lo aplica a cualquier modelo que pida la peticion
+ * y no tenga su propio ajuste. Las opciones salen del modelo del formulario, y
+ * sin decirlo parecia un ajuste solo de ese modelo (`D-093`)
+ */
+export function reasoningFieldHint(input: {
+  options: readonly ReasoningMode[];
+  note: string | null;
+  providerWide: boolean;
+}): string {
+  const alcance = input.providerWide
+    ? 'Es del proveedor, no solo de este modelo: viaja también con cualquier otro modelo suyo ' +
+      'que elijas en una conversación, si no tiene su propio ajuste y admite este valor; a los ' +
+      'que no lo admiten no se les envía nada. Las opciones de aquí son las del modelo de arriba. '
+    : '';
+  // la seccion se llama «Registros»: «Sistema» no existe en la barra lateral, y
+  // es el unico sitio donde Daniel puede comprobar si el ajuste llega (LA-055).
+  // Los seis veredictos, y «hidden» como lo que es, una deduccion (`D-093`)
+  return input.options.length === 0
+    ? 'Luxy no sabe cómo pedírselo a este modelo: no enviará nada. Sólo se ofrece donde la ' +
+        'documentación del modelo dice qué valores admite.'
+    : // mas corta y con los pasos: Registros solo carga las ultimas lineas, asi
+      // que hay que mirarlo nada mas enviar (octava ronda). Los veredictos
+      // vienen en ingles porque asi salen en el registro
+      `${alcance}${input.note ?? ''} No se sabe si tu pasarela deja pasar este ajuste. Para saberlo: envía un ` +
+        'mensaje, ve a Registros, pulsa «Actualizar» y busca «llamada al proveedor». Si ' +
+        'reasoningSent dice not_sent, no se envió nada. reasoningVerdict dice qué se le notó: ' +
+        'visible, razonó y se ve; counted, el proveedor dice que razonó sin enseñarlo (cuánto, en ' +
+        'reasoningTokensReported); hidden, probablemente razonó sin enseñarlo; not_seen, no se ' +
+        'le notó; unclear o no_data, no se puede decir.';
+}
+
+/**
  * el selector de razonamiento de un modelo (D-107), junto a la temperatura.
  *
  * Solo ofrece los valores que la documentacion de ESE modelo admite, y la
@@ -828,31 +864,25 @@ function ReasoningField({
   baseUrl,
   value,
   onChange,
+  providerWide = false,
 }: {
   model: string;
   baseUrl: string;
   value: ReasoningModeDraft;
   onChange: (next: ReasoningModeDraft) => void;
+  /**
+   * el valor se guarda en el nivel superior del proveedor HTTP, no en la
+   * entrada de ese modelo: `samplingFor` lo aplica a CUALQUIER modelo que pida
+   * la peticion y no tenga su propio ajuste. Las opciones salen del modelo del
+   * formulario, y sin decirlo parecia un ajuste solo de ese modelo
+   */
+  providerWide?: boolean;
 }): JSX.Element {
   const host = hostOfBaseUrl(baseUrl);
   const options = reasoningOptionsFor(model.trim(), host);
   const note = reasoningNoteFor(model.trim(), host);
   const huerfano = value !== '' && !options.includes(value);
-  // la seccion se llama «Registros»: «Sistema» no existe en la barra lateral, y
-  // es el unico sitio donde Daniel puede comprobar si el ajuste llega (LA-055).
-  // Los seis veredictos, y «hidden» como lo que es, una deduccion (`D-093`)
-  const hint =
-    options.length === 0
-      ? 'Luxy no sabe cómo pedírselo a este modelo: no enviará nada. Sólo se ofrece donde la ' +
-        'documentación del modelo dice qué valores admite.'
-      : // mas corta y con los pasos: Registros solo carga las ultimas lineas, asi
-        // que hay que mirarlo nada mas enviar (octava ronda). Los veredictos
-        // vienen en ingles porque asi salen en el registro
-        `${note ?? ''} No se sabe si tu pasarela deja pasar este ajuste. Para saberlo: envía un ` +
-        'mensaje, ve a Registros, pulsa «Actualizar» y busca «llamada al proveedor». Si ' +
-        'reasoningSent dice not_sent, no se envió nada. reasoningVerdict dice qué se le notó: ' +
-        'visible o counted, razonó; hidden, probablemente razonó sin enseñarlo; not_seen, no se ' +
-        'le notó; unclear o no_data, no se puede decir.';
+  const hint = reasoningFieldHint({ options, note, providerWide });
   return (
     <Field
       label="Razonamiento"
@@ -1579,6 +1609,7 @@ export function ConnectionsPage({
             baseUrl={providerDraft.baseUrl}
             value={providerDraft.reasoningMode}
             onChange={(next) => setProviderDraft({ ...providerDraft, reasoningMode: next })}
+            providerWide
           />
           <div className="row">
             <Field

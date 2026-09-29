@@ -521,16 +521,23 @@ export function describeRelink(
     case 'not-needed':
       return null;
     case 'pending':
-      // sin memoria propia: lo que viaja es su ficha retroactiva o el indice,
-      // que tampoco la llevaban, y no hay nada que reescribir hasta que se
-      // selle la primera. Sin boton: pulsarlo no tendria sobre que trabajar
+      // sin memoria propia: lo que puede viajar es su ficha retroactiva o el
+      // indice, que tampoco la llevaban, y no hay nada que reescribir hasta que
+      // se selle la primera. Sin boton: pulsarlo no tendria sobre que trabajar.
+      //
+      // «puede»: la ficha retroactiva solo viaja aprobada y al dia con los
+      // ultimos mensajes (`chooseConversationMemory`), y esto afirmaba que le
+      // llegaba sin condiciones (`D-093`). La fila no sabe si lo esta; la
+      // suya, justo al lado, si lo dice
       if (!relink.hasMemory) {
+        const puede =
+          'Aquí todavía no tiene memoria propia. Lo que puede llegarle de esta conversación es el índice de sus escenas o su ficha retroactiva, esta solo si está aprobada y al día con los últimos mensajes, y los dos se escribieron sin su ficha.';
         return {
           ...base,
           tone: 'idle',
           text: excluded
-            ? 'Aquí todavía no tiene memoria propia: lo que le llega es su ficha retroactiva o el índice de sus escenas, escritos sin su ficha. La conversación está fuera del trabajo de fondo, así que no se va a reescribir.'
-            : 'Aquí todavía no tiene memoria propia: lo que le llega es su ficha retroactiva o el índice de sus escenas, escritos sin su ficha. Cuando una respuesta suya aquí guarde memoria, esa se reescribirá con su ficha en segundo plano.',
+            ? `${puede} La conversación está fuera del trabajo de fondo, así que no se va a reescribir.`
+            : `${puede} Cuando una respuesta suya aquí guarde memoria, esa se reescribirá con su ficha en segundo plano.`,
         };
       }
       if (excluded) {
@@ -563,9 +570,15 @@ export function describeRelink(
       return {
         ...base,
         tone: 'ok',
+        // excluida no viaja a sus otras conversaciones (`D-105` se las salta):
+        // decirlo era prometer un viaje que no ocurre (`D-093`)
         text: `Reescrita con su ficha por ${quien}${
           relink.drift === null ? '' : `: ${driftWords(relink.drift)}`
-        }. Es la que viaja desde tu próximo mensaje, aquí o, si tiene encendida «Pasarle la memoria de sus dos últimas conversaciones», en sus otras conversaciones; hasta que un mensaje aquí guarde memoria nueva puedes volver a la de antes.`,
+        }. ${
+          excluded
+            ? 'Es la que viaja desde tu próximo mensaje aquí; a sus otras conversaciones no, porque esta está fuera de lo que recuerda'
+            : 'Es la que viaja desde tu próximo mensaje, aquí o, si tiene encendida «Pasarle la memoria de sus dos últimas conversaciones», en sus otras conversaciones'
+        }; hasta que un mensaje aquí guarde memoria nueva puedes volver a la de antes.`,
         canKeepOld: true,
         canReadPrevious: relink.previousBlock.length > 0,
       };
@@ -591,19 +604,43 @@ export function describeRelink(
         canRetry: !excluded,
       };
     case 'failed':
-      return { ...base, tone: 'warn', text: failureText(relink.failure, quien), canRetry: !excluded };
+      return {
+        ...base,
+        tone: 'warn',
+        text: failureText(relink.failure, quien, excluded, relink.drift),
+        canRetry: !excluded,
+      };
   }
 }
 
-function failureText(failure: MemoryRelinkFailure | null, quien: string): string {
+/**
+ * excluida no hay boton ni pasada que lo intente (`relinkOne` devuelve
+ * `excluded`): ofrecer «pedírselo otra vez» o el otro CLI eran dos salidas que
+ * no existian (`D-093`).
+ *
+ * Lo que la guarda rechazo va con sus cifras: la confirmacion del enganche
+ * promete que aqui se ve cuantas entradas dejo igual, corrigio, quito o añadio
+ * tambien si no se aplico, y la fila solo lo decia de una aplicada (decima
+ * ronda). Sin cifras guardadas, la frase de siempre.
+ */
+function failureText(
+  failure: MemoryRelinkFailure | null,
+  quien: string,
+  excluded: boolean,
+  drift: RelinkRowView['drift'],
+): string {
   const sigue = 'sigue valiendo la de antes, escrita sin su ficha.';
+  const salida = excluded
+    ? ' La conversación está fuera del trabajo de fondo, así que no se vuelve a intentar.'
+    : ' Puedes pedírselo otra vez o probar con el otro en «Quién hace el trabajo de fondo».';
+  const cifras = drift === null ? '' : ` (${driftWords(drift)})`;
   switch (failure) {
     case 'refused':
-      return `${quien} no quiso reescribirla con su ficha, así que ${sigue} Puedes pedírselo otra vez o probar con el otro en «Quién hace el trabajo de fondo».`;
+      return `${quien} no quiso reescribirla con su ficha, así que ${sigue}${salida}`;
     case 'lossy':
-      return `La reescritura con su ficha quitaba o recortaba demasiado y no se ha aplicado: ${sigue}`;
+      return `La reescritura con su ficha quitaba o recortaba demasiado${cifras} y no se ha aplicado: ${sigue}`;
     case 'vague':
-      return `La reescritura con su ficha ya no decía qué pasó y no se ha aplicado: ${sigue}`;
+      return `La reescritura con su ficha ya no decía qué pasó${cifras} y no se ha aplicado: ${sigue}`;
     case 'invalid':
     case null:
       return `La reescritura con su ficha no salió bien y no se ha aplicado: ${sigue}`;

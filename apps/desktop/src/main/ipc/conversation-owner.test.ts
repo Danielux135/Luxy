@@ -379,6 +379,7 @@ describe('enganchar', () => {
         reviewCalls: 1,
         profilePhotoStays: false,
         inheritedMemory: false,
+        inheritedTravels: false,
       },
     });
     expect((await montaje.store.owner(montaje.vault, HUERFANA)).characterId).toBeNull();

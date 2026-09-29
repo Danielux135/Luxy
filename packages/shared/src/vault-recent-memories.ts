@@ -189,9 +189,11 @@ const ABBREVIATIONS = new Set(['sr', 'sra', 'srta', 'dr', 'dra', 'd', 'dña', 'u
  * Un signo solo cierra frase si detras viene un espacio o se acaba el texto:
  * «3.30» o «1.200» partian en dos, y «Sr. Pérez» dejaba «Sr.» como una frase
  * enviada que contaba en `ecoRecientes` (octava ronda). Solo sirve para medir:
- * el bloque que se envia no pasa por aqui.
+ * el bloque que se envia no pasa por aqui. `ecoRecientes` parte con ella
+ * tambien el resumen de la memoria nueva: con dos criterios, una copia literal
+ * podia quedar en dos trozos que ya no casaban (novena ronda).
  */
-function sentencesOf(text: string): string[] {
+export function sentencesOf(text: string): string[] {
   const out: string[] = [];
   let current = '';
   const push = (): void => {

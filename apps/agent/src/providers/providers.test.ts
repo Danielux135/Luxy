@@ -3181,9 +3181,30 @@ describe('HttpApiProvider: control del razonamiento', () => {
     });
     const { provider, lineas } = registrar(base);
     expect((await provider.run(peticion())).ok).toBe(true);
+    // llego y ademas vino el recuento: `visible`, y la cifra sigue apuntada
     expect(lineas[0]).toMatchObject({
       reasoningChars: 3,
       reasoningField: 'reasoning_content',
+      reasoningTokensReported: 25,
+      reasoningVerdict: 'visible',
+    });
+  });
+
+  it('declarado y sin nada que se vea sale `counted`: la pasarela no lo deja pasar', async () => {
+    // lo que `D-107` quiere averiguar: razono, lo cobra, y no llega
+    espiar({
+      choices: [{ message: { content: 'listo' }, finish_reason: 'stop' }],
+      usage: {
+        prompt_tokens: 4,
+        completion_tokens: 30,
+        completion_tokens_details: { reasoning_tokens: 25 },
+      },
+    });
+    const { provider, lineas } = registrar(base);
+    expect((await provider.run(peticion())).ok).toBe(true);
+    expect(lineas[0]).toMatchObject({
+      reasoningChars: 0,
+      reasoningField: null,
       reasoningTokensReported: 25,
       reasoningVerdict: 'counted',
     });
@@ -3319,7 +3340,8 @@ describe('HttpApiProvider: control del razonamiento', () => {
         reasoningField: 'reasoning_content',
         reasoningTokensReported: 1,
         charsPerOutput: 0.8,
-        reasoningVerdict: 'counted',
+        // llego `reasoning_content`: lo visible gana al recuento
+        reasoningVerdict: 'visible',
       });
     } finally {
       rmSync(carpeta, { recursive: true, force: true });
