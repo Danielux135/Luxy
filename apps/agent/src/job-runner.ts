@@ -13,6 +13,7 @@ import type {
   ProviderImage,
   ReasoningEffort,
   ProviderCallMetrics,
+  ProviderFailureReason,
 } from '@luxy/shared';
 import {
   redact,
@@ -125,6 +126,13 @@ export type JobOutcome =
        * llevaba metadata de ninguna clase.
        */
       callMetrics?: ProviderCallMetrics;
+      /**
+       * por que fallo el CLI, cuando lo dijo de forma estructurada.
+       *
+       * Viaja aparte de `errorMessage` para que quien lo reciba decida sin
+       * leer prosa: «sin sesion» se arregla iniciando sesion, no reintentando.
+       */
+      failureReason?: ProviderFailureReason;
     }
   | {
       kind: 'cancelled';
@@ -443,6 +451,16 @@ export function isStudioEvaluation(job: ClaimedJob): boolean {
 
 /** cada cuanto se refresca el mensaje mientras se espera al modelo */
 const PROGRESS_TICK_MS = 30_000;
+
+/**
+ * el error de una conversacion que termino sin escribir nada visible.
+ *
+ * Es el mensaje de Luxy y dice que hacer: nunca copia lo que haya escrito el
+ * CLI, porque acaba en pantalla, en el motivo de un trabajo de fondo y en los
+ * registros. Ver la comprobacion en `runJob`.
+ */
+export const EMPTY_CONVERSATION_REPLY_MESSAGE =
+  'el modelo termino sin escribir ninguna respuesta. Vuelve a intentarlo; si se repite, prueba con otro modelo o con menos esfuerzo';
 
 /**
  * refresca la fase cada treinta segundos mientras el proveedor trabaja.
@@ -974,6 +992,9 @@ export async function runJob(
         ...(providerResult.callMetrics === undefined
           ? {}
           : { callMetrics: providerResult.callMetrics }),
+        ...(providerResult.failureReason === undefined
+          ? {}
+          : { failureReason: providerResult.failureReason }),
       };
     }
 
@@ -1037,6 +1058,37 @@ export async function runJob(
       ? parseConversationMemoryResponse(providerResult.finalText)
       : null;
     const visibleResult = parsedConversation?.visibleText ?? providerResult.finalText.trim();
+
+    // una conversacion sin NADA visible no es una respuesta (duodecima ronda).
+    //
+    // Claude Code puede cerrar el turno con un mensaje final que solo trae
+    // razonamiento —lo reintenta una vez y despues lo deja pasar—, y entonces su
+    // `result` llega vacio, sin `is_error` y con codigo 0. Codex, con el archivo
+    // del ultimo mensaje vacio, igual. Antes eso salia `completed` con la frase de
+    // relleno de abajo como texto: un turno privado la guardaba como respuesta
+    // del personaje, y los trabajos de fondo la leian como una negativa, que es
+    // justo la negativa falsa que `INV-FONDO-001` vino a quitar. Una tarea si
+    // puede no decir nada —su diff habla por ella—; una conversacion no.
+    //
+    // Va como fallo SIN motivo estructurado: el CLI no dijo nada, asi que no hay
+    // enum que poner, y quien lo reciba decide con `null` de quien es. Tampoco
+    // aporta memoria: un final que no es `completed` no la escribe
+    if (conversation && visibleResult.length === 0) {
+      return {
+        kind: 'failed',
+        errorMessage: EMPTY_CONVERSATION_REPLY_MESSAGE,
+        hasLocalChanges: (diff?.filesChanged ?? 0) > 0,
+        worktreePath: worktree?.path ?? null,
+        durationMs: elapsed(),
+        ...(executedModel === undefined ? {} : { executedModel }),
+        ...(providerResult.callMetrics === undefined
+          ? {}
+          : { callMetrics: providerResult.callMetrics }),
+        ...(providerResult.failureReason === undefined
+          ? {}
+          : { failureReason: providerResult.failureReason }),
+      };
+    }
 
     // el resumen dice exactamente lo que se verifico, sin exagerar
     const summaryLines = [visibleResult || 'El proveedor no devolvio resumen.'];

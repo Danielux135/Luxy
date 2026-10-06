@@ -4,6 +4,14 @@
 > tiene varios «siguiente paso exacto» abiertos a la vez, con dueños distintos.
 > El orden que manda es éste:
 >
+> 000. **`INV-FONDO-001` y `INV-LLAVE-001` (05-06/10): arreglados (`D-109`),
+>    con check en verde y SIN verse en Electron.** Desde el 28/09 fallaban los
+>    tres trabajos de fondo que van por Claude Code, porque el `claude` de la
+>    consola perdió la sesión y Luxy disfrazaba el error de respuesta.
+>    `LA-059` está hecha: la sesión ha vuelto. De `LA-060` falta vaciar la
+>    Papelera. La «llave en bucle» no existía: era una lectura mala del
+>    contador. Falta reiniciar Luxy y verlo en el registro. Bloque justo
+>    debajo.
 > 00. **`REV-TRES-ENCARGOS-001` y `REV-CUATRO-FRENTES-001` (28-29/09).** Los
 >    tres encargos del 25/09 —bóveda, enganche con resumen y promesas— se
 >    construyeron en un flujo cuya revisión independiente NO se hizo (la
@@ -72,6 +80,110 @@
 >
 > `KIMI-K3-EXPERIMENT-001`, al final del archivo, está **abandonado**, no en
 > curso. No lo retomes sin que Daniel lo pida.
+
+## INV-FONDO-001 e INV-LLAVE-001 — el trabajo de fondo parado y la llave en bucle (2026-10-05)
+
+Estado: **investigado el 05/10 (flujo `wf_b54b06d5-73d`, 32 agentes, cada
+causa con un escéptico que intenta tumbarla y otro que la reproduce) y
+arreglado el 06/10 (flujos `wf_6f8b7a28-515` y `wf_d5bb2e3c-e86`; `D-109`)**.
+Lo de Daniel: `LA-059` (hecha) y `LA-060` (falta vaciar la Papelera).
+
+**Causas confirmadas:**
+
+1. **El `claude` de la consola no tiene sesión desde el 28/09 06:48Z**
+   (`claude auth status --json`: `loggedIn:false`). Es una sesión aparte de la
+   app de escritorio. Cada llamada emite un `result` con `is_error:true` (y
+   `subtype:"success"`), sale con código 1 y stderr vacío. El código nuevo
+   no tiene la culpa: Luxy estuvo apagada del 25/09 al 28/09, y la primera
+   llamada después, la del enganche, fue la que se encontró la sesión caducada.
+2. **Luxy disfraza ese fallo de respuesta**, y es código antiguo:
+   `claude.ts` no lee `is_error`, el final sale `interrupted`, el turno
+   `completed` y el error pasa a ser el texto. Así, pendientes lo cuenta como
+   **negativa**, el catálogo como **fallida** y la reescritura como
+   **`invalid`**. Ningún registro dice «autenticación».
+3. **Una negativa bloquea la conversación**: en memoria, con el mapa
+   `failures`, hasta reiniciar Studio; en disco, con `refusedAtTurns`, hasta
+   que crece. `quedan` se calcula con esos mismos filtros, así que `quedan:0`
+   no significa «al día». Por eso el 30/09 hubo 63 pasadas sin ninguna llamada.
+   Todas las negativas registradas desde siempre (6) y las dos reescrituras
+   son falsas, producto de esto.
+4. **La llave no tiene ningún bucle.** `derivaciones` es el total de la
+   sesión, y dividirlo entre `abiertaMs` no da un ritmo. Cada turno privado
+   cuesta unas 4.000 derivaciones de golpe, porque `list()` descifra entera
+   cada conversación, el índice de memoria se tira en cada envío, la
+   conversación activa se descifra cinco veces y `openTurn` abre la memoria
+   aunque nadie la use. Con la bóveda quieta no deriva nada: sólo lee
+   `vault.json` unas 0,47 veces por segundo. Es coste, no un fallo: por ahora
+   sólo se mide.
+
+**Hallazgos laterales:**
+
+- **Privacidad:** quedan 153 transcripciones en claro de llamadas del trabajo
+  de fondo, del 05/09 al 29/09, de antes de `--no-session-persistence`
+  (`LA-060`).
+- **El extractor no apunta nada desde el 16/09**, ni siquiera con Claude
+  funcionando: 83 conversaciones revisadas, con `apuntados:0` y `cerrados:0`.
+  Sin investigar; se mira cuando vuelva la sesión.
+- **Hoy, los fallos de DeepSeek son de la pasarela:** HTTP 522 y 500 en
+  `api.hcnsec.cn`.
+- **06/10: DeepSeek-V4-Pro se salta los bloques.** En dos turnos de foto, con
+  la puerta abierta (`pide-o-hace-foto`) y el bloque de imagen en el prompt,
+  escribió sólo la escena (`textChars` 679 y 494): ni foto ni memoria (aviso
+  de memoria ausente en pantalla). Con V4-Flash, la misma escena generó la
+  foto a la primera (07:25Z, 2129 caracteres, `medio privado generado`). La
+  mediana de salida de V4-Pro baja de 3256 caracteres (25/09) a 1533 (05/10)
+  y a 494-679 (06/10). La causa no se sabe. Daniel usa Flash por ahora.
+- **Los turnos de la sesión de 14:48Z no tienen cifra de derivaciones.** El
+  cierre de Luxy a las 15:18Z (`run_in_background` con tope de 30 minutos)
+  no pasó por `lock()`. Corregido en la skill `abrir-luxy`.
+
+Lo que dicen los registros (`%LOCALAPPDATA%\Luxy\logs`, horas UTC), sólo
+metadatos:
+
+- **Apuntar promesas.** Hasta el 25/09 16:01Z, cada pasada daba
+  `conversaciones:1` (aunque siempre con `apuntados:0` y `cerrados:0`). Desde
+  el primer arranque con el código nuevo (28/09 06:43Z) todas dan
+  `conversaciones:0`: `negativas:1` el 28/09 06:48Z, `negativas:1` el 29/09
+  11:06Z y `negativas:2` el 29/09 15:48Z, y el resto, nada. El 30/09 corrió 63
+  veces con 24 turnos nuevos, y la lista de abiertas sigue congelada en 10.
+- **Catalogar escenas.** El 29/09 15:47-15:48Z: `fallidas:3`, y luego
+  `fallidas:1` tres veces, con `sustituido:true`.
+- **Reescribir la memoria del enganche (`D-108`).** El 29/09 15:48Z, dos veces
+  `resultado:"invalid"`. **Corrección: el 05/10 se le dijo a Daniel que el
+  enganche había reescrito las dos memorias. No es así: no se ha reescrito
+  ninguna.**
+- **La llave.** `derivaciones` en cada cierre, con la versión del 28/09 y la
+  del 29/09: entre 3,3 y 10,4 por segundo, y 6,0 y 6,3 el 30/09. `D-106` hizo
+  que leer no la mantenga abierta, pero algo deriva claves sin parar.
+
+Discrepancia anotada: el bloque de la novena y la décima ronda, justo debajo,
+dice «sin commitear». Las dos están en `ae41d2e` (29/09).
+
+**Arreglo hecho (06/10, `D-109`), con `npm run check` a solas en verde (233
+archivos, 4942 pruebas) y SIN verse en Electron.**
+
+- Un `result` con `is_error` es un fallo con motivo (`failureReason`) y no un
+  texto.
+- Un fallo del proceso no cuenta como negativa. Espera 10 minutos por
+  lanzamiento; con dos horas de salto si la culpa es de una conversación.
+- Las negativas falsas y las filas `invalid` se recuperan una vez.
+- Privado avisa cuando falta la sesión.
+- Las derivaciones se miden por evento.
+
+Construido y revisado en cuatro rondas, con 16 defectos importantes
+corregidos. Lo que queda abierto está al final de `D-109`.
+
+Siguiente paso: commit; reiniciar Luxy cuando Daniel diga (la `out/` ya es la
+del árbol final, porque la construyó el check); y después mirar en
+`studio.log` que vuelven a trabajar:
+
+- «pendientes extraidos» con `conversaciones` mayor que 0 y sin negativas;
+- «escenas catalogadas» sin fallidas;
+- «memoria reescrita con su ficha» con `recuperadas` y un `resultado` que no
+  sea `invalid`.
+
+Después, `INV-APUNTA-001`: por qué del 16/09 al 25/09 el extractor revisó 83
+conversaciones sin apuntar nada.
 
 ## REV-CUATRO-FRENTES-001 — novena y décima ronda: lo que encontraron las revisiones de la octava y de la novena (2026-09-29)
 

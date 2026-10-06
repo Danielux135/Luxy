@@ -675,8 +675,35 @@ describe('la memoria reescrita con su ficha, en la fila', () => {
   it('un intento que no termino no promete trabajo en segundo plano', () => {
     const atascada = describeRelink({ ...lista, phase: 'pending', stalled: true }, false)!;
     expect(atascada.text).not.toContain('en segundo plano');
-    expect(atascada.text).toContain('hasta que reinicies Studio');
+    // `INV-FONDO-001`: ya no hace falta reiniciar; la espera del CLI se acaba sola
+    expect(atascada.text).not.toContain('reinicies');
+    expect(atascada.text).toContain('espera unos minutos');
     expect(atascada).toMatchObject({ tone: 'warn', canRetry: true });
+  });
+
+  // undecima ronda: la que vuelve a fallar con el CLI contestando a las demas no
+  // se reintenta sola ni pasada la espera. «Unos minutos» seria falso. Y desde
+  // la decimotercera tampoco es «hasta que reinicies»: se salta un par de horas
+  it('una que falla por su cuenta dice que espera un par de horas, no unos minutos ni a reiniciar', () => {
+    const suya = describeRelink(
+      { ...lista, phase: 'pending', stalled: false, blockedThisSession: true },
+      false,
+    )!;
+    expect(suya.text).toContain('un par de horas');
+    expect(suya.text).not.toContain('reinicies');
+    expect(suya.text).not.toContain('unos minutos');
+    expect(suya.text).not.toContain('después de tu próximo mensaje');
+    expect(suya).toMatchObject({ tone: 'warn', canRetry: true });
+    // aunque el CLI este ademas en espera: lo suyo manda
+    const ambas = describeRelink(
+      { ...lista, phase: 'pending', stalled: true, blockedThisSession: true },
+      false,
+    )!;
+    expect(ambas.text).toContain('un par de horas');
+    // y excluida sigue sin reescribirse, sin boton
+    expect(
+      describeRelink({ ...lista, phase: 'pending', blockedThisSession: true }, true)!.canRetry,
+    ).toBe(false);
   });
 
   it('el boton siempre dice en que acabo, sin nada de lo que contesto el modelo', () => {

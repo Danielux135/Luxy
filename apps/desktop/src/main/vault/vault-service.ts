@@ -171,6 +171,20 @@ export class VaultService {
     return readVaultKeyFile(this.file);
   }
 
+  /**
+   * subclaves derivadas desde que se abrio esta sesion, solo para medir
+   * (`INV-LLAVE-001`).
+   *
+   * La linea de cierre da el total y nada mas, asi que no distinguia una rafaga
+   * de un lector continuo, y una sesion que acaba sin `lock()` lo perdia. Con
+   * esta cifra en las lineas de cada turno y de cada trabajo de fondo, restar
+   * dos seguidas dice cuanto costo lo de en medio. Es solo LECTURA: no toca la
+   * actividad ni el temporizador (`D-106`), y con la boveda cerrada vale 0.
+   */
+  get derivationCount(): number {
+    return this.derivations;
+  }
+
   status(): VaultStatus {
     let contents: VaultKeyFile | null = null;
     try {

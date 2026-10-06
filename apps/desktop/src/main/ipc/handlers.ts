@@ -251,6 +251,18 @@ import type { RelationStore } from '../vault/relation-store.js';
 import type { RecapStore } from '../vault/recap-store.js';
 import type { ImageAttemptPatch, ImageAttemptStore } from '../vault/image-attempt-store.js';
 import { RelationSync, createAuxiliaryLane, cursorMatchesOwner } from '../vault/relation-sync.js';
+import {
+  AuxiliaryCooldown,
+  LaunchPermit,
+  isProcessFailure,
+  normalizeLaunch,
+  noteVisibleTurn,
+  processFailureLabel,
+  processSubject,
+  type Launch,
+  type ProcessFailureLabel,
+  type ProcessFailureVerdict,
+} from '../vault/auxiliary-cooldown.js';
 import { RecapSync } from '../vault/recap-sync.js';
 import {
   decideRelation,
@@ -376,7 +388,10 @@ export interface HandlerContext {
    * memoria efectiva es la sellada de siempre y nada se reescribe, que es lo que
    * habia antes.
    */
-  memoryRelinks?: Pick<MemoryRelinkStore, 'all' | 'forConversation' | 'replace' | 'removeConversation'>;
+  memoryRelinks?: Pick<MemoryRelinkStore, 'all' | 'forConversation' | 'replace' | 'removeConversation'> &
+    // la recuperacion de una sola vez de `INV-FONDO-001`; un almacen falso de
+    // prueba puede no tenerla
+    Partial<Pick<MemoryRelinkStore, 'recoverProcessFailures'>>;
   /**
    * memoria episodica: indice de busqueda y episodios sobre esos turnos.
    *
@@ -1052,6 +1067,17 @@ export function registerIpcHandlers(context: HandlerContext): void {
    * sesion» son dos cosas distintas y se arreglan de forma distinta— y porque
    * asi el refresco periodico del renderer no dobla las llamadas.
    */
+  /**
+   * la espera de cada CLI tras un fallo de su PROCESO, UNA para los cuatro
+   * trabajos de fondo (`INV-FONDO-001`).
+   *
+   * Compartida a proposito: con una por trabajo, un Claude sin sesion se
+   * probaria una vez por trabajo en cada espera, y el aviso de la pantalla no
+   * sabria a quien creer. Vive en memoria: reiniciar Studio la vacia, que es lo
+   * seguro —el primer disparo vuelve a probar—.
+   */
+  const auxiliaryCooldown = new AuxiliaryCooldown();
+
   const vaultStatus = (): z.infer<typeof vaultStatusSchema> => {
     const hordeKey = context.secretStore.get(VAULT_HORDE_API_SECRET);
     return {
@@ -1062,6 +1088,10 @@ export function registerIpcHandlers(context: HandlerContext): void {
       // el hecho, no la clave: la pantalla necesita poder avisar de lo que se
       // sabe de la anonima, que es que su documentacion dice que comparte
       hordeAnonymous: hordeKey !== undefined && isAnonymousKey(hordeKey),
+      // va con el estado, que el renderer refresca cada pocos segundos: asi el
+      // aviso de «Claude Code no tiene la sesion iniciada» aparece y se va solo,
+      // sin un canal ni un temporizador mas. Solo enums y horas
+      auxiliaryFailures: auxiliaryCooldown.failures(),
     };
   };
 
@@ -1820,8 +1850,18 @@ export function registerIpcHandlers(context: HandlerContext): void {
    * cuadra— vuelve a intentarse en CADA apertura del panel, gastando una
    * llamada cada vez y pareciendo que el programa recataloga lo ya hecho. Se
    * olvida al reiniciar, que es cuando tiene sentido volver a probar.
+   *
+   * Un fallo del PROCESO del CLI no entra aqui (`INV-FONDO-001`): casi nunca
+   * dice nada de la conversacion, y bloquearla hasta reiniciar dejaba sin
+   * catalogar lo que el CLI ya podia hacer en cuanto Daniel iniciaba sesion. Va
+   * a la espera por proveedor, y la conversacion solo pasa al final de la cola.
+   * Ni siquiera si la espera lo atribuye a ella: entonces la salta la propia
+   * espera un par de horas (`AuxiliaryCooldown.blocked`), no la sesion
+   * (decimotercera ronda).
    */
   const catalogFailures = new Set<string>();
+  /** las que fallaron por el proceso, con el CLI: van al final, no fuera */
+  const catalogProcessFailed = new Map<string, string>();
 
   /**
    * el carril del trabajo de fondo: catalogar y apuntar pendientes lo comparten.
@@ -1895,6 +1935,7 @@ export function registerIpcHandlers(context: HandlerContext): void {
       dayStartsAtHour: 5,
     }),
     log: context.log,
+    cooldown: auxiliaryCooldown,
   });
 
   // sin boveda no hay llave con la que sellar: un temporizador que salte despues
@@ -1932,6 +1973,7 @@ export function registerIpcHandlers(context: HandlerContext): void {
       dayStartsAtHour: 5,
     }),
     log: context.log,
+    cooldown: auxiliaryCooldown,
   });
 
   // la pasada se mira entre VENTANA y ventana, no solo entre conversaciones: una
@@ -1966,6 +2008,7 @@ export function registerIpcHandlers(context: HandlerContext): void {
             erasingInFlight.has(conversationId),
           now: () => new Date().toISOString(),
           log: context.log,
+          cooldown: auxiliaryCooldown,
         });
   context.vault.onLock(() => memoryRelink?.cancel());
 
@@ -2253,6 +2296,10 @@ export function registerIpcHandlers(context: HandlerContext): void {
       // pedirla expresamente reintenta aunque se hubiera negado antes, tanto una
       // conversacion concreta como la pasada entera desde el boton
       force: args.force || args.conversationId !== undefined,
+      // y por lo mismo puede probar el CLI una vez aunque este en espera tras un
+      // fallo de su proceso: es lo que hace falta justo despues de
+      // `claude auth login`. El panel solo manda `force` en su primera vuelta
+      retryNow: args.force || args.conversationId !== undefined,
       ...(args.conversationId === undefined ? {} : { conversationId: args.conversationId }),
     });
   });
@@ -2351,6 +2398,8 @@ export function registerIpcHandlers(context: HandlerContext): void {
       // una sola. Quien quiere rehacerla manda las dos cosas
       force: args.force,
       dryRun: args.dryRun,
+      // «Rehacerlo» es un boton, y «Rellenar» lo manda en su primera vuelta
+      retryNow: args.retryNow || args.force,
       ...(args.conversationId === undefined ? {} : { conversationId: args.conversationId }),
     });
   });
@@ -2506,10 +2555,14 @@ export function registerIpcHandlers(context: HandlerContext): void {
             : '',
         holdsRewrite: relink !== undefined && relink.memory !== null,
         hasMemory: record !== null,
-        stalled:
+        // el CLI esta en espera tras un fallo de su proceso: la pantalla no
+        // puede prometer «despues de tu proximo mensaje» a secas
+        stalled: phase === 'pending' && memoryRelink !== null && memoryRelink.waitingForProcess(),
+        // y si el fallo es de ella, ni siquiera pasada la espera
+        blockedThisSession:
           phase === 'pending' &&
           memoryRelink !== null &&
-          memoryRelink.stalledThisSession(summary.conversationId),
+          memoryRelink.blockedThisSession(summary.conversationId),
       });
     }
 
@@ -2914,11 +2967,15 @@ export function registerIpcHandlers(context: HandlerContext): void {
     // el resultado VUELVE a la pantalla: sin el, un CLI que no arranca, una
     // respuesta que llega tarde o una conversacion ocupada dejaban la fila igual
     // y sin una palabra, y el boton parecia no hacer nada (septima ronda)
-    const relinkOutcome = await memoryRelink.run({
+    const ran = await memoryRelink.run({
       conversationId: id,
       projectAlias: args.projectAlias,
       force: true,
     });
+    // con `force` ni se espera a la espera del CLI ni se salta la conversacion;
+    // si llegara una de las dos, para la pantalla es un proceso que no llego a
+    // terminar, que es lo que las arma
+    const relinkOutcome = ran === 'waiting' || ran === 'blocked' ? 'process' : ran;
     return { ...(await readRecapList()), relinkOutcome };
   });
 
@@ -3186,6 +3243,9 @@ export function registerIpcHandlers(context: HandlerContext): void {
       // el catalogo no lee al dueño: solo se le quita la marca de fallo para
       // que vuelva a ser candidata si la tenia
       catalogFailures.delete(args.conversationId);
+      // y lo que la espera le apunto en los cuatro trabajos, incluido lo que
+      // saltaba: el prompt con el que fallaba ya no es el que se mandara
+      auxiliaryCooldown.forgetConversation(args.conversationId);
 
       // `D-108`: lo que la deja igual que una conversacion nacida con ella. Su
       // foto de perfil en la galeria desde ya, no desde el siguiente mensaje, y
@@ -3276,36 +3336,102 @@ export function registerIpcHandlers(context: HandlerContext): void {
       context.memoryPreferences.auxiliary(),
     );
 
+    // `resolveAuxiliaryTarget` ya solo devuelve Claude o Codex, pero el tipo es
+    // el de cualquier proveedor: la espera es solo de los CLI locales
+    const cliDestino = isLocalCliProvider(destino.provider) ? destino.provider : null;
+    // la espera va por lo que se lanza de verdad, con su modelo y su esfuerzo:
+    // con «Automatico» son los de la ventana, y un fallo de ESE modelo no puede
+    // frenar a los pendientes, que van con el CLI a secas (duodecima ronda)
+    const lanzamiento: Launch | null =
+      cliDestino === null
+        ? null
+        : normalizeLaunch({ provider: cliDestino, model: destino.model, effort: destino.effort });
+    /** la espera salta esta conversacion: su proceso falla por su cuenta con este lanzamiento */
+    const processBlocked = (conversationId: string): boolean =>
+      lanzamiento !== null &&
+      auxiliaryCooldown.blocked(lanzamiento, processSubject('catalog', conversationId));
+
     const existing = await context.catalogs.list(context.vault);
     const conversations = await context.privateConversations.list(context.vault);
     const excluded = context.memoryPreferences.excluded();
 
-    const pending = conversations.filter((conversation) => {
+    /**
+     * lo que la pasada sola acabara catalogando: sin catalogo, o con uno que se
+     * quedo corto. Sin mirar lo que la espera salta ahora, que vuelve pasado un
+     * rato: es lo que decide si un fallo se puede prometer reintentado solo
+     */
+    const wantsCatalog = (conversation: (typeof conversations)[number]): boolean => {
       if (excluded.has(conversation.conversationId)) return false;
-      if (args.conversationId !== undefined) {
-        // pedirla expresamente reintenta aunque haya fallado antes
-        return conversation.conversationId === args.conversationId;
-      }
       if (catalogFailures.has(conversation.conversationId)) return false;
       const own = existing.filter((scene) => scene.conversationId === conversation.conversationId);
       if (own.length === 0) return true;
       // un catalogo se queda corto en cuanto la conversacion crece: hay escenas
       // nuevas que nadie ha leido
       return own.every((scene) => scene.turnsAtCatalog < conversation.turns);
+    };
+    /** lo que la pasada sola catalogaria AHORA */
+    const needsCatalog = (conversation: (typeof conversations)[number]): boolean =>
+      // un par de horas, no la sesion: despues se prueba una vez (decimotercera
+      // ronda). Pedida a mano, se prueba igual
+      wantsCatalog(conversation) && !processBlocked(conversation.conversationId);
+    // las que la pasada sola volvera a coger. Un repaso pedido a mano de una ya
+    // catalogada no esta: si su proceso falla, nadie la reintenta sola, y el
+    // resultado no puede prometerlo (decimotercera ronda)
+    const retriedAlone = new Set(
+      conversations.filter(wantsCatalog).map((conversation) => conversation.conversationId),
+    );
+    const pending = conversations.filter((conversation) => {
+      if (args.conversationId === undefined) return needsCatalog(conversation);
+      if (excluded.has(conversation.conversationId)) return false;
+      // pedirla expresamente reintenta aunque haya fallado antes
+      return conversation.conversationId === args.conversationId;
     });
+    // la cola de la pasada sola, TAMBIEN cuando se pide una: «quedan» habla de
+    // lo que falta por ordenar, no de lo que falta de lo pedido. Con una sola,
+    // un boton que la ordenaba devolvia «quedan 0» con otras sin tocar, y la
+    // pantalla lo enseñaba como si fuera de todas (undecima ronda)
+    const queue = args.conversationId === undefined ? pending : conversations.filter(needsCatalog);
+    // las que acaban de fallar por el PROCESO con este CLI, al final: no se
+    // saltan —con el CLI arreglado tienen que salir solas—, pero una que falla
+    // sola no tapa a las demas. Entre si, el orden de siempre (`sort` es estable)
+    const lastly = (id: string): number =>
+      catalogProcessFailed.get(id) === destino.provider ? 1 : 0;
+    pending.sort((a, b) => lastly(a.conversationId) - lastly(b.conversationId));
 
     let cataloged = 0;
     let scenes = 0;
-    const failed: { conversationId: string; reason: string }[] = [];
+    // cuales, para que la pantalla quite de su aviso lo que una vuelta anterior
+    // dio por fallido y esta ha ordenado
+    const catalogedIds: string[] = [];
+    const failed: {
+      conversationId: string;
+      reason: string;
+      process?: boolean;
+      blocked?: boolean;
+    }[] = [];
     const uneven: { conversationId: string; scenes: number }[] = [];
     // leer ya no mantiene viva la boveda (`D-106`), asi que cerrarse a mitad de
     // una tanda pasa a ser lo normal. Y no es culpa de la conversacion: marcarla
     // como fallida la dejaba fuera de las pasadas hasta reiniciar (`D-088`)
     let cortadaPorCierre = false;
+    // las de la tanda que no se mandaron porque el CLI espera tras un fallo de
+    // su proceso, y el motivo de ese fallo si fue en esta tanda (`INV-FONDO-001`)
+    let enEspera = 0;
+    let motivoFallo: ProcessFailureLabel | null = null;
+    let atribucion: ProcessFailureVerdict | null = null;
+    // la apertura del panel respeta la espera; un boton puede probar una vez
+    const permit = new LaunchPermit(auxiliaryCooldown, args.retryNow);
 
-    for (const conversation of pending.slice(0, args.limit)) {
+    const batch = pending.slice(0, args.limit);
+    for (const [index, conversation] of batch.entries()) {
       if (!context.vault.isUnlocked()) {
         cortadaPorCierre = true;
+        break;
+      }
+      // el CLI espera: ni se descifra la conversacion, y las que quedan tampoco
+      // irian
+      if (lanzamiento !== null && !permit.allows(lanzamiento)) {
+        enEspera += batch.length - index;
         break;
       }
       const turns = await context.privateConversations.read(
@@ -3320,8 +3446,13 @@ export function registerIpcHandlers(context: HandlerContext): void {
         to: shown[shown.length - 1]!.sequence,
       };
 
+      // la llamada va sola en su `try`: lo que lance aqui es del PROCESO —el
+      // agente parado, un tiempo agotado—, y lo de despues, del almacen
+      let run: Awaited<ReturnType<typeof context.controller.runLocalTurn>> | null = null;
+      let processError: string | null = null;
+      permit.spend();
       try {
-        const run = await context.controller.runLocalTurn({
+        run = await context.controller.runLocalTurn({
           localTurnId: randomUUID(),
           provider: destino.provider,
           model: destino.model,
@@ -3338,15 +3469,87 @@ export function registerIpcHandlers(context: HandlerContext): void {
           // catalogar es una tarea sobre un texto: nada de encarnar a nadie
           kind: 'technical',
         });
+        // el final manda: con un fallo del proceso, `text` es como mucho el
+        // mensaje del error, y leerlo como catalogo lo contaba como «no supo»
+        // con un trozo de ese mensaje en el motivo
+        if (isProcessFailure(run)) {
+          processError = run.error ?? 'el trabajo de fondo no llego a terminar';
+        }
+      } catch (error) {
+        processError = error instanceof Error ? error.message : String(error);
+      }
 
-        const parsed = parseCatalogResponse(run.text, range);
+      if (processError !== null) {
+        // cerrada a mitad: no es culpa del CLI ni de la conversacion (`D-106`)
+        if (!context.vault.isUnlocked()) {
+          cortadaPorCierre = true;
+          break;
+        }
+        const reason = run?.failureReason ?? null;
+        // de quien es lo decide la espera: del CLI, espera; de la conversacion,
+        // va al final de la cola; y si la espera la da por suya, la pasada sola
+        // la salta un par de horas —no la sesion— sin rearmar la espera de los
+        // cuatro trabajos (undecima y decimotercera ronda)
+        const verdict: ProcessFailureVerdict =
+          lanzamiento === null
+            ? 'cli'
+            : auxiliaryCooldown.noteFailure(
+                lanzamiento,
+                reason,
+                processSubject('catalog', conversation.conversationId),
+              );
+        // pedida a mano, puede ser una que ya estaba fuera. Si se nego antes, la
+        // pasada sola la sigue saltando la sesion entera; si su proceso ya
+        // fallaba por su cuenta, la sigue saltando la espera
+        const refusedBefore = catalogFailures.has(conversation.conversationId);
+        const blocked =
+          !refusedBefore && (verdict === 'blocked' || processBlocked(conversation.conversationId));
+        if (refusedBefore) {
+          catalogProcessFailed.delete(conversation.conversationId);
+        } else if (cliDestino !== null) {
+          // tambien la saltada: cuando vuelva a probarse, al final
+          catalogProcessFailed.set(conversation.conversationId, cliDestino);
+        }
+        motivoFallo = processFailureLabel(reason);
+        atribucion = verdict;
+        failed.push({
+          conversationId: conversation.conversationId,
+          // el mensaje de Luxy —el del agente dice que hacer y nunca copia lo que
+          // escribio el CLI—, pasado por `redact` como todo lo que sale de ahi
+          reason: redact(processError),
+          // `process` promete que se reintenta sola en minutos, y la pantalla la
+          // retoma por ella; `blocked`, que se salta un par de horas. La que se
+          // nego antes, o un repaso a mano de una ya catalogada, no lleva
+          // ninguno: la pasada sola no la volvera a coger
+          ...(refusedBefore || !retriedAlone.has(conversation.conversationId)
+            ? {}
+            : blocked
+              ? { blocked: true }
+              : { process: true }),
+        });
+        continue;
+      }
+      // contesto, con lo que sea: el proceso funciona y la espera se acaba
+      if (lanzamiento !== null) {
+        auxiliaryCooldown.noteSuccess(
+          lanzamiento,
+          processSubject('catalog', conversation.conversationId),
+        );
+      }
+      catalogProcessFailed.delete(conversation.conversationId);
+      if (run === null) continue;
+      const reply = run;
+
+      try {
+        const parsed = parseCatalogResponse(reply.text, range);
         if (parsed.status !== 'structured') {
           catalogFailures.add(conversation.conversationId);
           failed.push({
             conversationId: conversation.conversationId,
             // con lo que dijo en su lugar: es lo unico que distingue «no supo»
-            // de «se nego». Pasa por redact como todo lo que sale de un modelo
-            reason: redact(describeCatalogFailure(parsed, run.text)),
+            // de «se nego». Pasa por redact como todo lo que sale de un modelo.
+            // Aqui SI es una respuesta: un fallo del proceso ya salio arriba
+            reason: redact(describeCatalogFailure(parsed, reply.text)),
           });
           continue;
         }
@@ -3357,7 +3560,7 @@ export function registerIpcHandlers(context: HandlerContext): void {
           parsed.scenes.map((scene) => ({
             ...scene,
             conversationId: conversation.conversationId,
-            model: run.executedModel ?? destino.model,
+            model: reply.executedModel ?? destino.model,
             catalogedAt: new Date().toISOString(),
             turnsAtCatalog: turns.length,
           })),
@@ -3365,6 +3568,7 @@ export function registerIpcHandlers(context: HandlerContext): void {
         // si venia marcada como fallida, deja de estarlo: se acaba de lograr
         catalogFailures.delete(conversation.conversationId);
         cataloged += 1;
+        catalogedIds.push(conversation.conversationId);
         scenes += parsed.scenes.length;
 
         // todas las escenas del mismo tamaño no es como fue la conversacion:
@@ -3398,18 +3602,39 @@ export function registerIpcHandlers(context: HandlerContext): void {
       conversaciones: cataloged,
       escenas: scenes,
       fallidas: failed.length,
+      // las que no se mandaron porque el CLI espera tras un fallo de su proceso
+      enEspera,
+      // el enum del agente, nunca su mensaje; `null` sin fallo del proceso
+      motivoFallo,
+      // de quien era ese fallo: del CLI, de la conversacion o ya repetido
+      atribucion,
       // quien lo hizo, y si se sustituyo un proveedor de pago
       proveedor: destino.provider,
       sustituido: destino.replaced,
       cortadaPorCierre,
+      // el total de subclaves derivadas desde que se abrio (`INV-LLAVE-001`)
+      derivaciones: context.vault.derivationCount,
     });
+    // lo que queda: las de la cola que no se han hecho ni descartado. Un fallo
+    // del proceso NO descarta —se vuelve a intentar pasada la espera—, y las que
+    // esperan tampoco se han tocado
+    const resolved = new Set([
+      ...catalogedIds,
+      ...failed.filter((each) => each.process !== true).map((each) => each.conversationId),
+    ]);
     return {
       cataloged,
       scenes,
+      catalogedIds,
       failed,
       uneven,
-      // las que quedaban menos las que se han hecho o descartado en esta tanda
-      pending: Math.max(0, pending.length - Math.min(pending.length, args.limit)),
+      waiting: enEspera,
+      pending: queue.filter((each) => !resolved.has(each.conversationId)).length,
+      // con que CLI, modelo y esfuerzo: la pantalla mira SU espera para saber
+      // cuando retomarla, no la de otro modelo del mismo CLI (duodecima ronda)
+      provider: cliDestino,
+      model: lanzamiento?.model ?? null,
+      effort: lanzamiento?.effort ?? null,
     };
   };
 
@@ -3754,6 +3979,9 @@ export function registerIpcHandlers(context: HandlerContext): void {
         // las que no se han podido leer no cuentan como desfase: la misma regla
         // que en un turno real, o la simulacion mediria otra cosa
         failedConversations: relationSync.failedConversations,
+        // si el CLI espera tras un fallo de su proceso: separa en cifras las que
+        // esperan de las negadas, para que «quedan 0» no se lea como al dia
+        processWaiting: relationSync.waitingForProcess,
         auxiliaryConfigured: context.memoryPreferences.auxiliary() !== null,
         anchor,
       });
@@ -6330,6 +6558,15 @@ export function registerIpcHandlers(context: HandlerContext): void {
       // existiria y no haria nada, que es como se perdio el modelo una vez
       ...(args.effort === null ? {} : { effort: args.effort }),
     });
+    // si lo contesto su CLI, el trabajo de fondo lo sabe: la espera de ese
+    // lanzamiento —y la de una cuenta sin sesion— se acaba, y una conversacion
+    // que falla sola ve al CLI contestar a otra (duodecima ronda). Solo enums
+    // y horas: nada del turno sale de aqui
+    noteVisibleTurn(
+      auxiliaryCooldown,
+      { provider: args.provider, model: args.model, effort: args.effort },
+      result,
+    );
 
     // lo que el modelo pidio generar, y como acabo. Se devuelve a la interfaz
     // para que pueda decir «no habia clave» o «el proveedor fallo» en vez de
@@ -6897,6 +7134,12 @@ export function registerIpcHandlers(context: HandlerContext): void {
       duracionMs: result.durationMs,
       extraccionEnCurso: relationSync.busy,
       final: result.outcome,
+      // por que fallo el CLI, si lo dijo: el enum del agente, nunca su mensaje
+      // (`INV-FONDO-001`). `null` si no fallo o si fallo sin decir por que
+      motivoFallo: result.failureReason ?? null,
+      // el total de subclaves derivadas desde que se abrio la boveda: restando
+      // la de la linea anterior se ve cuanto costo este turno (`INV-LLAVE-001`)
+      derivaciones: context.vault.derivationCount,
       // en que quedo la imagen, si pidio alguna. Una CLASIFICACION y un uuid:
       // ni el texto del plan ni el mensaje de error, que puede traer dentro lo
       // que el proveedor rechazo

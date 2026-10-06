@@ -458,8 +458,16 @@ export interface RelinkRowView {
   holdsRewrite: boolean;
   /** si tiene memoria sellada: sin ella viaja su ficha retroactiva o su indice */
   hasMemory: boolean;
-  /** el ultimo intento no termino y no se repite solo hasta reiniciar */
+  /**
+   * el CLI que la reescribiria esta en espera tras un fallo de su proceso: se
+   * retoma solo pasada la espera, no «despues de tu proximo mensaje» a secas
+   */
   stalled: boolean;
+  /**
+   * su proceso falla por su cuenta: no se reintenta sola en un par de horas
+   * (undecima y decimotercera ronda). Ausente en una vista vieja
+   */
+  blockedThisSession?: boolean;
 }
 
 export interface RelinkRowLook {
@@ -547,14 +555,27 @@ export function describeRelink(
           text: 'Esta memoria se escribió sin su ficha y no se va a reescribir: la conversación está fuera del trabajo de fondo.',
         };
       }
-      // el intento no llego a terminar y con ese CLI no se repite solo hasta
-      // reiniciar: decir «en segundo plano» prometeria un trabajo que no va a
-      // ocurrir (septima ronda, `D-093`)
+      // el fallo es de ella: no se reintenta sola ni pasada la espera del CLI.
+      // Prometer «unos minutos» seria falso (undecima ronda, `D-093`), y «hasta
+      // que reinicies» tambien: se vuelve a probar pasado un par de horas
+      // (decimotercera ronda)
+      if (relink.blockedThisSession === true) {
+        return {
+          ...base,
+          tone: 'warn',
+          text: 'Esta memoria se escribió sin su ficha. Sus últimos intentos de reescribirla no llegaron a terminar por algo suyo, así que no se volverá a intentar sola hasta dentro de un par de horas, después de un mensaje tuyo en Privado; puedes pedirlo tú ahora. Mientras tanto viaja la de antes.',
+          canRetry: true,
+        };
+      }
+      // el CLI esta en espera tras un fallo de su proceso: decir «después de tu
+      // próximo mensaje» a secas prometeria un intento que ese mensaje no va a
+      // lanzar (septima ronda, `D-093`). Ya no es «hasta que reinicies»: la
+      // espera se acaba sola (`INV-FONDO-001`)
       if (relink.stalled) {
         return {
           ...base,
           tone: 'warn',
-          text: 'Esta memoria se escribió sin su ficha. El último intento de reescribirla no llegó a terminar y no se volverá a intentar solo hasta que reinicies Studio; puedes pedirlo tú. Mientras tanto viaja la de antes.',
+          text: 'Esta memoria se escribió sin su ficha. El último intento del trabajo de fondo no llegó a terminar, así que espera unos minutos antes de volver a intentarlo solo, después de un mensaje tuyo en Privado; puedes pedirlo tú ahora. Mientras tanto viaja la de antes.',
           canRetry: true,
         };
       }

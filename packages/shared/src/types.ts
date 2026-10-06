@@ -13,6 +13,7 @@ import type {
   RESPONSE_ABORT_SOURCES,
   RESPONSE_OUTCOMES,
   PROVIDER_CALL_ENDINGS,
+  PROVIDER_FAILURE_REASONS,
 } from './constants.js';
 import type { ReasoningEffort } from './constants.js';
 
@@ -21,6 +22,8 @@ export type StreamTransportEnd = (typeof STREAM_TRANSPORT_ENDS)[number];
 export type ResponseOutcome = (typeof RESPONSE_OUTCOMES)[number];
 /** como acabo UNA llamada; el final del TURNO es `ResponseOutcome` */
 export type ProviderCallEnding = (typeof PROVIDER_CALL_ENDINGS)[number];
+/** por que fallo un CLI local, segun el propio CLI; ver `PROVIDER_FAILURE_REASONS` */
+export type ProviderFailureReason = (typeof PROVIDER_FAILURE_REASONS)[number];
 export type ResponseAbortSource = (typeof RESPONSE_ABORT_SOURCES)[number];
 export type KnownProviderId = (typeof PROVIDER_IDS)[number];
 /** identificador externo validado en los bordes del sistema */
@@ -477,4 +480,14 @@ export interface ProviderRunResult {
    * rellenan lo dejan sin definir.
    */
   termination?: ResponseTermination;
+  /**
+   * por que fallo, cuando el CLI lo dice de forma estructurada.
+   *
+   * Solo lo rellenan los CLI locales, solo con `ok: false` y solo cuando no hay
+   * respuesta que conservar: con este campo `finalText` va siempre vacio. El
+   * texto de un resultado de error es el mensaje del CLI, no una respuesta, y
+   * guardarlo como respuesta es justo el fallo que este campo existe para
+   * impedir.
+   */
+  failureReason?: ProviderFailureReason;
 }

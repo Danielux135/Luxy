@@ -83,6 +83,28 @@ export const DECRYPTED_RENDERER_STATE = [
    * solo aparece si sus mensajes nombran a un personaje (revision del 28/09)
    */
   'ownerHintDismissed',
+  /**
+   * lo que enseña el panel del catalogo: los identificadores de las
+   * conversaciones y, en una que el CLI contesto sin el bloque, hasta 160
+   * caracteres de lo que escribio sobre ella descifrada (`describeCatalogFailure`).
+   * Desde que las vueltas se juntan en vez de pisarse, ese extracto ya no se iba
+   * con la tanda siguiente: la conversacion queda fuera de las pasadas y su
+   * entrada se quedaba toda la sesion, con la boveda cerrada y despues de entrar
+   * con otra cuenta. Se va con el, ademas, a quien se le pidio la pasada: sin
+   * eso, abrir otra vez la retomaba sola con el destino de antes (duodecima
+   * ronda)
+   */
+  'lastCatalog',
+  /**
+   * los momentos de «Lo que recuerda»: el titulo de cada escena —lo escribio el
+   * CLI al catalogar una conversacion descifrada, o sale de ella al partirla por
+   * silencios—, con su fecha y su conversacion, y lo que se excluyo. Faltaba
+   * aqui (decimotercera ronda): sobrevivian al candado y al cambio de cuenta, el
+   * panel los pintaba bajo la sesion de otra cuenta, y como su apertura solo
+   * barre cuando no hay ninguno, cerrar la boveda dejaba el catalogo sin
+   * retomar hasta reiniciar
+   */
+  'memoryEpisodes',
 ] as const;
 
 export type DecryptedRendererState = (typeof DECRYPTED_RENDERER_STATE)[number];
@@ -99,4 +121,18 @@ export type DecryptedStateResetters = Record<DecryptedRendererState, () => void>
  */
 export function discardDecrypted(reset: DecryptedStateResetters): void {
   for (const key of DECRYPTED_RENDERER_STATE) reset[key]();
+}
+
+/**
+ * un vale para una lectura de la boveda que esta en vuelo: deja de valer en
+ * cuanto la purga vacia ese estado (y sube su contador).
+ *
+ * Lo que se pidio con la boveda abierta llega DESPUES de la purga si se cerro
+ * entre medias, y escribirlo devolvia a la ventana lo que la purga acababa de
+ * quitar, con la boveda cerrada. Quien lo pide saca el vale antes de esperar y
+ * lo mira al volver.
+ */
+export function purgeTicket(counter: { readonly current: number }): () => boolean {
+  const issued = counter.current;
+  return () => counter.current === issued;
 }

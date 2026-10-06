@@ -311,6 +311,12 @@ export class LuxyAgent {
     if (this.config.providers.claude.enabled && detection.capabilities.claude.available) {
       const claude = new ClaudeCodeProvider(this.config.providers.claude.model);
       await claude.detect();
+      // solo avisa: un CLI sin sesion sigue registrado. La consulta puede no
+      // existir o equivocarse en otra version, y cada turno que falle por esto
+      // ya lo dice el con `failureReason: 'auth'`
+      if (claude.getAuthenticated() === false) {
+        this.logger.warn('claude: sin sesion iniciada; ejecuta claude auth login');
+      }
       this.providers.set('claude', claude);
     }
     if (this.config.providers.codex.enabled && detection.capabilities.codex.available) {

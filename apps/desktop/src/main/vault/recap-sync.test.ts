@@ -29,6 +29,7 @@ import type { RecapMutator, RecapSnapshot, RecapState } from './recap-store.js';
 import { VaultError, type VaultService } from './vault-service.js';
 import { classifyReply } from '../../shared/refusal.js';
 import { createAuxiliaryLane, type AuxiliaryController } from './relation-sync.js';
+import { AUXILIARY_PROCESS_WAIT_MS, AuxiliaryCooldown } from './auxiliary-cooldown.js';
 import {
   RecapSync,
   effectiveRecapThrough,
@@ -192,6 +193,15 @@ interface MontajeOptions {
   gate?: Promise<void>;
   onCall?: (calls: number) => void;
   catalogFails?: boolean;
+  /** la espera del CLI; sin ella, la que crea la pasada */
+  cooldown?: AuxiliaryCooldown;
+  /**
+   * el resultado de fallo del contrato del agente en esa llamada: `outcome`
+   * failed, texto vacio y el motivo estructurado. `null` contesta normal
+   */
+  failure?: (
+    calls: number,
+  ) => { error: string; failureReason: 'auth' | 'rate_limit' | 'api_error' | 'exit_code' } | null;
 }
 
 function montar(options: MontajeOptions): Montaje {
@@ -218,6 +228,10 @@ function montar(options: MontajeOptions): Montaje {
       concurrency.max = Math.max(concurrency.max, dentro);
       try {
         if (options.gate !== undefined) await options.gate;
+        const fallo = options.failure?.(calls.length) ?? null;
+        if (fallo !== null) {
+          return { outcome: 'failed', text: '', executedModel: null, ...fallo };
+        }
         const reply =
           options.replies[calls.length - 1] ?? options.replies[options.replies.length - 1] ?? '';
         return { outcome: 'completed', text: reply, error: null, executedModel: 'codex-cli' };
@@ -264,6 +278,7 @@ function montar(options: MontajeOptions): Montaje {
     log: (message, fields) => {
       logs.push({ message, ...(fields === undefined ? {} : { fields }) });
     },
+    ...(options.cooldown === undefined ? {} : { cooldown: options.cooldown }),
   };
 
   return { sync: new RecapSync(deps), recaps, calls, logs, sending, unlocked, concurrency };
@@ -469,7 +484,7 @@ describe('el orden de la pasada', () => {
     expect(montaje.recaps.entry(CONV_VIEJA)!.memory).toBeNull();
   });
 
-  it('un proceso que no termina se cuenta y no tira la tanda', async () => {
+  it('un proceso que no termina se cuenta y no tira la tanda: la otra se resume igual', async () => {
     const montaje = montar({
       conversations: dosConversaciones(),
       replies: [ficha({ from: 0, to: 3 })],
@@ -482,11 +497,42 @@ describe('el orden de la pasada', () => {
 
     expect(result.failed).toHaveLength(1);
     expect(result.failed[0]!.conversationId).toBe(CONV_VIEJA);
-    expect(result.reviewed).toBe(1);
+    // undecima ronda: un tiempo agotado puede ser de esa conversacion sola. La
+    // otra se manda igual y el CLI no espera: eso queda para cuando falla
+    // tambien otra, o para `auth` y `rate_limit`
+    expect(montaje.calls).toHaveLength(2);
+    expect(result).toMatchObject({ reviewed: 1, waiting: 0 });
     // un proceso que no arranca no dice nada del contenido: no se persiste como
     // negativa, se marca en la sesion
     expect(montaje.recaps.entry(CONV_VIEJA)).toBeUndefined();
     expect(montaje.sync.failedThisSession).toBe(1);
+  });
+
+  it('una que falla sola, otra vez con el CLI contestando a las demas, se salta en la sesion sin rearmar la espera', async () => {
+    const espera = new AuxiliaryCooldown();
+    const montaje = montar({
+      conversations: dosConversaciones(),
+      replies: [ficha({ from: 0, to: 3 })],
+      cooldown: espera,
+      // la vieja falla siempre por su cuenta; la nueva contesta
+      failure: (llamada) =>
+        llamada === 2 ? null : { error: 'el agente no pudo terminar', failureReason: 'api_error' },
+    });
+
+    await montaje.sync.runOnce({ projectAlias: 'luxy', limit: 2 });
+    expect(montaje.calls).toHaveLength(2);
+    await montaje.sync.runOnce({ projectAlias: 'luxy', limit: 2 });
+    expect(montaje.calls).toHaveLength(3);
+    expect(espera.waiting('codex')).toBe(false);
+    expect(espera.waiting('claude')).toBe(false);
+    for (let vuelta = 0; vuelta < 3; vuelta += 1) {
+      await montaje.sync.runOnce({ projectAlias: 'luxy', limit: 2 });
+    }
+    expect(montaje.calls).toHaveLength(3);
+    expect(montaje.recaps.entry(CONV_VIEJA)).toBeUndefined();
+    const lineas = montaje.logs.filter((each) => each.message === 'memoria de lo ya hablado');
+    expect(lineas[0]?.fields).toMatchObject({ atribucion: 'conversation' });
+    expect(lineas[1]?.fields).toMatchObject({ atribucion: 'blocked' });
   });
 
   it('no toca lo excluido ni lo que se esta contestando', async () => {
@@ -937,6 +983,77 @@ describe('«Rehacerlo» sobre una ficha que ya valia', () => {
 
     expect(montaje.calls).toHaveLength(1);
     expect(result.pending).toBe(1);
+  });
+});
+
+// `INV-FONDO-001`: un fallo del PROCESO del CLI no es una respuesta. Ni negativa,
+// ni ventana rota, ni bloqueo de la conversacion hasta reiniciar: el CLI espera,
+// y se retoma solo al acabar la espera
+describe('la espera del CLI tras un fallo de su proceso', () => {
+  const sinSesion = { error: 'MENSAJE-DEL-AGENTE-INVENTADO', failureReason: 'auth' as const };
+
+  it('Claude sin sesion no cuenta negativas ni ventanas rotas, y el registro dice auth sin texto', async () => {
+    const montaje = montar({
+      conversations: dosConversaciones(),
+      replies: [ficha({ from: 0, to: 3 })],
+      auxiliary: { provider: 'claude', model: null },
+      failure: () => sinSesion,
+    });
+
+    const result = await montaje.sync.runOnce({ projectAlias: 'luxy', limit: 2 });
+
+    expect(montaje.calls).toHaveLength(1);
+    expect(result).toMatchObject({ refused: 0, invalid: 0, vague: 0, reviewed: 0, waiting: 1 });
+    expect(result.failed).toHaveLength(1);
+    expect(montaje.recaps.entry(CONV_VIEJA)).toBeUndefined();
+    expect(montaje.recaps.writes).toBe(0);
+    const linea = montaje.logs.find((each) => each.message === 'memoria de lo ya hablado');
+    expect(linea?.fields).toMatchObject({ motivoFallo: 'auth', enEspera: 1, negativas: 0 });
+    expect(JSON.stringify(montaje.logs)).not.toContain('MENSAJE-DEL-AGENTE-INVENTADO');
+  });
+
+  it('se retoma sola al acabar la espera, y la que fallo va al final sin bloquearse', async () => {
+    let ahora = Date.parse('2026-10-06T10:00:00.000Z');
+    let roto = true;
+    const montaje = montar({
+      conversations: dosConversaciones(),
+      replies: [ficha({ from: 0, to: 3 })],
+      cooldown: new AuxiliaryCooldown({ now: () => ahora }),
+      failure: () => (roto ? sinSesion : null),
+    });
+
+    await montaje.sync.runOnce({ projectAlias: 'luxy', limit: 1 });
+    expect(montaje.calls).toHaveLength(1);
+    // mientras espera, ninguna pasada lanza el CLI
+    const enEspera = await montaje.sync.runOnce({ projectAlias: 'luxy', limit: 2 });
+    expect(montaje.calls).toHaveLength(1);
+    expect(enEspera).toMatchObject({ waiting: 2, pending: 2 });
+
+    // `claude auth login`, sin reiniciar Studio
+    roto = false;
+    ahora += AUXILIARY_PROCESS_WAIT_MS;
+    const primera = await montaje.sync.runOnce({ projectAlias: 'luxy', limit: 1 });
+    // la que fallo paso al final: primero va la otra
+    expect(primera.reviewed).toBe(1);
+    expect(montaje.recaps.entry(CONV_NUEVA)?.memory?.summary).toBe(RESUMEN);
+    // y la que fallo no quedo fuera de nada
+    const segunda = await montaje.sync.runOnce({ projectAlias: 'luxy', limit: 1 });
+    expect(segunda.reviewed).toBe(1);
+    expect(montaje.recaps.entry(CONV_VIEJA)?.memory?.summary).toBe(RESUMEN);
+  });
+
+  it('el boton prueba una vez aunque espere; si vuelve a fallar, el resto de la tanda espera', async () => {
+    const montaje = montar({
+      conversations: dosConversaciones(),
+      replies: [ficha({ from: 0, to: 3 })],
+      failure: () => sinSesion,
+    });
+
+    await montaje.sync.runOnce({ projectAlias: 'luxy', limit: 2 });
+    expect(montaje.calls).toHaveLength(1);
+    const boton = await montaje.sync.runOnce({ projectAlias: 'luxy', limit: 2, retryNow: true });
+    expect(montaje.calls).toHaveLength(2);
+    expect(boton).toMatchObject({ waiting: 1 });
   });
 });
 

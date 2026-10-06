@@ -19,6 +19,13 @@
 // salta el resto de la sesion y la tanda sigue con las demas. Sin eso, una sola
 // conversacion ilegible —que ademas falla siempre igual— volvia a ser la primera
 // candidata en cada disparo y la pasada no avanzaba nunca.
+//
+// Salvo que lo que falle sea el PROCESO del CLI (`INV-FONDO-001`): eso no es de
+// la conversacion, es del CLI, y se apunta en la espera por proveedor que
+// comparten los cuatro trabajos de fondo (`auxiliary-cooldown.ts`). La
+// conversacion solo pasa al final de la cola, para que una que falle sola no
+// sea siempre la primera; no se bloquea, porque con el CLI arreglado tiene que
+// volver a leerse sin reiniciar Studio.
 import { randomUUID } from 'node:crypto';
 import {
   DEFAULT_AUXILIARY_PROVIDER,
@@ -35,6 +42,7 @@ import {
   resolveAuxiliaryTarget,
   verifyRelationExtraction,
   type LocalCliProvider,
+  type ProviderFailureReason,
   type ReasoningEffort,
   type RelationCounters,
   type RelationCursor,
@@ -42,6 +50,16 @@ import {
   type TemporalAnchor,
   type VerifiedRelationExtraction,
 } from '@luxy/shared';
+import {
+  AuxiliaryCooldown,
+  LaunchPermit,
+  isProcessFailure,
+  processFailureLabel,
+  processSubject,
+  type ProcessFailureLabel,
+  type ProcessFailureVerdict,
+} from './auxiliary-cooldown.js';
+import { RELATION_REFUSAL_VERSION } from './relation-refusal.js';
 import { mergeExtraction, type OwnedRelationNote } from './relation.js';
 import type { PrivateConversationStore } from './conversation-store.js';
 import type { MemoryPreferences } from './memory-preferences.js';
@@ -50,6 +68,12 @@ import type { VaultService } from './vault-service.js';
 
 /** conversaciones por tanda; cada una es una llamada al CLI */
 export const RELATION_DEFAULT_LIMIT = 3;
+
+/** el ultimo fallo del proceso de una tanda, para el registro: dos enums */
+interface ProcessFailureNote {
+  label: ProcessFailureLabel | null;
+  verdict: ProcessFailureVerdict | null;
+}
 
 /**
  * turnos sin revisar que hacen que una conversacion se mire nada mas contestar.
@@ -109,6 +133,11 @@ export interface AuxiliaryController {
     text: string;
     error: string | null;
     executedModel: string | null;
+    /**
+     * por que fallo el CLI, cuando el agente lo sabe por una señal estructurada.
+     * Ausente en un agente anterior: se trata igual que `null`.
+     */
+    failureReason?: ProviderFailureReason | null;
   }>;
 }
 
@@ -138,6 +167,14 @@ export interface RelationSyncDeps {
   /** el reloj y la zona, inyectados como en `recall` */
   anchor: () => TemporalAnchor;
   log: (message: string, fields?: Record<string, unknown>) => void;
+  /**
+   * la espera por proveedor que comparten los cuatro trabajos de fondo.
+   *
+   * Opcional para las pruebas que no la miran: sin ella, cada pasada tiene la
+   * suya. En Studio es UNA para todos, o un CLI roto se probaria una vez por
+   * trabajo en cada espera.
+   */
+  cooldown?: AuxiliaryCooldown;
 }
 
 export interface RelationRunOptions {
@@ -151,6 +188,14 @@ export interface RelationRunOptions {
   quietForMs?: number;
   /** pedida a mano: se reintenta aunque se negara antes */
   force?: boolean;
+  /**
+   * la ha pedido Daniel con un boton: puede lanzar el CLI UNA vez aunque este
+   * en espera tras un fallo del proceso.
+   *
+   * Va aparte de `force` porque `force` tambien lo usa la relectura que sigue a
+   * un enganche, que es automatica y tiene que respetar la espera.
+   */
+  retryNow?: boolean;
 }
 
 export interface RelationRunResult {
@@ -171,6 +216,12 @@ export interface RelationRunResult {
    * trabajo pendiente.
    */
   pending: number;
+  /**
+   * candidatas de esta tanda que no se mandaron porque el CLI esta en espera
+   * tras un fallo de su proceso. Siguen contando en `pending`: se haran solas
+   * cuando acabe la espera.
+   */
+  waiting: number;
 }
 
 /** una conversacion que puede tener algo sin revisar */
@@ -287,6 +338,10 @@ export function effectiveThrough(
  * volver a negarse y cada intento cuesta el arranque del proceso. Vuelve a
  * entrar cuando hay turnos nuevos o cuando sube la version del extractor.
  *
+ * Solo cuentan las apuntadas con `RELATION_REFUSAL_VERSION`: las de antes eran
+ * fallos del proceso tomados por negativas (`INV-FONDO-001`) y ya no frenan
+ * nada (`relation-refusal.ts`).
+ *
  * `provider` es quien haria el trabajo AHORA. Quien se nego fue un CLI concreto,
  * y el otro puede aceptar perfectamente lo que este rechazo: sin este parametro,
  * cambiar el selector del panel no servia de nada y el aviso «prueba con el
@@ -300,7 +355,7 @@ export function refusedStill(
   provider?: LocalCliProvider,
 ): boolean {
   if (cursor === undefined) return false;
-  if (cursor.refusedVersion === null || cursor.refusedVersion < RELATION_EXTRACTOR_VERSION) {
+  if (cursor.refusedVersion === null || cursor.refusedVersion < RELATION_REFUSAL_VERSION) {
     return false;
   }
   if (provider !== undefined && cursor.provider !== provider) return false;
@@ -408,8 +463,27 @@ export class RelationSync {
    * Guarda CON QUE fallo por el mismo motivo que el cursor guarda quien se nego:
    * un Codex que no arranca no dice nada de Claude, y cambiar de CLI en el panel
    * tiene que volver a intentarlo.
+   *
+   * Un fallo del PROCESO del CLI no entra nunca (decimotercera ronda). Va a la
+   * espera por lanzamiento y a `processFailed`, que no bloquea
+   * (`INV-FONDO-001`); y si la espera lo atribuye a la conversacion, ella la
+   * salta un par de horas (`AuxiliaryCooldown.blocked`), no la sesion: un fallo
+   * del CLI entero mal reconocido la dejaba fuera hasta reiniciar.
    */
   private readonly failures = new Map<string, LocalCliProvider>();
+
+  /**
+   * conversaciones cuyo ultimo intento en esta sesion acabo en un fallo del
+   * PROCESO, con el CLI que fallo.
+   *
+   * No las bloquea: las pone al final de la cola. Con el CLI roto la espera ya
+   * impide lanzarlo, y con una conversacion que falla sola —un tiempo agotado—
+   * esto evita que sea siempre la primera y tape a las demas. Se borra en cuanto
+   * esa conversacion recibe una respuesta, de la clase que sea.
+   */
+  private readonly processFailed = new Map<string, LocalCliProvider>();
+
+  private readonly cooldown: AuxiliaryCooldown;
 
   private idle: ReturnType<typeof setTimeout> | null = null;
   /** la ultima conversacion contestada, para el repaso por silencio */
@@ -417,7 +491,9 @@ export class RelationSync {
   private lastProjectAlias: string | null = null;
   private running = false;
 
-  constructor(private readonly deps: RelationSyncDeps) {}
+  constructor(private readonly deps: RelationSyncDeps) {
+    this.cooldown = deps.cooldown ?? new AuxiliaryCooldown();
+  }
 
   /** true mientras hay una extraccion en curso; para medir, no para decidir */
   get busy(): boolean {
@@ -425,14 +501,23 @@ export class RelationSync {
   }
 
   /**
-   * cuantas conversaciones se estan saltando por haber fallado en esta sesion.
+   * true si el CLI que hace ahora el trabajo de fondo esta en espera tras un
+   * fallo de su proceso. Lo lee el diagnostico: con esto, `quedan` mayor que
+   * cero se puede leer como «esperando al CLI» y no como «por leer».
+   */
+  get waitingForProcess(): boolean {
+    return this.cooldown.waiting(this.auxiliary());
+  }
+
+  /**
+   * cuantas conversaciones fallaron en esta sesion, de cualquier forma.
    *
    * Lo lee el diagnostico: una pasada que se queda por detras y una pasada que
    * ya lo intento y se quedo sin poder se ven igual en `behind`, y solo esta
    * cifra las distingue.
    */
   get failedThisSession(): number {
-    return this.failures.size;
+    return this.failedConversations.size;
   }
 
   /**
@@ -442,10 +527,11 @@ export class RelationSync {
    * van a extraer hoy. Si la guarda de desfase los cuenta, TODAS las promesas
    * anteriores se callan durante toda la sesion y lo unico que queda es un
    * contador en otra pantalla. Se trata igual que una negativa persistida, que
-   * ya estaba exceptuada por este mismo motivo.
+   * ya estaba exceptuada por este mismo motivo. Las que fallaron por el
+   * proceso del CLI cuentan igual: hasta que el CLI vuelva, tampoco se leen.
    */
   get failedConversations(): ReadonlySet<string> {
-    return new Set(this.failures.keys());
+    return new Set([...this.failures.keys(), ...this.processFailed.keys()]);
   }
 
   /**
@@ -456,6 +542,7 @@ export class RelationSync {
    */
   forgetFailure(conversationId: string): void {
     this.failures.delete(conversationId);
+    this.processFailed.delete(conversationId);
   }
 
   /**
@@ -595,6 +682,7 @@ export class RelationSync {
       refused: 0,
       failed: [],
       pending: 0,
+      waiting: 0,
     };
     if (!this.deps.vault.isUnlocked()) return result;
 
@@ -631,12 +719,24 @@ export class RelationSync {
     );
     result.pending = Math.max(0, candidates.length - Math.min(candidates.length, limit));
 
-    for (const candidate of candidates.slice(0, limit)) {
+    const permit = new LaunchPermit(this.cooldown, options.retryNow === true);
+    // el motivo del ultimo fallo del proceso de esta tanda, y de quien era, para
+    // el registro
+    const processFailure: ProcessFailureNote = { label: null, verdict: null };
+    const batch = candidates.slice(0, limit);
+    for (const [index, candidate] of batch.entries()) {
       // entre conversacion y conversacion se vuelve a mirar: cerrar la boveda
       // durante una pasada larga tiene que pararla, no llenar el log de errores
       if (!this.deps.vault.isUnlocked()) break;
+      // el CLI en espera tras un fallo de su proceso: ni se descifra la
+      // conversacion. Las que quedan de la tanda tampoco irian, asi que se
+      // cuentan y se para (`INV-FONDO-001`)
+      if (!permit.allows(target)) {
+        result.waiting += batch.length - index;
+        break;
+      }
       try {
-        await this.reviewOne(candidate, owners, target, options, result);
+        await this.reviewOne(candidate, owners, target, options, result, permit, processFailure);
       } catch (error) {
         // el try de dentro solo cubre la llamada al CLI. Fuera quedan descifrar
         // la conversacion, leer el almacen y guardar, y cualquiera de esas tres
@@ -674,7 +774,17 @@ export class RelationSync {
       negativas: result.refused,
       fallidas: result.failed.length,
       quedan: result.pending,
+      // las que no se mandaron porque el CLI espera tras un fallo de su
+      // proceso: sin esto, `quedan` no dice si es cola o espera
+      enEspera: result.waiting,
+      // el enum del agente, nunca su mensaje; `null` sin fallo del proceso
+      motivoFallo: processFailure.label,
+      // de quien era ese fallo: del CLI, de la conversacion o ya repetido
+      atribucion: processFailure.verdict,
       proveedor: target.provider,
+      // el total de subclaves derivadas desde que se abrio la boveda: restando
+      // lineas seguidas se ve cuanto cuesta cada pasada (`INV-LLAVE-001`)
+      derivaciones: this.deps.vault.derivationCount,
     });
     return result;
   }
@@ -774,6 +884,10 @@ export class RelationSync {
       // haber fallado con un CLI no dice nada del otro: cambiar el selector del
       // panel tiene que volver a intentarlo, igual que con una negativa
       if (!options.force && this.failures.get(conversationId) === target.provider) continue;
+      // su proceso falla por su cuenta: se salta un rato y despues se prueba
+      // una vez (decimotercera ronda). El boton la prueba igual
+      const subject = processSubject('relation', conversationId);
+      if (!options.force && this.cooldown.blocked(target, subject)) continue;
 
       const cursor = cursors.get(conversationId);
       if (!options.force && refusedStill(cursor, turns.length, target.provider)) continue;
@@ -811,9 +925,15 @@ export class RelationSync {
       });
     }
 
+    // las que acaban de fallar por el proceso con este CLI, al final: sin
+    // bloquearlas, una que falla sola —un tiempo agotado— no tapa a las demas
+    // en cada espera. Entre ellas, el mismo orden cronologico
+    const lastly = (id: string): number => (this.processFailed.get(id) === target.provider ? 1 : 0);
     return candidates.sort(
       (a, b) =>
-        a.startedAt.localeCompare(b.startedAt) || a.conversationId.localeCompare(b.conversationId),
+        lastly(a.conversationId) - lastly(b.conversationId) ||
+        a.startedAt.localeCompare(b.startedAt) ||
+        a.conversationId.localeCompare(b.conversationId),
     );
   }
 
@@ -823,6 +943,8 @@ export class RelationSync {
     target: { provider: LocalCliProvider; model: string | null },
     options: RelationRunOptions,
     result: RelationRunResult,
+    permit: LaunchPermit,
+    processFailure: ProcessFailureNote,
   ): Promise<void> {
     const { conversationId, characterId } = candidate;
 
@@ -860,8 +982,17 @@ export class RelationSync {
       anchor,
     });
 
+    // la espera puede haber empezado mientras se descifraba: otro trabajo del
+    // carril no, pero una tanda anterior de esta misma si
+    if (!permit.allows(target)) {
+      result.waiting += 1;
+      return;
+    }
+    permit.spend();
+
     let text: string;
     let executedModel: string | null;
+    let failureReason: ProviderFailureReason | null = null;
     try {
       const run = await this.deps.controller.runLocalTurn({
         localTurnId: randomUUID(),
@@ -872,19 +1003,44 @@ export class RelationSync {
         // apuntar promesas es una tarea SOBRE un texto: no encarna a nadie
         kind: 'technical',
       });
-      if (run.outcome !== 'completed') {
+      if (isProcessFailure(run)) {
+        failureReason = run.failureReason ?? null;
+        // el mensaje es el del agente, que dice que hacer y nunca copia lo que
+        // escribio el CLI. El texto de `run.text` no se mira: con un fallo no
+        // es una respuesta, y antes acababa contado como negativa
         throw new Error(run.error ?? 'el trabajo de fondo no llego a terminar');
       }
       text = run.text;
       executedModel = run.executedModel;
     } catch (error) {
-      this.failures.set(conversationId, target.provider);
+      // la boveda se cerro mientras el CLI pensaba: no es culpa del CLI ni de la
+      // conversacion, y no se marca nada (`D-106`, `D-088`). La pasada
+      // siguiente la vuelve a pedir
+      if (!this.deps.vault.isUnlocked()) return;
+      // un fallo del PROCESO: ni negativa ni cursor. Si es del CLI, espera; si
+      // es de la conversacion, pasa al final de la cola, y si la espera la da
+      // por suya se salta un par de horas sin rearmar la espera de nadie
+      // (undecima y decimotercera ronda)
+      const verdict = this.cooldown.noteFailure(
+        target,
+        failureReason,
+        processSubject('relation', conversationId),
+      );
+      processFailure.label = processFailureLabel(failureReason);
+      processFailure.verdict = verdict;
+      // tambien la que es suya: la salta la espera (`blocked`) un par de horas y
+      // no la sesion, y cuando vuelva a probarse tiene que ir al final
+      this.processFailed.set(conversationId, target.provider);
       result.failed.push({
         conversationId,
         reason: redact(error instanceof Error ? error.message : String(error)),
       });
       return;
     }
+
+    // contesto, con lo que sea: el proceso funciona y la espera se acaba
+    this.cooldown.noteSuccess(target, processSubject('relation', conversationId));
+    this.processFailed.delete(conversationId);
 
     const parsed = parseRelationExtraction(text);
     if (parsed.status !== 'structured') {
@@ -1008,7 +1164,9 @@ export class RelationSync {
           provider: target.provider,
           model: target.model,
           at: now,
-          refusedVersion: RELATION_EXTRACTOR_VERSION,
+          // la version de las NEGATIVAS, no la del extractor: las apuntadas
+          // antes eran fallos del proceso y ya no cuentan (`relation-refusal.ts`)
+          refusedVersion: RELATION_REFUSAL_VERSION,
           refusedAtTurns: turns,
           // una negativa no reviso nada: no puede certificar con que dueño se
           // reviso `through`, asi que conserva lo que hubiera

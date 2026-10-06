@@ -1,5 +1,51 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-10-05/06 — Claude — `INV-FONDO-001` e `INV-LLAVE-001`: el trabajo de fondo parado y la llave en bucle
+
+- Estado anterior: `ae41d2e`. Daniel probó el 30/09, y el registro mostraba
+  desde el 28/09 negativas, fallidas e `invalid` en los tres trabajos de fondo
+  por CLI, la lista de pendientes congelada y una «tasa» de derivaciones de 3 a
+  10 por segundo.
+- Investigación: flujo `wf_b54b06d5-73d`, con 32 agentes, tres lentes por
+  frente y un escéptico y un reproductor por causa. Causas y evidencia en
+  `CURRENT-TASK.md` y `D-109`. Resultado: el `claude` de la consola no tenía
+  sesión desde el 28/09 06:48Z, Luxy disfrazaba el error de respuesta y lo
+  contaba como negativa, y la «llave en bucle» no existía.
+- Arreglo: flujos `wf_6f8b7a28-515` (implementación en dos partes, dos rondas
+  de revisión con verificación y check) y `wf_d5bb2e3c-e86` (dos rondas más
+  sobre lo corregido, y check). 16 defectos importantes confirmados y
+  corregidos, casi todos en la atribución de la espera, con casos de bucle y
+  de bloqueo. Quien coordina leyó la última corrección: el contador
+  `generation` de `MemoryRelink`, el resultado interno `blocked` y el tercer
+  parámetro de `mergeCatalogRound`.
+- Archivos: `apps/agent` (`claude.ts`, `codex.ts`, `job-runner.ts`,
+  `local-turn.ts`, `agent.ts`, `runtime/host-entry.ts`, y la prueba nueva
+  `providers/cli-failure.test.ts`), `packages/shared` (`constants.ts`,
+  `types.ts`, `host-protocol.ts`) y `apps/desktop` (`auxiliary-cooldown.ts`,
+  nuevo, `relation-sync.ts`, `relation-refusal.ts`, `relation-selection.ts`,
+  `relation-diagnostics.ts`, `memory-relink.ts`, `memory-relink-store.ts`,
+  `recap-sync.ts`, `vault-service.ts`, `ipc/handlers.ts`, `shared/ipc.ts`,
+  `useVault.ts`, `Vault.tsx`, `vault-auxiliary.ts`, `vault-sweep.ts`,
+  `vault-lock-reset.ts`, `vault-recap-row.ts`), con sus pruebas: 38 archivos
+  de código modificados y 6 nuevos (`auxiliary-cooldown.ts`,
+  `relation-refusal.ts` y cuatro de pruebas).
+- Fuera del código:
+  - Daniel volvió a iniciar sesión (`LA-059`), comprobado con el entorno
+    restringido de Luxy.
+  - A petición suya, Claude movió a la Papelera 153 transcripciones en claro
+    del trabajo de fondo y 5 carpetas de pruebas (`LA-060`). Falta vaciarla.
+  - La skill `abrir-luxy` lanza ahora con `Start-Process`: con
+    `run_in_background` el tope de 30 minutos cerró la Luxy de Daniel el
+    05/10.
+- Hallazgo aparte: el 06/10, DeepSeek-V4-Pro de la pasarela escribe sólo la
+  escena, sin bloque de foto ni de memoria. Con V4-Flash la foto sale.
+- Resultado: `npm run check` a solas en verde (`TEST-RESULTS.md`). **No visto
+  en Electron.**
+- Siguiente paso: commit, reiniciar Luxy cuando Daniel diga y mirar en el
+  registro que pendientes, catálogo y reescritura vuelven a hacer trabajo:
+  `conversaciones` mayor que 0, sin negativas, y `resultado` distinto de
+  `invalid`.
+
 ### 2026-09-29 — Claude — `REV-CUATRO-FRENTES-001`: la documentación de la novena y la décima ronda, escrita una sola vez
 
 - Estado anterior: `f77efb6` (la octava ronda) con `npm run check` a solas en

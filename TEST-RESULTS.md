@@ -1,5 +1,26 @@
 # Luxy — resultados de comprobación
 
+### 2026-10-06 — INV-FONDO-001 — dos `npm run check` a solas y las pruebas de lo tocado
+
+Los pasó el último agente de cada flujo, sin nadie más en marcha, y en los dos
+lint, typecheck (paquetes y pruebas), test y build salieron con **salida 0**:
+
+- Tras la segunda ronda de `wf_6f8b7a28-515`: **233 archivos, 4899 pruebas en
+  verde y 12 omitidas.**
+- Tras la segunda ronda de `wf_d5bb2e3c-e86`, que es el árbol que se commitea:
+  **233 archivos, 4942 pruebas en verde y 12 omitidas (4954).** Las 12
+  omitidas son de `apps/agent/src/providers/live.test.ts`, como siempre.
+
+Cada corrección comprobó que sus pruebas nuevas fallan sin el arreglo:
+desactivó cada arreglo, ejecutó las pruebas y restauró el archivo con `cp`. Lo
+que no se ha ejecutado: Electron, el CLI real con un prompt y una API de
+modelo. Del CLI real sólo se ejecutaron `--help`, `claude auth status --json`
+y `codex login status`, y de éste sólo se miró el código de salida.
+
+Ojo con una comprobación que daba siempre bien: en este Git Bash,
+`grep -c $'\r$'` cuenta también las líneas LF. Los finales de línea se miran
+con `tr -cd '\r'` frente a `tr -cd '\n'` o con `git ls-files --eol`.
+
 ### 2026-09-29 — REV-CUATRO-FRENTES-001 (octava, novena y décima ronda) — los tres `npm run check` a solas y las pruebas de lo tocado
 
 Los `npm run check` los pasó quien coordina, a solas, cada uno después de la

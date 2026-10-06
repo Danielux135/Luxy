@@ -66,12 +66,21 @@ cambio no ha hecho nada».
 ## Lanzarla
 
 ```bash
-node_modules/electron/dist/electron.exe apps/desktop
+powershell.exe -NoProfile -Command 'Remove-Item Env:ELECTRON_RUN_AS_NODE -ErrorAction SilentlyContinue; Start-Process -FilePath (Resolve-Path "node_modules/electron/dist/electron.exe") -ArgumentList "apps/desktop" -WorkingDirectory (Get-Location)'
 ```
 
-Lánzalo **en segundo plano** (`run_in_background`): es una ventana gráfica y no
-termina sola. `ELECTRON_RUN_AS_NODE` no puede estar puesta en el entorno; si lo
-está, Electron arranca como Node y no abre ninguna ventana.
+Desde la raíz del repositorio: las dos rutas son relativas a ella.
+
+Lánzala **suelta**, con `Start-Process`, y no como tarea de la consola
+(`run_in_background`). Una tarea de fondo tiene un tope de tiempo, y al
+cumplirse mata a sus hijos: el 05/10 cerró la Luxy que Daniel estaba usando a
+los 30 minutos exactos, con la bóveda abierta. `Start-Process` vuelve
+enseguida y la ventana queda fuera de la sesión. Después comprueba con la
+primera orden de esta skill que la ventana existe.
+
+`ELECTRON_RUN_AS_NODE` no puede estar puesta en el entorno; si lo está,
+Electron arranca como Node y no abre ninguna ventana. La orden de arriba la
+quita.
 
 El equivalente que usa Daniel a mano es `start-luxy.bat` en la raíz, y
 `rebuild-and-start-luxy.bat` para reconstruir y abrir de una vez. Hacen lo

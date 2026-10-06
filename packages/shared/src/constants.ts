@@ -300,6 +300,30 @@ export const RESPONSE_OUTCOMES = [
 // resultados que conservan contenido parcial y admiten continuacion
 export const RECOVERABLE_RESPONSE_OUTCOMES = ['truncated', 'interrupted', 'timed_out'] as const;
 
+// por que fallo un CLI local cuando el propio CLI lo dice de forma estructurada.
+//
+// Existe por un fallo que paso desapercibido una semana: Claude Code sin sesion
+// no falla «hacia fuera». Emite un `result` con `is_error: true` —y `subtype:
+// "success"`, para mas confusion— cuyo texto es el mensaje de error, y Luxy
+// guardaba ese texto como si fuera la respuesta del modelo. Los trabajos de
+// fondo lo contaban como una negativa de Claude, y la pantalla no tenia forma
+// de saber que lo unico que faltaba era iniciar sesion.
+//
+// Es un enum y no un texto a proposito: Studio decide con el sin parsear
+// mensajes, y el registro puede llevarlo sin riesgo de arrastrar contenido.
+export const PROVIDER_FAILURE_REASONS = [
+  // el CLI no tiene sesion iniciada; se arregla con `claude auth login`
+  'auth',
+  // el CLI clasifico el fallo como limite de uso (su `rate_limit`, que es su
+  // traduccion de un HTTP 429). Solo se usa con esa señal: no se adivina
+  'rate_limit',
+  // el CLI marco el resultado como error por cualquier otro motivo
+  'api_error',
+  // el proceso salio con codigo distinto de 0 sin un resultado de error que
+  // explique por que
+  'exit_code',
+] as const;
+
 // --- union de una respuesta cortada con su continuacion (`joinContinuation`)
 
 // cuanto final del parcial se le enseña al modelo para que retome.

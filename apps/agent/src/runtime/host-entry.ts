@@ -183,6 +183,10 @@ export function startHostEntry(port: ParentPort): void {
           // principal la buscaba en un texto que ya no la llevaba
           memory: result.memory ?? null,
           memoryStatus: result.memoryStatus ?? null,
+          // el motivo del fallo como enum: sin copiarlo aqui, el proceso
+          // principal solo tendria `error`, que es prosa, para saber si al CLI
+          // le falta la sesion o si se nego
+          failureReason: result.failureReason ?? null,
         });
         break;
       }

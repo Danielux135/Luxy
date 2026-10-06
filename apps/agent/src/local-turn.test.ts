@@ -488,6 +488,63 @@ describe('aislamiento del gateway', () => {
     expect(volcado).not.toContain('una respuesta que tampoco');
   });
 
+  it('un fallo con motivo lo devuelve y lo apunta como enum, sin el mensaje', async () => {
+    // el motivo es lo que separa «sin sesion» o «limite de uso» de una
+    // negativa; el mensaje es prosa y no va al registro
+    const lineas: { message: string; fields: Record<string, unknown> }[] = [];
+    const espia = {
+      info: (message: string, fields: Record<string, unknown> = {}) =>
+        lineas.push({ message, fields }),
+      warn: () => undefined,
+      error: () => undefined,
+      debug: () => undefined,
+    } as unknown as AgentLogger;
+    const conLimite = {
+      id: 'claude',
+      displayName: 'Proveedor de prueba',
+      detect: async () => ({ available: true, version: 'falso' }),
+      run: async () => ({
+        ok: false,
+        finalText: '',
+        sessionId: null,
+        exitCode: 1,
+        timedOut: false,
+        cancelled: false,
+        errorMessage: 'mensaje para una persona',
+        failureReason: 'rate_limit',
+      }),
+    } as unknown as ProviderExecution;
+
+    const result = await runLocalTurn(input, new AbortController().signal, {
+      config: config(),
+      logger: espia,
+      getProvider: () => conLimite,
+      worktreesDirectory: 'C:/no/se/usa',
+      apiKeyFor: () => undefined,
+      onProgress: () => undefined,
+    });
+
+    expect(result.outcome).toBe('failed');
+    expect(result.responseOutcome).toBe('failed');
+    expect(result.failureReason).toBe('rate_limit');
+    const turno = lineas.find((linea) => linea.message === 'turno privado terminado');
+    expect(turno!.fields['motivoFallo']).toBe('rate_limit');
+    expect(JSON.stringify(lineas)).not.toContain('mensaje para una persona');
+  });
+
+  it('un fallo sin motivo conocido lo deja en null', async () => {
+    const result = await runLocalTurn(input, new AbortController().signal, {
+      config: config(),
+      logger,
+      getProvider: () => null,
+      worktreesDirectory: 'C:/no/se/usa',
+      apiKeyFor: () => undefined,
+      onProgress: () => undefined,
+    });
+    expect(result.outcome).toBe('failed');
+    expect(result.failureReason).toBeNull();
+  });
+
   it('descargar un adjunto es un error explicito, no una llamada silenciosa', () => {
     const error = new LocalTurnIsolationError('descargar un adjunto');
     // si esta rama se ejecuta alguna vez, es que alguien rompio el aislamiento

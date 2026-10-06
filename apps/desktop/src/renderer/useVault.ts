@@ -27,14 +27,20 @@ import type { OwnerChangePreview, OwnerView } from './vault-character-link.js';
 import type { HordeQueueProgress } from '../shared/horde-progress.js';
 import { callBridge } from './bridge-call.js';
 import { compatibilityFor, type CompatibilityRun } from './vault-compatibility-reply.js';
-import { discardDecrypted } from './vault-lock-reset.js';
+import { discardDecrypted, purgeTicket } from './vault-lock-reset.js';
 import {
   VAULT_LOCK_NOTICE_UNKNOWN,
   lockNoticeFor,
   vaultLockReasonSchema,
 } from '../shared/vault-lock.js';
 import { recapSignature } from './vault-recap-row.js';
-import type { RecapSweepRound } from './vault-sweep.js';
+import {
+  catalogResumeDue,
+  keepSweepingCatalog,
+  mergeCatalogRound,
+  type CatalogSummary,
+  type RecapSweepRound,
+} from './vault-sweep.js';
 import type {
   vaultCompatibilityResultSchema,
   vaultHordeAccountResultSchema,
@@ -45,6 +51,7 @@ import type {
   vaultRelationListResultSchema,
   vaultVisionProbeResultSchema,
   vaultMemoryDiagnosticsResultSchema,
+  vaultAuxiliaryFailureSchema,
   VaultImageTurnState,
 } from '../shared/ipc.js';
 import type { z } from 'zod';
@@ -115,6 +122,9 @@ export type VisionProbe = z.infer<typeof vaultVisionProbeResultSchema>;
 
 /** el diagnostico de la memoria: solo cifras, nunca contenido */
 export type MemoryDiagnosticsView = z.infer<typeof vaultMemoryDiagnosticsResultSchema>;
+
+/** el ultimo fallo del proceso de un CLI del trabajo de fondo: enums y horas */
+export type VaultAuxiliaryFailureView = z.infer<typeof vaultAuxiliaryFailureSchema>;
 
 /**
  * una prueba guardada a la vista, con identidad propia.
@@ -216,6 +226,12 @@ export interface VaultStatusView {
   hordeConfigured: boolean;
   /** esa clave es la anónima: funciona, y su documentación dice que comparte */
   hordeAnonymous: boolean;
+  /**
+   * los CLI del trabajo de fondo cuyo último proceso falló y aún no han vuelto
+   * a contestar (`INV-FONDO-001`). Solo enums y horas; vacío o ausente es que
+   * todo va bien
+   */
+  auxiliaryFailures?: readonly VaultAuxiliaryFailureView[];
 }
 
 const CLOSED: VaultStatusView = {
@@ -742,23 +758,43 @@ export interface VaultController {
     projectAlias: string;
     /** solo esta, y reintentandola aunque hubiera fallado antes */
     conversationId?: string;
-  }) => Promise<{ pending: number; cataloged: number; failed: number } | null>;
-  catalogingMemory: boolean;
-  /** que paso en el ultimo catalogado; null si no se ha hecho ninguno */
-  lastCatalog: {
-    cataloged: number;
-    scenes: number;
-    pending: number;
-    failed: { conversationId: string; reason: string }[];
     /**
-     * catálogos que parecen cortados por longitud y no por lo que pasa.
-     *
-     * Todas las escenas del mismo tamaño no es como fue la conversación: es que
-     * el modelo no encontró dónde cortar y repartió. El catálogo se conserva;
-     * esto sólo permite avisar y ofrecer repetirlo con otro modelo.
+     * la pide un botón: puede probar el CLI una vez aunque esté en espera tras
+     * un fallo de su proceso. Solo en la primera llamada de cada botón
      */
-    uneven: { conversationId: string; scenes: number }[];
-  } | null;
+    retryNow?: boolean;
+  }) => Promise<{ pending: number; cataloged: number; failed: number } | null>;
+  /**
+   * la pasada entera del catalogo: tandas hasta acabar, como al abrir el panel.
+   *
+   * Recuerda a quien se lo pidio, para poder retomarla sola si se queda
+   * esperando al CLI (undecima ronda). `retryNow` solo vale para la primera
+   * tanda: es un botón, y repetirlo arrancaría un CLI roto en cada vuelta.
+   * Devuelve cuantas conversaciones ordeno; 0 si ya habia otra en marcha
+   */
+  sweepCatalog: (
+    target: {
+      provider: string;
+      model: string | null;
+      effort: ReasoningEffort | null;
+      projectAlias: string;
+    },
+    options?: { retryNow?: boolean },
+  ) => Promise<number>;
+  catalogingMemory: boolean;
+  /**
+   * que paso en el catalogo de esta sesion, con las tandas juntas; null si no
+   * se ha hecho ninguno.
+   *
+   * `failed[].process`: falló el proceso del CLI, no la respuesta; se reintenta
+   * solo. `failed[].blocked`: su proceso falla por su cuenta; se salta un par de
+   * horas (`catalogRetryNote` dice cuando vuelve cada una). `uneven`: catálogos que parecen cortados por longitud y no por lo que
+   * pasa —todas las escenas del mismo tamaño no es como fue la conversación: es
+   * que el modelo no encontró dónde cortar y repartió—; el catálogo se conserva,
+   * y esto sólo permite avisar y ofrecer repetirlo con otro modelo. `waiting`:
+   * de la última tanda, las que no se mandaron porque el CLI espera
+   */
+  lastCatalog: CatalogSummary | null;
   /**
    * busca en lo ya hablado las promesas y los planes que quedaron pendientes.
    *
@@ -794,6 +830,8 @@ export interface VaultController {
     refused: number;
     failed: { conversationId: string; reason: string }[];
     pending: number;
+    /** de la tanda, las que no se mandaron porque el CLI espera tras un fallo */
+    waiting?: number;
   } | null;
   /**
    * lo que quedó pendiente entre los dos; `null` hasta que se pide.
@@ -833,6 +871,11 @@ export interface VaultController {
      * resumen?». Lo que devuelve se lee y se tira.
      */
     dryRun?: boolean;
+    /**
+     * la pide un botón en esta vuelta: puede probar el CLI una vez aunque esté
+     * en espera tras un fallo de su proceso
+     */
+    retryNow?: boolean;
   }) => Promise<RecapSweepRound | null>;
   syncingRecaps: boolean;
   /** qué pasó en la última tanda; null si no se ha hecho ninguna */
@@ -1100,6 +1143,19 @@ export function useVault(): VaultController {
   // la ultima renderizacion, y dos disparos seguidos lo leen los dos en `false`
   const catalogingRef = useRef(false);
   const [lastCatalog, setLastCatalog] = useState<VaultController['lastCatalog']>(null);
+  // a quien se le pidio la ultima pasada del catalogo, y cuando se retomo sola
+  // por ultima vez: lo que hace falta para retomarla si se queda esperando al
+  // CLI (undecima ronda). Son refs: no pintan nada
+  const catalogTargetRef = useRef<Parameters<VaultController['sweepCatalog']>[0] | null>(null);
+  const catalogResumedAtRef = useRef<number | null>(null);
+  // cuantas veces se ha vaciado el catalogo al cerrar. Una tanda que estaba en
+  // vuelo cuando se cerro llega DESPUES de la purga y volveria a escribir su
+  // resumen —con sus extractos— con la boveda cerrada: se compara con esto y se
+  // tira, como la vista previa del enganche (duodecima ronda)
+  const catalogEpochRef = useRef(0);
+  // lo mismo para los momentos de «Lo que recuerda»: una lectura en vuelo al
+  // cerrarse volveria a pintar los titulos con la boveda cerrada
+  const memoryEpochRef = useRef(0);
   const [syncingRelations, setSyncingRelations] = useState(false);
   // por el mismo motivo que el del catálogo: dentro del callback, un `useState`
   // llega con el valor de la última renderización
@@ -1203,6 +1259,24 @@ export function useVault(): VaultController {
       },
       characters: () => setCharacters([]),
       ownerHintDismissed: () => setOwnerHintDismissed(new Set()),
+      lastCatalog: () => {
+        catalogEpochRef.current += 1;
+        setLastCatalog(null);
+        // y la retoma automatica con el: a quien se le pidio la pasada y cuando
+        // se retomo. Sin esto, abrir otra vez la boveda —o entrar con otra
+        // cuenta— la relanzaba sola con el destino de antes, sin que nadie
+        // hubiera abierto el panel en esa apertura
+        catalogTargetRef.current = null;
+        catalogResumedAtRef.current = null;
+      },
+      memoryEpisodes: () => {
+        memoryEpochRef.current += 1;
+        // `null` y no `[]`: es lo que hace que abrir el panel en la siguiente
+        // apertura vuelva a barrer el catalogo, que es la unica forma de
+        // retomarlo despues de que el cierre se llevara la retoma
+        setMemoryEpisodes(null);
+        setMemoryExcluded([]);
+      },
     }),
     [],
   );
@@ -1505,8 +1579,11 @@ export function useVault(): VaultController {
   );
 
   const loadMemory = useCallback(async (): Promise<void> => {
+    const valid = purgeTicket(memoryEpochRef);
     const result = await window.luxy.listVaultMemory();
     if (!mounted.current) return;
+    // la boveda se cerro mientras se leia: la purga ya los quito
+    if (!valid()) return;
     if (!result.ok) {
       setError(result.error);
       return;
@@ -1544,6 +1621,7 @@ export function useVault(): VaultController {
       effort: ReasoningEffort | null;
       projectAlias: string;
       conversationId?: string;
+      retryNow?: boolean;
     }): Promise<{ pending: number; cataloged: number; failed: number } | null> => {
       // guarda en la pantalla ademas de la del proceso principal: sin esto se
       // encolan tandas que ya no hacen falta, y el `<details>` puede disparar
@@ -1551,24 +1629,40 @@ export function useVault(): VaultController {
       if (catalogingRef.current) return null;
       catalogingRef.current = true;
       setCatalogingMemory(true);
+      const valid = purgeTicket(catalogEpochRef);
+      // a quien se le pidio, tambien desde los botones por conversacion: sin
+      // esto, la que fallaba ahi por el proceso salia como «se vuelven a
+      // intentar solas» y la retoma no tenia a quien pedirselo (decimotercera
+      // ronda). La retoma barre la cola entera, sin `conversationId`
+      catalogTargetRef.current = {
+        provider: input.provider,
+        model: input.model,
+        effort: input.effort,
+        projectAlias: input.projectAlias,
+      };
       try {
-        const result = await window.luxy.syncVaultCatalog({ ...input, limit: 3 });
+        const result = await window.luxy.syncVaultCatalog({
+          ...input,
+          limit: 3,
+          retryNow: input.retryNow ?? false,
+        });
         if (!result.ok) {
           setError(result.error);
           return null;
         }
         if (!mounted.current) return null;
-        setLastCatalog({
-          cataloged: result.value.cataloged,
-          scenes: result.value.scenes,
-          pending: result.value.pending,
-          failed: result.value.failed,
-          uneven: result.value.uneven,
-        });
+        // la boveda se cerro mientras esta tanda estaba en vuelo: su resumen ya
+        // no tiene donde estar, y la pasada se para aqui
+        if (!valid()) return null;
+        // se JUNTA con lo de antes, no lo machaca: una tanda que solo espero no
+        // puede borrar el aviso de la que fallo (undecima ronda). Con lo que se
+        // pidio: la de un boton no acaba la pasada general que estaba a medias
+        const round = result.value;
+        setLastCatalog((previous) => mergeCatalogRound(previous, round, input));
         return {
-          pending: result.value.pending,
-          cataloged: result.value.cataloged,
-          failed: result.value.failed.length,
+          pending: round.pending,
+          cataloged: round.cataloged,
+          failed: round.failed.length,
         };
       } finally {
         catalogingRef.current = false;
@@ -1577,6 +1671,69 @@ export function useVault(): VaultController {
     },
     [],
   );
+
+  // mientras dura una pasada entera: entre tanda y tanda `catalogingRef` se
+  // suelta, y la retoma automatica no puede colarse en medio
+  const catalogSweepRef = useRef(false);
+
+  const sweepCatalog = useCallback<VaultController['sweepCatalog']>(
+    async (target, options = {}) => {
+      if (catalogSweepRef.current) return 0;
+      catalogSweepRef.current = true;
+      catalogTargetRef.current = target;
+      let ordered = 0;
+      try {
+        // tope de vueltas: una cola que no baja es un fallo, no un motivo para
+        // seguir gastando llamadas. Si una tanda no cataloga NADA y ademas no
+        // falla nada, algo va mal de forma sistematica —un modelo que no
+        // existe, por ejemplo— y seguir no sirve. Pero una negativa no para las
+        // demas: la conversacion negada queda marcada y la tanda siguiente coge
+        // otras
+        for (let vuelta = 0; vuelta < 12; vuelta += 1) {
+          const round = await syncCatalog({
+            ...target,
+            retryNow: options.retryNow === true && vuelta === 0,
+          });
+          ordered += round?.cataloged ?? 0;
+          if (!keepSweepingCatalog(round)) break;
+        }
+      } finally {
+        catalogSweepRef.current = false;
+      }
+      return ordered;
+    },
+    [syncCatalog],
+  );
+
+  // la pasada del catalogo que se quedo esperando al CLI se retoma sola: cuando
+  // otro trabajo de fondo lo ve contestar, o cuando pasa su espera, para
+  // probarlo una vez. Solo la arranca el panel y solo una vez por sesion, asi
+  // que sin esto lo que quedo a medias no se ordenaba hasta reiniciar Studio,
+  // aunque la pantalla dijera que se reintentaba solo (undecima ronda). Se mira
+  // con cada refresco del estado, que ya trae las esperas de los CLI
+  useEffect(() => {
+    if (!status.unlocked) return;
+    const target = catalogTargetRef.current;
+    if (target === null || catalogingRef.current || catalogSweepRef.current) return;
+    const now = Date.now();
+    if (
+      !catalogResumeDue({
+        summary: lastCatalog,
+        failures: status.auxiliaryFailures ?? [],
+        now,
+        lastResumeAt: catalogResumedAtRef.current,
+      })
+    ) {
+      return;
+    }
+    catalogResumedAtRef.current = now;
+    void (async () => {
+      // las escenas nuevas, para que la lista no se quede con las de antes. Sin
+      // nada nuevo no se relee: un intento que vuelve a fallar no tiene nada
+      // que enseñar, y releer con la boveda recien cerrada solo pintaria un error
+      if ((await sweepCatalog(target)) > 0 && mounted.current) await loadMemory();
+    })();
+  }, [status, lastCatalog, sweepCatalog, loadMemory]);
 
   const syncRelations = useCallback(
     async (input: {
@@ -1660,6 +1817,7 @@ export function useVault(): VaultController {
       conversationId?: string;
       force?: boolean;
       dryRun?: boolean;
+      retryNow?: boolean;
     }): Promise<RecapSweepRound | null> => {
       if (recapsRef.current) return null;
       recapsRef.current = true;
@@ -1683,6 +1841,7 @@ export function useVault(): VaultController {
             limit: 2,
             force: input.force ?? false,
             dryRun: input.dryRun ?? false,
+            retryNow: input.retryNow ?? false,
           }),
         );
         if (!result.ok) {
@@ -1875,6 +2034,7 @@ export function useVault(): VaultController {
 
   const excludeFromMemory = useCallback(
     async (conversationId: string, excluded: boolean): Promise<void> => {
+      const valid = purgeTicket(memoryEpochRef);
       const result = await callBridge(() =>
         window.luxy.excludeFromVaultMemory({ conversationId, excluded }),
       );
@@ -1884,6 +2044,8 @@ export function useVault(): VaultController {
         setHint(result.hint);
         return;
       }
+      // lo mismo que al leerlos: con la boveda ya cerrada, no se vuelven a pintar
+      if (!valid()) return;
       setMemoryEpisodes(result.value.episodes);
       setMemoryExcluded(result.value.excluded);
     },
@@ -2944,6 +3106,7 @@ export function useVault(): VaultController {
     setAuxiliary,
     loadMemory,
     syncCatalog,
+    sweepCatalog,
     catalogingMemory,
     lastCatalog,
     syncRelations,

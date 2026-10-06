@@ -378,6 +378,17 @@ inyección de shell, pero no convierte en seguro el código que la prueba import
   al CLI que la dio y un fallo suyo jamás hace perder un turno del usuario
   (`D-088`). Lo apuntado vive cifrado en `vault/relation.json`, sellado con la
   subclave de identidad como el catálogo.
+- Un fallo del CLI nunca es respuesta ni negativa (`D-109`). Un `result` con
+  `is_error` —que el CLI manda con `subtype:"success"`— sale como fallo con
+  `failureReason` (`auth`, `rate_limit`, `api_error` o `exit_code`) y un mensaje
+  que dice qué hacer, y su texto no va a ningún sitio. Un trabajo de
+  conversación sin texto visible también es `failed`. En los cuatro trabajos de
+  fondo, un fallo del proceso no persiste negativa ni fila `invalid`: arma una
+  espera de 10 minutos por lanzamiento (CLI, modelo y esfuerzo) en
+  `auxiliary-cooldown.ts`, que sólo `auth` extiende al CLI entero, y la
+  conversación a la que se le atribuye el fallo se salta dos horas. El `claude`
+  de la consola tiene su sesión aparte de la app de escritorio: si el fondo no
+  avanza, lo primero es `claude auth status --json`.
 - Las imágenes de la bóveda tienen **dos** proveedores y el proveedor es del
   **personaje**, no de la máquina: el de pago guarda la identidad en su servidor
   y AI Horde no tiene personajes, así que allí la identidad es una receta local

@@ -3,7 +3,7 @@
 // VERDAD en una carpeta temporal. Solo se simula el CLI. Todo el texto es
 // INVENTADO.
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -18,8 +18,13 @@ import { vaultFilePathFor } from './key-file.js';
 import { PrivateConversationStore, conversationsDirectory } from './conversation-store.js';
 import { ConversationOwnerStore, conversationOwnersFilePath } from './conversation-owner-store.js';
 import { MemoryRelinkStore, memoryRelinkFilePath } from './memory-relink-store.js';
-import { MemoryRelink } from './memory-relink.js';
+import { MemoryRelink, type MemoryRelinkDeps } from './memory-relink.js';
 import { createAuxiliaryLane } from './relation-sync.js';
+import {
+  AUXILIARY_BLOCK_MS,
+  AUXILIARY_PROCESS_WAIT_MS,
+  AuxiliaryCooldown,
+} from './auxiliary-cooldown.js';
 
 const PASSWORD = 'una frase larga de prueba';
 const FAST = { t: 1, m: 8 * 1024, p: 1 } as const;
@@ -85,7 +90,12 @@ describe('MemoryRelink', { timeout: 90_000 }, () => {
   let owners: ConversationOwnerStore;
   let relinks: MemoryRelinkStore;
   let llamadas: Llamada[];
-  let respuesta: () => Promise<{ outcome: 'completed' | 'failed'; text: string }>;
+  let respuesta: () => Promise<{
+    outcome: 'completed' | 'failed';
+    text: string;
+    error?: string | null;
+    failureReason?: 'auth' | 'rate_limit' | 'api_error' | 'exit_code' | null;
+  }>;
   let ocupadas: Set<string>;
   let excluidas: Set<string>;
   let auxiliar: { provider: string; model: string | null } | null;
@@ -130,7 +140,7 @@ describe('MemoryRelink', { timeout: 90_000 }, () => {
         runLocalTurn: async (input) => {
           llamadas.push({ provider: input.provider, kind: input.kind, prompt: input.prompt });
           const r = await respuesta();
-          return { ...r, error: null, executedModel: 'cli' };
+          return { error: null, ...r, executedModel: 'cli' };
         },
       },
       lane: createAuxiliaryLane(),
@@ -165,6 +175,20 @@ describe('MemoryRelink', { timeout: 90_000 }, () => {
   };
 
   const jsonl = (): Buffer => readFileSync(join(conversationsDirectory(directory), `${CONV}.jsonl`));
+
+  /**
+   * el archivo tal y como lo dejaba el codigo de antes de `INV-FONDO-001`:
+   * sellado igual, pero sin la marca de las recuperaciones ya hechas
+   */
+  const escribirArchivoAntiguo = async (rows: unknown[]): Promise<void> => {
+    const { sealText } = await import('@luxy/vault-crypto');
+    const sealed = await sealText(
+      vault.subkeyFor('identity', 'memory-relink'),
+      'vault.identity',
+      JSON.stringify({ v: 1, rows }),
+    );
+    writeFileSync(memoryRelinkFilePath(directory), JSON.stringify({ version: 1, content: sealed }));
+  };
 
   it('reescribe con el CLI local, en un turno tecnico, sin tocar el .jsonl', async () => {
     await enganchar();
@@ -532,20 +556,350 @@ describe('MemoryRelink', { timeout: 90_000 }, () => {
     expect(prompt).toContain('palabras palabras…"');
   });
 
-  it('un proceso caido deja la conversacion atascada en la sesion, y lo dice', async () => {
+  // `INV-FONDO-001`: un proceso caido ya no deja la conversacion atascada hasta
+  // reiniciar. Pone al CLI en espera, y la pantalla lo dice mientras dura
+  it('un proceso caido del CLI lo pone en espera, y lo dice; con el otro CLI no espera', async () => {
     await enganchar();
     auxiliar = { provider: 'codex', model: null };
-    respuesta = async () => ({ outcome: 'failed', text: '' });
-    expect(relink.stalledThisSession(CONV)).toBe(false);
+    // un limite de uso es del CLI por si solo (undecima ronda)
+    respuesta = async () => ({ outcome: 'failed', text: '', failureReason: 'rate_limit' });
+    expect(relink.waitingForProcess()).toBe(false);
     expect(await relink.run({ conversationId: CONV, projectAlias: 'luxy' })).toBe('process');
-    expect(relink.stalledThisSession(CONV)).toBe(true);
-    // con el otro CLI si se volveria a intentar solo: no esta atascada
+    expect(relink.waitingForProcess()).toBe(true);
+    // con el otro CLI si se volveria a intentar solo: ese no ha fallado
     auxiliar = { provider: 'claude', model: null };
-    expect(relink.stalledThisSession(CONV)).toBe(false);
+    expect(relink.waitingForProcess()).toBe(false);
     auxiliar = { provider: 'codex', model: null };
+    // el boton prueba una vez aunque espere, y si contesta la espera se acaba
     respuesta = async () => ({ outcome: 'completed', text: bloque(corregida) });
     expect(await relink.run({ conversationId: CONV, projectAlias: 'luxy', force: true })).toBe('ready');
-    expect(relink.stalledThisSession(CONV)).toBe(false);
+    expect(relink.waitingForProcess()).toBe(false);
+  });
+
+  // el resultado de fallo del contrato del agente: Claude Code sin sesion. Antes
+  // llegaba como `completed` con el mensaje del CLI de texto y se guardaba una
+  // fila `failed`/`invalid` que las pasadas automaticas ya no reintentaban
+  it('Claude sin sesion no guarda ninguna fila invalid, y el registro dice auth sin texto', async () => {
+    await enganchar();
+    auxiliar = { provider: 'claude', model: null };
+    respuesta = async () => ({
+      outcome: 'failed',
+      text: '',
+      error: 'MENSAJE-DEL-AGENTE-INVENTADO: ejecuta claude auth login',
+      failureReason: 'auth',
+    });
+    expect(await relink.run({ conversationId: CONV, projectAlias: 'luxy' })).toBe('process');
+    expect(await relinks.forConversation(vault, CONV)).toMatchObject({
+      status: 'pending',
+      failure: null,
+      memory: null,
+    });
+    const linea = registros.filter((r) => r.mensaje === 'memoria reescrita con su ficha').at(-1);
+    expect(linea?.campos).toMatchObject({ resultado: 'process', motivoFallo: 'auth' });
+    expect(typeof linea?.campos?.derivaciones).toBe('number');
+    expect(JSON.stringify(registros)).not.toContain('MENSAJE-DEL-AGENTE-INVENTADO');
+  });
+
+  it('con el CLI arreglado se retoma solo al acabar la espera, sin reiniciar', async () => {
+    let ahora = Date.parse('2026-10-06T10:00:00.000Z');
+    const espera = new AuxiliaryCooldown({ now: () => ahora });
+    const conEspera = new MemoryRelink({
+      vault,
+      conversations: store,
+      relinks,
+      recaps: { entryFor: async () => undefined },
+      characters: { list: async () => [] as never },
+      preferences: {
+        auxiliary: () => ({ provider: 'claude', model: null }) as never,
+        excluded: () => new Set(),
+      },
+      controller: {
+        runLocalTurn: async (input) => {
+          llamadas.push({ provider: input.provider, kind: input.kind, prompt: input.prompt });
+          const r = await respuesta();
+          return { error: null, ...r, executedModel: 'cli' };
+        },
+      },
+      lane: createAuxiliaryLane(),
+      isBusy: () => false,
+      now: () => new Date(ahora).toISOString(),
+      log: () => undefined,
+      cooldown: espera,
+    });
+    await enganchar();
+    respuesta = async () => ({ outcome: 'failed', text: '', failureReason: 'auth' });
+    expect(await conEspera.run({ conversationId: CONV, projectAlias: 'luxy' })).toBe('process');
+    // cada envio lanza la pasada general: durante la espera no llama a nadie
+    await conEspera.sweep('luxy', [CONV]);
+    await conEspera.sweep('luxy', [CONV]);
+    expect(llamadas).toHaveLength(1);
+    expect(espera.lastFailure('claude')).toMatchObject({ reason: 'auth' });
+
+    // Daniel ejecuta `claude auth login`; Studio sigue abierto
+    respuesta = async () => ({ outcome: 'completed', text: bloque(corregida) });
+    ahora += AUXILIARY_PROCESS_WAIT_MS;
+    await conEspera.sweep('luxy', [CONV]);
+    expect(llamadas).toHaveLength(2);
+    expect((await relinks.forConversation(vault, CONV))?.status).toBe('ready');
+    expect(espera.lastFailure('claude')).toBeNull();
+  });
+
+  // undecima ronda: la pasada general recorre las filas en el orden del archivo
+  // y un fallo del proceso no escribe nada, asi que la enganchada que fallaba
+  // iba SIEMPRE primera. Cada fallo, tratado como del CLI, rearmaba la espera de
+  // los cuatro trabajos, y las enganchadas de detras volvian `waiting` la
+  // sesion entera, sin reescribirse nunca
+  describe('una enganchada que falla delante de las demas', () => {
+    const R = '99999999-9999-4999-8999-999999999999';
+
+    /** R, enganchada y pendiente ANTES que CONV en el archivo */
+    const engancharLasDos = async (): Promise<void> => {
+      await store.appendTurn(vault, R, turno('hola', 'user', '2026-09-10T10:00:00.000Z'));
+      await store.appendTurn(vault, R, turno('r', 'assistant', '2026-09-10T10:01:00.000Z'), {
+        memory: { ...vieja, summary: `${vieja.summary} MARCA-R` },
+      });
+      await owners.append(vault, R, {
+        lastSequence: 1,
+        characterId: NORA,
+        characterLabel: 'Nora',
+        characterDescription: null,
+        instructions: null,
+        now: '2026-09-25T10:00:00.000Z',
+      });
+      await relink.noteLink(R);
+      await enganchar();
+    };
+
+    /** de quien era cada llamada, por lo que llevaba el prompt */
+    const quien = (): string[] =>
+      llamadas.map((each) => (each.prompt.includes('MARCA-R') ? 'R' : 'X'));
+
+    const conEspera = (
+      espera: AuxiliaryCooldown,
+      contestar: (prompt: string) => {
+        outcome: 'completed' | 'failed';
+        text: string;
+        failureReason?: 'auth' | 'api_error';
+      },
+      cambios: Partial<MemoryRelinkDeps> = {},
+    ): MemoryRelink =>
+      new MemoryRelink({
+        vault,
+        conversations: store,
+        relinks,
+        recaps: { entryFor: async () => undefined },
+        characters: { list: async () => [] as never },
+        preferences: {
+          auxiliary: () => ({ provider: 'claude', model: null }) as never,
+          excluded: () => new Set(),
+        },
+        controller: {
+          runLocalTurn: async (input) => {
+            llamadas.push({ provider: input.provider, kind: input.kind, prompt: input.prompt });
+            return { error: null, executedModel: 'cli', ...contestar(input.prompt) };
+          },
+        },
+        lane: createAuxiliaryLane(),
+        isBusy: () => false,
+        now: () => new Date().toISOString(),
+        log: (mensaje, campos) => registros.push({ mensaje, campos }),
+        cooldown: espera,
+        ...cambios,
+      });
+
+    it('su fallo propio no frena a las de detras ni rearma la espera, y repetido se salta', async () => {
+      await engancharLasDos();
+      const espera = new AuxiliaryCooldown();
+      const pasada = conEspera(espera, (prompt) =>
+        prompt.includes('MARCA-R')
+          ? { outcome: 'failed', text: '', failureReason: 'api_error' }
+          : { outcome: 'completed', text: bloque(corregida) },
+      );
+
+      // la pasada tras un envio: R falla, y CONV se reescribe en la misma
+      await pasada.sweep('luxy', [R, CONV]);
+      expect(quien()).toEqual(['R', 'X']);
+      expect((await relinks.forConversation(vault, CONV))?.status).toBe('ready');
+      expect(espera.waiting('claude')).toBe(false);
+
+      // la siguiente: R vuelve a fallar con el CLI contestando a las demas. Es
+      // suya: se salta un par de horas (decimotercera ronda), sin frenar a nadie
+      await pasada.sweep('luxy', [R, CONV]);
+      expect(quien()).toEqual(['R', 'X', 'R']);
+      expect(espera.waiting('claude')).toBe(false);
+      expect(espera.failures()).toEqual([]);
+      expect(pasada.blockedThisSession(R)).toBe(true);
+      for (let envio = 0; envio < 3; envio += 1) await pasada.sweep('luxy', [R, CONV]);
+      expect(llamadas).toHaveLength(3);
+      // nada en disco: sigue pendiente, y el boton la prueba igual
+      expect((await relinks.forConversation(vault, R))?.status).toBe('pending');
+      expect(await pasada.run({ conversationId: R, projectAlias: 'luxy', force: true })).toBe(
+        'process',
+      );
+      expect(llamadas).toHaveLength(4);
+      // y si falla tambien a mano, sigue siendo suya: ni rearma la espera ni
+      // vuelve a la cola (decimotercera ronda)
+      expect(espera.waiting('claude')).toBe(false);
+      expect(pasada.blockedThisSession(R)).toBe(true);
+
+      // el registro dice de quien era cada fallo, con enums
+      const fallos = registros.filter(
+        (each) =>
+          each.mensaje === 'memoria reescrita con su ficha' && each.campos?.resultado === 'process',
+      );
+      expect(fallos.map((each) => each.campos?.atribucion)).toEqual([
+        'conversation',
+        'blocked',
+        'blocked',
+      ]);
+      expect(JSON.stringify(registros)).not.toContain(R);
+    });
+
+    it('tras una espera del CLI, la que fallo va al final: no vuelve a ser la primera', async () => {
+      await engancharLasDos();
+      let ahora = Date.parse('2026-10-06T10:00:00.000Z');
+      const espera = new AuxiliaryCooldown({ now: () => ahora });
+      let roto = true;
+      const pasada = conEspera(espera, () =>
+        roto
+          ? { outcome: 'failed', text: '', failureReason: 'auth' }
+          : { outcome: 'completed', text: bloque(corregida) },
+      );
+
+      await pasada.sweep('luxy', [R, CONV]);
+      // sin sesion es del CLI: la de detras espera
+      expect(quien()).toEqual(['R']);
+      expect(espera.waiting('claude')).toBe(true);
+
+      // `claude auth login`, y pasa la espera
+      roto = false;
+      ahora += AUXILIARY_PROCESS_WAIT_MS;
+      await pasada.sweep('luxy', [R, CONV]);
+      expect(quien()).toEqual(['R', 'X', 'R']);
+      expect((await relinks.forConversation(vault, CONV))?.status).toBe('ready');
+      expect((await relinks.forConversation(vault, R))?.status).toBe('ready');
+    });
+
+    // «dos horas, no la sesion» (decimotercera ronda). Saltada por la espera, la
+    // pasada la daba por vista (`skipped`, a `idle`) hasta cerrar la boveda: con
+    // la boveda abierta, pasadas las dos horas nadie la volvia a probar sola,
+    // aunque su fila prometia que si
+    it('saltada por la espera, ni se descifra ni se da por vista: pasadas las dos horas la pasada la prueba', async () => {
+      await engancharLasDos();
+      let ahora = Date.parse('2026-10-06T10:00:00.000Z');
+      const espera = new AuxiliaryCooldown({ now: () => ahora });
+      let roto = true;
+      const descifradas: string[] = [];
+      const pasada = conEspera(
+        espera,
+        (prompt) =>
+          roto && prompt.includes('MARCA-R')
+            ? { outcome: 'failed', text: '', failureReason: 'api_error' }
+            : { outcome: 'completed', text: bloque(corregida) },
+        {
+          conversations: {
+            owner: (cual, id) => {
+              descifradas.push(id);
+              return store.owner(cual, id);
+            },
+            latestMemoryRecord: (cual, id) => store.latestMemoryRecord(cual, id),
+          },
+        },
+      );
+      // falla sola dos veces con el CLI contestando a la otra entre medias: suya
+      await pasada.sweep('luxy', [R, CONV]);
+      await pasada.sweep('luxy', [R, CONV]);
+      expect(quien()).toEqual(['R', 'X', 'R']);
+      expect(pasada.blockedThisSession(R)).toBe(true);
+
+      // cada envio lanza la pasada: mientras la espera la salta, ni la llama ni
+      // la descifra para nada
+      descifradas.length = 0;
+      for (let envio = 0; envio < 3; envio += 1) await pasada.sweep('luxy', [R, CONV]);
+      expect(llamadas).toHaveLength(3);
+      expect(descifradas).not.toContain(R);
+
+      // un envio EN ella la lanza sin pasar por la pasada: tampoco la da por vista
+      expect(await pasada.run({ conversationId: R, projectAlias: 'luxy' })).toBe('blocked');
+      expect(llamadas).toHaveLength(3);
+
+      // lo suyo se arregla y pasan las dos horas: el envio siguiente, en
+      // cualquier conversacion, la prueba
+      roto = false;
+      ahora += AUXILIARY_BLOCK_MS + 1;
+      expect(pasada.blockedThisSession(R)).toBe(false);
+      await pasada.sweep('luxy', [R, CONV]);
+      expect(quien()).toEqual(['R', 'X', 'R', 'R']);
+      expect((await relinks.forConversation(vault, R))?.status).toBe('ready');
+    });
+
+    // un cierre para la pasada que estaba en curso, y solo esa: la de despues
+    // sigue donde se quedo
+    it('un cierre a mitad corta la pasada aunque la boveda se abra antes de la siguiente', async () => {
+      await engancharLasDos();
+      const referencia: { pasada: MemoryRelink | null } = { pasada: null };
+      const pasada = conEspera(
+        new AuxiliaryCooldown(),
+        () => ({ outcome: 'completed', text: bloque(corregida) }),
+        {
+          // la primera queda escrita y, antes de la segunda, se cierra y se
+          // vuelve a abrir: lo que ve la pasada es solo el `cancel()`
+          log: (mensaje, campos) => {
+            registros.push({ mensaje, campos });
+            if (campos?.resultado === 'ready' && llamadas.length === 1) referencia.pasada?.cancel();
+          },
+        },
+      );
+      referencia.pasada = pasada;
+      await pasada.sweep('luxy', [R, CONV]);
+      expect(quien()).toEqual(['R']);
+      await pasada.sweep('luxy', [R, CONV]);
+      expect(quien()).toEqual(['R', 'X']);
+      expect((await relinks.forConversation(vault, CONV))?.status).toBe('ready');
+    });
+  });
+
+  // las dos filas `failed`/`invalid` del 29/09 eran fallos del proceso: se
+  // recuperan UNA vez al primer paso por la pasada, y se reescriben solas
+  it('recupera una vez la fila invalid que dejo un fallo del proceso, y la reescribe', async () => {
+    await enganchar();
+    const pendiente = await relinks.forConversation(vault, CONV);
+    // lo que dejo el codigo de antes: `failed`/`invalid` con Claude, en un
+    // archivo escrito antes de que existiera la marca de recuperacion
+    await escribirArchivoAntiguo([
+      {
+        ...pendiente!,
+        status: 'failed',
+        failure: 'invalid',
+        provider: 'claude',
+        updatedAt: '2026-09-29T15:48:00.000Z',
+      },
+    ]);
+    auxiliar = { provider: 'claude', model: null };
+    expect(await relink.run({ conversationId: CONV, projectAlias: 'luxy' })).toBe('ready');
+    expect(llamadas).toHaveLength(1);
+    expect(
+      registros.some((r) => r.campos?.resultado === 'recuperadas' && r.campos?.filas === 1),
+    ).toBe(true);
+
+    // y no se repite: una `invalid` de verdad, escrita despues, se respeta
+    // aunque se cierre y se vuelva a abrir la boveda
+    const lista = await relinks.forConversation(vault, CONV);
+    await relinks.replace(vault, CONV, lista, {
+      ...lista!,
+      status: 'failed',
+      failure: 'invalid',
+      memory: null,
+      drift: null,
+      provider: 'claude',
+      updatedAt: '2026-10-06T10:00:00.000Z',
+    });
+    vault.lock('manual');
+    relink.cancel();
+    await vault.unlock(PASSWORD);
+    expect(await relink.run({ conversationId: CONV, projectAlias: 'luxy' })).toBe('skipped');
+    expect((await relinks.forConversation(vault, CONV))?.status).toBe('failed');
+    expect(llamadas).toHaveLength(1);
   });
 
   it('excluida, ocupada o sin enganche no llama a nadie', async () => {
@@ -589,13 +943,20 @@ describe('MemoryRelink', { timeout: 90_000 }, () => {
     expect(await relinks.forConversation(vault, CONV)).toMatchObject({ status: 'failed', failure: 'lossy', memory: null });
   });
 
-  it('un proceso caido no se persiste, y con el mismo CLI no se repite en la sesion', async () => {
+  it('un proceso caido no se persiste; repetido sin que el CLI conteste a nadie, espera', async () => {
     await enganchar();
     respuesta = async () => ({ outcome: 'failed', text: '' });
     expect(await relink.run({ conversationId: CONV, projectAlias: 'luxy' })).toBe('process');
     expect((await relinks.forConversation(vault, CONV))?.status).toBe('pending');
-    expect(await relink.run({ conversationId: CONV, projectAlias: 'luxy' })).toBe('skipped');
-    expect(llamadas).toHaveLength(1);
+    // el primero sin motivo no se sabe de quien es: no frena a nadie (undecima
+    // ronda). El segundo, sin una respuesta del CLI entre medias, tampoco se
+    // sabe, y entonces espera: `INV-FONDO-001`, no «hasta reiniciar»
+    expect(relink.waitingForProcess()).toBe(false);
+    expect(await relink.run({ conversationId: CONV, projectAlias: 'luxy' })).toBe('process');
+    expect(relink.waitingForProcess()).toBe(true);
+    expect(relink.blockedThisSession(CONV)).toBe(false);
+    expect(await relink.run({ conversationId: CONV, projectAlias: 'luxy' })).toBe('waiting');
+    expect(llamadas).toHaveLength(2);
     // a mano si
     respuesta = async () => ({ outcome: 'completed', text: bloque(corregida) });
     expect(await relink.run({ conversationId: CONV, projectAlias: 'luxy', force: true })).toBe('ready');
@@ -658,6 +1019,20 @@ describe('MemoryRelink', { timeout: 90_000 }, () => {
     vault.lock('manual');
     await relink.sweep('luxy', [CONV]);
     expect(llamadas).toHaveLength(2);
+  });
+
+  // tras el primer cierre, `sweep()` miraba si parar ANTES de llamar a `run()`,
+  // que era lo unico que lo desmarcaba: la pasada general no volvia a hacer
+  // nada hasta un envio en una enganchada, un enganche o el boton
+  it('tras cerrar y volver a abrir la boveda, la pasada general vuelve a lanzar el CLI', async () => {
+    await enganchar();
+    vault.lock('manual');
+    relink.cancel();
+    await vault.unlock(PASSWORD);
+
+    await relink.sweep('luxy', [CONV]);
+    expect(llamadas).toHaveLength(1);
+    expect((await relinks.forConversation(vault, CONV))?.status).toBe('ready');
   });
 
   // octava ronda: una reescrita ya cumplida guardaba su texto sin que nada lo leyera

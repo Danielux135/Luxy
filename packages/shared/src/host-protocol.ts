@@ -9,7 +9,7 @@
 // trata igual que la entrada de telegram.
 import { z } from 'zod';
 import { agentEventSchema, agentHostStatusSchema } from './agent-events.js';
-import { REASONING_EFFORTS } from './constants.js';
+import { PROVIDER_FAILURE_REASONS, REASONING_EFFORTS } from './constants.js';
 import { conversationMemorySchema, conversationMemoryStatusSchema } from './schemas.js';
 
 /**
@@ -232,6 +232,19 @@ export const hostResponseSchema = z.discriminatedUnion('type', [
      */
     memory: conversationMemorySchema.nullable().optional(),
     memoryStatus: conversationMemoryStatusSchema.nullable().optional(),
+    /**
+     * por que fallo el CLI, cuando el CLI lo dijo de forma estructurada.
+     *
+     * Solo viene con `outcome: 'failed'`. Existe para que el proceso principal
+     * distinga «Claude Code no tiene la sesion iniciada» de una negativa o de
+     * cualquier otro fallo SIN leer `error`, que es prosa para una persona.
+     * Antes ese caso llegaba como `completed` con el mensaje de error del CLI
+     * en `text`, y los trabajos de fondo lo contaban como una negativa.
+     *
+     * Opcional y anulable para que un agente viejo siga hablando con un Studio
+     * nuevo; ausente y null significan «no se sabe».
+     */
+    failureReason: z.enum(PROVIDER_FAILURE_REASONS).nullable().optional(),
   }),
 ]);
 

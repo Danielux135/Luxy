@@ -6185,3 +6185,85 @@ Nada de esto está corregido. Ninguno rompe y todos son menores:
 - **`inheritedUnnoted` vive en memoria**: si fallan el apunte del turno y el
   reintento de la pasada y Studio se reinicia antes del siguiente envío, la
   fila se queda `not-needed` sin nada en pantalla.
+
+## D-109 — un fallo del CLI no es una respuesta ni una negativa: falla, espera por lanzamiento y se recupera solo
+
+Fecha: 2026-10-06. Autor: Claude. Contexto: `INV-FONDO-001`. Lo pidió Daniel
+(«ponte con el punto 2»), después de que el apuntador de promesas llevara una
+semana sin hacer nada.
+
+Estado (06/10): aceptada e implementada. Un flujo la construyó y la revisó dos
+veces (`wf_6f8b7a28-515`), y otro la revisó dos veces más (`wf_d5bb2e3c-e86`):
+16 defectos importantes confirmados, todos corregidos. La última corrección
+(tres cambios pequeños) la leyó quien coordina, no un revisor independiente.
+`npm run check` a solas en verde: 233 archivos, 4942 pruebas y 12 omitidas. **No
+visto en Electron.**
+
+### El fallo que la motiva
+
+El `claude` de la consola perdió la sesión el 28/09; tiene su sesión aparte de
+la app de escritorio. Desde entonces, cada llamada emitía un `result` con
+`is_error:true` y `subtype:"success"`, salía con código 1 y no escribía nada en
+stderr. Luxy copiaba el texto de ese `result` como respuesta, el final salía
+`interrupted` y el turno `completed`. Así, pendientes lo contó como negativa y
+bloqueó la conversación (en memoria hasta reiniciar Studio, en disco hasta que
+creciera), el catálogo como fallida y la reescritura de `D-108` como
+`invalid`. Ningún registro decía «autenticación». Todas las negativas de la
+historia del registro (6) y las dos reescrituras salieron de ahí.
+
+### Lo que se decide
+
+1. **Un fallo del CLI es un fallo.** Si llega un `result` con `is_error`, o un
+   `assistant` con `error`, el proveedor devuelve `ok:false` sin texto, con
+   cualquier código de salida. El motivo se toma sólo de señales estructuradas
+   del CLI, sin adivinar por palabras: `failureReason` es `auth`, `rate_limit`,
+   `api_error` o `exit_code`. El mensaje dice qué hacer, y el texto del CLI no
+   va ni al mensaje, ni al registro, ni al progreso. Codex recibe el mismo
+   trato con sus eventos `error` y `turn.failed`, y su falta de sesión se mira
+   con el código de salida de `codex login status`. Un trabajo de conversación
+   sin texto visible también es `failed`, y ya no se rellena con «El proveedor
+   no devolvió resumen.». `failureReason` cruza el protocolo del host y se
+   registra como `motivoFallo`.
+2. **En los cuatro trabajos de fondo** (pendientes, catálogo, reescritura y
+   relleno), un fallo del proceso no persiste negativa ni fila `invalid`. Las
+   negativas de verdad, una respuesta `completed` sin bloque, siguen como en
+   `D-088`.
+3. **La espera es por lanzamiento.** Un fallo arma 10 minutos de espera
+   (`AUXILIARY_PROCESS_WAIT_MS`) para ese CLI, con ese modelo y ese esfuerzo,
+   compartida por los cuatro trabajos (`auxiliary-cooldown.ts`). Sólo `auth`
+   la extiende al CLI entero. Cualquier respuesta la levanta, y así, tras
+   `claude auth login`, todo vuelve solo en minutos y sin reiniciar. Un botón
+   pulsado a mano da un intento aunque haya espera.
+4. **De quién es la culpa.** Se cuenta por tandas: los fallos entre dos
+   respuestas del mismo lanzamiento. Una conversación que falló sola en una
+   tanda anterior, o en dos tandas, se salta durante dos horas
+   (`AUXILIARY_BLOCK_MS`). En un apagón real todas fallan en la misma tanda y
+   no se salta ninguna. Se compara por conversación y no por trabajo.
+5. **Recuperar lo grabado, una vez y sin reescribir decisiones de Daniel.** Las
+   negativas se graban ahora con `RELATION_REFUSAL_VERSION`, que es la versión
+   del extractor más uno, y sólo cuentan las de esa versión. Las viejas se
+   quedan en disco sin efecto, y `through` no se toca, así que no se relee
+   nada. En `vault/memory-relink.json`, una migración sellada y única devuelve
+   a pendientes las filas `failed` con `invalid` o `refused`, con la marca
+   `inv-fondo-001` dentro del mismo archivo cifrado.
+6. **Se ve.** El estado de la bóveda lleva `auxiliaryFailures`, con enums y
+   horas, y Privado dice qué hacer bajo «Quién hace el trabajo de fondo»
+   («claude auth login»). Ofrece el otro CLI, pero no cambia a él solo.
+7. **La llave, sólo medida.** `VaultService.derivationCount` es de sólo
+   lectura, y el contador acumulado va en «turno privado terminado» y en las
+   líneas de los trabajos de fondo. El supuesto bucle de 6 por segundo no
+   existía: es el total de la sesión dividido entre el tiempo abierta.
+
+### Lo que queda abierto
+
+- Un límite de uso de Codex llega como `api_error` o `exit_code`, porque
+  `codex exec --json` no trae código estructurado. La conversación activa
+  puede saltarse dos horas en vez de esperar 10 minutos.
+- Si la bóveda se cierra, el catálogo no se reanuda solo: hay que volver a
+  abrir «Lo que recuerda». La pantalla lo dice.
+- `describeCatalogFailure` guarda hasta 160 caracteres de la respuesta en
+  `failed[].reason`. Ahora se purga al cerrar.
+- Un comentario de `packages/shared/src/vault-relink.ts` («failedThisSession…
+  en esta sesión») ha quedado desfasado.
+- Lo que ya traía cada respuesta privada no cambia: cada turno descifra la
+  bóveda entera varias veces, unas 4.000 derivaciones (`INV-LLAVE-001`).

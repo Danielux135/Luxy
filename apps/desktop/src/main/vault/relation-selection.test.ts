@@ -12,6 +12,7 @@ import {
   type RelationNote,
   type TemporalAnchor,
 } from '@luxy/shared';
+import { RELATION_REFUSAL_VERSION } from './relation-refusal.js';
 import { matchesStems, noteId, quoteStems } from './relation.js';
 import {
   OFFER_RUN_USER_TURNS,
@@ -479,11 +480,23 @@ describe('26. desfase: solo el hueco posterior al origen de ESA nota', () => {
     const result = select({
       notes: [VIEJA],
       turns: CON_HUECO,
-      cursors: [cursor(CONV_A, 2), cursor(CONV_C, 2, RELATION_EXTRACTOR_VERSION)],
+      cursors: [cursor(CONV_A, 2), cursor(CONV_C, 2, RELATION_REFUSAL_VERSION)],
     });
 
     expect(result.counters.blockedStale).toBe(0);
     expect(result.lines).toHaveLength(1);
+  });
+
+  // `INV-FONDO-001`: las negativas apuntadas antes eran fallos del proceso. Ya
+  // no sacan su conversacion de la guarda: hasta que se relea, su hueco cuenta
+  it('una negativa de antes ya no saca la conversacion de la guarda', () => {
+    const result = select({
+      notes: [VIEJA],
+      turns: CON_HUECO,
+      cursors: [cursor(CONV_A, 2), cursor(CONV_C, 2, 1)],
+    });
+
+    expect(result.counters.blockedStale).toBe(1);
   });
 
   it('ni una que no se ha podido leer en esta sesion', () => {
@@ -515,7 +528,7 @@ describe('26. desfase: solo el hueco posterior al origen de ESA nota', () => {
     const negada = select({
       notes: [VIEJA],
       turns: CON_HUECO,
-      cursors: [cursor(CONV_A, 2), cursor(CONV_C, -1, RELATION_EXTRACTOR_VERSION)],
+      cursors: [cursor(CONV_A, 2), cursor(CONV_C, -1, RELATION_REFUSAL_VERSION)],
     });
     expect(negada.counters.blockedStale).toBe(0);
     expect(negada.lines).toHaveLength(1);
@@ -525,7 +538,7 @@ describe('26. desfase: solo el hueco posterior al origen de ESA nota', () => {
     const result = select({
       notes: [VIEJA],
       turns: [...CON_HUECO, turn(CONV_OTRA, 9, 'user', '2026-09-04T10:00:00.000Z', 'otra cosa')],
-      cursors: [cursor(CONV_A, 2), cursor(CONV_C, 2, RELATION_EXTRACTOR_VERSION)],
+      cursors: [cursor(CONV_A, 2), cursor(CONV_C, 2, RELATION_REFUSAL_VERSION)],
       conversations: [CONV_A, CONV_C, CONV_NOW],
     });
 

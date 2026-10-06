@@ -10,6 +10,7 @@ import { describe, it, expect } from 'vitest';
 import {
   DECRYPTED_RENDERER_STATE,
   discardDecrypted,
+  purgeTicket,
   type DecryptedRendererState,
   type DecryptedStateResetters,
 } from './vault-lock-reset.js';
@@ -91,6 +92,22 @@ describe('la purga del cierre de la boveda', () => {
     expect(DECRYPTED_RENDERER_STATE).toContain('ownerHintDismissed');
   });
 
+  it('y el resumen del catalogo, que lleva lo que escribio el CLI sobre una conversacion', () => {
+    // una conversacion que el CLI contesta sin el bloque deja en su motivo hasta
+    // 160 caracteres de esa respuesta, y queda fuera de las pasadas: desde que
+    // las vueltas se juntan, ese extracto ya no lo pisaba la tanda siguiente y
+    // sobrevivia al candado y al cambio de cuenta (duodecima ronda)
+    expect(DECRYPTED_RENDERER_STATE).toContain('lastCatalog');
+  });
+
+  it('y los momentos de «Lo que recuerda», con el titulo que les puso el CLI', () => {
+    // decimotercera ronda: se quedaban fuera. Los titulos, fechas e ids de una
+    // cuenta se pintaban bajo la sesion de otra tras «Salir», y como el panel
+    // solo barre el catalogo cuando no hay ninguno, el cierre dejaba la retoma
+    // del catalogo sin nadie que la arrancase hasta reiniciar
+    expect(DECRYPTED_RENDERER_STATE).toContain('memoryEpisodes');
+  });
+
   it('y lo demas que ya llevaba contenido descifrado sigue estando', () => {
     // la lista se junto de dos copias escritas a mano que habian divergido: el
     // cierre de sesion vaciaba seis cosas y el bloqueo diez
@@ -111,5 +128,23 @@ describe('la purga del cierre de la boveda', () => {
 
   it('ninguna clave repetida: una purga que se llama dos veces tapa un olvido', () => {
     expect(new Set(DECRYPTED_RENDERER_STATE).size).toBe(DECRYPTED_RENDERER_STATE.length);
+  });
+});
+
+describe('lo que llega despues de la purga', () => {
+  it('una lectura que estaba en vuelo al cerrarse ya no vale', () => {
+    // la lectura sale con la boveda abierta y vuelve con ella cerrada: si se
+    // escribiera, devolveria a la ventana lo que la purga acababa de quitar
+    const contador = { current: 0 };
+    const valida = purgeTicket(contador);
+    expect(valida()).toBe(true);
+    contador.current += 1;
+    expect(valida()).toBe(false);
+  });
+
+  it('la que sale despues de la purga si vale', () => {
+    const contador = { current: 3 };
+    const valida = purgeTicket(contador);
+    expect(valida()).toBe(true);
   });
 });

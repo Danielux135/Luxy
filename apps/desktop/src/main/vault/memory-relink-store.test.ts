@@ -133,7 +133,9 @@ describe('MemoryRelinkStore', () => {
     const { openText } = await import('@luxy/vault-crypto');
     const disco = JSON.parse(readFileSync(file, 'utf8')) as { content: never };
     const texto = await openText(vault.subkeyFor('identity', 'memory-relink'), 'vault.identity', disco.content);
-    expect(JSON.parse(texto)).toEqual({ v: 1, rows: [futura] });
+    // el archivo era de antes de la marca: sigue sin ella, y la recuperacion
+    // de `INV-FONDO-001` queda pendiente para su primera pasada
+    expect(JSON.parse(texto)).toEqual({ v: 1, rows: [futura], recoveries: [] });
   });
 
   it('borrar una conversacion sin fila no reescribe el archivo', async () => {
@@ -150,5 +152,107 @@ describe('MemoryRelinkStore', () => {
     expect(readdirSync(directory).includes('vault') ? readdirSync(join(directory, 'vault')) : []).not.toContain(
       'memory-relink.json',
     );
+  });
+  // `INV-FONDO-001`: las filas `failed` que escribio un fallo del proceso tomado
+  // por respuesta. Se recuperan una sola vez, con la marca dentro del sobre
+  describe('la recuperacion de lo que dejo un fallo del proceso', () => {
+    const C = '44444444-4444-4444-8444-444444444444';
+
+    /** el archivo como lo escribia el codigo de antes: sin marca */
+    const archivoAntiguo = async (rows: unknown[]): Promise<void> => {
+      const { sealText } = await import('@luxy/vault-crypto');
+      const sealed = await sealText(
+        vault.subkeyFor('identity', 'memory-relink'),
+        'vault.identity',
+        JSON.stringify({ v: 1, rows }),
+      );
+      mkdirSync(join(directory, 'vault'), { recursive: true });
+      writeFileSync(file, JSON.stringify({ version: 1, content: sealed }));
+    };
+
+    const enDisco = async (): Promise<{ rows: unknown[]; recoveries?: string[] }> => {
+      const { openText } = await import('@luxy/vault-crypto');
+      const disco = JSON.parse(readFileSync(file, 'utf8')) as { content: never };
+      return JSON.parse(
+        await openText(
+          vault.subkeyFor('identity', 'memory-relink'),
+          'vault.identity',
+          disco.content,
+        ),
+      ) as { rows: unknown[]; recoveries?: string[] };
+    };
+
+    const falsa = (id: string, failure: 'invalid' | 'refused') =>
+      fila(id, { status: 'failed', failure, memory: null, drift: null, provider: 'claude' });
+
+    it('vuelve a pendientes solo las invalid y refused, una vez, y lo deja sellado', async () => {
+      await archivoAntiguo([
+        falsa(A, 'invalid'),
+        falsa(B, 'refused'),
+        // una que perdia material exige un bloque bien formado: es de verdad
+        fila(C, { status: 'failed', failure: 'lossy', memory: null, provider: 'claude' }),
+      ]);
+
+      expect(await store.recoverProcessFailures(vault, '2026-10-06T10:00:00.000Z')).toBe(2);
+      expect(await store.forConversation(vault, A)).toMatchObject({
+        status: 'pending',
+        failure: null,
+        provider: null,
+        memory: null,
+        updatedAt: '2026-10-06T10:00:00.000Z',
+      });
+      expect((await store.forConversation(vault, B))?.status).toBe('pending');
+      expect(await store.forConversation(vault, C)).toMatchObject({
+        status: 'failed',
+        failure: 'lossy',
+      });
+      expect((await enDisco()).recoveries).toEqual(['inv-fondo-001']);
+      // cifrado como siempre: ni la conversacion se ve en claro
+      expect(readFileSync(file, 'utf8')).not.toContain(A);
+
+      // una `invalid` de verdad, escrita despues, NO se toca en la segunda
+      const ahora = await store.forConversation(vault, A);
+      await store.replace(vault, A, ahora, falsa(A, 'invalid'));
+      const antes = readFileSync(file);
+      expect(await store.recoverProcessFailures(vault, '2026-10-07T10:00:00.000Z')).toBe(0);
+      expect((await store.forConversation(vault, A))?.status).toBe('failed');
+      // ni se reescribe el archivo para dejarlo igual
+      expect(readFileSync(file).equals(antes)).toBe(true);
+    });
+
+    it('un archivo nuevo nace con la recuperacion hecha', async () => {
+      await store.replace(vault, A, undefined, falsa(A, 'invalid'));
+      expect((await enDisco()).recoveries).toEqual(['inv-fondo-001']);
+      expect(await store.recoverProcessFailures(vault, '2026-10-06T10:00:00.000Z')).toBe(0);
+      expect((await store.forConversation(vault, A))?.status).toBe('failed');
+    });
+
+    it('la marca sobrevive a cualquier otra escritura', async () => {
+      await archivoAntiguo([falsa(A, 'invalid')]);
+      await store.recoverProcessFailures(vault, '2026-10-06T10:00:00.000Z');
+      await store.replace(vault, B, undefined, fila(B));
+      await store.removeConversation(vault, B);
+      expect((await enDisco()).recoveries).toEqual(['inv-fondo-001']);
+    });
+
+    it('sin archivo no crea ninguno', async () => {
+      expect(await store.recoverProcessFailures(vault, '2026-10-06T10:00:00.000Z')).toBe(0);
+      expect(
+        readdirSync(directory).includes('vault') ? readdirSync(join(directory, 'vault')) : [],
+      ).not.toContain('memory-relink.json');
+    });
+
+    it('un archivo que no abre lanza y no se toca', async () => {
+      mkdirSync(join(directory, 'vault'), { recursive: true });
+      writeFileSync(
+        file,
+        '{"version":1,"content":{"version":1,"purpose":"x","nonce":"y","ciphertext":"z"}}',
+      );
+      const antes = readFileSync(file);
+      await expect(store.recoverProcessFailures(vault, '2026-10-06T10:00:00.000Z')).rejects.toThrow(
+        VaultError,
+      );
+      expect(readFileSync(file).equals(antes)).toBe(true);
+    });
   });
 });

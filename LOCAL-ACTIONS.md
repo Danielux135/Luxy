@@ -8,6 +8,90 @@
 > esos cinco es ambigua** y hay que leer las dos. Renumerarlos tocaría citas en
 > varios documentos y no se ha hecho hoy. Los números nuevos se toman de LA-049.
 
+## LA-059 — volver a iniciar sesión en el Claude Code de la consola
+
+Estado: **`done` — 2026-10-06 08:30 (hora local).** Daniel inició sesión y
+Claude lo comprobó con `claude auth status --json`: `loggedIn:true` y
+`authMethod` `claude.ai`, también con el entorno restringido con el que Luxy
+lanza el CLI. Lo que queda de `INV-FONDO-001` es el arreglo del código.
+
+El `claude` de la consola, que es el que usa Luxy para apuntar las promesas,
+catalogar las escenas y reescribir la memoria del enganche, **perdió la sesión
+el 28/09** y desde entonces falla en cada llamada. Tiene su sesión aparte de la
+app de escritorio de Claude, así que la app funcionando no prueba nada. Un
+agente no puede arreglarlo: hay que autenticarse.
+
+1. Abrir PowerShell y ejecutar:
+
+   ```
+   claude auth login
+   ```
+
+   Se abre el navegador para entrar en la cuenta. Al autorizar, el navegador
+   vuelve a `localhost:<puerto>/callback`, que es la propia consola esperando,
+   y ésta termina sola. **No cierres la ventana de PowerShell hasta que
+   acabe**: es la que recibe esa vuelta. Sólo si el navegador no puede volver,
+   la página enseña un código para pegarlo en `Paste code here if prompted >`.
+
+   Lo que pasó el 06/10: Claude lanzó el inicio de sesión desde su propia
+   consola y lo paró al ver ese aviso, creyendo que hacía falta pegar un
+   código. Daniel autorizó después en la pestaña que se había abierto, y el
+   navegador dio `ERR_CONNECTION_REFUSED` en `localhost:64278`, porque ya no
+   había nadie escuchando. El código de esa dirección sólo sirve una vez y
+   para el proceso que lo pidió, que ya no existe: no hay que cambiar nada.
+2. Comprobarlo:
+
+   ```
+   claude auth status
+   ```
+
+   Tiene que decir que hay sesión (`loggedIn` a `true`). Si sigue en `false`,
+   no sigas y avisa.
+3. No hace falta tocar Luxy. Cuando entre el arreglo de `INV-FONDO-001`, el
+   carril se recuperará solo en unos minutos y reintentará lo que quedó
+   marcado como negativa falsa.
+
+Mientras tanto, la alternativa es elegir **Codex** en el selector «Quien hace
+el trabajo de fondo» de Privado: según su propio estado local, Codex sí tiene
+sesión. No se ha probado con la bóveda.
+
+## LA-060 — borrar las 153 copias en claro del trabajo de fondo
+
+Estado: **`pending` — abierta el 2026-10-05. Privacidad. El 06/10, a petición
+de Daniel, Claude movió la carpeta a la Papelera de reciclaje** (153 archivos,
+`Test-Path` en `False`), junto con 5 carpetas de pruebas de los agentes
+(textos inventados, 3 archivos). **En la papelera siguen legibles.** Falta
+lo único que un agente no hace: vaciarla, o borrar desde ella sólo esas
+carpetas. Los pasos de abajo eran para borrarlas directamente y ya no hacen
+falta.
+
+Hasta el 29/09, cada llamada de Luxy al `claude` de la consola dejaba una copia
+de la conversación en la carpeta de historial de Claude Code, **sin cifrar**.
+Esas llamadas llevaban dentro contenido de la bóveda: las conversaciones que se
+le pasaban para apuntar promesas o catalogar escenas. Desde `a45953b` ya no se
+guarda nada (`--no-session-persistence`), pero lo de antes sigue ahí: **153
+archivos, 21 MB, del 05/09 al 29/09**, todos de llamadas no interactivas hechas
+desde la carpeta `Luxy test`. Sólo se comprobaron sus metadatos, no su
+contenido. Un agente no los borra por regla: borrar es cosa de Daniel.
+
+1. Cerrar cualquier consola de Claude Code abierta en la carpeta `Luxy test`, si
+   hay alguna.
+2. En PowerShell:
+
+   ```
+   Remove-Item -Recurse -Force "$env:USERPROFILE\.claude\projects\C--Users-oscar-Desktop-Daniel-Luxy-test"
+   ```
+
+   Borra sólo el historial de esa carpeta, no el de este repositorio ni el de
+   otros proyectos.
+3. Comprobar que ya no existe:
+
+   ```
+   Test-Path "$env:USERPROFILE\.claude\projects\C--Users-oscar-Desktop-Daniel-Luxy-test"
+   ```
+
+   Tiene que decir `False`.
+
 ## LA-049 — copia de seguridad de la bóveda, a mano
 
 Estado: **`pending` — abierta el 2026-09-25. Es la más urgente de la lista.**

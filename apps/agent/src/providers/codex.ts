@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type {
   ProviderExecution,
+  ProviderFailureReason,
   ProviderRunRequest,
   ProviderRunResult,
   ToolPresence,
@@ -173,10 +174,99 @@ export function buildCodexArgs(options: CodexArgsOptions): string[] {
   return args;
 }
 
+/**
+ * tipos de evento con los que `codex exec --json` declara un fallo.
+ *
+ * `error` y `turn.failed` son los del formato actual; `stream_error` es el
+ * aviso de reintento del formato antiguo (`{"msg":{"type":...}}`). En los tres
+ * el texto es un mensaje del CLI o del servidor, nunca la respuesta.
+ */
+const CODEX_ERROR_EVENT_TYPES = new Set(['error', 'turn.failed', 'stream_error']);
+
+/** de esos, los que dan el turno por perdido; un reintento anunciado no */
+const CODEX_FATAL_EVENT_TYPES = new Set(['error', 'turn.failed']);
+
+const CODEX_API_ERROR_MESSAGE =
+  'Codex devolvio un error en lugar de una respuesta. Abre una consola, ejecuta codex y comprueba que contesta; despues vuelve a intentarlo.';
+
+/**
+ * lo que se le dice a Daniel cuando Codex no tiene sesion. Como el de Claude:
+ * dice QUE HACER, y lo que imprime el CLI no se copia nunca
+ */
+export const CODEX_AUTH_MESSAGE =
+  'Codex no tiene la sesion iniciada en este equipo. Abre una consola y ejecuta: codex login. Despues vuelve a intentarlo.';
+
+/**
+ * tope de la consulta de sesion tras un fallo. Lee la sesion guardada en este
+ * equipo y no sale a la red; diez segundos dan margen a un arranque en frio
+ */
+export const CODEX_AUTH_PROBE_TIMEOUT_MS = 10_000;
+
+/**
+ * true si esta version tiene `codex login status`.
+ *
+ * Se exige la linea de uso del subcomando, no solo `login`: en una version sin
+ * `status`, lanzar `codex login status` podria acabar en `codex login`, que
+ * abre un inicio de sesion. Comprobado contra codex-cli 0.154.0 el 2026-10-06:
+ * `codex login status --help` dice «Usage: codex login status [OPTIONS]».
+ */
+export function codexLoginStatusSupported(help: string | null): boolean {
+  return help !== null && help.includes('codex login status');
+}
+
+/**
+ * pregunta a Codex si tiene sesion: true, false o null (no se sabe).
+ *
+ * Existe porque `codex exec --json` no dice con un codigo POR QUE fallo un
+ * turno: su evento de error solo trae un mensaje, y clasificar ese mensaje
+ * seria adivinar (decimotercera ronda). Sin esto, un Codex sin sesion salia
+ * como `api_error` o `exit_code`, que pueden ser de una sola conversacion, y
+ * la espera del trabajo de fondo acababa saltando la conversacion activa en
+ * vez de esperar al CLI entero y decir que faltaba iniciar sesion.
+ *
+ * Solo se mira el codigo de salida —0 con sesion, otro sin ella o sin poder
+ * leerla, que para un turno es lo mismo—: lo que imprime puede llevar un trozo
+ * de una clave, y no sale de aqui. Con el MISMO entorno restringido que las
+ * ejecuciones, como `probeClaudeAuth`. Cualquier fallo, tiempo agotado o
+ * version sin el subcomando es null, y null no cambia nada.
+ */
+export async function probeCodexAuth(
+  executable = 'codex',
+  timeoutMs = CODEX_AUTH_PROBE_TIMEOUT_MS,
+): Promise<boolean | null> {
+  const help = await readHelp(executable, ['login', 'status', '--help'], timeoutMs);
+  if (!codexLoginStatusSupported(help)) return null;
+  try {
+    const result = await runProcess({
+      executable,
+      args: ['login', 'status'],
+      cwd: process.cwd(),
+      timeoutMs,
+      envAllowList: BASE_ENV_ALLOWLIST,
+    });
+    if (result.timedOut || result.cancelled || result.exitCode === null) return null;
+    return result.exitCode === 0;
+  } catch {
+    return null;
+  }
+}
+
 /** interpreta una linea del jsonl de codex */
-export function parseCodexStreamLine(
-  line: string,
-): { type: string; text: string | null; sessionId: string | null } | null {
+export function parseCodexStreamLine(line: string): {
+  type: string;
+  text: string | null;
+  sessionId: string | null;
+  /**
+   * el evento es un error del CLI. Su texto NO es la respuesta.
+   *
+   * Antes `{"type":"error","message":...}` aportaba su `message` como texto y
+   * acababa siendo `finalText`: con codigo distinto de 0 eso era una respuesta
+   * «interrumpida» que se conservaba, con el error del CLI dentro.
+   */
+  isError: boolean;
+  /** el error da el turno por perdido (no es un reintento anunciado) */
+  isFatal: boolean;
+} | null {
   const trimmed = line.trim();
   if (trimmed.length === 0 || !trimmed.startsWith('{')) return null;
 
@@ -201,6 +291,12 @@ export function parseCodexStreamLine(
         ? payload.id
         : null;
 
+  const isError = CODEX_ERROR_EVENT_TYPES.has(type);
+  const isFatal = CODEX_FATAL_EVENT_TYPES.has(type);
+  // el texto de un error no se extrae siquiera: es la unica forma de que
+  // ningun camino posterior pueda confundirlo con la respuesta
+  if (isError) return { type, text: null, sessionId, isError, isFatal };
+
   // el texto aparece en varios campos segun la version
   let text: string | null = null;
   const candidates = [
@@ -217,7 +313,7 @@ export function parseCodexStreamLine(
     }
   }
 
-  return { type, text, sessionId };
+  return { type, text, sessionId, isError, isFatal };
 }
 
 export class CodexCliProvider implements ProviderExecution {
@@ -241,8 +337,17 @@ export class CodexCliProvider implements ProviderExecution {
 
   private capabilities: CodexCapabilities | null = null;
   private presence: ToolPresence | null = null;
+  private readonly probeAuth: () => Promise<boolean | null>;
 
-  constructor(private readonly defaultModel?: string) {}
+  constructor(
+    private readonly defaultModel?: string,
+    options: {
+      /** la consulta de sesion tras un fallo; por defecto, `probeCodexAuth` */
+      probeAuth?: () => Promise<boolean | null>;
+    } = {},
+  ) {
+    this.probeAuth = options.probeAuth ?? (() => probeCodexAuth());
+  }
 
   async detect(): Promise<ToolPresence> {
     if (this.presence) return this.presence;
@@ -378,6 +483,9 @@ export class CodexCliProvider implements ProviderExecution {
     let sessionId: string | null = null;
     let finalText = '';
     let buffer = '';
+    // el CLI declaro el turno perdido. Solo es un dato: el texto de ese evento
+    // no se guarda en ningun sitio
+    let fatalError = false;
 
     const handleLine = (line: string): void => {
       if (!this.capabilities?.json) {
@@ -387,6 +495,12 @@ export class CodexCliProvider implements ProviderExecution {
       const event = parseCodexStreamLine(line);
       if (!event) return;
       if (event.sessionId) sessionId ??= event.sessionId;
+      if (event.isError) {
+        if (event.isFatal) fatalError = true;
+        // el TIPO del evento es un enum del CLI; su mensaje no sale de aqui
+        request.onEvent({ type: 'tool', message: `Codex: ${event.type}` });
+        return;
+      }
       if (event.text) {
         finalText = event.text;
         request.onEvent({ type: 'text', message: event.text.slice(0, 500) });
@@ -449,6 +563,37 @@ export class CodexCliProvider implements ProviderExecution {
           errorMessage: `Codex supero el tiempo maximo de ${Math.round(request.timeoutMs / 1000)}s`,
         };
       }
+      // sin respuesta del modelo y con el turno declarado perdido o con un
+      // codigo distinto de 0: es un FALLO, sin texto. Asi el final es `failed`
+      // y no una respuesta «interrumpida» que se conserva.
+      //
+      // Con texto del modelo delante se mantiene lo de siempre —se entrega como
+      // parcial—: ese texto si es del modelo, porque el de un error ya no
+      // llega a `finalText`.
+      if (finalText.length === 0 && (fatalError || result.exitCode !== 0)) {
+        // Codex no dice con un codigo si le falta la sesion: se le pregunta.
+        // Sin sesion no contesta a nadie, y el trabajo de fondo tiene que
+        // esperar al CLI entero en vez de culpar a una conversacion
+        // (decimotercera ronda). Su limite de uso no tiene consulta ni codigo,
+        // y no se adivina por el texto: lo cubre que lo que se salta caduca
+        const failureReason: ProviderFailureReason =
+          (await this.probeAuth()) === false ? 'auth' : fatalError ? 'api_error' : 'exit_code';
+        return {
+          ok: false,
+          finalText: '',
+          sessionId,
+          exitCode: result.exitCode,
+          timedOut: false,
+          cancelled: false,
+          errorMessage:
+            failureReason === 'auth'
+              ? CODEX_AUTH_MESSAGE
+              : failureReason === 'api_error'
+                ? CODEX_API_ERROR_MESSAGE
+                : buildCodexError(result.exitCode, result.stderr),
+          failureReason,
+        };
+      }
       if (result.exitCode !== 0) {
         return {
           ok: false,
@@ -461,7 +606,14 @@ export class CodexCliProvider implements ProviderExecution {
         };
       }
 
-      if (finalText.length === 0) finalText = result.stdout.trim().slice(-4000);
+      // sin `--json` la salida ES la respuesta en texto plano. Con `--json` son
+      // eventos JSONL: su cola no es nada que haya escrito el modelo, y antes se
+      // entregaba como respuesta cuando el turno acababa sin mensaje final
+      // (duodecima ronda). Vacio se queda vacio, y el job-runner lo da por
+      // fallido en una conversacion
+      if (finalText.length === 0 && !this.capabilities.json) {
+        finalText = result.stdout.trim().slice(-4000);
+      }
 
       return {
         ok: true,
@@ -484,6 +636,13 @@ export class CodexCliProvider implements ProviderExecution {
   }
 }
 
+/**
+ * traduce un codigo de salida a un mensaje que se entiende en telegram.
+ *
+ * Como en Claude: stderr se LEE para elegir el mensaje y no se copia, porque
+ * lo que imprime un CLI no lo controla Luxy y este texto acaba en pantalla y
+ * en los registros. stderr ya llega aparte, como aviso de progreso.
+ */
 export function buildCodexError(exitCode: number | null, stderr: string): string {
   const text = stderr.toLowerCase();
   if (/not logged in|unauthorized|authentication|sign in|login/.test(text)) {
@@ -495,6 +654,5 @@ export function buildCodexError(exitCode: number | null, stderr: string): string
   if (/not a git repository/.test(text)) {
     return 'Codex requiere un repositorio git. El worktree deberia serlo: revisa el estado del proyecto.';
   }
-  const detail = stderr.trim().split(/\r?\n/).slice(-3).join(' ').slice(0, 300);
-  return `Codex termino con codigo ${exitCode ?? 'desconocido'}${detail ? `: ${detail}` : ''}`;
+  return `Codex termino con codigo ${exitCode ?? 'desconocido'} sin dar una respuesta. Abre una consola y ejecuta codex para ver que le pasa; despues vuelve a intentarlo.`;
 }

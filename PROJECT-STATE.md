@@ -1,11 +1,24 @@
 # Luxy — estado canónico del proyecto
 
-Última actualización: **2026-09-29 — los tres encargos del 25/09 y los tres
-frentes del 28/09 (el razonamiento por modelo, la memoria entera de sus dos
-últimas conversaciones y la enganchada igual que una empezada), corregidos en
-diez rondas, cada una revisada después; la novena y la décima sin
-commitear, y la revisión de la décima con dieciséis defectos
-abiertos, dos importantes. Nada visto en pantalla; la bóveda sigue sin copia**
+Última actualización: **2026-10-06 — el trabajo de fondo de la bóveda estaba
+parado desde el 28/09: el `claude` de la consola perdió la sesión y Luxy
+disfrazaba el error de respuesta y de negativa. Arreglado (`D-109`) con
+`npm run check` a solas en verde (233 archivos, 4942 pruebas), sin verse en
+Electron. La bóveda sigue sin copia.**
+
+> **Trabajo de fondo, 06/10 (`INV-FONDO-001`, `D-109`).** Desde el 28/09 no
+> se apuntaban promesas, no se catalogaban escenas y no se reescribía la
+> memoria del enganche. La sesión del CLI ya ha vuelto (`LA-059`), y el código
+> ya no toma un fallo por respuesta ni por negativa: espera por lanzamiento y
+> se recupera solo. La «llave en bucle» de `INV-LLAVE-001` no existía. Quedan
+> 153 transcripciones en claro en la Papelera, que hay que vaciar (`LA-060`).
+> El 06/10, DeepSeek-V4-Pro de la pasarela escribe sólo la escena, sin foto ni
+> memoria: Lía va con V4-Flash.
+
+> **Lo anterior, del 29/09** (los tres encargos del 25/09 y los tres frentes
+> del 28/09): corregidos en diez rondas y commiteados en `ae41d2e`. La
+> revisión de la décima dejó dieciséis defectos abiertos, dos importantes,
+> los dos en la medida del eco. Nada visto en pantalla.
 
 > **Lo primero: la bóveda no tiene ninguna copia de seguridad.** Existe sólo en
 > este disco, no se ha sincronizado nunca, y la sincronización de hoy no serviría:

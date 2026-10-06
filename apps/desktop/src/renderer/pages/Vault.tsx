@@ -19,11 +19,7 @@ import {
   groupPendingByCharacter,
   pendingDecisionsFor,
 } from '../vault-pending.js';
-import {
-  keepSweepingCatalog,
-  keepSweepingRecaps,
-  keepSweepingRelations,
-} from '../vault-sweep.js';
+import { catalogRetryNote, keepSweepingRecaps, keepSweepingRelations } from '../vault-sweep.js';
 import {
   CLI_LABELS,
   RECAP_REFUSAL_LABELS,
@@ -49,7 +45,11 @@ import {
   userTextsOf,
 } from '../vault-character-link.js';
 import { describeReply, replyAt, replyTabLabel, replyTone } from '../vault-compatibility-reply.js';
-import { auxiliaryName, backgroundAuxiliary } from '../vault-auxiliary.js';
+import {
+  auxiliaryName,
+  backgroundAuxiliary,
+  describeAuxiliaryFailure,
+} from '../vault-auxiliary.js';
 import type { ConfigSummary } from '../useConfig.js';
 import type { VaultErrorArea } from '../useVault.js';
 import {
@@ -5502,15 +5502,9 @@ function MemoryPanel({
             effort,
             projectAlias: project,
           };
-          // tope de vueltas: una cola que no baja es un fallo, no un motivo
-          // para seguir gastando llamadas
-          for (let vuelta = 0; vuelta < 12; vuelta += 1) {
-            // si una tanda no cataloga NADA y ademas no falla nada, algo va mal
-            // de forma sistematica —un modelo que no existe, por ejemplo— y
-            // seguir no sirve. Pero una negativa no para las demas: la
-            // conversacion negada queda marcada y la tanda siguiente coge otras
-            if (!keepSweepingCatalog(await vault.syncCatalog(target))) break;
-          }
+          // las tandas, su tope y cuando parar viven en `sweepCatalog`, que
+          // ademas la retoma sola si se queda esperando al CLI
+          await vault.sweepCatalog(target);
           // y despues, en el mismo carril, lo que quedo pendiente entre los dos:
           // asi ella puede sacarlo sola sin que el se lo recuerde
           await buscarPendientes();
@@ -5564,6 +5558,27 @@ function MemoryPanel({
           aviso dentro de un recuadro que nadie había tocado */}
       <VaultNotice vault={vault} slots={['trabajo-de-fondo']} />
 
+      {/* el CLI que no puede contestar, junto a donde se elige (`INV-FONDO-001`).
+          Llega con el estado, que se refresca solo, así que aparece en cuanto
+          falla y se va en cuanto vuelve a contestar. Solo informa: no cambia
+          de CLI por su cuenta */}
+      {(vault.status.auxiliaryFailures ?? []).map((failure) => {
+        const aviso = describeAuxiliaryFailure(failure);
+        // uno por lanzamiento: el mismo CLI puede esperar con un modelo y no
+        // con otro (duodecima ronda)
+        const clave = JSON.stringify([
+          failure.provider,
+          failure.model,
+          failure.effort,
+          failure.wholeProvider,
+        ]);
+        return (
+          <Notice key={clave} tone={aviso.tone}>
+            {aviso.text}
+          </Notice>
+        );
+      })}
+
       {/* comprobar la memoria sobre lo YA hablado: cobertura, la busqueda por
           fecha contra las fechas reales y el estilo, todo en cifras */}
       <div className="row">
@@ -5595,6 +5610,10 @@ function MemoryPanel({
             ` ${vault.lastRelationSync.closed} se dieron por cumplidos.`}
           {vault.lastRelationSync.pending > 0 &&
             ` Quedan ${vault.lastRelationSync.pending} conversación(es) por leer.`}
+          {/* «quedan» no es «al día» ni una negativa: el CLI está esperando a
+              poder contestar, y lo que pasa se explica justo arriba */}
+          {(vault.lastRelationSync.waiting ?? 0) > 0 &&
+            ` ${vault.lastRelationSync.waiting} no se han mandado porque ${fondoNombre} no pudo contestar hace poco; se mandarán solas cuando vuelva.`}
           {vault.lastRelationSync.refused > 0 &&
             ` ${vault.lastRelationSync.refused} no se pudo leer con ${fondoNombre}: cambia arriba de CLI y vuelve a pulsar, o púlsalo otra vez para reintentar con el mismo.`}
         </p>
@@ -5622,8 +5641,46 @@ function MemoryPanel({
             ? `Se han ordenado ${vault.lastCatalog.cataloged} conversación(es) en ${vault.lastCatalog.scenes} momentos.`
             : 'No había nada nuevo que ordenar.'}
           {vault.lastCatalog.pending > 0 &&
+            vault.lastCatalog.waiting === 0 &&
             ` Quedan ${vault.lastCatalog.pending} sin ordenar.`}
         </p>
+      )}
+
+      {/* la pasada se paró porque el CLI espera tras un fallo de su proceso
+          (`INV-FONDO-001`). «Quedan N» a secas no decía por qué ni cómo seguir,
+          y era lo único que quedaba en pantalla: la vuelta que solo esperó
+          borraba el aviso de la que falló (undecima ronda) */}
+      {vault.lastCatalog !== null && vault.lastCatalog.waiting > 0 && (
+        <Notice tone="idle">
+          <button
+            className="btn btn--quiet"
+            disabled={vault.catalogingMemory}
+            onClick={() => {
+              void (async () => {
+                // el botón puede probar el CLI aunque esté en espera, pero UNA
+                // vez: si vuelve a fallar, el resto de la pasada espera con él
+                await vault.sweepCatalog(
+                  {
+                    provider,
+                    model: model.length === 0 ? null : model,
+                    effort,
+                    projectAlias: project,
+                  },
+                  { retryNow: true },
+                );
+                await vault.loadMemory();
+              })();
+            }}
+          >
+            {vault.catalogingMemory ? 'Probando…' : `Probar ahora con ${destinoNombre}`}
+          </button>{' '}
+          {/* la retoma vive en esta ventana y el cierre de la bóveda se la lleva
+              (`D-106`: el trabajo de fondo no la mantiene abierta, y la espera
+              dura más que el cierre automático por defecto). Prometer «mientras
+              Luxy siga abierta» era falso: al volver a abrir el panel, se barre
+              otra vez (decimotercera ronda) */}
+          {`Quedan ${Math.max(vault.lastCatalog.pending, vault.lastCatalog.waiting)} sin ordenar, esperando a que ${destinoNombre} pueda contestar: el último intento del trabajo de fondo no llegó a terminar. Se ordenarán solas cuando acabe la espera de unos minutos, sin reiniciar, mientras la bóveda siga abierta; si se cierra antes, al volver a abrir «Lo que recuerda».`}
+        </Notice>
       )}
 
       {vault.lastCatalog !== null && vault.lastCatalog.failed.length > 0 && (
@@ -5642,8 +5699,15 @@ function MemoryPanel({
                 projectAlias: project,
               };
               void (async () => {
-                for (const each of vault.lastCatalog?.failed ?? []) {
-                  await vault.syncCatalog({ ...target, conversationId: each.conversationId });
+                // el botón puede probar el CLI aunque esté en espera, pero UNA
+                // vez: si la primera vuelve a fallar, las demás esperan con él
+                const fallidas = vault.lastCatalog?.failed ?? [];
+                for (const [index, each] of fallidas.entries()) {
+                  await vault.syncCatalog({
+                    ...target,
+                    conversationId: each.conversationId,
+                    retryNow: index === 0,
+                  });
                 }
                 await vault.loadMemory();
               })();
@@ -5657,9 +5721,13 @@ function MemoryPanel({
             ? 'Una conversación no se pudo ordenar y se queda partida por silencios'
             : `${vault.lastCatalog.failed.length} conversaciones no se pudieron ordenar y se quedan partidas por silencios`}
           :{' '}
-          {[...new Set(vault.lastCatalog.failed.map((each) => each.reason))].join('; ')}. No se
-          reintentan solas hasta que reinicies, para no gastar una llamada en cada
-          apertura.
+          {[...new Set(vault.lastCatalog.failed.map((each) => each.reason))].join('; ')}.{' '}
+          {/* un fallo del PROCESO casi nunca es de la conversación: se reintenta
+              solo pasada la espera del CLI (`INV-FONDO-001`), y la pasada se
+              retoma sola mientras la bóveda siga abierta. Lo que falla por su
+              cuenta se salta un par de horas, y lo que falló por la respuesta
+              espera a que reinicies (undecima y decimotercera ronda) */}
+          {catalogRetryNote(vault.lastCatalog.failed)}
         </Notice>
       )}
 
@@ -5678,8 +5746,14 @@ function MemoryPanel({
                 projectAlias: project,
               };
               void (async () => {
-                for (const each of vault.lastCatalog?.uneven ?? []) {
-                  await vault.syncCatalog({ ...target, conversationId: each.conversationId });
+                // como el reintento: el botón prueba el CLI una vez aunque espere
+                const desiguales = vault.lastCatalog?.uneven ?? [];
+                for (const [index, each] of desiguales.entries()) {
+                  await vault.syncCatalog({
+                    ...target,
+                    conversationId: each.conversationId,
+                    retryNow: index === 0,
+                  });
                 }
                 await vault.loadMemory();
               })();
@@ -5759,6 +5833,8 @@ function MemoryPanel({
                       effort,
                       projectAlias: project,
                       conversationId: episode.conversationId,
+                      // una pulsación, una llamada: puede probar el CLI aunque espere
+                      retryNow: true,
                     })
                     .then(() => vault.loadMemory());
                 }}
@@ -6109,6 +6185,9 @@ function RecapSection({
           // `force` solo en la primera vuelta: repetirlo en las doce volvería a
           // empezar desde cero las mismas conversaciones ya rellenadas
           force: force && vuelta === 0,
+          // y por lo mismo el permiso de probar el CLI aunque esté en espera
+          // tras un fallo de su proceso: una vez por pulsación, no doce
+          retryNow: vuelta === 0,
         });
         if (!keepSweepingRecaps(result)) break;
       }
@@ -6130,7 +6209,8 @@ function RecapSection({
     setFuePrueba(true);
     setCorriendo({ accion: 'prueba', conversationId: null });
     try {
-      await vault.syncRecaps({ projectAlias: project, dryRun: true });
+      // una sola tanda y pedida a mano: puede probar el CLI aunque esté en espera
+      await vault.syncRecaps({ projectAlias: project, dryRun: true, retryNow: true });
     } finally {
       setCorriendo(null);
     }
@@ -7093,7 +7173,16 @@ function PendingDiagnosticsSummary({
         con Codex o Claude, {c.behind} por detrás
         {c.turnsBehind > 0 ? ` (${c.turnsBehind} turnos sin leer)` : ''}
         {c.refusedPersisted > 0 ? `, ${c.refusedPersisted} negativas` : ''}
+        {/* las que esperan a que el CLI vuelva a contestar, aparte de las
+            negadas: sin esto «por detrás» no decía si era cola, negativa o un
+            CLI sin sesión (`INV-FONDO-001`) */}
+        {(c.waitingForProcess ?? 0) > 0
+          ? `, ${c.waitingForProcess} esperando a que el CLI vuelva a contestar`
+          : ''}
         {c.failedThisSession > 0 ? `, ${c.failedThisSession} fallidas en esta sesión` : ''}.
+        {(c.refusedLegacy ?? 0) > 0
+          ? ` ${c.refusedLegacy} negativas antiguas eran en realidad fallos del CLI y ya no frenan nada.`
+          : ''}
         {c.excludedSkipped > 0 ? ` ${c.excludedSkipped} excluidas quedan fuera.` : ''}
         {g.byOther > 0
           ? ` Cuidado: ${g.byOther} escenas del catálogo se hicieron con otro proveedor.`

@@ -22,9 +22,16 @@ import {
   RELATION_IDLE_MS,
   RelationSync,
   createAuxiliaryLane,
+  refusedStill,
   type AuxiliaryController,
   type RelationSyncDeps,
 } from './relation-sync.js';
+import {
+  AUXILIARY_BLOCK_MS,
+  AUXILIARY_PROCESS_WAIT_MS,
+  AuxiliaryCooldown,
+} from './auxiliary-cooldown.js';
+import { RELATION_REFUSAL_VERSION } from './relation-refusal.js';
 
 const CONV_VIEJA = 'aaaaaaaa-1111-4111-8111-111111111111';
 const CONV_NUEVA = 'bbbbbbbb-2222-4222-8222-222222222222';
@@ -89,6 +96,7 @@ interface Montaje {
   unlocked: { value: boolean };
   /** cuantas llamadas al CLI coincidieron dentro: el carril lo deja en uno */
   concurrency: { max: number };
+  logs: { message: string; fields?: Record<string, unknown> }[];
 }
 
 interface MontajeOptions {
@@ -103,6 +111,15 @@ interface MontajeOptions {
   onCall?: () => void;
   /** conversaciones cuyo descifrado revienta: pasa FUERA del try de la llamada */
   unreadable?: Set<string>;
+  /** la espera del CLI; sin ella, la que crea la pasada */
+  cooldown?: AuxiliaryCooldown;
+  /**
+   * el resultado de fallo del contrato del agente en esa llamada: `outcome`
+   * failed, texto vacio y el motivo estructurado. `null` contesta normal
+   */
+  failure?: (
+    calls: number,
+  ) => { error: string; failureReason: 'auth' | 'rate_limit' | 'api_error' | 'exit_code' } | null;
 }
 
 function montar(options: MontajeOptions): Montaje {
@@ -111,6 +128,7 @@ function montar(options: MontajeOptions): Montaje {
   const sending = new Set<string>();
   const unlocked = { value: true };
   const concurrency = { max: 0 };
+  const logs: Montaje['logs'] = [];
   let dentro = 0;
 
   const byId = new Map(options.conversations.map((each) => [each.conversationId, each]));
@@ -128,6 +146,10 @@ function montar(options: MontajeOptions): Montaje {
       concurrency.max = Math.max(concurrency.max, dentro);
       try {
         if (options.gate !== undefined) await options.gate;
+        const fallo = options.failure?.(calls.length) ?? null;
+        if (fallo !== null) {
+          return { outcome: 'failed', text: '', executedModel: null, ...fallo };
+        }
         const reply =
           options.replies[calls.length - 1] ?? options.replies[options.replies.length - 1] ?? '';
         return { outcome: 'completed', text: reply, error: null, executedModel: 'codex-cli' };
@@ -138,7 +160,8 @@ function montar(options: MontajeOptions): Montaje {
   };
 
   const deps: RelationSyncDeps = {
-    vault: { isUnlocked: () => unlocked.value } as unknown as VaultService,
+    // `derivationCount` fijo: lo que se mira es que la linea lo lleve
+    vault: { isUnlocked: () => unlocked.value, derivationCount: 7 } as unknown as VaultService,
     conversations: {
       async list(): Promise<PrivateConversationSummary[]> {
         return options.conversations.map((each) => ({
@@ -174,10 +197,13 @@ function montar(options: MontajeOptions): Montaje {
     lane: createAuxiliaryLane(),
     isSending: (conversationId) => sending.has(conversationId),
     anchor: () => ANCHOR,
-    log: () => undefined,
+    log: (message, fields) => {
+      logs.push({ message, ...(fields === undefined ? {} : { fields }) });
+    },
+    ...(options.cooldown === undefined ? {} : { cooldown: options.cooldown }),
   };
 
-  return { sync: new RelationSync(deps), relations, calls, sending, unlocked, concurrency };
+  return { sync: new RelationSync(deps), relations, calls, sending, unlocked, concurrency, logs };
 }
 
 /** una conversacion corta donde el usuario promete algo en el turno 2 */
@@ -275,7 +301,7 @@ describe('el cursor', () => {
     expect(montaje.relations.state.notes).toHaveLength(0);
     expect(montaje.relations.state.cursors[0]).toMatchObject({
       through: -1,
-      refusedVersion: RELATION_EXTRACTOR_VERSION,
+      refusedVersion: RELATION_REFUSAL_VERSION,
       refusedAtTurns: 4,
     });
     expect(montaje.relations.state.counters.refused).toBe(1);
@@ -434,7 +460,7 @@ describe('la pasada sobre lo ya hablado', () => {
     expect(nueva).toMatchObject({ through: 3, refusedVersion: null });
   });
 
-  it('un fallo del CLI se cuenta y no tira la tanda', async () => {
+  it('un fallo dudoso del proceso se cuenta y no tira la tanda: la otra se lee igual', async () => {
     const montaje = montar({
       conversations: dosConversaciones(),
       replies: [bloque({})],
@@ -447,7 +473,112 @@ describe('la pasada sobre lo ya hablado', () => {
 
     expect(result.failed).toHaveLength(1);
     expect(result.failed[0]!.conversationId).toBe(CONV_VIEJA);
-    expect(result.reviewed).toBe(1);
+    // undecima ronda: un tiempo agotado puede ser de esa conversacion sola. Ni
+    // frena a la otra ni pone al CLI en espera: eso queda para cuando falla
+    // tambien otra, o para `auth` y `rate_limit`
+    expect(result).toMatchObject({ reviewed: 1, waiting: 0 });
+    expect(montaje.calls).toHaveLength(2);
+    expect(montaje.sync.waitingForProcess).toBe(false);
+  });
+
+  it('una que falla sola, otra vez con el CLI contestando a las demas, se salta en la sesion sin rearmar la espera', async () => {
+    const montaje = montar({
+      conversations: dosConversaciones(),
+      replies: [bloque({})],
+      // la vieja falla siempre por su cuenta; la nueva contesta
+      failure: (llamada) =>
+        llamada === 2 ? null : { error: 'el agente no pudo terminar', failureReason: 'api_error' },
+    });
+
+    await montaje.sync.runOnce({ projectAlias: 'luxy', limit: 2 });
+    expect(montaje.calls).toHaveLength(2);
+    // la siguiente pasada la vuelve a probar, ya con una respuesta del CLI entre
+    // medias: es suya
+    const segunda = await montaje.sync.runOnce({ projectAlias: 'luxy', limit: 2 });
+    expect(montaje.calls).toHaveLength(3);
+    expect(segunda).toMatchObject({ waiting: 0 });
+    expect(montaje.sync.waitingForProcess).toBe(false);
+    // y ya no se lanza en cada disparo
+    for (let turno = 0; turno < 3; turno += 1) {
+      await montaje.sync.runOnce({ projectAlias: 'luxy', limit: 2 });
+    }
+    expect(montaje.calls).toHaveLength(3);
+    expect([...montaje.sync.failedConversations]).toEqual([CONV_VIEJA]);
+    // ni negativa ni cursor: solo se salta en la sesion
+    expect(montaje.relations.state.counters.refused).toBe(0);
+    const lineas = montaje.logs.filter((each) => each.message === 'pendientes extraidos');
+    expect(lineas[0]?.fields).toMatchObject({ motivoFallo: 'api_error', atribucion: 'conversation' });
+    expect(lineas[1]?.fields).toMatchObject({ motivoFallo: 'api_error', atribucion: 'blocked' });
+  });
+
+  it('la UNICA conversacion activa que falla siempre sola no rearma la espera para siempre', async () => {
+    // duodecima ronda: el disparo de despues de cada turno solo mira la
+    // conversacion en la que se escribe. Si es la unica y falla siempre por su
+    // cuenta, el CLI no podia contestar nunca a otra —la espera impedia lanzar a
+    // nadie— y cada diez minutos se volvia a lanzar, fallaba y la rearmaba
+    let ahora = Date.parse('2026-10-06T10:00:00.000Z');
+    const montaje = montar({
+      conversations: [{ conversationId: CONV_VIEJA, characterId: LIA, turns: conPromesa() }],
+      replies: [PROMESA],
+      cooldown: new AuxiliaryCooldown({ now: () => ahora }),
+      failure: () => ({ error: 'el agente no pudo terminar', failureReason: 'api_error' }),
+    });
+
+    // tres horas de turnos, uno cada dos minutos
+    for (let minuto = 0; minuto < 180; minuto += 2) {
+      await montaje.sync.runOnce({ projectAlias: 'luxy', conversationId: CONV_VIEJA, limit: 1 });
+      ahora += 2 * 60 * 1000;
+    }
+
+    // la primera es suya, la segunda no se sabe y espera, y la tercera —con la
+    // espera que armo ella sola— es suya: se salta y la suelta. Dos horas
+    // despues se prueba una vez (decimotercera ronda): vuelve a fallar y sigue
+    // siendo suya, sin rearmar la espera
+    expect(montaje.calls).toHaveLength(4);
+    expect(montaje.sync.waitingForProcess).toBe(false);
+    expect([...montaje.sync.failedConversations]).toEqual([CONV_VIEJA]);
+    // ni negativa ni cursor
+    expect(montaje.relations.state.counters.refused).toBe(0);
+    const atribuciones = montaje.logs
+      .filter((each) => each.message === 'pendientes extraidos')
+      .map((each) => each.fields?.['atribucion'])
+      .filter((each) => each !== null);
+    expect(atribuciones).toEqual(['conversation', 'cli', 'blocked', 'blocked']);
+  });
+
+  it('la que es suya no se queda fuera la sesion: pasadas dos horas se prueba otra vez', async () => {
+    // decimotercera ronda: un fallo del CLI entero que no se reconoce como tal
+    // —Codex no dice con un codigo que ha llegado a su limite de uso— la dejaba
+    // fuera hasta reiniciar, aunque el limite se renovara horas despues
+    let ahora = Date.parse('2026-10-06T10:00:00.000Z');
+    let roto = true;
+    const montaje = montar({
+      conversations: [{ conversationId: CONV_VIEJA, characterId: LIA, turns: conPromesa() }],
+      replies: [PROMESA],
+      cooldown: new AuxiliaryCooldown({ now: () => ahora }),
+      failure: () =>
+        roto ? { error: 'el agente no pudo terminar', failureReason: 'api_error' } : null,
+    });
+    const disparo = () =>
+      montaje.sync.runOnce({ projectAlias: 'luxy', conversationId: CONV_VIEJA, limit: 1 });
+
+    await disparo();
+    await disparo();
+    ahora += AUXILIARY_PROCESS_WAIT_MS;
+    await disparo();
+    expect(montaje.calls).toHaveLength(3);
+    // saltada: un disparo mas no la lanza
+    ahora += 60 * 60 * 1000;
+    await disparo();
+    expect(montaje.calls).toHaveLength(3);
+
+    // el limite se renueva; pasadas las dos horas, el siguiente disparo la prueba
+    roto = false;
+    ahora += AUXILIARY_BLOCK_MS;
+    await disparo();
+    expect(montaje.calls).toHaveLength(4);
+    expect(montaje.relations.state.cursors[0]?.conversationId).toBe(CONV_VIEJA);
+    expect([...montaje.sync.failedConversations]).toEqual([]);
   });
 
   it('una conversacion que no se puede descifrar tampoco tira la tanda', async () => {
@@ -551,7 +682,7 @@ describe('cambiar de CLI cuando uno se niega', () => {
     await montaje.sync.runOnce({ projectAlias: 'luxy' });
     expect(montaje.relations.state.cursors[0]).toMatchObject({
       provider: 'codex',
-      refusedVersion: RELATION_EXTRACTOR_VERSION,
+      refusedVersion: RELATION_REFUSAL_VERSION,
     });
 
     // el mismo CLI no la reintenta: volveria a negarse
@@ -595,20 +726,236 @@ describe('cambiar de CLI cuando uno se niega', () => {
       replies: [PROMESA],
       auxiliary: { provider: 'codex', model: null },
       onCall: () => {
-        if (montaje.calls.length === 1) throw new Error('spawn codex ENOENT');
+        if (montaje.calls.at(-1)?.provider === 'codex') throw new Error('spawn codex ENOENT');
       },
     };
     const montaje = montar(opciones);
 
+    // sin motivo, el primer fallo se le da a la conversacion; el segundo, sin
+    // que Codex conteste a nadie entre medias, ya pone a Codex en espera
+    // (undecima ronda), y el tercer disparo no lo lanza
     await montaje.sync.runOnce({ projectAlias: 'luxy' });
     await montaje.sync.runOnce({ projectAlias: 'luxy' });
-    expect(montaje.calls).toHaveLength(1);
+    await montaje.sync.runOnce({ projectAlias: 'luxy' });
+    expect(montaje.calls).toHaveLength(2);
 
     opciones.auxiliary = { provider: 'claude', model: null };
     const result = await montaje.sync.runOnce({ projectAlias: 'luxy' });
 
-    expect(montaje.calls).toHaveLength(2);
+    expect(montaje.calls).toHaveLength(3);
     expect(result.reviewed).toBe(1);
+  });
+});
+
+// `INV-FONDO-001`: Claude Code sin sesion devolvia su mensaje de error como si
+// fuera la respuesta, y la pasada lo apuntaba como NEGATIVA: la conversacion
+// quedaba bloqueada en la sesion hasta reiniciar y en disco hasta que creciera
+describe('un fallo del proceso del CLI no es una negativa', () => {
+  const sinSesion = { error: 'MENSAJE-DEL-AGENTE-INVENTADO', failureReason: 'auth' as const };
+  const dosConversaciones = (): MontajeOptions['conversations'] => [
+    {
+      conversationId: CONV_NUEVA,
+      characterId: LIA,
+      turns: conversacion(4).map((turn) => ({
+        ...turn,
+        createdAt: new Date(Date.UTC(2026, 8, 10, 0, turn.sequence)).toISOString(),
+      })),
+    },
+    { conversationId: CONV_VIEJA, characterId: LIA, turns: conPromesa() },
+  ];
+
+  it('no persiste negativa, ni la cuenta, ni mueve el cursor; el registro dice auth sin texto', async () => {
+    const montaje = montar({
+      conversations: dosConversaciones(),
+      replies: [PROMESA],
+      auxiliary: { provider: 'claude', model: null },
+      failure: () => sinSesion,
+    });
+
+    const result = await montaje.sync.runOnce({ projectAlias: 'luxy', limit: 2 });
+
+    expect(result).toMatchObject({ refused: 0, reviewed: 0, waiting: 1 });
+    expect(result.failed).toHaveLength(1);
+    // el motivo es el mensaje del agente, que dice que hacer
+    expect(result.failed[0]!.reason).toBe('MENSAJE-DEL-AGENTE-INVENTADO');
+    // ni negativa persistida, ni contador, ni cursor
+    expect(montaje.relations.state.cursors).toEqual([]);
+    expect(montaje.relations.state.counters.refused).toBe(0);
+    // la otra no se mando: con el CLI roto fallaria igual
+    expect(montaje.calls).toHaveLength(1);
+
+    const linea = montaje.logs.find((each) => each.message === 'pendientes extraidos');
+    expect(linea?.fields).toMatchObject({
+      negativas: 0,
+      fallidas: 1,
+      enEspera: 1,
+      quedan: 2,
+      motivoFallo: 'auth',
+      derivaciones: 7,
+    });
+    expect(JSON.stringify(montaje.logs)).not.toContain('MENSAJE-DEL-AGENTE-INVENTADO');
+  });
+
+  it('el agente parado tambien es del proceso, y su motivo sale como sin-motivo', async () => {
+    const montaje = montar({
+      conversations: dosConversaciones(),
+      replies: [PROMESA],
+      onCall: () => {
+        throw new Error('el proceso del agente no esta arrancado');
+      },
+    });
+
+    await montaje.sync.runOnce({ projectAlias: 'luxy', limit: 2 });
+
+    // sin motivo, el primero se le da a la conversacion; al fallar tambien la
+    // otra, es del CLI y espera (undecima ronda)
+    expect(montaje.calls).toHaveLength(2);
+    expect(montaje.sync.waitingForProcess).toBe(true);
+    expect(montaje.relations.state.counters.refused).toBe(0);
+    const linea = montaje.logs.find((each) => each.message === 'pendientes extraidos');
+    expect(linea?.fields).toMatchObject({ motivoFallo: 'sin-motivo', atribucion: 'cli' });
+  });
+
+  it('se retoma sola al acabar la espera, sin reiniciar, y la que fallo va al final', async () => {
+    let ahora = Date.parse('2026-10-06T10:00:00.000Z');
+    let roto = true;
+    const montaje = montar({
+      conversations: dosConversaciones(),
+      replies: [bloque({})],
+      cooldown: new AuxiliaryCooldown({ now: () => ahora }),
+      failure: () => (roto ? sinSesion : null),
+    });
+
+    // el disparo despues de cada turno: con el CLI roto, un intento por espera
+    await montaje.sync.runOnce({ projectAlias: 'luxy', limit: 1 });
+    expect(montaje.sync.waitingForProcess).toBe(true);
+    for (let turno = 0; turno < 5; turno += 1) {
+      const result = await montaje.sync.runOnce({ projectAlias: 'luxy', limit: 1 });
+      // «quedan» no se queda en cero: siguen pendientes, solo esperan
+      expect(result).toMatchObject({ waiting: 1, pending: 2 });
+    }
+    expect(montaje.calls).toHaveLength(1);
+    // la que fallo cuenta como no leida, no como desfase
+    expect([...montaje.sync.failedConversations]).toEqual([CONV_VIEJA]);
+
+    // `claude auth login`; Studio sigue abierto
+    roto = false;
+    ahora += AUXILIARY_PROCESS_WAIT_MS;
+    expect(montaje.sync.waitingForProcess).toBe(false);
+    const primera = await montaje.sync.runOnce({ projectAlias: 'luxy', limit: 1 });
+    expect(primera.reviewed).toBe(1);
+    // la que fallo paso al final de la cola: primero va la otra
+    expect(montaje.relations.state.cursors.map((each) => each.conversationId)).toEqual([
+      CONV_NUEVA,
+    ]);
+    // y despues ella, sin que nada la bloquee
+    const segunda = await montaje.sync.runOnce({ projectAlias: 'luxy', limit: 1 });
+    expect(segunda.reviewed).toBe(1);
+    expect(montaje.sync.failedThisSession).toBe(0);
+  });
+
+  it('el boton prueba una vez aunque espere; si vuelve a fallar, el resto espera', async () => {
+    const montaje = montar({
+      conversations: dosConversaciones(),
+      replies: [PROMESA],
+      failure: () => sinSesion,
+    });
+
+    await montaje.sync.runOnce({ projectAlias: 'luxy', limit: 2 });
+    expect(montaje.calls).toHaveLength(1);
+    // la relectura tras un enganche fuerza pero es automatica: respeta la espera
+    await montaje.sync.runOnce({ projectAlias: 'luxy', limit: 2, force: true });
+    expect(montaje.calls).toHaveLength(1);
+    const boton = await montaje.sync.runOnce({
+      projectAlias: 'luxy',
+      limit: 2,
+      force: true,
+      retryNow: true,
+    });
+    expect(montaje.calls).toHaveLength(2);
+    expect(boton).toMatchObject({ waiting: 1 });
+  });
+
+  it('una espera compartida: lo que fallo en otro trabajo tambien frena este', async () => {
+    const espera = new AuxiliaryCooldown();
+    espera.noteFailure('codex', 'api_error');
+    const montaje = montar({
+      conversations: dosConversaciones(),
+      replies: [PROMESA],
+      cooldown: espera,
+    });
+
+    const result = await montaje.sync.runOnce({ projectAlias: 'luxy', limit: 2 });
+
+    expect(montaje.calls).toHaveLength(0);
+    expect(result).toMatchObject({ waiting: 2, pending: 2 });
+  });
+});
+
+// las negativas apuntadas antes de `INV-FONDO-001` eran fallos del proceso: ya no
+// frenan nada, sin reescribir el archivo ni releer lo ya leido
+describe('las negativas de antes', () => {
+  it('no bloquean, y la negativa de verdad que salga despues si, una sola vez', async () => {
+    const montaje = montar({
+      conversations: [{ conversationId: CONV_VIEJA, characterId: LIA, turns: conPromesa() }],
+      replies: ['lo siento, no puedo ayudarte con esto'],
+      auxiliary: { provider: 'claude', model: null },
+    });
+    montaje.relations.state.cursors = [
+      {
+        conversationId: CONV_VIEJA,
+        through: -1,
+        throughAt: null,
+        version: RELATION_EXTRACTOR_VERSION,
+        provider: 'claude',
+        model: null,
+        at: '2026-09-29T15:48:04.000Z',
+        // lo que dejo un Claude sin sesion el 29/09
+        refusedVersion: 1,
+        refusedAtTurns: 4,
+      },
+    ];
+    expect(refusedStill(montaje.relations.state.cursors[0], 4, 'claude')).toBe(false);
+
+    await montaje.sync.runOnce({ projectAlias: 'luxy' });
+    expect(montaje.calls).toHaveLength(1);
+    // y si ahora se niega de verdad, eso si se respeta: en disco, no solo en la
+    // sesion, con la version de las negativas de ahora
+    expect(montaje.relations.state.cursors[0]).toMatchObject({
+      refusedVersion: RELATION_REFUSAL_VERSION,
+      refusedAtTurns: 4,
+    });
+    expect(refusedStill(montaje.relations.state.cursors[0], 4, 'claude')).toBe(true);
+    await montaje.sync.runOnce({ projectAlias: 'luxy' });
+    expect(montaje.calls).toHaveLength(1);
+  });
+
+  it('un cursor con lo leido sigue valiendo: no se relee desde el principio', async () => {
+    const turns = conversacion(8);
+    const montaje = montar({
+      conversations: [{ conversationId: CONV_VIEJA, characterId: LIA, turns }],
+      replies: [bloque({})],
+    });
+    montaje.relations.state.cursors = [
+      {
+        conversationId: CONV_VIEJA,
+        through: 3,
+        throughAt: turns[3]!.createdAt,
+        version: RELATION_EXTRACTOR_VERSION,
+        provider: 'codex',
+        model: null,
+        at: '2026-09-29T15:48:04.000Z',
+        refusedVersion: 1,
+        refusedAtTurns: 8,
+        owner: LIA,
+      },
+    ];
+
+    await montaje.sync.runOnce({ projectAlias: 'luxy' });
+
+    const prompt = montaje.calls[0]!.prompt;
+    expect(prompt).toContain('PARTE NUEVA (DATOS):\n[4] Usuario');
+    expect(montaje.relations.state.cursors[0]).toMatchObject({ through: 7, refusedVersion: null });
   });
 });
 

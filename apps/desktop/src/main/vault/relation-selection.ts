@@ -22,7 +22,6 @@
 // habia alguna disponible y el bloque viajaba en el 71 % de los prompts.
 import {
   ACTIVE_RELATION_KINDS,
-  RELATION_EXTRACTOR_VERSION,
   civilDayLabel,
   quoteAppearsIn,
   type RelationCursor,
@@ -33,6 +32,7 @@ import {
   type TemporalAnchor,
 } from '@luxy/shared';
 import { MENTION_MIN_SHARED, matchesNote, matchesStems, quoteStems } from './relation.js';
+import { isCurrentRefusal } from './relation-refusal.js';
 import { hasSameRoot } from './raise-roots.js';
 import { tokenize } from './turn-index.js';
 
@@ -443,8 +443,9 @@ export function selectPendingForTurn(input: PendingSelectionInput): PendingSelec
   for (const cursor of input.cursors) {
     through.set(cursor.conversationId, cursor.through);
     // una negativa persistida no silencia al personaje para siempre: esa
-    // conversacion deja de contar como hueco hasta que crezca
-    if (cursor.refusedVersion === RELATION_EXTRACTOR_VERSION) {
+    // conversacion deja de contar como hueco hasta que crezca. Solo las que
+    // siguen valiendo: las de antes de `INV-FONDO-001` eran fallos del proceso
+    if (isCurrentRefusal(cursor)) {
       unreadable.add(cursor.conversationId);
     }
   }

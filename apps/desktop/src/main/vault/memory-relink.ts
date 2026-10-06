@@ -13,7 +13,12 @@
 //  - un cierre de la boveda a mitad no marca nada como fallido (`D-106`);
 //  - lo que llega tarde se tira: si mientras el CLI pensaba se ha sellado otra
 //    memoria, ha cambiado el enganche o hay un envio en curso, el resultado ya
-//    no describe lo que hay.
+//    no describe lo que hay;
+//  - un fallo del PROCESO del CLI no es una respuesta: ni se guarda como
+//    `invalid` ni se persiste. Si es del CLI, lo pone en la espera que
+//    comparten los cuatro trabajos de fondo (`INV-FONDO-001`); si es de la
+//    conversacion, la pasa al final de la cola y, si la espera la da por suya,
+//    la salta un par de horas (undecima y decimotercera ronda).
 import { randomUUID } from 'node:crypto';
 import {
   DEFAULT_AUXILIARY_PROVIDER,
@@ -34,10 +39,19 @@ import {
   type LocalCliProvider,
   type MemoryRelinkEntry,
   type MemoryRelinkOutcome,
+  type ProviderFailureReason,
   type RelinkOwnerRef,
   type SealedMemoryRef,
 } from '@luxy/shared';
 import { classifyReply } from '../../shared/refusal.js';
+import {
+  AuxiliaryCooldown,
+  isProcessFailure,
+  processFailureLabel,
+  processSubject,
+  type ProcessFailureLabel,
+  type ProcessFailureVerdict,
+} from './auxiliary-cooldown.js';
 import type { VaultCharacterStore } from './character-store.js';
 import type { PrivateConversationStore } from './conversation-store.js';
 import type { MemoryPreferences } from './memory-preferences.js';
@@ -49,7 +63,13 @@ import type { VaultService } from './vault-service.js';
 export interface MemoryRelinkDeps {
   vault: VaultService;
   conversations: Pick<PrivateConversationStore, 'owner' | 'latestMemoryRecord'>;
-  relinks: Pick<MemoryRelinkStore, 'forConversation' | 'replace'>;
+  /**
+   * `recoverProcessFailures` es opcional para las pruebas que no lo miran: la
+   * recuperacion de las filas que escribio un fallo del proceso
+   * (`INV-FONDO-001`) solo existe en el almacen de verdad
+   */
+  relinks: Pick<MemoryRelinkStore, 'forConversation' | 'replace'> &
+    Partial<Pick<MemoryRelinkStore, 'recoverProcessFailures'>>;
   /**
    * la ficha retroactiva y el indice: memoria que viaja en una enganchada sin
    * memoria propia y que tambien se escribio sin su ficha (septima ronda)
@@ -64,16 +84,41 @@ export interface MemoryRelinkDeps {
   isBusy: (conversationId: string) => boolean;
   now: () => string;
   log: (message: string, fields?: Record<string, unknown>) => void;
+  /**
+   * la espera por proveedor que comparten los cuatro trabajos de fondo. Sin
+   * ella —en las pruebas que no la miran— tiene la suya propia
+   */
+  cooldown?: AuxiliaryCooldown;
 }
 
 export interface MemoryRelinkRunOptions {
   conversationId: string;
   projectAlias: string;
-  /** pedida con el boton: se salta la negativa guardada y el fallo de la sesion */
+  /**
+   * pedida con el boton: se salta la negativa guardada y puede lanzar el CLI
+   * una vez aunque este en espera tras un fallo de su proceso. Solo la manda el
+   * boton de «Lo que recuerda»: nada automatico la usa
+   */
   force?: boolean;
 }
 
 export type { MemoryRelinkOutcome };
+
+/**
+ * en que acabo una pasada, mas dos que no lanzan el CLI: `waiting`, porque
+ * esta en espera tras un fallo de su proceso, y `blocked`, porque la espera
+ * salta esta conversacion un par de horas —su proceso falla por su cuenta—.
+ *
+ * `blocked` no es `skipped`: tiene trabajo, y la pasada general no puede darla
+ * por vista. Como `skipped` se quedaba fuera de la pasada hasta cerrar la
+ * boveda, y pasadas las dos horas nadie la volvia a probar sola, aunque su
+ * fila lo prometia.
+ *
+ * Ninguna de las dos viaja a la pantalla —el boton fuerza, y ni espera ni
+ * salta— ni al registro: la espera ya se registro con el fallo que la armo, y
+ * una linea por enganchada en cada envio solo seria ruido.
+ */
+export type MemoryRelinkRunOutcome = MemoryRelinkOutcome | 'waiting' | 'blocked';
 
 /** el registro de la memoria sellada, sin su texto */
 function refOf(record: { sequence: number; createdAt: string } | null): SealedMemoryRef | null {
@@ -87,13 +132,38 @@ function sameRef(a: SealedMemoryRef | null, b: SealedMemoryRef | null): boolean 
 
 export class MemoryRelink {
   /**
-   * conversaciones cuyo PROCESO fallo en esta sesion, con el CLI con que fallo.
+   * la espera del CLI tras un fallo de su proceso.
    *
-   * Un proceso que no termina no dice nada del contenido y no se persiste; sin
-   * esto, cada mensaje de esa conversacion volveria a arrancar el mismo CLI para
-   * fallar igual. Se olvida al reiniciar.
+   * Un proceso que no termina no dice nada del contenido y no se persiste.
+   * Apuntarlo SIEMPRE por conversacion y hasta reiniciar dejaba sin reescribir
+   * lo pendiente aunque el CLI ya funcionara (`INV-FONDO-001`); apuntarlo
+   * siempre al CLI dejaba que una sola conversacion rota frenara a todas
+   * (undecima ronda). La espera decide de quien es (`noteFailure`).
    */
-  private readonly failures = new Map<string, LocalCliProvider>();
+  private readonly cooldown: AuxiliaryCooldown;
+  // las conversaciones cuyo proceso falla por su cuenta ya no se apuntan aqui
+  // hasta reiniciar: las salta la espera un par de horas
+  // (`AuxiliaryCooldown.blocked`, decimotercera ronda). Sin saltarlas, cada
+  // pasada volvia a lanzarlas —hasta media hora de carril con un tiempo
+  // agotado— y, como fallo del CLI, rearmaban la espera de los cuatro trabajos;
+  // y saltandolas la sesion entera, un fallo del CLI entero mal reconocido
+  // dejaba sin reescribir su memoria hasta reiniciar
+  /**
+   * conversaciones cuyo ultimo intento fue un fallo del proceso, con el CLI.
+   *
+   * No las bloquea: las pone al final de la pasada general, como `processFailed`
+   * en los pendientes y la ficha retroactiva. La pasada recorre las filas en el
+   * orden del archivo, y un fallo del proceso no escribe nada: sin esto, la que
+   * falla iba SIEMPRE primera, volvia a armar la espera y todas las de detras
+   * se quedaban en `waiting` la sesion entera (undecima ronda)
+   */
+  private readonly processFailed = new Map<string, LocalCliProvider>();
+  /**
+   * si la recuperacion de las filas que escribio un fallo del proceso ya se
+   * comprobo en esta apertura. El almacen la sella en disco y solo la hace una
+   * vez; esto solo evita releer el archivo para nada en cada pasada.
+   */
+  private recoveryChecked = false;
   /**
    * conversaciones que la pasada general ya miro sin nada que hacer mientras la
    * boveda sigue abierta. Sin esto, cada envio volveria a descifrar todas las
@@ -108,17 +178,62 @@ export class MemoryRelink {
    * Si el apunte fallaba, la fila se quedaba en «no hace falta»; los turnos
    * siguientes ya van con la sellada y no lo vuelven a intentar, asi que la
    * memoria que salio de lo heredado no se reescribia nunca. La pasada lo
-   * reintenta antes de decidir. Se olvida al reiniciar, como `failures`.
+   * reintenta antes de decidir. Se olvida al reiniciar.
    */
   private readonly inheritedUnnoted = new Map<string, string>();
-  private cancelled = false;
+  /**
+   * cuantas veces se ha parado. Cada pasada —la general y la de una
+   * conversacion— se queda con el valor con el que empezo y para en cuanto
+   * cambia: un cierre corta la que estaba en curso, y solo esa.
+   *
+   * Era un `cancelled` que solo volvia a `false` al empezar `run()`, y `sweep()`
+   * miraba si parar ANTES de llamarlo: tras el primer cierre de la boveda, la
+   * pasada general no hacia nada hasta que algo llamara a `run()` directamente
+   * —un envio en una enganchada, enganchar o el boton—, y lo pendiente, lo que
+   * esperaba y lo que la espera habia saltado no se reintentaba solo.
+   */
+  private generation = 0;
 
-  constructor(private readonly deps: MemoryRelinkDeps) {}
+  constructor(private readonly deps: MemoryRelinkDeps) {
+    this.cooldown = deps.cooldown ?? new AuxiliaryCooldown();
+  }
 
   /** para la pasada en curso. Se engancha a `vault.onLock` */
   cancel(): void {
-    this.cancelled = true;
+    this.generation += 1;
     this.idle.clear();
+    // otra apertura puede ser otra cuenta: se vuelve a mirar una vez
+    this.recoveryChecked = false;
+  }
+
+  /**
+   * una vez por archivo: las filas `failed` que solo pudo escribir un fallo del
+   * proceso tomado por respuesta vuelven a pendientes (`INV-FONDO-001`).
+   *
+   * Lo hace el almacen, que lo sella dentro del mismo archivo cifrado; aqui solo
+   * se pide una vez por apertura, dentro del carril. Si falla no pasa nada: las
+   * filas siguen como estaban y se vuelve a intentar en la pasada siguiente.
+   */
+  private async recoverFalseFailures(): Promise<void> {
+    if (this.recoveryChecked || !this.deps.vault.isUnlocked()) return;
+    try {
+      const recovered = await this.deps.relinks.recoverProcessFailures?.(
+        this.deps.vault,
+        this.deps.now(),
+      );
+      this.recoveryChecked = true;
+      if (recovered !== undefined && recovered > 0) {
+        // lo dado por visto se vuelve a mirar: ahora hay pendientes nuevas
+        this.idle.clear();
+        this.deps.log('memoria reescrita con su ficha', {
+          resultado: 'recuperadas',
+          filas: recovered,
+        });
+      }
+    } catch {
+      // el motivo no se registra: podria traer dentro lo que no valido
+      this.deps.log('memoria reescrita con su ficha', { resultado: 'sin-recuperar' });
+    }
   }
 
   /**
@@ -219,13 +334,29 @@ export class MemoryRelink {
    * conversaciones recibian la memoria escrita sin su ficha (`D-105`). Se
    * lanza tras cada envio, en cualquier conversacion, y casi siempre vuelve sin
    * llamar a nadie. Para al cerrarse la boveda. No lanza nunca.
+   *
+   * Las que acaban de fallar por el proceso con este CLI van al final: sin
+   * bloquearlas, una que falla sola no tapa a las demas (undecima ronda). Entre
+   * si, el orden de siempre (`sort` es estable).
    */
   async sweep(projectAlias: string, candidates: readonly string[]): Promise<void> {
-    for (const conversationId of candidates) {
-      if (this.stopped()) return;
+    // la de antes de un cierre se para; esta empieza con la boveda abierta
+    const generation = this.generation;
+    const target = this.auxiliary();
+    const lastly = (id: string): number => (this.processFailed.get(id) === target.provider ? 1 : 0);
+    const ordered = [...candidates].sort((a, b) => lastly(a) - lastly(b));
+    for (const conversationId of ordered) {
+      if (this.stopped(generation)) return;
       if (this.idle.has(conversationId)) continue;
+      // la espera la salta un par de horas: tampoco se descifra para nada, como
+      // lo visto. Pero no se da por vista: en cuanto deje de saltarla, esta
+      // misma pregunta la deja pasar
+      if (this.cooldown.blocked(target, processSubject('relink', conversationId))) continue;
       const outcome = await this.run({ conversationId, projectAlias });
       if (outcome === 'cut' || outcome === 'locked') return;
+      // el CLI esta en espera: las demas tampoco irian, y descifrarlas para
+      // nada es justo el coste que la espera existe para ahorrar
+      if (outcome === 'waiting') return;
     }
   }
 
@@ -302,13 +433,24 @@ export class MemoryRelink {
   }
 
   /**
-   * true si el ultimo PROCESO de esta conversacion fallo en esta sesion con el
-   * CLI que toca ahora: ahi no se vuelve a intentar sola hasta reiniciar, y la
-   * pantalla no puede decir «en segundo plano» (septima ronda).
+   * true si el CLI que toca ahora esta en espera tras un fallo de su proceso.
+   *
+   * La pantalla no puede decir entonces «en segundo plano después de tu
+   * próximo mensaje» a secas: ese mensaje no lo lanzara hasta que acabe la
+   * espera (septima ronda, `INV-FONDO-001`). Ya no es «hasta reiniciar».
    */
-  stalledThisSession(conversationId: string): boolean {
-    const failed = this.failures.get(conversationId);
-    return failed !== undefined && failed === this.auxiliary().provider;
+  waitingForProcess(): boolean {
+    return this.cooldown.waiting(this.auxiliary());
+  }
+
+  /**
+   * true mientras se salta esta conversacion con el CLI que toca ahora: la
+   * espera dio su fallo del proceso por suyo. No se reintenta sola en un par de
+   * horas, y la pantalla no puede prometer «unos minutos» (undecima y
+   * decimotercera ronda).
+   */
+  blockedThisSession(conversationId: string): boolean {
+    return this.cooldown.blocked(this.auxiliary(), processSubject('relink', conversationId));
   }
 
   /**
@@ -317,22 +459,27 @@ export class MemoryRelink {
    * Quien la llama NO debe envolverla otra vez en el carril: se esperaria a si
    * misma.
    */
-  async run(options: MemoryRelinkRunOptions): Promise<MemoryRelinkOutcome> {
+  async run(options: MemoryRelinkRunOptions): Promise<MemoryRelinkRunOutcome> {
     return this.deps.lane(async () => {
-      this.cancelled = false;
-      let outcome: MemoryRelinkOutcome;
+      // empieza aqui, dentro del carril: un cierre de ANTES ya no la para
+      const generation = this.generation;
+      await this.recoverFalseFailures();
+      let outcome: MemoryRelinkRunOutcome;
       try {
-        outcome = await this.relinkOne(options);
+        outcome = await this.relinkOne(options, generation);
       } catch {
         // leer o guardar pueden fallar —un almacen que no abre, la boveda que
         // se cierra entre dos `await`—. No es culpa del CLI ni de la
         // conversacion: no se marca nada, y la pasada general lo vuelve a mirar
-        if (this.stopped()) return 'cut';
+        if (this.stopped(generation)) return 'cut';
         this.deps.log('memoria reescrita con su ficha', { resultado: 'fallo-local' });
         return 'skipped';
       }
       // lo que no tiene nada que hacer no se vuelve a mirar en la pasada general
-      // hasta que se cierre la boveda; lo demas si
+      // hasta que se cierre la boveda; lo demas si. `waiting` y `blocked` NO:
+      // tienen trabajo, y en cuanto acabe la espera —la del CLI, o la que salta
+      // esta conversacion— hay que volver a mirarlas. Tambien cuando las lanzo
+      // un envio en ellas y no la pasada
       if (outcome === 'skipped' || outcome === 'no-memory' || outcome === 'excluded') {
         this.idle.add(options.conversationId);
       } else {
@@ -342,8 +489,9 @@ export class MemoryRelink {
     });
   }
 
-  private stopped(): boolean {
-    return this.cancelled || !this.deps.vault.isUnlocked();
+  /** si la pasada que empezo con `generation` tiene que parar */
+  private stopped(generation: number): boolean {
+    return generation !== this.generation || !this.deps.vault.isUnlocked();
   }
 
   /**
@@ -357,7 +505,10 @@ export class MemoryRelink {
     return { provider: DEFAULT_AUXILIARY_PROVIDER, model: null };
   }
 
-  private async relinkOne(options: MemoryRelinkRunOptions): Promise<MemoryRelinkOutcome> {
+  private async relinkOne(
+    options: MemoryRelinkRunOptions,
+    generation: number,
+  ): Promise<MemoryRelinkRunOutcome> {
     const { vault, conversations, relinks } = this.deps;
     const id = options.conversationId;
     if (!vault.isUnlocked()) return 'locked';
@@ -374,6 +525,7 @@ export class MemoryRelink {
     if (this.deps.isBusy(id)) return 'busy';
 
     const target = this.auxiliary();
+    const subject = processSubject('relink', id);
     const force = options.force === true;
     // lo barato primero: se dispara tras CADA envio de una enganchada, y sin esto
     // cada uno descifraria la conversacion entera para no hacer nada
@@ -424,20 +576,25 @@ export class MemoryRelink {
     }
     if (excluded) return 'excluded';
     const phase = relinkPhase(entry, owner, refOf(sealed));
-    if (
-      !relinkNeedsRun({
-        phase,
-        entry,
-        provider: target.provider,
-        force,
-        failedThisSession: force ? null : (this.failures.get(id) ?? null),
-      })
-    ) {
-      return 'skipped';
+    // solo lo que la espera atribuyo a la conversacion, y solo mientras la
+    // salta: un fallo del CLI no la deja fuera, lo frena la espera, aqui abajo
+    // (`INV-FONDO-001`); y lo suyo se vuelve a probar pasado un par de horas,
+    // no al reiniciar (decimotercera ronda)
+    const blocked = this.cooldown.blocked(target, subject);
+    const needsRun = (failedThisSession: LocalCliProvider | null): boolean =>
+      relinkNeedsRun({ phase, entry, provider: target.provider, force, failedThisSession });
+    if (!needsRun(blocked ? target.provider : null)) {
+      // saltada SOLO por la espera no es lo mismo que nada que hacer: `skipped`
+      // la daba por vista hasta cerrar la boveda, y nadie la volvia a probar
+      // pasadas las dos horas
+      return blocked && needsRun(null) ? 'blocked' : 'skipped';
     }
     if (sealed === null || owner.winningEventId === null || owner.characterId === null) {
       return 'no-memory';
     }
+    // el CLI espera tras un fallo de su proceso: no se lanza, y la fila sigue
+    // pendiente para cuando acabe. El boton (`force`) puede probar una vez
+    if (!force && this.cooldown.waiting(target)) return 'waiting';
 
     // la ficha de la boveda si tiene texto; si no, la que sello el enganche. Es
     // la misma regla con la que main decide cual viaja en el turno
@@ -459,6 +616,7 @@ export class MemoryRelink {
     const prompt = buildMemoryRelinkPrompt({ label, description, previous });
     const started = Date.now();
     let text: string;
+    let failureReason: ProviderFailureReason | null = null;
     try {
       const turn = await this.deps.controller.runLocalTurn({
         localTurnId: randomUUID(),
@@ -469,17 +627,33 @@ export class MemoryRelink {
         // corregir una memoria es una tarea SOBRE un texto: no encarna a nadie
         kind: 'technical',
       });
-      if (turn.outcome !== 'completed') throw new Error('sin terminar');
+      // con un fallo del proceso, `text` es como mucho el mensaje del error:
+      // leerlo como respuesta lo daba por `invalid` y lo guardaba como tal
+      if (isProcessFailure(turn)) {
+        failureReason = turn.failureReason ?? null;
+        throw new Error('sin terminar');
+      }
       text = turn.text;
     } catch {
-      if (this.stopped()) {
+      if (this.stopped(generation)) {
         this.logOutcome('cut', target.provider, null, started, force);
         return 'cut';
       }
-      this.failures.set(id, target.provider);
-      this.logOutcome('process', target.provider, null, started, force);
+      // nada en disco: ni fila `failed` ni `invalid`. De quien es lo decide la
+      // espera: del CLI, espera; de la conversacion, va al final de la cola; y
+      // si la espera la da por suya, la salta un par de horas sin frenar a
+      // nadie (`AuxiliaryCooldown.blocked`), y al volver a probarse va al final
+      const verdict = this.cooldown.noteFailure(target, failureReason, subject);
+      this.processFailed.set(id, target.provider);
+      this.logOutcome('process', target.provider, null, started, force, {
+        label: processFailureLabel(failureReason),
+        verdict,
+      });
       return 'process';
     }
+    // contesto, con lo que sea: el proceso funciona y la espera se acaba
+    this.cooldown.noteSuccess(target, subject);
+    this.processFailed.delete(id);
 
     const parsed = parseMemoryRelinkResponse(text);
     // se clasifica SOLO sin bloque que valga, y solo lo de fuera del bloque: una
@@ -491,7 +665,7 @@ export class MemoryRelink {
 
     // la llamada es lo que mas tarda: aqui dentro cabe un cierre, un envio y un
     // «soltar». Lo que ya no describe lo que hay se tira
-    if (this.stopped()) {
+    if (this.stopped(generation)) {
       this.logOutcome('cut', target.provider, decision, started, force);
       return 'cut';
     }
@@ -529,7 +703,6 @@ export class MemoryRelink {
       this.logOutcome('stale', target.provider, decision, started, force);
       return 'stale';
     }
-    if (decision.status === 'ready') this.failures.delete(id);
     const outcome: MemoryRelinkOutcome = decision.status === 'ready' ? 'ready' : decision.failure;
     this.logOutcome(outcome, target.provider, decision, started, force);
     return outcome;
@@ -546,11 +719,16 @@ export class MemoryRelink {
     decision: ReturnType<typeof decideRelink> | null,
     started: number,
     force: boolean,
+    failure: { label: ProcessFailureLabel; verdict: ProcessFailureVerdict } | null = null,
   ): void {
     this.deps.log('memoria reescrita con su ficha', {
       resultado: outcome,
       proveedor: provider,
       forzada: force,
+      // solo con `process`: el enum del agente, nunca lo que escribio el CLI
+      motivoFallo: failure?.label ?? null,
+      // solo con `process`: de quien era el fallo, tambien un enum
+      atribucion: failure?.verdict ?? null,
       conservadas: decision?.drift?.kept ?? null,
       corregidas: decision?.drift?.rewritten ?? null,
       quitadas: decision?.drift?.dropped ?? null,
@@ -562,6 +740,8 @@ export class MemoryRelink {
       entradasAntes: decision?.sizes?.entriesBefore ?? null,
       entradasDespues: decision?.sizes?.entriesAfter ?? null,
       duracionMs: Date.now() - started,
+      // el total de subclaves derivadas desde que se abrio (`INV-LLAVE-001`)
+      derivaciones: this.deps.vault.derivationCount,
     });
   }
 }

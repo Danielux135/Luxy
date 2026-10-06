@@ -18,6 +18,7 @@ import {
 } from '@luxy/shared';
 import { noteId } from './relation.js';
 import { diagnoseRelations, type RelationDiagnosticsInput } from './relation-diagnostics.js';
+import { RELATION_REFUSAL_VERSION } from './relation-refusal.js';
 import { tokenize } from './turn-index.js';
 
 // un identificador de verdad: si se colara en el resultado, la prueba de abajo
@@ -169,7 +170,7 @@ function input(over: Partial<RelationDiagnosticsInput> = {}): RelationDiagnostic
       cursor(CONV_B, 1, { provider: 'claude' }),
       // se nego y no ha crecido: deja de contar como hueco hasta que lo haga
       cursor(CONV_N, -1, {
-        refusedVersion: RELATION_EXTRACTOR_VERSION,
+        refusedVersion: RELATION_REFUSAL_VERSION,
         refusedAtTurns: 2,
       }),
     ],
@@ -250,9 +251,39 @@ describe('55. cifras correctas con datos sinteticos', () => {
       outdatedVersion: 0,
       excludedSkipped: 1,
       refusedPersisted: 1,
+      refusedLegacy: 0,
+      waitingForProcess: 0,
       failedThisSession: 1,
       auxiliaryConfigured: true,
     });
+  });
+
+  // `INV-FONDO-001`: las negativas de antes eran fallos del proceso. No frenan,
+  // pero se cuentan, para que se vea que estan y que ya no bloquean
+  it('una negativa de antes no cuenta como negativa: sale aparte', () => {
+    const result = diagnoseRelations(
+      input({
+        cursors: [
+          cursor(CONV_A, 3),
+          cursor(CONV_B, 1, { provider: 'claude' }),
+          cursor(CONV_N, -1, { refusedVersion: 1, refusedAtTurns: 2 }),
+        ],
+      }),
+    );
+    expect(result.coverage).toMatchObject({ refusedPersisted: 0, refusedLegacy: 1, behind: 2 });
+  });
+
+  // y con el CLI en espera, «por detras» no se confunde ni con una negativa ni
+  // con «al dia»: cada conversacion se cuenta por UN motivo
+  it('con el CLI en espera, las que van por detras salen como esperando, salvo las negadas', () => {
+    const result = diagnoseRelations(input({ processWaiting: true }));
+    expect(result.coverage).toMatchObject({
+      behind: 2,
+      refusedPersisted: 1,
+      // CONV_B; CONV_N esta negada y se cuenta como negada
+      waitingForProcess: 1,
+    });
+    expect(diagnoseRelations(input()).coverage.waitingForProcess).toBe(0);
   });
 
   it('una version anterior del extractor deja la conversacion por delante otra vez', () => {

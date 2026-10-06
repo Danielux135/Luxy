@@ -243,6 +243,27 @@ describe('VaultService', () => {
       expect(vault.isUnlocked()).toBe(false);
     });
 
+    // `INV-LLAVE-001`: el contador que solo salia en la linea de cierre, ahora
+    // tambien a mitad de sesion. Mirarlo es SOLO leer: ni deriva ni cuenta como
+    // actividad (`D-106`)
+    it('el contador de derivaciones se lee sin derivar y sin mantenerla abierta', async () => {
+      const vault = service();
+      await vault.create(PASSWORD);
+      vault.setAutoLockMinutes(1);
+      const base = vault.derivationCount;
+
+      vault.subkeyFor('media');
+      vault.subkeyFor('identity', 'characters');
+      expect(vault.derivationCount).toBe(base + 2);
+      // leerlo no deriva
+      expect(vault.derivationCount).toBe(base + 2);
+
+      clock += 61_000;
+      expect(vault.tickAutoLock()).toBe(true);
+      // y con la boveda cerrada vale 0, como en la linea de cierre
+      expect(vault.derivationCount).toBe(0);
+    });
+
     it('una espera del usuario aplaza el cierre, y el limite empieza al soltarla', async () => {
       const vault = service();
       await vault.create(PASSWORD);

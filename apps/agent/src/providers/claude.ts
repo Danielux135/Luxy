@@ -5,6 +5,7 @@
 // Nunca se usa --dangerously-skip-permissions.
 import type {
   ProviderExecution,
+  ProviderFailureReason,
   ProviderRunRequest,
   ProviderRunResult,
   ToolPresence,
@@ -12,6 +13,31 @@ import type {
 import { effortIgnoredWarning } from '@luxy/shared';
 import { runProcess, BASE_ENV_ALLOWLIST } from '../process.js';
 import { detectTool, readHelp, helpHasFlag } from '../detect.js';
+
+/**
+ * lo que se le dice a Daniel cuando Claude Code no tiene sesion.
+ *
+ * Dice QUE HACER y nada mas. El texto que da el propio CLI no se copia aqui
+ * nunca: este mensaje llega a la pantalla y a los registros, y lo que imprime
+ * un CLI no lo controla Luxy.
+ */
+export const CLAUDE_AUTH_MESSAGE =
+  'Claude Code no tiene la sesion iniciada en este equipo. Abre una consola y ejecuta: claude auth login. Despues vuelve a intentarlo.';
+
+const CLAUDE_RATE_LIMIT_MESSAGE =
+  'Claude Code ha llegado a su limite de uso. Espera a que se renueve, o elige otro proveedor para este turno, y vuelve a intentarlo.';
+
+const CLAUDE_API_ERROR_MESSAGE =
+  'Claude Code devolvio un error en lugar de una respuesta. Abre una consola, ejecuta claude y comprueba que contesta; despues vuelve a intentarlo.';
+
+/**
+ * tope de la consulta de sesion durante la deteccion.
+ *
+ * Corto a proposito: es un dato informativo y no puede retrasar el arranque.
+ * Medido en este equipo, `claude auth status --json` tarda algo mas de medio
+ * segundo; diez dan margen a un arranque en frio sin dejar colgado a nadie.
+ */
+export const CLAUDE_AUTH_PROBE_TIMEOUT_MS = 10_000;
 
 /** flags que la version instalada admite realmente */
 export interface ClaudeCapabilities {
@@ -251,7 +277,26 @@ export interface ClaudeStreamEvent {
   text: string | null;
   sessionId: string | null;
   isResult: boolean;
+  /**
+   * el CLI marco este evento como error: un `result` con `is_error: true` o un
+   * `assistant` con `error`. Su texto es el mensaje del CLI y NUNCA la
+   * respuesta, aunque llegue en el mismo campo que una respuesta.
+   *
+   * Por que no basta con `subtype`: sin sesion, el CLI emite un `result` con
+   * `subtype: "success"` y `is_error: true` a la vez. Comprobado con el CLI de
+   * este equipo el 2026-10-05; la unica señal fiable es `is_error`.
+   */
+  isError: boolean;
+  /**
+   * la categoria que pone el CLI en `error` del `assistant` sintetico
+   * (`authentication_failed`, `rate_limit`...). Es un enum del CLI, no prosa;
+   * aun asi solo sirve para decidir y no se copia a ningun mensaje ni registro.
+   */
+  errorCategory: string | null;
 }
+
+/** forma de un enum del CLI; cualquier otra cosa no se toma por categoria */
+const CLI_ENUM = /^[a-z][a-z0-9_]{0,63}$/;
 
 /** interpreta una linea de stream-json sin fallar si el formato cambia */
 export function parseClaudeStreamLine(line: string): ClaudeStreamEvent | null {
@@ -294,7 +339,174 @@ export function parseClaudeStreamLine(line: string): ClaudeStreamEvent | null {
     }
   }
 
-  return { type, text, sessionId, isResult: type === 'result' };
+  const isResult = type === 'result';
+  // el `assistant` sintetico de un fallo de API lleva la categoria arriba del
+  // todo, junto a `is_api_error_message`; su `message.model` es "<synthetic>"
+  const errorCategory =
+    type === 'assistant' && typeof payload.error === 'string' && CLI_ENUM.test(payload.error)
+      ? payload.error
+      : null;
+  const isError = isResult
+    ? payload.is_error === true
+    : type === 'assistant' &&
+      (errorCategory !== null ||
+        (typeof payload.error === 'string' && payload.error.length > 0) ||
+        payload.is_api_error_message === true);
+
+  return { type, text, sessionId, isResult, isError, errorCategory };
+}
+
+/**
+ * lo que la salida stream-json deja dicho sobre como acabo el turno.
+ *
+ * Se separa del proceso para poder probarlo con salidas grabadas, sin lanzar
+ * el CLI ni gastar nada.
+ */
+export class ClaudeStreamState {
+  sessionId: string | null = null;
+  /** texto del ultimo `result` que NO venia marcado como error */
+  finalText = '';
+  /** el ultimo `result` llego con `is_error: true` */
+  resultIsError = false;
+  /**
+   * el ultimo `assistant` fue un error del CLI.
+   *
+   * Se borra si despues llega un `assistant` normal: un fallo intermedio del
+   * que el CLI se recupero no convierte en fallo una respuesta que si llego.
+   */
+  assistantError = false;
+  /** categoria de ese error, si el CLI la dio con forma de enum */
+  errorCategory: string | null = null;
+
+  accept(event: ClaudeStreamEvent): void {
+    if (event.sessionId) this.sessionId = event.sessionId;
+    if (event.isResult) {
+      this.resultIsError = event.isError;
+      // el texto de un resultado de error es el mensaje del CLI: no se guarda
+      // ni siquiera aparte, para que ningun camino pueda acabar usandolo
+      this.finalText = event.isError ? '' : (event.text ?? '');
+      return;
+    }
+    if (event.type === 'assistant') {
+      this.assistantError = event.isError;
+      this.errorCategory = event.isError ? event.errorCategory : null;
+    }
+  }
+
+  /** el CLI dijo, de forma estructurada, que el turno fallo */
+  get failed(): boolean {
+    return this.resultIsError || this.assistantError;
+  }
+}
+
+/**
+ * traduce la categoria del CLI a la de Luxy.
+ *
+ * Solo dos categorias tienen traduccion propia, y las dos salen de enums del
+ * propio CLI, no de buscar palabras en un texto. `rate_limit` es como el CLI
+ * etiqueta un HTTP 429 (visto en su clasificador: `status===429` da
+ * `"rate_limit"`). Las demas —`overloaded`, `billing_error`, `server_error`...—
+ * se dejan en `api_error`: inventar una accion para cada una seria adivinar.
+ */
+export function claudeFailureReasonFor(errorCategory: string | null): ProviderFailureReason {
+  if (errorCategory === 'authentication_failed') return 'auth';
+  if (errorCategory === 'rate_limit') return 'rate_limit';
+  return 'api_error';
+}
+
+/**
+ * por que fallo el turno segun la salida y el codigo de salida, o null si no
+ * fallo. El orden importa: la señal estructurada del CLI manda sobre el codigo.
+ * Hoy un resultado de error sale con codigo 1, pero un `is_error: true` con
+ * codigo 0 no seria menos error, y su texto seguiria sin ser una respuesta.
+ */
+export function classifyClaudeExit(
+  stream: ClaudeStreamState,
+  exitCode: number | null,
+): ProviderFailureReason | null {
+  if (stream.failed) return claudeFailureReasonFor(stream.errorCategory);
+  if (exitCode !== 0 && stream.finalText.length === 0) return 'exit_code';
+  return null;
+}
+
+/** el mensaje para Daniel de cada motivo: dice que hacer, no lo que dijo el CLI */
+export function describeClaudeFailure(
+  reason: ProviderFailureReason,
+  exitCode: number | null,
+  stderr: string,
+): string {
+  switch (reason) {
+    case 'auth':
+      return CLAUDE_AUTH_MESSAGE;
+    case 'rate_limit':
+      return CLAUDE_RATE_LIMIT_MESSAGE;
+    case 'api_error':
+      return CLAUDE_API_ERROR_MESSAGE;
+    case 'exit_code':
+      return buildClaudeError(exitCode, stderr);
+  }
+}
+
+/**
+ * true si esta version tiene `claude auth status --json`.
+ *
+ * Se exige la linea de uso del subcomando, no solo el flag: una version sin
+ * `auth` responde a `claude auth status --help` con la ayuda GENERAL, y
+ * lanzar despues `claude auth status --json` en esa version seria lanzar un
+ * prompt.
+ */
+export function claudeAuthStatusSupported(help: string | null): boolean {
+  return help !== null && /claude auth status/.test(help) && helpHasFlag(help, '--json');
+}
+
+/**
+ * lee `loggedIn` de `claude auth status --json`; null si no se puede saber.
+ *
+ * Sin sesion el CLI sale con codigo 1 y AUN ASI escribe el JSON, asi que el
+ * codigo de salida no decide nada. Del objeto solo se mira ese campo: el resto
+ * —correo, organizacion— no lo necesita Luxy y no sale de esta funcion.
+ */
+export function parseClaudeAuthStatus(stdout: string): boolean | null {
+  const start = stdout.indexOf('{');
+  const end = stdout.lastIndexOf('}');
+  if (start < 0 || end <= start) return null;
+  try {
+    const payload = JSON.parse(stdout.slice(start, end + 1)) as unknown;
+    if (typeof payload !== 'object' || payload === null) return null;
+    const loggedIn = (payload as { loggedIn?: unknown }).loggedIn;
+    return typeof loggedIn === 'boolean' ? loggedIn : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * pregunta al CLI si tiene sesion: true, false o null (no se sabe).
+ *
+ * Con el MISMO entorno restringido que las ejecuciones: lo que importa es si
+ * la sesion que vera un turno de Luxy existe, no la que veria una consola con
+ * todas las variables del usuario. Cualquier fallo, tiempo agotado o version
+ * sin el subcomando es null, y null no bloquea nada.
+ */
+export async function probeClaudeAuth(
+  executable = 'claude',
+  timeoutMs = CLAUDE_AUTH_PROBE_TIMEOUT_MS,
+): Promise<boolean | null> {
+  const help = await readHelp(executable, ['auth', 'status', '--help'], timeoutMs);
+  if (!claudeAuthStatusSupported(help)) return null;
+  try {
+    const result = await runProcess({
+      executable,
+      args: ['auth', 'status', '--json'],
+      cwd: process.cwd(),
+      timeoutMs,
+      envAllowList: BASE_ENV_ALLOWLIST,
+    });
+    if (result.timedOut || result.cancelled) return null;
+    return parseClaudeAuthStatus(result.stdout);
+  } catch {
+    return null;
+  }
 }
 
 export class ClaudeCodeProvider implements ProviderExecution {
@@ -311,6 +523,7 @@ export class ClaudeCodeProvider implements ProviderExecution {
 
   private capabilities: ClaudeCapabilities | null = null;
   private presence: ToolPresence | null = null;
+  private authenticated: boolean | null = null;
 
   constructor(private readonly defaultModel = 'opus') {}
 
@@ -328,12 +541,34 @@ export class ClaudeCodeProvider implements ProviderExecution {
     // sin modo no interactivo el proveedor no sirve para luxy
     if (!this.capabilities.print) {
       this.presence = { ...presence, available: false };
+      return this.presence;
     }
+
+    // la sesion se consulta, pero NO decide la disponibilidad.
+    //
+    // Durante mas de una semana el CLI de este equipo estuvo sin sesion y Luxy
+    // no lo supo: la deteccion solo miraba `--version` y `--help`. Ahora se
+    // mira, y se deja como dato. Quitar Claude de los disponibles por esto seria peor:
+    // la consulta puede equivocarse o no existir en otra version, y entonces
+    // Claude desapareceria sin que nadie entendiera por que. El turno que falle
+    // por falta de sesion ya lo dice el solo (`failureReason: 'auth'`).
+    this.authenticated = await probeClaudeAuth();
     return this.presence;
   }
 
   getCapabilities(): ClaudeCapabilities | null {
     return this.capabilities;
+  }
+
+  /**
+   * si el CLI tenia sesion al detectarlo: true, false o null si no se sabe.
+   *
+   * Es una foto del arranque, no un estado vivo: si Daniel inicia sesion
+   * despues, esto no cambia hasta la siguiente deteccion. Por eso no bloquea
+   * nada y solo sirve para avisar.
+   */
+  getAuthenticated(): boolean | null {
+    return this.authenticated;
   }
 
   async run(request: ProviderRunRequest): Promise<ProviderRunResult> {
@@ -400,8 +635,7 @@ export class ClaudeCodeProvider implements ProviderExecution {
 
     request.onEvent({ type: 'phase', message: 'lanzando Claude Code' });
 
-    let sessionId: string | null = null;
-    let finalText = '';
+    const stream = new ClaudeStreamState();
     // stdout llega por trozos: hay que reconstruir las lineas
     let buffer = '';
     const useStreamJson = this.capabilities.outputFormat && this.capabilities.streamJson;
@@ -414,11 +648,11 @@ export class ClaudeCodeProvider implements ProviderExecution {
       }
       const event = parseClaudeStreamLine(line);
       if (!event) return;
-      if (event.sessionId) sessionId = event.sessionId;
-      if (event.isResult && event.text) {
-        finalText = event.text;
-        return;
-      }
+      stream.accept(event);
+      // el resultado es la respuesta entera y vuelve aparte. Un error del CLI
+      // no se enseña como progreso: en un trabajo de la cola, `text` acaba en
+      // la salida visible del modelo, y ese texto no es del modelo
+      if (event.isResult || event.isError) return;
       if (event.text) {
         request.onEvent({ type: 'text', message: event.text.slice(0, 500) });
       } else if (event.type === 'assistant' || event.type === 'user') {
@@ -455,6 +689,11 @@ export class ClaudeCodeProvider implements ProviderExecution {
     // se procesa lo que quedara en el buffer
     if (buffer.trim().length > 0) handleLine(buffer);
 
+    const sessionId = stream.sessionId;
+    // solo el texto de un `result` que NO era error: el de un error es el
+    // mensaje del CLI y ni siquiera llega a esta variable
+    let finalText = stream.finalText;
+
     if (result.cancelled) {
       return {
         ok: false,
@@ -477,7 +716,34 @@ export class ClaudeCodeProvider implements ProviderExecution {
         errorMessage: `Claude Code supero el tiempo maximo de ${Math.round(request.timeoutMs / 1000)}s`,
       };
     }
+    // un fallo que el CLI declara es un FALLO, con cualquier codigo de salida.
+    //
+    // Sin sesion, Claude Code emite un `result` con `is_error: true` cuyo
+    // texto es el mensaje de error, y sale con codigo 1. Antes ese texto se
+    // devolvia como `finalText` junto a `ok: false`, y aguas abajo eso es una
+    // respuesta «interrumpida» que se conserva: el turno salia completado con
+    // el error dentro, y los trabajos de fondo lo contaban como una negativa
+    // de Claude. Ahora no hay texto, asi que el final es `failed` de verdad.
+    const failureReason = useStreamJson
+      ? classifyClaudeExit(stream, result.exitCode)
+      : result.exitCode !== 0
+        ? 'exit_code'
+        : null;
+    if (failureReason !== null) {
+      return {
+        ok: false,
+        finalText: '',
+        sessionId,
+        exitCode: result.exitCode,
+        timedOut: false,
+        cancelled: false,
+        errorMessage: describeClaudeFailure(failureReason, result.exitCode, result.stderr),
+        failureReason,
+      };
+    }
     if (result.exitCode !== 0) {
+      // codigo distinto de 0 DESPUES de un resultado que no era error: lo que
+      // llego si es del modelo, y se entrega como parcial, igual que antes
       return {
         ok: false,
         finalText,
@@ -504,18 +770,24 @@ export class ClaudeCodeProvider implements ProviderExecution {
   }
 }
 
-/** traduce los fallos habituales a un mensaje que se entiende en telegram */
+/**
+ * traduce un codigo de salida a un mensaje que se entiende en telegram.
+ *
+ * stderr se LEE para elegir el mensaje, pero no se copia: lo que imprime un
+ * CLI no lo controla Luxy, y este mensaje acaba en la pantalla y en los
+ * registros. Antes se pegaban sus tres ultimas lineas; ahora se dice que hacer
+ * para verlo uno mismo. stderr ya llega aparte, como aviso de progreso.
+ */
 export function buildClaudeError(exitCode: number | null, stderr: string): string {
   const text = stderr.toLowerCase();
   if (/not logged in|unauthorized|authentication|login/.test(text)) {
-    return 'Claude Code no tiene sesion iniciada en esta maquina. Ejecuta "claude" en una terminal y autentica tu suscripcion.';
+    return CLAUDE_AUTH_MESSAGE;
   }
   if (/rate limit|quota|usage limit/.test(text)) {
-    return 'Claude Code ha alcanzado el limite de uso de tu suscripcion. Intentalo mas tarde.';
+    return CLAUDE_RATE_LIMIT_MESSAGE;
   }
   if (/enoent|not recognized|no se reconoce/.test(text)) {
     return 'No se encontro el ejecutable de Claude Code en el PATH de esta maquina.';
   }
-  const detail = stderr.trim().split(/\r?\n/).slice(-3).join(' ').slice(0, 300);
-  return `Claude Code termino con codigo ${exitCode ?? 'desconocido'}${detail ? `: ${detail}` : ''}`;
+  return `Claude Code termino con codigo ${exitCode ?? 'desconocido'} sin dar una respuesta. Abre una consola y ejecuta claude para ver que le pasa; despues vuelve a intentarlo.`;
 }

@@ -43,15 +43,49 @@ const sealedFileSchema = z.object({
   }),
 });
 
+/**
+ * la recuperacion de `INV-FONDO-001`: hasta el 06/10 un fallo del PROCESO del
+ * CLI —Claude Code sin sesion— llegaba como una respuesta sin bloque, y la fila
+ * se guardaba `failed` con `invalid` (o `refused`, si el mensaje del error
+ * sonaba a negativa). Todas las de entonces son falsas: el registro no tiene ni
+ * una reescritura de verdad que fallara asi.
+ */
+export const RELINK_RECOVERY_PROCESS_FAILURES = 'inv-fondo-001';
+
+/**
+ * las recuperaciones que ya trae cualquier archivo NUEVO.
+ *
+ * Un archivo que nace con esta version no puede tener filas falsas, asi que
+ * nace con ellas hechas: si no, la primera recuperacion sobre un archivo creado
+ * despues volveria a pendientes las `failed` de verdad.
+ */
+const RECOVERIES_AT_BIRTH: readonly string[] = [RELINK_RECOVERY_PROCESS_FAILURES];
+
 /** las filas entran sin validar: una rota no puede tirar las demas */
 const payloadSchema = z.object({
   v: z.literal(1),
   rows: z.array(z.unknown()).default([]),
+  /**
+   * las recuperaciones de una sola vez ya hechas sobre ESTE archivo, por nombre.
+   * Van dentro del sobre: la marca y el cambio se escriben a la vez o no se
+   * escriben. Un archivo de antes no la trae, y eso es lo que la dispara
+   */
+  recoveries: z.array(z.string().min(1).max(64)).max(32).default([]),
 });
 
 interface RelinkSnapshot {
   rows: MemoryRelinkEntry[];
   unreadable: unknown[];
+  recoveries: readonly string[];
+}
+
+/**
+ * true si una fila `failed` pudo escribirla un fallo del proceso tomado por
+ * respuesta: sin bloque que leer solo salen `invalid` o `refused`. `vague` y
+ * `lossy` exigen un bloque bien formado, que un mensaje de error no trae.
+ */
+function writtenByProcessFailure(row: MemoryRelinkEntry): boolean {
+  return row.status === 'failed' && (row.failure === 'invalid' || row.failure === 'refused');
 }
 
 /** true si una fila que no se pudo leer dice ser de esa conversacion */
@@ -66,7 +100,9 @@ export class MemoryRelinkStore {
   constructor(private readonly file: string) {}
 
   private async read(vault: VaultService): Promise<RelinkSnapshot> {
-    if (!existsSync(this.file)) return { rows: [], unreadable: [] };
+    if (!existsSync(this.file)) {
+      return { rows: [], unreadable: [], recoveries: RECOVERIES_AT_BIRTH };
+    }
 
     let raw: unknown;
     try {
@@ -115,7 +151,60 @@ export class MemoryRelinkStore {
       if (row.success) rows.push(row.data);
       else unreadable.push(candidate);
     }
-    return { rows, unreadable };
+    return { rows, unreadable, recoveries: payload.recoveries };
+  }
+
+  /**
+   * UNA vez por archivo: las filas `failed` que pudo escribir un fallo del
+   * proceso tomado por respuesta vuelven a `pending` (`INV-FONDO-001`).
+   *
+   * Por que es seguro:
+   *
+   *  - pasa por el mismo carril, el mismo sellado y la misma escritura atomica
+   *    que cualquier otra fila (temporal cifrado, `fsync`, `rename`); un archivo
+   *    que no abre lanza y NO se toca;
+   *  - la marca va dentro del mismo sobre que el cambio: o se escriben las dos
+   *    cosas o ninguna, asi que no puede quedar hecha a medias ni repetirse;
+   *  - solo cambia filas `failed` con `invalid` o `refused`, las unicas que un
+   *    texto sin bloque puede producir; no toca ninguna memoria (en `failed` no
+   *    hay) ni lo que no valido, que vuelve al archivo tal cual;
+   *  - `pending` es lo que ya eran antes del intento fallido: la pasada general
+   *    las vuelve a mirar sola, con la espera del CLI como freno;
+   *  - un Studio anterior que reescriba el archivo pierde la marca (no conoce el
+   *    campo). Si despues vuelve esta version, la recuperacion se repite: como
+   *    mucho cuesta un intento de mas por fila, nunca una memoria.
+   *
+   * Devuelve cuantas filas cambio; 0 si ya estaba hecha o no habia ninguna.
+   */
+  async recoverProcessFailures(vault: VaultService, now: string): Promise<number> {
+    // sin archivo no hay nada falso que recuperar, y no se crea uno para nada:
+    // el que nazca despues ya trae la marca (`RECOVERIES_AT_BIRTH`)
+    if (!existsSync(this.file)) return 0;
+    let changed = 0;
+    await this.mutate(vault, (current) => {
+      if (current.recoveries.includes(RELINK_RECOVERY_PROCESS_FAILURES)) return current;
+      const rows = current.rows.map((row) => {
+        if (!writtenByProcessFailure(row)) return row;
+        changed += 1;
+        return memoryRelinkEntrySchema.parse({
+          ...row,
+          status: 'pending',
+          memory: null,
+          drift: null,
+          failure: null,
+          // ningun CLI llego a contestar: no hay con quien se intentara
+          provider: null,
+          model: null,
+          updatedAt: now,
+        });
+      });
+      return {
+        rows,
+        unreadable: current.unreadable,
+        recoveries: [...current.recoveries, RELINK_RECOVERY_PROCESS_FAILURES],
+      };
+    });
+    return changed;
   }
 
   /** todas, por conversacion. Lo usa quien lee muchas a la vez */
@@ -161,6 +250,7 @@ export class MemoryRelinkStore {
       return {
         rows: [...current.rows.filter((row) => row.conversationId !== conversationId), checked],
         unreadable: current.unreadable.filter((raw) => !rawBelongsTo(raw, conversationId)),
+        recoveries: current.recoveries,
       };
     });
     return written;
@@ -184,6 +274,7 @@ export class MemoryRelinkStore {
       return {
         rows: current.rows.filter((row) => row.conversationId !== conversationId),
         unreadable: current.unreadable.filter((raw) => !rawBelongsTo(raw, conversationId)),
+        recoveries: current.recoveries,
       };
     });
   }
@@ -219,7 +310,13 @@ export class MemoryRelinkStore {
       const sealed = await sealText(
         key,
         'vault.identity',
-        JSON.stringify({ v: 1, rows: [...rows.data, ...state.unreadable] }),
+        // la marca de las recuperaciones viaja siempre: perderla en una
+        // escritura cualquiera repetiria una recuperacion ya hecha
+        JSON.stringify({
+          v: 1,
+          rows: [...rows.data, ...state.unreadable],
+          recoveries: state.recoveries,
+        }),
       );
       mkdirSync(join(this.file, '..'), { recursive: true });
       const temporary = `${this.file}.tmp`;

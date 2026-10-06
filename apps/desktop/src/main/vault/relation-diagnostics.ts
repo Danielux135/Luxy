@@ -51,6 +51,7 @@ import {
 // diagnostico que dijera «al dia» con otro criterio que el extractor seria peor
 // que no tenerlo
 import { effectiveThrough, lastReviewableOf, refusedStill } from './relation-sync.js';
+import { isLegacyRefusal } from './relation-refusal.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -140,6 +141,12 @@ export interface RelationDiagnosticsInput {
    * aplica.
    */
   failedConversations?: ReadonlySet<string>;
+  /**
+   * true si el CLI del trabajo de fondo esta en espera tras un fallo de su
+   * proceso (`INV-FONDO-001`). Las que van por detras no se estan leyendo por
+   * eso, y no porque se negaran: el diagnostico tiene que poder decirlo.
+   */
+  processWaiting?: boolean;
   /** true si Daniel eligio a mano quien hace el trabajo de fondo */
   auxiliaryConfigured: boolean;
   /** la zona, el corte del dia y el instante: los mismos que un turno real */
@@ -164,6 +171,17 @@ export interface RelationDiagnostics {
     outdatedVersion: number;
     excludedSkipped: number;
     refusedPersisted: number;
+    /**
+     * negativas apuntadas antes de `INV-FONDO-001`: eran fallos del proceso y ya
+     * no frenan nada. Se cuentan para que se vea que estan y que no bloquean
+     */
+    refusedLegacy: number;
+    /**
+     * de las que van por detras, las que no se leen porque el CLI esta en
+     * espera tras un fallo de su proceso. Con esto `behind` no se confunde con
+     * una negativa ni con «al dia»
+     */
+    waitingForProcess: number;
     failedThisSession: number;
     auxiliaryConfigured: boolean;
   };
@@ -375,12 +393,16 @@ export function diagnoseRelations(input: RelationDiagnosticsInput): RelationDiag
   let turnsBehind = 0;
   let outdatedVersion = 0;
   let refusedPersisted = 0;
+  let refusedLegacy = 0;
+  let waitingForProcess = 0;
   for (const conversationId of ownerOf.keys()) {
     const cursor = cursorOf.get(conversationId);
     if (cursor !== undefined && cursor.version < RELATION_EXTRACTOR_VERSION) outdatedVersion += 1;
+    if (cursor !== undefined && isLegacyRefusal(cursor)) refusedLegacy += 1;
 
     const turns = [...(grouped.get(conversationId) ?? [])].sort((a, b) => a.sequence - b.sequence);
-    if (refusedStill(cursor, turns.length)) refusedPersisted += 1;
+    const refused = refusedStill(cursor, turns.length);
+    if (refused) refusedPersisted += 1;
 
     const lastReviewable = lastReviewableOf(turns);
     // sin una sola respuesta no hay nada que un cursor pueda señalar: no esta
@@ -400,6 +422,9 @@ export function diagnoseRelations(input: RelationDiagnosticsInput): RelationDiag
     else {
       behind += 1;
       turnsBehind += pending;
+      // la negada se salta por su negativa, este o no el CLI en espera: cada
+      // una se cuenta por UN motivo
+      if (input.processWaiting === true && !refused) waitingForProcess += 1;
     }
   }
 
@@ -546,6 +571,8 @@ export function diagnoseRelations(input: RelationDiagnosticsInput): RelationDiag
         input.excluded.has(conversation.conversationId),
       ).length,
       refusedPersisted,
+      refusedLegacy,
+      waitingForProcess,
       failedThisSession: input.failedThisSession,
       auxiliaryConfigured: input.auxiliaryConfigured,
     },

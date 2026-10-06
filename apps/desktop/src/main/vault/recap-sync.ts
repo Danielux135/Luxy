@@ -75,9 +75,19 @@ import {
   type RecapGapReason,
   type RecapRefusalKind,
   type RecapTurn,
+  type ProviderFailureReason,
   type TemporalAnchor,
 } from '@luxy/shared';
 import { classifyReply } from '../../shared/refusal.js';
+import {
+  AuxiliaryCooldown,
+  LaunchPermit,
+  isProcessFailure,
+  processFailureLabel,
+  processSubject,
+  type ProcessFailureLabel,
+  type ProcessFailureVerdict,
+} from './auxiliary-cooldown.js';
 import type { CatalogedEpisode, CatalogStore } from './catalog-store.js';
 import type { PrivateConversationStore } from './conversation-store.js';
 import type { MemoryPreferences } from './memory-preferences.js';
@@ -147,6 +157,11 @@ export interface RecapSyncDeps {
   isSending: (conversationId: string) => boolean;
   anchor: () => TemporalAnchor;
   log: (message: string, fields?: Record<string, unknown>) => void;
+  /**
+   * la espera por proveedor que comparten los cuatro trabajos de fondo
+   * (`INV-FONDO-001`). Sin ella —en las pruebas que no la miran— tiene la suya
+   */
+  cooldown?: AuxiliaryCooldown;
 }
 
 export interface RecapRunOptions {
@@ -169,6 +184,12 @@ export interface RecapRunOptions {
    * rastro. No hay ningun camino de escritura fuera de `persistEntry`.
    */
   dryRun?: boolean;
+  /**
+   * la ha pedido Daniel con un boton en ESTA vuelta: puede lanzar el CLI una vez
+   * aunque este en espera tras un fallo de su proceso. El panel la manda solo en
+   * la primera de sus vueltas, como `force`
+   */
+  retryNow?: boolean;
 }
 
 /** lo que se habria guardado, para poder leerlo antes de decidir */
@@ -200,8 +221,13 @@ export interface RecapRunResult {
   vague: number;
   /** ventanas cuyo bloque no se pudo leer: ausente, cortado o mal formado */
   invalid: number;
-  /** conversaciones cuyo proceso no llego a terminar */
+  /** conversaciones cuyo proceso no llego a terminar, o que no se pudieron leer */
   failed: { conversationId: string; reason: string }[];
+  /**
+   * conversaciones de la tanda que no se mandaron porque el CLI esta en espera
+   * tras un fallo de su proceso. Siguen en `pending`
+   */
+  waiting: number;
   /** conversaciones que ya tenian memoria propia */
   superseded: number;
   /** tramos declarados en esta pasada */
@@ -251,6 +277,12 @@ interface PassState {
   result: RecapRunResult;
   /** una por conversacion, la ultima que se habria escrito */
   previews: Map<string, RecapPreview>;
+  /** si se puede lanzar el CLI: la espera, o el boton una vez */
+  permit: LaunchPermit;
+  /** el motivo del ultimo fallo del proceso de la tanda, para el registro */
+  processFailure: ProcessFailureLabel | null;
+  /** y de quien era ese fallo, tambien para el registro */
+  processVerdict: ProcessFailureVerdict | null;
 }
 
 /** lo que se va acumulando dentro de UNA conversacion */
@@ -462,26 +494,43 @@ export class RecapSync {
    * tanda entera. Se olvida al reiniciar, que es cuando tiene sentido volver a
    * probar. Y guarda CON QUE fallo porque un Codex que no arranca no dice nada
    * de Claude.
+   *
+   * Aqui entra lo que falla al leer o al guardar. Un fallo del PROCESO no entra
+   * nunca (decimotercera ronda): va a la espera por lanzamiento y a
+   * `processFailed`, que no bloquea (`INV-FONDO-001`), y si la espera lo
+   * atribuye a la conversacion ella la salta un par de horas
+   * (`AuxiliaryCooldown.blocked`), no la sesion.
    */
   private readonly failures = new Map<string, LocalCliProvider>();
+
+  /**
+   * conversaciones cuyo ultimo intento acabo en un fallo del proceso, con el CLI
+   * que fallo. No se saltan: van al final de la cola, para que una que falla
+   * sola —una ventana que agota el tiempo— no tape a las demas en cada vuelta.
+   */
+  private readonly processFailed = new Map<string, LocalCliProvider>();
+
+  private readonly cooldown: AuxiliaryCooldown;
 
   private cancelled = false;
   private running = false;
 
-  constructor(private readonly deps: RecapSyncDeps) {}
+  constructor(private readonly deps: RecapSyncDeps) {
+    this.cooldown = deps.cooldown ?? new AuxiliaryCooldown();
+  }
 
   /** true mientras hay una pasada en curso; para medir, no para decidir */
   get busy(): boolean {
     return this.running;
   }
 
-  /** cuantas conversaciones se estan saltando por haber fallado en esta sesion */
+  /** cuantas conversaciones fallaron en esta sesion, de cualquier forma */
   get failedThisSession(): number {
-    return this.failures.size;
+    return this.failedConversations.size;
   }
 
   get failedConversations(): ReadonlySet<string> {
-    return new Set(this.failures.keys());
+    return new Set([...this.failures.keys(), ...this.processFailed.keys()]);
   }
 
   /**
@@ -517,6 +566,7 @@ export class RecapSync {
       vague: 0,
       invalid: 0,
       failed: [],
+      waiting: 0,
       superseded: 0,
       gaps: 0,
       clipped: 0,
@@ -556,12 +606,27 @@ export class RecapSync {
     const candidates = this.pending(await this.deps.timeline(), entries, target, options);
     result.pending = Math.max(0, candidates.length - Math.min(candidates.length, limit));
 
-    const pass: PassState = { options, target, result, previews: new Map() };
+    const pass: PassState = {
+      options,
+      target,
+      result,
+      previews: new Map(),
+      permit: new LaunchPermit(this.cooldown, options.retryNow === true),
+      processFailure: null,
+      processVerdict: null,
+    };
 
-    for (const candidate of candidates.slice(0, limit)) {
+    const batch = candidates.slice(0, limit);
+    for (const [index, candidate] of batch.entries()) {
       // entre conversacion y conversacion se vuelve a mirar: cerrar la boveda
       // durante una pasada larga tiene que pararla, no llenar el log de errores
       if (this.stopped()) break;
+      // el CLI en espera tras un fallo de su proceso: ni se descifra nada. Las
+      // que quedan de la tanda tampoco irian (`INV-FONDO-001`)
+      if (!pass.permit.allows(target)) {
+        result.waiting += batch.length - index;
+        break;
+      }
       try {
         await this.reviewOne(candidate, catalogs.get(candidate.conversationId) ?? null, pass);
       } catch (error) {
@@ -608,8 +673,16 @@ export class RecapSync {
       aportadas: result.added,
       caracteres: result.chars,
       quedan: result.pending,
+      // las que no se mandaron porque el CLI espera tras un fallo de su proceso
+      enEspera: result.waiting,
+      // el enum del agente, nunca su mensaje; `null` sin fallo del proceso
+      motivoFallo: pass.processFailure,
+      // de quien era ese fallo: del CLI, de la conversacion o ya repetido
+      atribucion: pass.processVerdict,
       proveedor: target.provider,
       sustituido: target.replaced,
+      // el total de subclaves derivadas desde que se abrio (`INV-LLAVE-001`)
+      derivaciones: this.deps.vault.derivationCount,
     });
     return result;
   }
@@ -636,6 +709,35 @@ export class RecapSync {
   ): void {
     if (options.dryRun === true) return;
     this.failures.set(conversationId, provider);
+  }
+
+  /**
+   * el PROCESO del CLI fallo con esa conversacion. De quien es lo decide la
+   * espera: del CLI, espera el CLI y ella pasa al final de la cola; de ella sola,
+   * pasa al final sin frenar a nadie; y si la espera la da por suya, se salta
+   * un par de horas (undecima y decimotercera ronda).
+   *
+   * Salvo en el vistazo, por el mismo motivo que `markFailure`: promete no dejar
+   * rastro, y la espera tambien lo es —la pasada de verdad no lanzaria el CLI
+   * hasta que acabe—. El vistazo es una tanda pedida a mano, asi que no hay
+   * bucle que frenar; lo que fallo se ve en su resultado.
+   */
+  private markProcessFailure(
+    conversationId: string,
+    pass: PassState,
+    reason: ProviderFailureReason | null,
+  ): void {
+    pass.processFailure = processFailureLabel(reason);
+    if (pass.options.dryRun === true) return;
+    const verdict = this.cooldown.noteFailure(
+      pass.target,
+      reason,
+      processSubject('recap', conversationId),
+    );
+    pass.processVerdict = verdict;
+    // tambien la que es suya: la salta la espera (`blocked`) un par de horas y
+    // no la sesion, y cuando vuelva a probarse tiene que ir al final
+    this.processFailed.set(conversationId, pass.target.provider);
   }
 
   /**
@@ -730,6 +832,14 @@ export class RecapSync {
 
       // haber fallado con un CLI no dice nada del otro, igual que negarse
       if (!options.force && this.failures.get(conversationId) === target.provider) continue;
+      // su proceso falla por su cuenta: se salta un rato y despues se prueba
+      // una vez (decimotercera ronda). «Rehacerlo» la prueba igual
+      if (
+        !options.force &&
+        this.cooldown.blocked(target, processSubject('recap', conversationId))
+      ) {
+        continue;
+      }
       if (!options.force && refusedStillRecap(entry, turns.length, target.provider)) continue;
 
       const ordered = [...turns].sort((a, b) => a.sequence - b.sequence);
@@ -750,9 +860,14 @@ export class RecapSync {
       candidates.push({ conversationId, startedAt: first.createdAt, turns: turns.length });
     }
 
+    // las que acaban de fallar por el proceso con este CLI, al final: sin
+    // bloquearlas, una que falla sola no tapa a las demas
+    const lastly = (id: string): number => (this.processFailed.get(id) === target.provider ? 1 : 0);
     return candidates.sort(
       (a, b) =>
-        a.startedAt.localeCompare(b.startedAt) || a.conversationId.localeCompare(b.conversationId),
+        lastly(a.conversationId) - lastly(b.conversationId) ||
+        a.startedAt.localeCompare(b.startedAt) ||
+        a.conversationId.localeCompare(b.conversationId),
     );
   }
 
@@ -941,10 +1056,19 @@ export class RecapSync {
         startsAtFirstTurn: expected.from === firstSequence,
       });
 
+      // ENTRE VENTANAS tambien: la espera puede haber empezado con la ventana
+      // anterior de otra conversacion de esta misma tanda
+      if (!pass.permit.allows(pass.target)) {
+        pass.result.waiting += 1;
+        return;
+      }
+      pass.permit.spend();
+
       state.windows += 1;
       this.tally(state, pass, 'windows');
 
       let text: string;
+      let failureReason: ProviderFailureReason | null = null;
       try {
         const run = await this.deps.controller.runLocalTurn({
           localTurnId: randomUUID(),
@@ -956,14 +1080,21 @@ export class RecapSync {
           // quien esta encarnando a alguien dispara la moderacion
           kind: 'technical',
         });
-        if (run.outcome !== 'completed') {
+        // con un fallo del proceso el texto es como mucho el mensaje del error:
+        // leido como respuesta se apuntaria como ventana negada o rota
+        if (isProcessFailure(run)) {
+          failureReason = run.failureReason ?? null;
           throw new Error(run.error ?? 'el trabajo de fondo no llego a terminar');
         }
         text = run.text;
       } catch (error) {
+        // la boveda se cerro mientras el CLI pensaba: no es culpa de nadie, y
+        // la tanda ya se para sola (`D-106`)
+        if (this.stopped()) return;
         // el proceso no termino. No dice nada del contenido, asi que no se
-        // persiste como negativa: se marca en la sesion y se deja para otro rato
-        this.markFailure(state.conversationId, pass.target.provider, pass.options);
+        // persiste como negativa ni bloquea la conversacion: el CLI espera y la
+        // conversacion pasa al final de la cola (`INV-FONDO-001`)
+        this.markProcessFailure(state.conversationId, pass, failureReason);
         pass.result.failed.push({
           conversationId: state.conversationId,
           reason: redact(error instanceof Error ? error.message : String(error)),
@@ -971,6 +1102,12 @@ export class RecapSync {
         state.delta.failed += 1;
         return;
       }
+      // contesto, con lo que sea: el proceso funciona y la espera se acaba.
+      // Tambien en el vistazo: que el CLI conteste no es rastro de nada, es un
+      // hecho, y quitar la espera de un CLI que funciona no cambia lo que hara
+      // la pasada de verdad salvo para bien
+      this.cooldown.noteSuccess(pass.target, processSubject('recap', state.conversationId));
+      this.processFailed.delete(state.conversationId);
 
       // PRIMERO se intenta leer el bloque. Si trae una ficha que vale, el modelo
       // no se nego: lo diga como lo diga. Clasificar antes tiraba fichas buenas,

@@ -35,3 +35,88 @@ export function backgroundAuxiliary(preference: AuxiliaryChoice | null): Auxilia
 export function auxiliaryName(target: { provider: string; model: string | null }): string {
   return target.model ?? (target.provider === 'codex' ? 'Codex' : 'Claude');
 }
+
+/**
+ * el ultimo fallo del PROCESO de un CLI del trabajo de fondo, tal y como llega
+ * con el estado de la boveda (`INV-FONDO-001`). Solo enums y horas.
+ */
+export interface AuxiliaryFailureNotice {
+  provider: 'claude' | 'codex';
+  reason: 'auth' | 'rate_limit' | 'api_error' | 'exit_code' | null;
+  /**
+   * con que modelo y esfuerzo fallo; `null` o ausente, los que trae el CLI. La
+   * espera es de ese lanzamiento (duodecima ronda)
+   */
+  model?: string | null;
+  effort?: string | null;
+  /** la espera es del CLI entero: una cuenta sin sesion */
+  wholeProvider?: boolean;
+}
+
+/**
+ * el CLI con lo que lo hace distinto de los demas lanzamientos, si lo hay.
+ *
+ * Una espera de un modelo solo frena lo que va con ese modelo: el aviso tiene
+ * que decir cual, o Daniel culparia al CLI entero.
+ */
+function launchLabel(failure: AuxiliaryFailureNotice, label: string): string {
+  if (failure.wholeProvider === true) return label;
+  const model = failure.model ?? null;
+  const effort = failure.effort ?? null;
+  const detalle = [
+    ...(model !== null && model.length > 0 ? [`modelo ${model}`] : []),
+    ...(effort !== null ? [`esfuerzo ${effort}`] : []),
+  ];
+  return detalle.length === 0 ? label : `${label} (${detalle.join(', ')})`;
+}
+
+/** el CLI con su nombre de programa, que es lo que Daniel escribe en la consola */
+const CLI_PROGRAM: Record<
+  AuxiliaryFailureNotice['provider'],
+  { label: string; login: string; run: string }
+> = {
+  claude: { label: 'Claude Code', login: 'claude auth login', run: 'claude' },
+  codex: { label: 'Codex', login: 'codex login', run: 'codex' },
+};
+
+/**
+ * que decirle a Daniel cuando el CLI del trabajo de fondo no puede contestar.
+ *
+ * Existe porque durante una semana Claude Code estuvo sin sesion y la pantalla
+ * no dijo nada: los trabajos de fondo contaban negativas que no existian. El
+ * texto dice QUE HACER y no culpa al contenido. No cambia de CLI por su cuenta
+ * (no hay sustituciones silenciosas): como mucho recuerda que el otro esta
+ * arriba, en el mismo desplegable. Decide por el enum del agente, nunca por un
+ * mensaje: el mensaje es prosa y puede cambiar.
+ */
+export function describeAuxiliaryFailure(failure: AuxiliaryFailureNotice): {
+  tone: 'warn' | 'idle';
+  text: string;
+} {
+  const cli = CLI_PROGRAM[failure.provider];
+  const otro = failure.provider === 'claude' ? 'Codex' : 'Claude';
+  const solo = 'No hace falta reiniciar Luxy: se vuelve a intentar solo pasados unos minutos';
+  const lanzado = launchLabel(failure, cli.label);
+  // con un modelo o un esfuerzo concretos, lo demas del trabajo de fondo sigue:
+  // se dice, para que no parezca que esta todo parado
+  const soloEse = lanzado === cli.label ? '' : ' Solo espera lo que va con eso; lo demás sigue.';
+  switch (failure.reason) {
+    case 'auth':
+      return {
+        tone: 'warn',
+        text: `${cli.label} no tiene la sesión iniciada en este equipo, así que el trabajo de fondo con él está parado. Abre una consola y ejecuta: ${cli.login}. ${solo}, o al momento si pulsas «Buscar lo pendiente en lo ya hablado». Si lo prefieres, mientras tanto puedes elegir ${otro} aquí arriba.`,
+      };
+    case 'rate_limit':
+      return {
+        tone: 'idle',
+        text: `${lanzado} ha llegado a su límite de uso, así que el trabajo de fondo con él espera.${soloEse} ${solo}; no tienes que hacer nada. Si lo prefieres, mientras tanto puedes elegir ${otro} aquí arriba.`,
+      };
+    case 'api_error':
+    case 'exit_code':
+    case null:
+      return {
+        tone: 'warn',
+        text: `El último intento del trabajo de fondo con ${lanzado} no llegó a terminar.${soloEse} ${solo}. Si se repite, abre una consola y ejecuta ${cli.run} para ver qué le pasa.`,
+      };
+  }
+}

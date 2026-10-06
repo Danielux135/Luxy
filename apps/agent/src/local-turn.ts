@@ -20,6 +20,7 @@ import type {
   ClaimedJob,
   ConversationMemory,
   ConversationMemoryStatus,
+  ProviderFailureReason,
   ProviderId,
   ProviderImage,
   ReasoningEffort,
@@ -104,6 +105,15 @@ export interface LocalTurnResult {
    */
   memory?: ConversationMemory | null;
   memoryStatus?: ConversationMemoryStatus | null;
+  /**
+   * por que fallo el CLI, si lo dijo de forma estructurada; null si no se sabe
+   * o si el turno no fallo.
+   *
+   * Es lo que permite a Studio separar «Claude Code no tiene sesion» de una
+   * negativa sin leer `error`. Ese caso llegaba antes como `completed` con el
+   * mensaje de error del CLI en `text`.
+   */
+  failureReason?: ProviderFailureReason | null;
 }
 
 export interface LocalTurnDeps {
@@ -227,6 +237,10 @@ export async function runLocalTurn(
     tokensIn: result.inputTokens,
     tokensOut: result.outputTokens,
     model: result.executedModel,
+    // un enum cerrado, nunca el mensaje: el `error` es prosa y el texto que
+    // dio el CLI no se guarda en ningun sitio. Sin esto, un turno que fallo
+    // por falta de sesion era indistinguible en el registro de cualquier otro
+    motivoFallo: result.failureReason ?? null,
   });
 
   return result;
@@ -289,5 +303,6 @@ function toLocalResult(outcome: JobOutcome): LocalTurnResult {
     durationMs: outcome.durationMs,
     inputTokens: null,
     outputTokens: null,
+    failureReason: outcome.failureReason ?? null,
   };
 }

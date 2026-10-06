@@ -23,6 +23,7 @@ import {
   effectiveThrough,
   type RelationSyncDeps,
 } from './relation-sync.js';
+import { RELATION_REFUSAL_VERSION } from './relation-refusal.js';
 
 const CONV = 'aaaaaaaa-1111-4111-8111-111111111111';
 const NORA = 'nora-inventada';
@@ -191,7 +192,8 @@ describe('la carrera con una extraccion en curso', () => {
     });
     expect(resultado.refused).toBe(1);
     expect(montaje.relations.state.cursors[0]!.owner).toBe(NORA);
-    expect(montaje.relations.state.cursors[0]!.refusedVersion).toBe(RELATION_EXTRACTOR_VERSION);
+    // la version de las negativas, no la del extractor (`INV-FONDO-001`)
+    expect(montaje.relations.state.cursors[0]!.refusedVersion).toBe(RELATION_REFUSAL_VERSION);
   });
 });
 

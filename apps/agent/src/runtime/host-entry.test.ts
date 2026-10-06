@@ -7,9 +7,13 @@ import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vites
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { hostResponseSchema } from '@luxy/shared';
 
 /** peticiones que recibio el host simulado, en orden */
 const recibidos: Array<Record<string, unknown>> = [];
+
+/** si una prueba lo pone, el host simulado devuelve ESTO en vez del turno completado */
+let siguienteResultado: Record<string, unknown> | null = null;
 
 vi.mock('./host.js', () => ({
   AgentHost: class {
@@ -21,6 +25,7 @@ vi.mock('./host.js', () => ({
     }
     async runLocalTurn(input: Record<string, unknown>): Promise<Record<string, unknown>> {
       recibidos.push(input);
+      if (siguienteResultado !== null) return siguienteResultado;
       return {
         outcome: 'completed',
         text: 'respuesta',
@@ -112,6 +117,7 @@ describe('host-entry: el turno privado llega entero', () => {
 
   beforeEach(() => {
     recibidos.length = 0;
+    siguienteResultado = null;
   });
 
   it('reenvia kind, que antes se perdia y convertia un turno tecnico en roleplay', async () => {
@@ -166,6 +172,43 @@ describe('host-entry: el turno privado llega entero', () => {
     expect((respuesta?.['memory'] as { summary?: string } | undefined)?.summary).toBe(
       'lo que va pasando',
     );
+  });
+
+  it('el motivo de un fallo del CLI llega al proceso principal y el protocolo lo conserva', async () => {
+    // sin este campo, el proceso principal solo tenia `error`, que es prosa,
+    // para saber si a Claude Code le faltaba la sesion o si se habia negado
+    siguienteResultado = {
+      outcome: 'failed',
+      text: '',
+      error: 'Claude Code no tiene la sesion iniciada en este equipo.',
+      executedModel: 'opus',
+      durationMs: 1,
+      inputTokens: null,
+      outputTokens: null,
+      modelCalls: null,
+      responseOutcome: 'failed',
+      failureReason: 'auth',
+    };
+    const port = await arrancar();
+
+    port.deliver(peticion({}));
+    await vi.waitFor(() => expect(port.sent.some((m) => m['type'] === 'local_turn')).toBe(true));
+
+    const respuesta = port.sent.find((m) => m['type'] === 'local_turn');
+    expect(respuesta?.['failureReason']).toBe('auth');
+    // zod quita lo que no conoce: si el esquema no lo declarase, Studio no lo veria
+    const parsed = hostResponseSchema.parse(respuesta);
+    expect(parsed.type === 'local_turn' && parsed.failureReason).toBe('auth');
+  });
+
+  it('un turno sin fallo manda el motivo como null', async () => {
+    const port = await arrancar();
+
+    port.deliver(peticion({}));
+    await vi.waitFor(() => expect(port.sent.some((m) => m['type'] === 'local_turn')).toBe(true));
+
+    const respuesta = port.sent.find((m) => m['type'] === 'local_turn');
+    expect(respuesta?.['failureReason']).toBeNull();
   });
 
   it('descarta un mensaje que no cumple el protocolo', async () => {

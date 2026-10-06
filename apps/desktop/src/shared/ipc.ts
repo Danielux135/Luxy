@@ -17,6 +17,7 @@ import {
   MEMORY_RELINK_FAILURES,
   MEMORY_RELINK_OUTCOMES,
   MEMORY_RELINK_PHASES,
+  PROVIDER_FAILURE_REASONS,
   REASONING_EFFORTS,
   RECAP_REFUSAL_KINDS,
   RECAP_SOURCES,
@@ -236,6 +237,32 @@ export const vaultAccountStatusSchema = z.object({
  */
 export const vaultPresenceResultSchema = z.object({ counted: z.boolean() });
 
+/**
+ * el ultimo fallo del PROCESO de un CLI del trabajo de fondo, sin superar
+ * (`INV-FONDO-001`).
+ *
+ * Solo enums y horas: el proveedor, el motivo estructurado del agente y desde
+ * cuando se vuelve a intentar solo. Nunca el mensaje del CLI. Es lo que deja a
+ * la pantalla decir «Claude Code no tiene la sesion iniciada; ejecuta claude
+ * auth login» sin parsear ningun texto.
+ */
+export const vaultAuxiliaryFailureSchema = z.object({
+  provider: z.enum(LOCAL_CLI_PROVIDERS),
+  /**
+   * con que modelo y esfuerzo fallo: la espera es de ESE lanzamiento, no del CLI
+   * entero, y el aviso tiene que nombrar el que falla (duodecima ronda). `null`,
+   * el que trae el CLI
+   */
+  model: z.string().max(128).nullable(),
+  effort: z.enum(REASONING_EFFORTS).nullable(),
+  /** la espera es del CLI entero, con cualquier modelo: una cuenta sin sesion */
+  wholeProvider: z.boolean(),
+  /** `null`: fallo sin motivo estructurado (el agente parado, un tiempo agotado) */
+  reason: z.enum(PROVIDER_FAILURE_REASONS).nullable(),
+  at: z.string(),
+  retryAt: z.string(),
+});
+
 export const vaultStatusSchema = z.object({
   configured: z.boolean(),
   unlocked: z.boolean(),
@@ -267,6 +294,12 @@ export const vaultStatusSchema = z.object({
    * contrario de lo que se espera.
    */
   hordeAnonymous: z.boolean(),
+  /**
+   * los CLI del trabajo de fondo cuyo ultimo proceso fallo y aun no ha vuelto a
+   * contestar. Se van solos en cuanto uno contesta. Opcional: los handlers que
+   * devuelven el estado sin pasar por el de siempre no lo traen
+   */
+  auxiliaryFailures: z.array(vaultAuxiliaryFailureSchema).optional(),
 });
 
 /**
@@ -792,6 +825,13 @@ export const vaultCatalogSyncArgsSchema = z.object({
   conversationId: conversationIdSchema.optional(),
   /** tope de conversaciones por tanda: cada una es una llamada de verdad */
   limit: z.number().int().min(1).max(10).default(3),
+  /**
+   * la pide un boton: puede lanzar el CLI UNA vez aunque este en espera tras un
+   * fallo de su proceso (`INV-FONDO-001`). La apertura del panel no la manda, y
+   * los botones solo en su primera llamada: si no, un CLI roto se arrancaria
+   * una vez por conversacion fallida
+   */
+  retryNow: z.boolean().default(false),
 });
 
 /**
@@ -835,6 +875,11 @@ export const vaultRelationSyncResultSchema = z.object({
   failed: z.array(z.object({ conversationId: z.string(), reason: z.string() })),
   /** cuantas siguen por revisar AL TERMINAR esta tanda, recalculado */
   pending: z.number().int().min(0),
+  /**
+   * de la tanda, las que no se mandaron porque el CLI espera tras un fallo de su
+   * proceso. Siguen en `pending`. Opcional: una tanda anterior no la trae
+   */
+  waiting: z.number().int().min(0).optional(),
 });
 
 /**
@@ -930,6 +975,12 @@ export const vaultRecapSyncArgsSchema = z.object({
    * boveda: viaja al renderer como cualquier turno, y a ningun registro.
    */
   dryRun: z.boolean().default(false),
+  /**
+   * la pide un boton en esta vuelta: puede lanzar el CLI UNA vez aunque este en
+   * espera tras un fallo de su proceso (`INV-FONDO-001`). Solo en la primera de
+   * las doce vueltas del panel, como `force`
+   */
+  retryNow: z.boolean().default(false),
 });
 
 /**
@@ -977,6 +1028,11 @@ export const vaultRecapSyncResultSchema = z.object({
   /** ventanas cuyo bloque no se pudo leer: ausente, cortado o mal formado */
   invalid: z.number().int().min(0),
   failed: z.array(z.object({ conversationId: z.string(), reason: z.string() })),
+  /**
+   * de la tanda, las que no se mandaron porque el CLI espera tras un fallo de su
+   * proceso (`INV-FONDO-001`). Opcional: una tanda anterior no la trae
+   */
+  waiting: z.number().int().min(0).optional(),
   /** conversaciones que ya tenian memoria propia: la sellada gana siempre */
   superseded: z.number().int().min(0),
   gaps: z.number().int().min(0),
@@ -1152,11 +1208,18 @@ export const vaultRecapRowSchema = z.object({
        */
       hasMemory: z.boolean(),
       /**
-       * el ultimo intento no llego a terminar con el CLI que toca, y con ese no
-       * se vuelve a intentar sola hasta reiniciar: la pantalla no puede decir
-       * «en segundo plano» (septima ronda)
+       * el CLI que toca esta en espera tras un fallo de su proceso: se retoma
+       * solo pasada la espera, y la pantalla no puede prometer «despues de tu
+       * proximo mensaje» a secas (septima ronda, `INV-FONDO-001`)
        */
       stalled: z.boolean(),
+      /**
+       * su proceso falla por su cuenta con el CLI que toca: es de ella, y no se
+       * reintenta sola en un par de horas (undecima y decimotercera ronda; el
+       * nombre es de cuando era hasta reiniciar). Opcional: una vista anterior
+       * no lo trae
+       */
+      blockedThisSession: z.boolean().optional(),
     })
     .nullable()
     .optional(),
@@ -1276,14 +1339,40 @@ export const vaultAuxiliarySetArgsSchema = z.object({
 export const vaultCatalogSyncResultSchema = z.object({
   cataloged: z.number().int().min(0),
   scenes: z.number().int().min(0),
-  /** las que se intentaron y no salieron, con el motivo */
-  failed: z.array(z.object({ conversationId: z.string(), reason: z.string() })),
+  /**
+   * las que se intentaron y no salieron, con el motivo.
+   *
+   * `process` dice que lo que fallo fue el PROCESO del CLI, no la respuesta:
+   * esas no se quedan fuera hasta reiniciar, se reintentan solas pasada la
+   * espera (`INV-FONDO-001`), y su motivo es el mensaje de Luxy, nunca lo que
+   * escribio el CLI.
+   *
+   * `blocked` dice que su proceso falla por su cuenta: la espera la da por suya
+   * y la pasada sola la salta un par de horas, despues de las cuales se prueba
+   * una vez (decimotercera ronda). No lleva `process`: no se reintenta en
+   * minutos, y la pantalla no lo promete. Sin ninguno de los dos, fallo por la
+   * respuesta y no se reintenta sola en la sesion
+   */
+  failed: z.array(
+    z.object({
+      conversationId: z.string(),
+      reason: z.string(),
+      process: z.boolean().optional(),
+      blocked: z.boolean().optional(),
+    }),
+  ),
+  /**
+   * de la tanda, las que no se mandaron porque el CLI espera tras un fallo de su
+   * proceso. Siguen en `pending`. Opcional por compatibilidad
+   */
+  waiting: z.number().int().min(0).optional(),
   /**
    * cuantas quedan por catalogar despues de esta tanda.
    *
    * Se devuelve porque sin esto la pantalla no puede distinguir «esta acabando
    * una cola» de «esta repitiendo lo mismo cada vez», que es exactamente la
-   * confusion que produjo no enseñarlo.
+   * confusion que produjo no enseñarlo. Es la cola entera aunque se pida una
+   * sola conversacion: lo que falta por ordenar, no lo que falta de lo pedido
    */
   pending: z.number().int().min(0),
   /**
@@ -1296,6 +1385,24 @@ export const vaultCatalogSyncResultSchema = z.object({
    * con otro modelo.
    */
   uneven: z.array(z.object({ conversationId: z.string(), scenes: z.number().int() })),
+  /**
+   * cuales se ordenaron en esta tanda. La pantalla junta las vueltas de una
+   * pasada, y sin esto no podia quitar de su aviso una conversacion que una
+   * vuelta anterior dio por fallida y esta ha ordenado. Opcional por
+   * compatibilidad (undecima ronda)
+   */
+  catalogedIds: z.array(z.string()).optional(),
+  /**
+   * el CLI que lo hizo. La pantalla mira SU espera para retomar sola una pasada
+   * que se quedo esperando a que el CLI volviera (undecima ronda). Opcional
+   */
+  provider: z.enum(LOCAL_CLI_PROVIDERS).nullable().optional(),
+  /**
+   * y con que modelo y esfuerzo: la espera va por lanzamiento, y la de otro
+   * modelo del mismo CLI no dice nada de esta pasada (duodecima ronda). Opcional
+   */
+  model: z.string().max(128).nullable().optional(),
+  effort: z.enum(REASONING_EFFORTS).nullable().optional(),
 });
 
 export const vaultMediaAttachArgsSchema = z.object({
@@ -1500,6 +1607,17 @@ export const vaultRelationDiagnosticsSchema = z.object({
     outdatedVersion: diagnosticCount,
     excludedSkipped: diagnosticCount,
     refusedPersisted: diagnosticCount,
+    /**
+     * negativas de antes de `INV-FONDO-001`, que eran fallos del proceso y ya
+     * no frenan nada. Opcional: un diagnostico anterior no la trae
+     */
+    refusedLegacy: diagnosticCount.optional(),
+    /**
+     * de las que van por detras, las que esperan a que el CLI vuelva tras un
+     * fallo de su proceso: lo que distingue «esperando» de «al dia» y de una
+     * negativa. Opcional por lo mismo
+     */
+    waitingForProcess: diagnosticCount.optional(),
     failedThisSession: diagnosticCount,
     auxiliaryConfigured: z.boolean(),
   }),
