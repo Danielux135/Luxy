@@ -185,6 +185,29 @@ del árbol final, porque la construyó el check); y después mirar en
 Después, `INV-APUNTA-001`: por qué del 16/09 al 25/09 el extractor revisó 83
 conversaciones sin apuntar nada.
 
+**Comprobado en uso real, 06/10, 15:00-15:16Z** (`2a87775`, build
+`5fab6b77b9f9`). Luxy se reinició, Daniel abrió la bóveda y mandó un mensaje a
+Lía:
+
+- No hubo aviso de sesión al arrancar.
+- Las 9 llamadas a Claude Code salieron `completed`, con `motivoFallo:null`.
+- «escenas catalogadas»: 3 conversaciones y 12 escenas, sin fallidas.
+- «pendientes extraidos», en cinco pasadas: 5 apuntadas y 1 cerrada, sin
+  negativas ni fallidas. Quedó 1 conversación por leer, que leyeron las
+  pasadas siguientes.
+- «memoria reescrita con su ficha»: primero `recuperadas`, con una fila (la
+  migración), y después `ready`, con 8 entradas conservadas y nada corregido,
+  quitado ni aportado. El resumen sigue en 142.
+- Las derivaciones ya se registran por evento: el turno cerró con 10.721
+  acumuladas.
+
+Así que **el extractor sí apunta**. `INV-APUNTA-001` baja de prioridad: se
+mira sólo si con los días sigue sin recoger promesas.
+
+Lo único lento fue el mensaje de Daniel: 6,4 minutos con DeepSeek-V4.1-Flash
+por la pasarela. El primer intento dio `stream_error` a los 80 s, sin texto,
+y el segundo tardó 303 s (106 s hasta las cabeceras). No es de Luxy.
+
 ## REV-CUATRO-FRENTES-001 — novena y décima ronda: lo que encontraron las revisiones de la octava y de la novena (2026-09-29)
 
 Estado: **corregido el 29/09 en dos rondas, sin commitear. Las dos tuvieron

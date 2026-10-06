@@ -41,10 +41,14 @@
   escena, sin bloque de foto ni de memoria. Con V4-Flash la foto sale.
 - Resultado: `npm run check` a solas en verde (`TEST-RESULTS.md`). **No visto
   en Electron.**
-- Siguiente paso: commit, reiniciar Luxy cuando Daniel diga y mirar en el
-  registro que pendientes, catálogo y reescritura vuelven a hacer trabajo:
-  `conversaciones` mayor que 0, sin negativas, y `resultado` distinto de
-  `invalid`.
+- Commit: `2a87775`, autor Daniel, sin firmas.
+- Comprobado en uso real el 06/10 entre las 15:00 y las 15:16Z, con Luxy
+  reiniciada y un mensaje a Lía: 9 llamadas a Claude Code `completed`; 3
+  conversaciones y 12 escenas catalogadas sin fallos; 5 pendientes apuntados y
+  1 cerrado, sin negativas; la fila falsa recuperada y la memoria del enganche
+  reescrita (`ready`, nada que cambiar). Detalle en `CURRENT-TASK.md`.
+- Siguiente paso: lo que elija Daniel. `INV-APUNTA-001` baja de prioridad
+  porque el extractor sí apunta.
 
 ### 2026-09-29 — Claude — `REV-CUATRO-FRENTES-001`: la documentación de la novena y la décima ronda, escrita una sola vez
 
