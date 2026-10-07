@@ -1,6 +1,7 @@
 // entorno del worker y su validacion
 import { z } from 'zod';
-import { secretRegistry } from '@luxy/shared';
+import { VAULT_MAX_OBJECT_BYTES, secretRegistry } from '@luxy/shared';
+import { VAULT_STORAGE_DEFAULT_OBJECT_MAX_BYTES } from './object-store.js';
 
 export interface Env {
   // secretos (wrangler secret put)
@@ -17,6 +18,8 @@ export interface Env {
   JOB_LEASE_SECONDS?: string;
   RATE_LIMIT_PER_MINUTE?: string;
   LOG_LEVEL?: string;
+  /** tope en bytes de un archivo cifrado de la boveda en Supabase Storage */
+  VAULT_OBJECT_MAX_BYTES?: string;
 }
 
 // un entero recibido como cadena desde las vars del worker
@@ -42,6 +45,12 @@ export const envSchema = z.object({
   JOB_LEASE_SECONDS: numericString(120),
   RATE_LIMIT_PER_MINUTE: numericString(30),
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).optional().default('info'),
+  // el tope real del almacen, que capabilities anuncia y la subida hace
+  // cumplir. Nunca por encima de 90 MiB: eso ya no cabe en el cuerpo de una
+  // peticion a un Worker, lo diga quien lo diga (GW-R2-01)
+  VAULT_OBJECT_MAX_BYTES: numericString(VAULT_STORAGE_DEFAULT_OBJECT_MAX_BYTES).transform((value) =>
+    Math.min(value, VAULT_MAX_OBJECT_BYTES),
+  ),
 });
 
 export type ValidatedEnv = z.infer<typeof envSchema>;

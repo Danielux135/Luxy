@@ -48,7 +48,22 @@ import {
   type AutoLockMinutes,
   type VaultKeyFile,
 } from './key-file.js';
+import { existsSync, readdirSync, renameSync } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
 import type { VaultLockReason, VaultUnlockVia } from '../../shared/vault-lock.js';
+import { LOCAL_VAULT_CONFLICT } from '../../shared/vault-local-conflict.js';
+import { SyncAnchorStore, syncAnchorFilePath } from './sync-anchor-store.js';
+
+export { LOCAL_VAULT_CONFLICT };
+
+/** hay algun archivo dentro, a cualquier profundidad */
+function holdsAnyFile(directory: string): boolean {
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    if (entry.isFile()) return true;
+    if (entry.isDirectory() && holdsAnyFile(join(directory, entry.name))) return true;
+  }
+  return false;
+}
 
 /**
  * tope de una espera del usuario, medido con el reloj de pared.
@@ -327,6 +342,11 @@ export class VaultService {
     /** al registrarse, y al entrar con ella: envoltura local de recuperacion */
     recoveryKey?: string;
     account: { email: string; vaultId: string };
+    /**
+     * se entra en una cuenta que YA existia (no se crea). Con la carpeta de la
+     * boveda vacia, este equipo es una replica desde ya (`SYNC-F1-07`)
+     */
+    joiningExistingAccount?: boolean;
   }): Promise<void> {
     if (input.masterKey.length !== KEY_BYTES) {
       throw new VaultError('la llave de la cuenta no es valida');
@@ -341,10 +361,22 @@ export class VaultService {
         );
       }
     }
+    // una boveda local SIN cuenta y con contenido no se pisa (`SYNC-F1-07`).
+    // Hasta aqui se sustituia su vault.json por el de la cuenta: si la llave era
+    // otra, todo lo que habia en la carpeta quedaba cifrado con una llave que ya
+    // no estaba en ningun sitio. Solo se adopta si es la MISMA llave, y eso solo
+    // se sabe con la boveda abierta
+    if (existing !== null && existing.account === undefined && this.localContentExists()) {
+      const sameKey =
+        this.masterKey !== null && deriveVaultId(this.masterKey) === deriveVaultId(input.masterKey);
+      if (!sameKey) throw new VaultError(LOCAL_VAULT_CONFLICT.message, LOCAL_VAULT_CONFLICT.hint);
+    }
 
     if (input.password === undefined && input.recoveryKey === undefined) {
       throw new VaultError('no hay con que guardar la boveda en este equipo');
     }
+    // se mira ANTES de escribir nada: despues la carpeta ya no estaria vacia
+    const joinsAsReplica = input.joiningExistingAccount === true && !this.localContentExists();
 
     const wraps: unknown[] = [];
     if (input.password !== undefined) {
@@ -377,7 +409,23 @@ export class VaultService {
         contents = upsertWrap(contents, password);
       }
     }
-    writeVaultKeyFile(this.file, contents);
+    // un equipo que entra en una cuenta con la carpeta vacia es una replica: no
+    // escribe turnos hasta tener las fichas y lo demas (F2), porque sin ellas
+    // sellaria una memoria pobre que ganaria para siempre. Se apunta ANTES de
+    // vault.json y fuera del estado sellado, para que no haya ningun momento en
+    // que este equipo pueda escribir: ni antes de su primera pasada, ni despues
+    // de perder ese estado (F1-R1-01). Si no se puede apuntar, no se entra
+    const anchor = new SyncAnchorStore(syncAnchorFilePath(dirname(this.file)));
+    if (joinsAsReplica) anchor.record('replica', 'account-login');
+    try {
+      writeVaultKeyFile(this.file, contents);
+    } catch (error) {
+      // sin vault.json no se ha entrado: el ancla recien apuntada se quita, o
+      // una boveda local creada despues en esta carpeta naceria sin poder
+      // escribir. La carpeta estaba vacia, asi que queda como estaba
+      if (joinsAsReplica) anchor.remove();
+      throw error;
+    }
     this.adopt(input.masterKey, 'account');
   }
 
@@ -507,6 +555,70 @@ export class VaultService {
   bindAccount(account: { email: string; vaultId: string }): void {
     const contents = this.requireContents();
     writeVaultKeyFile(this.file, { ...contents, account });
+  }
+
+  /** la carpeta de la boveda, al lado de vault.json */
+  private vaultDirectory(): string {
+    return join(dirname(this.file), 'vault');
+  }
+
+  /** la carpeta de la boveda tiene algun archivo: conversaciones, medios, fichas... */
+  private localContentExists(): boolean {
+    const directory = this.vaultDirectory();
+    return existsSync(directory) && holdsAnyFile(directory);
+  }
+
+  /**
+   * hay una boveda local sin cuenta y con contenido: entrar o crear una cuenta
+   * aqui la pisaria. Se lee sin la llave.
+   */
+  hasUnlinkedLocalContent(): boolean {
+    const existing = this.safeContents();
+    return existing !== null && existing.account === undefined && this.localContentExists();
+  }
+
+  /**
+   * aparta la boveda local sin cuenta: la RENOMBRA, nunca la borra.
+   *
+   * Es la salida que ofrece la negativa de `adoptAccountKey`. Primero se cierra
+   * —lo que hubiera descifrado en memoria se va con el cierre—, despues se
+   * renombra vault.json y por ultimo la carpeta. Si la carpeta no se puede
+   * mover (un archivo abierto), vault.json vuelve a su sitio: una carpeta
+   * apartada sin su llave al lado seria ilegible.
+   *
+   * Devuelve los nombres con que quedaron, sin la ruta.
+   */
+  setAsideLocalVault(now: Date = new Date()): { vaultFile: string; vaultDirectory: string | null } {
+    const existing = this.safeContents();
+    if (!existsSync(this.file)) throw new VaultError('no hay ninguna boveda local que apartar');
+    if (existing?.account !== undefined) {
+      throw new VaultError(
+        'esta boveda ya pertenece a una cuenta',
+        'no hace falta apartarla: entra en tu cuenta',
+      );
+    }
+    if (this.isUnlocked()) this.lock('manual');
+
+    const stamp = now.toISOString().replace(/[:.]/g, '-');
+    const fileAside = `${this.file}.apartada-${stamp}`;
+    const directory = this.vaultDirectory();
+    const directoryAside = `${directory}-apartada-${stamp}`;
+    if (existsSync(fileAside) || existsSync(directoryAside)) {
+      throw new VaultError('ya hay una boveda apartada con esa fecha', 'espera un segundo y vuelve a intentarlo');
+    }
+
+    renameSync(this.file, fileAside);
+    if (!existsSync(directory)) return { vaultFile: basename(fileAside), vaultDirectory: null };
+    try {
+      renameSync(directory, directoryAside);
+    } catch {
+      renameSync(fileAside, this.file);
+      throw new VaultError(
+        'no se ha podido apartar la carpeta de la boveda',
+        'no se ha tocado nada. Cierra Luxy del todo y vuelve a intentarlo',
+      );
+    }
+    return { vaultFile: basename(fileAside), vaultDirectory: basename(directoryAside) };
   }
 
   /** lee el archivo tratando uno dañado como inexistente */

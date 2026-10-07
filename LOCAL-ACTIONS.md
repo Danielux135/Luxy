@@ -8,6 +8,50 @@
 > esos cinco es ambigua** y hay que leer las dos. Renumerarlos tocaría citas en
 > varios documentos y no se ha hecho hoy. Los números nuevos se toman de LA-049.
 
+## LA-062 — confirmar que la contraseña de la bóveda y la clave de recuperación están apuntadas fuera del ordenador
+
+Estado: **`pending` — abierta el 2026-10-07. Va antes de estrenar el segundo
+ordenador (`SEG-SYNC-001`, F2).** Daniel: «juraría que tengo la clave de la
+bóveda apuntada por ahí, pero no estoy 100% seguro».
+
+El otro ordenador sólo abre la bóveda con la contraseña o con la clave de
+recuperación que Luxy enseñó una única vez al vincular la bóveda con la
+cuenta, el 02/09. El servidor tampoco puede abrirla, y eso es a propósito
+(`D-049`). Si se olvida la contraseña y no está la clave, la bóveda no se
+puede abrir en ningún sitio, ni con la copia del servidor ni con la de
+`LA-049`.
+
+1. Busca dónde las apuntaste y comprueba que la contraseña es la que usas hoy
+   para abrir Privado.
+2. Si la clave de recuperación no aparece, díselo a Claude: hoy Luxy no puede
+   generar una nueva, y habría que añadirlo antes del segundo ordenador.
+
+## LA-061 — iniciar sesión en Wrangler para que Claude pueda desplegar el gateway
+
+Estado: **`done` — 2026-10-06.** Daniel inició sesión, y Claude lo comprobó
+con `wrangler whoami`: «You are logged in with an OAuth Token». Daniel autorizó
+a Claude a desplegar el gateway y a migrar para `SEG-SYNC-001`. Pero `wrangler whoami` da
+«Not logged in. Your auth token has expired and could not be refreshed», y
+Claude no puede autenticarse por Daniel.
+
+1. En PowerShell, desde la raíz del repositorio (`npx` no funciona con la
+   política de ejecución de este equipo; el atajo `.cmd` sí):
+
+   ```
+   node_modules\.bin\wrangler.cmd login
+   ```
+
+   Se abre el navegador de Cloudflare. Autoriza, y **no cierres la ventana de
+   PowerShell** hasta que diga que ha terminado: recibe la vuelta del
+   navegador en `localhost`.
+2. Comprobarlo:
+
+   ```
+   node_modules\.bin\wrangler.cmd whoami
+   ```
+
+   Tiene que salir tu cuenta, no «Not logged in».
+
 ## LA-059 — volver a iniciar sesión en el Claude Code de la consola
 
 Estado: **`done` — 2026-10-06 08:30 (hora local).** Daniel inició sesión y
@@ -94,7 +138,10 @@ contenido. Un agente no los borra por regla: borrar es cosa de Daniel.
 
 ## LA-049 — copia de seguridad de la bóveda, a mano
 
-Estado: **`pending` — abierta el 2026-09-25. Es la más urgente de la lista.**
+Estado: **`done` — 2026-10-07, hecha por Daniel** con Luxy cerrada. Claude no
+ha visto la copia. En ese momento la carpeta `vault` tenía 126 archivos y
+unos 10 MB. Abierta el 2026-09-25. Hay que repetirla antes de cada cambio
+grande (el primer despliegue de F2 y el segundo ordenador).
 
 La bóveda —Lía, las 22 conversaciones, las 70 imágenes y sus fichas de memoria—
 existe sólo en el disco de este ordenador, y la sincronización no serviría de copia

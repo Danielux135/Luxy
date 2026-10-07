@@ -2324,17 +2324,181 @@ export const vaultCharacterAvatarResultSchema = z.object({
   dataUrl: z.string().nullable(),
 });
 
-export const vaultSyncResultSchema = z.object({
+/**
+ * que sincronizar (`SYNC-F1-07`): todo, o solo una conversacion. La segunda es
+ * la de la primera prueba en vivo: se ensaya con una conversacion desechable
+ * antes de tocar las de verdad.
+ */
+export const vaultSyncScopeSchema = z.union([
+  z.object({ mode: z.literal('all') }).strict(),
+  z.object({ mode: z.literal('conversation'), conversationId: z.string().uuid() }).strict(),
+]);
+export type VaultSyncScope = z.infer<typeof vaultSyncScopeSchema>;
+
+/** sin argumentos —el boton de siempre— es «todo» */
+export const vaultSyncArgsSchema = z.preprocess(
+  (value) =>
+    value === undefined ||
+    value === null ||
+    (typeof value === 'object' && Object.keys(value).length === 0)
+      ? { mode: 'all' }
+      : value,
+  vaultSyncScopeSchema,
+);
+
+/**
+ * como acabo cada conversacion en una pasada.
+ *
+ * - `ok`: lo de aqui y lo del servidor coinciden al acabar;
+ * - `frozen`: la misma secuencia tiene un registro distinto a cada lado. Esta
+ *   «en dos versiones»: ni sube ni baja, y no se borra nada de ningun lado;
+ * - `local-duplicates`: en este equipo hay secuencias repetidas con distinto
+ *   registro (el numerado viejo). No se sube hasta decidir cual vale;
+ * - `busy`: tenia un envio, un borrado, un cambio de dueño o «borrar su
+ *   memoria» en curso. Va en la siguiente;
+ * - `failed`: fallo algo de esta conversacion; las demas siguieron;
+ * - `interrupted`: la boveda se cerro mientras se hacia;
+ * - `not-reached`: la pasada se paro antes de llegar a ella.
+ */
+export const VAULT_SYNC_CONVERSATION_STATUSES = [
+  'ok',
+  'frozen',
+  'local-duplicates',
+  'busy',
+  'failed',
+  'interrupted',
+  'not-reached',
+] as const;
+export type VaultSyncConversationStatus = (typeof VAULT_SYNC_CONVERSATION_STATUSES)[number];
+
+export const vaultSyncConversationReportSchema = z.object({
+  conversationId: z.string().uuid(),
+  status: z.enum(VAULT_SYNC_CONVERSATION_STATUSES),
+  /** turnos en este equipo al acabar, sin copias ni lineas rotas */
+  local: z.number().int().min(0),
+  /** turnos que el servidor tiene confirmados al acabar; `null` si no se le pregunto */
+  server: z.number().int().min(0).nullable(),
   uploaded: z.number().int().min(0),
   downloaded: z.number().int().min(0),
-  conversations: z.number().int().min(0),
-  /** imagenes y videos, aparte: son otro tipo de trabajo y otro coste */
-  mediaUploaded: z.number().int().min(0),
-  mediaDownloaded: z.number().int().min(0),
-  /** demasiado grandes para una peticion; se quedan en su equipo */
-  mediaSkipped: z.number().int().min(0),
-  /** con un envio en curso: no se tocaron y van en la siguiente */
-  conversationsDeferred: z.number().int().min(0),
+  /** lineas de aqui que no se pueden usar: rotas, de otra conversacion o fuera de rango */
+  unreadable: z.number().int().min(0),
+  /** secuencias repetidas con distinto registro en este equipo */
+  duplicateSequences: z.number().int().min(0),
+  /** turnos que el servidor tuvo y ya no tiene; se vuelven a subir */
+  serverLost: z.number().int().min(0),
+  /** turnos que no pueden viajar: de mas de 4 MiB o con una forma que el contrato no admite */
+  notUploadable: z.number().int().min(0),
+  /** registros del servidor que esta boveda no puede abrir; la conversacion se detiene ahi */
+  unopenable: z.number().int().min(0),
+  /** que fallo, ya redactado; `null` si nada */
+  error: z.string().nullable(),
+});
+export type VaultSyncConversationReport = z.infer<typeof vaultSyncConversationReportSchema>;
+
+/**
+ * por que se paro la pasada antes de acabar.
+ *
+ * - `locked`: se cerro la boveda. No se da nada por bueno: sigue al reabrir;
+ * - `session`: la sesion de la cuenta ya no vale;
+ * - `gateway-outdated`: el servidor no conoce el protocolo v2 (404);
+ * - `gateway-protocol`: el servidor habla un protocolo que este Studio no sabe;
+ * - `unreachable`: no hay red o el servidor no responde;
+ * - `server-error`: el servidor respondio con un fallo donde la pasada no
+ *   puede seguir sin el (las capacidades o la lista de conversaciones);
+ * - `tombstones-unreadable`: la lista de borradas de este equipo no se lee, y
+ *   sin ella volverian conversaciones borradas;
+ * - `media-store-missing`: falta el almacen de medios en Supabase.
+ */
+export const VAULT_SYNC_STOP_REASONS = [
+  'locked',
+  'session',
+  'gateway-outdated',
+  'gateway-protocol',
+  'unreachable',
+  'server-error',
+  'tombstones-unreadable',
+  'media-store-missing',
+] as const;
+export type VaultSyncStopReason = (typeof VAULT_SYNC_STOP_REASONS)[number];
+
+export const vaultSyncMediaReportSchema = z.object({
+  /** se llego a sincronizar medios en esta pasada */
+  reached: z.boolean(),
+  uploaded: z.number().int().min(0),
+  downloaded: z.number().int().min(0),
+  /** ya estaban en el servidor: cuentan como copiados, no como subidos */
+  alreadyThere: z.number().int().min(0),
+  /** de mas de 90 MiB: se quedan en el equipo donde se crearon */
+  skipped: z.number().int().min(0),
+  /** su conversacion aun no esta en el servidor: van cuando suban sus turnos */
+  waiting: z.number().int().min(0),
+  failed: z.number().int().min(0),
+  /** del servidor y no se abren con esta boveda: no entran */
+  unopenable: z.number().int().min(0),
+  /** con una forma que el contrato no admite: no viajan */
+  notUploadable: z.number().int().min(0),
+  /** el primer fallo, ya redactado */
+  error: z.string().nullable(),
+});
+export type VaultSyncMediaReport = z.infer<typeof vaultSyncMediaReportSchema>;
+
+export const vaultSyncResultSchema = z.object({
+  protocol: z.literal(2),
+  scope: z.enum(['all', 'conversation']),
+  stopped: z.enum(VAULT_SYNC_STOP_REASONS).nullable(),
+  /** el detalle del motivo, ya redactado */
+  stoppedDetail: z.string().nullable(),
+  /**
+   * `replica`: este equipo se estreno con la boveda de la cuenta y sin nada
+   * propio. Hasta tener los hechos (F2) no escribe turnos
+   */
+  role: z.enum(['origin', 'replica']).nullable(),
+  conversations: z.array(vaultSyncConversationReportSchema),
+  /** borradas en este equipo cuya copia sigue en el servidor hasta F2 */
+  deletedStillOnServer: z.number().int().min(0),
+  uploaded: z.number().int().min(0),
+  downloaded: z.number().int().min(0),
+  media: vaultSyncMediaReportSchema,
+  /**
+   * cuando acabo la pasada. La pantalla dice «coincidia a las 10:42», no
+   * «coincide»: en F1 nada sincroniza solo, y lo que se escriba despues ya no
+   * esta en el servidor (STUDIO-R1-01, `D-093`)
+   */
+  finishedAt: z.string().datetime(),
+});
+export type VaultSyncResult = z.infer<typeof vaultSyncResultSchema>;
+
+/**
+ * el diagnostico local, sin descifrar nada: cifras por conversacion.
+ *
+ * Es lo primero de la prueba en vivo: antes de subir nada, cuantas
+ * conversaciones hay y cuales tienen secuencias repetidas.
+ */
+export const vaultSyncDiagnosisSchema = z.object({
+  conversations: z.array(
+    z.object({
+      conversationId: z.string().uuid(),
+      lines: z.number().int().min(0),
+      turns: z.number().int().min(0),
+      unreadable: z.number().int().min(0),
+      duplicateLines: z.number().int().min(0),
+      duplicateSequences: z.number().int().min(0),
+      holes: z.number().int().min(0),
+      partialTail: z.boolean(),
+    }),
+  ),
+  /** borradas en este equipo; `null` si su lista no se puede leer */
+  deleted: z.number().int().min(0).nullable(),
+});
+export type VaultSyncDiagnosis = z.infer<typeof vaultSyncDiagnosisSchema>;
+
+/**
+ * apartar la boveda local sin cuenta para poder entrar en una (`SYNC-F1-07`).
+ * Se renombra, nunca se borra: devuelve los nombres con que quedo.
+ */
+export const vaultLocalSetAsideResultSchema = z.object({
+  vaultFile: z.string(),
+  vaultDirectory: z.string().nullable(),
 });
 
 export const configSaveArgsSchema = z.object({
@@ -2812,7 +2976,12 @@ export interface LuxyBridge {
   readVaultCharacterAvatar(
     args: z.infer<typeof vaultCharacterForgetArgsSchema>,
   ): Promise<IpcResult<z.infer<typeof vaultCharacterAvatarResultSchema>>>;
-  syncVault(): Promise<IpcResult<z.infer<typeof vaultSyncResultSchema>>>;
+  /** todo, o solo una conversacion; sin argumentos, todo */
+  syncVault(args?: VaultSyncScope): Promise<IpcResult<z.infer<typeof vaultSyncResultSchema>>>;
+  /** cifras de cada conversacion de este equipo, sin descifrar nada */
+  diagnoseVaultSync(): Promise<IpcResult<z.infer<typeof vaultSyncDiagnosisSchema>>>;
+  /** aparta (renombra) la boveda local sin cuenta; nunca borra */
+  setAsideLocalVault(): Promise<IpcResult<z.infer<typeof vaultLocalSetAsideResultSchema>>>;
   /**
    * avisa de que la boveda se cerro, por el camino que sea. Devuelve la funcion
    * de baja. Llega el motivo SIN validar: quien lo reciba lo pasa por

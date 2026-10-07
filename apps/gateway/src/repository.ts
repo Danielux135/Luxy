@@ -1,5 +1,5 @@
 // acceso a datos: traduce entre las filas de postgres y los tipos compartidos
-import { generateShortId } from '@luxy/shared';
+import { VAULT_FACT_SEQUENCE_BASE, generateShortId } from '@luxy/shared';
 import type {
   Job,
   JobOrigin,
@@ -9,20 +9,10 @@ import type {
   PrivateRecord,
   ProviderId,
 } from '@luxy/shared';
-import { type SupabaseClient, eq, gte, inList } from './supabase.js';
+import { type SupabaseClient, SupabaseError, eq, gt, gte, inList, lt } from './supabase.js';
 // una sola definicion de la fila: dos copias se desincronizan en cuanto una
 // columna nueva entra por un lado y no por el otro
 import type { VaultUserRow } from './vault-auth.js';
-
-interface VaultMediaRow {
-  media_id: string;
-  conversation_id: string;
-  object_key: string;
-  byte_size: number;
-  content: unknown;
-  thumbnail_object_key: string | null;
-  created_at: string;
-}
 
 const VAULT_USER_COLUMNS =
   'id,email,auth_salt,argon2_t,argon2_m,argon2_p,auth_hash,wrapped_master_key,' +
@@ -752,126 +742,310 @@ export class Repository {
   }
 
   // --- sincronizacion (autorizada por owner_user_id) ---
+  //
+  // Ninguna operacion de aqui se traga un error. La v1 convertia un 409 o un
+  // 500 de Supabase en «0 guardados» con un `.catch(() => [])`, y desde la
+  // segunda sincronizacion no subia nada sin avisar (SEG-SYNC-001). Un fallo
+  // real sube como SupabaseError y el manejador lo convierte en un 502
+  // redactado.
 
-  /** crea la conversacion a nombre del usuario si no existe */
-  async ensureVaultConversation(ownerUserId: string, conversationId: string): Promise<void> {
-    await this.db.insertIfAbsent(
+  /** dueño de una conversacion, o null si no existe */
+  async getVaultConversationOwner(conversationId: string): Promise<string | null> {
+    const row = await this.db.selectOne<{ owner_user_id: string }>('vault_conversations', {
+      columns: 'owner_user_id',
+      filters: { conversation_id: eq(conversationId) },
+    });
+    return row?.owner_user_id ?? null;
+  }
+
+  /**
+   * crea la conversacion a nombre del usuario si no existe, y dice de quien es.
+   *
+   * `foreign` si ya era de otra cuenta: la clave primaria es global, y antes el
+   * alta se daba por buena aunque la fila fuera ajena, con lo que un usuario
+   * podia colgar turnos de la conversacion de otro. Quien llama no inserta nada
+   * en ese caso.
+   */
+  async ensureVaultConversation(
+    ownerUserId: string,
+    conversationId: string,
+  ): Promise<'created' | 'owned' | 'foreign'> {
+    const created = await this.db.insertIfAbsent(
       'vault_conversations',
       { conversation_id: conversationId, owner_user_id: ownerUserId },
       'conversation_id',
     );
+    if (created) return 'created';
+    const owner = await this.getVaultConversationOwner(conversationId);
+    return owner === ownerUserId ? 'owned' : 'foreign';
   }
 
   /**
-   * inserta turnos sin duplicar.
+   * true si la conversacion guarda hechos (filas del rango reservado).
    *
-   * idempotente por (conversation_id, sequence): reenviar un lote tras un corte
-   * de red no crea copias. Devuelve cuantos eran nuevos de verdad.
+   * Es lo que la hace un «espacio» de F2. Los turnos no entran ahi ni un
+   * espacio se purga como una conversacion; mirarlo ya en F1 deja la frontera
+   * puesta antes de que existan los hechos.
    */
-  async insertVaultRecords(ownerUserId: string, records: PrivateRecord[]): Promise<number> {
-    if (records.length === 0) return 0;
-    const rows = records.map((record) => ({
-      record_id: record.recordId,
-      owner_user_id: ownerUserId,
-      conversation_id: record.conversationId,
-      sequence: record.sequence,
-      content: record.content,
-      sealed_memory: record.sealedMemory,
-      created_at: record.createdAt,
-    }));
-
-    const inserted = await this.db
-      .insert<{ record_id: string }>('vault_records?on_conflict=conversation_id,sequence', rows)
-      .catch(() => [] as { record_id: string }[]);
-    return inserted.length;
+  async vaultConversationHoldsFacts(conversationId: string): Promise<boolean> {
+    const rows = await this.db.select<{ record_id: string }>('vault_records', {
+      columns: 'record_id',
+      filters: {
+        conversation_id: eq(conversationId),
+        sequence: gte(VAULT_FACT_SEQUENCE_BASE),
+      },
+      limit: 1,
+    });
+    return rows.length > 0;
   }
 
-  async listVaultConversations(
+  /** el ultimo turno del servidor anterior a `sequence`: la base de un lote */
+  async lastVaultRecordBefore(
+    conversationId: string,
+    sequence: number,
+  ): Promise<{ sequence: number; record_id: string } | null> {
+    return this.db.selectOne<{ sequence: number; record_id: string }>('vault_records', {
+      columns: 'sequence,record_id',
+      filters: { conversation_id: eq(conversationId), sequence: lt(sequence) },
+      order: 'sequence.desc',
+    });
+  }
+
+  /**
+   * inserta un lote de turnos ENTERO o nada.
+   *
+   * Un INSERT plano de PostgREST es una sola sentencia: si una fila choca, no
+   * entra ninguna y llega un SupabaseError con `isUniqueViolation`. Sin
+   * on_conflict ni ignore-duplicates a proposito: esos mezclarian en silencio
+   * el lote con lo que ya hubiera, aunque fuera otra version de la
+   * conversacion.
+   */
+  async insertVaultRecords(ownerUserId: string, records: PrivateRecord[]): Promise<void> {
+    if (records.length === 0) return;
+    await this.db.insert(
+      'vault_records',
+      records.map((record) => ({
+        record_id: record.recordId,
+        owner_user_id: ownerUserId,
+        conversation_id: record.conversationId,
+        sequence: record.sequence,
+        content: record.content,
+        sealed_memory: record.sealedMemory,
+        created_at: record.createdAt,
+      })),
+      false,
+    );
+  }
+
+  /**
+   * explica por que un lote choco, registro a registro.
+   *
+   * - duplicate: la misma secuencia ya tiene ESE recordId;
+   * - conflict: la secuencia la ocupa otro recordId, o el recordId esta en
+   *   otra secuencia o conversacion;
+   * - pending: no chocaba; habria entrado con el resto.
+   *
+   * Las secuencias se miran en la conversacion (que ya se comprobo que es del
+   * usuario) y los ids, solo entre los suyos.
+   */
+  async classifyVaultRecords(
     ownerUserId: string,
-    query: { since?: string; limit: number },
-  ): Promise<{ conversation_id: string; turn_count: number; updated_at: string }[]> {
-    return this.db.select('vault_conversations', {
-      columns: 'conversation_id,turn_count,updated_at',
+    conversationId: string,
+    records: Array<{ recordId: string; sequence: number }>,
+  ): Promise<Array<{ recordId: string; sequence: number; outcome: 'duplicate' | 'conflict' | 'pending' }>> {
+    if (records.length === 0) return [];
+    const bySequence = await this.db.select<{ sequence: number; record_id: string }>('vault_records', {
+      columns: 'sequence,record_id',
+      filters: {
+        conversation_id: eq(conversationId),
+        sequence: inList(records.map((record) => record.sequence)),
+      },
+      limit: records.length,
+    });
+    const byId = await this.db.select<{ record_id: string }>('vault_records', {
+      columns: 'record_id',
       filters: {
         owner_user_id: eq(ownerUserId),
-        ...(query.since === undefined ? {} : { updated_at: gte(query.since) }),
+        record_id: inList(records.map((record) => record.recordId)),
       },
-      order: 'updated_at.desc',
-      limit: query.limit,
+      limit: records.length,
+    });
+    const occupant = new Map(bySequence.map((row) => [row.sequence, row.record_id]));
+    const knownIds = new Set(byId.map((row) => row.record_id));
+
+    return records.map((record) => {
+      const there = occupant.get(record.sequence);
+      if (there !== undefined) {
+        return { ...record, outcome: there === record.recordId ? ('duplicate' as const) : ('conflict' as const) };
+      }
+      return { ...record, outcome: knownIds.has(record.recordId) ? ('conflict' as const) : ('pending' as const) };
+    });
+  }
+
+  // Las lecturas de la v2 devuelven la respuesta de PostgREST sin analizarla:
+  // los alias dan ya la forma del contrato (vault-sync-v2.ts) y el gateway no
+  // tiene nada que mirar dentro de unos sobres cifrados. El filtro por
+  // owner_user_id es la autorizacion de todas.
+
+  async listVaultConversationsRaw(
+    ownerUserId: string,
+    after: string | null,
+    limit: number,
+  ): Promise<Response> {
+    return this.db.selectRaw('vault_conversations', {
+      columns: 'conversationId:conversation_id,turnCount:turn_count,updatedAt:updated_at',
+      filters: {
+        owner_user_id: eq(ownerUserId),
+        ...(after === null ? {} : { conversation_id: gt(after) }),
+      },
+      order: 'conversation_id.asc',
+      limit,
+    });
+  }
+
+  /** {sequence, recordId} de los turnos; las filas del rango reservado no salen */
+  async listVaultManifestRaw(
+    ownerUserId: string,
+    conversationId: string,
+    after: number,
+    limit: number,
+  ): Promise<Response> {
+    return this.db.selectRaw('vault_records', {
+      columns: 'sequence,recordId:record_id',
+      filters: {
+        owner_user_id: eq(ownerUserId),
+        conversation_id: eq(conversationId),
+        // `and` porque la clave `sequence` no se puede repetir en los filtros
+        and: `(sequence.gt.${after},sequence.lt.${VAULT_FACT_SEQUENCE_BASE})`,
+      },
+      order: 'sequence.asc',
+      limit,
+    });
+  }
+
+  /** los turnos de esas secuencias, ya con la forma del contrato */
+  async fetchVaultRecordsRaw(
+    ownerUserId: string,
+    conversationId: string,
+    sequences: number[],
+  ): Promise<Response> {
+    return this.db.selectRaw('vault_records', {
+      columns:
+        'recordId:record_id,conversationId:conversation_id,sequence,content,' +
+        'sealedMemory:sealed_memory,createdAt:created_at',
+      filters: {
+        owner_user_id: eq(ownerUserId),
+        conversation_id: eq(conversationId),
+        sequence: inList(sequences),
+        // el esquema ya lo impide; aqui por si un dia alguien lo relaja. La
+        // misma forma de dos condiciones que el manifiesto
+        and: `(sequence.gte.0,sequence.lt.${VAULT_FACT_SEQUENCE_BASE})`,
+      },
+      order: 'sequence.asc',
+      limit: sequences.length,
     });
   }
 
   // --- medios ---
 
-  async listVaultMedia(
-    ownerUserId: string,
-    conversationId?: string,
-  ): Promise<VaultMediaRow[]> {
-    return this.db.select('vault_media', {
+  async listVaultMediaRaw(ownerUserId: string, after: string | null, limit: number): Promise<Response> {
+    return this.db.selectRaw('vault_media', {
       columns:
-        'media_id,conversation_id,object_key,byte_size,content,thumbnail_object_key,created_at',
-      // el filtro por usuario es la autorizacion, igual que en los registros
+        'mediaId:media_id,conversationId:conversation_id,objectKey:object_key,byteSize:byte_size,' +
+        'content,thumbnailObjectKey:thumbnail_object_key,createdAt:created_at',
       filters: {
         owner_user_id: eq(ownerUserId),
-        ...(conversationId === undefined ? {} : { conversation_id: eq(conversationId) }),
+        ...(after === null ? {} : { media_id: gt(after) }),
       },
-      order: 'created_at.desc',
-      limit: 500,
-    });
-  }
-
-  async findVaultMediaObject(
-    ownerUserId: string,
-    objectKey: string,
-  ): Promise<{ object_key: string } | null> {
-    return this.db.selectOne('vault_media', {
-      columns: 'object_key',
-      filters: { owner_user_id: eq(ownerUserId), object_key: eq(objectKey) },
+      order: 'media_id.asc',
+      limit,
     });
   }
 
   /**
-   * inserta un medio si no estaba.
+   * autoriza la descarga de un objeto: tiene que ser el original O la
+   * miniatura de un medio del usuario.
    *
-   * idempotente por (propietario, clave de objeto): reenviar una subida cortada
-   * no duplica la fila ni falla.
+   * Antes solo valia el original, y la miniatura que el otro equipo pedia
+   * despues daba 404: la bajada de un medio con miniatura no podia completarse.
    */
-  async insertVaultMedia(ownerUserId: string, media: PrivateMedia): Promise<number> {
-    const inserted = await this.db
-      .insert<{ media_id: string }>('vault_media?on_conflict=owner_user_id,object_key', {
-        media_id: media.mediaId,
-        owner_user_id: ownerUserId,
-        conversation_id: media.conversationId,
-        object_key: media.objectKey,
-        byte_size: media.byteSize,
-        content: media.content,
-        thumbnail_object_key: media.thumbnailObjectKey,
-        created_at: media.createdAt,
-      })
-      .catch(() => [] as { media_id: string }[]);
-    return inserted.length;
+  async findVaultMediaObject(
+    ownerUserId: string,
+    objectKey: string,
+  ): Promise<{ media_id: string } | null> {
+    // la clave entra en la sintaxis de `or`: solo pasa si es opaca de verdad
+    if (!/^[0-9a-f]{32}$/.test(objectKey)) return null;
+    return this.db.selectOne<{ media_id: string }>('vault_media', {
+      columns: 'media_id',
+      filters: {
+        owner_user_id: eq(ownerUserId),
+        or: `(object_key.eq.${objectKey},thumbnail_object_key.eq.${objectKey})`,
+      },
+    });
   }
 
-  async listVaultRecords(
+  /**
+   * da de alta un medio y dice que paso.
+   *
+   * Ignora el duplicado por (propietario, clave de objeto), como insertIfAbsent,
+   * pero sin tragarse nada: si no entro, comprueba que lo que habia es ESE
+   * medio. La misma clave con otro mediaId, o el mismo mediaId con otra clave,
+   * es un conflicto, no un «ya estaba».
+   */
+  async insertVaultMedia(
+    ownerUserId: string,
+    media: PrivateMedia,
+  ): Promise<'stored' | 'duplicate' | 'conflict'> {
+    let inserted: Array<{ media_id: string }>;
+    try {
+      inserted = await this.db.insertIgnoringDuplicates<{ media_id: string }>(
+        'vault_media',
+        {
+          media_id: media.mediaId,
+          owner_user_id: ownerUserId,
+          conversation_id: media.conversationId,
+          object_key: media.objectKey,
+          byte_size: media.byteSize,
+          content: media.content,
+          thumbnail_object_key: media.thumbnailObjectKey,
+          created_at: media.createdAt,
+        },
+        'owner_user_id,object_key',
+      );
+    } catch (error) {
+      // el arbitro es la clave de objeto: un 23505 aqui es el mediaId usado
+      // por otra clave
+      if (error instanceof SupabaseError && error.isUniqueViolation) return 'conflict';
+      throw error;
+    }
+    if (inserted.length > 0) return 'stored';
+
+    const existing = await this.db.selectOne<{ media_id: string }>('vault_media', {
+      columns: 'media_id',
+      filters: { owner_user_id: eq(ownerUserId), object_key: eq(media.objectKey) },
+    });
+    if (existing === null) {
+      // choco y ya no esta: alguien lo borro entre medias. Que se reintente
+      throw new Error('el medio cambio mientras se daba de alta');
+    }
+    return existing.media_id === media.mediaId ? 'duplicate' : 'conflict';
+  }
+
+  /** una tanda de medios de una conversacion, para purgar sus objetos */
+  async listVaultMediaForPurge(
     ownerUserId: string,
     conversationId: string,
+    after: string | null,
     limit: number,
-  ): Promise<
-    {
-      record_id: string;
-      conversation_id: string;
-      sequence: number;
-      content: unknown;
-      sealed_memory: unknown;
-      created_at: string;
-    }[]
-  > {
-    return this.db.select('vault_records', {
-      columns: 'record_id,conversation_id,sequence,content,sealed_memory,created_at',
-      // el filtro por usuario es la autorizacion: un usuario no puede leer los
-      // registros de otro aunque conozca el identificador de conversacion
-      filters: { owner_user_id: eq(ownerUserId), conversation_id: eq(conversationId) },
-      order: 'sequence.asc',
+  ): Promise<Array<{ media_id: string; object_key: string; thumbnail_object_key: string | null }>> {
+    return this.db.select('vault_media', {
+      columns: 'media_id,object_key,thumbnail_object_key',
+      filters: {
+        owner_user_id: eq(ownerUserId),
+        conversation_id: eq(conversationId),
+        ...(after === null ? {} : { media_id: gt(after) }),
+      },
+      order: 'media_id.asc',
       limit,
     });
   }

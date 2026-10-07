@@ -38,3 +38,17 @@ describe('el arranque engancha el cierre de la boveda', () => {
     expect(source).not.toContain('tickAutoLock');
   });
 });
+
+describe('el arranque engancha la sincronizacion (SYNC-F1-07)', () => {
+  it('pasa el estado y las lapidas a los handlers', () => {
+    // sin ellas no hay lapida al borrar ni guardia de replica: una conversacion
+    // borrada volveria con la siguiente pasada
+    const registro = source.slice(source.indexOf('registerIpcHandlers({'));
+    expect(registro).toContain('syncLedger: {');
+    expect(registro).toContain('new SyncStateStore(syncStateFilePath(luxyConfigDir())');
+    expect(registro).toContain('new SyncDeletedStore(syncDeletedFilePath(luxyConfigDir()))');
+    // y el ancla del papel: sin ella, una replica cuyo estado sellado no abre
+    // volvia a escribir (F1-R1-01)
+    expect(registro).toContain('new SyncAnchorStore(syncAnchorFilePath(luxyConfigDir()))');
+  });
+});

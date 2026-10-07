@@ -527,3 +527,169 @@ describe('borrar la memoria propia sin tocar la conversacion', () => {
     expect(() => store.clearMemory('../otra-cosa')).toThrow(VaultError);
   });
 });
+
+describe('el almacen frente a la sincronizacion (SYNC-F1-04)', () => {
+  let directory: string;
+  let vault: VaultService;
+  let store: PrivateConversationStore;
+  let conversations: string;
+
+  /** una fuente aparte, con la MISMA boveda, para fabricar registros de verdad */
+  let source: PrivateConversationStore;
+
+  beforeEach(async () => {
+    directory = mkdtempSync(join(tmpdir(), 'luxy-f104-'));
+    vault = new VaultService(vaultFilePathFor(directory), memoryDeviceKeys(), {
+      argon2Params: FAST,
+    });
+    await vault.create(PASSWORD);
+    conversations = conversationsDirectory(directory);
+    store = new PrivateConversationStore(conversations);
+    source = new PrivateConversationStore(join(directory, 'fuente'));
+  });
+
+  afterEach(() => {
+    rmSync(directory, { recursive: true, force: true });
+  });
+
+  const archivo = (): string => join(conversations, `${A}.jsonl`);
+
+  /** registros sellados de A con secuencias 0..n-1 */
+  async function sellados(textos: string[]) {
+    const out = [];
+    for (const texto of textos) out.push(await source.appendTurn(vault, A, turn(texto)));
+    return out;
+  }
+
+  it('con un hueco, el turno nuevo usa la mayor secuencia mas uno', async () => {
+    const [cero, , dos] = await sellados(['cero', 'uno', 'dos']);
+    mkdirSync(conversations, { recursive: true });
+    // falta la 1: contar lineas (2) repetiria la secuencia 2, que ya existe
+    writeFileSync(archivo(), `${JSON.stringify(cero)}\n${JSON.stringify(dos)}\n`, 'utf8');
+
+    const nuevo = await store.appendTurn(vault, A, turn('tres'));
+
+    expect(nuevo.sequence).toBe(3);
+    expect(store.scanIntegrity(A).duplicateSequences).toBe(0);
+    expect((await store.read(vault, A)).map((t) => t.text)).toEqual(['cero', 'dos', 'tres']);
+  });
+
+  it('un turno nuevo se fuerza a disco', async () => {
+    fsCalls.length = 0;
+    await store.appendTurn(vault, A, turn('hola'));
+    expect(fsCalls).toContain('fsync');
+  });
+
+  it('una linea a medias seguida de appendRemote no corrompe el registro nuevo', async () => {
+    const [cero, uno] = await sellados(['cero', 'uno']);
+    mkdirSync(conversations, { recursive: true });
+    // un corte de luz a mitad de escribir la linea 1: sin salto final
+    writeFileSync(archivo(), `${JSON.stringify(cero)}\n{"recordId":"a-medi`, 'utf8');
+    expect(store.scanIntegrity(A).partialTail).toBe(true);
+
+    expect(store.appendRemote(A, [uno!])).toBe(1);
+
+    // sin el salto delante, lo nuevo se pegaba a la linea rota y se perdian
+    // las dos
+    expect((await store.read(vault, A)).map((t) => t.text)).toEqual(['cero', 'uno']);
+    expect(store.scanIntegrity(A)).toMatchObject({ unreadable: 1, partialTail: false });
+  });
+
+  it('y lo mismo con un turno escrito aqui', async () => {
+    const [cero] = await sellados(['cero']);
+    mkdirSync(conversations, { recursive: true });
+    writeFileSync(archivo(), `${JSON.stringify(cero)}\n{"recordId":"a-medi`, 'utf8');
+
+    await store.appendTurn(vault, A, turn('uno'));
+
+    expect((await store.read(vault, A)).map((t) => t.text)).toEqual(['cero', 'uno']);
+  });
+
+  it('appendRemote fuerza el lote a disco', async () => {
+    const registros = await sellados(['cero', 'uno']);
+    fsCalls.length = 0;
+    expect(store.appendRemote(A, registros)).toBe(2);
+    expect(fsCalls).toContain('fsync');
+  });
+
+  it('rechaza un registro de otra conversacion y no escribe nada del lote', async () => {
+    const [cero, uno] = await sellados(['cero', 'uno']);
+    const ajeno = { ...uno!, conversationId: B };
+
+    expect(() => store.appendRemote(A, [cero!, ajeno])).toThrow(
+      expect.objectContaining({ reason: 'foreign' }),
+    );
+    // o entra el lote entero o no entra nada
+    expect(store.scanIntegrity(A).lines).toBe(0);
+  });
+
+  it('rechaza una secuencia ya ocupada aqui por otro registro', async () => {
+    const [cero] = await sellados(['cero']);
+    await store.appendTurn(vault, A, turn('el mio'));
+
+    // la misma secuencia 0 con otro recordId: dos versiones, no se pisa
+    expect(() => store.appendRemote(A, [cero!])).toThrow(
+      expect.objectContaining({ reason: 'occupied', sequence: 0 }),
+    );
+    expect((await store.read(vault, A)).map((t) => t.text)).toEqual(['el mio']);
+  });
+
+  it('rechaza el rango reservado a los hechos', async () => {
+    const [cero] = await sellados(['cero']);
+    expect(() => store.appendRemote(A, [{ ...cero!, sequence: 1_000_000_000 }])).toThrow(
+      expect.objectContaining({ reason: 'reserved' }),
+    );
+    expect(store.scanIntegrity(A).lines).toBe(0);
+  });
+
+  it('rechaza un recordId que ya esta en otra secuencia', async () => {
+    const [cero] = await sellados(['cero']);
+    store.appendRemote(A, [cero!]);
+    expect(() => store.appendRemote(A, [{ ...cero!, sequence: 7 }])).toThrow(
+      expect.objectContaining({ reason: 'duplicate-record' }),
+    );
+    expect(store.scanIntegrity(A).lines).toBe(1);
+  });
+
+  it('el diagnostico cuenta bien cada caso, sin descifrar', async () => {
+    const [cero, uno, dos] = await sellados(['cero', 'uno', 'dos']);
+    const otroUno = (await source.appendTurn(vault, B, turn('otro'))) as typeof uno;
+    mkdirSync(conversations, { recursive: true });
+    const lineas = [
+      JSON.stringify(cero),
+      // copia exacta: misma secuencia y mismo recordId
+      JSON.stringify(cero),
+      JSON.stringify(uno),
+      // la secuencia 1 otra vez, con otro recordId: el fallo del numerado viejo
+      JSON.stringify({ ...otroUno!, conversationId: A, sequence: 1 }),
+      // falta la 2 y la 3: dos huecos
+      JSON.stringify({ ...dos!, sequence: 4 }),
+      '{ esto no es json',
+      JSON.stringify({ ...dos!, conversationId: B, sequence: 9 }),
+      JSON.stringify({ ...dos!, recordId: '33333333-3333-4333-8333-333333333333', sequence: 1_000_000_000 }),
+    ];
+    writeFileSync(archivo(), `${lineas.join('\n')}\n`, 'utf8');
+
+    // la boveda cerrada: el diagnostico no necesita la llave
+    vault.lock('manual');
+    expect(store.scanIntegrity(A)).toEqual({
+      lines: 8,
+      unreadable: 3,
+      duplicateLines: 1,
+      duplicateSequences: 1,
+      holes: 2,
+      partialTail: false,
+    });
+  });
+
+  it('una conversacion que no existe tiene un diagnostico vacio', () => {
+    expect(store.scanIntegrity(A)).toEqual({
+      lines: 0,
+      unreadable: 0,
+      duplicateLines: 0,
+      duplicateSequences: 0,
+      holes: 0,
+      partialTail: false,
+    });
+  });
+});

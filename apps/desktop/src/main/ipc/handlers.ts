@@ -172,6 +172,7 @@ import {
   vaultDeviceUnlockSetArgsSchema,
   vaultPasswordArgsSchema,
   vaultUnlockArgsSchema,
+  vaultSyncArgsSchema,
   type vaultStatusSchema,
   type vaultRecapListResultSchema,
   type vaultConversationSendResultSchema,
@@ -193,7 +194,10 @@ import type { MemoryRelinkStore } from '../vault/memory-relink-store.js';
 import { MemoryRelink } from '../vault/memory-relink.js';
 import { measureRecentEcho, type RecentEcho } from '../vault/recent-echo.js';
 import type { PrivateMediaStore } from '../vault/media-store.js';
-import { syncVault } from '../vault/sync.js';
+import { SyncCoordinator } from '../vault/sync-coordinator.js';
+import type { SyncStateStore } from '../vault/sync-state-store.js';
+import type { SyncDeletedStore } from '../vault/sync-deleted-store.js';
+import type { SyncAnchorStore } from '../vault/sync-anchor-store.js';
 import { randomUUID } from 'node:crypto';
 import {
   MACHINE_TOKEN_SECRET,
@@ -424,6 +428,25 @@ export interface HandlerContext {
   imageAttempts: ImageAttemptStore;
   /** imagenes y videos privados, cifrados en disco */
   privateMedia: PrivateMediaStore;
+  /**
+   * lo que la sincronizacion guarda de ESTE equipo (`SYNC-F1-05`): su estado
+   * sellado, sin contenido, y las conversaciones borradas aqui, sin sellar.
+   *
+   * Opcional solo para los dobles de las pruebas que no sincronizan: sin el no
+   * hay sincronizacion, ni lapida al borrar, ni guardia de replica. `index.ts`
+   * lo pasa siempre, y `index-wiring.test.ts` lo vigila.
+   */
+  syncLedger?: {
+    state: SyncStateStore;
+    deleted: SyncDeletedStore;
+    /**
+     * el papel de este equipo, sin sellar: una replica lo es desde que entra en
+     * la cuenta y no deja de serlo si el estado sellado se pierde (F1-R1-01)
+     */
+    anchor: SyncAnchorStore;
+    /** solo para las pruebas: el gateway falso */
+    fetchImpl?: typeof fetch;
+  };
   /** raiz de los artefactos generados; se abre, nunca se sirve por HTTP */
   artifactsDirectory: string;
   /** raiz local a la que deben pertenecer los worktrees que se abran */
@@ -1457,6 +1480,10 @@ export function registerIpcHandlers(context: HandlerContext): void {
     if (erasingInFlight.has(args.conversationId)) throw erasingNow();
     erasingInFlight.add(args.conversationId);
     try {
+      // si la sincronizacion la esta tocando, se espera a que la suelte: lo que
+      // bajara despues de borrar la resucitaria. Ya marcada como ocupada, la
+      // pasada no vuelve a cogerla
+      await sync?.settled(args.conversationId);
       return await deleteConversationNow(args.conversationId);
     } finally {
       erasingInFlight.delete(args.conversationId);
@@ -1465,6 +1492,11 @@ export function registerIpcHandlers(context: HandlerContext): void {
 
   const deleteConversationNow = async (conversationId: string): Promise<{ deleted: true }> => {
     const args = { conversationId };
+    // la lapida ANTES de borrar nada (`SYNC-F1-05`): desde aqui ese id ni sube
+    // ni baja, y la siguiente pasada no la trae de vuelta del servidor. Sin
+    // sellar, asi que no depende de la llave. Si no se puede apuntar, no se
+    // borra nada: borrar sin lapida es borrar para que vuelva
+    sync?.noteDeleted(args.conversationId);
     // los medios primero: si solo se borrara la conversacion, sus archivos
     // cifrados quedarian ocupando disco sin nada que los referenciara
     await context.privateMedia.deleteConversation(args.conversationId);
@@ -1526,6 +1558,11 @@ export function registerIpcHandlers(context: HandlerContext): void {
       // conversacion: sin ella no la usa nadie
       await intentar(async () => {
         await memoryRelinks?.removeConversation(context.vault, args.conversationId);
+      });
+      // y sus entradas del estado de la sincronizacion: no dicen nada de dentro,
+      // pero borrarla no deja rastro tampoco ahi
+      await intentar(async () => {
+        await sync?.forgetConversation(args.conversationId);
       });
     } finally {
       // pase lo que pase con los cuatro almacenes. El indice guarda los turnos ya
@@ -1904,6 +1941,54 @@ export function registerIpcHandlers(context: HandlerContext): void {
       'se esta borrando algo de esta conversacion',
       'espera a que termine el borrado y vuelve a intentarlo',
     );
+
+  /**
+   * la sincronizacion (`SYNC-F1-07`): un solo vuelo, y la conversacion que toca
+   * marcada para que borrar, borrar su memoria o cambiarle el dueño la esperen.
+   *
+   * Lo ocupado sale de las mismas marcas que ya usan los envios y los borrados.
+   * Para los turnos, cualquiera de las tres; para los medios, solo el borrado:
+   * los de una conversacion con un envio en curso SI viajan (revision del 28/09).
+   *
+   * Trabajo de fondo (`D-106`): ni `beginUserWait` ni `touch()`.
+   */
+  const syncLedger = context.syncLedger;
+  const sync =
+    syncLedger === undefined
+      ? null
+      : new SyncCoordinator({
+          vault: context.vault,
+          conversations: context.privateConversations,
+          media: context.privateMedia,
+          state: syncLedger.state,
+          deleted: syncLedger.deleted,
+          anchor: syncLedger.anchor,
+          isBusy: (conversationId, part) =>
+            part === 'media'
+              ? erasingInFlight.has(conversationId)
+              : sendInFlight.has(conversationId) ||
+                erasingInFlight.has(conversationId) ||
+                ownerChangeInFlight.has(conversationId),
+          connection: () => {
+            const stored = context.configStore.load();
+            if (stored === null) throw new VaultError('Luxy no esta configurado en esta maquina');
+            // la SESION DE LA CUENTA, no el token de maquina: el gateway decide
+            // de quien es cada registro por el usuario de esa sesion (D-045)
+            const sessionToken = context.accounts.sessionToken();
+            return {
+              gatewayUrl: stored.gatewayUrl,
+              sessionToken,
+              onUnauthorized: () => context.accounts.forgetSession(),
+              onSessionRenewed: (expiresAt) =>
+                context.accounts.renewSessionExpiry(sessionToken, expiresAt),
+            };
+          },
+          // lo bajado cambia el historial: el indice con los turnos descifrados
+          // ya no vale
+          onDownloaded: () => context.privateMemory.invalidate(),
+          log: context.log,
+          ...(syncLedger.fetchImpl === undefined ? {} : { fetchImpl: syncLedger.fetchImpl }),
+        });
 
   handle(IPC_INVOKE.vaultCatalogSync, vaultCatalogSyncArgsSchema, async (args) => {
     if (!context.vault.isUnlocked()) throw new VaultError('la boveda esta bloqueada');
@@ -2813,6 +2898,9 @@ export function registerIpcHandlers(context: HandlerContext): void {
     if (erasingInFlight.has(args.conversationId)) throw erasingNow();
     erasingInFlight.add(args.conversationId);
     try {
+      // `clearMemory` reescribe el archivo entero: una linea que la
+      // sincronizacion bajara a la vez se perderia en el rename
+      await sync?.settled(args.conversationId);
       return await forgetSealedMemoryNow(args.conversationId, contestandoAhora);
     } finally {
       erasingInFlight.delete(args.conversationId);
@@ -3222,6 +3310,10 @@ export function registerIpcHandlers(context: HandlerContext): void {
     // con ella puesta, la pasada veria la conversacion ocupada y no haria nada
     let relinkAfter = false;
     try {
+      // el enganche se ancla en la ultima secuencia que hay: con la
+      // sincronizacion bajando turnos a la vez, el ancla saldria de un archivo
+      // a medias
+      await sync?.settled(args.conversationId);
       const plan = await planOwnerChange(args);
       const linking = args.characterId !== null;
 
@@ -4284,33 +4376,43 @@ export function registerIpcHandlers(context: HandlerContext): void {
   };
 
   /**
-   * sincroniza la boveda con el gateway.
+   * sincroniza la boveda con el gateway (protocolo v2, `SYNC-F1-06`).
    *
-   * Sube ciphertext y baja ciphertext. El identificador de boveda se deriva
-   * aqui, en el proceso principal: el renderer no lo ve, porque aunque no
-   * revele la llave sigue siendo un dato que agrupa todo lo tuyo.
+   * Sube ciphertext y baja ciphertext, todo o solo una conversacion. En F1 solo
+   * la lanza el boton: no hay disparos automaticos hasta probarla en vivo. El
+   * resultado dice conversacion a conversacion que paso, y por que se paro si
+   * se paro: nunca «sincronizado» con fallos (`D-093`).
    */
-  handle(IPC_INVOKE.vaultSync, emptyArgsSchema, async () => {
+  handle(IPC_INVOKE.vaultSync, vaultSyncArgsSchema, async (args) => {
     if (!context.vault.isUnlocked()) throw new VaultError('la boveda esta bloqueada');
-    const stored = context.configStore.load();
-    if (stored === null) throw new VaultError('Luxy no esta configurado en esta maquina');
+    if (sync === null) throw new VaultError('la sincronizacion no esta disponible en este equipo');
+    return sync.request(args);
+  });
 
-    // autoriza la SESION DE LA CUENTA, no el token de maquina: el gateway
-    // decide de quien es cada registro por el usuario de esa sesion, y dos
-    // personas pueden compartir una maquina sin compartir boveda (D-045)
-    return syncVault(
-      context.vault,
-      context.privateConversations,
-      {
-        gatewayUrl: stored.gatewayUrl,
-        sessionToken: context.accounts.sessionToken(),
-        onUnauthorized: () => context.accounts.forgetSession(),
-        // la conversacion a la que se le esta contestando se deja para la
-        // proxima: su ultimo mensaje aun puede retirarse (revision del 28/09)
-        isSending: (conversationId) => sendInFlight.has(conversationId),
-      },
-      context.privateMedia,
-    );
+  /**
+   * el diagnostico local, antes de subir nada: cifras por conversacion, sin
+   * descifrar ni una linea. Lo primero de la prueba en vivo.
+   */
+  handle(IPC_INVOKE.vaultSyncDiagnose, emptyArgsSchema, () => {
+    if (sync === null) throw new VaultError('la sincronizacion no esta disponible en este equipo');
+    return sync.diagnose();
+  });
+
+  /**
+   * aparta la boveda local sin cuenta para poder entrar en una (`SYNC-F1-07`).
+   *
+   * Entrar en una cuenta sobre una boveda local con contenido y otra llave la
+   * dejaba ilegible para siempre; ahora se niega, y esto es la salida que
+   * ofrece: renombrar, nunca borrar.
+   */
+  handle(IPC_INVOKE.vaultLocalSetAside, emptyArgsSchema, () => {
+    const result = context.vault.setAsideLocalVault();
+    // lo que estaba en memoria era de la boveda apartada
+    context.memoryPreferences.reload();
+    context.privateMemory.invalidate();
+    // ni un nombre de carpeta en el registro: solo que se hizo
+    context.log('boveda local apartada', { carpeta: result.vaultDirectory !== null });
+    return result;
   });
 
   /**
@@ -5725,6 +5827,10 @@ export function registerIpcHandlers(context: HandlerContext): void {
         'abrela para poder escribir en una conversacion privada',
       );
     }
+    // la guardia de replica y la de lo borrado, ANTES de nada: antes de copiar
+    // la foto de perfil a la conversacion y de llamar a ningun modelo. Se repite
+    // justo antes de cada escritura, mas abajo
+    await sync?.assertMayWrite(conversationId);
     const store = context.privateConversations;
 
     // el titulo sale del primer mensaje y viaja cifrado con cada turno
@@ -5839,6 +5945,11 @@ export function registerIpcHandlers(context: HandlerContext): void {
     // toca» es el error que este modulo existe para no repetir
     const imageCapable = imageBlock === null;
 
+    // la guardia de replica (`D-110`) y la de lo borrado, justo antes de
+    // escribir: una replica sin los hechos sellaria una memoria pobre que
+    // ganaria para siempre, y escribir en una conversacion borrada aqui la
+    // resucitaria sin que la sincronizacion la llevara a ningun sitio
+    await sync?.assertMayWrite(conversationId);
     const userRecord = await store.appendTurn(context.vault, conversationId, {
       role: 'user',
       text: args.message,
@@ -6834,6 +6945,9 @@ export function registerIpcHandlers(context: HandlerContext): void {
         };
       }
 
+      // la misma guardia que para su mensaje: el papel pudo decidirse mientras
+      // contestaba, y una replica no sella nada
+      await sync?.assertMayWrite(conversationId);
       await store.appendTurn(
         context.vault,
         conversationId,

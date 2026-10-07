@@ -33,6 +33,12 @@ RATE_LIMIT_PER_MINUTE = "30"
 # nivel de log: debug | info | warn | error
 LOG_LEVEL = "info"
 
+# tope en bytes de un archivo cifrado de la boveda en Supabase Storage. Sin
+# esta linea vale 50000000: el plan gratuito no guarda archivos de mas de 50 MB.
+# Subelo solo si tu plan y el limite del bucket admiten mas; nunca pasa de
+# 94371840 (90 MiB, el cuerpo de una peticion a un Worker)
+# VAULT_OBJECT_MAX_BYTES = "50000000"
+
 # -----------------------------------------------------------------------------
 # Secretos. NO van en este archivo. Se cargan uno a uno con:
 #

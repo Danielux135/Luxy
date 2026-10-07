@@ -1106,7 +1106,51 @@ en un recuerdo como «lo que tenía delante».
 
 ## SEG-SYNC-001 — la bóveda no tiene copia, y la sincronización no la haría (2026-09-25)
 
-Estado: **diagnosticado con lectura de código y mediciones, NADA arreglado.**
+Estado: **en diseño desde el 06/10** (flujo `wf_030f5df2-696`, con lectores,
+tres propuestas, críticas y síntesis). Daniel aprobó arreglarla y autorizó a
+Claude a desplegar el gateway y a migrar. Para desplegar falta `LA-061`
+(Wrangler, sesión caducada). Las migraciones se aplican en el SQL Editor de
+Supabase, y aquí no hay CLI de Supabase: el diseño intenta no necesitar
+ninguna.
+
+**Diseño (06-07/10, `wf_030f5df2-696`):** sin migración. Los turnos y los
+hechos van en `vault_records`, separados por un rango reservado
+(`VAULT_FACT_SEQUENCE_BASE` = 1e9); el protocolo v2 cierra el v1 con 426. Hay
+dos fases:
+
+- **F1, la copia de turnos y medios:** construida el 07/10
+  (`wf_c5b33936-911`), con `npm run check` en verde (239 archivos, 5214
+  pruebas) y dry-run correcto (`D-110`). Falta desplegarla y probarla en vivo.
+- **F2, todo lo demás y el segundo ordenador:** la identidad de Lía, las
+  fichas, los enganches, la reescritura, las exclusiones, el cuaderno, el
+  catálogo, la papelera y el equipo de fondo.
+
+El diseño completo está en el diario del flujo (`result.final`); se registra
+como `D-110` antes de construir F2.
+
+**Respuestas de Daniel (07/10), para F2:**
+
+1. Borrar una conversación: **papelera de 30 días**. Se borra al momento en
+   los dos ordenadores, y la copia cifrada del servidor espera 30 días.
+2. «Borrar su memoria»: **en los dos ordenadores**.
+3. Copia **automática**: al abrir la bóveda, unos segundos después de cada
+   respuesta y al enganchar o borrar. El botón sigue. Se enciende tras las
+   pruebas.
+4. Trabajo de fondo: **en los dos ordenadores, pero sin pisarse**. Si uno ya
+   lo ha hecho, el otro no lo repite. Esto **cambia el diseño**, que proponía
+   un único equipo de fondo: F2 tiene que reclamar el trabajo antes de
+   hacerlo, o comprobar los hechos, para no gastar el CLI dos veces ni sacar
+   dos versiones.
+5. Las casillas de Lía: **iguales en los dos ordenadores**.
+6. Dos versiones de una conversación: **tener ya la copia**. La conversación
+   se para con un aviso, y la herramienta para separarla llega en F3.
+7. La contraseña y la clave de recuperación: **«juraría que tengo la clave de
+   la bóveda apuntada por ahí, pero no estoy 100% seguro»**. Hay que
+   confirmarlo antes de estrenar el segundo ordenador (`LA-062`). Luxy no
+   tiene forma de generar una clave de recuperación nueva; si se ha perdido,
+   F2 tiene que añadirla.
+
+**Lo de abajo es el diagnóstico del 25/09.**
 
 **Lo demostrado.** La bóveda sólo existe en este disco (Daniel, 25/09: la bóveda
 ni existe en el otro ordenador) y **no hay ni una sincronización** en los

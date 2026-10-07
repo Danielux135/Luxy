@@ -3,14 +3,58 @@
 import type { GatewayConfig } from './env.js';
 
 export class SupabaseError extends Error {
+  /**
+   * codigo de Postgres o de PostgREST (23505, 23503, PGRST205...), si lo trae.
+   *
+   * Existe para que un 409 se pueda reconocer: un unique violado y una clave
+   * foranea sin padre llegan los dos como 409, y no significan lo mismo.
+   */
+  readonly code: string | null;
+
   constructor(
     message: string,
     readonly status: number,
     readonly details: string,
+    code: string | null = errorCodeOf(details),
   ) {
     super(message);
     this.name = 'SupabaseError';
+    this.code = code;
   }
+
+  /** se violo un unique: un INSERT plano no metio NINGUNA fila del lote */
+  get isUniqueViolation(): boolean {
+    return this.status === 409 && this.code === '23505';
+  }
+
+  /** la fila apunta a un padre que no existe (por ejemplo, una conversacion purgada) */
+  get isForeignKeyViolation(): boolean {
+    return this.status === 409 && this.code === '23503';
+  }
+
+  /**
+   * construye el error a partir de una respuesta fallida.
+   *
+   * El codigo se lee del cuerpo ENTERO antes de recortarlo: recortado a 500
+   * caracteres podria no ser JSON y el 409 dejaria de reconocerse.
+   */
+  static async from(response: Response, message: string): Promise<SupabaseError> {
+    const details = await response.text().catch(() => '');
+    return new SupabaseError(message, response.status, details.slice(0, 500), errorCodeOf(details));
+  }
+}
+
+function errorCodeOf(details: string): string | null {
+  try {
+    const parsed = JSON.parse(details) as unknown;
+    if (parsed !== null && typeof parsed === 'object') {
+      const code = (parsed as { code?: unknown }).code;
+      if (typeof code === 'string' && code.length > 0) return code;
+    }
+  } catch {
+    // un cuerpo que no es JSON no trae codigo; el estado sigue valiendo
+  }
+  return null;
 }
 
 export interface SelectOptions {
@@ -42,12 +86,7 @@ export class SupabaseClient {
     });
 
     if (!response.ok) {
-      const details = await response.text().catch(() => '');
-      throw new SupabaseError(
-        `supabase respondio ${response.status}`,
-        response.status,
-        details.slice(0, 500),
-      );
+      throw await SupabaseError.from(response, `supabase respondio ${response.status}`);
     }
 
     if (!expectJson || response.status === 204) return undefined as T;
@@ -77,6 +116,26 @@ export class SupabaseClient {
     return rows[0] ?? null;
   }
 
+  /**
+   * select que devuelve la respuesta SIN analizar el cuerpo.
+   *
+   * Para las lecturas de la sincronizacion: el gateway no tiene nada que mirar
+   * dentro de unos sobres cifrados, y analizar megas de JSON solo para volver
+   * a serializarlos gasta la CPU del Worker. Con alias en `columns`, PostgREST
+   * ya da la forma del contrato y el cuerpo se reenvia tal cual. Si no es 2xx,
+   * lanza un SupabaseError: el cuerpo de error nunca llega al cliente.
+   */
+  async selectRaw(table: string, options: SelectOptions = {}): Promise<Response> {
+    const response = await fetch(`${this.restUrl}/${table}?${this.buildQuery(options)}`, {
+      method: 'GET',
+      headers: this.headers,
+    });
+    if (!response.ok) {
+      throw await SupabaseError.from(response, `supabase respondio ${response.status}`);
+    }
+    return response;
+  }
+
   async insert<T>(table: string, values: unknown, returning = true): Promise<T[]> {
     return this.request<T[]>(`/${table}`, {
       method: 'POST',
@@ -103,6 +162,30 @@ export class SupabaseClient {
       },
     );
     return Array.isArray(rows) && rows.length > 0;
+  }
+
+  /**
+   * inserta lo que no choque con `conflictColumns` y devuelve SOLO lo nuevo.
+   *
+   * `on_conflict` sin `Prefer: resolution` es un INSERT normal que responde 409
+   * al primer duplicado: es lo que congelaba la sincronizacion v1, que ademas
+   * se tragaba ese error. Aqui va la cabecera, y cualquier otro error (otro
+   * unique, una clave foranea, un 500) se propaga.
+   */
+  async insertIgnoringDuplicates<T>(
+    table: string,
+    values: unknown,
+    conflictColumns: string,
+  ): Promise<T[]> {
+    const rows = await this.request<T[] | undefined>(
+      `/${table}?on_conflict=${encodeURIComponent(conflictColumns)}`,
+      {
+        method: 'POST',
+        headers: { Prefer: 'resolution=ignore-duplicates,return=representation' },
+        body: JSON.stringify(values),
+      },
+    );
+    return Array.isArray(rows) ? rows : [];
   }
 
   async upsert<T>(table: string, values: unknown, conflictColumn: string): Promise<T[]> {
@@ -153,12 +236,7 @@ export class SupabaseClient {
       },
     );
     if (!response.ok) {
-      const details = await response.text().catch(() => '');
-      throw new SupabaseError(
-        `rpc ${functionName} respondio ${response.status}`,
-        response.status,
-        details.slice(0, 500),
-      );
+      throw await SupabaseError.from(response, `rpc ${functionName} respondio ${response.status}`);
     }
     const text = await response.text();
     return (text.length > 0 ? JSON.parse(text) : null) as T;
@@ -169,5 +247,8 @@ export class SupabaseClient {
 export const eq = (value: string | number): string => `eq.${value}`;
 /** mayor o igual: se usa para traer solo lo posterior a una marca de tiempo */
 export const gte = (value: string | number): string => `gte.${value}`;
+/** estrictamente mayor: el cursor de una pagina no se repite en la siguiente */
+export const gt = (value: string | number): string => `gt.${value}`;
+export const lt = (value: string | number): string => `lt.${value}`;
 export const isNull = (): string => 'is.null';
 export const inList = (values: Array<string | number>): string => `in.(${values.join(',')})`;

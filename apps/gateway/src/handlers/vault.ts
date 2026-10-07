@@ -1,4 +1,4 @@
-// cuentas y sincronizacion de la boveda privada.
+// cuentas de la boveda privada, bytes de sus medios y cierre de la sync v1.
 //
 // El gateway transporta, almacena y AUTORIZA; nunca lee. La correccion que
 // exigio D-045: la propiedad de un registro es por usuario, no por vault_id.
@@ -6,21 +6,14 @@
 // valida, y filtra por el usuario de esa sesion. Un token valido de una cuenta
 // no da acceso al contenido de otra.
 //
-// Ademas de validar con Zod, el push ejecuta assertNoPlaintextLeak sobre cada
-// registro: un servidor que confia en que el cliente hizo los deberes acaba
-// guardando lo que no debe el dia que alguien cambia el cliente.
+// La sincronizacion vive en `vault-sync-v2.ts` (D-110). De la v1 solo queda el
+// cierre: sus rutas responden 426 sin autenticar ni tocar la base.
 import {
-  assertNoPlaintextLeak,
-  VAULT_MAX_OBJECT_BYTES,
-  vaultMediaPushRequestSchema,
+  VAULT_SYNC_PROTOCOL,
   vaultChangePasswordRequestSchema,
   vaultLoginFinishRequestSchema,
   vaultLoginStartRequestSchema,
   vaultRegisterRequestSchema,
-  vaultSyncPullQuerySchema,
-  vaultSyncPushRequestSchema,
-  type PrivateMedia,
-  type PrivateRecord,
 } from '@luxy/shared';
 import type { ApiDeps } from './api.js';
 import { errorResponse, json, readBody } from './api.js';
@@ -36,49 +29,6 @@ import {
   verifyAuthHash,
   type AuthenticatedVaultUser,
 } from '../vault-auth.js';
-
-interface VaultRecordRow {
-  record_id: string;
-  conversation_id: string;
-  sequence: number;
-  content: unknown;
-  sealed_memory: unknown;
-  created_at: string;
-}
-
-interface VaultMediaRow {
-  media_id: string;
-  conversation_id: string;
-  object_key: string;
-  byte_size: number;
-  content: unknown;
-  thumbnail_object_key: string | null;
-  created_at: string;
-}
-
-function toPrivateMedia(row: VaultMediaRow): PrivateMedia {
-  return {
-    mediaId: row.media_id,
-    conversationId: row.conversation_id,
-    objectKey: row.object_key,
-    byteSize: row.byte_size,
-    content: row.content as PrivateMedia['content'],
-    thumbnailObjectKey: row.thumbnail_object_key,
-    createdAt: row.created_at,
-  };
-}
-
-function toPrivateRecord(row: VaultRecordRow): PrivateRecord {
-  return {
-    recordId: row.record_id,
-    conversationId: row.conversation_id,
-    privacy: 'private',
-    sequence: row.sequence,
-    content: row.content as PrivateRecord['content'],
-    sealedMemory: (row.sealed_memory ?? null) as PrivateRecord['sealedMemory'],
-    createdAt: row.created_at,
-  };
-}
 
 // -----------------------------------------------------------------------------
 // cuentas
@@ -219,7 +169,7 @@ export const handleVaultChangePassword = withVaultAuth(async (request, deps, use
 // autorizacion
 // -----------------------------------------------------------------------------
 
-type VaultHandler = (
+export type VaultHandler = (
   request: Request,
   deps: ApiDeps,
   user: AuthenticatedVaultUser,
@@ -241,94 +191,42 @@ export function withVaultAuth(handler: VaultHandler) {
       deps.logger.error('fallo autenticando cuenta de boveda', describeError(error));
       return errorResponse('no se pudo autenticar la cuenta', 500);
     }
+    if (user.sessionRenewal === 'failed') {
+      // la peticion sigue: la sesion vale hasta su caducidad de antes. Pero si
+      // se repite, la sesion caducara en uso y esto es lo que lo explica
+      deps.logger.warn('no se pudo renovar la sesion de boveda', { userId: user.id });
+    }
     return handler(request, deps, user, params);
   };
 }
 
 // -----------------------------------------------------------------------------
-// sincronizacion (autorizada por usuario, ya no por vault_id)
+// sincronizacion v1: cerrada
 // -----------------------------------------------------------------------------
 
-export const handleVaultPush = withVaultAuth(async (request, deps, user) => {
-  const body = await readBody(request, vaultSyncPushRequestSchema);
-  if (!body.ok) return body.response;
-
-  for (const record of body.data.records) {
-    try {
-      assertNoPlaintextLeak(record);
-    } catch (error) {
-      return errorResponse(
-        error instanceof Error ? error.message : 'el registro lleva contenido en claro',
-        422,
-      );
-    }
-    if (record.conversationId !== body.data.conversationId) {
-      return errorResponse('un registro no pertenece a la conversacion indicada', 422);
-    }
-  }
-
-  // la conversacion se crea a nombre del usuario de la sesion: nadie puede
-  // subir a la conversacion de otro
-  await deps.repo.ensureVaultConversation(user.id, body.data.conversationId);
-  const stored = await deps.repo.insertVaultRecords(user.id, body.data.records);
-
-  // ni la conversacion ni nada del contenido; solo cuantos y de quien
-  deps.logger.info('registros de boveda almacenados', {
-    userId: user.id,
-    stored,
-    received: body.data.records.length,
-  });
-  return json({ stored, skipped: body.data.records.length - stored });
-});
-
-export const handleVaultConversations = withVaultAuth(async (request, deps, user) => {
-  const url = new URL(request.url);
-  // el vaultId ya no viaja: la autorizacion es el usuario de la sesion, y la
-  // consulta se hace siempre sobre lo suyo. Un cliente viejo puede seguir
-  // mandandolo; se ignora a proposito en vez de rechazarlo.
-  const query = vaultSyncPullQuerySchema.safeParse({
-    since: url.searchParams.get('since') ?? undefined,
-    limit: url.searchParams.get('limit') ?? undefined,
-  });
-  if (!query.success) return errorResponse('los parametros de sincronizacion no son validos', 422);
-
-  const rows = await deps.repo.listVaultConversations(user.id, query.data);
-  return json({
-    conversations: rows.map((row) => ({
-      conversationId: row.conversation_id,
-      turnCount: row.turn_count,
-      updatedAt: row.updated_at,
-    })),
-  });
-});
-
-export const handleVaultPull = withVaultAuth(async (request, deps, user, params) => {
-  const conversationId = params.conversationId;
-  if (conversationId === undefined) return errorResponse('falta la conversacion', 400);
-
-  const url = new URL(request.url);
-  const limitRaw = url.searchParams.get('limit');
-  const limit = limitRaw === null ? 200 : Math.min(500, Math.max(1, Number.parseInt(limitRaw, 10) || 200));
-
-  const rows = await deps.repo.listVaultRecords(user.id, conversationId, limit);
-  return json({ records: rows.map(toPrivateRecord) });
-});
+/**
+ * responde 426 a cualquier ruta de sincronizacion v1, ANTES de autenticar.
+ *
+ * La v1 nunca funciono (SEG-SYNC-001) y un Studio que la hable no sabe de dos
+ * versiones, de bases ni de lapidas: dejarle escribir mezclaria historias o
+ * resucitaria lo borrado. Antes de autenticar porque no hay nada que proteger
+ * con la sesion: la respuesta es la misma para todos y no toca la base.
+ */
+export async function handleVaultV1Closed(): Promise<Response> {
+  return json(
+    {
+      error:
+        'actualiza Luxy Studio: este servidor ya no admite la sincronizacion antigua ' +
+        'y lo de este equipo sigue a salvo',
+      protocol: VAULT_SYNC_PROTOCOL,
+    },
+    426,
+  );
+}
 
 // -----------------------------------------------------------------------------
 // medios: los metadatos van a la tabla, los bytes al almacen de objetos
 // -----------------------------------------------------------------------------
-
-/**
- * lista los medios del usuario.
- *
- * Devuelve los registros tal cual: metadatos cifrados y claves opacas. El
- * cliente decide cuales le faltan sin que el servidor sepa que hay dentro.
- */
-export const handleVaultMediaList = withVaultAuth(async (request, deps, user) => {
-  const conversationId = new URL(request.url).searchParams.get('conversationId');
-  const rows = await deps.repo.listVaultMedia(user.id, conversationId ?? undefined);
-  return json({ media: rows.map(toPrivateMedia) });
-});
 
 /**
  * sube los BYTES de un objeto.
@@ -346,21 +244,33 @@ export const handleVaultMediaUpload = withVaultAuth(async (request, deps, user, 
     return errorResponse('la clave del objeto no es valida', 422);
   }
 
+  // el tope del almacen de este despliegue, el mismo que anuncia capabilities
+  // y nunca mas de 90 MiB. Antes se miraban los 90 MiB del protocolo, y un
+  // archivo por encima del tope de Storage se leia entero en el Worker para
+  // que Storage lo rechazara despues (GW-R2-01)
+  const maxBytes = deps.config.VAULT_OBJECT_MAX_BYTES;
   const declared = Number(request.headers.get('Content-Length') ?? '0');
-  if (declared > VAULT_MAX_OBJECT_BYTES) {
+  if (declared > maxBytes) {
     return errorResponse('ese archivo es demasiado grande para sincronizarlo', 413);
   }
 
   const bytes = await request.arrayBuffer();
   if (bytes.byteLength === 0) return errorResponse('el archivo esta vacio', 422);
-  if (bytes.byteLength > VAULT_MAX_OBJECT_BYTES) {
+  if (bytes.byteLength > maxBytes) {
     return errorResponse('ese archivo es demasiado grande para sincronizarlo', 413);
   }
 
   try {
     await deps.objects.put(user.id, objectKey, bytes);
   } catch (error) {
-    if (error instanceof ObjectStoreError) return errorResponse(error.message, error.status);
+    if (error instanceof ObjectStoreError) {
+      // el almacen admite menos de lo configurado: se dice para ajustarlo. Solo
+      // el usuario, ni la clave ni el tamaño
+      if (error.status === 413) {
+        deps.logger.warn('el almacen rechazo un objeto de boveda por su tamaño', { userId: user.id });
+      }
+      return errorResponse(error.message, error.status);
+    }
     deps.logger.error('fallo guardando un objeto de boveda', describeError(error));
     return errorResponse('no se pudo guardar el archivo', 502);
   }
@@ -370,34 +280,12 @@ export const handleVaultMediaUpload = withVaultAuth(async (request, deps, user, 
   return json({ stored: true });
 });
 
-/** crea el registro de un medio cuyos bytes ya estan subidos */
-export const handleVaultMediaPush = withVaultAuth(async (request, deps, user) => {
-  const body = await readBody(request, vaultMediaPushRequestSchema);
-  if (!body.ok) return body.response;
-
-  try {
-    assertNoPlaintextLeak(body.data.media);
-  } catch (error) {
-    return errorResponse(
-      error instanceof Error ? error.message : 'el registro lleva contenido en claro',
-      422,
-    );
-  }
-
-  // el registro no puede existir sin sus bytes: al reves, la interfaz del otro
-  // equipo enseñaria un archivo que no se puede abrir
-  const present = await deps.objects
-    .get(user.id, body.data.media.objectKey)
-    .then(() => true)
-    .catch(() => false);
-  if (!present) return errorResponse('sube el archivo antes de registrarlo', 409);
-
-  await deps.repo.ensureVaultConversation(user.id, body.data.media.conversationId);
-  const stored = await deps.repo.insertVaultMedia(user.id, body.data.media);
-  return json({ stored, skipped: stored === 0 ? 1 : 0 });
-});
-
-/** descarga los bytes de un objeto propio */
+/**
+ * descarga los bytes de un objeto propio.
+ *
+ * Vale para el original y para la miniatura: la tabla autoriza los dos. Antes
+ * solo el original, y la miniatura que pide el otro equipo daba 404.
+ */
 export const handleVaultMediaDownload = withVaultAuth(async (_request, deps, user, params) => {
   const objectKey = params.objectKey;
   if (objectKey === undefined || !/^[0-9a-f]{32}$/.test(objectKey)) {
@@ -421,13 +309,6 @@ export const handleVaultMediaDownload = withVaultAuth(async (_request, deps, use
     deps.logger.error('fallo leyendo un objeto de boveda', describeError(error));
     return errorResponse('no se pudo leer el archivo', 502);
   }
-});
-
-export const handleVaultDelete = withVaultAuth(async (_request, deps, user, params) => {
-  const conversationId = params.conversationId;
-  if (conversationId === undefined) return errorResponse('falta la conversacion', 400);
-  const deleted = await deps.repo.deleteVaultConversation(user.id, conversationId);
-  return json({ deleted });
 });
 
 // -----------------------------------------------------------------------------

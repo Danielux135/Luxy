@@ -164,6 +164,10 @@ export const IPC_INVOKE = {
   /** lo que se mando de verdad, para poder mirarlo despues de que falle */
   vaultImageAttempts: 'luxy:vault:image:attempts',
   vaultSync: 'luxy:vault:sync',
+  /** cifras de cada conversacion de este equipo antes de sincronizar; no descifra nada */
+  vaultSyncDiagnose: 'luxy:vault:sync:diagnose',
+  /** renombra la boveda local sin cuenta para poder entrar en una; nunca borra */
+  vaultLocalSetAside: 'luxy:vault:local:set-aside',
 } as const;
 
 /** canales de notificacion (main -> renderer) */

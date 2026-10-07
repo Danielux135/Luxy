@@ -327,6 +327,14 @@ export function assertNoPlaintextLeak(payload: unknown): void {
  */
 export const vaultIdSchema = base64UrlSchema.length(43);
 
+// --- protocolo v1 -------------------------------------------------------------
+//
+// El gateway ya NO lo sirve: sus rutas responden 426 antes de autenticar
+// (D-110). Estos esquemas siguen aqui solo mientras Studio no pase a
+// `vault-sync-v2.ts` (SYNC-F1-06); despues se retiran. No construyas nada nuevo
+// sobre ellos: sus fechas no aceptan lo que devuelve Postgres y su tope de 200
+// no pagina (SEG-SYNC-001).
+
 export const vaultSyncPushRequestSchema = z.object({
   vaultId: vaultIdSchema.optional(),
   conversationId: z.string().uuid(),

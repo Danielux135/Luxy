@@ -53,6 +53,9 @@ import type {
   vaultMemoryDiagnosticsResultSchema,
   vaultAuxiliaryFailureSchema,
   VaultImageTurnState,
+  VaultSyncDiagnosis,
+  VaultSyncResult,
+  VaultSyncScope,
 } from '../shared/ipc.js';
 import type { z } from 'zod';
 
@@ -1055,16 +1058,27 @@ export interface VaultController {
   /** avatar descifrado como data URL; null si ese personaje no tiene */
   readCharacterAvatar: (characterId: string) => Promise<string | null>;
   syncing: boolean;
-  lastSync: {
-    uploaded: number;
-    downloaded: number;
-    mediaUploaded: number;
-    mediaDownloaded: number;
-    mediaSkipped: number;
-    /** con un envio en curso: se deja para la siguiente (revision del 28/09) */
-    conversationsDeferred: number;
-  } | null;
-  sync: () => Promise<void>;
+  /**
+   * la ultima pasada, entera: conversacion a conversacion, los medios y por que
+   * se paro si se paro. La pantalla la resume con `vault-sync-status.ts`
+   */
+  lastSync: VaultSyncResult | null;
+  /**
+   * desde esa pasada se ha escrito o borrado algo aqui: eso no esta en el
+   * servidor, y la pantalla no puede seguir diciendo que coincidia todo
+   * (STUDIO-R1-01). En F1 nada sincroniza solo
+   */
+  lastSyncChangedSince: boolean;
+  /** todo, o solo una conversacion (`SYNC-F1-08`) */
+  sync: (scope?: VaultSyncScope) => Promise<void>;
+  /** el diagnostico local, sin descifrar nada; `null` hasta pedirlo */
+  syncDiagnosis: VaultSyncDiagnosis | null;
+  diagnoseSync: () => Promise<void>;
+  /**
+   * aparta la boveda local sin cuenta para poder entrar en una: la renombra,
+   * nunca la borra. Devuelve si se hizo
+   */
+  setAsideLocalVault: () => Promise<boolean>;
   acknowledgeRecoveryKey: () => void;
   clearError: () => void;
 }
@@ -1219,6 +1233,15 @@ export function useVault(): VaultController {
   } | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [lastSync, setLastSync] = useState<VaultController['lastSync']>(null);
+  const [syncDiagnosis, setSyncDiagnosis] = useState<VaultSyncDiagnosis | null>(null);
+  // cuantas veces se ha escrito o borrado algo aqui. Un contador y no un
+  // booleano: un envio que acaba MIENTRAS sincroniza puede quedar fuera de esa
+  // pasada, y al llegar el resultado se compara con el de cuando empezo
+  const localChangesRef = useRef(0);
+  const [lastSyncChangedSince, setLastSyncChangedSince] = useState(false);
+  // la sincronizacion y el diagnostico que esten en vuelo al cerrar la boveda
+  // llegan DESPUES de la purga: se comparan con esto y se tiran
+  const syncEpochRef = useRef(0);
   const mounted = useRef(true);
 
   /**
@@ -1277,9 +1300,24 @@ export function useVault(): VaultController {
         setMemoryEpisodes(null);
         setMemoryExcluded([]);
       },
+      lastSync: () => {
+        syncEpochRef.current += 1;
+        setLastSync(null);
+        setLastSyncChangedSince(false);
+      },
+      syncDiagnosis: () => {
+        syncEpochRef.current += 1;
+        setSyncDiagnosis(null);
+      },
     }),
     [],
   );
+
+  /** se ha escrito o borrado algo en este ordenador: la ultima pasada ya no lo cuenta */
+  const noteLocalChange = useCallback((): void => {
+    localChangesRef.current += 1;
+    setLastSyncChangedSince(true);
+  }, []);
 
   const refresh = useCallback(async (): Promise<void> => {
     const result = await window.luxy.getVaultStatus();
@@ -2345,11 +2383,12 @@ export function useVault(): VaultController {
         setHint(result.hint);
         return;
       }
+      noteLocalChange();
       await reloadMedia();
     } finally {
       if (mounted.current) setAttaching(false);
     }
-  }, [openConversationId, reloadMedia]);
+  }, [openConversationId, reloadMedia, noteLocalChange]);
 
   /**
    * devuelve una data URL con los bytes descifrados, o null si el archivo es
@@ -2397,6 +2436,8 @@ export function useVault(): VaultController {
           setHint(result.hint);
           return false;
         }
+        // lo escrito aqui no esta en el servidor hasta la siguiente pasada
+        noteLocalChange();
         // una conversacion nueva cuyo primer mensaje se quedo sin respuesta ya no
         // existe: main retiro el turno y borro el archivo. Si la pantalla se
         // quedara con su id, el reenvio iria como conversacion YA EMPEZADA, sin
@@ -2474,24 +2515,32 @@ export function useVault(): VaultController {
         if (mounted.current) setSending(false);
       }
     },
-    [openConversationId, reloadConversations, reloadMedia],
+    [openConversationId, reloadConversations, reloadMedia, noteLocalChange],
   );
 
   const removeConversation = useCallback(
     async (conversationId: string): Promise<void> => {
       const result = await window.luxy.deleteVaultConversation(conversationId);
+      // tambien si fallo a medias: algo se pudo borrar ya, y la ultima pasada
+      // no lo cuenta
+      noteLocalChange();
       // un borrado que falla a medias deja en disco algo que Daniel mando
       // borrar —el resumen de lo que se dijo, lo apuntado, las escenas—, y
       // callarlo era lo peor de los dos: la conversacion desaparecia de la
       // lista y nadie decia que algo habia sobrevivido
-      if (!result.ok) setError(result.error);
+      if (!result.ok) {
+        setError(result.error);
+        // la pista dice que hacer: con la lista de borradas ilegible, por
+        // ejemplo, que no se ha borrado nada y por que (`SYNC-F1-05`)
+        setHint(result.hint);
+      }
       if (openConversationId === conversationId) {
         setOpenConversationId(null);
         setTurns([]);
       }
       await reloadConversations();
     },
-    [openConversationId, reloadConversations],
+    [openConversationId, reloadConversations, noteLocalChange],
   );
 
   /**
@@ -2531,6 +2580,7 @@ export function useVault(): VaultController {
             ? null
             : { amount: result.value.costCredits, unit: result.value.costUnit ?? 'creditos' },
         );
+        noteLocalChange();
         await reloadMedia();
         return true;
       } finally {
@@ -2542,7 +2592,7 @@ export function useVault(): VaultController {
         }
       }
     },
-    [openConversationId, reloadMedia],
+    [openConversationId, reloadMedia, noteLocalChange],
   );
 
   /**
@@ -2614,6 +2664,7 @@ export function useVault(): VaultController {
             ? null
             : { amount: result.value.costCredits, unit: result.value.costUnit ?? 'creditos' },
         );
+        noteLocalChange();
         await reloadMedia();
         return true;
       } finally {
@@ -2624,7 +2675,7 @@ export function useVault(): VaultController {
         }
       }
     },
-    [openConversationId, reloadMedia],
+    [openConversationId, reloadMedia, noteLocalChange],
   );
 
   /** dice que no. No se genera, no se cobra y el intento queda apuntado como descartado */
@@ -2980,32 +3031,75 @@ export function useVault(): VaultController {
     setCharacters(result.value.characters);
   }, []);
 
-  const sync = useCallback(async (): Promise<void> => {
-    setSyncing(true);
+  const sync = useCallback(
+    async (scope: VaultSyncScope = { mode: 'all' }): Promise<void> => {
+      setSyncing(true);
+      setError(null);
+      setHint(null);
+      const valid = purgeTicket(syncEpochRef);
+      const changesAtStart = localChangesRef.current;
+      try {
+        const result = await window.luxy.syncVault(scope);
+        // la boveda se cerro mientras tanto: lo que llega ya no se pinta
+        if (!valid()) return;
+        if (!result.ok) {
+          setError(result.error);
+          setHint(result.hint);
+          return;
+        }
+        // el resultado entero, tambien si se paro a mitad: la pantalla dice que
+        // se hizo y que no, y nunca «sincronizado» con fallos (`D-093`)
+        setLastSync(result.value);
+        // lo escrito mientras corria puede no haber entrado en esta pasada
+        setLastSyncChangedSince(localChangesRef.current !== changesAtStart);
+        // con la boveda cerrada a mitad no hay nada que releer
+        if (result.value.stopped === 'locked') return;
+        // lo descargado puede incluir conversaciones que aqui no existian
+        if (result.value.downloaded > 0 || result.value.media.downloaded > 0) {
+          await reloadConversations();
+          if (openConversationId !== null) await openConversation(openConversationId);
+        }
+      } finally {
+        if (mounted.current) setSyncing(false);
+      }
+    },
+    [reloadConversations, openConversation, openConversationId],
+  );
+
+  const diagnoseSync = useCallback(async (): Promise<void> => {
+    setError(null);
+    setHint(null);
+    const valid = purgeTicket(syncEpochRef);
+    const result = await window.luxy.diagnoseVaultSync();
+    if (!valid()) return;
+    if (!result.ok) {
+      setError(result.error);
+      setHint(result.hint);
+      return;
+    }
+    setSyncDiagnosis(result.value);
+  }, []);
+
+  const setAsideLocalVault = useCallback(async (): Promise<boolean> => {
+    setBusy(true);
     setError(null);
     setHint(null);
     try {
-      const result = await window.luxy.syncVault();
+      const result = await window.luxy.setAsideLocalVault();
       if (!result.ok) {
         setError(result.error);
         setHint(result.hint);
-        return;
+        return false;
       }
-      setLastSync({
-        uploaded: result.value.uploaded,
-        downloaded: result.value.downloaded,
-        mediaUploaded: result.value.mediaUploaded,
-        mediaDownloaded: result.value.mediaDownloaded,
-        mediaSkipped: result.value.mediaSkipped,
-        conversationsDeferred: result.value.conversationsDeferred,
-      });
-      // lo descargado puede incluir conversaciones que aqui no existian
-      await reloadConversations();
-      if (openConversationId !== null) await openConversation(openConversationId);
+      setHint(
+        `La bóveda local se ha apartado sin borrar nada (${result.value.vaultFile}${result.value.vaultDirectory === null ? '' : ` y ${result.value.vaultDirectory}`}). Ya puedes entrar en tu cuenta.`,
+      );
+      await refresh();
+      return true;
     } finally {
-      if (mounted.current) setSyncing(false);
+      if (mounted.current) setBusy(false);
     }
-  }, [reloadConversations, openConversation, openConversationId]);
+  }, [refresh]);
 
   // las tres que faltaban por estabilizar. El objeto que devuelve este hook es
   // nuevo en cada render —y hay uno cada 5 s por el latido—, asi que NADIE debe
@@ -3145,7 +3239,11 @@ export function useVault(): VaultController {
     createCharacter,
     syncing,
     lastSync,
+    lastSyncChangedSince,
     sync,
+    syncDiagnosis,
+    diagnoseSync,
+    setAsideLocalVault,
     acknowledgeRecoveryKey,
     clearError,
   };

@@ -11,20 +11,23 @@
 // El NOMBRE del archivo es el identificador de la conversacion, que es un uuid
 // aleatorio. Nunca el titulo: `%APPDATA%` no puede revelar de que hablas.
 import {
-  appendFileSync,
   closeSync,
   existsSync,
+  fstatSync,
   fsyncSync,
   mkdirSync,
   openSync,
   readFileSync,
+  readSync,
   readdirSync,
   renameSync,
   unlinkSync,
   writeFileSync,
+  writeSync,
 } from 'node:fs';
 import { join } from 'node:path';
 import {
+  VAULT_FACT_SEQUENCE_BASE,
   lastForeignSequence,
   privateRecordSchema,
   resolveConversationOwner,
@@ -77,6 +80,101 @@ function replaceFileAtomically(file: string, contents: string): void {
     closeSync(descriptor);
   }
   renameSync(temporary, file);
+}
+
+/**
+ * añade lineas al final del archivo y las fuerza a disco.
+ *
+ * Dos cosas que `appendFileSync` no hacia y que la sincronizacion necesita:
+ *
+ *  - si la ultima linea quedo a medias —un corte de luz en mitad de una
+ *    escritura—, lo nuevo se pegaba a ella y se perdian las DOS: la lectura
+ *    salta la linea que no parsea, y ya no habria forma de separarlas. Con el
+ *    salto delante, la rota se queda sola y lo nuevo se lee bien;
+ *  - el `fsync`: un turno que se da por guardado, o que la sincronizacion da por
+ *    bajado, tiene que estar en disco y no en una cache del sistema.
+ *
+ * Todo sincrono a proposito: quien llama comprueba justo antes, en el mismo
+ * bloque, que nadie mas esta escribiendo en esa conversacion.
+ */
+function appendLinesDurably(file: string, lines: readonly string[]): void {
+  if (lines.length === 0) return;
+  const descriptor = openSync(file, 'a+');
+  try {
+    const size = fstatSync(descriptor).size;
+    let prefix = '';
+    if (size > 0) {
+      const last = new Uint8Array(1);
+      readSync(descriptor, last, 0, 1, size - 1);
+      if (last[0] !== 0x0a) prefix = '\n';
+    }
+    writeSync(descriptor, `${prefix}${lines.join('\n')}\n`, null, 'utf8');
+    fsyncSync(descriptor);
+  } finally {
+    closeSync(descriptor);
+  }
+}
+
+/**
+ * lo que se sabe de un archivo de conversacion sin descifrar nada.
+ *
+ * Es el diagnostico previo a sincronizar (`SYNC-F1-04`): `appendTurn` numeraba
+ * con el numero de lineas, asi que un hueco —una linea rota, o un registro que
+ * nunca llego— hacia que el turno siguiente repitiera una secuencia ya usada.
+ * Una conversacion asi no puede subirse sin elegir cual de las dos vale, y eso
+ * no lo decide la sincronizacion.
+ */
+export interface ConversationIntegrity {
+  /** lineas con algo escrito */
+  lines: number;
+  /**
+   * lineas que no se pueden usar: no son JSON, no validan, dicen ser de otra
+   * conversacion o caen en el rango reservado a los hechos
+   */
+  unreadable: number;
+  /** copias exactas de un registro que ya estaba (misma secuencia y mismo recordId) */
+  duplicateLines: number;
+  /** secuencias ocupadas por mas de un recordId distinto */
+  duplicateSequences: number;
+  /** secuencias que faltan entre 0 y la mayor */
+  holes: number;
+  /** el archivo no acaba en salto de linea: la ultima quedo a medias */
+  partialTail: boolean;
+}
+
+/** un archivo leido linea a linea, con lo que vale y lo que no */
+interface ScannedConversation {
+  /** registros validos, de esta conversacion y fuera del rango reservado, sin copias exactas */
+  records: PrivateRecord[];
+  integrity: ConversationIntegrity;
+}
+
+/**
+ * por que no se pudo añadir un registro que llega del servidor.
+ *
+ * `occupied` es el que importa: esa secuencia ya la tiene aqui otro registro,
+ * asi que la conversacion esta en dos versiones y quien llama la congela. El
+ * resto son registros que no deberian haber llegado hasta aqui.
+ */
+export type RemoteAppendRefusal = 'foreign' | 'reserved' | 'occupied' | 'duplicate-record';
+
+export class RemoteAppendError extends VaultError {
+  constructor(
+    readonly reason: RemoteAppendRefusal,
+    readonly sequence: number,
+  ) {
+    super(
+      reason === 'occupied'
+        ? 'esa secuencia ya la tiene otro registro en este equipo'
+        : reason === 'foreign'
+          ? 'ha llegado un registro de otra conversacion'
+          : reason === 'reserved'
+            ? 'ha llegado un registro fuera del rango de los turnos'
+            : 'ha llegado un registro que ya esta en otra secuencia',
+      'no se ha escrito nada de ese lote; lo que habia sigue intacto',
+    );
+    this.name = 'RemoteAppendError';
+  }
 }
 
 export interface PrivateTurnView {
@@ -263,31 +361,177 @@ export class PrivateConversationStore {
     await openTurn(vault, record);
   }
 
-  /** guarda un registro ya sellado que viene de otro equipo */
-  appendRaw(conversationId: string, record: PrivateRecord): void {
-    mkdirSync(this.directory, { recursive: true });
-    appendFileSync(fileFor(this.directory, conversationId), `${JSON.stringify(record)}\n`, 'utf8');
+  /**
+   * el archivo linea a linea, sin descifrar nada.
+   *
+   * A diferencia de `readRecords`, que es para LEER y se salta en silencio lo que
+   * no entiende, esto cuenta cada cosa: es lo que mira la sincronizacion antes
+   * de subir y lo que enseña el diagnostico.
+   */
+  private scan(conversationId: string): ScannedConversation {
+    const file = fileFor(this.directory, conversationId);
+    const empty: ConversationIntegrity = {
+      lines: 0,
+      unreadable: 0,
+      duplicateLines: 0,
+      duplicateSequences: 0,
+      holes: 0,
+      partialTail: false,
+    };
+    if (!existsSync(file)) return { records: [], integrity: empty };
+
+    const text = readFileSync(file, 'utf8');
+    const integrity = { ...empty, partialTail: text.length > 0 && !text.endsWith('\n') };
+    const bySequence = new Map<number, Set<string>>();
+    const seen = new Set<string>();
+    const records: PrivateRecord[] = [];
+    for (const line of text.split('\n')) {
+      if (line.trim().length === 0) continue;
+      integrity.lines += 1;
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(line);
+      } catch {
+        integrity.unreadable += 1;
+        continue;
+      }
+      const record = privateRecordSchema.safeParse(parsed);
+      if (
+        !record.success ||
+        record.data.conversationId.toLowerCase() !== conversationId.toLowerCase() ||
+        record.data.sequence >= VAULT_FACT_SEQUENCE_BASE
+      ) {
+        integrity.unreadable += 1;
+        continue;
+      }
+      const identity = `${record.data.sequence}:${record.data.recordId}`;
+      if (seen.has(identity)) {
+        integrity.duplicateLines += 1;
+        continue;
+      }
+      seen.add(identity);
+      const ids = bySequence.get(record.data.sequence) ?? new Set<string>();
+      ids.add(record.data.recordId);
+      bySequence.set(record.data.sequence, ids);
+      records.push(record.data);
+    }
+
+    let max = -1;
+    for (const [sequence, ids] of bySequence) {
+      if (ids.size > 1) integrity.duplicateSequences += 1;
+      max = Math.max(max, sequence);
+    }
+    integrity.holes = max + 1 - bySequence.size;
+    return { records: records.sort((a, b) => a.sequence - b.sequence), integrity };
   }
 
-  /** añade un turno ya sellado. la boveda debe estar abierta */
+  /** el diagnostico de una conversacion: cifras, ni una palabra de dentro */
+  scanIntegrity(conversationId: string): ConversationIntegrity {
+    return this.scan(conversationId).integrity;
+  }
+
+  /**
+   * lo que puede viajar de una conversacion, con su diagnostico.
+   *
+   * Sin copias exactas, sin lineas rotas, sin registros de otra conversacion y
+   * sin nada del rango reservado. Si hay secuencias repetidas con distinto
+   * `recordId`, quien sincroniza no debe subir nada: el diagnostico lo dice.
+   */
+  syncView(conversationId: string): ScannedConversation {
+    return this.scan(conversationId);
+  }
+
+  /**
+   * guarda registros ya sellados que vienen del servidor (`SYNC-F1-04`).
+   *
+   * Lo comprueba todo ANTES de escribir nada, y o entra el lote entero o no
+   * entra ninguno: que sea de esta conversacion, que no caiga en el rango de los
+   * hechos, que su secuencia este libre aqui y que su `recordId` sea nuevo. Una
+   * secuencia ocupada por otro registro es una conversacion en dos versiones, y
+   * nada remoto pisa nada local (`D-093`).
+   *
+   * Sincrono de principio a fin: quien llama comprueba en el mismo bloque que
+   * la conversacion no esta ocupada ni borrada, y entre esa comprobacion y la
+   * escritura no puede colarse nadie.
+   *
+   * No abre nada: quien llama ya ha verificado cada registro con la boveda.
+   */
+  appendRemote(conversationId: string, records: readonly PrivateRecord[]): number {
+    if (records.length === 0) return 0;
+    const file = fileFor(this.directory, conversationId);
+    const current = this.scan(conversationId).records;
+    const sequences = new Set(current.map((record) => record.sequence));
+    const recordIds = new Set(current.map((record) => record.recordId));
+
+    const lines: string[] = [];
+    for (const candidate of records) {
+      const record = privateRecordSchema.parse(candidate);
+      if (record.conversationId.toLowerCase() !== conversationId.toLowerCase()) {
+        throw new RemoteAppendError('foreign', record.sequence);
+      }
+      if (record.sequence >= VAULT_FACT_SEQUENCE_BASE) {
+        throw new RemoteAppendError('reserved', record.sequence);
+      }
+      if (sequences.has(record.sequence)) throw new RemoteAppendError('occupied', record.sequence);
+      if (recordIds.has(record.recordId)) {
+        throw new RemoteAppendError('duplicate-record', record.sequence);
+      }
+      sequences.add(record.sequence);
+      recordIds.add(record.recordId);
+      lines.push(JSON.stringify(record));
+    }
+
+    mkdirSync(this.directory, { recursive: true });
+    appendLinesDurably(file, lines);
+    return lines.length;
+  }
+
+  /**
+   * añade un turno ya sellado. la boveda debe estar abierta.
+   *
+   * La secuencia es la mayor que haya mas uno, no el numero de lineas: con un
+   * hueco —una linea rota, o un turno que la sincronizacion aun no ha bajado—
+   * contar lineas repetia una secuencia ya usada, y esa conversacion quedaba en
+   * dos versiones dentro del propio archivo.
+   */
   async appendTurn(
     vault: VaultService,
     conversationId: string,
     turn: SealTurnInput['turn'],
     memory?: SealTurnInput['memory'],
   ): Promise<PrivateRecord> {
-    const existing = this.readRecords(conversationId);
+    const sequence = this.nextSequence(conversationId);
     const record = await sealTurn(vault, {
       conversationId,
-      sequence: existing.length,
+      sequence,
       turn,
       ...(memory === undefined ? {} : { memory }),
     });
 
+    // entre leer y escribir solo hay el sellado, y mientras dura un envio nadie
+    // mas escribe en esta conversacion (la sincronizacion la salta). Si aun asi
+    // cambio, es mejor fallar que dejar dos turnos con el mismo numero
+    if (this.nextSequence(conversationId) !== sequence) {
+      throw new VaultError(
+        'la conversacion cambio mientras se guardaba el turno',
+        'no se ha guardado; vuelve a enviarlo',
+      );
+    }
+
     mkdirSync(this.directory, { recursive: true });
     // una linea por turno: añadir no reescribe lo anterior
-    appendFileSync(fileFor(this.directory, conversationId), `${JSON.stringify(record)}\n`, 'utf8');
+    appendLinesDurably(fileFor(this.directory, conversationId), [JSON.stringify(record)]);
     return record;
+  }
+
+  private nextSequence(conversationId: string): number {
+    let max = -1;
+    for (const record of this.scan(conversationId).records) max = Math.max(max, record.sequence);
+    const next = max + 1;
+    if (next >= VAULT_FACT_SEQUENCE_BASE) {
+      throw new VaultError('esta conversacion ya no admite mas turnos');
+    }
+    return next;
   }
 
   /** descifra una conversacion entera. exige la boveda abierta */

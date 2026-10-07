@@ -84,6 +84,14 @@ export class MemoryPreferences {
     }
   }
 
+  /**
+   * olvida lo leido: la siguiente consulta vuelve al disco. Lo usa apartar la
+   * boveda local (`SYNC-F1-07`): lo que habia en memoria era de la apartada.
+   */
+  reload(): void {
+    this.cached = null;
+  }
+
   isExcluded(conversationId: string): boolean {
     return this.excluded().has(conversationId);
   }

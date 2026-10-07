@@ -46,20 +46,25 @@ import {
 } from './handlers/studio.js';
 import {
   handleVaultChangePassword,
-  handleVaultConversations,
-  handleVaultDelete,
   handleVaultLoginFinish,
   handleVaultLoginStart,
   handleVaultLogout,
   handleVaultMediaDownload,
-  handleVaultMediaList,
-  handleVaultMediaPush,
   handleVaultMediaUpload,
-  handleVaultPull,
-  handleVaultPush,
   handleVaultRegister,
+  handleVaultV1Closed,
 } from './handlers/vault.js';
-import { redact } from '@luxy/shared';
+import {
+  handleVaultV2Capabilities,
+  handleVaultV2ConversationList,
+  handleVaultV2Manifest,
+  handleVaultV2MediaList,
+  handleVaultV2MediaPush,
+  handleVaultV2Purge,
+  handleVaultV2RecordsFetch,
+  handleVaultV2RecordsPush,
+} from './handlers/vault-sync-v2.js';
+import { VAULT_SYNC_V2_PATHS, redact } from '@luxy/shared';
 
 type Deps = ApiDeps & WebhookDeps;
 
@@ -119,28 +124,47 @@ const router = new Router<Deps>()
   .post('/api/vault/password', (request, deps, params) =>
     handleVaultChangePassword(request, deps, params),
   )
-  // sincronizacion: autorizada por sesion de usuario
-  .post('/api/vault/records', (request, deps, params) => handleVaultPush(request, deps, params))
-  .get('/api/vault/conversations', (request, deps, params) =>
-    handleVaultConversations(request, deps, params),
+  // sincronizacion v1: cerrada con 426 ANTES de autenticar (D-110). Ningun
+  // Studio viejo puede escribir ni resucitar lo borrado con aquellas reglas
+  .post('/api/vault/records', () => handleVaultV1Closed())
+  .get('/api/vault/conversations', () => handleVaultV1Closed())
+  .get('/api/vault/conversations/:conversationId', () => handleVaultV1Closed())
+  .get('/api/vault/media', () => handleVaultV1Closed())
+  .post('/api/vault/media', () => handleVaultV1Closed())
+  .post('/api/vault/conversations/:conversationId/delete', () => handleVaultV1Closed())
+  // sincronizacion v2: autorizada por sesion de usuario. Los ids van en el
+  // cuerpo, nunca en la URL, para que no queden en registros de acceso
+  .get(VAULT_SYNC_V2_PATHS.capabilities, (request, deps, params) =>
+    handleVaultV2Capabilities(request, deps, params),
   )
-  .get('/api/vault/conversations/:conversationId', (request, deps, params) =>
-    handleVaultPull(request, deps, params),
+  .post(VAULT_SYNC_V2_PATHS.conversationsList, (request, deps, params) =>
+    handleVaultV2ConversationList(request, deps, params),
   )
-  .get('/api/vault/media', (request, deps, params) =>
-    handleVaultMediaList(request, deps, params),
+  .post(VAULT_SYNC_V2_PATHS.manifest, (request, deps, params) =>
+    handleVaultV2Manifest(request, deps, params),
   )
-  .post('/api/vault/media', (request, deps, params) =>
-    handleVaultMediaPush(request, deps, params),
+  .post(VAULT_SYNC_V2_PATHS.recordsFetch, (request, deps, params) =>
+    handleVaultV2RecordsFetch(request, deps, params),
   )
+  .post(VAULT_SYNC_V2_PATHS.recordsPush, (request, deps, params) =>
+    handleVaultV2RecordsPush(request, deps, params),
+  )
+  .post(VAULT_SYNC_V2_PATHS.mediaList, (request, deps, params) =>
+    handleVaultV2MediaList(request, deps, params),
+  )
+  .post(VAULT_SYNC_V2_PATHS.mediaPush, (request, deps, params) =>
+    handleVaultV2MediaPush(request, deps, params),
+  )
+  .post(VAULT_SYNC_V2_PATHS.purge, (request, deps, params) =>
+    handleVaultV2Purge(request, deps, params),
+  )
+  // los bytes de los medios: siguen igual. La descarga autoriza el original
+  // y la miniatura
   .put('/api/vault/media/objects/:objectKey', (request, deps, params) =>
     handleVaultMediaUpload(request, deps, params),
   )
   .get('/api/vault/media/objects/:objectKey', (request, deps, params) =>
     handleVaultMediaDownload(request, deps, params),
-  )
-  .post('/api/vault/conversations/:conversationId/delete', (request, deps, params) =>
-    handleVaultDelete(request, deps, params),
   )
   .post('/api/studio/jobs/:jobId/action', (request, deps, params) =>
     handleStudioJobAction(request, deps, params),

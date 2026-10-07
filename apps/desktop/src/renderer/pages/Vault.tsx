@@ -30,6 +30,14 @@ import {
 } from '../vault-recap-row.js';
 import { describeKudosBreakdown } from '../vault-kudos-breakdown.js';
 import { vaultNoticeFor } from '../vault-notice.js';
+import {
+  CAPTION_DOES_NOT_TRAVEL,
+  DELETE_KEEPS_SERVER_COPY,
+  NOT_TRAVELING_YET,
+  summarizeDiagnosis,
+  summarizeSync,
+} from '../vault-sync-status.js';
+import { LOCAL_VAULT_CONFLICT } from '../../shared/vault-local-conflict.js';
 import { useVaultPresence } from '../vault-presence.js';
 import {
   RECENT_MEMORIES_CHECKBOX,
@@ -875,6 +883,12 @@ function ConversationPanel({
               >
                 Borrar conversación
               </button>
+            )}
+            {/* hasta que haya papelera (F2), borrar no llega al servidor: la
+                copia que se hubiera sincronizado se queda allí, y esta pantalla
+                no puede decir que se borró de todas partes */}
+            {vault.openConversationId !== null && vault.status.account.email !== null && (
+              <p className="field__hint">{DELETE_KEEPS_SERVER_COPY}</p>
             )}
           </div>
         </>
@@ -4472,6 +4486,19 @@ function AccountPanel({ vault }: { vault: VaultController }): JSX.Element {
 
       {vault.error !== null && <Notice tone="fault">{vault.error}</Notice>}
       {vault.hint !== null && <Notice tone="idle">{vault.hint}</Notice>}
+      {/* la salida que ofrece la negativa a pisar una boveda local sin cuenta
+          (`SYNC-F1-07`): renombrarla, nunca borrarla */}
+      {vault.error === LOCAL_VAULT_CONFLICT.message && (
+        <div className="row">
+          <button
+            className="btn"
+            disabled={vault.busy}
+            onClick={() => void vault.setAsideLocalVault()}
+          >
+            Apartar la bóveda local
+          </button>
+        </div>
+      )}
 
       <div className="row">
         <button className="btn btn--primary" disabled={!canSubmit} onClick={submit}>
@@ -4783,9 +4810,32 @@ function UnlockedPanel({ vault }: { vault: VaultController }): JSX.Element {
                   ? undefined
                   : 'Sincronizar necesita la sesión de tu cuenta'
               }
-              onClick={() => void vault.sync()}
+              onClick={() => void vault.sync({ mode: 'all' })}
             >
-              {vault.syncing ? 'Sincronizando…' : 'Sincronizar'}
+              {vault.syncing ? 'Sincronizando…' : 'Sincronizar todo'}
+            </button>
+            {/* la primera prueba en vivo se hace con una conversación desechable:
+                solo esa sube, y se puede repetir para ver que la segunda vez no
+                sube nada */}
+            <button
+              className="btn btn--quiet"
+              disabled={
+                vault.syncing ||
+                vault.busy ||
+                !vault.status.account.signedIn ||
+                vault.openConversationId === null
+              }
+              title={
+                vault.openConversationId === null
+                  ? 'Abre una conversación para sincronizar solo esa'
+                  : undefined
+              }
+              onClick={() => {
+                const conversationId = vault.openConversationId;
+                if (conversationId !== null) void vault.sync({ mode: 'conversation', conversationId });
+              }}
+            >
+              Solo esta conversación
             </button>
             {/* «Cerrar ahora» no decía QUÉ se cierra, y quien busca la salida
                 de la bóveda no lo reconocía como tal */}
@@ -4838,31 +4888,7 @@ function UnlockedPanel({ vault }: { vault: VaultController }): JSX.Element {
             con él— y no se repite aquí */}
         <VaultNotice vault={vault} slots={null} />
 
-        {vault.lastSync !== null && (
-          <>
-            <p className="field__hint">
-              Última sincronización: {vault.lastSync.uploaded} turnos subidos,{' '}
-              {vault.lastSync.downloaded} descargados; {vault.lastSync.mediaUploaded}{' '}
-              archivos subidos, {vault.lastSync.mediaDownloaded} descargados. Lo
-              que viaja va cifrado; el servidor no puede leerlo.
-            </p>
-            {vault.lastSync.mediaSkipped > 0 && (
-              <Notice tone="warn">
-                {vault.lastSync.mediaSkipped} archivo(s) son demasiado grandes
-                para sincronizarlos y se quedan en el equipo donde se crearon.
-                El resto sí ha viajado.
-              </Notice>
-            )}
-            {vault.lastSync.conversationsDeferred > 0 && (
-              <p className="field__hint">
-                La conversación a la que se estaba contestando no se ha
-                sincronizado: su último mensaje aún podía retirarse. Irá la próxima
-                vez que pulses «Sincronizar».
-              </p>
-            )}
-          </>
-        )}
-
+        <SyncReport vault={vault} />
       </Panel>
 
       <ImageProvidersPanel vault={vault} />
@@ -4938,6 +4964,102 @@ function UnlockedPanel({ vault }: { vault: VaultController }): JSX.Element {
           </div>
         )}
       </Panel>
+    </>
+  );
+}
+
+/**
+ * lo que dijo la ultima sincronizacion y el diagnostico local (`SYNC-F1-08`).
+ *
+ * Todo el texto sale de `vault-sync-status.ts`, que es donde se fija la regla
+ * de `D-093`: «sincronizados» solo cuando los turnos y archivos de aqui estan
+ * en el servidor, y siempre junto a lo que todavia no viaja. Aqui solo se
+ * pinta, con el titulo de cada conversacion que la pantalla ya tiene descifrado.
+ */
+function SyncReport({ vault }: { vault: VaultController }): JSX.Element {
+  const titles = useMemo(
+    () => new Map(vault.conversations.map((entry) => [entry.conversationId, entry.title])),
+    [vault.conversations],
+  );
+  const titleOf = (conversationId: string): string | null => titles.get(conversationId) ?? null;
+  const diagnosis =
+    vault.syncDiagnosis === null ? null : summarizeDiagnosis(vault.syncDiagnosis, titleOf);
+  // en pasado y con su hora, y diciendo si desde entonces se escribio algo
+  // aqui: en F1 nada sincroniza solo (STUDIO-R1-01)
+  const summary =
+    vault.lastSync === null
+      ? null
+      : summarizeSync(vault.lastSync, titleOf, { changedSince: vault.lastSyncChangedSince });
+
+  return (
+    <>
+      <div className="row">
+        <button
+          className="btn btn--quiet"
+          disabled={vault.syncing}
+          onClick={() => void vault.diagnoseSync()}
+        >
+          Diagnóstico local
+        </button>
+      </div>
+
+      {diagnosis !== null && (
+        <>
+          <Notice tone={diagnosis.headline.tone}>{diagnosis.headline.text}</Notice>
+          {diagnosis.lines.map((line, index) =>
+            line.tone === 'idle' ? (
+              <p key={index} className="field__hint">
+                {line.text}
+              </p>
+            ) : (
+              <Notice key={index} tone={line.tone}>
+                {line.text}
+              </Notice>
+            ),
+          )}
+        </>
+      )}
+
+      {summary !== null && (
+        <>
+          <Notice tone={summary.headline.tone}>{summary.headline.text}</Notice>
+          {summary.lines.map((line, index) =>
+            line.tone === 'idle' ? (
+              <p key={index} className="field__hint">
+                {line.text}
+              </p>
+            ) : (
+              <Notice key={index} tone={line.tone}>
+                {line.text}
+              </Notice>
+            ),
+          )}
+          {summary.conversations.length > 0 && (
+            <details>
+              <summary>
+                Conversación a conversación ({summary.conversations.length})
+              </summary>
+              <ul className="vault-sync-list">
+                {summary.conversations.map((row) => (
+                  <li key={row.conversationId}>
+                    <Tag tone={row.tone}>{row.label}</Tag> <strong>{row.title}</strong>
+                    {' · '}
+                    {row.counts}
+                    {row.detail !== null && <div className="field__hint">{row.detail}</div>}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+        </>
+      )}
+
+      <p className="field__hint">
+        En esta versión solo sincroniza este botón: nada se copia solo. {CAPTION_DOES_NOT_TRAVEL}
+        {/* con un resultado ya va en sus lineas; sin el, antes de sincronizar,
+            tambien se dice lo que no viaja (STUDIO-R2-01) */}
+        {summary === null && ` ${NOT_TRAVELING_YET}`}
+      </p>
     </>
   );
 }

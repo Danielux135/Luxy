@@ -126,6 +126,14 @@ describe('la purga del cierre de la boveda', () => {
     }
   });
 
+  it('y el resultado de la sincronizacion y el diagnostico (STUDIO-R1-01)', () => {
+    // se quedaban toda la sesion: tras cerrar, o tras salir y entrar con otra
+    // cuenta, seguia el resumen de la boveda anterior, con sus filas y un
+    // «coincide» que ya no era verdad
+    expect(DECRYPTED_RENDERER_STATE).toContain('lastSync');
+    expect(DECRYPTED_RENDERER_STATE).toContain('syncDiagnosis');
+  });
+
   it('ninguna clave repetida: una purga que se llama dos veces tapa un olvido', () => {
     expect(new Set(DECRYPTED_RENDERER_STATE).size).toBe(DECRYPTED_RENDERER_STATE.length);
   });

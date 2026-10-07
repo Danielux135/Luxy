@@ -38,6 +38,9 @@ import {
 } from './vault/conversation-owner-store.js';
 import { RecapStore, recapFilePath } from './vault/recap-store.js';
 import { MemoryRelinkStore, memoryRelinkFilePath } from './vault/memory-relink-store.js';
+import { SyncStateStore, syncStateFilePath } from './vault/sync-state-store.js';
+import { SyncDeletedStore, syncDeletedFilePath } from './vault/sync-deleted-store.js';
+import { SyncAnchorStore, syncAnchorFilePath } from './vault/sync-anchor-store.js';
 import { ImageAttemptStore, imageAttemptsDirectory } from './vault/image-attempt-store.js';
 import { PrivateMediaStore, mediaIndexDirectory } from './vault/media-store.js';
 import { VaultCharacterStore, charactersFilePath } from './vault/character-store.js';
@@ -418,6 +421,17 @@ async function bootstrap(): Promise<void> {
     recaps,
     imageAttempts,
     privateMedia,
+    // lo que la sincronizacion guarda de este equipo (`SYNC-F1-05`): el estado
+    // sellado y las lapidas sin sellar. Sin esto no hay lapida al borrar ni
+    // guardia de replica, asi que va siempre (`index-wiring.test.ts`)
+    syncLedger: {
+      state: new SyncStateStore(syncStateFilePath(luxyConfigDir()), {
+        onReset: () => log('estado de la sincronizacion ilegible: se empieza de cero'),
+      }),
+      deleted: new SyncDeletedStore(syncDeletedFilePath(luxyConfigDir())),
+      // el papel fuera del estado sellado: la replica no se rebaja (F1-R1-01)
+      anchor: new SyncAnchorStore(syncAnchorFilePath(luxyConfigDir())),
+    },
     logsDirectory: logsDirectory(),
     artifactsDirectory: artifactsDirectory(),
     worktreesDirectory: worktreesDirectory(),

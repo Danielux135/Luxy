@@ -1,13 +1,35 @@
-import { describe, it, expect } from 'vitest';
+import { afterEach, beforeEach, describe, it, expect } from 'vitest';
 import {
-  handleVaultConversations,
-  handleVaultDelete,
   handleVaultLoginFinish,
   handleVaultLoginStart,
-  handleVaultPull,
-  handleVaultPush,
   handleVaultRegister,
+  handleVaultV1Closed,
 } from './vault.js';
+import {
+  handleVaultV2Capabilities,
+  handleVaultV2ConversationList,
+  handleVaultV2Manifest,
+  handleVaultV2MediaList,
+  handleVaultV2MediaPush,
+  handleVaultV2Purge,
+  handleVaultV2RecordsFetch,
+  handleVaultV2RecordsPush,
+} from './vault-sync-v2.js';
+import worker from '../index.js';
+import { SupabaseClient } from '../supabase.js';
+import { ObjectStoreError, VaultObjectStore } from '../object-store.js';
+import {
+  VAULT_SESSION_RENEW_BELOW_MS,
+  VAULT_SESSION_TTL_MS,
+  authenticateVaultUser,
+} from '../vault-auth.js';
+import { AuthError } from '../auth.js';
+import {
+  FakeSupabase,
+  fakeEnv,
+  installFakeFetch,
+  seedVaultAccount,
+} from '../fake-supabase.fixture.js';
 
 const VAULT_ID = 'A'.repeat(43);
 const CONVERSATION = 'ad6a9bf6-c69f-4eab-9624-f405b78bdda5';
@@ -32,17 +54,14 @@ const record = (sequence = 0) => ({
 /**
  * ALCANCE DE ESTAS PRUEBAS, para que nadie las lea como mas de lo que son.
  *
- * Los cuatro manejadores estan envueltos en `withMachineAuth`, que consulta el
- * token contra Supabase. Conducirlos de extremo a extremo exigiria un cliente
- * falso completo, y eso ya lo cubren las pruebas de autenticacion.
+ * La primera parte verifica el CONTRATO de las cuentas y los esquemas que
+ * siguen en `@luxy/shared`. La segunda (SYNC-F1-02) conduce el Worker entero
+ * contra `FakeSupabase`, un PostgREST y un Storage en memoria que imitan lo que
+ * hacen los de verdad: fechas con «+00:00», INSERT atomico con 409 y un 400
+ * con statusCode "404" para un objeto que no existe.
  *
- * Aqui se verifica el CONTRATO: que un lote se acota, que un identificador de
- * boveda mal formado se rechaza, que el guardian de texto en claro hace su
- * trabajo, y que la respuesta de listado no tiene donde meter un titulo.
- *
- * Lo que NO se verifica y sigue pendiente de una prueba real contra Postgres:
- * que la idempotencia por (vault_id, conversation_id, sequence) funcione de
- * verdad, y que el borrado en cascada se lleve turnos y medios.
+ * Sigue sin verificarse contra un Postgres real: no hay Supabase de pruebas
+ * (LA-015). La sincronizacion v2 se prueba en `vault-sync-v2.test.ts`.
  */
 
 describe('cuentas', () => {
@@ -176,9 +195,24 @@ describe('cuentas', () => {
 describe('contrato de subida', () => {
   it('los manejadores de sincronizacion existen y estan protegidos', () => {
     // van envueltos en withVaultAuth: sin sesion valida no se llega al cuerpo
-    for (const handler of [handleVaultPush, handleVaultPull, handleVaultConversations, handleVaultDelete]) {
+    for (const handler of [
+      handleVaultV2Capabilities,
+      handleVaultV2ConversationList,
+      handleVaultV2Manifest,
+      handleVaultV2RecordsFetch,
+      handleVaultV2RecordsPush,
+      handleVaultV2MediaList,
+      handleVaultV2MediaPush,
+      handleVaultV2Purge,
+    ]) {
       expect(typeof handler).toBe('function');
     }
+  });
+
+  it('la v1 responde 426 sin mirar nada', async () => {
+    const response = await handleVaultV1Closed();
+    expect(response.status).toBe(426);
+    expect(((await response.json()) as { protocol: number }).protocol).toBe(2);
   });
 
   it('un registro valido tiene solo campos cifrados o de metadato', () => {
@@ -287,5 +321,194 @@ describe('lo que se registra', () => {
       ],
     });
     expect(JSON.stringify(parsed)).not.toContain('un titulo');
+  });
+});
+
+// -----------------------------------------------------------------------------
+// SYNC-F1-02: correcciones de base, con el Worker entero contra FakeSupabase
+// -----------------------------------------------------------------------------
+
+const USER = '11111111-1111-4111-8111-111111111111';
+const TOKEN = 'sesion-de-prueba-del-usuario-uno';
+const DIA = 24 * 60 * 60 * 1000;
+const ORIGINAL = 'a'.repeat(32);
+const MINIATURA = 'b'.repeat(32);
+
+describe('SYNC-F1-02 con el Worker entero', () => {
+  let fake: FakeSupabase;
+  let restore: () => void;
+
+  beforeEach(async () => {
+    fake = new FakeSupabase();
+    restore = installFakeFetch(fake);
+    await seedVaultAccount(fake, {
+      userId: USER,
+      token: TOKEN,
+      expiresAt: new Date(Date.now() + 25 * DIA).toISOString(),
+    });
+  });
+
+  afterEach(() => restore());
+
+  const get = (path: string, token: string | null = TOKEN) =>
+    worker.fetch(
+      new Request(`https://gateway.test${path}`, {
+        headers: token === null ? {} : { Authorization: `Bearer ${token}` },
+      }),
+      fakeEnv(fake),
+      {} as never,
+    );
+
+  it('una miniatura se puede descargar, y la clave de nadie no', async () => {
+    fake.seed('vault_conversations', [{ conversation_id: CONVERSATION, owner_user_id: USER }]);
+    fake.seed('vault_media', [
+      {
+        media_id: '33333333-3333-4333-8333-333333333333',
+        owner_user_id: USER,
+        conversation_id: CONVERSATION,
+        object_key: ORIGINAL,
+        byte_size: 3,
+        content: { ...envelope, purpose: 'vault.media' },
+        thumbnail_object_key: MINIATURA,
+      },
+    ]);
+    fake.objects.set(`${USER}/${ORIGINAL}`, new Uint8Array([1, 2, 3]));
+    fake.objects.set(`${USER}/${MINIATURA}`, new Uint8Array([9, 8]));
+
+    const miniatura = await get(`/api/vault/media/objects/${MINIATURA}`);
+    expect(miniatura.status).toBe(200);
+    expect([...new Uint8Array(await miniatura.arrayBuffer())]).toEqual([9, 8]);
+    expect((await get(`/api/vault/media/objects/${ORIGINAL}`)).status).toBe(200);
+    expect((await get(`/api/vault/media/objects/${'c'.repeat(32)}`)).status).toBe(404);
+  });
+
+  it('capabilities devuelve la caducidad en forma canonica', async () => {
+    const antes = Date.now();
+    const response = await get('/api/vault/v2/capabilities');
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { protocol: number; facts: boolean; sessionExpiresAt: string };
+    expect(body.protocol).toBe(2);
+    expect(body.facts).toBe(false);
+    // le quedaban 25 dias: no se toca, pero sale con Z aunque Postgres diga +00:00
+    expect(body.sessionExpiresAt).toBe(new Date(body.sessionExpiresAt).toISOString());
+    expect(Date.parse(body.sessionExpiresAt)).toBeLessThan(antes + 26 * DIA);
+    expect(String(fake.rows('vault_sessions')[0]!.expires_at).endsWith('+00:00')).toBe(true);
+  });
+});
+
+describe('SYNC-F1-02: la sesion se renueva al usarla', () => {
+  let fake: FakeSupabase;
+  let restore: () => void;
+  const ahora = Date.parse('2026-10-07T08:00:00.000Z');
+
+  beforeEach(() => {
+    fake = new FakeSupabase();
+    restore = installFakeFetch(fake);
+  });
+
+  afterEach(() => restore());
+
+  const autenticar = (token: string) =>
+    authenticateVaultUser(
+      new Request('https://gateway.test/x', { headers: { Authorization: `Bearer ${token}` } }),
+      new SupabaseClient({ SUPABASE_URL: fake.baseUrl, SUPABASE_SERVICE_ROLE_KEY: fake.serviceKey }),
+      ahora,
+    );
+
+  it('con menos de 15 dias por delante pasa a ahora + 30 dias', async () => {
+    await seedVaultAccount(fake, { userId: USER, token: TOKEN, expiresAt: new Date(ahora + 10 * DIA).toISOString() });
+    const user = await autenticar(TOKEN);
+    expect(user.sessionRenewal).toBe('renewed');
+    expect(user.sessionExpiresAt).toBe(new Date(ahora + VAULT_SESSION_TTL_MS).toISOString());
+    expect(Date.parse(String(fake.rows('vault_sessions')[0]!.expires_at))).toBe(ahora + VAULT_SESSION_TTL_MS);
+  });
+
+  it('con 15 dias o mas no se toca', async () => {
+    const caducidad = new Date(ahora + VAULT_SESSION_RENEW_BELOW_MS + 1000).toISOString();
+    await seedVaultAccount(fake, { userId: USER, token: TOKEN, expiresAt: caducidad });
+    const user = await autenticar(TOKEN);
+    expect(user.sessionRenewal).toBe('not-needed');
+    expect(user.sessionExpiresAt).toBe(caducidad);
+    expect(fake.log.filter((info) => info.method === 'PATCH')).toHaveLength(0);
+  });
+
+  it('una sesion caducada no se renueva', async () => {
+    await seedVaultAccount(fake, { userId: USER, token: TOKEN, expiresAt: new Date(ahora - 1000).toISOString() });
+    await expect(autenticar(TOKEN)).rejects.toBeInstanceOf(AuthError);
+    expect(fake.log.filter((info) => info.method === 'PATCH')).toHaveLength(0);
+  });
+
+  it('una sesion cerrada mientras tanto no gana dias', async () => {
+    await seedVaultAccount(fake, { userId: USER, token: TOKEN, expiresAt: new Date(ahora + 2 * DIA).toISOString() });
+    // el PATCH filtra revoked_at is null: si otro cierre llega antes, no casa
+    const sesion = fake.tables.get('vault_sessions')![0]!;
+    const original = fake.fetch;
+    let cerrada = false;
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (!cerrada && init?.method === 'PATCH') {
+        cerrada = true;
+        sesion.revoked_at = ahora * 1000;
+      }
+      return original(input, init);
+    }) as typeof fetch;
+    await expect(autenticar(TOKEN)).rejects.toBeInstanceOf(AuthError);
+    expect(Date.parse(String(fake.rows('vault_sessions')[0]!.expires_at))).toBe(ahora + 2 * DIA);
+  });
+
+  it('si la renovacion falla, la peticion sigue con la caducidad de antes', async () => {
+    const caducidad = new Date(ahora + 3 * DIA).toISOString();
+    await seedVaultAccount(fake, { userId: USER, token: TOKEN, expiresAt: caducidad });
+    fake.failNext((info) => info.method === 'PATCH', 500, '{"message":"caido"}');
+    const user = await autenticar(TOKEN);
+    expect(user.sessionRenewal).toBe('failed');
+    expect(user.sessionExpiresAt).toBe(caducidad);
+  });
+});
+
+describe('SYNC-F1-02: el almacen de objetos', () => {
+  let fake: FakeSupabase;
+  let restore: () => void;
+  let store: VaultObjectStore;
+
+  beforeEach(() => {
+    fake = new FakeSupabase();
+    restore = installFakeFetch(fake);
+    store = new VaultObjectStore({ SUPABASE_URL: fake.baseUrl, SUPABASE_SERVICE_ROLE_KEY: fake.serviceKey });
+  });
+
+  afterEach(() => restore());
+
+  it('exists() no lee el cuerpo del objeto', async () => {
+    fake.objects.set(`${USER}/${ORIGINAL}`, new Uint8Array(1024));
+    expect(await store.exists(USER, ORIGINAL)).toBe(true);
+    // ni un byte leido: el cuerpo se cancela
+    expect(fake.objectBodyReads).toBe(0);
+    expect(fake.objectBodyCancels).toBe(1);
+  });
+
+  it('exists() entiende los dos «no existe» de Storage', async () => {
+    fake.missingObjectStatus = 400;
+    expect(await store.exists(USER, ORIGINAL)).toBe(false);
+    fake.missingObjectStatus = 404;
+    expect(await store.exists(USER, ORIGINAL)).toBe(false);
+  });
+
+  it('exists() no confunde una averia con «no existe»', async () => {
+    fake.failNext((info) => info.kind === 'storage', 500, 'caido');
+    await expect(store.exists(USER, ORIGINAL)).rejects.toBeInstanceOf(ObjectStoreError);
+  });
+
+  it('delete() dice si lo borro, y una averia se propaga', async () => {
+    fake.objects.set(`${USER}/${ORIGINAL}`, new Uint8Array(4));
+    expect(await store.delete(USER, ORIGINAL)).toBe(true);
+    expect(fake.objects.has(`${USER}/${ORIGINAL}`)).toBe(false);
+    expect(await store.delete(USER, ORIGINAL)).toBe(false);
+    fake.failNext((info) => info.kind === 'storage', 503, 'caido');
+    await expect(store.delete(USER, ORIGINAL)).rejects.toBeInstanceOf(ObjectStoreError);
+  });
+
+  it('get() de un objeto que no existe es un 404, no una averia', async () => {
+    fake.missingObjectStatus = 400;
+    await expect(store.get(USER, ORIGINAL)).rejects.toMatchObject({ status: 404 });
   });
 });

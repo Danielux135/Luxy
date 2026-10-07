@@ -31,7 +31,7 @@ import {
   type AccountClientDeps,
   type AccountLoginMethod,
 } from './account-client.js';
-import { VaultError, type VaultService } from './vault-service.js';
+import { LOCAL_VAULT_CONFLICT, VaultError, type VaultService } from './vault-service.js';
 
 /** lo que se puede contar al renderer sobre la sesion. Nunca el token */
 export interface AccountStatus {
@@ -141,6 +141,28 @@ export class VaultAccountManager {
     this.sessions.delete();
   }
 
+  /**
+   * apunta la caducidad que devuelve el gateway al renovar la sesion
+   * (`capabilities`, `SYNC-F1-07`).
+   *
+   * El servidor alarga una sesion que se usa (le quedan menos de 15 dias: pasa
+   * a 30), pero aqui seguia contando desde que se entro, y Studio la daba por
+   * caducada y pedia entrar otra vez aunque el servidor la hubiera renovado.
+   *
+   * Solo vale para la sesion con la que se hizo la peticion —si entretanto se
+   * entro de nuevo, esa caducidad es de otra—, y solo hacia delante: una
+   * respuesta que llegue tarde no la acorta. Si el servidor la cerro, el 401
+   * siguiente la olvida igual.
+   */
+  renewSessionExpiry(sessionToken: string, expiresAt: string): void {
+    const live = this.liveSession();
+    if (live === null || live.sessionToken !== sessionToken) return;
+    const next = Date.parse(expiresAt);
+    if (!Number.isFinite(next) || next <= Date.parse(live.expiresAt)) return;
+    this.session = { ...live, expiresAt: new Date(next).toISOString() };
+    this.sessions.set(JSON.stringify(this.session));
+  }
+
   // ---------------------------------------------------------------------------
   // registro, entrada y salida
   // ---------------------------------------------------------------------------
@@ -161,6 +183,11 @@ export class VaultAccountManager {
         'este equipo ya guarda la boveda de una cuenta',
         'sal de esa cuenta y borra su boveda de este equipo antes de crear otra',
       );
+    }
+    // una cuenta nueva trae una llave nueva: sobre una boveda local con
+    // contenido la dejaria ilegible. Se mira ANTES de crear nada en el servidor
+    if (this.vault.hasUnlinkedLocalContent()) {
+      throw new VaultError(LOCAL_VAULT_CONFLICT.message, LOCAL_VAULT_CONFLICT.hint);
     }
     const { session, recoveryKey } = await registerAccount(
       this.deps(),
@@ -212,6 +239,8 @@ export class VaultAccountManager {
         masterKey: session.masterKey,
         ...(method === 'password' ? { password: secret } : { recoveryKey: secret }),
         account: { email: address, vaultId: session.vaultId },
+        // la cuenta ya existia: con la carpeta vacia, este equipo es una replica
+        joiningExistingAccount: true,
       });
     } catch (error) {
       wipe(session.masterKey);

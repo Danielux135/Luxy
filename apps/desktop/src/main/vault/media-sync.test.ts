@@ -1,26 +1,34 @@
-// pruebas de la sincronizacion de imagenes y videos.
+// pruebas de la sincronizacion de imagenes y videos, protocolo v2 (SYNC-F1-06).
 //
-// Sin red y sin Supabase: el gateway es un objeto con memoria que se comporta
-// como el real en lo que importa aqui —rechaza un registro cuyos bytes no estan
-// subidos, y separa lo de cada equipo.
+// Contra el gateway DE VERDAD y su Supabase falso (`sync-gateway.fixture.ts`):
+// el alta de un medio exige sus bytes y su conversacion, la lista va por paginas
+// y la descarga la autoriza la tabla. Sin red y sin tokens.
 //
 // Lo que se comprueba de verdad: que un archivo generado en un equipo se puede
 // ABRIR en el otro. Contar subidas y bajadas no demuestra nada si lo que llega
 // no se descifra.
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { VAULT_MAX_OBJECT_BYTES } from '@luxy/shared';
-import { VaultService, VaultError, type DeviceKeyStore } from './vault-service.js';
+import { VaultService, type DeviceKeyStore } from './vault-service.js';
 import { vaultFilePathFor } from './key-file.js';
+import { PrivateConversationStore, conversationsDirectory } from './conversation-store.js';
 import { PrivateMediaStore, mediaIndexDirectory } from './media-store.js';
 import { LocalBlobStore, mediaDirectory } from './blob-store.js';
-import { syncMedia } from './media-sync.js';
+import { SyncStateStore, syncStateFilePath } from './sync-state-store.js';
+import { SyncDeletedStore, syncDeletedFilePath } from './sync-deleted-store.js';
+import { SyncAnchorStore, syncAnchorFilePath } from './sync-anchor-store.js';
+import { sealTurn } from './private-store.js';
+import { syncVault, type SyncPart, type VaultSyncDeps, type VaultSyncStores } from './sync.js';
+import { TEST_TOKEN, startTestGateway, type TestGateway } from './sync-gateway.fixture.js';
+import type { VaultSyncMediaReport } from '../../shared/ipc.js';
 
 const PASSWORD = 'una frase larga de prueba';
 const FAST = { t: 1, m: 8 * 1024, p: 1 } as const;
 const A = '11111111-1111-4111-8111-111111111111';
+const B = '22222222-2222-4222-8222-222222222222';
 
 function memoryDeviceKeys(): DeviceKeyStore {
   let value: string | undefined;
@@ -47,219 +55,514 @@ const metadata = (name: string) => ({
   model: null,
 });
 
-/** gateway falso: guarda objetos y registros como el real, y con sus reglas */
-function fakeGateway() {
-  const objects = new Map<string, Uint8Array>();
-  const media: unknown[] = [];
-  const calls: { method: string; path: string }[] = [];
+const turn = (text: string) => ({
+  role: 'user' as const,
+  text,
+  title: 'Titulo',
+  provider: null,
+  model: null,
+  inputTokens: null,
+  outputTokens: null,
+});
 
-  const impl = (async (url: string | URL, init?: RequestInit) => {
-    const path = new URL(url.toString()).pathname;
-    const method = init?.method ?? 'GET';
-    calls.push({ method, path });
-
-    const objectMatch = /^\/api\/vault\/media\/objects\/([0-9a-f]{32})$/.exec(path);
-    if (objectMatch !== null) {
-      const key = objectMatch[1]!;
-      if (method === 'PUT') {
-        objects.set(key, new Uint8Array(init?.body as ArrayBuffer));
-        return Response.json({ stored: true });
-      }
-      const stored = objects.get(key);
-      if (stored === undefined) return new Response('', { status: 404 });
-      return new Response(stored.slice().buffer as ArrayBuffer, { status: 200 });
-    }
-
-    if (path === '/api/vault/media' && method === 'POST') {
-      const body = JSON.parse(String(init?.body)) as { media: { objectKey: string } };
-      // el registro no puede existir sin sus bytes, como en el gateway real
-      if (!objects.has(body.media.objectKey)) return new Response('', { status: 409 });
-      media.push(body.media);
-      return Response.json({ stored: 1, skipped: 0 });
-    }
-
-    if (path === '/api/vault/media' && method === 'GET') {
-      return Response.json({ media });
-    }
-
-    return new Response('', { status: 404 });
-  }) as unknown as typeof fetch;
-
-  return { impl, objects, media, calls };
+interface Machine {
+  directory: string;
+  conversations: PrivateConversationStore;
+  media: PrivateMediaStore;
+  deleted: SyncDeletedStore;
+  stores: VaultSyncStores;
 }
 
-describe('sincronizacion de medios', () => {
-  let directories: string[] = [];
-  let gateway: ReturnType<typeof fakeGateway>;
+let root: string;
+let vault: VaultService;
+let gateway: TestGateway;
+let count = 0;
 
-  /** un equipo con su boveda y su almacen de medios */
-  async function machine(): Promise<{ vault: VaultService; store: PrivateMediaStore }> {
-    const directory = mkdtempSync(join(tmpdir(), 'luxy-media-sync-'));
-    directories.push(directory);
-    const vault = new VaultService(vaultFilePathFor(directory), memoryDeviceKeys(), {
-      argon2Params: FAST,
-    });
-    await vault.create(PASSWORD);
-    const store = new PrivateMediaStore(
-      mediaIndexDirectory(directory),
-      new LocalBlobStore(mediaDirectory(directory)),
-    );
-    return { vault, store };
+function machine(): Machine {
+  count += 1;
+  const directory = join(root, `equipo-${count}`);
+  mkdirSync(directory, { recursive: true });
+  const conversations = new PrivateConversationStore(conversationsDirectory(directory));
+  const media = new PrivateMediaStore(
+    mediaIndexDirectory(directory),
+    new LocalBlobStore(mediaDirectory(directory)),
+  );
+  const deleted = new SyncDeletedStore(syncDeletedFilePath(directory));
+  return {
+    directory,
+    conversations,
+    media,
+    deleted,
+    stores: {
+      conversations,
+      media,
+      deleted,
+      state: new SyncStateStore(syncStateFilePath(directory)),
+      anchor: new SyncAnchorStore(syncAnchorFilePath(directory)),
+    },
+  };
+}
+
+/** las subidas de bytes (PUT de objetos) que llegaron al gateway */
+function puts(): number {
+  return gateway.calls.filter((call) => call.method === 'PUT').length;
+}
+
+/**
+ * cambia el tamaño apuntado de un medio en el indice de este equipo: generar
+ * decenas de megas en una prueba seria pagar disco para probar una comparacion
+ */
+function falsearTamano(equipo: Machine, conversationId: string, mediaId: string, byteSize: number): void {
+  const index = join(mediaIndexDirectory(equipo.directory), `${conversationId}.jsonl`);
+  const parsed = readFileSync(index, 'utf8')
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line) as { mediaId: string; byteSize: number });
+  for (const record of parsed) {
+    if (record.mediaId === mediaId) record.byteSize = byteSize;
   }
+  writeFileSync(index, `${parsed.map((r) => JSON.stringify(r)).join('\n')}\n`, 'utf8');
+}
 
-  const deps = (onUnauthorized?: () => void) => ({
-    gatewayUrl: 'https://gw.example',
-    sessionToken: 'sesion-de-prueba',
-    fetchImpl: gateway.impl,
-    ...(onUnauthorized === undefined ? {} : { onUnauthorized }),
-  });
+function deps(extra: Partial<VaultSyncDeps> = {}): VaultSyncDeps {
+  return {
+    gatewayUrl: 'https://gateway.test',
+    sessionToken: TEST_TOKEN,
+    fetchImpl: gateway.fetchImpl,
+    ...extra,
+  };
+}
 
-  beforeEach(() => {
-    gateway = fakeGateway();
-    directories = [];
-  });
+beforeEach(async () => {
+  root = mkdtempSync(join(tmpdir(), 'luxy-media-sync-v2-'));
+  vault = new VaultService(vaultFilePathFor(root), memoryDeviceKeys(), { argon2Params: FAST });
+  await vault.create(PASSWORD);
+  gateway = await startTestGateway();
+  count = 0;
+});
 
-  afterEach(() => {
-    for (const directory of directories) rmSync(directory, { recursive: true, force: true });
-  });
+afterEach(() => {
+  gateway.stop();
+  rmSync(root, { recursive: true, force: true });
+});
 
-  it('sube un archivo y el otro equipo lo puede ABRIR', async () => {
-    const primero = await machine();
+describe('sincronizacion de medios v2', () => {
+  it('sube un archivo y el otro equipo lo puede ABRIR, miniatura incluida', async () => {
+    const primero = machine();
+    await primero.conversations.appendTurn(vault, A, turn('hola'));
     const bytes = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]);
-    const guardado = await primero.store.add(primero.vault, A, bytes, metadata('foto.png'));
-
-    expect((await syncMedia(primero.vault, primero.store, deps())).uploaded).toBe(1);
-
-    // el segundo equipo: otro almacen, otra carpeta, y la MISMA llave maestra,
-    // que es lo que garantiza la cuenta al entrar con la misma contraseña
-    const otroDirectorio = mkdtempSync(join(tmpdir(), 'luxy-media-sync-'));
-    directories.push(otroDirectorio);
-    const segundo = new PrivateMediaStore(
-      mediaIndexDirectory(otroDirectorio),
-      new LocalBlobStore(mediaDirectory(otroDirectorio)),
+    const guardado = await primero.media.add(
+      vault,
+      A,
+      bytes,
+      metadata('foto.png'),
+      new Uint8Array([9, 9]),
     );
 
-    expect((await syncMedia(primero.vault, segundo, deps())).downloaded).toBe(1);
+    const subida = await syncVault(vault, primero.stores, deps());
+    expect(subida.media).toMatchObject({ reached: true, uploaded: 1, failed: 0, error: null });
+
+    const segundo = machine();
+    const bajada = await syncVault(vault, segundo.stores, deps());
+    expect(bajada.media).toMatchObject({ downloaded: 1, failed: 0, unopenable: 0 });
 
     // contar bajadas no demuestra nada: lo que importa es que se pueda abrir
-    const leido = await segundo.read(primero.vault, A, guardado.mediaId);
+    const leido = await segundo.media.read(vault, A, guardado.mediaId);
     expect([...leido.bytes]).toEqual([...bytes]);
     expect(leido.mimeType).toBe('image/png');
+    // y la miniatura, que la v1 no podia bajar
+    expect([...(await segundo.media.readThumbnail(vault, A, guardado.mediaId))]).toEqual([9, 9]);
   });
 
   it('lo que viaja no lleva el nombre ni el prompt en claro', async () => {
-    const { vault, store } = await machine();
-    await store.add(vault, A, new Uint8Array([9, 9, 9]), metadata('secreto.png'));
+    const equipo = machine();
+    await equipo.conversations.appendTurn(vault, A, turn('hola'));
+    await equipo.media.add(vault, A, new Uint8Array([9, 9, 9]), metadata('secreto.png'));
 
-    await syncMedia(vault, store, deps());
+    await syncVault(vault, equipo.stores, deps());
 
-    const enviado = JSON.stringify(gateway.media);
+    const enviado = JSON.stringify(gateway.calls.map((call) => call.body));
     expect(enviado).not.toContain('secreto.png');
     expect(enviado).not.toContain('un prompt que no debe viajar');
     expect(enviado).not.toContain('image/png');
   });
 
   it('los bytes suben ANTES que el registro', async () => {
-    const { vault, store } = await machine();
-    await store.add(vault, A, new Uint8Array([1, 2, 3]), metadata('foto.png'));
+    const equipo = machine();
+    await equipo.conversations.appendTurn(vault, A, turn('hola'));
+    await equipo.media.add(vault, A, new Uint8Array([1, 2, 3]), metadata('foto.png'));
 
-    await syncMedia(vault, store, deps());
+    await syncVault(vault, equipo.stores, deps());
 
     const put = gateway.calls.findIndex((call) => call.method === 'PUT');
-    const post = gateway.calls.findIndex(
-      (call) => call.method === 'POST' && call.path === '/api/vault/media',
-    );
+    const alta = gateway.calls.findIndex((call) => call.path.endsWith('/v2/media/push'));
     // al reves quedaria una fila apuntando a algo que no existe
-    expect(put).toBeLessThan(post);
+    expect(put).toBeGreaterThanOrEqual(0);
+    expect(put).toBeLessThan(alta);
   });
 
-  it('no vuelve a subir lo que ya esta', async () => {
-    const { vault, store } = await machine();
-    await store.add(vault, A, new Uint8Array([1, 2, 3]), metadata('foto.png'));
+  it('la segunda pasada no sube ni baja nada', async () => {
+    const equipo = machine();
+    await equipo.conversations.appendTurn(vault, A, turn('hola'));
+    await equipo.media.add(vault, A, new Uint8Array([1, 2, 3]), metadata('foto.png'));
 
-    await syncMedia(vault, store, deps());
-    const segunda = await syncMedia(vault, store, deps());
+    await syncVault(vault, equipo.stores, deps());
+    gateway.calls.length = 0;
+    const segunda = await syncVault(vault, equipo.stores, deps());
 
-    expect(segunda.uploaded).toBe(0);
-    expect(segunda.downloaded).toBe(0);
+    expect(segunda.media).toMatchObject({ uploaded: 0, downloaded: 0, alreadyThere: 0, failed: 0 });
+    expect(gateway.calls.some((call) => call.method === 'PUT')).toBe(false);
   });
 
   it('un archivo demasiado grande se salta sin romper el resto', async () => {
-    const { vault, store } = await machine();
-    await store.add(vault, A, new Uint8Array([1, 2, 3]), metadata('pequeño.png'));
+    const equipo = machine();
+    await equipo.conversations.appendTurn(vault, A, turn('hola'));
+    await equipo.media.add(vault, A, new Uint8Array([1, 2, 3]), metadata('pequeño.png'));
+    // se falsea el tamaño del registro: generar 90 MB en una prueba seria pagar
+    // minutos de disco para comprobar una comparacion
+    const enorme = await equipo.media.add(vault, A, new Uint8Array([4, 5, 6]), metadata('enorme.mp4'));
+    falsearTamano(equipo, A, enorme.mediaId, VAULT_MAX_OBJECT_BYTES + 1);
 
-    // se falsea el tamaño del registro: generar 90 MB en una prueba seria
-    // pagar minutos de disco para comprobar una comparacion
-    const enorme = await store.add(vault, A, new Uint8Array([4, 5, 6]), metadata('enorme.mp4'));
-    const index = join(mediaIndexDirectory(directories[0]!), `${A}.jsonl`);
-    const { readFileSync, writeFileSync } = await import('node:fs');
-    const lines = readFileSync(index, 'utf8').trim().split('\n');
-    const parsed = lines.map((line) => JSON.parse(line) as { mediaId: string; byteSize: number });
-    for (const record of parsed) {
-      if (record.mediaId === enorme.mediaId) record.byteSize = VAULT_MAX_OBJECT_BYTES + 1;
+    const result = await syncVault(vault, equipo.stores, deps());
+
+    expect(result.media).toMatchObject({ skipped: 1, uploaded: 1, failed: 0 });
+  });
+
+  it('uno por encima del tope del almacen se salta SIN subir un byte (GW-R2-01)', async () => {
+    const equipo = machine();
+    await equipo.conversations.appendTurn(vault, A, turn('hola'));
+    const pequeno = await equipo.media.add(vault, A, new Uint8Array([1, 2, 3]), metadata('pequeño.png'));
+    const grande = await equipo.media.add(vault, A, new Uint8Array([4, 5, 6]), metadata('grande.mp4'));
+    // 60 MB: cabe en los 90 MiB del protocolo, no en los 50 MB de Storage. Con
+    // los 90 MiB anunciados se subia entero, Storage lo rechazaba y en la
+    // pasada siguiente se volvia a subir
+    falsearTamano(equipo, A, grande.mediaId, 60 * 1000 * 1000);
+
+    const result = await syncVault(vault, equipo.stores, deps());
+
+    expect(result.media).toMatchObject({ skipped: 1, uploaded: 1, failed: 0, error: null });
+    // solo los bytes del pequeño: el grande ni se intenta
+    expect(puts()).toBe(1);
+    expect(gateway.media().map((entry) => entry.mediaId)).toEqual([pequeno.mediaId]);
+  });
+
+  it.each([400, 413] as const)(
+    'si Storage rechaza los bytes por tamaño (%i), se salta y no se da de alta (GW-R2-01)',
+    async (status) => {
+      const equipo = machine();
+      await equipo.conversations.appendTurn(vault, A, turn('hola'));
+      await equipo.media.add(vault, A, new Uint8Array([1, 2, 3]), metadata('foto.png'));
+      // un almacen que admite menos de lo que anuncia el gateway
+      gateway.fake.objectSizeLimit = 1;
+      gateway.fake.oversizeStatus = status;
+
+      const result = await syncVault(vault, equipo.stores, deps());
+
+      // ni un fallo pasajero que reintentar ni un «subido»: demasiado grande
+      expect(result.media).toMatchObject({ skipped: 1, uploaded: 0, failed: 0, error: null });
+      expect(gateway.calls.some((call) => call.path.endsWith('/v2/media/push'))).toBe(false);
+      expect(gateway.fake.objects.size).toBe(0);
+      expect(gateway.media()).toEqual([]);
+    },
+  );
+
+  it('descarta un medio que esta boveda no puede abrir', async () => {
+    const otraCarpeta = mkdtempSync(join(tmpdir(), 'luxy-media-otra-'));
+    try {
+      const otraVault = new VaultService(vaultFilePathFor(otraCarpeta), memoryDeviceKeys(), {
+        argon2Params: FAST,
+      });
+      await otraVault.create('otra frase larga distinta');
+      const ajeno = machine();
+      await ajeno.conversations.appendTurn(otraVault, A, turn('de otra'));
+      await ajeno.media.add(otraVault, A, new Uint8Array([1, 2, 3]), metadata('de otra.png'));
+      await syncVault(otraVault, ajeno.stores, deps());
+
+      // otra boveda, otra llave: lo que hay en el servidor no se abre aqui
+      const mio = machine();
+      const result = await syncVault(vault, mio.stores, deps());
+
+      expect(result.media).toMatchObject({ downloaded: 0, unopenable: 1 });
+      expect(mio.media.rawRecords(A)).toHaveLength(0);
+    } finally {
+      rmSync(otraCarpeta, { recursive: true, force: true });
     }
-    writeFileSync(index, `${parsed.map((r) => JSON.stringify(r)).join('\n')}\n`, 'utf8');
-
-    const result = await syncMedia(vault, store, deps());
-
-    expect(result.skipped).toBe(1);
-    // el pequeño SI sube: perder el resto por un video enorme seria peor
-    expect(result.uploaded).toBe(1);
   });
 
-  it('descarta un registro que esta boveda no puede abrir', async () => {
-    const ajeno = await machine();
-    await ajeno.store.add(ajeno.vault, A, new Uint8Array([1, 2, 3]), metadata('de otra.png'));
-    await syncMedia(ajeno.vault, ajeno.store, deps());
+  it('mas de 500 medios: la lista va por paginas y no se queda ninguno', async () => {
+    const primero = machine();
+    await primero.conversations.appendTurn(vault, A, turn('hola'));
+    for (let n = 0; n < 501; n += 1) {
+      await primero.media.add(vault, A, new Uint8Array([n % 256, 1]), metadata(`f${n}.png`));
+    }
+    const subida = await syncVault(vault, primero.stores, deps());
+    expect(subida.media).toMatchObject({ uploaded: 501, failed: 0 });
 
-    // otra boveda, otra llave: lo que hay en el servidor no se abre aqui
-    const mio = await machine();
-    const result = await syncMedia(mio.vault, mio.store, deps());
+    gateway.calls.length = 0;
+    const segundo = machine();
+    const bajada = await syncVault(vault, segundo.stores, deps());
+    expect(bajada.media).toMatchObject({ downloaded: 501, failed: 0 });
+    // 500, 1 y la vacia: una pagina corta no prueba que no haya mas (F1-R1-02)
+    expect(gateway.calls.filter((call) => call.path.endsWith('/v2/media/list'))).toHaveLength(3);
+    expect(segundo.media.rawRecords(A)).toHaveLength(501);
+  }, 120_000);
 
-    expect(result.downloaded).toBe(0);
-    expect(mio.store.rawRecords(A)).toHaveLength(0);
+  it('un 200 sin «stored» no cuenta como subido', async () => {
+    const equipo = machine();
+    await equipo.conversations.appendTurn(vault, A, turn('hola'));
+    await equipo.media.add(vault, A, new Uint8Array([1, 2, 3]), metadata('foto.png'));
+    // lo que respondia la v1: un 200 con cero guardados
+    gateway.rewrite = (path, status, body) =>
+      path.endsWith('/v2/media/push') && status === 200 ? { stored: 0, skipped: 1 } : body;
+
+    const result = await syncVault(vault, equipo.stores, deps());
+    expect(result.media).toMatchObject({ uploaded: 0, failed: 1 });
+    expect(result.media.error).toContain('inesperado');
   });
 
-  it('con la boveda cerrada no sincroniza', async () => {
-    const { vault, store } = await machine();
-    vault.lock('manual');
-    await expect(syncMedia(vault, store, deps())).rejects.toThrow(VaultError);
-    expect(gateway.calls).toHaveLength(0);
+  it('«duplicate» cuenta como copiado, no como subido', async () => {
+    const equipo = machine();
+    await equipo.conversations.appendTurn(vault, A, turn('hola'));
+    await equipo.media.add(vault, A, new Uint8Array([1, 2, 3]), metadata('foto.png'));
+    gateway.rewrite = (path, status, body) =>
+      path.endsWith('/v2/media/push') && status === 200 ? { outcome: 'duplicate' } : body;
+
+    const result = await syncVault(vault, equipo.stores, deps());
+    expect(result.media).toMatchObject({ uploaded: 0, alreadyThere: 1, failed: 0 });
   });
 
-  it('un 401 olvida la sesion y explica que hacer', async () => {
-    const { vault, store } = await machine();
-    const impl = (async () => new Response('', { status: 401 })) as unknown as typeof fetch;
-    let olvidada = false;
+  it('el medio de una conversacion con un envio en curso SI viaja', async () => {
+    const equipo = machine();
+    await equipo.conversations.appendTurn(vault, A, turn('hola'));
+    await syncVault(vault, equipo.stores, deps());
+    await equipo.media.add(vault, A, new Uint8Array([1, 2, 3]), metadata('foto.png'));
 
-    await expect(
-      syncMedia(vault, store, {
-        gatewayUrl: 'https://gw.example',
-        sessionToken: 'caducada',
-        fetchImpl: impl,
-        onUnauthorized: () => {
-          olvidada = true;
-        },
-      }),
-    ).rejects.toMatchObject({ hint: expect.stringContaining('vuelve a entrar') });
-    expect(olvidada).toBe(true);
+    const result = await syncVault(
+      vault,
+      equipo.stores,
+      deps({ isBusy: (id: string, part: SyncPart) => id === A && part === 'turns' }),
+    );
+
+    expect(result.conversations[0]?.status).toBe('busy');
+    expect(result.media).toMatchObject({ uploaded: 1, failed: 0 });
   });
 
-  it('si falta el almacen en Supabase, lo dice', async () => {
-    const { vault, store } = await machine();
-    await store.add(vault, A, new Uint8Array([1, 2, 3]), metadata('foto.png'));
+  it('si su conversacion aun no esta en el servidor, espera a la siguiente', async () => {
+    const equipo = machine();
+    await equipo.conversations.appendTurn(vault, A, turn('hola'));
+    await equipo.media.add(vault, A, new Uint8Array([1, 2, 3]), metadata('foto.png'));
 
-    const impl = (async (_url: string | URL, init?: RequestInit) => {
-      if ((init?.method ?? 'GET') === 'GET') return Response.json({ media: [] });
-      return new Response('', { status: 503 });
-    }) as unknown as typeof fetch;
+    // sus turnos no suben en esta pasada (envio en curso): el alta del medio
+    // no crea la conversacion
+    const primera = await syncVault(
+      vault,
+      equipo.stores,
+      deps({ isBusy: (_id: string, part: SyncPart) => part === 'turns' }),
+    );
+    expect(primera.media).toMatchObject({ uploaded: 0, waiting: 1, failed: 0 });
+    // y espera SIN subir sus bytes: el alta los habria dejado huerfanos
+    expect(puts()).toBe(0);
+    expect(gateway.fake.objects.size).toBe(0);
 
-    await expect(
-      syncMedia(vault, store, {
-        gatewayUrl: 'https://gw.example',
-        sessionToken: 'sesion',
-        fetchImpl: impl,
-      }),
-    ).rejects.toMatchObject({ hint: expect.stringContaining('almacen de medios') });
+    const segunda = await syncVault(vault, equipo.stores, deps());
+    expect(segunda.media).toMatchObject({ uploaded: 1, waiting: 0 });
+  });
+
+  it('los de una conversacion que nunca sube no dejan bytes huerfanos en cada pasada (GW-F1-02)', async () => {
+    const equipo = machine();
+    // secuencias repetidas aqui (el numerado viejo): sus turnos no suben nunca
+    const uno = await sealTurn(vault, { conversationId: A, sequence: 0, turn: turn('a') });
+    const otro = await sealTurn(vault, { conversationId: A, sequence: 0, turn: turn('b') });
+    mkdirSync(conversationsDirectory(equipo.directory), { recursive: true });
+    writeFileSync(
+      join(conversationsDirectory(equipo.directory), `${A}.jsonl`),
+      `${JSON.stringify(uno)}\n${JSON.stringify(otro)}\n`,
+      'utf8',
+    );
+    await equipo.media.add(vault, A, new Uint8Array([1, 2, 3]), metadata('video.mp4'), new Uint8Array([4]));
+
+    for (let pasada = 0; pasada < 3; pasada += 1) {
+      gateway.calls.length = 0;
+      const result = await syncVault(vault, equipo.stores, deps());
+      expect(result.conversations[0]?.status).toBe('local-duplicates');
+      expect(result.media).toMatchObject({ uploaded: 0, waiting: 1, failed: 0 });
+      // antes: hasta 90 MiB y su miniatura otra vez en cada pasada, un 409 y
+      // los objetos en Storage sin fila que los nombre
+      expect(puts()).toBe(0);
+    }
+    expect(gateway.fake.objects.size).toBe(0);
+    expect(gateway.media()).toEqual([]);
+  });
+
+  it('con «solo esta conversacion» pregunta UNA vez si su conversacion esta en el servidor', async () => {
+    const equipo = machine();
+    await equipo.conversations.appendTurn(vault, A, turn('hola'));
+    await syncVault(vault, equipo.stores, deps());
+    await equipo.media.add(vault, A, new Uint8Array([1, 2, 3]), metadata('a.png'));
+    await equipo.media.add(vault, A, new Uint8Array([4, 5, 6]), metadata('b.png'));
+    gateway.calls.length = 0;
+
+    // con un envio en curso sus turnos se saltan y no hay manifiesto que diga
+    // si esta alli: se pregunta a la lista, y una sola vez
+    const result = await syncVault(
+      vault,
+      equipo.stores,
+      deps({ isBusy: (_id: string, part: SyncPart) => part === 'turns' }),
+      { mode: 'conversation', conversationId: A },
+    );
+
+    expect(result.media).toMatchObject({ uploaded: 2, waiting: 0, failed: 0 });
+    // una sola lista para los dos medios: su pagina y la vacia que la cierra
+    expect(gateway.calls.filter((call) => call.path.endsWith('/conversations/list'))).toHaveLength(2);
+  });
+
+  it('los medios de una conversacion borrada aqui ni suben ni bajan', async () => {
+    const origen = machine();
+    await origen.conversations.appendTurn(vault, A, turn('hola'));
+    await origen.conversations.appendTurn(vault, B, turn('hola'));
+    await origen.media.add(vault, A, new Uint8Array([1]), metadata('a.png'));
+    await origen.media.add(vault, B, new Uint8Array([2]), metadata('b.png'));
+    await syncVault(vault, origen.stores, deps());
+
+    const otro = machine();
+    otro.deleted.add(A);
+    const result = await syncVault(vault, otro.stores, deps());
+
+    expect(result.media).toMatchObject({ downloaded: 1 });
+    expect(otro.media.rawRecords(A)).toHaveLength(0);
+    expect(otro.media.rawRecords(B)).toHaveLength(1);
+  });
+
+  it('si falta el almacen en Supabase, lo dice y para', async () => {
+    const equipo = machine();
+    await equipo.conversations.appendTurn(vault, A, turn('hola'));
+    await equipo.media.add(vault, A, new Uint8Array([1, 2, 3]), metadata('foto.png'));
+    gateway.intercept = (_path, _body, request) =>
+      request.method === 'PUT' ? Response.json({ error: 'sin bucket' }, { status: 503 }) : undefined;
+
+    const result = await syncVault(vault, equipo.stores, deps());
+    expect(result.stopped).toBe('media-store-missing');
+    expect(result.stoppedDetail).toContain('almacen de medios');
+    // los turnos si se sincronizaron
+    expect(result.conversations[0]?.status).toBe('ok');
+  });
+
+  it('con la boveda cerrada a mitad de los medios, se para y no da nada por bueno', async () => {
+    const primero = machine();
+    await primero.conversations.appendTurn(vault, A, turn('hola'));
+    for (let n = 0; n < 3; n += 1) {
+      await primero.media.add(vault, A, new Uint8Array([n, 1]), metadata(`f${n}.png`));
+    }
+    await syncVault(vault, primero.stores, deps());
+
+    const segundo = machine();
+    let descargas = 0;
+    gateway.intercept = (path, _body, request) => {
+      if (request.method === 'GET' && path.includes('/media/objects/')) {
+        descargas += 1;
+        if (descargas === 2) vault.lock('manual');
+      }
+      return undefined;
+    };
+    const result = await syncVault(vault, segundo.stores, deps());
+
+    expect(result.stopped).toBe('locked');
+    expect(result.media.downloaded).toBe(1);
+    expect(segundo.media.rawRecords(A)).toHaveLength(1);
+  });
+});
+
+// -----------------------------------------------------------------------------
+// el alta rechazada (T2R-02)
+// -----------------------------------------------------------------------------
+
+describe('un alta de medio rechazada no cuenta como subida', () => {
+  // la regla del diseño: solo cuenta como subido lo que el gateway confirma con
+  // stored o duplicate. Es la misma clase de fallo que SEG-SYNC-001 («cero
+  // guardados» contado como subido), y ninguna de estas ramas tenia prueba
+  const rechazos: {
+    nombre: string;
+    status: number;
+    body: unknown;
+    cuenta: Partial<VaultSyncMediaReport>;
+    error: RegExp | null;
+  }[] = [
+    {
+      nombre: '404, la conversacion es de otra cuenta',
+      status: 404,
+      body: { error: 'esa conversacion no existe' },
+      cuenta: { failed: 1, waiting: 0, skipped: 0 },
+      error: /otra cuenta/,
+    },
+    {
+      nombre: '409 object-missing',
+      status: 409,
+      body: { error: 'faltan los bytes', reason: 'object-missing' },
+      cuenta: { failed: 1, waiting: 0, skipped: 0 },
+      error: /no encuentra los bytes/,
+    },
+    {
+      nombre: '409 conflict',
+      status: 409,
+      body: { error: 'esa clave la usa otro', reason: 'conflict' },
+      cuenta: { failed: 1, waiting: 0, skipped: 0 },
+      error: /ya la usa otro/,
+    },
+    {
+      nombre: '409 space',
+      status: 409,
+      body: { error: 'es un espacio', reason: 'space' },
+      cuenta: { failed: 1, waiting: 0, skipped: 0 },
+      error: /otra cosa con el identificador/,
+    },
+    {
+      // con onServer por delante ya no se alcanza en una pasada normal: una
+      // conversacion que desaparece del servidor entre la lista y el alta
+      nombre: '409 conversation-missing',
+      status: 409,
+      body: { error: 'falta la conversacion', reason: 'conversation-missing' },
+      cuenta: { failed: 0, waiting: 1, skipped: 0 },
+      error: null,
+    },
+    {
+      nombre: '413 en el alta',
+      status: 413,
+      body: { error: 'el envio pesa demasiado' },
+      cuenta: { failed: 0, waiting: 0, skipped: 1 },
+      error: null,
+    },
+  ];
+
+  for (const rechazo of rechazos) {
+    it(`${rechazo.nombre}: lo cuenta como lo que es y no como subido`, async () => {
+      const equipo = machine();
+      await equipo.conversations.appendTurn(vault, A, turn('hola'));
+      await equipo.media.add(vault, A, new Uint8Array([1, 2, 3]), metadata('foto.png'));
+      gateway.intercept = (path) =>
+        path.endsWith('/v2/media/push') ? Response.json(rechazo.body, { status: rechazo.status }) : undefined;
+
+      const result = await syncVault(vault, equipo.stores, deps());
+
+      expect(result.media).toMatchObject({ uploaded: 0, alreadyThere: 0, ...rechazo.cuenta });
+      if (rechazo.error === null) expect(result.media.error).toBeNull();
+      else expect(result.media.error).toMatch(rechazo.error);
+      // los bytes subieron antes del alta, pero el servidor no tiene el medio
+      expect(puts()).toBe(1);
+      expect(gateway.media()).toEqual([]);
+    });
+  }
+
+  it('un 409 con un motivo que no conoce es una respuesta invalida, no un «subido»', async () => {
+    const equipo = machine();
+    await equipo.conversations.appendTurn(vault, A, turn('hola'));
+    await equipo.media.add(vault, A, new Uint8Array([1, 2, 3]), metadata('foto.png'));
+    gateway.intercept = (path) =>
+      path.endsWith('/v2/media/push')
+        ? Response.json({ error: 'x', reason: 'otra-cosa' }, { status: 409 })
+        : undefined;
+
+    const result = await syncVault(vault, equipo.stores, deps());
+
+    expect(result.media).toMatchObject({ uploaded: 0, failed: 1 });
   });
 });

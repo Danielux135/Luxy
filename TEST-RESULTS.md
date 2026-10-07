@@ -1,5 +1,25 @@
 # Luxy — resultados de comprobación
 
+### 2026-10-07 — SEG-SYNC-001 F1 — `npm run check` a solas y dry-run del gateway
+
+- `npm run check` (`comprobar:check` de `wf_c5b33936-911`, sin ningún otro
+  agente en marcha), con salida 0:
+  - lint sin avisos;
+  - typecheck de los paquetes y de las pruebas;
+  - **239 archivos, 5214 pruebas en verde y 12 omitidas (5226)**, las de
+    siempre de `live.test.ts`;
+  - build completo.
+- Dry-run del gateway desde una copia de `wrangler.toml.example`, con `main`
+  absoluto porque la copia está fuera de `apps/gateway`, con salida 0:
+  605,68 KiB (gzip 140,99) y sólo las 5 variables del ejemplo.
+- Las pruebas del gateway corren contra un PostgREST y un Storage falsos
+  (`fake-supabase.fixture.ts`) que imitan `on_conflict`/`Prefer`, `23505` y
+  `23503`, las fechas `+00:00`, `max_rows` y el tope de tamaño de Storage. El
+  gateway de HEAD, lanzado contra el mismo doble, reproduce los tres fallos
+  de `SEG-SYNC-001`.
+- No ejecutado todavía: el gateway desplegado, Studio en Electron y una
+  sincronización real.
+
 ### 2026-10-06 — INV-FONDO-001 — dos `npm run check` a solas y las pruebas de lo tocado
 
 Los pasó el último agente de cada flujo, sin nadie más en marcha, y en los dos

@@ -8,13 +8,14 @@
 //
 // Sin red y sin Supabase: el gateway es un objeto con memoria.
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { toBase64Url } from '@luxy/vault-crypto';
-import { VaultService, VaultError, type DeviceKeyStore } from './vault-service.js';
+import { LOCAL_VAULT_CONFLICT, VaultService, VaultError, type DeviceKeyStore } from './vault-service.js';
 import { vaultFilePathFor } from './key-file.js';
 import { VaultAccountManager, type SessionStore } from './account-manager.js';
+import { SyncAnchorStore, syncAnchorFilePath } from './sync-anchor-store.js';
 
 const FAST = { t: 1, m: 8 * 1024, p: 1 } as const;
 const EMAIL = 'daniel@example.com';
@@ -514,5 +515,267 @@ describe('cuenta de la boveda', () => {
       });
       await expect(accounts.register(EMAIL, PASSWORD)).rejects.toThrow(VaultError);
     });
+  });
+});
+
+describe('una boveda local sin cuenta no se pisa al entrar (SYNC-F1-07)', () => {
+  let directories: string[] = [];
+  let gateway: ReturnType<typeof fakeGateway>;
+
+  function machine(): { vault: VaultService; accounts: VaultAccountManager; directory: string } {
+    const directory = mkdtempSync(join(tmpdir(), 'luxy-apartar-'));
+    directories.push(directory);
+    const vault = new VaultService(vaultFilePathFor(directory), memoryStore(), {
+      argon2Params: FAST,
+    });
+    const accounts = new VaultAccountManager(vault, memoryStore(), {
+      gatewayUrl: () => 'https://gw.example',
+      fetchImpl: gateway.impl,
+      argon2Params: FAST,
+    });
+    return { vault, accounts, directory };
+  }
+
+  /** una boveda creada aqui, sin cuenta, con una conversacion dentro */
+  async function localConContenido(): Promise<ReturnType<typeof machine> & { antes: string; subclave: string }> {
+    const equipo = machine();
+    await equipo.vault.create(PASSWORD);
+    const subclave = toBase64Url(equipo.vault.subkeyFor('conversation', 'c1'));
+    mkdirSync(join(equipo.directory, 'vault', 'conversations'), { recursive: true });
+    writeFileSync(join(equipo.directory, 'vault', 'conversations', 'c.jsonl'), '{}\n', 'utf8');
+    equipo.vault.lock('manual');
+    return { ...equipo, antes: readFileSync(vaultFilePathFor(equipo.directory), 'utf8'), subclave };
+  }
+
+  beforeEach(() => {
+    gateway = fakeGateway();
+    directories = [];
+  });
+
+  afterEach(() => {
+    for (const directory of directories) rmSync(directory, { recursive: true, force: true });
+  });
+
+  it('entrar se niega y no toca nada', async () => {
+    const cuenta = machine();
+    await cuenta.accounts.register(EMAIL, PASSWORD);
+    const local = await localConContenido();
+
+    await expect(local.accounts.login(EMAIL, PASSWORD)).rejects.toThrow(LOCAL_VAULT_CONFLICT.message);
+
+    // vault.json igual byte a byte, y la boveda local se sigue abriendo con su llave
+    expect(readFileSync(vaultFilePathFor(local.directory), 'utf8')).toBe(local.antes);
+    await local.vault.unlock(PASSWORD);
+    expect(toBase64Url(local.vault.subkeyFor('conversation', 'c1'))).toBe(local.subclave);
+    expect(local.accounts.status().signedIn).toBe(false);
+  });
+
+  it('crear una cuenta tambien, y antes de tocar el servidor', async () => {
+    const local = await localConContenido();
+
+    await expect(local.accounts.register('otra@example.com', PASSWORD)).rejects.toThrow(
+      LOCAL_VAULT_CONFLICT.message,
+    );
+    // ninguna cuenta huerfana en el servidor
+    expect(gateway.accounts.size).toBe(0);
+    expect(readFileSync(vaultFilePathFor(local.directory), 'utf8')).toBe(local.antes);
+  });
+
+  it('sin contenido en la carpeta, entra como siempre', async () => {
+    const cuenta = machine();
+    await cuenta.accounts.register(EMAIL, PASSWORD);
+    const vacia = machine();
+    await vacia.vault.create(PASSWORD);
+    vacia.vault.lock('manual');
+
+    await vacia.accounts.login(EMAIL, PASSWORD);
+    expect(vacia.vault.boundAccount()).toMatchObject({ email: EMAIL });
+  });
+
+  it('con la MISMA llave abierta, se adopta: no hay nada que perder', async () => {
+    // una boveda vinculada cuyo vault.json perdio la marca de la cuenta
+    const equipo = machine();
+    await equipo.vault.create(PASSWORD);
+    await equipo.accounts.link(EMAIL, PASSWORD);
+    const subclave = toBase64Url(equipo.vault.subkeyFor('conversation', 'c1'));
+    const archivo = vaultFilePathFor(equipo.directory);
+    const contenido = JSON.parse(readFileSync(archivo, 'utf8')) as Record<string, unknown>;
+    delete contenido.account;
+    writeFileSync(archivo, JSON.stringify(contenido), 'utf8');
+    mkdirSync(join(equipo.directory, 'vault', 'conversations'), { recursive: true });
+    writeFileSync(join(equipo.directory, 'vault', 'conversations', 'c.jsonl'), '{}\n', 'utf8');
+
+    await equipo.accounts.login(EMAIL, PASSWORD);
+    expect(equipo.vault.boundAccount()).toMatchObject({ email: EMAIL });
+    expect(toBase64Url(equipo.vault.subkeyFor('conversation', 'c1'))).toBe(subclave);
+  });
+
+  it('apartarla la renombra sin borrar nada, y despues se puede entrar', async () => {
+    const cuenta = machine();
+    await cuenta.accounts.register(EMAIL, PASSWORD);
+    const local = await localConContenido();
+
+    const apartada = local.vault.setAsideLocalVault(new Date('2026-10-07T10:00:00.000Z'));
+
+    expect(apartada.vaultFile).toBe('vault.json.apartada-2026-10-07T10-00-00-000Z');
+    expect(apartada.vaultDirectory).toBe('vault-apartada-2026-10-07T10-00-00-000Z');
+    // nada borrado: la llave y el contenido siguen ahi, con otro nombre
+    expect(readFileSync(join(local.directory, apartada.vaultFile), 'utf8')).toBe(local.antes);
+    expect(
+      existsSync(join(local.directory, apartada.vaultDirectory!, 'conversations', 'c.jsonl')),
+    ).toBe(true);
+
+    await local.accounts.login(EMAIL, PASSWORD);
+    expect(local.vault.boundAccount()).toMatchObject({ email: EMAIL });
+  });
+
+  it('una boveda que ya es de una cuenta no se aparta', async () => {
+    const cuenta = machine();
+    await cuenta.accounts.register(EMAIL, PASSWORD);
+    expect(() => cuenta.vault.setAsideLocalVault()).toThrow(VaultError);
+    expect(cuenta.vault.status().configured).toBe(true);
+  });
+});
+
+describe('entrar en una cuenta con la carpeta vacia deja este equipo como replica (F1-R1-01)', () => {
+  // antes el papel solo se decidia en la primera pasada, y hasta entonces era
+  // «sin papel», que dejaba escribir: un equipo nuevo que escribia en Privado
+  // antes de pulsar «Sincronizar» quedaba como origen y seguia despues las
+  // conversaciones del otro sin las fichas
+  let directories: string[] = [];
+  let gateway: ReturnType<typeof fakeGateway>;
+
+  function equipo(): { vault: VaultService; accounts: VaultAccountManager; directory: string } {
+    const directory = mkdtempSync(join(tmpdir(), 'luxy-ancla-'));
+    directories.push(directory);
+    const vault = new VaultService(vaultFilePathFor(directory), memoryStore(), { argon2Params: FAST });
+    const accounts = new VaultAccountManager(vault, memoryStore(), {
+      gatewayUrl: () => 'https://gw.example',
+      fetchImpl: gateway.impl,
+      argon2Params: FAST,
+    });
+    return { vault, accounts, directory };
+  }
+
+  beforeEach(() => {
+    gateway = fakeGateway();
+    directories = [];
+  });
+
+  afterEach(() => {
+    for (const directory of directories) rmSync(directory, { recursive: true, force: true });
+  });
+
+  it('un equipo nuevo que entra queda apuntado como replica antes de nada, sin la llave', async () => {
+    await equipo().accounts.register(EMAIL, PASSWORD);
+    const nuevo = equipo();
+
+    await nuevo.accounts.login(EMAIL, PASSWORD);
+
+    // apuntado fuera del estado sellado: no depende de la primera pasada ni
+    // de que ese estado se pueda leer
+    expect(new SyncAnchorStore(syncAnchorFilePath(nuevo.directory)).read()).toEqual({
+      kind: 'role',
+      role: 'replica',
+    });
+    const raw = JSON.parse(readFileSync(syncAnchorFilePath(nuevo.directory), 'utf8')) as Record<string, unknown>;
+    expect(raw).toMatchObject({ version: 1, role: 'replica', source: 'account-login' });
+    // sin un solo identificador ni nada de la cuenta
+    expect(JSON.stringify(raw)).not.toContain(EMAIL);
+  });
+
+  it('tambien entrando con la clave de recuperacion', async () => {
+    const { recoveryKey } = await equipo().accounts.register(EMAIL, PASSWORD);
+    const nuevo = equipo();
+    await nuevo.accounts.login(EMAIL, recoveryKey, 'recovery');
+    expect(new SyncAnchorStore(syncAnchorFilePath(nuevo.directory)).read()).toEqual({
+      kind: 'role',
+      role: 'replica',
+    });
+  });
+
+  it('el de siempre, que vuelve a entrar con su boveda llena, no', async () => {
+    const deSiempre = equipo();
+    await deSiempre.accounts.register(EMAIL, PASSWORD);
+    mkdirSync(join(deSiempre.directory, 'vault', 'conversations'), { recursive: true });
+    writeFileSync(join(deSiempre.directory, 'vault', 'conversations', 'c.jsonl'), '{}\n', 'utf8');
+    await deSiempre.accounts.logout();
+
+    // la sesion caduco y vuelve a «Entrar»: es el paso 5 del despliegue
+    await deSiempre.accounts.login(EMAIL, PASSWORD);
+
+    expect(new SyncAnchorStore(syncAnchorFilePath(deSiempre.directory)).read()).toEqual({ kind: 'none' });
+  });
+
+  it('crear la cuenta no deja replica: no hay nada en el servidor de lo que ser copia', async () => {
+    const nuevo = equipo();
+    await nuevo.accounts.register(EMAIL, PASSWORD);
+    expect(new SyncAnchorStore(syncAnchorFilePath(nuevo.directory)).read()).toEqual({ kind: 'none' });
+  });
+
+  it('si no se puede apuntar, no se entra: no hay ningun momento en que pueda escribir', async () => {
+    await equipo().accounts.register(EMAIL, PASSWORD);
+    const nuevo = equipo();
+    // en el sitio del ancla, una carpeta: leerla da EISDIR, que no es «no existe»
+    mkdirSync(syncAnchorFilePath(nuevo.directory), { recursive: true });
+
+    await expect(nuevo.accounts.login(EMAIL, PASSWORD)).rejects.toThrow();
+    expect(existsSync(vaultFilePathFor(nuevo.directory))).toBe(false);
+    expect(nuevo.vault.isUnlocked()).toBe(false);
+  });
+
+  it('si vault.json no se puede escribir, el ancla recien apuntada se quita y se puede reintentar', async () => {
+    await equipo().accounts.register(EMAIL, PASSWORD);
+    const nuevo = equipo();
+    // donde va el temporal de vault.json, una carpeta: escribirlo falla
+    const temporal = `${vaultFilePathFor(nuevo.directory)}.tmp`;
+    mkdirSync(temporal, { recursive: true });
+
+    await expect(nuevo.accounts.login(EMAIL, PASSWORD)).rejects.toThrow();
+    // sin entrar, nada apuntado: una boveda local creada despues aqui escribiria
+    expect(new SyncAnchorStore(syncAnchorFilePath(nuevo.directory)).read()).toEqual({ kind: 'none' });
+
+    rmSync(temporal, { recursive: true, force: true });
+    await nuevo.accounts.login(EMAIL, PASSWORD);
+    expect(new SyncAnchorStore(syncAnchorFilePath(nuevo.directory)).read()).toEqual({
+      kind: 'role',
+      role: 'replica',
+    });
+  });
+});
+
+describe('la caducidad renovada por el gateway (SYNC-F1-07)', () => {
+  let directory: string;
+  let gateway: ReturnType<typeof fakeGateway>;
+
+  beforeEach(() => {
+    gateway = fakeGateway();
+    directory = mkdtempSync(join(tmpdir(), 'luxy-renovar-'));
+  });
+
+  afterEach(() => {
+    rmSync(directory, { recursive: true, force: true });
+  });
+
+  it('se guarda hacia delante, solo para la sesion con la que se pidio, y sobrevive al reinicio', async () => {
+    const sessions = memoryStore();
+    const vault = new VaultService(vaultFilePathFor(directory), memoryStore(), { argon2Params: FAST });
+    const options = { gatewayUrl: () => 'https://gw.example', fetchImpl: gateway.impl, argon2Params: FAST };
+    const accounts = new VaultAccountManager(vault, sessions, options);
+    await accounts.register(EMAIL, PASSWORD);
+    const token = accounts.sessionToken();
+    const antes = accounts.status().expiresAt!;
+    const despues = new Date(Date.parse(antes) + 30 * 24 * 3_600_000).toISOString();
+
+    // una respuesta de otra sesion no la toca
+    accounts.renewSessionExpiry('token-de-otra-sesion-0000', despues);
+    expect(accounts.status().expiresAt).toBe(antes);
+    // una mas corta tampoco
+    accounts.renewSessionExpiry(token, new Date(Date.parse(antes) - 1000).toISOString());
+    expect(accounts.status().expiresAt).toBe(antes);
+
+    accounts.renewSessionExpiry(token, despues);
+    expect(accounts.status().expiresAt).toBe(despues);
+    expect(new VaultAccountManager(vault, sessions, options).status().expiresAt).toBe(despues);
   });
 });

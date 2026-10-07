@@ -1,5 +1,36 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-10-07 — Claude — `SEG-SYNC-001`: sincronización v2, fase 1 (turnos y medios)
+
+- Estado anterior: `6da3a6a`. La sincronización v1 nunca había funcionado y
+  la bóveda no tenía copia. Daniel aprobó el arreglo y autorizó desplegar y
+  migrar (`LA-061` hecha: Wrangler con sesión).
+- Diseño: `wf_030f5df2-696`, con 3 lectores, 3 propuestas, 6 críticas y una
+  síntesis. Sale sin migración y en dos fases.
+- Daniel respondió las 7 preguntas de F2 (`CURRENT-TASK.md`) e hizo la copia
+  a mano de `LA-049`.
+- Construcción: `wf_c5b33936-911`. Primero el gateway y el contrato, después
+  Studio, dos rondas de revisión con verificación (9 + 4 defectos
+  confirmados y corregidos; el crítico era el recorte a 1000 filas de
+  PostgREST, que habría cortado el manifiesto) y el check.
+- Archivos:
+  - `packages/shared/src/vault-sync-v2.ts` (nuevo);
+  - en el gateway, `handlers/vault-sync-v2.ts` (nuevo), `supabase.ts`,
+    `repository.ts`, `object-store.ts`, `vault-auth.ts`, `env.ts`,
+    `index.ts` y el doble `fake-supabase.fixture.ts`;
+  - en Studio, `sync.ts`, `media-sync.ts`, `sync-coordinator.ts`,
+    `sync-http.ts`, `sync-state-store.ts`, `sync-deleted-store.ts`,
+    `sync-anchor-store.ts`, `conversation-store.ts`, `vault-service.ts`,
+    `handlers.ts`, `useVault.ts`, `Vault.tsx` y `vault-sync-status.ts`;
+  - `docs/CLOUDFLARE.md`, y las pruebas de todo.
+- Resultado: `npm run check` a solas en verde (239 archivos, 5214 pruebas) y
+  dry-run del gateway con salida 0 (605,68 KiB).
+- Decisión: `D-110`.
+- Siguiente paso: commit, apuntar la versión activa del Worker, desplegar con
+  `--keep-vars` y comprobar sin datos: `/health`, capacidades con 401 y v1
+  con 426. Después, con Daniel: reiniciar Studio, probar con una conversación
+  desechable y hacer la sincronización completa.
+
 ### 2026-10-05/06 — Claude — `INV-FONDO-001` e `INV-LLAVE-001`: el trabajo de fondo parado y la llave en bucle
 
 - Estado anterior: `ae41d2e`. Daniel probó el 30/09, y el registro mostraba

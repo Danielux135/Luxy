@@ -6267,3 +6267,94 @@ historia del registro (6) y las dos reescrituras salieron de ahí.
   en esta sesión») ha quedado desfasado.
 - Lo que ya traía cada respuesta privada no cambia: cada turno descifra la
   bóveda entera varias veces, unas 4.000 derivaciones (`INV-LLAVE-001`).
+
+## D-110 — sincronización v2: copia sin migración, el v1 cerrado y nada remoto pisa nada local
+
+Fecha: 2026-10-07. Autor: Claude. Contexto: `SEG-SYNC-001`. Daniel aprobó
+arreglar la sincronización y autorizó desplegar y migrar.
+
+Estado (07/10): **F1 construida.** La fase 1 (turnos y medios) se construyó en
+el flujo `wf_c5b33936-911`, con dos rondas de revisión y 13 defectos
+importantes corregidos, uno crítico. `npm run check` a solas salió en verde
+(239 archivos, 5214 pruebas) y el dry-run del gateway también. Quien coordina
+leyó la última corrección. F2, lo demás y el segundo ordenador, está diseñada
+y sin construir. Diseño: flujo `wf_030f5df2-696`, con tres propuestas y seis
+críticas.
+
+### Por qué
+
+La bóveda sólo existía en este disco, y la sincronización v1 nunca había
+funcionado:
+
+- la bajada se cortaba con las fechas `+00:00` de Postgres;
+- `insertVaultRecords` congelaba lo nuevo y se tragaba el error;
+- había un tope de 200 sin paginar;
+- borrar era sólo local, así que la conversación resucitaba;
+- la identidad de un turno era sólo su número.
+
+### Lo que se decide (F1)
+
+1. **Sin migración.** Todo cabe en `vault_records`, `vault_media` y el bucket
+   de `0007` y `0008`, que ya están aplicados. No hay ningún Supabase de
+   pruebas donde ensayar una (`luxy-studio-test` es el real), y el servidor
+   sólo hace INSERT, SELECT y DELETE.
+2. **Protocolo v2** (`packages/shared/src/vault-sync-v2.ts`, rutas en
+   `apps/gateway/src/handlers/vault-sync-v2.ts`):
+   - capacidades, manifiesto `{sequence, recordId}`, registros por
+     secuencias, subida atómica con `base` y lista y alta de medios;
+   - la purga va por tandas;
+   - las lecturas se reenvían sin analizar;
+   - los ids viajan en el cuerpo y no en la URL;
+   - topes por bytes antes de leer;
+   - el registro del gateway sólo lleva `userId` y recuentos;
+   - las páginas siguen hasta llegar vacías, porque PostgREST recorta a
+     `max_rows` (1000) sin avisar.
+3. **El v1 de sincronización responde 426 antes de autenticar.** Nunca
+   funcionó, así que no se rompe nada, y ningún Studio viejo puede escribir ni
+   resucitar lo borrado. Un gateway viejo responde 404 a las capacidades, y
+   el Studio nuevo entonces no sincroniza y lo dice.
+4. **Rango reservado:** de `VAULT_FACT_SEQUENCE_BASE` (1e9) en adelante es
+   para los hechos de F2. La subida de turnos lo rechaza y las lecturas lo
+   filtran.
+5. **Nada remoto pisa nada local.**
+   - Misma secuencia con otro `recordId`: la conversación se congela en «dos
+     versiones», sin borrar nada.
+   - Se baja antes de subir.
+   - Un registro que llega se abre antes de escribirlo, se escribe con
+     `appendRemote` y `fsync`, y la última línea a medias se repara.
+   - `appendTurn` numera con el máximo más uno.
+6. **Borrar en F1 es una lápida local** (`vault/sync-deleted.json`, sin
+   sellar y escrita antes de borrar): esa conversación ni sube ni baja. La
+   copia del servidor se queda hasta la papelera de F2.
+7. **Réplica:** un equipo que encuentra en el servidor conversaciones que no
+   tiene queda como réplica, no envía, y el trabajo de fondo no corre hasta
+   tener los hechos de F2. `adoptAccountKey` ya no pisa una bóveda local con
+   contenido.
+8. **Sincronizar es trabajo de fondo** (`D-106`): sin espera de usuario y sin
+   `touch()`. Si la bóveda se cierra a mitad, la pasada se para y lo dice.
+9. **La pantalla dice lo que se copió y lo que no** (`D-093`): nombra turnos y
+   archivos, y lista lo que todavía no viaja.
+10. **Tope por archivo:** 90 MiB en el protocolo. El gateway anuncia
+    `VAULT_OBJECT_MAX_BYTES` (50.000.000 por defecto, el límite del plan
+    gratuito), y un 413 de Storage es «saltado», no una avería.
+
+### Respuestas de Daniel para F2 (07/10)
+
+- **Papelera de 30 días.**
+- **«Borrar su memoria» en los dos ordenadores.**
+- **Copia automática**, que se enciende tras las pruebas.
+- **Trabajo de fondo en los dos, sin pisarse.** Esto cambia el diseño, que
+  proponía un único equipo de fondo.
+- **Las casillas de Lía, iguales en los dos.**
+- **Ante dos versiones, tener ya la copia.**
+- **La clave de recuperación no está confirmada** (`LA-062`).
+
+Detalle en `CURRENT-TASK.md`.
+
+### Lo que queda abierto
+
+- Si un archivo supera el tope real de Storage, se vuelve a subir en cada
+  pasada antes de recibir el 413.
+- Que el plan gratuito de Supabase limite a 50 MB por archivo es un dato
+  externo sin comprobar.
+- Corregir el pie de foto no viaja (F3).

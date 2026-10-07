@@ -154,7 +154,9 @@ const bridge: LuxyBridge = {
     ipcRenderer.invoke(IPC_INVOKE.vaultCharacterImport, args),
   readVaultCharacterAvatar: (args: unknown) =>
     ipcRenderer.invoke(IPC_INVOKE.vaultCharacterAvatar, args),
-  syncVault: () => ipcRenderer.invoke(IPC_INVOKE.vaultSync),
+  syncVault: (args?: unknown) => ipcRenderer.invoke(IPC_INVOKE.vaultSync, args),
+  diagnoseVaultSync: () => ipcRenderer.invoke(IPC_INVOKE.vaultSyncDiagnose, {}),
+  setAsideLocalVault: () => ipcRenderer.invoke(IPC_INVOKE.vaultLocalSetAside, {}),
   onVaultLocked: (listener: (payload: unknown) => void) => {
     // el motivo pasa tal cual y sin el IpcRendererEvent: lo valida el renderer
     const handler = (_event: unknown, payload: unknown): void => listener(payload);

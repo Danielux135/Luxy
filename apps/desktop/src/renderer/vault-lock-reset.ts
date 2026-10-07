@@ -105,6 +105,16 @@ export const DECRYPTED_RENDERER_STATE = [
    * retomar hasta reiniciar
    */
   'memoryEpisodes',
+  /**
+   * el resultado de la ultima sincronizacion: una fila por conversacion de esta
+   * boveda, con sus identificadores y sus cifras, y un titular que dice que
+   * coincidia todo. Se quedaba al cerrar, al salir de la cuenta y al entrar con
+   * otra: se pintaba el resumen de la boveda anterior, y un «coincide» que ya no
+   * era verdad (STUDIO-R1-01)
+   */
+  'lastSync',
+  /** el diagnostico local: las mismas filas por conversacion, de esta boveda */
+  'syncDiagnosis',
 ] as const;
 
 export type DecryptedRendererState = (typeof DECRYPTED_RENDERER_STATE)[number];

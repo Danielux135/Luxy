@@ -24,7 +24,14 @@ MACHINE_OFFLINE_SECONDS = "45"
 JOB_LEASE_SECONDS = "120"
 RATE_LIMIT_PER_MINUTE = "30"
 LOG_LEVEL = "info"
+# VAULT_OBJECT_MAX_BYTES = "50000000"   # opcional: tope de un archivo de la bóveda
 ```
+
+`VAULT_OBJECT_MAX_BYTES` es el tope de un archivo cifrado de la bóveda en
+Supabase Storage. Sin ella vale 50.000.000 bytes, por debajo de los 50 MB por
+archivo del plan gratuito; nunca pasa de 90 MiB, el cuerpo de una petición a un
+Worker. `capabilities` lo anuncia y Studio salta sin subirlo lo que no cabe.
+Súbela solo si el plan y el límite del bucket admiten más.
 
 ## 2. Cargar los secretos
 
@@ -145,6 +152,79 @@ ejecutarse.
 respuestas completadas creadas por ese mismo Studio. La valoracion queda en la
 metadata del trabajo y alimenta la recomendacion visible de modelos.
 
+### Bóveda (sesión de cuenta)
+
+Las cuentas (`/api/vault/register`, `/api/vault/login/start`,
+`/api/vault/login/finish`, `/api/vault/logout`, `/api/vault/password`) y los
+bytes de los medios (`PUT` y `GET /api/vault/media/objects/:objectKey`) siguen
+como estaban. La descarga de un objeto se autoriza en `vault_media` por la
+clave del original **o** por la de su miniatura. La subida de bytes responde
+**413** si el objeto pasa de `VAULT_OBJECT_MAX_BYTES` (lo mira antes de leer,
+por `Content-Length`) **o** si Storage lo rechaza por tamaño, en cualquiera de
+sus dos formas (413, o 400 con `statusCode: "413"`): «demasiado grande» no es
+un fallo pasajero, y con un 502 Studio lo reintentaba entero en cada pasada.
+
+**Sincronización v2 (`D-110`).** El contrato exacto —cuerpos, respuestas,
+topes— está en `packages/shared/src/vault-sync-v2.ts` y lo comparten el gateway
+y Studio. Todas exigen `Authorization: Bearer <sesión de la cuenta>` (sin ella,
+401) y filtran por el usuario de esa sesión. **Los ids van en el cuerpo, nunca
+en la URL**, para que no queden en registros de acceso.
+
+| Método | Ruta | Cuerpo | Respuesta |
+|---|---|---|---|
+| `GET` | `/api/vault/v2/capabilities` | — | `{protocol: 2, facts, limits, sessionExpiresAt}`; `limits.objectMaxBytes` es `VAULT_OBJECT_MAX_BYTES` |
+| `POST` | `/api/vault/v2/conversations/list` | `{after, limit ≤ 500}` | `[{conversationId, turnCount, updatedAt}]` |
+| `POST` | `/api/vault/v2/conversations/manifest` | `{conversationId, after, limit ≤ 1000}` | `[{sequence, recordId}]` |
+| `POST` | `/api/vault/v2/records/fetch` | `{conversationId, sequences ≤ 100}` | `[registro]` |
+| `POST` | `/api/vault/v2/records/push` | `{conversationId, base, records ≤ 40}` | 200 `{results}` / 409 `{reason}` |
+| `POST` | `/api/vault/v2/media/list` | `{after, limit ≤ 500}` | `[medio]` |
+| `POST` | `/api/vault/v2/media/push` | `{media}` | 200 `{outcome}` / 409 `{reason}` |
+| `POST` | `/api/vault/v2/conversations/purge` | `{conversationId, after}` | `{done, after, deletedObjects}` |
+
+Lo que el servidor hace cumplir:
+
+- **Lecturas sin analizar.** Las listas, el manifiesto y los registros son el
+  cuerpo de PostgREST tal cual, con alias de columnas. Las fechas llegan como
+  las escribe Postgres (`+00:00`) y el cliente las normaliza; las páginas van
+  ordenadas por id o secuencia. PostgREST recorta cualquier lectura a su «Max
+  rows» (1000 por defecto en Supabase) **sin avisar**, así que ningún tope de
+  página pasa de 1000 (`VAULT_POSTGREST_MAX_ROWS`) y el cliente pide páginas
+  hasta recibir una **vacía**: una corta no prueba que no haya más.
+- **Topes por bytes antes de leer.** `Content-Length` primero y, si falta o
+  miente, se cuenta al leer: un lote de turnos hasta 512 KiB, un registro solo
+  hasta 4 MiB, el alta de un medio hasta 1 MiB y las demás peticiones hasta
+  16 KiB. Si se pasa, **413**. Un límite de página por encima del máximo es un
+  **422**, no se recorta.
+- **Subida de turnos atómica.** `base` es el último turno del servidor anterior
+  al lote. El orden: dueño (otra cuenta, **404**), espacio de hechos (**409**
+  `space`), base (**409** `base-mismatch`) e `INSERT` plano. Si choca, no entra
+  nada y responde **409** `records` con cada registro clasificado en
+  `duplicate`, `conflict` o `pending`. Una conversación que no existe solo se
+  crea con `base: null`; con base, **409** `conversation-missing`.
+- **Rango reservado.** Los turnos van por debajo de `VAULT_FACT_SEQUENCE_BASE`
+  (1.000.000.000); lo de arriba es de los hechos de F2 y ninguna ruta de turnos
+  lo acepta ni lo devuelve.
+- **Alta de medios.** La conversación tiene que existir y ser del usuario (no
+  la crea), no ser un espacio, y los bytes del original y de la miniatura tienen
+  que estar ya subidos: se comprueba sin descargarlos. Responde `stored` o
+  `duplicate`; si no, **409** con `object-missing`, `conversation-missing`,
+  `space` o `conflict`.
+- **Purga por tandas.** Cada llamada borra los objetos de 20 medios como mucho
+  (≤ 40 objetos, ≤ 48 subpeticiones contando la autenticación) y devuelve el
+  cursor; la última borra la conversación y, en cascada, sus turnos y medios.
+  Es reanudable e idempotente. La usará F2.
+- **Fallos.** Un error de Supabase o del almacén es un **502** redactado; su
+  cuerpo no sale ni se registra.
+- **Sesión.** Si a la sesión le quedan menos de 15 días, usarla la alarga a
+  30. `capabilities` devuelve la caducidad ya renovada.
+
+**v1 cerrada.** `POST /api/vault/records`, `GET /api/vault/conversations`,
+`GET /api/vault/conversations/:id`, `GET` y `POST /api/vault/media` y
+`POST /api/vault/conversations/:id/delete` responden **426** «actualiza Luxy
+Studio» **antes de autenticar** y sin tocar la base. La v1 nunca funcionó
+(`SEG-SYNC-001`), y así ningún Studio viejo puede escribir ni resucitar lo
+borrado.
+
 ## 8. Cron de leases
 
 `wrangler.toml` incluye:
@@ -185,6 +265,13 @@ npx wrangler tail --format pretty
 Son JSON de una línea por evento. **Los secretos salen ya redactados**: el
 Worker registra sus propios secretos al arrancar y `redact()` los elimina de
 cualquier log o mensaje antes de que salgan.
+
+Los de la bóveda llevan **solo el `userId` y recuentos** (recibidos,
+guardados, duplicados, conflictos, objetos borrados) y, si algo falla, el
+estado y el código de Supabase. Nunca un id de conversación, de turno, de medio
+ni una clave de objeto, ni el cuerpo de un error de Supabase: el detalle de un
+`23505` o un `23503` incluye la clave que chocó. Las pruebas del gateway lo
+comprueban en cada línea.
 
 ## 11. Rate limiting
 
