@@ -285,6 +285,74 @@ su resultado, pasar `LA-063` a `informativa` y este bloque a `done`. Pendiente
 aparte, y de Daniel: si los modelos de Anthropic y de OpenAI que revende
 NanoGPT caen bajo `D-003`.
 
+## F35-IMAGEN-001 — una foto que no se parece a lo que Lía describe (2026-10-13)
+
+Estado: **diagnosticado, nada cambiado.** Daniel pasó un caso: la escena
+narrada era de sofá, con la camisa abierta y una mano bajo la ropa interior, y
+salió un primer plano de perfil, vestida y con el pecho grande. Modelo
+`WAI-ANI-NSFW-PONYXL`, `avisos: 0`.
+
+- **Visto en la propia imagen:** el generador cumplió el encuadre que escribió
+  el modelo de la conversación, «close-up from the side». Lo que la foto tenía
+  que enseñar queda fuera del plano. Nadie pidió ese encuadre, y contradice la
+  foto que ella narró. La escena, además, repetía «1girl, young woman, adult»
+  y llevaba relleno («soft warm lighting, intimate atmosphere»), dos cosas que
+  `buildVaultImageInstruction` ya prohíbe.
+- **Leído en el código público de AI Horde** (`detection.py`, `base.py` y la
+  referencia de modelos): con un modelo marcado NSFW, y sin avisar, cambia
+  `young`, `small`, `little` y `tiny` por `adult`, y `girl` por `adult woman`
+  (también en `1girl`). Además añade términos al negativo. La receta de Lía
+  llega con `adult breasts` y `adult frame` donde decía `small`. Lo que la
+  pantalla enseña como «Se pidió al generarla» no es lo que recibe el
+  generador.
+- **Ya avisado por Luxy y sin aplicar:** la receta usa «masterpiece, best
+  quality» y no el prefijo de Pony (`qualityPrefixWarning`).
+
+Posibles cambios, sin decidir:
+
+- una regla de encuadre en la instrucción: no añadir un encuadre que nadie
+  pidió y, si se pone, que quepa en él todo lo que se describe;
+- enseñar en el panel el prompt tal como lo deja AI Horde (`D-093`);
+- avisar en la receta de las palabras que no hacen efecto.
+
+No se proponen sinónimos para esquivar esa lista: es una medida anti-CSAM.
+
+## F35-BORRAR-001 — «Borrar conversación» borra sin preguntar (2026-10-08)
+
+Estado: **anotado, sin empezar.** Va después de la prueba en vivo de
+`SEG-SYNC-001` F1, junto con `F35-CORTADAS-001`. Daniel, el 08/10: «borrar
+conversación te la borra de una. Ni cuadro de confirmación ni nada. Si le doy
+sin querer, adiós conversación. Hay que cambiar eso».
+
+Comprobado: el botón (`Vault.tsx` ~880) llama a `vault.removeConversation` al
+primer clic. El borrado se lo lleva todo de este ordenador —mensajes y
+memoria, medios, ficha, escenas, promesas, intentos de foto, enganche y
+reescrita (`handlers.ts` ~1493)— y no hay papelera hasta F2. Ya existe el
+patrón para hacerlo bien: un paso intermedio en la propia pantalla, no un
+`confirm()` del navegador (`Vault.tsx` ~6227, el de «Borrar su memoria»).
+Confirmar debe nombrar la conversación y lo que se pierde.
+
+En Privado hay otros botones de borrar que tampoco preguntan: la clave de AI
+Horde (~1006) y la del proveedor de pago (~1123). Se recuperan volviendo a
+pegarlas, pero se revisan a la vez. En Ajustes, «Borrar» un secreto
+(`Config.tsx` ~1372) y «Borrar token guardado» (`System.tsx` ~265), lo mismo.
+
+## F35-CORTADAS-001 — las respuestas cortadas salen como enteras (2026-10-08)
+
+Estado: **anotado, sin empezar.** Va después de la prueba en vivo de
+`SEG-SYNC-001` F1. Daniel, el 08/10: «algunas respuestas se cortaron a medias,
+y salen como mensajes enteros».
+
+Según `luxy.log`, de las respuestas privadas que no son del CLI, 300 acabaron
+`completed`, 11 `interrupted`, 5 `truncated` y 1 `timed_out`. Las 17 últimas
+se guardaron con su texto parcial, que es lo que manda `CLAUDE.md`: no se
+reintenta un corte que ya produjo texto. Pero Privado **no lo marca**: sólo
+avisa cuando el corte rompe el bloque de imagen (`Vault.tsx` ~1178). Falta
+mirar si el registro del turno guarda el final (`responseOutcome`), para poder
+marcar las de antes, y ofrecer «continuar» o «repetir». El diagnóstico local
+de la sincronización mira la integridad de los archivos, no si una respuesta
+está entera.
+
 ## INV-FONDO-001 e INV-LLAVE-001 — el trabajo de fondo parado y la llave en bucle (2026-10-05)
 
 Estado: **investigado el 05/10 (flujo `wf_b54b06d5-73d`, 32 agentes, cada
