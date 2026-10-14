@@ -66,21 +66,33 @@ cambio no ha hecho nada».
 ## Lanzarla
 
 ```bash
-powershell.exe -NoProfile -Command 'Remove-Item Env:ELECTRON_RUN_AS_NODE -ErrorAction SilentlyContinue; Start-Process -FilePath (Resolve-Path "node_modules/electron/dist/electron.exe") -ArgumentList "apps/desktop" -WorkingDirectory (Get-Location)'
+powershell.exe -NoProfile -Command '$exe = (Resolve-Path "node_modules/electron/dist/electron.exe").Path; $r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = ([char]34 + $exe + [char]34 + " apps/desktop"); CurrentDirectory = (Get-Location).Path }; "Create: " + $r.ReturnValue + ", PID " + $r.ProcessId'
 ```
 
-Desde la raíz del repositorio: las dos rutas son relativas a ella.
+Desde la raíz del repositorio: las rutas se resuelven a partir de ella. Tiene
+que devolver `Create: 0`. Después comprueba con la primera orden de esta skill
+que la ventana existe.
 
-Lánzala **suelta**, con `Start-Process`, y no como tarea de la consola
-(`run_in_background`). Una tarea de fondo tiene un tope de tiempo, y al
-cumplirse mata a sus hijos: el 05/10 cerró la Luxy que Daniel estaba usando a
-los 30 minutos exactos, con la bóveda abierta. `Start-Process` vuelve
-enseguida y la ventana queda fuera de la sesión. Después comprueba con la
-primera orden de esta skill que la ventana existe.
+Lánzala **fuera del árbol de procesos de Claude**, con `Win32_Process.Create`,
+que la crea colgando de `WmiPrvSE`. Las otras dos formas la han cerrado con
+Daniel dentro:
 
-`ELECTRON_RUN_AS_NODE` no puede estar puesta en el entorno; si lo está,
-Electron arranca como Node y no abre ninguna ventana. La orden de arriba la
-quita.
+- **Como tarea de la consola (`run_in_background`):** tiene un tope de tiempo
+  y al cumplirse mata a sus hijos. El 05/10 cerró Luxy a los 30 minutos
+  exactos, con la bóveda abierta.
+- **Con `Start-Process`:** se libra del tope, pero el proceso sigue dentro del
+  *job* de Windows de la app de Claude. El 13/10 a las 17:47 la app de Claude
+  se colgó, Windows la cerró y Luxy cayó con ella, sin pasar por `lock()`.
+  Comprobado con `IsProcessInJob`: lanzada así da `True`; un proceso creado
+  con `Win32_Process.Create` da `False`.
+
+El entorno tampoco se hereda: el proceso nace con el del usuario, así que
+`ELECTRON_RUN_AS_NODE` no puede colarse. Si la ventana no aparece, mira que
+no esté puesta como variable de usuario: con ella, Electron arranca como Node.
+
+**Pendiente de ver con Luxy:** el 13/10 la orden se probó con un proceso
+inofensivo, no con la aplicación, porque Daniel la tenía abierta. Si al usarla
+la ventana no sale, vuelve a `Start-Process` y apúntalo aquí.
 
 El equivalente que usa Daniel a mano es `start-luxy.bat` en la raíz, y
 `rebuild-and-start-luxy.bat` para reconstruir y abrir de una vez. Hacen lo
