@@ -1,12 +1,117 @@
 # Luxy — acciones locales de Daniel
 
-> **Nota de identificadores, 2026-09-23.** Este archivo tiene cinco números
-> duplicados con contenidos distintos: **LA-022, LA-023, LA-030, LA-031 y
-> LA-032** aparecen dos veces cada uno (verificado con
-> `grep -o '^## LA-[0-9]*' LOCAL-ACTIONS.md | sort | uniq -d`). Como el resto de
-> la documentación cita las LA por su número, **cualquier referencia cruzada a
-> esos cinco es ambigua** y hay que leer las dos. Renumerarlos tocaría citas en
-> varios documentos y no se ha hecho hoy. Los números nuevos se toman de LA-049.
+> **Renumeración de identificadores, 2026-10-14.** Cinco números estaban
+> repetidos, cada uno con dos entradas distintas. En cada pareja conservó el
+> número la entrada más antigua, la que lo llevaba primero en el historial de
+> git; la otra pasó a un número nuevo y no se movió de sitio:
+>
+> | Antes | Ahora | Título |
+> | --- | --- | --- |
+> | `LA-022` | `LA-065` | validar inicialización automática de Git |
+> | `LA-023` | `LA-066` | validar la rama de consolidación al finalizar |
+> | `LA-030` | `LA-067` | integrar y validar la biblioteca de conversaciones |
+> | `LA-031` | `LA-068` | permitir Luxy y registrar `DESKTOP-VM5J5GT` |
+> | `LA-032` | `LA-069` | prueba real y acotada de Kimi K3 |
+>
+> Las entradas antiguas de `CHANGELOG-WORK.md` y `TEST-RESULTS.md` no se
+> reescriben y siguen citando el número viejo; con esta tabla se sabe a cuál se
+> refieren. Allí, una cita de `LA-030`, `LA-031` o `LA-032` fechada entre el
+> 2026-08-28 y el 2026-08-31 es de la renumerada (`LA-067`, `LA-068` o
+> `LA-069`): Codex las escribió en su worktree y no entraron en git hasta el
+> 2026-09-02. Una del 2026-09-01 en adelante es de la que conservó el número.
+> Las dos citas de `LA-022`, del 2026-08-10, son de la que lo conserva, y
+> `LA-023` no tiene ninguna. Desde ese día, una prueba de
+> `packages/shared/src/docs.test.ts` falla si se repite el número de una
+> cabecera `## LA-NNN` aquí o `## D-NNN` en `DECISIONS.md`. Un número nuevo
+> sigue al último del archivo (hoy, `LA-069`).
+
+## LA-064 — probar el nivel de razonamiento y el tope por modelo en NanoGPT
+
+Estado: **`pending` — abierta el 2026-10-13.** Es la primera prueba real de
+`F36-RAZONAMIENTO-001` (`D-111`): hasta aquí sólo lo han visto las pruebas
+automáticas. **Gasta saldo de NanoGPT**, poco: son cuatro mensajes cortos.
+
+Motivo: saber si NanoGPT acepta el campo, si el modelo razona más o menos
+según el nivel y si el tope por modelo llega. Nada de eso está medido.
+
+**Antes de empezar**
+
+1. Apuntar el saldo que marca el panel de NanoGPT. Es el único freno: el
+   «Presupuesto diario» de Luxy no cuenta nada en un proveedor HTTP.
+2. Cerrar Luxy, reconstruir y volver a abrirla. En la carpeta del
+   repositorio:
+
+   ```powershell
+   npm.cmd run build
+   ```
+
+   **Con `npm.cmd run desktop:dev` no vale**: no reconstruye el agente
+   empaquetado, que descartaría los ajustes sin dar error mientras la
+   pantalla dice que se envían.
+3. No cambiar la temperatura ni las penalizaciones en toda la prueba, y **no
+   elegir ningún modelo de Anthropic ni de OpenAI** (`D-003` está sin
+   decidir).
+
+**Los pasos**
+
+1. Conexiones → tarjeta de NanoGPT → «Ajustes por modelo» → «Añadir modelo».
+   Al abrirse el editor aparece el botón «Actualizar modelos de este
+   proveedor» (sin ningún ajuste guardado y con el editor cerrado no sale):
+   pulsarlo. El catálogo guardado es de las 13:03 del 13/10 y lo leyó la
+   versión anterior, **sin detalle**: hasta pulsar el botón no hay niveles
+   que ofrecer. Esto cierra también el paso 3 de `LA-063`.
+   - Esperado: la fecha de hoy junto al botón y, en Modelos, «Leído con
+     detalle». Las filas de los modelos llevan una etiqueta: «razona: none ·
+     low · high · max», «razona, sin niveles declarados» o «NanoGPT declara
+     que no razona».
+2. En ese mismo editor, escribir el modelo
+   `deepseek/deepseek-v4-flash-0731` (sale entre las sugerencias).
+   - Esperado: el selector de razonamiento ofrece «Sin razonar», «Razonar
+     poco (low)», «Razonar más (high)» y «Razonar al máximo (max)», que es lo
+     que su catálogo declaraba el 13/10. Bajo el máximo de tokens, «NanoGPT
+     declara 131072 de salida para este modelo».
+   - Elegir «Razonar más (high)» y poner «Máximo de tokens de este modelo» en
+     `16384`. Guardar.
+3. Privado → conversación desechable → Proveedor `nanogpt` → Modelo
+   `deepseek/deepseek-v4-flash-0731`.
+   - Esperado, bajo los selectores: una línea que dice que Luxy pide el nivel
+     «más (high)», el de su ajuste propio, y que el máximo de salida es de
+     16384 tokens, el de este modelo.
+   - Enviar un mensaje que pida pensar: una cuenta, un acertijo corto.
+4. Registros → «Actualizar» → buscar «llamada al proveedor», la última.
+   - Esperado: `reasoningSent: reasoning_effort`, `outputCap: 16384` y
+     `reasoningVerdict: visible` (o `counted`, si NanoGPT cuenta el
+     razonamiento sin enseñarlo). Si dice `not_seen`, el campo viajó y el
+     modelo no razonó: también es un resultado.
+5. Volver al ajuste del modelo, cambiar a «Sin razonar», y repetir los pasos 3
+   y 4 con un mensaje parecido.
+   - Esperado: `reasoningSent: reasoning_effort` otra vez (lo que viaja ahora
+     es `none`) y `reasoningVerdict: not_seen`. La respuesta debería empezar
+     antes.
+6. Lo mismo con «Razonar al máximo (max)». `max` figura en el catálogo y en
+   la guía de NanoGPT, pero no en el esquema publicado de su API: **si
+   contesta con un error, es un resultado, no una avería**. No se reintenta
+   solo.
+7. Cydonia, sin tocar nada: Modelo `TheDrummer/Cydonia-24B-v4.3` y un
+   mensaje. Es además el paso 4 de `LA-063`.
+   - Esperado: la línea de Privado dice que Luxy no envía ningún nivel, y en
+     Registros esa llamada no lleva `reasoningSent`.
+
+Resultado esperado: en `%APPDATA%\Luxy\config.json`, la entrada `nanogpt`
+gana `modelSampling` y `modelOutputCaps` con ese modelo; y
+`%LOCALAPPDATA%\Luxy\catalog\http-nanogpt.json` pasa a llevar
+`"detail": "detailed"`.
+
+Riesgo: cada mensaje gasta saldo, y el razonamiento se cobra como salida. Un
+nivel guardado se aplica a **todos** los turnos de ese modelo hasta que se
+quite: al acabar, dejarlo como se quiera usar de verdad. Si se vuelve a un
+Luxy anterior con un nivel nuevo guardado, la configuración no abre hasta
+quitarlo a mano (`D-111`).
+
+Evidencia a devolver: de cada una de las cuatro llamadas, `reasoningSent`,
+`reasoningVerdict`, `outputCap` y los segundos hasta la primera palabra; el
+saldo al acabar; y, si alguna falla, el código y el cuerpo que enseña Luxy.
+Con eso se sabe si `D-111` se queda como está.
 
 ## LA-063 — NanoGPT: pasarela de pago, proveedor HTTP en Conexiones
 
@@ -1380,17 +1485,13 @@ git config --global user.email "danielux135@gmail.com"
 Comprobación: `git config --list --show-origin | grep user.` debe mostrar las
 dos entradas con origen en el `.gitconfig` global.
 
-Actualización `LA-032`: `LUX-SKA7` ya es la prueba nueva que confirma
-`list_files` y `write_file`. Tras el reinicio de Desktop con `KIMI-K3-RETRY-001`,
-pulsa **Reintentar trabajo** en ese mismo registro: debe reutilizar su worktree
-y, si hay otro corte transitorio, mostrar `conexion con el proveedor
-interrumpida` y reintentarlo antes de fallar.
+## LA-068 — permitir Luxy y registrar `DESKTOP-VM5J5GT`
 
-Actualización `LA-032`: `LUX-BHM8` fue una prueba nueva y reveló un defecto SSE
-local, ya corregido. Crear ahora un trabajo nuevo con Kimi K3; debe registrar
-`herramienta write_file` y `write_file: hecho` antes del resultado final.
+> Antes `LA-031`: renumerada el 2026-10-14 porque el número estaba repetido.
 
-## LA-031 — permitir Luxy y registrar `DESKTOP-VM5J5GT`
+> Sus pasos de registro, de «El catálogo de 19 modelos» a «Completar el
+> onboarding», quedaron debajo de la entrada de Kimi K3 al unir las ramas el
+> 2026-09-02; se trajeron aquí el 2026-10-14.
 
 Estado: `done` — cerrada el 2026-08-31. Desktop registró `portatil-oscar` con
 la ID `6f34d4b8-5927-43ee-a0d0-360ac54f3c01`; `config.json` no contiene token
@@ -1430,17 +1531,6 @@ el portapapeles de Windows; no está en este documento ni en el repositorio.
 No queda ninguna acción administrativa de App Control ni de registro. La prueba
 real de una API China queda pendiente de que Daniel configure una clave válida y
 autorice su consumo.
-
-## LA-032 — prueba real y acotada de Kimi K3
-
-Estado: `in_progress` — abierta el 2026-08-31 por petición de Daniel.
-
-En **Trabajos**, crear un trabajo nuevo con el modelo **Kimi K3** y pedir una
-edición pequeña, por ejemplo crear `kimi-prueba.txt` con una línea dentro del
-worktree. Revisar que el detalle muestre una herramienta ejecutada, un diff y
-archivos modificados. No reintentar `LUX-A9K9`: no cambió archivos y ya consumió
-su llamada. Si Kimi no completa el ciclo, devolver el detalle a Codex; no activar
-ningún permiso adicional ni realizar push.
 
 El catálogo de 19 modelos se ha reconstruido y verificado, pero la ventana de
 Luxy que ya está abierta conserva la compilación anterior. Tras completar el
@@ -1509,7 +1599,35 @@ Después de esos pasos, volver a pedir a Codex que verifique sin exponer valores
 existencia de config, `machineId`, token cifrado, heartbeat, herramientas y
 proyecto anunciado.
 
-## LA-030 — integrar y validar la biblioteca de conversaciones
+## LA-069 — prueba real y acotada de Kimi K3
+
+> Antes `LA-032`: renumerada el 2026-10-14 porque el número estaba repetido.
+
+> Sus dos «Actualización» (`LUX-SKA7` y `LUX-BHM8`) quedaron dentro de
+> `LA-030` al unir las ramas el 2026-09-02; se trajeron aquí el 2026-10-14.
+
+Estado: `in_progress` — abierta el 2026-08-31 por petición de Daniel.
+
+En **Trabajos**, crear un trabajo nuevo con el modelo **Kimi K3** y pedir una
+edición pequeña, por ejemplo crear `kimi-prueba.txt` con una línea dentro del
+worktree. Revisar que el detalle muestre una herramienta ejecutada, un diff y
+archivos modificados. No reintentar `LUX-A9K9`: no cambió archivos y ya consumió
+su llamada. Si Kimi no completa el ciclo, devolver el detalle a Codex; no activar
+ningún permiso adicional ni realizar push.
+
+Actualización `LA-069`: `LUX-SKA7` ya es la prueba nueva que confirma
+`list_files` y `write_file`. Tras el reinicio de Desktop con `KIMI-K3-RETRY-001`,
+pulsa **Reintentar trabajo** en ese mismo registro: debe reutilizar su worktree
+y, si hay otro corte transitorio, mostrar `conexion con el proveedor
+interrumpida` y reintentarlo antes de fallar.
+
+Actualización `LA-069`: `LUX-BHM8` fue una prueba nueva y reveló un defecto SSE
+local, ya corregido. Crear ahora un trabajo nuevo con Kimi K3; debe registrar
+`herramienta write_file` y `write_file: hecho` antes del resultado final.
+
+## LA-067 — integrar y validar la biblioteca de conversaciones
+
+> Antes `LA-030`: renumerada el 2026-10-14 porque el número estaba repetido.
 
 Estado: `pending` — abierta el 2026-08-28. La implementación y la batería
 automatizada están completas; no hay commit, publicación ni prueba visual.
@@ -1656,7 +1774,9 @@ aviso 422 del agente.
 Este archivo sólo contiene acciones que una IA no debe ejecutar por su cuenta.
 No repetir una acción marcada como completada sin una razón nueva.
 
-## LA-023 — validar la rama de consolidación al finalizar
+## LA-066 — validar la rama de consolidación al finalizar
+
+> Antes `LA-023`: renumerada el 2026-10-14 porque el número estaba repetido.
 
 Estado: `pending`
 
@@ -1671,7 +1791,9 @@ En **Trabajos**, verificar que desaparece el bloque técnico que decía
 `invalid_enum_value` para `provider: hunyuan` y que el historial vuelve a listar
 los trabajos. No crear ni reintentar un trabajo para esta comprobación.
 
-## LA-022 — validar inicialización automática de Git
+## LA-065 — validar inicialización automática de Git
+
+> Antes `LA-022`: renumerada el 2026-10-14 porque el número estaba repetido.
 
 Estado: `pending`
 

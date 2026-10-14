@@ -35,6 +35,11 @@
 >   commiteado en `f77efb6`); 4741 y 4751 tras la novena y la décima (229
 >   archivos, sin commitear). **La revisión de la décima dejó dieciséis
 >   defectos, dos importantes, sin corregir.**
+> - Del 13/10: `PROVEEDORES-006`, NanoGPT como proveedor HTTP de pago
+>   (`LA-063`), y `F36-RAZONAMIENTO-001` (`D-111`), el nivel de razonamiento y
+>   el máximo de tokens por modelo en un proveedor HTTP, con lo que declara el
+>   catálogo de NanoGPT; sin ninguna llamada real (`LA-064`). Anotado y sin
+>   empezar, `F37-FICHAS-001`.
 >
 > El detalle, en `CURRENT-TASK.md`.
 

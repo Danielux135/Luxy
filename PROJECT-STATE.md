@@ -184,6 +184,19 @@ Electron. La bóveda sigue sin copia.**
 > run check` a solas. La regla de los GLM que se apagan espera a Daniel
 > (`D-107`). Sin saber si la pasarela deja pasar el campo**: lo dirá `LA-055`.
 
+> **`F36-RAZONAMIENTO-001` (`D-111`, 2026-10-13): en NanoGPT el razonamiento
+> se elige por modelo, con lo que declara su catálogo.** Un proveedor HTTP
+> tiene ahora «Ajustes por modelo»: muestreo, nivel de razonamiento y máximo
+> de tokens propios de cada modelo. En los servidores de NanoGPT la tabla de
+> `D-107` no se consulta: el selector ofrece los niveles que su catálogo
+> detallado declara, de siete posibles, y el campo viaja sólo si el modelo
+> tiene su ajuste propio. El catálogo guarda lo que declara cada modelo, y un
+> refresco no pisa uno detallado con uno simple ni con uno vacío. Privado
+> enseña, bajo los selectores, el nivel y el tope que se van a usar.
+> **Implementado, revisado y sin commitear. Sin ninguna llamada real a
+> NanoGPT y sin verse en pantalla**: `LA-064`. La Luxy abierta sigue siendo
+> la versión anterior hasta que se reconstruya.
+
 > **`F33-RECUERDO-ENTERO-001` (`D-105`, quinta ronda, 2026-09-28): con la
 > casilla «Pasarle la memoria de sus dos últimas conversaciones» le llega la
 > memoria entera de cada una** —resumen, hechos, decisiones y lecciones, sin
@@ -894,7 +907,7 @@ portapapeles. La máquina `portatil-oscar` quedó registrada con ID
 `6f34d4b8-5927-43ee-a0d0-360ac54f3c01`: existe `config.json`, el token no está
 en claro y `secrets.enc` cifrado existe. Tras reiniciar Desktop sin
 `ELECTRON_RUN_AS_NODE`, el proceso informó `agente listo`. No se aplicó ninguna
-política de App Control ni se relajó protección alguna; ver `LA-031`.
+política de App Control ni se relajó protección alguna; ver `LA-068`.
 
 El catálogo inicial de API China también se actualizó a los 19 modelos actuales:
 retira versiones ya ausentes y añade GLM 4.5 Air, Kimi K3, Qwen 3.8 27B,
@@ -923,7 +936,7 @@ repite el rechazo de Electron con `spawn UNKNOWN`, eventos 3033/3077 y la misma
 Policy ID empresarial. Wrangler está instalado pero sin sesión Cloudflare y no
 hay certificado local de firma de código. Continúan ausentes el secreto de
 registro, `config.json` y `secrets.enc`; no se creó una identidad parcial ni se
-dejó un token en claro. Próximo punto de decisión y acciones: `LA-031`.
+dejó un token en claro. Próximo punto de decisión y acciones: `LA-068`.
 
 Última actualización: **2026-08-28 — alta de este ordenador bloqueada fuera de Luxy**
 
@@ -933,7 +946,7 @@ propone un nombre desde el hostname. La implementación pasa lint, typecheck,
 `MACHINE_REGISTRATION_SECRET` y Windows Code Integrity exige nivel de firma
 empresarial para ejecutar Electron (eventos 3033/3077, Policy ID
 `{0283ac0f-fff1-49ae-ada1-8a933130cad6}`). No se fabricó ninguna ID, no se
-guardó token en claro y la app no quedó abierta. Pasos externos: `LA-031`.
+guardó token en claro y la app no quedó abierta. Pasos externos: `LA-068`.
 
 Última actualización: **2026-08-28 — F2.4-T1 implementada y verificada**
 
@@ -946,7 +959,7 @@ restaurar y buscar conversaciones sin migración ni sondeo adicional. El cambio
 está conectado desde Zod/Gateway hasta IPC y renderer y pasa lint, typecheck,
 1.655 pruebas y build. Permanece sin commit, push, deploy ni prueba manual; esas
 acciones requieren revisión o autorización y la validación local está en
-`LA-030`.
+`LA-067`.
 
 Última actualización: **2026-08-27 — F4.9-DYNAMIC-HTTP-PROVIDERS**
 

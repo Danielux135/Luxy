@@ -275,3 +275,44 @@ describe('.gitignore protege los archivos sensibles', () => {
     expect(gitignore).toContain('!.env.providers.example');
   });
 });
+
+/** identificadores de las cabeceras `## <prefijo>-NNN`, en orden de aparicion */
+function headerIds(text: string, prefix: 'LA' | 'D'): string[] {
+  return [...text.matchAll(new RegExp(`^## (${prefix}-\\d+)`, 'gm'))].map((match) => match[1]!);
+}
+
+/** los que aparecen mas de una vez, cada uno una sola vez */
+function repeatedIds(ids: string[]): string[] {
+  const seen = new Set<string>();
+  const repeated = new Set<string>();
+  for (const id of ids) {
+    if (seen.has(id)) repeated.add(id);
+    seen.add(id);
+  }
+  return [...repeated];
+}
+
+// el resto de la documentacion cita las acciones locales y las decisiones solo
+// por su numero, asi que un numero repetido vuelve ambigua cada cita. ya
+// ocurrio: dos copias del repositorio (la de Claude y el worktree de Codex)
+// numeraban cada una por su cuenta y, al unirse, LA-022, LA-023, LA-030, LA-031
+// y LA-032 quedaron con dos entradas distintas cada uno. se renumeraron el
+// 2026-10-14. antes de escribir una entrada nueva hay que mirar el ultimo numero
+// del archivo; esta prueba falla si alguien no lo hizo.
+describe('los numeros de LA y de D no se repiten', () => {
+  // sin la primera comprobacion, una expresion que no casara con nada dejaria
+  // la prueba en verde para siempre
+  it('LOCAL-ACTIONS.md no repite el numero de ninguna cabecera LA', () => {
+    const ids = headerIds(read('LOCAL-ACTIONS.md'), 'LA');
+    expect(ids.length, 'no se encontro ninguna cabecera ## LA-NNN').toBeGreaterThan(0);
+    const repetidos = repeatedIds(ids);
+    expect(repetidos, `LOCAL-ACTIONS.md repite cabecera: ${repetidos.join(', ')}`).toEqual([]);
+  });
+
+  it('DECISIONS.md no repite el numero de ninguna cabecera D', () => {
+    const ids = headerIds(read('DECISIONS.md'), 'D');
+    expect(ids.length, 'no se encontro ninguna cabecera ## D-NNN').toBeGreaterThan(0);
+    const repetidos = repeatedIds(ids);
+    expect(repetidos, `DECISIONS.md repite cabecera: ${repetidos.join(', ')}`).toEqual([]);
+  });
+});

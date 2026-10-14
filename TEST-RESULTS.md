@@ -1,5 +1,44 @@
 # Luxy — resultados de comprobación
 
+### 2026-10-14 — DOCS-DUPLICADOS-001 — la prueba de números repetidos
+
+- `node_modules/.bin/vitest run packages/shared/src/docs.test.ts`, con la
+  prueba nueva y antes de renumerar: «Tests 1 failed | 65 passed (66)», con
+  el mensaje «LOCAL-ACTIONS.md repite cabecera: LA-031, LA-032, LA-030,
+  LA-023, LA-022». Apuntada a una copia de `DECISIONS.md` con un `D-050`
+  repetido: «DECISIONS.md repite cabecera: D-050».
+- Después de renumerar: «Tests 66 passed (66)». `npm run lint` y
+  `npm run typecheck` con salida 0 (los ejecutó el agente que aplicó).
+- `grep -o '^## LA-[0-9]*' LOCAL-ACTIONS.md | sort | uniq -d` sale vacío, y
+  el equivalente con `D-` en `DECISIONS.md` también.
+- `npm test` entero no se ejecutó: el único archivo de código tocado es
+  `docs.test.ts`.
+
+### 2026-10-13 — F36-RAZONAMIENTO-001 — lint, typecheck y pruebas a solas, sin build
+
+- A las 16:40, por quien coordina, sin ningún otro agente en marcha y en
+  serie, los tres con salida 0:
+  - `npm run lint`: sin avisos;
+  - `npm run typecheck`: los paquetes y las pruebas;
+  - `npm test`: **241 archivos, 5446 pruebas en verde y 12 omitidas
+    (5458)**, las de siempre de `live.test.ts`. 198,88 s.
+- El mismo resultado dio un momento antes la comprobación final del flujo
+  `wf_658fea4b-624`. Tras la construcción y la revisión
+  (`wf_5807291e-6f2`) eran 5426 en verde: los menores añadieron 20.
+- Respecto al 07/10 (239 archivos, 5214): dos archivos de prueba nuevos,
+  `catalog-refresh.test.ts` y `ipc/catalog-refresh-handler.test.ts`, y 232
+  pruebas más.
+- Finales de línea: ninguno de los archivos tocados sale `w/mixed` en
+  `git ls-files --eol`; contrastado con `tr`.
+- **No ejecutado: `npm run build`.** Reescribe `apps/desktop/out`, y hay una
+  Luxy abierta que corre desde ahí. Por eso tampoco es un `npm run check`
+  entero. Lo hace Daniel al empezar `LA-064`.
+- No ejecutado: Studio en Electron, ni una sola llamada a NanoGPT. Todas las
+  pruebas van con `fetch` inyectado y cargas inventadas con la forma de
+  NanoGPT. Lo único real fue leer, sin clave, su catálogo público.
+- Sin prueba automática: que el error de «Actualizar modelos de este
+  proveedor» se borre al cerrar el editor.
+
 ### 2026-10-07 — SEG-SYNC-001 F1 — `npm run check` a solas y dry-run del gateway
 
 - `npm run check` (`comprobar:check` de `wf_c5b33936-911`, sin ningún otro

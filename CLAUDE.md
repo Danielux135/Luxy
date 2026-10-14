@@ -33,6 +33,13 @@ o cambia de alcance, actualiza `CURRENT-TASK.md` y añade evidencia a
 `CHANGELOG-WORK.md` en ese momento. Sin archivos, comandos, resultados reales y
 siguiente paso documentados, el trabajo no está terminado.
 
+Un número nuevo de `LA` o de `D` sigue al último de su archivo. Dos copias del
+repositorio (otra rama o un worktree) numeran cada una por su cuenta, así que
+al unir una copia lo que choque se renumera: conserva el número la entrada que
+lo llevaba primero en git, y la otra pasa al siguiente libre con una línea
+«Antes `LA-0NN`». `docs.test.ts` falla si un número se repite. Así nacieron
+los cinco duplicados renumerados el 2026-10-14 (tabla en `LOCAL-ACTIONS.md`).
+
 ## Qué es Luxy
 
 Agente personal con Luxy Studio como interfaz principal en Windows. Studio crea
@@ -358,17 +365,32 @@ inyección de shell, pero no convierte en seguro el código que la prueba import
   `chat completions`. Sus claves viven cifradas en `SecretStore`, nunca en
   `config.json`; las URLs remotas exigen HTTPS y HTTP sólo se admite en loopback.
 - El catálogo real de una conexión consulta sólo `/v1/models`; no sondea rutas
-  tentativas de precios (`D-022`).
+  tentativas de precios (`D-022`). En los servidores de NanoGPT esa misma ruta
+  se pide con `?detailed=true`, y los precios que trae no se leen (`D-111`).
 - El razonamiento de una conexión HTTP se elige POR MODELO en su muestreo
   (`reasoningMode`, `D-107`). Vacío no manda nada. Lo traduce la tabla de
   `reasoning-control.ts`, con nombres enteros y la fuente de cada regla; un
-  modelo sin regla no recibe nada. A DeepSeek sólo se le ofrece apagarlo:
-  encenderlo rompe los trabajos con herramientas. Todo nombre de campo nuevo del
-  registro se comprueba con `isSecretKeyName` (`redact.ts`): tapa cualquiera que
-  acabe en key, token, secret, password o credential, en singular o plural y en
-  camelCase, snake o kebab (`visiblePorToken` salía como `[REDACTADO]`). El
-  veredicto `reasoningVerdict` mira primero lo visible y después el recuento:
-  `counted` es que el proveedor declaró razonamiento y no llegó nada que se vea.
+  modelo sin regla no recibe nada. En la tabla, a DeepSeek sólo se le ofrece
+  apagarlo: encenderlo rompe los trabajos con herramientas. Todo nombre de
+  campo nuevo del registro se comprueba con `isSecretKeyName` (`redact.ts`):
+  tapa cualquiera que acabe en key, token, secret, password o credential, en
+  singular o plural y en camelCase, snake o kebab (`visiblePorToken` salía
+  como `[REDACTADO]`). El veredicto `reasoningVerdict` mira primero lo visible
+  y después el recuento: `counted` es que el proveedor declaró razonamiento y
+  no llegó nada que se vea.
+- En una pasarela con **dialecto de catálogo** (`CATALOG_DIALECTS`, hoy sólo
+  NanoGPT) la tabla NO se consulta (`D-111`). El selector ofrece los niveles
+  que DECLARA su catálogo guardado, de siete posibles (`off`, `minimal`, `low`,
+  `medium`, `high`, `xhigh`, `max`), y el campo viaja sólo si ese modelo tiene
+  su ajuste propio en el `modelSampling` del proveedor HTTP. El `reasoningMode`
+  de nivel de proveedor no viaja nunca allí, y en una llamada cuyo cuerpo lleva
+  `tools` sólo viaja `off`. El agente no conoce el catálogo: un nivel escrito a
+  mano dentro de esa entrada viaja y decide la pasarela. El tope de salida
+  también es por modelo (`modelOutputCaps`: petición, modelo, proveedor). Un
+  refresco no pisa un catálogo detallado con uno simple ni con uno vacío
+  (`catalog-refresh.ts`). Los textos dicen «declara», con fecha, nunca «admite»
+  (`D-093`). `npm run desktop:dev` no reconstruye el agente empaquetado: un
+  cambio del agente se prueba con `npm run build`.
 - El trabajo de fondo de la bóveda —catalogar escenas, apuntar lo que queda
   pendiente entre los dos— va **sólo** por Claude Code o Codex con la sesión
   local, nunca por una API de pago (`D-087`). Lo resuelve

@@ -80,9 +80,173 @@
 > 5. **`PROVEEDORES-006` (13/10): NanoGPT, la primera pasarela de pago.** No
 >    depende de nada de lo anterior. Lo que falta es de Daniel, y se hace
 >    dentro de `LA-064`.
+> 6. **`F36-RAZONAMIENTO-001` (13/10): elegir razonamiento y nivel en NanoGPT.
+>    Construido y revisado, sin commitear; `blocked` a la espera de la prueba
+>    de Daniel (`LA-064`). Ningún paso `in_progress`.** Bloque justo debajo.
+> 7. **`F37-FICHAS-001` (13/10): fichas de pasarela en pantalla y detección
+>    con IA. Anotado, sin empezar; va justo después de `F36`.** Bloque debajo
+>    del de `F36`.
+> 8. **`CATALOGO-CHOQUE-001` (14/10): dos catálogos que comparten archivo.
+>    Anotado, sin empezar; va después de commitear `F36`.** Bloque debajo del
+>    de `F37`.
 >
 > `KIMI-K3-EXPERIMENT-001`, al final del archivo, está **abandonado**, no en
 > curso. No lo retomes sin que Daniel lo pida.
+
+## F36-RAZONAMIENTO-001 — elegir razonamiento y nivel en NanoGPT (2026-10-13)
+
+Estado: **`blocked` — Claude, 2026-10-13. Construido, revisado y sin
+commitear; a la espera de `LA-064`, que es de Daniel.** Decisión: `D-111`.
+
+Daniel, con NanoGPT ya instalada (`PROVEEDORES-006`): «haz los cambios de
+código que sean necesarios para poder utilizar perfectamente el thinking y
+niveles de razonamiento al menos en nanogpt».
+
+Antes de este paso no se podía, por tres motivos observados en el código:
+
+- la tabla de `D-107` (`reasoning-control.ts`) casa nombres enteros y ninguno
+  de los de NanoGPT casa: llevan el prefijo `deepseek/`;
+- un proveedor HTTP tiene un solo `reasoningMode` para todos sus modelos, y el
+  formulario lo ofrece y lo valida contra el modelo predeterminado, que en
+  `nanogpt` es Cydonia y no razona;
+- Luxy sólo conoce tres valores (`off`, `low`, `high`) y NanoGPT declara hasta
+  `max`.
+
+Hipótesis: NanoGPT publica por modelo, en la versión detallada de su catálogo,
+si razona (`capabilities.reasoning`) y qué niveles admite
+(`reasoning_efforts`), y los acepta en `reasoning_effort`. Leyéndolo de ahí, el
+selector se rellena solo, sin una regla escrita a mano por modelo.
+
+Criterio de aceptación: con un DeepSeek de NanoGPT se puede elegir no razonar
+o cualquiera de los niveles que su catálogo declara; lo elegido viaja en el
+cuerpo y queda en el registro; un modelo que no razona no ofrece nada; los
+demás proveedores no cambian ni un byte de su cuerpo (`D-098`); y
+`npm run check` en verde.
+
+**Lo construido** (detalle y motivos en `D-111`):
+
+- siete niveles (`off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`);
+  la tabla de `D-107` no gana ninguno;
+- en los servidores de NanoGPT la tabla no se consulta: el selector ofrece lo
+  que declara su catálogo detallado, y `reasoning_effort` viaja sólo si el
+  modelo tiene su ajuste propio;
+- la tarjeta de un proveedor HTTP tiene «Ajustes por modelo»: muestreo, nivel
+  y «Máximo de tokens de este modelo» (`modelSampling` y `modelOutputCaps`
+  en `providers.http[]`);
+- el catálogo guarda lo que declara cada modelo y cómo se leyó (`detail`), y
+  un refresco no pisa uno detallado con uno simple ni con uno vacío
+  (`apps/desktop/src/main/catalog-refresh.ts`);
+- Modelos etiqueta cada fila con lo declarado, y Privado enseña bajo los
+  selectores el nivel y el tope que se van a usar;
+- el registro apunta `reasoningSent`, `outputCap` y `reasoningVerdict` de cada
+  llamada.
+
+**Lo que NO está hecho:** ninguna llamada real a NanoGPT, nada visto en la
+ventana, y la Luxy abierta sigue siendo la versión anterior. El criterio de
+aceptación sólo está cumplido en las pruebas automáticas.
+
+**Lo que decide Daniel:** si `D-003` alcanza a los modelos de Anthropic y de
+OpenAI que revende NanoGPT. Hasta entonces no se usan.
+
+**Siguiente paso exacto:** `LA-064`. Empieza cerrando Luxy y reconstruyendo
+con `npm.cmd run build`; con `desktop:dev` la prueba no vale. Después,
+`F37-FICHAS-001`.
+
+## F37-FICHAS-001 — fichas de pasarela en pantalla y detección con IA (2026-10-13)
+
+Estado: **anotado, sin empezar. Va después de `F36-RAZONAMIENTO-001`**, y no
+antes de que Daniel lo haya probado con NanoGPT.
+
+Daniel, el 13/10, con `F36` en construcción: «¿Y si construimos en Luxy un
+apartado en el que puedas especificar qué links hacen llamadas a su lista de
+modelos y detalles?», y después: «¿no nos serviría pedirle en una llamada de
+IA a Claude por ejemplo que nos dé los datos que Luxy necesita?». Y:
+«apúntalo como siguiente paso».
+
+El problema que resuelve: `F36` deja a NanoGPT descrita como una ficha escrita
+en el código (a qué servidor se aplica, qué consulta lleva su catálogo, qué
+campo se manda para el razonamiento). Una pasarela nueva seguiría pidiendo
+tocar código, porque entre pasarelas cambian tres cosas:
+
+1. **a dónde se pregunta** por la lista de modelos y sus detalles;
+2. **cómo viene escrita la respuesta** (NanoGPT dice `reasoning_efforts`;
+   OpenRouter, `supported_parameters`; otras no dicen nada);
+3. **cómo se le pide el nivel al modelo** (`reasoning_effort`, `thinking`,
+   `enable_thinking`…).
+
+Lo hablado, sin diseñar todavía:
+
+- la ficha pasa del código a Conexiones, por proveedor, con NanoGPT como
+  plantilla ya rellena;
+- la consulta del catálogo se escribe como RUTA (`/models?detailed=true`),
+  nunca como dirección completa: esa petición lleva la clave, y la regla de
+  hoy es que el destino sale de la configuración guardada y del mismo
+  servidor que la URL base;
+- Luxy reconoce sola los formatos de respuesta que ya conoce; para uno nuevo,
+  «Detectar formato»: una llamada a Claude Code o Codex con la sesión local
+  (como el trabajo de fondo de `D-087`, nunca una API de pago), **una vez por
+  pasarela**, con una muestra de la respuesta y no el catálogo entero. La IA
+  devuelve una ficha; Luxy comprueba su forma, Daniel la confirma y a partir
+  de ahí se aplica sin IA;
+- el catálogo dice qué admite cada modelo, no cómo pedírselo: el campo del
+  cuerpo sale de la documentación de la pasarela (enlace que se le da a la
+  IA) o de un desplegable;
+- una llamada de prueba, de Daniel, valida la ficha con lo que ya se apunta
+  en Registros.
+
+Decisiones que son de Daniel y están sin tomar: dejar elegir a mano «cómo se
+pide el razonamiento» relaja la regla de `D-107` de mandar sólo lo
+documentado para ese modelo; y si la IA puede leer la documentación de la
+pasarela por su cuenta.
+
+Lo que `F36` deja hecho y se reutiliza tal cual: los siete niveles, los
+ajustes y el tope por modelo de un proveedor HTTP, el catálogo guardado con
+lo que declara cada modelo, el refresco que no pisa un catálogo bueno, lo
+que manda el agente y la línea de Privado. Lo único que cambia de sitio es la
+ficha de NanoGPT: de una tabla en `reasoning-control.ts` a la configuración.
+
+## CATALOGO-CHOQUE-001 — dos catálogos que comparten archivo (2026-10-14)
+
+Estado: **anotado, sin empezar.** Va después de commitear
+`F36-RAZONAMIENTO-001`, porque toca `catalog-refresh.ts`, que hoy sólo existe
+sin commitear. Daniel, el 14/10: «déjalo apuntado a las tareas pendientes».
+
+El defecto, anterior a `F36` y encontrado en su revisión: `snapshotPath`
+(`apps/desktop/src/main/catalog-store.ts`) guarda el catálogo de un proveedor
+HTTP en `http-<id>.json` y el de una conexión en `<id>.json`. Una conexión
+`http-x` y un proveedor HTTP `x` van al mismo archivo, y el esquema admite la
+pareja (`rechazaIdentificadoresCruzados` sólo rechaza ids idénticos). El
+segundo que se actualiza pisa al primero, y las reglas de «no pisar un
+catálogo bueno» de `catalog-refresh.ts` se decidirían sobre un catálogo
+ajeno. La configuración de Daniel no tiene ninguna pareja así: una conexión
+(`hcnsec`) y seis proveedores.
+
+Arreglo propuesto, sin probar: un prefijo de archivo para los proveedores que
+ninguna conexión pueda llevar (el id de una conexión no admite `_` ni `.`),
+leyendo el nombre viejo como respaldo para no dejar huérfanos los catálogos
+ya guardados. Rechazar la pareja en el esquema haría que una configuración
+que ya la tenga dejara de abrir. **No** se arregla cambiando la clave de
+`createCatalogRefresher` al nombre de archivo: un origen recibiría el
+catálogo del otro. El comentario de esa función y la prueba «la clave es el
+origen y no el nombre de archivo…» nombran la pareja como algo que pasa hoy:
+se actualizan al arreglarlo.
+
+Criterio de aceptación: una prueba que falle hoy con la pareja `http-x` / `x`
+y pase con el arreglo; los catálogos ya guardados se siguen leyendo; y
+`npm run check` en verde.
+
+**Siguiente paso exacto:** commitear `F36` (lo autoriza Daniel) y entonces
+empezar este paso. Hay además una tarjeta de tarea en Claude Code con el
+mismo encargo; lanzarla antes del commit no sirve, porque arranca en una
+copia limpia del repositorio sin esos archivos.
+
+## DOCS-DUPLICADOS-001 — cinco números de `LA` repetidos (2026-10-14)
+
+Estado: **`done` — Claude, 2026-10-14.** Renumerados a `LA-065`…`LA-069`
+con la tabla arriba de `LOCAL-ACTIONS.md`, y `docs.test.ts` falla si un
+número de `LA` o de `D` vuelve a repetirse. Evidencia en `CHANGELOG-WORK.md`.
+Queda fuera un choque latente: la `LA-049` del worktree de Codex
+`local-image-runtime-001`, que se renumera si Daniel decide traer esa copia.
 
 ## PROVEEDORES-006 — NanoGPT, sexta ronda: la primera pasarela de pago (2026-10-13)
 
@@ -4169,7 +4333,7 @@ ni push. El trabajo permanece sin commit en
 
 Siguiente paso exacto: revisar el diff y, si Daniel lo aprueba, crear el commit
 local de `F2.4-T1`; la publicación/reconstrucción y validación manual quedan en
-`LA-030`. Después, el siguiente bloque planificado es `F2.5`.
+`LA-067`. Después, el siguiente bloque planificado es `F2.5`.
 
 ---
 

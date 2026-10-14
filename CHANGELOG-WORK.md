@@ -1,5 +1,158 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-10-14 — Claude — `DOCS-DUPLICADOS-001`: cinco números de `LA` repetidos, renumerados, y una prueba que lo impide
+
+- Estado anterior: `LOCAL-ACTIONS.md` tenía repetidos `LA-022`, `LA-023`,
+  `LA-030`, `LA-031` y `LA-032`, avisado por una nota del 2026-09-23 que no
+  se había resuelto.
+- Objetivo: Daniel, el 14/10: «no me gusta nada lo de duplicados».
+- Causa demostrada en git: `LA-030`, `LA-031` y `LA-032` nacieron el
+  2026-09-01 en la rama de la bóveda y el 2026-08-28/31 en el worktree de
+  Codex de la biblioteca de conversaciones, que entró con el merge `b9dc457`
+  del 2026-09-02. `LA-023`: `bc48fc4` (08-17) y `308e947` (08-20). `LA-022`:
+  en `1b01fc3` (08-10) eran `LA-021` y `LA-022`, y el merge `82e728a`
+  (08-20) renumeró la primera a `LA-022` al chocar con otra `LA-021`.
+- Archivos modificados: `LOCAL-ACTIONS.md` (cinco cabeceras con su línea
+  «Antes», la nota de arriba sustituida por la tabla de renumeración, y dos
+  trozos devueltos a su entrada), `PROJECT-STATE.md` (cuatro citas),
+  `CURRENT-TASK.md` (una cita y este paso), `CLAUDE.md` y `AGENTS.md` (la
+  misma regla de numeración en los dos), `packages/shared/src/docs.test.ts`
+  (prueba nueva), `TEST-RESULTS.md` y este archivo.
+- Comandos ejecutados: flujo `wf_fa785a5d-691` (cinco clasificadores, uno
+  por número; un revisor que vio las 54 apariciones juntas; uno que aplicó y
+  otro que revisó en disco); `git log -S` para fechar cada entrada; y las
+  comprobaciones de `TEST-RESULTS.md`.
+- Resultado real: en cada pareja conserva el número la entrada que lo llevaba
+  primero en git, y la otra pasa a `LA-065`…`LA-069`. **En `LA-022` el
+  reparto que encargó quien coordina iba al revés de esa regla**; el
+  clasificador lo vio en git y se aplicó la regla: «validar reanudación del
+  mismo worktree» conserva `LA-022`, y así sus dos citas del 2026-08-10
+  siguen siendo correctas. Las citas de los documentos vivos apuntan al
+  número nuevo; las de los históricos no se reescriben y se resuelven con la
+  tabla, que da la regla de fechas. Al unir las ramas el 2026-09-02 habían
+  quedado mal colocados los pasos de registro de `LA-068` (debajo de la
+  entrada de Kimi) y las dos actualizaciones de `LA-069` (dentro de
+  `LA-030`); se devolvieron a su entrada con una línea que lo dice.
+- Pruebas: la prueba nueva, vista roja contra el archivo real («repite
+  cabecera: LA-031, LA-032, LA-030, LA-023, LA-022») y contra una copia con un
+  `D-050` repetido; verde después. Detalle en `TEST-RESULTS.md`.
+- Decisiones: la regla de numeración de `CLAUDE.md` y `AGENTS.md`. Sin
+  número de decisión: es una convención de documentación.
+- Riesgos o límites: **queda un sexto choque latente fuera de esta carpeta.**
+  El worktree de Codex `local-image-runtime-001` (24/09, sin commitear, sólo
+  documentación y cuatro flujos de ComfyUI) tiene una `LA-049` que en la
+  principal es otra. La prueba sólo lo verá si esa copia se une; Daniel
+  decide si se trae. `MASTER-PLAN.md` sigue diciendo que la 0007 está «sin
+  aplicar» junto a `LA-031`: desfase anterior, fuera de este paso.
+- Estado nuevo: `DOCS-DUPLICADOS-001` `done`.
+- Siguiente paso exacto: ninguno propio. Lo pendiente sigue siendo `LA-064`.
+
+### 2026-10-14 — Claude — `CATALOGO-CHOQUE-001`: anotado, sin empezar
+
+Daniel pidió dejar apuntado el defecto de `snapshotPath` que salió en la
+revisión de `F36`. Sólo documentación: bloque nuevo en `CURRENT-TASK.md`
+(entrada 8 de «Por dónde entrar») y el identificador en «Lo que queda
+abierto» de `D-111`. Ningún código ni prueba. Siguiente paso exacto: commitear
+`F36` y empezar este paso.
+
+### 2026-10-13 16:45 — Claude — `F36-RAZONAMIENTO-001`: nivel de razonamiento y máximo de tokens por modelo en NanoGPT (`D-111`, `LA-064`)
+
+- Estado anterior: `3ae1890`, con la documentación de `PROVEEDORES-006` sin
+  commitear (entrada de abajo). `F36-RAZONAMIENTO-001` `in_progress` desde
+  esa mañana.
+- Objetivo: Daniel, con NanoGPT instalada: «haz los cambios de código que
+  sean necesarios para poder utilizar perfectamente el thinking y niveles de
+  razonamiento al menos en nanogpt».
+- Hipótesis o causa demostrada: no se podía por tres motivos vistos en el
+  código: la tabla de `D-107` casa nombres enteros y los de NanoGPT llevan
+  prefijo; un proveedor HTTP tenía un solo `reasoningMode`, validado contra su
+  modelo predeterminado; y Luxy conocía tres valores. Comprobado sin clave el
+  13/10 contra el catálogo público: 644 modelos, 387 que declaran razonar y
+  232 con lista de niveles, cuyo vocabulario son exactamente siete valores.
+  **`reasoning_efforts` no está en su documentación: se observó en la
+  respuesta.** Las frases de su guía que cita el código se compararon
+  literales con la página.
+- Archivos leídos: `packages/shared/src` (`reasoning-control.ts`,
+  `sampling.ts`, `schemas.ts`, `types.ts`, `provider-call.ts`,
+  `models/catalog-fetch.ts`), `apps/agent/src` (`providers/http-provider.ts`,
+  `providers/sse.ts`, `providers/agentic-loop.ts`, `job-runner.ts`,
+  `agent.ts`, `runtime/host-entry.ts`), `apps/desktop/src`
+  (`main/ipc/handlers.ts`, `main/catalog-store.ts`, `main/config-store.ts`,
+  `main/agent-controller.ts`, `renderer/http-provider-config.ts`,
+  `renderer/useCatalog.ts`, `renderer/pages/Config.tsx`,
+  `renderer/pages/Vault.tsx`, `shared/model-selection.ts`), `package.json`
+  y `DECISIONS.md` (`D-003`, `D-022`, `D-082`, `D-093`, `D-098`, `D-102`,
+  `D-107`).
+- Archivos modificados:
+  - `packages/shared/src`: `reasoning-control.ts`, `sampling.ts`,
+    `schemas.ts`, `types.ts`, `models/catalog-fetch.ts` y sus pruebas
+    (`reasoning-control.test.ts`, `sampling.test.ts`,
+    `models/catalog-fetch.test.ts`, `models/capabilities.test.ts`);
+  - `apps/agent/src`: `providers/http-provider.ts`, `providers/sse.ts`,
+    `providers/providers.test.ts`, `providers/sse.test.ts`,
+    `runtime/host-entry.test.ts`;
+  - `apps/desktop/src`: `main/catalog-refresh.ts` (nuevo),
+    `main/catalog-refresh.test.ts` (nuevo),
+    `main/ipc/catalog-refresh-handler.test.ts` (nuevo),
+    `main/ipc/handlers.ts`, `main/catalog-store.test.ts`,
+    `renderer/http-provider-config.ts`, `renderer/useCatalog.ts`,
+    `renderer/pages/Config.tsx`, `renderer/pages/Vault.tsx`,
+    `renderer/ui/glossary.ts`, `shared/model-selection.ts` y sus pruebas;
+  - documentación: `DECISIONS.md` (`D-111`, notas en `D-107` y `D-022`),
+    `LOCAL-ACTIONS.md` (`LA-064`, `LA-063`), `CURRENT-TASK.md`,
+    `PROJECT-STATE.md`, `MASTER-PLAN.md`, `TEST-RESULTS.md`, `CLAUDE.md` y
+    `AGENTS.md` (el mismo párrafo en los dos),
+    `docs/PROVEEDORES-SEXTA-RONDA.md` y este archivo.
+- Comandos ejecutados: cinco flujos (lectura `wf_2901a656-512`, crítica
+  `wf_65623447-f7c`, construcción `wf_75c8e93c-c82`, revisión
+  `wf_5807291e-6f2` y menores `wf_658fea4b-624`); lecturas sin clave del
+  catálogo y de la documentación públicos de NanoGPT; un sondeo de
+  `%APPDATA%\Luxy\config.json` que sólo imprime identificadores; y, al
+  final y a solas, `npm run lint`, `npm run typecheck` y `npm test`.
+  **Ninguna llamada de inferencia, ningún `npm run build`, ningún commit.**
+- Resultado real: construido lo que describe `D-111`. La revisión de siete
+  revisores confirmó dos hallazgos, el mismo defecto: una respuesta 200 con
+  forma de lista simple a la petición con detalle se sellaba como `detailed`
+  y podía pisar el catálogo bueno; corregido en `catalog-refresh.ts`. De sus
+  trece menores salieron diez distintos, todos ciertos. Uno es operativo (el
+  de `desktop:dev`, en «Riesgos»). Los otros nueve están cerrados con prueba
+  roja antes y verde después, salvo donde se dice:
+  - `bareHost` reconoce el esquema sólo al principio y quita un punto final
+    del host (antes, `example.org?next=https://api.nano-gpt.com` se leía
+    como NanoGPT);
+  - los comentarios de la compuerta de herramientas dicen lo que hace el
+    código: es por llamada cuyo cuerpo lleva `tools` (sólo comentarios);
+  - un `capabilities`, `owned_by` o `created` raros cuestan el campo y no el
+    modelo;
+  - no hay dos refrescos a la vez del mismo origen
+    (`createCatalogRefresher`);
+  - el tope por modelo sólo admite dígitos («300.000» se guardaba como 300);
+  - la línea de Privado no describe una entrada apagada o sin clave;
+  - la pista del catálogo sin detalle con el modelo vacío ya no deja una
+    frase colgada;
+  - el aviso fijo nombra también el nivel de razonamiento del proveedor;
+  - el error de «Actualizar modelos de este proveedor» se borra al cerrar el
+    editor (**implementado, sin prueba automática**).
+- Pruebas: `npm run lint` 0, `npm run typecheck` 0 y `npm test` 0, a solas a
+  las 16:40: **241 archivos, 5446 pruebas en verde y 12 omitidas**. Detalle
+  en `TEST-RESULTS.md`.
+- Decisiones: `D-111`, que sustituye en parte a `D-107` y acota `D-022` sólo
+  en los servidores de NanoGPT. Queda para Daniel `D-003`.
+- Riesgos o límites: **nada medido contra NanoGPT y nada visto en la
+  ventana.** El único freno de gasto es el saldo: `dailyCallLimit` no tiene
+  campo en pantalla. Con `npm run desktop:dev` el agente empaquetado
+  (`apps/desktop/out/agent/host-entry.js`, del 07/10) no se reconstruye y
+  descarta los ajustes sin error. Encontrado y sin arreglar, anterior a este
+  paso: una conexión `http-x` y un proveedor HTTP `x` comparten archivo de
+  catálogo (`snapshotPath`); la configuración de Daniel no tiene ninguna
+  pareja así. El resto, en «Lo que queda abierto» de `D-111`.
+- Estado nuevo: `F36-RAZONAMIENTO-001` `blocked`, a la espera de `LA-064`.
+  Ningún paso `in_progress`. La Luxy abierta (arrancada a las 09:07) sigue
+  con la versión anterior.
+- Siguiente paso exacto: `LA-064`, de Daniel: cerrar Luxy,
+  `npm.cmd run build`, abrirla y seguir sus siete pasos. Después,
+  `F37-FICHAS-001`.
+
 ### 2026-10-13 10:50 — Claude — `PROVEEDORES-006`: NanoGPT, proveedor HTTP de pago (`LA-063`)
 
 - Estado anterior: `3ae1890`, con `CURRENT-TASK.md` modificado sin commitear

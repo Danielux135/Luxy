@@ -292,6 +292,12 @@ La ausencia de precio no bloquea un modelo ni autoriza a inventar una cifra. Si
 otra conexión futura documenta una API de precios real, será una integración
 explícita de esa conexión, no una batería de rutas tentativas.
 
+**Acotada por `D-111` (2026-10-13).** En los servidores de NanoGPT la misma
+ruta `/models` se pide con `?detailed=true`, para leer qué niveles de
+razonamiento declara cada modelo. No se añade ninguna ruta y los precios que
+trae esa lista no se leen: es una decisión de alcance de `D-111`, no algo que
+mande esta.
+
 ## D-023 — definir y confirmar una evaluación antes de ejecutarla
 
 Fecha: 2026-08-09
@@ -5402,6 +5408,11 @@ tras la décima por seis con check en verde (4751). Lo que queda abierto, al
 final. **Sin probar contra la pasarela real ni contra la API de Z.AI, y sin
 verse en pantalla** (`LA-055`, `LA-058`).
 
+**Sustituida en parte por `D-111` (2026-10-13), sólo en los servidores de
+NanoGPT.** Allí la tabla no se consulta: se ofrece lo que declara el catálogo
+de la pasarela, el vocabulario pasa de tres valores a siete y a DeepSeek se le
+ofrecen sus niveles. En cualquier otro servidor todo lo de abajo sigue igual.
+
 Corrige en parte el párrafo de `D-082` que dice que una conexión HTTP no ve el
 selector porque `chat completions` «no tiene dónde ponerlo». El contrato de
 OpenAI no tiene un campo común, pero cada proveedor documenta el suyo. `D-082`
@@ -5649,7 +5660,8 @@ la décima, que no tocó esta decisión (4751): nada importante.
 - La pista del proveedor HTTP dice que el valor viaja con cualquier otro modelo
   suyo «si no tiene su propio ajuste», y un proveedor de `providers.http` no
   puede tenerlo (`modelSampling` solo existe en las conexiones): insinúa una
-  salida que no existe. Lo principal sí es cierto.
+  salida que no existe. Lo principal sí es cierto. **Cerrado por `D-111`
+  (13/10):** un proveedor HTTP ya tiene ajustes por modelo.
 - **La regla de DeepSeek no se puede rastrear hasta su fuente.** La página
   citada no nombra ninguno de sus tres modelos. Según la de precios
   (api-docs.deepseek.com/quick_start/pricing), los nombres de la API son
@@ -6358,3 +6370,229 @@ Detalle en `CURRENT-TASK.md`.
 - Que el plan gratuito de Supabase limite a 50 MB por archivo es un dato
   externo sin comprobar.
 - Corregir el pie de foto no viaja (F3).
+
+## D-111 — en una pasarela que publica sus niveles, el razonamiento se elige por modelo con lo que declara su catálogo; el tope de salida, también por modelo
+
+Fecha: 2026-10-13. Autor: Claude. Contexto: `F36-RAZONAMIENTO-001`. Daniel, con
+NanoGPT ya instalada (`PROVEEDORES-006`): «haz los cambios de código que sean
+necesarios para poder utilizar perfectamente el thinking y niveles de
+razonamiento al menos en nanogpt».
+
+Estado (13/10): **implementada y sin commitear. Sin ninguna llamada real a
+NanoGPT y sin verse en pantalla** (`LA-064`). Leída por siete lectores
+(`wf_2901a656-512`), diseñada con tres críticas (`wf_65623447-f7c`), construida
+en cinco etapas en serie (`wf_75c8e93c-c82`), revisada por siete revisores con
+dos defectos confirmados y corregidos (`wf_5807291e-6f2`), y con los menores de
+esa revisión cerrados aparte (`wf_658fea4b-624`). Los recuentos, en
+`TEST-RESULTS.md`.
+
+Sustituye **en parte** a `D-107` y acota `D-022`, sólo para los servidores de
+la lista de abajo. En cualquier otro servidor, `D-107` sigue igual, letra por
+letra.
+
+### Por qué
+
+Con `D-107` no se podía, por tres motivos vistos en el código:
+
+- su tabla casa nombres enteros y ninguno de NanoGPT casa: llevan prefijo de
+  fabricante (`deepseek/deepseek-v4-flash-0731`);
+- un proveedor HTTP tenía un solo `reasoningMode` para todos sus modelos, y el
+  formulario lo ofrecía y lo validaba contra el modelo predeterminado, que en
+  `nanogpt` es Cydonia y no razona;
+- Luxy conocía tres valores (`off`, `low`, `high`) y NanoGPT declara hasta
+  `max`.
+
+Y una tabla escrita a mano no sirve aquí: NanoGPT publicaba el 13/10, leído
+sin clave, 644 modelos, 387 que dicen razonar y 232 con su lista de niveles, y
+cambian sin avisar. Lo que sí publica, por modelo y en la versión detallada de
+su catálogo, es si razona (`capabilities.reasoning`) y qué niveles admite
+(`reasoning_efforts`). El primero está en su documentación; **el segundo no:
+se observó en la respuesta**, y por eso todo lo que sale de él se dice en
+pantalla como «declara», con fecha.
+
+### Lo que se decide
+
+1. **Siete valores.** `REASONING_MODES` pasa a `off`, `minimal`, `low`,
+   `medium`, `high`, `xhigh` y `max`, en ese orden, que es el de la guía de
+   NanoGPT («Extended thinking»). `off` no se renombra a `none`: la
+   configuración guarda la elección y no el campo del cuerpo, `none` es un
+   valor real de ese campo, y `LA-055` y `LA-058` citan «Sin razonar». Las
+   reglas de la tabla no ganan ningún modo: siguen ofreciendo sólo `off`,
+   `low` y `high`, y hay una prueba que lo fija.
+2. **Dialecto de catálogo** (`CATALOG_DIALECTS`, en
+   `packages/shared/src/reasoning-control.ts`). Una entrada por pasarela: a
+   qué servidores se aplica, con qué consulta se pide su catálogo y qué campo
+   viaja. Hoy hay una, NanoGPT: `api.nano-gpt.com` y `nano-gpt.com`, consulta
+   `detailed=true`, campo `reasoning_effort` en la raíz del cuerpo, con `none`
+   para `off` y el mismo nombre para los demás. **En esos servidores la tabla
+   no se consulta.** Un servidor va por la tabla o por un dialecto, nunca por
+   los dos.
+3. **Lo que se ofrece sale del catálogo guardado**, no del código: el selector
+   de un modelo lleva los niveles que NanoGPT declara para ese identificador.
+   Un modelo que declara que no razona no ofrece nada.
+4. **Lo que decide si algo viaja es que el modelo tenga su ajuste propio.** El
+   agente no conoce el catálogo, así que no puede comprobar el nivel contra
+   él. En un servidor con dialecto:
+   - el campo viaja sólo si ese modelo tiene su entrada en `modelSampling`;
+   - el `reasoningMode` de nivel de proveedor **no viaja nunca**: vale para
+     todos los modelos de la entrada y nadie lo eligió mirando lo que declara
+     cada uno. El formulario lo enseña apagado y el registro apunta
+     `not_sent`;
+   - un nivel desfasado, o escrito a mano dentro de esa entrada, **viaja, y
+     decide la pasarela**. Su guía dice que no todos los modelos admiten todos
+     los niveles y que algunas rutas lo ajustan al más cercano; un error suyo
+     no se reintenta.
+5. **Elegir a mano, en dos casos.** Con el catálogo leído sin detalle y con
+   un modelo que dice razonar sin publicar niveles, el selector ofrece los
+   siete y la pantalla dice que decide NanoGPT. En los demás casos sólo se
+   ofrece lo declarado.
+6. **Un proveedor HTTP gana ajustes por modelo y tope de salida por modelo.**
+   `providers.http[]` gana `modelSampling` (el mismo esquema de las
+   conexiones, sin tocarlo) y un mapa hermano `modelOutputCaps` (modelo →
+   entero de 256 a 200.000, 32 entradas como mucho). El tope efectivo es, por
+   este orden, el de la petición, el de ese modelo y el del proveedor. Va en
+   un mapa aparte y no dentro del muestreo porque la entrada de muestreo
+   **sustituye entera** a la del proveedor, y el tope es una cadena de caída:
+   dos precedencias opuestas en el mismo objeto. Las conexiones no ganan el
+   tope. Motivo de meterlo en este paso: el razonamiento gasta del mismo
+   tope, `nanogpt` va a 4096 y un nivel alto acabaría en «agotó el límite de
+   salida», que no se reintenta.
+7. **El catálogo guarda lo que declara cada modelo.** Opcionales y sin valor
+   por defecto: `reasoning` (tres estados: sí, no, o no lo dice),
+   `reasoningEfforts` (las cadenas crudas), `declaredOutputCap` y
+   `declaredContext`; y por catálogo, `detail` (`detailed` o `basic`). Un dato
+   raro cuesta el campo, nunca el modelo ni el catálogo.
+8. **Un refresco no pisa un catálogo bueno**
+   (`apps/desktop/src/main/catalog-refresh.ts`):
+   - en un servidor con dialecto se pide la lista detallada;
+   - si falla y lo guardado es detallado, **se conserva lo guardado** y el
+     error dice el código HTTP; si lo guardado no lo es, se cae a la lista
+     simple y se guarda como `basic`;
+   - una respuesta 200 que no trae ningún dato de detalle no se sella como
+     `detailed`;
+   - nunca se escribe un catálogo de cero modelos encima de uno con modelos;
+   - no hay dos refrescos a la vez del mismo origen: el segundo recibe el
+     resultado del primero.
+9. **El registro dice lo que se mandó.** La línea «llamada al proveedor»
+   apunta `reasoningSent`, `outputCap` y `reasoningVerdict` con el mismo
+   contexto que tuvo el cuerpo. `usage.reasoning_tokens` se lee también en la
+   raíz, tomando el mayor de los candidatos y nunca la suma.
+10. **La pantalla no promete** (`D-093`). Nunca «admite» ni «no razona»:
+    «NanoGPT declara / no declara», con la fecha del catálogo, y «no está
+    comprobado con ninguna llamada». `max` figura en su catálogo y en su guía,
+    no en el esquema publicado de su API, y la pista lo dice.
+
+### Lo que sustituye de `D-107`, motivo por motivo
+
+**La regla 2** («sólo lo que la documentación oficial de ese modelo admite; un
+modelo sin regla no recibe nada aunque se escriba a mano»). En un servidor con
+dialecto, la fuente pasa de la documentación del fabricante al catálogo de la
+pasarela, y la guarda pasa de «tiene regla» a «tiene ajuste propio». Lo que se
+pierde: el agente ya no impide que viaje un nivel que la pasarela no declara.
+Lo que se acepta a cambio: un error de la pasarela, que se ve y no se
+reintenta. La regla 1 (vacío no manda nada, `D-098`) y la 3 (nombres enteros,
+en la tabla) no cambian.
+
+**«A DeepSeek sólo se le ofrece apagarlo»** tenía tres motivos:
+
+- *«38 de 39 llamadas no razonaron».* Es una medida de la otra pasarela, del
+  28/09. En NanoGPT no hay ni una llamada: no se traslada ni se refuta. Aquí
+  encenderlo es lo que Daniel pide.
+- *«Con `tools` hay que devolverle su razonamiento o contesta 400».* **Sigue
+  en pie**: Luxy no lo devuelve. Por eso, en una llamada cuyo cuerpo lleva
+  `tools` sólo viaja `off`; cualquier otro nivel no se envía y el modelo hace
+  lo que traiga. La compuerta es por llamada, no por trabajo: con el
+  protocolo de reserva (herramientas como texto) el cuerpo no lleva `tools` y
+  el nivel viaja en cada vuelta. Hoy no se alcanza con NanoGPT: el contexto de
+  herramientas sólo se da a los identificadores agénticos del catálogo de
+  fábrica, comparados enteros (`findDefaultModel`, en `job-runner.ts`), y
+  ninguno de los de NanoGPT coincide. Lo reabre que alguno llegue a
+  coincidir, o que esa función pase a mirar el proveedor.
+- *«Anula la temperatura que `D-102` está midiendo».* `D-102` mide en otra
+  conexión. En NanoGPT se avisa en pantalla, con «no está comprobado en
+  NanoGPT», cada vez que el nombre del modelo lleva «deepseek».
+
+La regla vieja queda intacta para sus tres nombres en cualquier servidor sin
+dialecto.
+
+**El primer «queda abierto» de la décima ronda** (la pista del proveedor HTTP
+insinuaba un ajuste por modelo que no existía) queda cerrado: ahora existe.
+
+### `D-022`, `D-082`, `D-102` y `D-003`
+
+- **`D-022`.** `?detailed=true` es la misma ruta `/models` con un parámetro
+  documentado y acotado a esos dos servidores: la «integración explícita de
+  esa conexión» que `D-022` reserva, no una batería de rutas. Los precios que
+  trae esa lista **se ignoran por alcance de este paso, no porque lo mande
+  `D-022`**. El aviso fijo «esta conexión no publica precios» ya no se dice
+  de un catálogo de NanoGPT: sólo que Luxy no los lee. Leerlos es lo que
+  haría que el «Presupuesto diario» dejase de ser ciego en un proveedor HTTP,
+  y queda sin hacer.
+- **`D-082`** no guarda el esfuerzo de Claude y Codex porque una elección
+  cara que sobrevive a cerrar la ventana se vuelve a cobrar sola. Aquí **se
+  guarda**, como en `D-107`, y por primera vez en una pasarela de pago. Se
+  decide a la vista: el aviso fijo de «Ajustes por modelo» dice que los
+  tokens de razonamiento se cobran como salida, que el ajuste vale para todos
+  los turnos de ese modelo hasta que se quite y que el presupuesto diario no
+  lo frena. **El único freno real es el saldo prepagado**, sin recarga
+  automática: `dailyCallLimit` existe en `providers.http[]`, pero no tiene
+  campo en pantalla. `LA-064` empieza apuntando el saldo.
+- **`D-102`** («con un campo nuevo, nunca con valores nuevos del enum») no
+  aplica: es de `characters.json` y nace de un borrado silencioso.
+  `config.json` falla con ruido y no escribe (`config-store.ts`), y el enum
+  no cruza al gateway.
+- **`D-003` no se resuelve aquí.** El catálogo de NanoGPT trae modelos de
+  Anthropic y de OpenAI, con sus niveles, y Luxy no los filtra ni los pone
+  delante en las sugerencias. Si usarlos por una pasarela choca con `D-003`
+  lo decide Daniel; hasta entonces ni las pruebas ni `LA-064` usan uno.
+
+### Volver a un Studio anterior
+
+- Uno de entre `D-107` y `D-111` **no abre** una configuración que lleve
+  cualquiera de los cuatro valores nuevos (`minimal`, `medium`, `xhigh`,
+  `max`). No la sobrescribe. Se sale quitando ese valor a mano.
+- Uno anterior a este paso **descarta en silencio** `modelSampling` y
+  `modelOutputCaps` de un proveedor HTTP al leer, y los borra al guardar.
+- Lo mismo le pasa al agente empaquetado si no se reconstruye: con
+  `npm run desktop:dev` el agente sigue siendo el de la última construcción
+  completa, descarta los ajustes sin error y la línea de Privado afirma que
+  se envían. La primera prueba se hace con `npm run build`, y sólo vale si en
+  Registros aparece `reasoningSent`.
+
+### Lo que queda abierto
+
+- **Nada medido.** Que NanoGPT acepte el campo, que el modelo razone más o
+  menos según el nivel y que `max` no dé error lo dirá `LA-064`.
+- Un nivel guardado que deja de estar declarado sigue viajando hasta que se
+  cambie; la fila lo marca.
+- Si la lista detallada falla siempre y lo guardado es detallado, el botón no
+  cae nunca a la simple. La única salida es borrar el archivo del catálogo.
+- Un identificador que no está en el catálogo detallado no puede recibir un
+  nivel desde la pantalla.
+- Una **conexión** que apunte a NanoGPT no puede elegir niveles en pantalla:
+  sus opciones no reciben lo declarado. NanoGPT va como proveedor HTTP.
+- Los descriptores de imagen mandan su propio tope de 2000 y no miran el del
+  modelo.
+- **Dos catálogos pueden compartir archivo**, y es anterior a este paso: una
+  conexión llamada `http-x` y un proveedor HTTP llamado `x` van los dos a
+  `http-x.json` (`snapshotPath`, en `catalog-store.ts`), y el esquema admite
+  la pareja. El segundo que se actualiza pisa al primero, y las reglas de «no
+  pisar un catálogo bueno» se decidirían sobre un catálogo ajeno. La
+  configuración de Daniel no tiene ninguna pareja así. Sin arreglar:
+  `CATALOGO-CHOQUE-001`.
+- Con una URL base escrita como `https:api.nano-gpt.com/api/v1`, sin las dos
+  barras, el catálogo se pide y se guarda bien, pero los mensajes dicen «la
+  pasarela» en vez de «NanoGPT»: la consulta se decide con `URL` y el nombre
+  con la cadena cruda.
+- En una **conexión** cuya URL base lleve consulta o fragmento, la lista de
+  respaldo se compone por concatenación y no llega a `/models`. También es
+  anterior; el esquema de un proveedor HTTP los prohíbe.
+- Que el error de «Actualizar modelos de este proveedor» se borre al cerrar
+  el editor está implementado y sin prueba automática.
+- «Ajustes por modelo» y la línea de Privado salen ahora en todos los
+  proveedores HTTP, no sólo en NanoGPT. En un servidor de la tabla, una
+  entrada por modelo le quita a ese modelo el nivel de razonamiento del
+  proveedor, y el aviso lo dice.
+- La ficha de NanoGPT vive en el código. Pasarla a Conexiones, y reconocer
+  el formato de otra pasarela con una llamada a Claude Code o Codex, es
+  `F37-FICHAS-001`.
