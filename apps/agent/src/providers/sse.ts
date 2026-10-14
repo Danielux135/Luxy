@@ -510,19 +510,38 @@ export function reasoningOf(carrier: ReasoningCarrier): {
 }
 
 /**
- * `completion_tokens_details.reasoning_tokens` (OpenAI, DeepSeek, MiMo, Qwen, y
- * el DTO de NewAPI), o `output_tokens_details.reasoning_tokens`. 0 si no viene.
+ * los tokens de razonamiento que DECLARA el consumo, o 0 si no dice nada.
+ *
+ * Se miran tres sitios: `completion_tokens_details.reasoning_tokens` (OpenAI,
+ * DeepSeek, MiMo, Qwen, y el DTO de NewAPI), `output_tokens_details.
+ * reasoning_tokens`, y `reasoning_tokens` en la RAIZ del consumo, que es donde
+ * NanoGPT lo documenta ademas del anidado (F36).
+ *
+ * POR QUE EL MAYOR Y NO EL PRIMERO QUE VENGA: antes era una cadena `??`, que se
+ * queda con el primero que no sea nulo. Un 0 anidado —el campo relleno por
+ * compatibilidad— tapaba el recuento de verdad y la llamada salia como «no
+ * declaro razonamiento». Y nunca la suma: cuando vienen dos, son el mismo
+ * recuento dicho en dos sitios.
  */
 export function usageReasoningTokens(usage: unknown): number {
   if (typeof usage !== 'object' || usage === null) return 0;
   const compatible = usage as {
     completion_tokens_details?: { reasoning_tokens?: unknown } | null;
     output_tokens_details?: { reasoning_tokens?: unknown } | null;
+    reasoning_tokens?: unknown;
   };
-  const value =
-    compatible.completion_tokens_details?.reasoning_tokens ??
-    compatible.output_tokens_details?.reasoning_tokens;
-  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0;
+  const candidates: unknown[] = [
+    compatible.completion_tokens_details?.reasoning_tokens,
+    compatible.output_tokens_details?.reasoning_tokens,
+    compatible.reasoning_tokens,
+  ];
+  let highest = 0;
+  for (const value of candidates) {
+    // lo que no es un numero finito y positivo no cuenta, venga de donde venga:
+    // esta cifra acaba en el registro y decide el veredicto de si razono
+    if (typeof value === 'number' && Number.isFinite(value) && value > highest) highest = value;
+  }
+  return highest;
 }
 
 /** caracteres de nombres y argumentos de un `tool_calls` sin transmitir */

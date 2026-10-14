@@ -98,3 +98,91 @@ describe('capacidades que declara la pasarela', () => {
     expect(entries).toEqual([{ id: 'bueno', declaredCapabilities: ['vision'] }]);
   });
 });
+
+describe('razonamiento que declara la pasarela', () => {
+  // POR QUE (F36): `declaredCapabilities` guarda solo lo que viene a `true`, asi
+  // que «declara false» y «no lo declara» dan la misma lista vacia (ver arriba,
+  // `codestral-latest` y `sin-capacidades`). Para las demas banderas da igual;
+  // para el razonamiento no: de un modelo del que la pasarela no dice nada no se
+  // puede afirmar que no razone. Por eso va en un dato aparte, con tres estados.
+  it('tiene tres estados: si, no y no lo dice', () => {
+    const entries = parseProviderModelEntries({
+      data: [
+        { id: 'razona', capabilities: { reasoning: true, vision: false } },
+        { id: 'no-razona', capabilities: { reasoning: false } },
+        { id: 'no-lo-dice', capabilities: { vision: false } },
+        { id: 'sin-capacidades' },
+      ],
+    });
+    // `toStrictEqual`: en los dos ultimos la clave NO existe, que no es lo
+    // mismo que valer `false`
+    expect(entries).toStrictEqual([
+      { id: 'razona', declaredCapabilities: ['reasoning'], reasoning: true },
+      { id: 'no-razona', declaredCapabilities: [], reasoning: false },
+      { id: 'no-lo-dice', declaredCapabilities: [] },
+      { id: 'sin-capacidades', declaredCapabilities: [] },
+    ]);
+  });
+
+  it('acompaña a su modelo hasta el catalogo guardado, con sus niveles', () => {
+    const snapshot = buildCatalogSnapshot({
+      connectionId: 'nanogpt',
+      source: 'http',
+      fetchedAt: '2026-10-13T09:17:00.000Z',
+      modelsPayload: {
+        data: [
+          {
+            id: 'deepseek/deepseek-v4-flash',
+            capabilities: { reasoning: true },
+            reasoning_efforts: ['none', 'high', 'max'],
+          },
+          { id: 'TheDrummer/Cydonia-24B-v4.3', capabilities: { reasoning: false } },
+          { id: 'sin-capacidades' },
+        ],
+      },
+      pricingPayload: null,
+      detail: 'detailed',
+    });
+
+    expect(snapshot.models.map((m) => [m.apiModel, m.reasoning, m.reasoningEfforts])).toEqual([
+      ['deepseek/deepseek-v4-flash', true, ['none', 'high', 'max']],
+      ['TheDrummer/Cydonia-24B-v4.3', false, undefined],
+      ['sin-capacidades', undefined, undefined],
+    ]);
+    // el modelo del que no se dice nada sale como salia antes: sin claves nuevas
+    expect(snapshot.models[2]).toStrictEqual({
+      apiModel: 'sin-capacidades',
+      ownedBy: null,
+      billing: 'unknown',
+      modelRatio: null,
+      completionRatio: null,
+      perCall: null,
+      groups: [],
+      declaredCapabilities: [],
+    });
+  });
+
+  it('de las banderas de una entrada detallada solo se traduce lo que ya se traducia', () => {
+    const [entry] = parseProviderModelEntries({
+      data: [
+        {
+          id: 'deepseek/deepseek-v4-flash',
+          capabilities: {
+            reasoning: true,
+            tool_calling: true,
+            structured_output: true,
+            batch_api: true,
+          },
+          reasoning_efforts: ['none', 'max'],
+        },
+      ],
+    });
+    expect(entry?.reasoning).toBe(true);
+    expect(entry?.reasoningEfforts).toEqual(['none', 'max']);
+    // `tool_calling` se guarda como lo dice la pasarela, pero NO pasa a ser
+    // herramientas nativas: daria trabajos con herramientas a modelos que
+    // razonan, y Luxy no les devuelve el razonamiento. Queda fuera de F36
+    expect(entry?.declaredCapabilities).toContain('tool_calling');
+    expect(mapDeclaredCapabilities(entry?.declaredCapabilities ?? [])).toEqual(['reasoning']);
+  });
+});

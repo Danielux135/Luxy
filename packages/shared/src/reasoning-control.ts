@@ -8,7 +8,15 @@
 // estar seguro de que la pasarela lo deje pasar; por eso todo lo que se manda
 // queda apuntado en el registro y hay un veredicto numerico de si razono.
 //
-// TRES REGLAS que no se pueden aflojar:
+// HAY DOS CAMINOS, y un host va solo por uno de ellos:
+//
+//  - la TABLA (`RULES`): cada modelo con lo que dice la documentacion de su
+//    fabricante. Es el camino de siempre y el de casi todos los hosts;
+//  - un DIALECTO DE CATALOGO (`CATALOG_DIALECTS`, F36): una pasarela que publica
+//    en su propio catalogo que niveles declara cada modelo y que los pide todos
+//    con un unico campo. En esos hosts la tabla NO se consulta.
+//
+// TRES REGLAS que no se pueden aflojar EN LA TABLA:
 //
 // 1. vacio no manda nada: sin `reasoningMode` el cuerpo sale igual que hoy,
 //    byte por byte (D-098);
@@ -20,10 +28,38 @@
 //    pueden apagar, y en la serie 5.3 apagarlo da error—, asi que un nombre con
 //    sufijo de agregador (`-promo`, `-free`, `-alibaba`) se queda sin regla.
 //
+// EN UN HOST CON DIALECTO DE CATALOGO la regla 1 vale igual y la 2 se SUSTITUYE
+// a proposito. Alli hay cientos de modelos que cambian sin avisar, y lo que se
+// ofrece sale de lo que DECLARA el catalogo de la pasarela, no de una tabla
+// escrita a mano. Pero el agente no conoce el catalogo, asi que no puede
+// comprobar el nivel contra el: lo que decide si algo viaja es que el modelo
+// tenga su ajuste PROPIO (`modelSampling`). Un nivel desfasado o escrito a mano
+// DENTRO de ese ajuste viaja, y decide la pasarela. A cambio:
+//
+//  - el modo de nivel de proveedor no viaja nunca en esos hosts: vale para
+//    todos los modelos de la entrada y nadie lo eligio mirando lo que declara
+//    cada uno;
+//  - en una LLAMADA cuyo cuerpo lleva `tools` solo viaja «off»: DeepSeek
+//    documenta que, razonando y con `tools`, hay que devolverle su razonamiento
+//    en cada peticion o contesta 400, y Luxy no lo devuelve (`D-107`). Por una
+//    pasarela no esta medido, asi que en esa llamada cualquier otro nivel NO SE
+//    ENVIA. Que no es apagarlo: el campo se omite y el modelo hace lo que
+//    traiga de fabrica. La compuerta es de la llamada y no del trabajo: con las
+//    herramientas como texto (el protocolo de reserva del agente) el cuerpo no
+//    lleva `tools`, y el nivel viaja en cada vuelta.
+//
 // Aqui solo hay Zod y logica pura: lo consumen el agente y el renderer.
 import { z } from 'zod';
 
-export const REASONING_MODES = ['off', 'low', 'high'] as const;
+/**
+ * EL ORDEN IMPORTA: es de menos a mas razonamiento, y es el orden en el que
+ * salen las opciones del selector y lo que devuelve `reasoningModesFromDeclared`.
+ *
+ * `off` no se llama `none` a proposito: `none` es un valor REAL del cuerpo
+ * (`reasoning_effort: 'none'`), y con el mismo nombre alguien acabaria
+ * volcando la eleccion cruda.
+ */
+export const REASONING_MODES = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
 export type ReasoningMode = (typeof REASONING_MODES)[number];
 
 export const reasoningModeSchema = z.enum(REASONING_MODES);
@@ -31,21 +67,33 @@ export const reasoningModeSchema = z.enum(REASONING_MODES);
 /**
  * como se nombra cada valor en pantalla.
  *
- * `low` y `high` llevan el nombre tecnico entre parentesis porque NO son
+ * todos menos `off` llevan el nombre tecnico entre parentesis porque NO son
  * relativos a lo que el modelo hace de fabrica: en Kimi y en GLM-5.3 el nivel
  * de fabrica es `max`, asi que «Razonar mas» tambien es menos que lo de siempre.
+ *
+ * Que un valor este aqui no significa que se le ofrezca a nadie: las reglas de
+ * la tabla siguen ofreciendo solo `off`, `low` y `high`, y los otros cuatro
+ * solo aparecen donde el catalogo de una pasarela los declara.
  */
 export const REASONING_MODE_LABELS: Readonly<Record<ReasoningMode, string>> = {
   off: 'Sin razonar: contesta directamente',
+  minimal: 'Razonar lo mínimo (minimal)',
   low: 'Razonar poco (low)',
+  medium: 'Razonar a medias (medium)',
   high: 'Razonar más (high)',
+  xhigh: 'Razonar mucho (xhigh)',
+  max: 'Razonar al máximo (max)',
 };
 
-/** resumen corto para la lista de una conexion */
+/** resumen corto para la lista de una conexion o de un proveedor */
 export const REASONING_MODE_SHORT: Readonly<Record<ReasoningMode, string>> = {
   off: 'sin razonar',
+  minimal: 'lo mínimo (minimal)',
   low: 'poco (low)',
+  medium: 'a medias (medium)',
   high: 'más (high)',
+  xhigh: 'mucho (xhigh)',
+  max: 'al máximo (max)',
 };
 
 type JsonFields = Readonly<Record<string, unknown>>;
@@ -248,19 +296,142 @@ const RULES: readonly ReasoningRule[] = [
   },
 ];
 
-/** host sin puerto y en minusculas; acepta tambien una URL entera */
-function bareHost(host: string | null | undefined): string | null {
+/**
+ * host sin puerto y en minusculas; acepta tambien una URL entera.
+ *
+ * SE EXPORTA porque de aqui sale que camino le toca a un host —la tabla o un
+ * dialecto de catalogo—, y quien pide el catalogo, quien pinta el selector y
+ * quien compone el cuerpo tienen que estar mirando el mismo host.
+ *
+ * La autoridad de una URL acaba en la primera `/`, `?` o `#`, y los navegadores
+ * tratan `\` como `/`. Antes solo se cortaba en `/`; como lo que va detras de
+ * la ultima `@` se toma por host, `https://otro.example?x=@api.nano-gpt.com`
+ * salia como si fuera la pasarela.
+ *
+ * El esquema solo se reconoce al PRINCIPIO. Antes valia el primer `://` de
+ * cualquier parte, y donde la cadena no empieza por `esquema://` —un host a
+ * secas, o `https:otro.example`, que `URL` acepta sin las barras— el de la
+ * consulta se tomaba por el suyo: `otro.example?next=https://api.nano-gpt.com`
+ * salia como la pasarela. Lo que no empieza por un esquema se lee desde su
+ * primer caracter, asi que nada de lo que va detras de la primera `/`, `?` o
+ * `#` puede salir como host. Es hacia donde hay que fallar: una cadena que no
+ * se sabe leer puede quedarse sin casar con ningun host —y entonces no viaja
+ * nada—, pero no casar con la pasarela por lo que lleve detras.
+ *
+ * Y se quita UN punto final: `api.nano-gpt.com.` es el mismo servidor con el
+ * nombre escrito entero, y `URL` conserva ese punto en `host`. Uno solo: con
+ * dos ya no es un nombre de host, y se queda sin casar.
+ */
+export function bareHost(host: string | null | undefined): string | null {
   if (host === null || host === undefined || host.length === 0) return null;
   let value = host.trim().toLowerCase();
-  const scheme = value.indexOf('://');
-  if (scheme >= 0) value = value.slice(scheme + 3);
-  const slash = value.indexOf('/');
-  if (slash >= 0) value = value.slice(0, slash);
+  const scheme = /^[a-z][a-z0-9+.-]*:\/\//.exec(value);
+  if (scheme !== null) value = value.slice(scheme[0].length);
+  const end = value.search(/[/\\?#]/);
+  if (end >= 0) value = value.slice(0, end);
   const at = value.lastIndexOf('@');
   if (at >= 0) value = value.slice(at + 1);
   const colon = value.indexOf(':');
   if (colon >= 0) value = value.slice(0, colon);
+  if (value.endsWith('.')) value = value.slice(0, -1);
   return value.length === 0 ? null : value;
+}
+
+/**
+ * una pasarela cuyo CATALOGO dice que niveles declara cada modelo, y que los
+ * pide todos con un unico campo.
+ *
+ * POR QUE NO ES UNA REGLA MAS DE LA TABLA: la tabla nombra modelos uno a uno
+ * con la documentacion de su fabricante. Una pasarela de cientos de modelos,
+ * que entran y salen sin avisar, no cabe ahi; pero publica ella misma lo que
+ * declara de cada uno, y eso es un dato suyo, con su fecha, no una deduccion
+ * nuestra. Lo que se guarda aqui es solo COMO se le pide.
+ */
+export interface CatalogDialect {
+  /** identificador estable; no viaja al cuerpo */
+  family: string;
+  /** como se la nombra en los textos de pantalla */
+  label: string;
+  /**
+   * hosts EXACTOS en los que vale. Sin comodines ni sufijos: un host parecido
+   * (`api.nano-gpt.com.otro.example`) no es la pasarela.
+   */
+  hosts: readonly string[];
+  /** nombre del campo, en la RAIZ del cuerpo */
+  field: string;
+  /**
+   * lo que viaja en ese campo para cada modo, que es tambien como lo escribe su
+   * catalogo: con esto se traduce en los dos sentidos
+   */
+  values: Readonly<Record<ReasoningMode, string>>;
+  /** parametros de consulta con los que su lista de modelos trae el detalle */
+  catalogQuery: Readonly<Record<string, string>>;
+}
+
+const CATALOG_DIALECTS: readonly CatalogDialect[] = [
+  {
+    // https://docs.nano-gpt.com/api-reference/miscellaneous/extended-thinking.md
+    // (leido el 13/10/2026): «NanoGPT accepts `none`, `minimal`, `low`,
+    // `medium`, `high`, `xhigh`, and `max`. Not every model supports every
+    // level; some routes map an accepted level to the nearest supported
+    // effort», y si llegan los dos, «top-level `reasoning_effort` is
+    // authoritative». `max` esta en esa pagina y en el catalogo, no en el
+    // esquema publicado de su API.
+    //
+    // Los dos hosts salen de .../miscellaneous/api-hosts.md: el directo para
+    // las claves de API y el de la web, con la misma ruta `/api/v1`.
+    //
+    // El detalle del catalogo se pide con `detailed=true`
+    // (.../endpoint/models.md). La lectura previa de F36 apunto, medido ese
+    // dia contra la lista publica, que solo vale ese literal: `detailed=1` y
+    // `detailed=TRUE` devolvian la simple. Los niveles por modelo vienen en
+    // `reasoning_efforts`, un campo que esa pagina NO documenta: puede faltar o
+    // cambiar, y por eso todo lo que lo lee aguanta que no este.
+    //
+    // NADA de esto esta comprobado con una llamada de inferencia.
+    family: 'nanogpt',
+    label: 'NanoGPT',
+    hosts: ['api.nano-gpt.com', 'nano-gpt.com'],
+    field: 'reasoning_effort',
+    values: {
+      off: 'none',
+      minimal: 'minimal',
+      low: 'low',
+      medium: 'medium',
+      high: 'high',
+      xhigh: 'xhigh',
+      max: 'max',
+    },
+    catalogQuery: { detailed: 'true' },
+  },
+];
+
+/** el dialecto de catalogo de este host, o null si va por la tabla */
+export function catalogDialectFor(host: string | null | undefined): CatalogDialect | null {
+  const bare = bareHost(host);
+  if (bare === null) return null;
+  return CATALOG_DIALECTS.find((dialect) => dialect.hosts.includes(bare)) ?? null;
+}
+
+/**
+ * los modos que corresponden a lo que DECLARA el catalogo, en el orden de
+ * `REASONING_MODES` y sin repetidos.
+ *
+ * `declared` son las cadenas CRUDAS de la pasarela, quiza releidas del disco:
+ * se tratan como dato de un tercero, no como el tipo que dicen ser. Lo que no
+ * sea una cadena o no sea un valor del dialecto se ignora —un nivel que Luxy no
+ * sabe nombrar no se puede ofrecer—, y nunca cuesta los demas.
+ */
+export function reasoningModesFromDeclared(
+  dialect: CatalogDialect,
+  declared: readonly string[],
+): readonly ReasoningMode[] {
+  const raw: readonly unknown[] = Array.isArray(declared) ? declared : [];
+  const seen = new Set<string>();
+  for (const value of raw) {
+    if (typeof value === 'string') seen.add(value.trim().toLowerCase());
+  }
+  return REASONING_MODES.filter((mode) => seen.has(dialect.values[mode].toLowerCase()));
 }
 
 function ruleFor(model: string, host: string | null | undefined): ReasoningRule | null {
@@ -276,21 +447,93 @@ function ruleFor(model: string, host: string | null | undefined): ReasoningRule 
 }
 
 /**
+ * lo que la PANTALLA sabe del modelo en un host con dialecto de catalogo.
+ *
+ * En los demas hosts no se mira: la tabla no depende de ningun catalogo.
+ */
+export interface ReasoningOptionsContext {
+  /**
+   * las cadenas crudas que el catalogo declara para este modelo. `null` o
+   * ausente = la pantalla no tiene niveles de el, que NO es «no razona»
+   */
+  declared?: readonly string[] | null;
+  /**
+   * se puede elegir a mano entre los siete: el catalogo se leyo sin detalle o
+   * el modelo razona sin declarar niveles. Decide la pasarela
+   */
+  manual?: boolean;
+}
+
+/**
  * los valores que se pueden ofrecer para este modelo en este host, en orden.
- * Vacio = no hay regla y el selector no ofrece nada.
+ * Vacio = el selector no ofrece nada.
+ *
+ * En un host con dialecto de catalogo la tabla no se consulta: sin `context`
+ * no hay nada que ofrecer, porque alli solo se ofrece lo declarado.
  */
 export function reasoningOptionsFor(
   model: string,
   host: string | null | undefined,
+  context?: ReasoningOptionsContext,
 ): readonly ReasoningMode[] {
+  const dialect = catalogDialectFor(host);
+  if (dialect !== null) {
+    if (model.trim().length === 0) return [];
+    if (context?.manual === true) return [...REASONING_MODES];
+    const declared = context?.declared;
+    if (declared === null || declared === undefined) return [];
+    return reasoningModesFromDeclared(dialect, declared);
+  }
   const rule = ruleFor(model, host);
   if (rule === null) return [];
   return REASONING_MODES.filter((mode) => Object.hasOwn(rule.modes, mode));
 }
 
-/** lo que hay que saber de la regla de este modelo, o null si no la tiene */
-export function reasoningNoteFor(model: string, host: string | null | undefined): string | null {
+/**
+ * lo que hay que saber antes de elegir, o null si no hay nada que elegir.
+ *
+ * En un host con dialecto de catalogo no afirma nada del modelo: dice lo que la
+ * pasarela DECLARA y quien decide al final (`D-093`). La fecha del catalogo la
+ * pone la pantalla, que es quien la tiene.
+ */
+export function reasoningNoteFor(
+  model: string,
+  host: string | null | undefined,
+  context?: ReasoningOptionsContext,
+): string | null {
+  const dialect = catalogDialectFor(host);
+  if (dialect !== null) {
+    if (reasoningOptionsFor(model, host, context).length === 0) return null;
+    return context?.manual === true
+      ? `Luxy no tiene niveles declarados por ${dialect.label} para este modelo: el nivel se ` +
+          `elige a mano y decide ${dialect.label}, que puede ajustarlo o contestar con un error.`
+      : `${dialect.label} declara estos niveles para este modelo en su catálogo; no está ` +
+          `comprobado con ninguna llamada. Lo que eliges es lo que Luxy pide: si la ruta que ` +
+          `atiende la petición no tiene ese nivel, ${dialect.label} puede ajustarlo al más ` +
+          `cercano o contestar con un error.`;
+  }
   return ruleFor(model, host)?.note ?? null;
+}
+
+/**
+ * lo que el AGENTE sabe de la llamada en un host con dialecto de catalogo.
+ *
+ * El cuerpo y la linea de registro tienen que recibir el MISMO: si uno lo
+ * calcula distinto, el registro deja de decir lo que viajo.
+ */
+export interface ReasoningRequestContext {
+  /**
+   * el modelo tiene su ajuste PROPIO en `modelSampling`. Sin el, el modo viene
+   * del nivel de proveedor y en estos hosts no viaja
+   */
+  ownEntry?: boolean;
+  /**
+   * el CUERPO de esta llamada lleva `tools`: solo puede viajar «off», y
+   * cualquier otro nivel no se envia —el campo se omite; no apaga nada—. Es de
+   * la llamada y no del trabajo: con las herramientas como texto el cuerpo no
+   * lleva `tools` y esto es `false`
+   */
+  withTools?: boolean;
 }
 
 /**
@@ -299,13 +542,28 @@ export function reasoningNoteFor(model: string, host: string | null | undefined)
  * Sin modo, sin regla o con un valor que la regla no admite, devuelve `{}`: el
  * cuerpo sale como hoy. Devuelve una COPIA: el cuerpo se serializa despues y
  * nadie debe poder tocar la tabla por accidente.
+ *
+ * En un host con dialecto de catalogo no hay regla que consultar: viaja el
+ * campo de la pasarela SOLO si el modo sale del ajuste propio del modelo, y con
+ * `tools` en el cuerpo solo «off». El agente no conoce el catalogo, asi que no
+ * comprueba el nivel: eso lo decide la pasarela.
  */
 export function reasoningRequestFields(
   model: string,
   host: string | null | undefined,
   mode: ReasoningMode | undefined,
+  context?: ReasoningRequestContext,
 ): Record<string, unknown> {
   if (mode === undefined) return {};
+  const dialect = catalogDialectFor(host);
+  if (dialect !== null) {
+    if (context?.ownEntry !== true || model.trim().length === 0) return {};
+    if (context.withTools === true && mode !== 'off') return {};
+    // `hasOwn` y no el indice a secas: un valor escrito a mano que no sea un
+    // modo (`toString`) sacaria una funcion del prototipo
+    if (!Object.hasOwn(dialect.values, mode)) return {};
+    return { [dialect.field]: dialect.values[mode] };
+  }
   const rule = ruleFor(model, host);
   if (rule === null || !Object.hasOwn(rule.modes, mode)) return {};
   const fields = rule.modes[mode];
@@ -323,14 +581,18 @@ export const REASONING_NOT_SENT = 'not_sent';
  * SIN modo no añade ninguna clave: la linea sale como antes. Con modo, apunta
  * el elegido y las CLAVES de primer nivel que viajaron unidas con «+», o
  * `not_sent` si no viajo ninguna. Nunca valores de texto libre.
+ *
+ * `context` tiene que ser el mismo que recibio `reasoningRequestFields` para
+ * esa llamada: de el depende lo que viajo en un host con dialecto de catalogo.
  */
 export function reasoningLogFields(
   model: string,
   host: string | null | undefined,
   mode: ReasoningMode | undefined,
+  context?: ReasoningRequestContext,
 ): { reasoningMode?: ReasoningMode; reasoningSent?: string } {
   if (mode === undefined) return {};
-  const keys = Object.keys(reasoningRequestFields(model, host, mode));
+  const keys = Object.keys(reasoningRequestFields(model, host, mode, context));
   return {
     reasoningMode: mode,
     reasoningSent: keys.length === 0 ? REASONING_NOT_SENT : keys.join('+'),

@@ -2,7 +2,7 @@ import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { CatalogSnapshot } from '@luxy/shared';
+import { catalogReasoningFor, type CatalogSnapshot } from '@luxy/shared';
 import { readCatalogSnapshot, writeCatalogSnapshot } from './catalog-store.js';
 
 function snapshot(overrides: Partial<CatalogSnapshot> = {}): CatalogSnapshot {
@@ -146,6 +146,129 @@ describe('catalogos guardados de los dos origenes', () => {
     );
     const leido = readCatalogSnapshot(directory, 'declara', 'http');
     expect(leido?.models[0]?.declaredCapabilities).toEqual(['vision', 'tools']);
+  });
+
+  it('conserva lo que la pasarela declara de razonamiento y limites, y con que lista se leyo', () => {
+    // la trampa de siempre: tras pulsar el boton la pantalla recibe el objeto
+    // en memoria, y lo que no este en el esquema de LECTURA desaparece al
+    // reabrir Luxy. Los niveles se verian un rato y luego no
+    const detallado = snapshot({
+      connectionId: 'nanogpt',
+      detail: 'detailed',
+      models: [
+        {
+          apiModel: 'deepseek/deepseek-v4-pro',
+          ownedBy: null,
+          billing: 'unknown',
+          modelRatio: null,
+          completionRatio: null,
+          perCall: null,
+          groups: [],
+          declaredCapabilities: ['reasoning'],
+          reasoning: true,
+          reasoningEfforts: ['none', 'high', 'max'],
+          declaredOutputCap: 64000,
+          declaredContext: 128000,
+        },
+        {
+          // declara que NO razona: `false` no es lo mismo que no decirlo
+          apiModel: 'TheDrummer/Cydonia-24B-v4.3',
+          ownedBy: null,
+          billing: 'unknown',
+          modelRatio: null,
+          completionRatio: null,
+          perCall: null,
+          groups: [],
+          declaredCapabilities: [],
+          reasoning: false,
+          declaredContext: 32768,
+        },
+      ],
+    });
+    writeCatalogSnapshot(directory, detallado);
+    const leido = readCatalogSnapshot(directory, 'nanogpt', 'http');
+
+    expect(leido).toEqual(detallado);
+    expect(leido?.models[1]?.reasoning).toBe(false);
+    expect(catalogReasoningFor(leido, 'deepseek/deepseek-v4-pro')).toEqual({
+      state: 'levels',
+      levels: ['none', 'high', 'max'],
+      fetchedAt: '2026-09-04T16:00:00.000Z',
+      outputCap: 64000,
+    });
+    expect(catalogReasoningFor(leido, 'TheDrummer/Cydonia-24B-v4.3').state).toBe('not-reasoning');
+
+    // y «se leyo sin detalle» tambien sobrevive: sin eso, al reabrir no se
+    // podria distinguir de un catalogo en el que nadie declara niveles
+    writeCatalogSnapshot(directory, snapshot({ connectionId: 'sin-detalle', detail: 'basic' }));
+    expect(readCatalogSnapshot(directory, 'sin-detalle', 'http')?.detail).toBe('basic');
+  });
+
+  it('un catalogo guardado antes de F36 se lee igual y no pasa por detallado', () => {
+    // sin `detail` y sin nada declarado: asi son todos los que ya hay en disco
+    const viejo = snapshot({ connectionId: 'nanogpt' });
+    writeFileSync(join(directory, 'http-nanogpt.json'), JSON.stringify(viejo), 'utf8');
+
+    const leido = readCatalogSnapshot(directory, 'nanogpt', 'http');
+    expect(leido).toEqual(viejo);
+    // ningun valor por defecto: las claves nuevas ni existen
+    expect(Object.keys(leido ?? {})).not.toContain('detail');
+    const modelo = Object.keys(leido?.models[0] ?? {});
+    for (const clave of ['reasoning', 'reasoningEfforts', 'declaredOutputCap', 'declaredContext']) {
+      expect(modelo).not.toContain(clave);
+    }
+    // de un catalogo viejo no se puede decir que el modelo no declare niveles:
+    // no se pidieron. Por eso su estado es `basic` y no `no-levels`
+    expect(catalogReasoningFor(leido, 'pixtral-12b-2409')).toEqual({
+      state: 'basic',
+      levels: [],
+      fetchedAt: '2026-09-04T16:00:00.000Z',
+      outputCap: null,
+    });
+  });
+
+  it('un dato raro en lo declarado cuesta ese campo, no el catalogo', () => {
+    // quien lee del disco tira el catalogo ENTERO si el esquema falla, y la
+    // pantalla diria «Sin consultar todavia» sobre 644 modelos ya leidos
+    const base = snapshot({ connectionId: 'raro' }).models[0];
+    const raro = {
+      ...snapshot({ connectionId: 'raro' }),
+      detail: 'detallado',
+      models: [
+        {
+          ...base,
+          apiModel: 'a-medias',
+          reasoning: true,
+          reasoningEfforts: 'high',
+          declaredOutputCap: -5,
+          declaredContext: 128000,
+        },
+        {
+          ...base,
+          apiModel: 'todo-mal',
+          reasoning: 'si',
+          reasoningEfforts: ['low', 7],
+          declaredOutputCap: 1.5,
+          declaredContext: null,
+        },
+      ],
+    };
+    writeFileSync(join(directory, 'http-raro.json'), JSON.stringify(raro), 'utf8');
+
+    const leido = readCatalogSnapshot(directory, 'raro', 'http');
+    expect(leido?.models.map((model) => model.apiModel)).toEqual(['a-medias', 'todo-mal']);
+    // lo que si casa se conserva al lado de lo que no
+    expect(leido?.models[0]?.reasoning).toBe(true);
+    expect(leido?.models[0]?.declaredContext).toBe(128000);
+    expect(leido?.models[0]?.reasoningEfforts).toBeUndefined();
+    expect(leido?.models[0]?.declaredOutputCap).toBeUndefined();
+    expect(leido?.models[1]?.reasoning).toBeUndefined();
+    expect(leido?.models[1]?.reasoningEfforts).toBeUndefined();
+    expect(leido?.models[1]?.declaredOutputCap).toBeUndefined();
+    expect(leido?.models[1]?.declaredContext).toBeUndefined();
+    // un `detail` desconocido se lee como «no se sabe», que es sin detalle
+    expect(leido?.detail).toBeUndefined();
+    expect(catalogReasoningFor(leido, 'a-medias').state).toBe('basic');
   });
 
   it('un identificador con separadores de ruta no escapa de la carpeta', () => {

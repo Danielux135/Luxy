@@ -37,6 +37,7 @@ import {
   RetryError,
   PROVIDER_CALL_LOG_MESSAGE,
   PROVIDER_SILENCE_TIMEOUT_MS,
+  REASONING_MODES,
   SOFT_TERMINAL_GRACE_MS,
   TERMINAL_GRACE_MS,
   type HttpProviderConfig,
@@ -3347,6 +3348,416 @@ describe('HttpApiProvider: control del razonamiento', () => {
       rmSync(carpeta, { recursive: true, force: true });
     }
   }, 15_000);
+});
+
+// F36: en el host de NanoGPT el razonamiento no sale de la tabla de `D-107`
+// sino de un unico campo, `reasoning_effort`, y los niveles que declara cada
+// modelo estan en un catalogo que el agente NO conoce. Lo unico que decide aqui
+// si el campo viaja es que el modelo tenga su ajuste PROPIO. Se fija eso, que
+// con `tools` en el cuerpo solo viaje «Sin razonar», que la linea de registro
+// diga lo que viajo EN ESA llamada —y no en otra del mismo proveedor—, y el
+// tope de salida por modelo con su precedencia.
+//
+// Las respuestas son inventadas: nada de esto esta medido contra NanoGPT.
+describe('HttpApiProvider: razonamiento y tope por modelo en un host con catalogo propio', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const RAZONA = 'deepseek/deepseek-v4-pro';
+  const OTRO = 'zai-org/glm-5.3';
+
+  const nano: HttpProviderConfig = {
+    id: 'nanogpt',
+    displayName: 'NanoGPT',
+    baseUrl: 'https://api.nano-gpt.com/api/v1',
+    // el predeterminado de la entrada real: uno que no razona
+    model: 'TheDrummer/Cydonia-24B-v4.3',
+    apiKeyEnv: 'NANOGPT_API_KEY',
+    enabled: true,
+    supportsStreaming: false,
+    maxOutputTokens: 4096,
+    dailyBudget: 0,
+  };
+
+  const SIN_NADA = ['max_tokens', 'messages', 'model', 'stream'];
+  const CON_HERRAMIENTAS = ['max_tokens', 'messages', 'model', 'tool_choice', 'tools'];
+
+  const peticion = (overrides: Partial<ProviderRunRequest> = {}): ProviderRunRequest => ({
+    prompt: 'hola',
+    workingDirectory: 'C:/wt',
+    timeoutMs: 30_000,
+    signal: new AbortController().signal,
+    readOnly: true,
+    onEvent: () => undefined,
+    ...overrides,
+  });
+
+  /** un trabajo con herramientas; con `nativas` el cuerpo lleva `tools` */
+  const conHerramientas = (model: string, nativas = true): ProviderRunRequest => ({
+    ...peticion({ readOnly: false, model }),
+    agentic: {
+      runner: { execute: vi.fn(async () => ({ ok: true, content: 'ok' })) },
+      allowedTools: ['write_file'],
+      limits: modelLimitsSchema.parse({}),
+      useNativeTools: nativas,
+    },
+  });
+
+  /**
+   * un proveedor sin red: guarda TODOS los cuerpos enviados y todas las lineas
+   * de registro, en orden, para poder comparar una llamada con la siguiente
+   */
+  function montar(
+    config: HttpProviderConfig,
+    respuesta: Record<string, unknown> = {
+      choices: [{ message: { content: 'listo' }, finish_reason: 'stop' }],
+      usage: { prompt_tokens: 4, completion_tokens: 2 },
+    },
+  ): {
+    provider: HttpApiProvider;
+    cuerpos: Record<string, unknown>[];
+    lineas: ProviderCallRecord[];
+  } {
+    const cuerpos: Record<string, unknown>[] = [];
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (_url, init) => {
+      cuerpos.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      return new Response(JSON.stringify(respuesta), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    });
+    const lineas: ProviderCallRecord[] = [];
+    const provider = new HttpApiProvider(
+      config,
+      'una-clave',
+      new MemoryBudgetStore(),
+      undefined,
+      (record) => lineas.push(record),
+    );
+    return { provider, cuerpos, lineas };
+  }
+
+  const claves = (cuerpo: Record<string, unknown> | undefined): string[] =>
+    Object.keys(cuerpo ?? {}).sort();
+
+  it('con ajuste propio viaja `reasoning_effort` y nada mas; los demas, el cuerpo de siempre', async () => {
+    const { provider, cuerpos, lineas } = montar({
+      ...nano,
+      modelSampling: { [RAZONA]: { reasoningMode: 'max' } },
+    });
+
+    expect((await provider.run(peticion({ model: RAZONA }))).ok).toBe(true);
+    expect((await provider.run(peticion({ model: OTRO }))).ok).toBe(true);
+    expect((await provider.run(peticion())).ok).toBe(true);
+    expect(cuerpos).toHaveLength(3);
+    expect(lineas).toHaveLength(3);
+
+    // un solo campo y en la RAIZ: ni el `thinking` de DeepSeek ni el objeto
+    // `reasoning` de otras pasarelas. Se fija el cuerpo entero para cazarlo
+    expect(claves(cuerpos[0])).toEqual([
+      'max_tokens',
+      'messages',
+      'model',
+      'reasoning_effort',
+      'stream',
+    ]);
+    expect(cuerpos[0]?.['reasoning_effort']).toBe('max');
+    expect(lineas[0]).toMatchObject({ reasoningMode: 'max', reasoningSent: 'reasoning_effort' });
+
+    // otro modelo del mismo proveedor, y el predeterminado: clave por clave lo
+    // de antes, y su linea sin ninguna clave de razonamiento elegido
+    for (const indice of [1, 2]) {
+      expect(claves(cuerpos[indice]), String(indice)).toEqual(SIN_NADA);
+      expect('reasoningMode' in lineas[indice]!, String(indice)).toBe(false);
+      expect('reasoningSent' in lineas[indice]!, String(indice)).toBe(false);
+    }
+  });
+
+  it('cada uno de los siete niveles viaja con el valor de la pasarela', async () => {
+    for (const mode of REASONING_MODES) {
+      vi.restoreAllMocks();
+      const { provider, cuerpos, lineas } = montar({
+        ...nano,
+        modelSampling: { [RAZONA]: { reasoningMode: mode } },
+      });
+      expect((await provider.run(peticion({ model: RAZONA }))).ok, mode).toBe(true);
+      // «Sin razonar» se dice `none`: `off` es el nombre de la eleccion en
+      // Luxy, no un valor del cuerpo
+      expect(cuerpos[0]?.['reasoning_effort'], mode).toBe(mode === 'off' ? 'none' : mode);
+      expect(lineas[0], mode).toMatchObject({
+        reasoningMode: mode,
+        reasoningSent: 'reasoning_effort',
+      });
+    }
+  });
+
+  it('el modo de nivel de proveedor no viaja nunca, y el registro lo dice', async () => {
+    const { provider, cuerpos, lineas } = montar({
+      ...nano,
+      reasoningMode: 'high',
+      temperature: 0.9,
+      modelSampling: { [RAZONA]: { reasoningMode: 'low' }, [OTRO]: { temperature: 0.4 } },
+    });
+
+    expect((await provider.run(peticion())).ok).toBe(true);
+    expect((await provider.run(peticion({ model: RAZONA }))).ok).toBe(true);
+    expect((await provider.run(peticion({ model: OTRO }))).ok).toBe(true);
+
+    // sin entrada propia: el nivel del proveedor esta guardado y NO viaja —vale
+    // para todos sus modelos y nadie lo eligio mirando lo que declara cada
+    // uno—. El muestreo del proveedor si, como siempre
+    expect(claves(cuerpos[0])).toEqual([...SIN_NADA, 'temperature']);
+    expect(cuerpos[0]?.['temperature']).toBe(0.9);
+    expect(lineas[0]).toMatchObject({ reasoningMode: 'high', reasoningSent: 'not_sent' });
+
+    // con entrada propia viaja EL SUYO, y no hereda el muestreo del proveedor
+    expect(claves(cuerpos[1])).toEqual([
+      'max_tokens',
+      'messages',
+      'model',
+      'reasoning_effort',
+      'stream',
+    ]);
+    expect(cuerpos[1]?.['reasoning_effort']).toBe('low');
+    expect(lineas[1]).toMatchObject({ reasoningMode: 'low', reasoningSent: 'reasoning_effort' });
+
+    // una entrada propia SIN nivel no recoge el del proveedor: la entrada
+    // sustituye entera al nivel superior
+    expect(claves(cuerpos[2])).toEqual([...SIN_NADA, 'temperature']);
+    expect(cuerpos[2]?.['temperature']).toBe(0.4);
+    expect('reasoningMode' in lineas[2]!).toBe(false);
+    expect('reasoningSent' in lineas[2]!).toBe(false);
+  });
+
+  it('con `tools` en el cuerpo solo viaja «Sin razonar», y el registro es el de ESA llamada', async () => {
+    const { provider, cuerpos, lineas } = montar({
+      ...nano,
+      modelSampling: { [RAZONA]: { reasoningMode: 'high' } },
+    });
+
+    // el MISMO proveedor y el MISMO modelo, primero con herramientas y despues
+    // sin ellas: lo que cambia es la llamada, no la configuracion
+    expect((await provider.run(conHerramientas(RAZONA))).ok).toBe(true);
+    expect((await provider.run(peticion({ model: RAZONA }))).ok).toBe(true);
+
+    // razonando y con `tools`, DeepSeek exige que se le devuelva su
+    // razonamiento, y Luxy no lo devuelve (D-107): el nivel no se enciende
+    expect(claves(cuerpos[0])).toEqual(CON_HERRAMIENTAS);
+    expect(lineas[0]).toMatchObject({ reasoningMode: 'high', reasoningSent: 'not_sent' });
+    // la linea de la llamada sin herramientas no puede copiar la de antes
+    expect(cuerpos[1]?.['reasoning_effort']).toBe('high');
+    expect(lineas[1]).toMatchObject({ reasoningMode: 'high', reasoningSent: 'reasoning_effort' });
+
+    // apagarlo si se puede pedir con herramientas
+    vi.restoreAllMocks();
+    const apagado = montar({ ...nano, modelSampling: { [RAZONA]: { reasoningMode: 'off' } } });
+    expect((await apagado.provider.run(conHerramientas(RAZONA))).ok).toBe(true);
+    expect(claves(apagado.cuerpos[0])).toEqual([
+      'max_tokens',
+      'messages',
+      'model',
+      'reasoning_effort',
+      'tool_choice',
+      'tools',
+    ]);
+    expect(apagado.cuerpos[0]?.['reasoning_effort']).toBe('none');
+    expect(apagado.lineas[0]).toMatchObject({
+      reasoningMode: 'off',
+      reasoningSent: 'reasoning_effort',
+    });
+  });
+
+  it('el protocolo de reserva no lleva `tools`: ahi el nivel viaja como en una conversacion', async () => {
+    // la regla es de la LLAMADA y no del trabajo: lo que DeepSeek rechaza es
+    // razonar con `tools` en el cuerpo, y por el protocolo de reserva las
+    // herramientas van como texto y `tools` no viaja
+    const { provider, cuerpos, lineas } = montar({
+      ...nano,
+      modelSampling: { [RAZONA]: { reasoningMode: 'high' } },
+    });
+
+    expect((await provider.run(conHerramientas(RAZONA, false))).ok).toBe(true);
+
+    expect(claves(cuerpos[0])).toEqual(['max_tokens', 'messages', 'model', 'reasoning_effort']);
+    expect(cuerpos[0]?.['reasoning_effort']).toBe('high');
+    expect(lineas[0]).toMatchObject({ reasoningMode: 'high', reasoningSent: 'reasoning_effort' });
+  });
+
+  it('en un host sin catalogo propio nada de esto se aplica', async () => {
+    // la referencia, para que lo de abajo no pase por casualidad: en el host
+    // de NanoGPT el nivel de proveedor no viaja y el de la entrada si
+    const referencia = montar({
+      ...nano,
+      model: 'qwen/qwen3.8-27b',
+      modelSampling: { 'qwen/qwen3.8-27b': { reasoningMode: 'low' } },
+    });
+    expect((await referencia.provider.run(peticion())).ok).toBe(true);
+    expect(claves(referencia.cuerpos[0])).toEqual([
+      'max_tokens',
+      'messages',
+      'model',
+      'reasoning_effort',
+      'stream',
+    ]);
+
+    // Groq va por la tabla: el nivel SUPERIOR sigue llegando con sus dos
+    // campos, y tambien con `tools` en el cuerpo, exactamente como antes
+    vi.restoreAllMocks();
+    const groq = montar({
+      ...nano,
+      id: 'groq',
+      baseUrl: 'https://api.groq.com/openai/v1',
+      model: 'qwen/qwen3.8-27b',
+      reasoningMode: 'low',
+    });
+    expect((await groq.provider.run(peticion())).ok).toBe(true);
+    expect((await groq.provider.run(conHerramientas('qwen/qwen3.8-27b'))).ok).toBe(true);
+    for (const indice of [0, 1]) {
+      expect(groq.cuerpos[indice], String(indice)).toMatchObject({
+        reasoning_effort: 'low',
+        reasoning_format: 'parsed',
+      });
+      expect(groq.lineas[indice], String(indice)).toMatchObject({
+        reasoningMode: 'low',
+        reasoningSent: 'reasoning_effort+reasoning_format',
+      });
+    }
+
+    // y un host cualquiera con un modelo sin regla: nada, aunque tenga su
+    // ajuste propio. Alli sigue mandando la regla 2 de `D-107`
+    vi.restoreAllMocks();
+    const otro = montar({
+      ...nano,
+      baseUrl: 'https://pasarela.example/v1',
+      modelSampling: { [RAZONA]: { reasoningMode: 'max' } },
+    });
+    expect((await otro.provider.run(peticion({ model: RAZONA }))).ok).toBe(true);
+    expect(claves(otro.cuerpos[0])).toEqual(SIN_NADA);
+    expect(otro.lineas[0]).toMatchObject({ reasoningMode: 'max', reasoningSent: 'not_sent' });
+  });
+
+  it('el tope del modelo gana al del proveedor y pierde ante el de la peticion', async () => {
+    const { provider, cuerpos, lineas } = montar({
+      ...nano,
+      temperature: 0.9,
+      modelOutputCaps: { [RAZONA]: 16_000 },
+    });
+
+    const resultados = [
+      await provider.run(peticion({ model: RAZONA })),
+      await provider.run(peticion({ model: OTRO })),
+      await provider.run(peticion()),
+      await provider.run(peticion({ model: RAZONA, maxOutputTokens: 2048 })),
+      await provider.run(conHerramientas(RAZONA)),
+    ];
+    expect(resultados.map((resultado) => resultado.ok)).toEqual([true, true, true, true, true]);
+
+    const esperado = [16_000, 4096, 4096, 2048, 16_000];
+    expect(cuerpos.map((cuerpo) => cuerpo['max_tokens'])).toEqual(esperado);
+    // el mismo numero en los tres sitios que lo cuentan: el cuerpo, la linea de
+    // registro y el diagnostico del final. Si uno se calculara aparte, un final
+    // `output_budget` se interpretaria contra un tope que no fue el que viajo
+    expect(lineas.map((linea) => linea.outputCap)).toEqual(esperado);
+    expect(
+      resultados.slice(0, 4).map((resultado) => resultado.termination?.maxOutputTokens),
+    ).toEqual(esperado.slice(0, 4));
+
+    // el tope va en un mapa aparte del muestreo a proposito: el modelo con
+    // tope propio NO pierde la temperatura del proveedor, y no gana ni una clave
+    for (const indice of [0, 1, 2, 3]) {
+      expect(claves(cuerpos[indice]), String(indice)).toEqual([...SIN_NADA, 'temperature']);
+      expect(cuerpos[indice]?.['temperature'], String(indice)).toBe(0.9);
+    }
+  });
+
+  it('un modelo llamado como el prototipo no saca un tope de ahi', async () => {
+    const { provider, cuerpos, lineas } = montar({
+      ...nano,
+      modelOutputCaps: { [RAZONA]: 16_000 },
+    });
+
+    // la referencia: el mapa SI se lee para el modelo que esta en el
+    expect((await provider.run(peticion({ model: RAZONA }))).ok).toBe(true);
+    expect(cuerpos[0]?.['max_tokens']).toBe(16_000);
+
+    // por indice, `constructor` sacaria una funcion, `JSON.stringify` la
+    // descartaria y el cuerpo saldria SIN `max_tokens`
+    for (const model of ['constructor', 'toString', '__proto__']) {
+      expect((await provider.run(peticion({ model }))).ok, model).toBe(true);
+      expect(cuerpos.at(-1)?.['max_tokens'], model).toBe(4096);
+      expect(lineas.at(-1)?.outputCap, model).toBe(4096);
+    }
+  });
+
+  it('el tope del modelo es tambien el que decide si se agoto la salida', async () => {
+    // 2000 tokens sin una palabra visible y sin `finish_reason`: agotan el
+    // tope del MODELO (1024), no el del proveedor (8192). Mirando el del
+    // proveedor saldria como «no envio texto visible», y se reintentaria
+    vi.spyOn(globalThis, 'fetch').mockImplementation(
+      async () =>
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(
+                new TextEncoder().encode(
+                  [
+                    'data: {"choices":[],"usage":{"prompt_tokens":321,"completion_tokens":2000}}',
+                    'data: [DONE]',
+                  ].join('\n') + '\n',
+                ),
+              );
+              controller.close();
+            },
+          }),
+          { status: 200 },
+        ),
+    );
+    const lineas: ProviderCallRecord[] = [];
+    const provider = new HttpApiProvider(
+      {
+        ...nano,
+        supportsStreaming: true,
+        maxOutputTokens: 8192,
+        modelOutputCaps: { [RAZONA]: 1024 },
+      },
+      'una-clave',
+      new MemoryBudgetStore(),
+      undefined,
+      (record) => lineas.push(record),
+    );
+
+    const result = await provider.run(peticion({ model: RAZONA }));
+
+    expect(result.ok).toBe(false);
+    expect(result.errorMessage).toContain(
+      'agoto el limite de salida antes de producir texto visible o pedir una herramienta',
+    );
+    expect(result.errorMessage).toContain('2000 tokens de salida consumidos');
+    expect(lineas).toHaveLength(1);
+    expect(lineas[0]).toMatchObject({ ending: 'output_budget', outputCap: 1024 });
+  }, 15_000);
+
+  it('el recuento de razonamiento de la raiz del consumo llega a la linea', async () => {
+    // NanoGPT lo documenta en `usage.reasoning_tokens`, fuera del anidado
+    const { provider, lineas } = montar(
+      { ...nano, modelSampling: { [RAZONA]: { reasoningMode: 'high' } } },
+      {
+        choices: [{ message: { content: 'listo' }, finish_reason: 'stop' }],
+        usage: { prompt_tokens: 4, completion_tokens: 30, reasoning_tokens: 25 },
+      },
+    );
+
+    expect((await provider.run(peticion({ model: RAZONA }))).ok).toBe(true);
+
+    // declarado y sin nada que se vea: `counted`, con su cifra
+    expect(lineas[0]).toMatchObject({
+      reasoningMode: 'high',
+      reasoningSent: 'reasoning_effort',
+      reasoningTokensReported: 25,
+      reasoningVerdict: 'counted',
+    });
+  });
 });
 
 // los cuatro rangos son DISTINTOS, y confundirlos manda a la pasarela un valor

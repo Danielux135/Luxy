@@ -15,6 +15,9 @@ const recibidos: Array<Record<string, unknown>> = [];
 /** si una prueba lo pone, el host simulado devuelve ESTO en vez del turno completado */
 let siguienteResultado: Record<string, unknown> | null = null;
 
+/** configuraciones que recibio el host simulado, ya validadas por el hijo */
+const configurados: Array<Record<string, unknown> | null> = [];
+
 vi.mock('./host.js', () => ({
   AgentHost: class {
     subscribe(): void {
@@ -22,6 +25,9 @@ vi.mock('./host.js', () => ({
     }
     getStatus(): null {
       return null;
+    }
+    async updateConfig(config: Record<string, unknown> | null): Promise<void> {
+      configurados.push(config);
     }
     async runLocalTurn(input: Record<string, unknown>): Promise<Record<string, unknown>> {
       recibidos.push(input);
@@ -117,6 +123,7 @@ describe('host-entry: el turno privado llega entero', () => {
 
   beforeEach(() => {
     recibidos.length = 0;
+    configurados.length = 0;
     siguienteResultado = null;
   });
 
@@ -223,5 +230,67 @@ describe('host-entry: el turno privado llega entero', () => {
     await new Promise((resolve) => setTimeout(resolve, 20));
 
     expect(recibidos).toHaveLength(0);
+  });
+
+  // F36: los ajustes por modelo de un proveedor HTTP viajan DENTRO de la
+  // configuracion, y el hijo la valida ENTERA con su propia copia del esquema
+  // —su bundle se construye aparte del de Studio—. Con el esquema anterior esta
+  // misma configuracion se ACEPTABA, y eso era lo malo: `modelSampling` y
+  // `modelOutputCaps` no existian en un proveedor HTTP, zod quita lo que no
+  // conoce, y el host recibia la entrada sin ellos. El razonamiento no viajaba,
+  // el tope seguia siendo el del proveedor y nada avisaba en pantalla. Contra
+  // ese esquema esta prueba falla justo ahi: el `ack` llega con `ok: true` y
+  // los dos mapas no estan.
+  it('un configure con ajustes por modelo en un proveedor HTTP llega entero', async () => {
+    const port = await arrancar();
+    const modelo = 'deepseek/deepseek-v4-pro';
+
+    port.deliver({
+      type: 'configure',
+      requestId: 'c1',
+      config: {
+        machineName: 'equipo-de-pruebas',
+        gatewayUrl: 'https://gateway.example',
+        machineToken: 'x'.repeat(32),
+        projects: {
+          privado: { path: 'C:/no/existe/privado', type: 'other', allowEdits: false },
+        },
+        providers: {
+          http: [
+            {
+              id: 'nanogpt',
+              displayName: 'NanoGPT',
+              baseUrl: 'https://api.nano-gpt.com/api/v1',
+              model: 'TheDrummer/Cydonia-24B-v4.3',
+              apiKeyEnv: 'NANOGPT_API_KEY',
+              enabled: true,
+              maxOutputTokens: 4096,
+              modelSampling: { [modelo]: { reasoningMode: 'max', temperature: 0.7 } },
+              modelOutputCaps: { [modelo]: 16_000 },
+            },
+          ],
+        },
+      },
+      providerKeys: {},
+    });
+    await vi.waitFor(() => expect(port.sent.some((m) => m['type'] === 'ack')).toBe(true));
+
+    // el `ack` dice si el hijo acepto la configuracion. Se mira primero el
+    // error para que, si la rechaza, el fallo de la prueba diga por que
+    const ack = port.sent.find((m) => m['type'] === 'ack');
+    expect(ack?.['error']).toBeNull();
+    expect(ack?.['ok']).toBe(true);
+    expect(configurados).toHaveLength(1);
+
+    const providers = configurados[0]?.['providers'] as
+      { http?: Array<Record<string, unknown>> } | undefined;
+    const http = providers?.http?.[0];
+    expect(http?.['id']).toBe('nanogpt');
+    expect(http?.['modelSampling']).toEqual({
+      [modelo]: { reasoningMode: 'max', temperature: 0.7 },
+    });
+    expect(http?.['modelOutputCaps']).toEqual({ [modelo]: 16_000 });
+    // y el tope del proveedor sigue siendo el suyo, no el de fabrica
+    expect(http?.['maxOutputTokens']).toBe(4096);
   });
 });

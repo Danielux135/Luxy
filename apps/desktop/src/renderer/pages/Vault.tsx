@@ -58,6 +58,7 @@ import {
   backgroundAuxiliary,
   describeAuxiliaryFailure,
 } from '../vault-auxiliary.js';
+import { effectiveModelSettingsLine } from '../http-provider-config.js';
 import type { ConfigSummary } from '../useConfig.js';
 import type { VaultErrorArea } from '../useVault.js';
 import {
@@ -364,6 +365,19 @@ function ConversationPanel({
   // haria fallar la llamada, que se paga igual
   const effort =
     composer.effort !== null && efforts.includes(composer.effort) ? composer.effort : null;
+  // lo que un proveedor HTTP le aplicara a ESE modelo: nivel de razonamiento y
+  // tope de salida. Se guardan en Conexiones, por modelo, y aqui no se veian:
+  // se elegia el modelo sin saber con que nivel iba a contestar. Sale de la
+  // configuracion que esta pagina ya recibe, sin preguntar nada a nadie, y es
+  // `null` para lo que no es un proveedor HTTP. Tambien para una entrada apagada
+  // o sin su clave guardada: el agente no la registra, y con ese id puede estar
+  // contestando la familia de una conexion, que tiene otro tope
+  const modelSettingsLine = effectiveModelSettingsLine(
+    summary.config,
+    provider,
+    model.length === 0 ? null : model,
+    summary.secrets.configured,
+  );
 
   // con la confirmacion del enganche abierta no se envia: un turno en medio
   // dejaba su texto desfasado —«tambien sus N mensajes anteriores», «no tiene
@@ -736,9 +750,11 @@ function ConversationPanel({
                 onChange={(elegido) => vault.setComposer({ model: elegido })}
               />
             )}
-            {/* solo donde significa algo. Una conexion HTTP no tiene donde
-                poner esto —el contrato `chat completions` no lo contempla— y
-                pintarlo alli seria un mando que no mueve nada */}
+            {/* solo donde significa algo: el esfuerzo POR TURNO es de los CLI.
+                A una conexion o a un proveedor HTTP el razonamiento se le elige
+                por modelo en Conexiones (`D-107`), y pintarlo aqui seria un
+                mando que no mueve nada. Lo que tiene guardado un proveedor HTTP
+                se enseña debajo de la fila, de solo lectura */}
             {efforts.length > 0 && (
               <Field
                 label="Esfuerzo"
@@ -774,6 +790,13 @@ function ConversationPanel({
               </select>
             </Field>
           </div>
+          {/* de SOLO LECTURA: aqui se ve con que nivel y con que tope va a
+              contestar el modelo elegido, y donde se cambian. No es un mando */}
+          {modelSettingsLine !== null && (
+            <p className="field__hint" style={{ margin: '-8px 0 12px' }}>
+              {modelSettingsLine}
+            </p>
+          )}
 
           {suggestedCharacters.length > 0 && (
             <Notice tone="idle">

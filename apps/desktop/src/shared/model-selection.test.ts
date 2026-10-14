@@ -4,8 +4,10 @@
 // el modelo aun en `DeepSeek-V4-Pro`, que para Claude no existe. La regla estaba
 // escrita en la pantalla y no la comprobaba nadie.
 import { describe, it, expect } from 'vitest';
+import { storedAgentConfigSchema, type StoredAgentConfig } from '@luxy/shared';
 import {
   NATIVE_MODEL_SUGGESTIONS,
+  effectiveModelSettings,
   effortsFor,
   executionChoices,
   missingProviderReason,
@@ -471,5 +473,207 @@ describe('una opcion por ejecucion, no por nombre', () => {
       texto('Kimi-K3', 'kimi', 'hcnsec'),
     ];
     expect(executionChoices(catalogo, EN_MARCHA)).toHaveLength(2);
+  });
+});
+
+// F36: lo que Privado enseña, de solo lectura, bajo el modelo de un proveedor
+// HTTP. Tiene que decir lo MISMO que hara el agente con esa configuracion: si
+// dice un nivel que luego no viaja, promete un efecto que no llega (`D-093`).
+describe('effectiveModelSettings', () => {
+  const FLASH = 'deepseek/deepseek-v4-flash';
+  const CYDONIA = 'TheDrummer/Cydonia-24B-v4.3';
+
+  function configCon(http: Record<string, unknown>[]): StoredAgentConfig {
+    return storedAgentConfigSchema.parse({
+      machineName: 'portatil',
+      gatewayUrl: 'https://example.com',
+      providers: { http },
+    });
+  }
+
+  const nanogpt = (extra: Record<string, unknown> = {}): Record<string, unknown> => ({
+    id: 'nanogpt',
+    displayName: 'NanoGPT',
+    baseUrl: 'https://api.nano-gpt.com/api/v1',
+    model: CYDONIA,
+    apiKeyEnv: 'LUXY_HTTP_NANOGPT_API_KEY',
+    enabled: true,
+    maxOutputTokens: 4096,
+    ...extra,
+  });
+
+  const groq = (extra: Record<string, unknown> = {}): Record<string, unknown> => ({
+    id: 'groq',
+    displayName: 'Groq',
+    baseUrl: 'https://api.groq.com/openai/v1',
+    model: 'qwen/qwen3.8-27b',
+    apiKeyEnv: 'LUXY_HTTP_GROQ_API_KEY',
+    enabled: true,
+    ...extra,
+  });
+
+  it('solo habla de las entradas de providers.http', () => {
+    const config = configCon([nanogpt()]);
+    expect(effectiveModelSettings(null, 'nanogpt', FLASH)).toBeNull();
+    // los CLI y las familias de una conexion no tienen estos ajustes aqui
+    expect(effectiveModelSettings(config, 'claude', 'opus')).toBeNull();
+    expect(effectiveModelSettings(config, 'deepseek', 'DeepSeek-V4-Flash')).toBeNull();
+    expect(effectiveModelSettings(config, 'nanogpt', FLASH)).not.toBeNull();
+  });
+
+  it('una entrada apagada no dice nada: el agente no la registra', () => {
+    // apagada, ese mismo id puede servirlo la familia de una conexion, con otra
+    // URL, otro muestreo y otro tope: describirla seria hablar de una entrada
+    // que no es la que ejecuta
+    const ajustes = {
+      modelSampling: { [FLASH]: { reasoningMode: 'high' } },
+      modelOutputCaps: { [FLASH]: 16384 },
+    };
+    const apagada = configCon([nanogpt({ ...ajustes, enabled: false })]);
+    expect(effectiveModelSettings(apagada, 'nanogpt', FLASH)).toBeNull();
+    expect(effectiveModelSettings(apagada, 'nanogpt', null)).toBeNull();
+    // sin `enabled` el esquema la deja apagada: tampoco
+    const sinDecirlo = configCon([nanogpt({ ...ajustes, enabled: undefined })]);
+    expect(effectiveModelSettings(sinDecirlo, 'nanogpt', FLASH)).toBeNull();
+    // y apagar una no calla a su vecina encendida
+    const mezcla = configCon([nanogpt({ ...ajustes, enabled: false }), groq()]);
+    expect(effectiveModelSettings(mezcla, 'nanogpt', FLASH)).toBeNull();
+    expect(effectiveModelSettings(mezcla, 'groq', null)).not.toBeNull();
+
+    // encendida, la misma entrada dice lo de siempre
+    const encendida = configCon([nanogpt(ajustes)]);
+    expect(effectiveModelSettings(encendida, 'nanogpt', FLASH)).toEqual({
+      model: FLASH,
+      usesProviderDefault: false,
+      reasoningMode: 'high',
+      reasoningSource: 'model',
+      reasoningTravels: true,
+      outputCap: 16384,
+      outputCapSource: 'model',
+    });
+  });
+
+  it('el ajuste propio del modelo: su nivel viaja y su tope gana al del proveedor', () => {
+    const config = configCon([
+      nanogpt({
+        modelSampling: { [FLASH]: { reasoningMode: 'high' } },
+        modelOutputCaps: { [FLASH]: 16384 },
+      }),
+    ]);
+    expect(effectiveModelSettings(config, 'nanogpt', FLASH)).toEqual({
+      model: FLASH,
+      usesProviderDefault: false,
+      reasoningMode: 'high',
+      reasoningSource: 'model',
+      reasoningTravels: true,
+      outputCap: 16384,
+      outputCapSource: 'model',
+    });
+  });
+
+  it('«por defecto» se resuelve al modelo del proveedor, con lo suyo', () => {
+    const config = configCon([
+      nanogpt({
+        modelSampling: { [FLASH]: { reasoningMode: 'high' } },
+        modelOutputCaps: { [FLASH]: 16384 },
+      }),
+    ]);
+    const esperado = {
+      model: CYDONIA,
+      usesProviderDefault: true,
+      reasoningMode: null,
+      reasoningSource: null,
+      reasoningTravels: false,
+      outputCap: 4096,
+      outputCapSource: 'provider',
+    };
+    // sin elegir, el modelo que viaja es el del proveedor: no hereda lo de otro
+    expect(effectiveModelSettings(config, 'nanogpt', null)).toEqual(esperado);
+    expect(effectiveModelSettings(config, 'nanogpt', '')).toEqual(esperado);
+
+    // y si el ajuste es justo del predeterminado, «por defecto» lo lleva
+    const delPredeterminado = configCon([
+      nanogpt({
+        model: FLASH,
+        modelSampling: { [FLASH]: { reasoningMode: 'max' } },
+        modelOutputCaps: { [FLASH]: 32768 },
+      }),
+    ]);
+    expect(effectiveModelSettings(delPredeterminado, 'nanogpt', null)).toMatchObject({
+      model: FLASH,
+      usesProviderDefault: true,
+      reasoningMode: 'max',
+      reasoningSource: 'model',
+      reasoningTravels: true,
+      outputCap: 32768,
+      outputCapSource: 'model',
+    });
+  });
+
+  it('en NanoGPT el nivel de proveedor esta guardado pero NO viaja', () => {
+    // el agente no lo manda en un host con dialecto de catalogo: enseñarlo como
+    // si se aplicara seria mentir
+    const config = configCon([nanogpt({ reasoningMode: 'high' })]);
+    expect(effectiveModelSettings(config, 'nanogpt', FLASH)).toMatchObject({
+      reasoningMode: 'high',
+      reasoningSource: 'provider',
+      reasoningTravels: false,
+    });
+  });
+
+  it('la entrada del modelo sustituye ENTERA al nivel de proveedor', () => {
+    // con una entrada que solo trae temperatura, el modo de arriba ya no le toca
+    const config = configCon([
+      groq({
+        reasoningMode: 'low',
+        modelSampling: { 'openai/gpt-oss-20b': { temperature: 0.7 } },
+      }),
+    ]);
+    expect(effectiveModelSettings(config, 'groq', 'openai/gpt-oss-20b')).toMatchObject({
+      reasoningMode: null,
+      reasoningSource: null,
+      reasoningTravels: false,
+    });
+    // el predeterminado no tiene entrada: le toca el del proveedor, y en Groq viaja
+    expect(effectiveModelSettings(config, 'groq', null)).toMatchObject({
+      model: 'qwen/qwen3.8-27b',
+      reasoningMode: 'low',
+      reasoningSource: 'provider',
+      reasoningTravels: true,
+    });
+    // a un modelo sin regla le toca el mismo modo, pero la tabla no lo manda
+    expect(effectiveModelSettings(config, 'groq', 'llama-3.3-70b-versatile')).toMatchObject({
+      reasoningMode: 'low',
+      reasoningSource: 'provider',
+      reasoningTravels: false,
+    });
+  });
+
+  it('un tope propio sin entrada de muestreo no tapa el nivel del proveedor', () => {
+    const config = configCon([
+      groq({ reasoningMode: 'low', modelOutputCaps: { 'qwen/qwen3.8-27b': 16384 } }),
+    ]);
+    expect(effectiveModelSettings(config, 'groq', 'qwen/qwen3.8-27b')).toMatchObject({
+      reasoningMode: 'low',
+      reasoningSource: 'provider',
+      reasoningTravels: true,
+      outputCap: 16384,
+      outputCapSource: 'model',
+    });
+  });
+
+  it('la clave del modelo distingue mayusculas, como en el agente', () => {
+    const config = configCon([
+      nanogpt({
+        modelSampling: { [FLASH]: { reasoningMode: 'high' } },
+        modelOutputCaps: { [FLASH]: 16384 },
+      }),
+    ]);
+    expect(effectiveModelSettings(config, 'nanogpt', 'deepseek/DeepSeek-V4-Flash')).toMatchObject({
+      reasoningMode: null,
+      reasoningTravels: false,
+      outputCap: 4096,
+      outputCapSource: 'provider',
+    });
   });
 });

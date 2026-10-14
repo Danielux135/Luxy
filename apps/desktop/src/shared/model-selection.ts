@@ -11,9 +11,19 @@
 // Y aqui vive tambien la regla de QUIEN ejecuta un modelo —`providerForModel`—,
 // que no es «su familia» aunque durante meses lo pareciera. Ver el comentario
 // de `providerCandidatesForModel`, que es donde esta escrita una sola vez.
+//
+// Y lo que acompaña a ese modelo: el esfuerzo que se le puede pedir a un CLI en
+// cada turno (`effortsFor`) y, para un proveedor HTTP, el razonamiento y el tope
+// de salida que tiene guardados en su configuracion (`effectiveModelSettings`).
 
-import { isConversationalModel } from '@luxy/shared';
-import type { ModelOrigin } from '@luxy/shared';
+import {
+  hasOwnModelSampling,
+  isConversationalModel,
+  outputCapForModel,
+  reasoningRequestFields,
+  samplingForModel,
+} from '@luxy/shared';
+import type { ModelOrigin, ReasoningMode, StoredAgentConfig } from '@luxy/shared';
 
 /** lo minimo que hace falta de un modelo del catalogo para elegirlo */
 export interface SelectableModel {
@@ -241,9 +251,15 @@ const EFFORTS_DESCONOCIDO = HASTA_XHIGH;
 /**
  * los esfuerzos que se le pueden ofrecer al usuario para este proveedor y modelo.
  *
- * Vacio significa «este proveedor no entiende de esfuerzos»: es el caso de las
- * conexiones HTTP, donde el contrato `chat completions` no tiene donde ponerlo
- * y ofrecerlo seria un boton que no hace nada.
+ * Vacio significa «a este proveedor no se le elige el esfuerzo POR TURNO»: es el
+ * caso de las conexiones y de los proveedores HTTP. No es que no razonen ni que
+ * no se les pueda pedir: su razonamiento se elige POR MODELO y se guarda en
+ * Conexiones (`reasoningMode`, `D-107`), porque viaja en el cuerpo con el
+ * dialecto de cada modelo y no como un argumento de la llamada. El esfuerzo de
+ * aqui es el de los CLI, que si lo aceptan en cada turno; ofrecerselo a un
+ * proveedor HTTP seria un boton que no mueve nada, porque su proveedor no lee
+ * `effort`. Lo que Privado enseña de un proveedor HTTP —de solo lectura— sale
+ * de `effectiveModelSettings`.
  */
 export function effortsFor(provider: string, model: string | null): readonly string[] {
   // Claude no varia por modelo: el nivel es de la sesion, no del modelo
@@ -251,6 +267,111 @@ export function effortsFor(provider: string, model: string | null): readonly str
   if (provider !== 'codex') return [];
   if (model === null || model.length === 0) return EFFORTS_DESCONOCIDO;
   return MODEL_EFFORTS[model] ?? EFFORTS_DESCONOCIDO;
+}
+
+// -----------------------------------------------------------------------------
+// lo que un proveedor HTTP aplica a un modelo
+// -----------------------------------------------------------------------------
+
+/** el razonamiento y el tope de salida que le tocan a un modelo de un proveedor HTTP */
+export interface EffectiveModelSettings {
+  /** el modelo que viaja: el elegido, o el predeterminado del proveedor */
+  model: string;
+  /** no se eligio ninguno: se usa el del proveedor */
+  usesProviderDefault: boolean;
+  /**
+   * el modo guardado que le TOCA a ese modelo, viaje o no: el de su ajuste
+   * propio si lo tiene, y si no el del nivel de proveedor. `null` si no hay
+   */
+  reasoningMode: ReasoningMode | null;
+  /** de cual de los dos sale ese modo; `null` si no hay modo */
+  reasoningSource: 'model' | 'provider' | null;
+  /**
+   * si ese modo llega al cuerpo en un turno de conversacion. Un modo guardado
+   * puede NO viajar: el de nivel de proveedor en un host con dialecto de
+   * catalogo, o uno que la tabla no tiene para ese modelo. Decir el nivel sin
+   * mirar esto seria prometer un efecto que no llega (`D-093`)
+   */
+  reasoningTravels: boolean;
+  /** el `max_tokens` que viaja si la peticion no trae el suyo */
+  outputCap: number;
+  /** de donde sale ese tope */
+  outputCapSource: 'model' | 'provider';
+}
+
+/**
+ * lo que un proveedor HTTP le aplica a un modelo, leido de la configuracion.
+ *
+ * POR QUE EXISTE: el nivel de razonamiento y el tope de salida de un proveedor
+ * HTTP se guardan en Conexiones, por modelo, y en Privado no se veian: se
+ * elegia el modelo sin saber con que nivel iba a contestar ni cuanto sitio
+ * tenia para hacerlo. Esto lo calcula para enseñarlo en una linea de solo
+ * lectura, SIN preguntar nada al agente ni al catalogo.
+ *
+ * Tiene que dar lo mismo que el agente, asi que usa sus mismas piezas y en su
+ * mismo orden (`HttpApiProvider`): el modelo es el elegido o el del proveedor;
+ * la entrada del modelo sustituye ENTERA al nivel superior (`samplingForModel`);
+ * y lo que viaja lo decide `reasoningRequestFields` con el host y con si el
+ * modo es del ajuste propio.
+ *
+ * Vale para un turno de CONVERSACION, que es lo que se manda desde Privado: no
+ * lleva herramientas ni fija su propio tope, asi que el tope es el del modelo y,
+ * si no, el del proveedor. Describir una imagen si fija el suyo en la peticion,
+ * y ese gana a los dos: esto no lo cuenta.
+ *
+ * `null` si `providerId` no es una entrada de `providers.http`: los CLI y las
+ * familias de una conexion no tienen estos ajustes aqui.
+ *
+ * Y `null` tambien si la entrada esta APAGADA: el agente no la registra, y
+ * entonces ese mismo id puede ocuparlo la familia de una conexion, con otra
+ * URL, otro muestreo y otro tope. Describirla seria hablar de una entrada que
+ * no es la que ejecuta. El agente tampoco registra la que no tiene su clave
+ * guardada, pero eso la configuracion no lo dice: lo mira quien pinta la linea
+ * (`effectiveModelSettingsLine`), que si sabe que claves hay.
+ */
+export function effectiveModelSettings(
+  config: StoredAgentConfig | null,
+  providerId: string,
+  model: string | null,
+): EffectiveModelSettings | null {
+  const provider = config?.providers.http.find((entry) => entry.id === providerId);
+  if (provider === undefined || !provider.enabled) return null;
+
+  const usesProviderDefault = model === null || model.length === 0;
+  const effectiveModel = usesProviderDefault ? provider.model : model;
+  // con entrada propia, el modo del proveedor ya no le toca aunque la entrada
+  // no traiga ninguno: por eso se pregunta a `samplingForModel` y no se lee
+  // `provider.reasoningMode` a secas
+  const mode = samplingForModel(
+    effectiveModel,
+    provider.modelSampling,
+    provider.reasoningMode === undefined ? {} : { reasoningMode: provider.reasoningMode },
+  ).reasoningMode;
+  const ownEntry = hasOwnModelSampling(effectiveModel, provider.modelSampling);
+  const sent = reasoningRequestFields(effectiveModel, hostOf(provider.baseUrl), mode, {
+    ownEntry,
+    withTools: false,
+  });
+  const ownCap = outputCapForModel(effectiveModel, provider.modelOutputCaps);
+
+  return {
+    model: effectiveModel,
+    usesProviderDefault,
+    reasoningMode: mode ?? null,
+    reasoningSource: mode === undefined ? null : ownEntry ? 'model' : 'provider',
+    reasoningTravels: Object.keys(sent).length > 0,
+    outputCap: ownCap ?? provider.maxOutputTokens,
+    outputCapSource: ownCap === undefined ? 'provider' : 'model',
+  };
+}
+
+/** el host de la URL base, como lo saca el agente; null si no es una URL */
+function hostOf(baseUrl: string): string | null {
+  try {
+    return new URL(baseUrl).host;
+  } catch {
+    return null;
+  }
 }
 
 /**

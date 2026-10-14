@@ -20,6 +20,7 @@ import type {
   ProviderCallMetrics,
   StreamTransportEnd,
   SamplingParameters,
+  ReasoningMode,
 } from '@luxy/shared';
 import {
   CALL_ATTENDED_AFTER_MS,
@@ -36,6 +37,8 @@ import {
   secretRegistry,
   redact,
   utcDay,
+  hasOwnModelSampling,
+  outputCapForModel,
   samplingForModel,
   samplingLogFields,
   samplingRequestFields,
@@ -225,6 +228,24 @@ interface PayloadSize {
   messages: number;
   images: number;
   imageChars: number;
+}
+
+/**
+ * lo que decide el razonamiento de una peticion, antes de saber si la llamada
+ * lleva herramientas. Lo compone `HttpApiProvider.reasoningChoice`.
+ */
+interface ReasoningChoice {
+  /** el modelo que viaja en el cuerpo, exacto */
+  model: string;
+  /** host del endpoint; de el depende que dialecto vale */
+  host: string | null;
+  /** la eleccion guardada, o `undefined` si no hay ninguna */
+  mode: ReasoningMode | undefined;
+  /**
+   * el modo sale del ajuste PROPIO del modelo y no del nivel de proveedor. En
+   * un host con dialecto de catalogo es lo que decide si viaja (F36)
+   */
+  ownEntry: boolean;
 }
 
 /**
@@ -593,7 +614,9 @@ export class HttpApiProvider implements ProviderExecution {
     try {
       const result = await retryWithBackoff(
         () =>
-          this.trackCall(tracker, request, payload, diagnostics, () =>
+          // `false`: una consulta nunca lleva `tools`, y `callApi` compone su
+          // cuerpo con ese mismo valor
+          this.trackCall(tracker, request, payload, diagnostics, false, () =>
             this.callApi(messages, request, diagnostics, parcial),
           ),
         {
@@ -1030,12 +1053,18 @@ export class HttpApiProvider implements ProviderExecution {
    * el registro se cierra en las dos salidas, y no en un `finally`, porque el
    * motivo del fallo es justo el dato que faltaba: de las tres llamadas vacias
    * del 2026-09-14 no quedo constancia de ninguna clase.
+   *
+   * `withTools` es si el cuerpo de ESTA llamada lleva `tools`. Lo pasa quien
+   * compone el cuerpo y no se deduce aqui de la peticion: en un host con
+   * dialecto de catalogo de eso depende que el razonamiento viaje, y la linea
+   * tiene que apuntar lo que viajo en esta llamada, no en otra del mismo modelo.
    */
   private async trackCall<T>(
     tracker: CallTracker,
     request: ProviderRunRequest,
     payload: PayloadSize,
     diagnostics: RequestDiagnostics,
+    withTools: boolean,
     run: () => Promise<T>,
   ): Promise<T> {
     // EL CUPO SE MIRA AQUI, en cada llamada.
@@ -1056,13 +1085,15 @@ export class HttpApiProvider implements ProviderExecution {
 
     try {
       const value = await run();
-      this.closeCall(tracker, request, payload, diagnostics, attempt, gapMs, null);
+      this.closeCall(tracker, request, payload, diagnostics, withTools, attempt, gapMs, null);
       return value;
     } catch (error) {
       // el fallo viaja envuelto en un objeto y no suelto: un `reject(null)` es
       // raro pero posible, y ahi «no hay error» y «el error es null» no pueden
       // significar lo mismo
-      this.closeCall(tracker, request, payload, diagnostics, attempt, gapMs, { error });
+      this.closeCall(tracker, request, payload, diagnostics, withTools, attempt, gapMs, {
+        error,
+      });
       throw error;
     } finally {
       tracker.endedAt = Date.now();
@@ -1081,6 +1112,7 @@ export class HttpApiProvider implements ProviderExecution {
     request: ProviderRunRequest,
     payload: PayloadSize,
     diagnostics: RequestDiagnostics,
+    withTools: boolean,
     attempt: number,
     gapMs: number | null,
     failure: { error: unknown } | null,
@@ -1171,12 +1203,11 @@ export class HttpApiProvider implements ProviderExecution {
         // lo que viajo en el cuerpo, sacado de la misma funcion que lo compuso.
         // Sin muestreo no añade ninguna clave: la linea sale como antes
         ...samplingLogFields(this.samplingFor(request)),
-        // lo elegido y las claves que viajaron; sin elegir, ninguna clave
-        ...reasoningLogFields(
-          this.modelFor(request),
-          this.endpointHost(),
-          this.samplingFor(request).reasoningMode,
-        ),
+        // lo elegido y las claves que viajaron; sin elegir, ninguna clave. Con
+        // el `withTools` de ESTA llamada: en un host con dialecto de catalogo
+        // el mismo modelo manda su nivel en una conversacion y no lo manda en
+        // una vuelta que lleva `tools`
+        ...this.reasoningLogFor(request, withTools),
         // y si razono, con cifras: SIEMPRE, porque la pregunta abierta —¿oculta
         // la pasarela el razonamiento de Qwen o es Luxy la que no lo ve?— se
         // contesta tambien con las llamadas en las que no se eligio nada
@@ -1277,8 +1308,14 @@ export class HttpApiProvider implements ProviderExecution {
     // una vuelta del bucle es una llamada de pago como cualquier otra: se mide
     // y se registra igual que las de una conversacion
     const payload = measurePayload(messages);
-    return this.trackCall(tracker, request, payload, diagnostics, () =>
-      this.dispatchTurn(messages, tools, request, diagnostics),
+    // si el cuerpo lleva `tools`. Es de la LLAMADA y no del trabajo: por el
+    // protocolo de reserva las herramientas van como texto y `tools` no viaja.
+    // Se calcula UNA vez y se le da al cuerpo y a su linea de registro: si cada
+    // uno hiciera su cuenta, el registro podria decir que viajo un nivel de
+    // razonamiento que no viajo
+    const withTools = tools !== null;
+    return this.trackCall(tracker, request, payload, diagnostics, withTools, () =>
+      this.dispatchTurn(messages, tools, request, diagnostics, withTools),
     );
   }
 
@@ -1288,6 +1325,8 @@ export class HttpApiProvider implements ProviderExecution {
     tools: unknown[] | null,
     request: ProviderRunRequest,
     diagnostics: RequestDiagnostics,
+    // el mismo valor que recibe la linea de registro de esta llamada
+    withTools: boolean,
   ): Promise<LoopTurnResult> {
     const controller = new AbortController();
     // el tope es el de UNA peticion, no el del trabajo entero: con
@@ -1323,7 +1362,7 @@ export class HttpApiProvider implements ProviderExecution {
           // cuerpo sale identico al de antes de que existiera este campo
           ...samplingRequestFields(this.samplingFor(request)),
           // lo mismo con el razonamiento (D-107): sin elegir, ni una clave
-          ...this.reasoningFieldsFor(request),
+          ...this.reasoningFieldsFor(request, withTools),
           ...(tools === null ? {} : { tools, tool_choice: 'auto' }),
           ...(transmitir ? { stream: true, stream_options: { include_usage: true } } : {}),
         }),
@@ -1449,23 +1488,38 @@ export class HttpApiProvider implements ProviderExecution {
   }
 
   /**
+   * techo de tokens de salida, y el UNICO sitio que lo decide.
+   *
+   * Por orden: lo que pida la peticion, el tope propio del modelo
+   * (`modelOutputCaps`, que solo tienen las entradas de `providers.http`) y el
+   * del proveedor.
+   *
+   * La peticion manda sobre todo lo demas: un trabajo por lotes necesita mas
+   * sitio porque el razonamiento del modelo gasta del mismo presupuesto que la
+   * respuesta. Y por eso mismo el tope del modelo va antes que el del
+   * proveedor (F36): un modelo que razona no cabe en el tope pensado para los
+   * que no razonan, y los dos se sirven por la misma entrada.
+   *
+   * De aqui salen el `max_tokens` de los dos cuerpos, el `outputCap` del
+   * registro, el diagnostico del final y la deteccion del tope agotado. Si
+   * alguno hiciera su propia cuenta, un final `output_budget` se interpretaria
+   * contra un tope que no fue el que viajo.
+   */
+  private maxTokensFor(request: ProviderRunRequest): number {
+    return (
+      request.maxOutputTokens ??
+      outputCapForModel(this.modelFor(request), this.config.modelOutputCaps) ??
+      this.config.maxOutputTokens
+    );
+  }
+
+  /**
    * modelo con el que hacer la peticion.
    *
    * request.model existia en el contrato desde el principio pero este proveedor
    * lo ignoraba, asi que todos los trabajos usaban el modelo de la
    * configuracion. El valor se manda EXACTO, sin normalizar.
    */
-  /**
-   * techo de tokens de salida.
-   *
-   * lo que pida la peticion manda sobre el catalogo: un trabajo por lotes
-   * necesita mas sitio porque el razonamiento del modelo gasta del mismo
-   * presupuesto que la respuesta.
-   */
-  private maxTokensFor(request: ProviderRunRequest): number {
-    return request.maxOutputTokens ?? this.config.maxOutputTokens;
-  }
-
   private modelFor(request: ProviderRunRequest): string {
     return request.model !== undefined && request.model.length > 0
       ? request.model
@@ -1476,9 +1530,9 @@ export class HttpApiProvider implements ProviderExecution {
    * parametros de muestreo de ESTA peticion, y SOLO los que esten puestos.
    *
    * Depende de la peticion porque el modelo viaja en cada una: un mismo
-   * proveedor de familia sirve varios modelos, y el muestreo es por modelo
-   * (`modelSampling`). Si el modelo no tiene entrada, se usan los cuatro del
-   * nivel superior, que es lo que habia antes.
+   * proveedor —de familia o una entrada de `providers.http`— sirve varios
+   * modelos, y el muestreo es por modelo (`modelSampling`). Si el modelo no
+   * tiene entrada, se usan los del nivel superior, que es lo que habia antes.
    *
    * Lo leen el cuerpo Y la linea de registro, y es una funcion pura de la
    * configuracion —que es de solo lectura— y de la peticion: asi lo que se
@@ -1498,18 +1552,62 @@ export class HttpApiProvider implements ProviderExecution {
   }
 
   /**
-   * los campos de razonamiento de ESTA peticion (D-107), o `{}`.
+   * lo que decide el razonamiento de ESTA peticion: que modelo, en que host,
+   * que modo esta guardado y si ese modo es el del ajuste PROPIO del modelo.
    *
-   * Sale de `samplingFor`, asi que sigue su misma precedencia: la entrada del
-   * modelo sustituye entera al nivel superior. Depende del host porque las
-   * reglas de Groq no valen para otro servidor que use el mismo nombre.
+   * ES EL UNICO SITIO QUE LO DECIDE. Lo leen los dos cuerpos y la linea de
+   * registro: con tres cuentas sueltas, el registro podia apuntar un modo o un
+   * host distintos de los que compusieron el cuerpo.
+   *
+   * El modo sale de `samplingFor`, asi que sigue su misma precedencia: la
+   * entrada del modelo sustituye entera al nivel superior. El host cuenta
+   * porque las reglas de Groq no valen para otro servidor que use el mismo
+   * nombre, y porque un host con dialecto de catalogo (NanoGPT) no usa la
+   * tabla. Y `ownEntry` es lo que decide alli si el modo viaja: el del nivel
+   * de proveedor vale para todos sus modelos y nadie lo eligio mirando lo que
+   * declara cada uno, asi que no viaja nunca (F36).
+   *
+   * `ownEntry` se pregunta con `hasOwnModelSampling`, que hace la misma
+   * comprobacion que `samplingFor`: si discreparan, viajaria como «propio» un
+   * modo que en realidad vino del proveedor.
    */
-  private reasoningFieldsFor(request: ProviderRunRequest): Record<string, unknown> {
-    return reasoningRequestFields(
-      this.modelFor(request),
-      this.endpointHost(),
-      this.samplingFor(request).reasoningMode,
-    );
+  private reasoningChoice(request: ProviderRunRequest): ReasoningChoice {
+    const model = this.modelFor(request);
+    return {
+      model,
+      host: this.endpointHost(),
+      mode: this.samplingFor(request).reasoningMode,
+      ownEntry: hasOwnModelSampling(model, this.config.modelSampling),
+    };
+  }
+
+  /**
+   * los campos de razonamiento de ESTA llamada (D-107), o `{}`.
+   *
+   * `withTools` es si el cuerpo lleva `tools`: en un host con dialecto de
+   * catalogo, con herramientas solo viaja «Sin razonar». En los demas hosts no
+   * cambia nada: alli manda la tabla, igual que antes.
+   */
+  private reasoningFieldsFor(
+    request: ProviderRunRequest,
+    withTools: boolean,
+  ): Record<string, unknown> {
+    const { model, host, mode, ownEntry } = this.reasoningChoice(request);
+    return reasoningRequestFields(model, host, mode, { ownEntry, withTools });
+  }
+
+  /**
+   * lo elegido y lo que viajo, para la linea de registro de ESTA llamada.
+   *
+   * Recibe el mismo `withTools` que el cuerpo y pasa por `reasoningChoice` como
+   * el: es lo que hace que la linea diga lo que viajo de verdad.
+   */
+  private reasoningLogFor(
+    request: ProviderRunRequest,
+    withTools: boolean,
+  ): ReturnType<typeof reasoningLogFields> {
+    const { model, host, mode, ownEntry } = this.reasoningChoice(request);
+    return reasoningLogFields(model, host, mode, { ownEntry, withTools });
   }
 
   /**
@@ -1584,8 +1682,10 @@ export class HttpApiProvider implements ProviderExecution {
           // vacio salvo que la conexion los tenga puestos: sin configurar, el
           // cuerpo sale identico al de antes de que existiera este campo
           ...samplingRequestFields(this.samplingFor(request)),
-          // lo mismo con el razonamiento (D-107): sin elegir, ni una clave
-          ...this.reasoningFieldsFor(request),
+          // lo mismo con el razonamiento (D-107): sin elegir, ni una clave. Una
+          // consulta nunca lleva `tools`; `run()` le da ese mismo `false` a la
+          // linea de registro
+          ...this.reasoningFieldsFor(request, false),
           stream: this.config.supportsStreaming,
           // algunos proveedores solo devuelven usage si se pide explicitamente
           ...(this.config.supportsStreaming ? { stream_options: { include_usage: true } } : {}),

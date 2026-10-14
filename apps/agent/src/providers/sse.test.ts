@@ -583,6 +583,67 @@ describe('truncamiento y razonamiento', () => {
     expect(usageReasoningTokens(null)).toBe(0);
   });
 
+  // F36: NanoGPT documenta `usage.reasoning_tokens` en la RAIZ ademas del
+  // anidado. Solo se leia el anidado, y con una cadena `??`: un 0 anidado se
+  // daba por bueno y la raiz no se miraba nunca, asi que una llamada que habia
+  // razonado salia como «0 tokens de razonamiento declarados»
+  it('lee tambien `reasoning_tokens` de la raiz del consumo y se queda con el mayor', () => {
+    expect(usageReasoningTokens({ reasoning_tokens: 40 })).toBe(40);
+    // el anidado a cero no tapa la raiz
+    expect(
+      usageReasoningTokens({
+        completion_tokens_details: { reasoning_tokens: 0 },
+        reasoning_tokens: 40,
+      }),
+    ).toBe(40);
+    // ni tapa al otro anidado
+    expect(
+      usageReasoningTokens({
+        completion_tokens_details: { reasoning_tokens: 0 },
+        output_tokens_details: { reasoning_tokens: 7 },
+      }),
+    ).toBe(7);
+    // el MAYOR y nunca la suma: es el mismo recuento dicho en dos sitios
+    expect(
+      usageReasoningTokens({
+        completion_tokens_details: { reasoning_tokens: 12 },
+        reasoning_tokens: 12,
+      }),
+    ).toBe(12);
+    expect(
+      usageReasoningTokens({
+        completion_tokens_details: { reasoning_tokens: 30 },
+        output_tokens_details: { reasoning_tokens: 7 },
+        reasoning_tokens: 12,
+      }),
+    ).toBe(30);
+  });
+
+  it('un `reasoning_tokens` de la raiz que no es un numero positivo no cuenta', () => {
+    // la referencia: el mismo sitio con un numero de verdad SI se lee
+    expect(usageReasoningTokens({ reasoning_tokens: 3 })).toBe(3);
+    for (const raro of ['40', null, Number.NaN, Number.POSITIVE_INFINITY, -5, 0, {}, true]) {
+      expect(usageReasoningTokens({ reasoning_tokens: raro }), String(raro)).toBe(0);
+      // y no estropea el anidado que si vale
+      expect(
+        usageReasoningTokens({
+          reasoning_tokens: raro,
+          completion_tokens_details: { reasoning_tokens: 9 },
+        }),
+        String(raro),
+      ).toBe(9);
+    }
+  });
+
+  it('en flujo, el recuento de la raiz llega igual que el anidado', () => {
+    const a = new TurnAssembler();
+    a.push('{"choices":[{"delta":{"content":"hola"}}]}');
+    a.push(
+      '{"choices":[],"usage":{"prompt_tokens":5,"completion_tokens":60,"reasoning_tokens":40,"completion_tokens_details":{"reasoning_tokens":0}}}',
+    );
+    expect(a.reportedReasoningTokens()).toBe(40);
+  });
+
   it('cuenta los caracteres de las herramientas pedidas, sin guardarlos', () => {
     const a = new TurnAssembler();
     a.push(

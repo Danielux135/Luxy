@@ -9,6 +9,7 @@
 // red. Quien hace la peticion es el proceso principal de Desktop, que es el
 // unico que tiene la clave descifrada.
 import { z } from 'zod';
+import { catalogDialectFor } from '../reasoning-control.js';
 import type { ModelCapability } from './types.js';
 
 /**
@@ -17,12 +18,18 @@ import type { ModelCapability } from './types.js';
  * `passthrough` a proposito: cada pasarela añade campos suyos y perder la
  * respuesta entera por un campo desconocido seria absurdo. Lo unico obligatorio
  * es el identificador.
+ *
+ * Los otros tres llevan `.catch(undefined)` por lo mismo: sin el, un valor que
+ * no casa —`capabilities: null`, `owned_by: null`, la fecha como texto— hacia
+ * fallar la FILA, y el modelo desaparecia del catalogo con todo lo demas que
+ * declaraba. Un dato raro cuesta ese campo, nunca el modelo. `owned_by` y
+ * `created` ni siquiera se leen.
  */
 export const providerModelEntrySchema = z
   .object({
     id: z.string().min(1).max(200),
-    owned_by: z.string().max(200).optional(),
-    created: z.number().optional(),
+    owned_by: z.string().max(200).optional().catch(undefined),
+    created: z.number().optional().catch(undefined),
     /**
      * lo que la pasarela dice que ese modelo sabe hacer.
      *
@@ -32,7 +39,7 @@ export const providerModelEntrySchema = z
      * deduccion nuestra. Antes se descartaba entero y quedaba solo el nombre,
      * asi que para saber cual sabe mirar una imagen habia que adivinarlo.
      */
-    capabilities: z.record(z.unknown()).optional(),
+    capabilities: z.record(z.unknown()).optional().catch(undefined),
   })
   .passthrough();
 
@@ -44,7 +51,37 @@ export const providerModelsResponseSchema = z
 export const BILLING_MODES = ['token', 'call', 'unknown'] as const;
 export type BillingMode = (typeof BILLING_MODES)[number];
 
-export interface CatalogModelPrice {
+/**
+ * lo que la pasarela DECLARA de un modelo sobre su razonamiento y sus limites.
+ *
+ * Los cuatro son opcionales y SIN valor por defecto, y la clave solo existe si
+ * la pasarela dio el dato: ausente es «no lo dice», que no es lo mismo que
+ * «no» ni que cero (`D-093`). Los traen las listas detalladas —la de NanoGPT
+ * con `?detailed=true`— y no los catalogos guardados antes de F36.
+ *
+ * Son DATOS DE UN TERCERO, con la fecha del catalogo: la pantalla dice «la
+ * pasarela declara», nunca «este modelo admite».
+ */
+export interface DeclaredModelDetail {
+  /**
+   * `capabilities.reasoning`. TRES estados: `true`, `false` y ausente. Va
+   * aparte de `declaredCapabilities` porque alli una bandera a `false` y una
+   * que no viene dan la misma lista vacia
+   */
+  reasoning?: boolean;
+  /**
+   * `reasoning_efforts`, con las cadenas CRUDAS de la pasarela (`none`, `low`,
+   * `max`...). No se traducen aqui: las traduce `reasoningModesFromDeclared`
+   * con el dialecto del host, e ignora las que no conoce
+   */
+  reasoningEfforts?: string[];
+  /** `max_output_tokens`. Informa; el tope que viaja lo elige el usuario */
+  declaredOutputCap?: number;
+  /** `context_length` */
+  declaredContext?: number;
+}
+
+export interface CatalogModelPrice extends DeclaredModelDetail {
   apiModel: string;
   ownedBy: string | null;
   billing: BillingMode;
@@ -94,6 +131,17 @@ export interface PricingProbe {
  */
 export type CatalogSource = 'connection' | 'http';
 
+/**
+ * con que lista se leyo el catalogo.
+ *
+ * `detailed` es la lista con detalle de un host con dialecto de catalogo;
+ * `basic`, la simple de ese mismo host, que no trae niveles de nadie. Hace
+ * falta distinguirlas porque en una lista simple «este modelo no declara
+ * niveles» es mentira: es que no se pidieron.
+ */
+export const CATALOG_DETAILS = ['detailed', 'basic'] as const;
+export type CatalogDetail = (typeof CATALOG_DETAILS)[number];
+
 export interface CatalogSnapshot {
   connectionId: string;
   /** ausente en los catalogos guardados antes de que existieran los dos origenes */
@@ -119,6 +167,13 @@ export interface CatalogSnapshot {
    * catalogos guardados antes de esto, que es lo mismo que cero.
    */
   unreadableModels?: number;
+  /**
+   * con que lista se leyo. Opcional y SIN valor por defecto: ausente en los
+   * hosts sin dialecto de catalogo y en lo guardado antes de F36, y ahi no se
+   * puede afirmar que traiga detalle. Solo `detailed` permite decir que un
+   * modelo no declara niveles.
+   */
+  detail?: CatalogDetail;
 }
 
 /**
@@ -196,10 +251,90 @@ export function mapDeclaredCapabilities(declared: readonly string[]): ModelCapab
 }
 
 /** un modelo servido, con lo que la pasarela declara de el */
-export interface ProviderModelEntry {
+export interface ProviderModelEntry extends DeclaredModelDetail {
   id: string;
   /** las banderas que vienen a `true`, con el nombre que les da la pasarela */
   declaredCapabilities: string[];
+}
+
+/** cuantos niveles se guardan por modelo, y lo largo que puede ser cada uno */
+export const MAX_DECLARED_REASONING_EFFORTS = 12;
+export const MAX_DECLARED_REASONING_EFFORT_CHARS = 24;
+
+/** `capabilities.reasoning`, solo si es un booleano de verdad */
+function declaredReasoning(capabilities: unknown): boolean | undefined {
+  if (capabilities === null || typeof capabilities !== 'object' || Array.isArray(capabilities)) {
+    return undefined;
+  }
+  const value = (capabilities as Record<string, unknown>)['reasoning'];
+  return typeof value === 'boolean' ? value : undefined;
+}
+
+/**
+ * `reasoning_efforts`: las cadenas tal cual, recortadas y sin repetir.
+ *
+ * Es un campo que NanoGPT no documenta, asi que puede llegar con cualquier
+ * forma. Lo que no sea una lista se ignora entero; dentro de una lista, lo que
+ * no sea una cadena de 1 a 24 caracteres se salta sin perder las demas. Los
+ * topes no son del protocolo: impiden que una respuesta rara llene el catalogo
+ * guardado y la fila que lo pinta.
+ */
+function declaredReasoningEfforts(raw: unknown): string[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const efforts: string[] = [];
+  for (const value of raw as unknown[]) {
+    if (typeof value !== 'string') continue;
+    const effort = value.trim();
+    if (effort.length === 0 || effort.length > MAX_DECLARED_REASONING_EFFORT_CHARS) continue;
+    if (efforts.includes(effort)) continue;
+    efforts.push(effort);
+    if (efforts.length === MAX_DECLARED_REASONING_EFFORTS) break;
+  }
+  // una lista que se queda vacia no es un dato: no se distingue de no traerla
+  return efforts.length === 0 ? undefined : efforts;
+}
+
+/**
+ * un limite declarado, solo si es un entero positivo que se pueda escribir.
+ *
+ * `null` es lo que manda NanoGPT cuando no lo sabe, y NO es cero. Un cero, un
+ * negativo, un decimal o una cadena tampoco son un limite. `isSafeInteger` deja
+ * fuera ademas a `Infinity` y a los que ya no son exactos (1e30).
+ */
+function declaredLimit(raw: unknown): number | undefined {
+  return typeof raw === 'number' && Number.isSafeInteger(raw) && raw > 0 ? raw : undefined;
+}
+
+/** solo las claves que traen dato: un modelo del que no se dice nada no gana ninguna */
+function pickDeclaredDetail(detail: DeclaredModelDetail): DeclaredModelDetail {
+  return {
+    ...(detail.reasoning === undefined ? {} : { reasoning: detail.reasoning }),
+    ...(detail.reasoningEfforts === undefined ? {} : { reasoningEfforts: detail.reasoningEfforts }),
+    ...(detail.declaredOutputCap === undefined
+      ? {}
+      : { declaredOutputCap: detail.declaredOutputCap }),
+    ...(detail.declaredContext === undefined ? {} : { declaredContext: detail.declaredContext }),
+  };
+}
+
+/**
+ * lo que una entrada de la lista declara de razonamiento y limites.
+ *
+ * Se lee como `unknown` y se filtra a mano, campo por campo, en vez de
+ * añadirlo a `providerModelEntrySchema`: alli un campo sin su `catch` tira la
+ * FILA entera, y aqui tiene que costar solo el campo. Nunca el modelo ni el
+ * catalogo.
+ *
+ * La misma entrada detallada trae `pricing` y `cost_estimate`, y NO se leen:
+ * es el alcance de F36 —el razonamiento—, no algo que prohiba `D-022`.
+ */
+function parseDeclaredDetail(entry: Readonly<Record<string, unknown>>): DeclaredModelDetail {
+  return pickDeclaredDetail({
+    reasoning: declaredReasoning(entry['capabilities']),
+    reasoningEfforts: declaredReasoningEfforts(entry['reasoning_efforts']),
+    declaredOutputCap: declaredLimit(entry['max_output_tokens']),
+    declaredContext: declaredLimit(entry['context_length']),
+  });
 }
 
 /**
@@ -225,6 +360,7 @@ export function parseProviderModelReport(payload: unknown): {
     entries.push({
       id: model.data.id,
       declaredCapabilities: parseModelCapabilities(model.data.capabilities),
+      ...parseDeclaredDetail(model.data),
     });
   }
   return { entries, unreadable };
@@ -262,6 +398,8 @@ export function buildCatalogSnapshot(input: {
   pricingPayload: unknown | null;
   notice?: string | null;
   pricingProbes?: PricingProbe[];
+  /** con que lista se leyo; sin el, el catalogo no lleva la clave */
+  detail?: CatalogDetail;
 }): CatalogSnapshot {
   const { entries: served, unreadable } = parseProviderModelReport(input.modelsPayload);
 
@@ -287,7 +425,9 @@ export function buildCatalogSnapshot(input: {
 
   // el precio y las capacidades vienen de sitios distintos —la tabla de precios
   // y `/v1/models`— y se juntan aqui: quien manda sobre que EXISTE es la lista
-  // de servidos, y las capacidades acompañan siempre a su modelo
+  // de servidos, y las capacidades acompañan siempre a su modelo. Lo declarado
+  // de razonamiento y limites tambien, y solo las claves que traen dato: un
+  // modelo del que la pasarela no dice nada sale igual que antes de F36
   const models = served.map((entry) => ({
     ...(prices.get(entry.id) ?? {
       apiModel: entry.id,
@@ -299,6 +439,7 @@ export function buildCatalogSnapshot(input: {
       groups: [],
     }),
     declaredCapabilities: entry.declaredCapabilities,
+    ...pickDeclaredDetail(entry),
   }));
 
   return {
@@ -311,6 +452,7 @@ export function buildCatalogSnapshot(input: {
     ...(input.pricingProbes === undefined ? {} : { pricingProbes: input.pricingProbes }),
     // cero no se guarda: es el caso normal y el campo es opcional
     ...(unreadable === 0 ? {} : { unreadableModels: unreadable }),
+    ...(input.detail === undefined ? {} : { detail: input.detail }),
   };
 }
 
@@ -336,6 +478,24 @@ export const catalogModelPriceSchema = z.object({
   groups: z.array(z.string()),
   /** ausente en los catalogos guardados antes de que se leyeran las capacidades */
   declaredCapabilities: z.array(z.string()).optional(),
+  /**
+   * lo declarado de razonamiento y limites (`DeclaredModelDetail`).
+   *
+   * `.optional().catch(undefined)` y no `.optional()` a secas: quien lee del
+   * disco tira el catalogo ENTERO si el esquema falla, y estos cuatro son
+   * informativos. Un valor que no case —editado a mano, o escrito por una
+   * version que los guardaba de otra forma— cuesta ese campo de ese modelo y
+   * nada mas. Los limites son los mismos que al leer de la red.
+   */
+  reasoning: z.boolean().optional().catch(undefined),
+  reasoningEfforts: z
+    .array(z.string().min(1).max(MAX_DECLARED_REASONING_EFFORT_CHARS))
+    .min(1)
+    .max(MAX_DECLARED_REASONING_EFFORTS)
+    .optional()
+    .catch(undefined),
+  declaredOutputCap: z.number().int().positive().safe().optional().catch(undefined),
+  declaredContext: z.number().int().positive().safe().optional().catch(undefined),
 });
 
 export const pricingProbeSchema = z.object({
@@ -363,7 +523,121 @@ export const catalogSnapshotSchema = z.object({
   pricingProbes: z.array(pricingProbeSchema).optional(),
   /** filas de `/v1/models` que no se pudieron leer */
   unreadableModels: z.number().int().min(0).optional(),
+  /**
+   * con que lista se leyo. Sin valor por defecto: un catalogo anterior no lo
+   * lleva y no puede pasar por detallado. Con `catch` por lo mismo que los
+   * campos declarados: un valor desconocido se lee como «no se sabe», que la
+   * pantalla trata como sin detalle, en vez de dejar sin catalogo.
+   */
+  detail: z.enum(CATALOG_DETAILS).optional().catch(undefined),
 });
+
+/**
+ * la ruta de la lista de modelos de siempre: la base sin barras finales mas
+ * `/models`.
+ *
+ * Es una concatenacion y no pasa por `URL` A PROPOSITO: asi es como se ha
+ * pedido siempre, y para los hosts sin dialecto tiene que seguir saliendo la
+ * misma cadena, byte a byte. Tambien es el respaldo cuando la lista con
+ * detalle de un host con dialecto no contesta.
+ */
+export function basicCatalogModelsUrl(baseUrl: string): string {
+  return `${baseUrl.replace(/\/+$/, '')}/models`;
+}
+
+/**
+ * la ruta con la que se pide el catalogo de esta URL base, y si trae detalle.
+ *
+ * SOLO un host con dialecto de catalogo recibe los parametros de consulta de
+ * su dialecto (`?detailed=true` en NanoGPT). Es la MISMA ruta `/models` con un
+ * parametro que esa pasarela documenta, pedida a ese host y a ningun otro: no
+ * es sondear rutas (`D-022`). Al resto se le pide exactamente lo de siempre.
+ *
+ * En el host con dialecto se compone con `URL` y `searchParams`, no
+ * concatenando: la base de una conexion —no la de un proveedor HTTP— puede
+ * traer su propia consulta, y pegarle `?detailed=true` detras la romperia. El
+ * host que decide es el que `URL` dice que va a recibir la peticion.
+ */
+export function catalogModelsUrl(baseUrl: string): { url: string; detailed: boolean } {
+  const basic = basicCatalogModelsUrl(baseUrl);
+  let target: URL;
+  try {
+    target = new URL(baseUrl);
+  } catch {
+    // una base que no es una URL fallara al pedirla, como hoy: no se arregla aqui
+    return { url: basic, detailed: false };
+  }
+  const dialect = catalogDialectFor(target.hostname);
+  if (dialect === null) return { url: basic, detailed: false };
+  target.pathname = `${target.pathname.replace(/\/+$/, '')}/models`;
+  for (const [name, value] of Object.entries(dialect.catalogQuery)) {
+    target.searchParams.set(name, value);
+  }
+  target.hash = '';
+  return { url: target.toString(), detailed: true };
+}
+
+/**
+ * que se sabe del razonamiento de un modelo segun el catalogo guardado.
+ *
+ * Son seis estados y no un booleano porque la pantalla dice una cosa distinta
+ * en cada uno, y confundir dos es afirmar algo que nadie ha dicho:
+ *
+ *  - `missing`: no hay catalogo guardado;
+ *  - `basic`: lo hay, pero no se leyo con detalle. No se puede decir que el
+ *    modelo no declare niveles: no se pidieron;
+ *  - `unknown-model`: se leyo con detalle y ese identificador no esta. Se
+ *    compara EXACTO: los identificadores distinguen mayusculas y el sufijo
+ *    (`:thinking`) es parte del nombre;
+ *  - `not-reasoning`: la pasarela declara `reasoning: false` y ningun nivel;
+ *  - `no-levels`: no declara niveles, y de si razona dice que si o no dice nada;
+ *  - `levels`: declara niveles.
+ */
+export type CatalogReasoningState =
+  'missing' | 'basic' | 'unknown-model' | 'not-reasoning' | 'no-levels' | 'levels';
+
+export interface CatalogReasoning {
+  state: CatalogReasoningState;
+  /**
+   * las cadenas CRUDAS que declara el catalogo; vacio salvo en `levels`. Son
+   * las que espera `reasoningOptionsFor` en `declared`
+   */
+  levels: readonly string[];
+  /** cuando se leyo el catalogo, para decirlo en pantalla; null sin catalogo */
+  fetchedAt: string | null;
+  /** el tope de salida que la pasarela declara para el modelo, o null */
+  outputCap: number | null;
+}
+
+/**
+ * lo declarado para un modelo en el catalogo guardado. Pura: sin red ni disco.
+ *
+ * `levels` sale crudo y no traducido porque este archivo no sabe de que host es
+ * el catalogo; quien lo pinta tiene la URL base y por tanto el dialecto.
+ */
+export function catalogReasoningFor(
+  snapshot: CatalogSnapshot | null | undefined,
+  apiModel: string,
+): CatalogReasoning {
+  if (snapshot === null || snapshot === undefined) {
+    return { state: 'missing', levels: [], fetchedAt: null, outputCap: null };
+  }
+  const fetchedAt = snapshot.fetchedAt;
+  const model = snapshot.models.find((entry) => entry.apiModel === apiModel);
+  const outputCap = model?.declaredOutputCap ?? null;
+  if (snapshot.detail !== 'detailed') return { state: 'basic', levels: [], fetchedAt, outputCap };
+  if (model === undefined) {
+    return { state: 'unknown-model', levels: [], fetchedAt, outputCap: null };
+  }
+  const levels = model.reasoningEfforts ?? [];
+  if (levels.length > 0) return { state: 'levels', levels: [...levels], fetchedAt, outputCap };
+  return {
+    state: model.reasoning === false ? 'not-reasoning' : 'no-levels',
+    levels: [],
+    fetchedAt,
+    outputCap,
+  };
+}
 
 /** una linea que explica por que no hay precios, con lo que contesto cada ruta */
 export function describePricingProbes(probes: PricingProbe[]): string {

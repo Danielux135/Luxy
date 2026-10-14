@@ -1,14 +1,14 @@
 // Proyectos, Conexiones y Modelos.
-import { useEffect, useRef, useState, type JSX } from 'react';
+import { useEffect, useRef, useState, type JSX, type ReactNode } from 'react';
 import {
   ALLOWED_TEST_EXECUTABLES,
   ModelRegistry,
   REASONING_MODE_LABELS,
-  reasoningNoteFor,
-  reasoningOptionsFor,
+  REASONING_MODE_SHORT,
   type ReasoningMode,
   buildCatalogReport,
   buildDefaultCatalog,
+  catalogDialectFor,
   connectionProfileSchema,
   guessDisplayGroup,
   type CatalogSnapshot,
@@ -33,21 +33,33 @@ import {
   projectToDraft,
   type ProjectDraft,
 } from '../project-profile.js';
+import { callBridge } from '../bridge-call.js';
 import {
   buildHttpProvider,
+  catalogDateLabel,
+  describeProviderModelSettings,
   describeSampling,
   emptyHttpProviderDraft,
-  emptySamplingDraft,
+  emptyProviderModelDraft,
   hostOfBaseUrl,
   httpProviderToDraft,
   HTTP_PROVIDER_PRESETS,
+  isReasoningOrphan,
+  providerModelSettings,
+  providerModelSettingsToDraft,
+  providerModelSuggestions,
+  reasoningChoicesFor,
   reasoningModeDraft,
-  samplingToDraft,
+  reasoningOutputCapIsShort,
+  REASONING_OUTPUT_CAP_FLOOR,
   withModelSampling,
+  withProviderModelSampling,
   type HttpProviderConfig,
   type HttpProviderDraft,
+  type ProviderModelDraft,
+  type ProviderModelSettings,
+  type ReasoningChoices,
   type ReasoningModeDraft,
-  type SamplingDraft,
 } from '../http-provider-config.js';
 import { Empty, Explica, Field, Notice, Panel, Tag } from '../ui/primitives.js';
 import type { ConfigSummary } from '../useConfig.js';
@@ -55,7 +67,9 @@ import {
   catalogChanged,
   catalogOriginKey,
   catalogOriginsOf,
+  useStoredCatalog,
   type CatalogOrigin,
+  type StoredCatalog,
 } from '../useCatalog.js';
 
 /**
@@ -802,19 +816,35 @@ function defaultProject(): NonNullable<StoredAgentConfig['projects']>[string] {
 // -----------------------------------------------------------------------------
 
 /**
- * muestreo POR MODELO de una conexion.
+ * los pasos para mirar en Registros que se envio y que se le noto al modelo.
  *
- * Es por modelo y no por conexion porque una conexion registra a la vez varias
- * familias —y esas mismas ejecutan los trabajos con herramientas—: una
- * temperatura de conexion se la llevarian todas. Aqui solo la recibe el modelo
- * exacto que se elige, y por eso el aviso dice que no acompaña a un cambio de
- * modelo.
- *
- * Los cuatro campos son los mismos, con el mismo aviso y las mismas reglas, que
- * los de un proveedor HTTP: vacio = no se envia.
+ * Van aparte porque los dicen IGUAL los dos caminos del selector: la tabla de
+ * `D-107` y el catalogo de la pasarela. La seccion se llama «Registros»
+ * —«Sistema» no existe en la barra lateral—, y es el unico sitio donde Daniel
+ * puede comprobar si el ajuste llega (LA-055). Solo carga las ultimas lineas,
+ * asi que hay que mirarlo nada mas enviar (octava ronda). Los seis veredictos
+ * vienen en ingles porque asi salen en el registro, y «hidden» se dice como lo
+ * que es, una deduccion (`D-093`)
  */
+const REGISTROS_STEPS =
+  'envía un mensaje, ve a Registros, pulsa «Actualizar» y busca «llamada al proveedor». Si ' +
+  'reasoningSent dice not_sent, no se envió nada. reasoningVerdict dice qué se le notó: ' +
+  'visible, razonó y se ve; counted, el proveedor dice que razonó sin enseñarlo (cuánto, en ' +
+  'reasoningTokensReported); hidden, probablemente razonó sin enseñarlo; not_seen, no se ' +
+  'le notó; unclear o no_data, no se puede decir.';
+
 /**
- * la pista del selector de razonamiento, aparte para poder probarla.
+ * el rotulo del boton que vuelve a leer el catalogo de UN proveedor HTTP.
+ *
+ * Es una constante porque lo citan las pistas de aqui y los errores de
+ * `reasoningModeError`: si el boton se llamara de otra forma, mandarian a
+ * pulsar algo que no existe. Una prueba comprueba que coinciden.
+ */
+export const REFRESH_PROVIDER_MODELS = 'Actualizar modelos de este proveedor';
+
+/**
+ * la pista del selector de razonamiento EN UN HOST DE LA TABLA, aparte para
+ * poder probarla. La de un host con dialecto de catalogo es `reasoningHintFor`.
  *
  * `providerWide`: en el formulario del proveedor HTTP el valor va al nivel
  * superior, y `samplingFor` lo aplica a cualquier modelo que pida la peticion
@@ -831,43 +861,370 @@ export function reasoningFieldHint(input: {
       'que elijas en una conversación, si no tiene su propio ajuste y admite este valor; a los ' +
       'que no lo admiten no se les envía nada. Las opciones de aquí son las del modelo de arriba. '
     : '';
-  // la seccion se llama «Registros»: «Sistema» no existe en la barra lateral, y
-  // es el unico sitio donde Daniel puede comprobar si el ajuste llega (LA-055).
-  // Los seis veredictos, y «hidden» como lo que es, una deduccion (`D-093`)
   return input.options.length === 0
     ? 'Luxy no sabe cómo pedírselo a este modelo: no enviará nada. Sólo se ofrece donde la ' +
         'documentación del modelo dice qué valores admite.'
-    : // mas corta y con los pasos: Registros solo carga las ultimas lineas, asi
-      // que hay que mirarlo nada mas enviar (octava ronda). Los veredictos
-      // vienen en ingles porque asi salen en el registro
-      `${alcance}${input.note ?? ''} No se sabe si tu pasarela deja pasar este ajuste. Para saberlo: envía un ` +
-        'mensaje, ve a Registros, pulsa «Actualizar» y busca «llamada al proveedor». Si ' +
-        'reasoningSent dice not_sent, no se envió nada. reasoningVerdict dice qué se le notó: ' +
-        'visible, razonó y se ve; counted, el proveedor dice que razonó sin enseñarlo (cuánto, en ' +
-        'reasoningTokensReported); hidden, probablemente razonó sin enseñarlo; not_seen, no se ' +
-        'le notó; unclear o no_data, no se puede decir.';
+    : `${alcance}${input.note ?? ''} No se sabe si tu pasarela deja pasar este ajuste. Para ` +
+        `saberlo: ${REGISTROS_STEPS}`;
+}
+
+/** «su catálogo del 13/10/2026», y lo mismo sin fecha cuando no hay ninguna que decir */
+function datedCatalog(choices: ReasoningChoices): {
+  date: string | null;
+  ofDate: string;
+  theirs: string;
+} {
+  const date = catalogDateLabel(choices.catalog?.fetchedAt);
+  return date === null
+    ? { date, ofDate: '', theirs: 'su catálogo guardado' }
+    : { date, ofDate: ` del ${date}`, theirs: `su catálogo del ${date}` };
+}
+
+/**
+ * la pista del selector de razonamiento, venga de donde vengan las opciones.
+ *
+ * En un host de la tabla es `reasoningFieldHint`, sin tocar. En un host con
+ * dialecto de catalogo (NanoGPT) hay un texto por cada sitio del que pueden
+ * salir —o no salir— las opciones, porque cada silencio es distinto: no hay
+ * catalogo, se leyo sin detalle, el modelo no esta, la pasarela declara que no
+ * razona, o razona y no declara niveles. Juntarlos en un «no admitido» seria
+ * afirmar de un tercero algo que nadie ha dicho (`D-093`).
+ *
+ * Por eso ninguno de estos textos dice que el modelo «admite» nada ni que algo
+ * este comprobado: dicen lo que la pasarela DECLARA, con la fecha del catalogo,
+ * y que lo elegido es lo que Luxy pide. Nada de NanoGPT se ha medido con una
+ * llamada.
+ *
+ * `modelEmpty`: el campo del modelo esta vacio. Sin nombre no hay nada que
+ * buscar en el catalogo, y decir «ese identificador no esta» seria absurdo.
+ */
+export function reasoningHintFor(
+  choices: ReasoningChoices,
+  context: { providerWide: boolean; modelEmpty?: boolean },
+): string {
+  const dialect = choices.dialect;
+  if (dialect === null) {
+    return reasoningFieldHint({
+      options: choices.options,
+      note: choices.note,
+      providerWide: context.providerWide,
+    });
+  }
+  const label = dialect.label;
+  const { date, ofDate, theirs } = datedCatalog(choices);
+  const refresh = `pulsa «${REFRESH_PROVIDER_MODELS}»`;
+  const steps = `Para ver qué se envió y qué se le notó: ${REGISTROS_STEPS}`;
+  // elegido a mano no hay nada declarado que lo respalde: decide la pasarela. Si
+  // rechaza el nivel con un 4xx, el agente no lo reintenta: solo repite los 5xx
+  // y el 429.
+  //
+  // Sin nada que ofrecer no hay nivel que elegir —con el campo «Modelo» vacio,
+  // que es lo primero que se ve al añadir uno—, y entonces tampoco hay nota:
+  // «un error así» se quedaba sin error delante, y los pasos de Registros
+  // mandaban a mirar un envio que no se puede hacer
+  const manual =
+    choices.options.length === 0 || context.modelEmpty === true
+      ? 'Escribe arriba el modelo para elegir el nivel a mano.'
+      : `${choices.note ?? ''} Un error así no se reintenta. ${steps}`;
+  switch (choices.source) {
+    case 'provider-wide':
+      return (
+        `En ${label} el nivel no se elige para todo el proveedor, sino para cada modelo: cada ` +
+        `uno declara los suyos en el catálogo de ${label}. Se elige en «Ajustes por modelo», en ` +
+        'la tarjeta de este proveedor, una vez guardado.'
+      );
+    case 'unavailable':
+      return (
+        `En ${label} los niveles salen de su catálogo, y Luxy sólo lo lee para un proveedor ` +
+        'HTTP, en sus «Ajustes por modelo». Aquí no se ofrece ninguno.'
+      );
+    case 'loading':
+      return `Luxy está leyendo el catálogo guardado de ${label}: los niveles salen de él.`;
+    case 'missing':
+      return `No hay ningún catálogo de ${label} guardado, y los niveles salen de él: ${refresh}.`;
+    case 'unknown-model':
+      return context.modelEmpty === true
+        ? `Escribe arriba el modelo: los niveles salen de lo que ${label} declara para cada ` +
+            `uno en ${theirs}.`
+        : `Este identificador no está en el catálogo de ${label}${ofDate}: comprueba las ` +
+            `mayúsculas y el sufijo, o ${refresh}. Mientras no esté, no se ofrece ningún nivel.`;
+    case 'not-reasoning':
+      return `${label} declara que este modelo no razona, en ${theirs}: no se ofrece ningún nivel.`;
+    case 'basic':
+      return (
+        `El catálogo guardado de ${label}${ofDate} se leyó sin detalle y no trae los niveles ` +
+        `que declara cada modelo: ${refresh} para pedirlo otra vez. ${manual}`
+      );
+    case 'no-levels':
+      return `${label} no declara niveles para este modelo en ${theirs}. ${manual}`;
+    case 'levels': {
+      if (choices.options.length === 0) {
+        return (
+          `${label} declara para este modelo, en ${theirs}, niveles que Luxy no sabe pedir ` +
+          `(${(choices.catalog?.levels ?? []).join(', ')}): no se ofrece ninguno.`
+        );
+      }
+      // la nota de shared no lleva fecha —alli no la hay—: la pone la pantalla
+      const read = date === null ? '' : ` Luxy leyó ese catálogo el ${date}.`;
+      // de NanoGPT en concreto: su catalogo y su guia nombran `max`, el esquema
+      // publicado de su API no. Otro dialecto no hereda la frase
+      const max =
+        dialect.family === 'nanogpt' && choices.options.includes('max')
+          ? ` «${REASONING_MODE_LABELS.max}» figura en el catálogo y en la guía de ${label}, no ` +
+            'en el esquema publicado de su API: si contesta con un error, elige otro.'
+          : '';
+      return `${choices.note ?? ''}${read}${max} ${steps}`;
+    }
+    default:
+      return `Luxy no puede ofrecer ningún nivel para este modelo en ${label}.`;
+  }
+}
+
+/**
+ * lo que se dice de un valor que YA NO esta entre lo que se ofrece.
+ *
+ * En un host de la tabla es la frase de siempre: alli ese valor no viaja nunca
+ * (`not_sent`). En un host con dialecto de catalogo es al reves, y por eso no
+ * puede decir «no admitido»: el agente no conoce el catalogo, asi que un nivel
+ * guardado en la entrada de un modelo SE SIGUE ENVIANDO aunque la pasarela ya no
+ * lo declare. La unica excepcion es el nivel de proveedor, que alli no se envia.
+ *
+ * Dice «si ya estaba guardado» porque el selector no sabe si el valor viene del
+ * disco o de un borrador al que se le cambio el modelo despues de elegir.
+ */
+export function reasoningOrphanNotice(value: ReasoningMode, choices: ReasoningChoices): string {
+  const label = choices.dialect?.label;
+  if (label === undefined) {
+    return (
+      'Este modelo no admite ese valor: elige otro o «Lo que traiga el modelo (no se envía ' +
+      `nada)». ${choices.note ?? 'Luxy no sabe cómo pedírselo a este modelo.'}`
+    );
+  }
+  const { ofDate, theirs } = datedCatalog(choices);
+  const level = `«${REASONING_MODE_SHORT[value]}»`;
+  const empty = '«Lo que traiga el modelo (no se envía nada)»';
+  const stillSent = 'Si ya estaba guardado, Luxy lo sigue enviando hasta que lo cambies';
+  switch (choices.source) {
+    case 'provider-wide':
+      return (
+        `En ${label} el nivel de proveedor no se envía nunca: se elige para cada modelo. ` +
+        `Déjalo aquí en ${empty} y elígelo en «Ajustes por modelo», en la tarjeta de este ` +
+        'proveedor.'
+      );
+    case 'unavailable':
+      return (
+        `En ${label} los niveles salen de su catálogo, y Luxy sólo lo lee para un proveedor ` +
+        `HTTP: aquí no puede comprobar ${level}. ${stillSent}; déjalo en ${empty}.`
+      );
+    case 'missing':
+      return (
+        `No hay ningún catálogo de ${label} guardado: Luxy no puede comprobar ${level}. ` +
+        `${stillSent}. Pulsa «${REFRESH_PROVIDER_MODELS}».`
+      );
+    case 'unknown-model':
+      return (
+        `Este identificador no está en el catálogo de ${label}${ofDate}: Luxy no puede ` +
+        `comprobar ${level}. ${stillSent}. Comprueba las mayúsculas y el sufijo, o pulsa ` +
+        `«${REFRESH_PROVIDER_MODELS}».`
+      );
+    case 'not-reasoning':
+      return (
+        `${label} declara que este modelo no razona, en ${theirs}. ${stillSent}: déjalo en ` +
+        `${empty}.`
+      );
+    case 'levels':
+      return choices.options.length === 0
+        ? `${label} declara para este modelo, en ${theirs}, niveles que Luxy no sabe pedir ` +
+            `(${(choices.catalog?.levels ?? []).join(', ')}). ${stillSent}: déjalo en ${empty}.`
+        : `${label} no declara ${level} para este modelo en ${theirs}. ${stillSent}. Elige ` +
+            `uno de los que declara o ${empty}.`;
+    default:
+      return `Ese valor no se puede elegir aquí: déjalo en ${empty}.`;
+  }
+}
+
+/**
+ * el rotulo de la opcion que conserva en el desplegable un valor que no se
+ * ofrece. Se sigue ENSEÑANDO en vez de borrarse solo, y lo que lleva entre
+ * parentesis dice por que no esta entre las demas —nunca «no admitido» en un
+ * host con dialecto de catalogo, donde nadie ha dicho eso—.
+ */
+export function reasoningOrphanOption(value: ReasoningMode, choices: ReasoningChoices): string {
+  const base = REASONING_MODE_LABELS[value];
+  const label = choices.dialect?.label;
+  if (label === undefined) return `${base} (no admitido)`;
+  switch (choices.source) {
+    case 'loading':
+      return `${base} (leyendo el catálogo)`;
+    case 'provider-wide':
+      return `${base} (aquí no se envía)`;
+    case 'levels':
+    case 'not-reasoning':
+      return `${base} (${label} no lo declara)`;
+    default:
+      return `${base} (sin comprobar)`;
+  }
+}
+
+/**
+ * el aviso que sale cuando el nombre del modelo lleva «deepseek».
+ *
+ * Recibe las MISMAS opciones que el selector de debajo. Sin eso, en un host con
+ * dialecto de catalogo decia «con este nombre no puede» —la tabla no tiene esos
+ * identificadores— justo encima de un selector que ofrecia los niveles
+ * declarados. En la tabla el texto es el de siempre.
+ */
+export function deepseekSamplingNotice(choices: ReasoningChoices): string {
+  const documented =
+    'DeepSeek documenta que, cuando el modelo razona, ni la temperatura ni las penalizaciones ' +
+    'de frecuencia y de presencia hacen efecto.';
+  const measure =
+    'Para medir, cambia una sola cosa cada vez y mira en Registros si esa llamada razonó.';
+  const label = choices.dialect?.label;
+  if (label !== undefined) {
+    return (
+      `${documented} No está comprobado en ${label}: con cualquier nivel distinto de «Sin ` +
+      'razonar», la temperatura y las penalizaciones de esta entrada pueden dejar de actuar ' +
+      `sin dar error. ${measure}`
+    );
+  }
+  // «Con Sin razonar, si» solo donde Luxy sabe pedirlo: con otro nombre el
+  // selector de abajo sale apagado
+  const off = choices.options.includes('off')
+    ? 'Con «Sin razonar» sí, si tu pasarela deja pasar el ajuste: el registro lo dirá.'
+    : 'Luxy sólo sabe apagarle el razonamiento a DeepSeek-V4-Flash, V4-Pro y V4.1-Flash; con este nombre no puede.';
+  return `${documented} ${off} ${measure}`;
+}
+
+/**
+ * la marca de una fila de «Ajustes por modelo», o null si no hay nada que marcar.
+ *
+ * Existe porque lo guardado puede quedarse atras sin que nadie lo vea: la
+ * pasarela cambia los niveles de un modelo, o el identificador se escribio con
+ * una errata, y el ajuste sigue en la lista con el mismo aspecto. Antes solo se
+ * veia al pulsar «Editar».
+ *
+ * Solo marca en un host con dialecto de catalogo, y solo lo que el catalogo
+ * guardado permite decir: mientras se lee, o si se leyo sin detalle, calla.
+ */
+export function providerModelRowMark(
+  row: Pick<ProviderModelSettings, 'apiModel' | 'sampling'>,
+  baseUrl: string,
+  stored: StoredCatalog,
+): string | null {
+  const choices = reasoningChoicesFor(row.apiModel, baseUrl, { stored });
+  const label = choices.dialect?.label;
+  if (label === undefined) return null;
+  const { ofDate } = datedCatalog(choices);
+  const mode = row.sampling?.reasoningMode;
+  const level = mode === undefined ? null : `«${REASONING_MODE_SHORT[mode]}»`;
+  if (choices.source === 'unknown-model') {
+    return (
+      `Este identificador no está en el catálogo de ${label}${ofDate}: comprueba las ` +
+      'mayúsculas y el sufijo.' +
+      (level === null ? '' : ` Luxy sigue enviando ${level} con él.`)
+    );
+  }
+  if (mode === undefined || level === null || !isReasoningOrphan(mode, choices)) return null;
+  switch (choices.source) {
+    case 'missing':
+      return `No hay catálogo de ${label} guardado para comprobar ${level}; Luxy lo sigue enviando.`;
+    case 'not-reasoning':
+      return (
+        `${label} declara que este modelo no razona, en su catálogo${ofDate}; Luxy sigue ` +
+        `enviando ${level} hasta que lo cambies.`
+      );
+    case 'levels':
+      return (
+        `${label} no declara ${level} en el catálogo${ofDate}; Luxy lo sigue enviando hasta ` +
+        'que lo cambies.'
+      );
+    default:
+      return null;
+  }
+}
+
+/**
+ * la pista del campo «Máximo de tokens de este modelo».
+ *
+ * El dato de la pasarela va AL LADO y nunca dentro del campo: es suyo y tiene
+ * fecha, y rellenarlo solo seria elegir por el usuario un tope que se cobra
+ * (`D-098`). Los numeros salen sin separador de miles porque asi hay que
+ * escribirlos: «16.384» se rechaza al guardar.
+ */
+export function outputCapFieldHint(providerMax: number, choices: ReasoningChoices): string {
+  const base =
+    `Vacío = el del proveedor (${providerMax}). Un número entero entre 256 y 200000, sin ` +
+    'puntos ni comas.';
+  const declared = choices.catalog?.outputCap ?? null;
+  const label = choices.dialect?.label;
+  if (declared === null || label === undefined) return base;
+  return (
+    `${base} ${label} declara ${declared} de salida para este modelo en ` +
+    `${datedCatalog(choices).theirs}; no está comprobado con ninguna llamada.`
+  );
+}
+
+/**
+ * el aviso de tope corto para un nivel que razona.
+ *
+ * El razonamiento se cobra como salida y sale del MISMO `max_tokens` que la
+ * respuesta: con poco sitio puede gastarlo entero, y eso es una llamada pagada
+ * que acaba en error. Es un aviso y no un valor por defecto —vacio sigue sin
+ * mandar nada—, y los numeros que propone no estan medidos: son el tope por
+ * defecto de un proveedor y su doble.
+ */
+export function reasoningCapWarning(input: {
+  /** el campo del modelo esta vacio: se aplicaria el tope del proveedor */
+  ownIsEmpty: boolean;
+  providerMax: number;
+  choices: ReasoningChoices;
+}): string {
+  const floor = REASONING_OUTPUT_CAP_FLOOR;
+  const declared = input.choices.catalog?.outputCap ?? null;
+  const label = input.choices.dialect?.label;
+  const inEffect = input.ownIsEmpty
+    ? ` Con este campo vacío se usa el del proveedor (${input.providerMax}).`
+    : '';
+  const advice =
+    declared !== null && label !== undefined && declared < floor * 2
+      ? ` ${label} declara ${declared} de salida para este modelo: no pongas más que eso.`
+      : ` Pon aquí ${floor} o más; por ejemplo, ${floor * 2}.`;
+  return (
+    `Con un máximo por debajo de ${floor} tokens, el razonamiento puede gastarlo entero antes ` +
+    'de escribir la respuesta: sale del mismo máximo, y esa llamada se paga igual.' +
+    `${inEffect}${advice}`
+  );
 }
 
 /**
  * el selector de razonamiento de un modelo (D-107), junto a la temperatura.
  *
- * Solo ofrece los valores que la documentacion de ESE modelo admite, y la
- * primera opcion es siempre «no enviar nada». Un modelo sin regla ve el selector
- * apagado: ofrecerle algo seria prometer un efecto que no llega (D-093).
+ * Solo ofrece lo que hay con que respaldar: en un host de la tabla, los valores
+ * que la documentacion de ESE modelo admite; en un host con dialecto de
+ * catalogo, los niveles que la pasarela declara para el —o los siete, a mano,
+ * cuando el catalogo no los trae—. La primera opcion es siempre «no enviar
+ * nada». Sin nada que ofrecer el selector sale apagado: ofrecer algo ahi seria
+ * prometer un efecto que no llega (D-093).
  *
- * Si el valor guardado ya no vale —porque se cambio el modelo o la URL—, se
- * sigue ENSEÑANDO con su aviso en vez de borrarse solo: borrarlo en silencio
- * cambiaria la configuracion sin que nadie lo decidiera. Al guardar se rechaza.
+ * NO calcula las opciones: las recibe hechas (`reasoningChoicesFor`). Son las
+ * mismas que mira la validacion al guardar y el aviso de DeepSeek, y si cada
+ * uno las calculara por su cuenta bastaria un argumento distinto para que la
+ * pantalla se contradijera.
+ *
+ * Si el valor guardado ya no esta entre ellas —porque se cambio el modelo o la
+ * URL, o porque la pasarela dejo de declararlo—, se sigue ENSEÑANDO con su
+ * aviso en vez de borrarse solo: borrarlo en silencio cambiaria la
+ * configuracion sin que nadie lo decidiera. Al guardar se rechaza.
  */
 function ReasoningField({
-  model,
-  baseUrl,
+  choices,
   value,
   onChange,
   providerWide = false,
+  modelEmpty = false,
 }: {
-  model: string;
-  baseUrl: string;
+  choices: ReasoningChoices;
   value: ReasoningModeDraft;
   onChange: (next: ReasoningModeDraft) => void;
   /**
@@ -877,113 +1234,192 @@ function ReasoningField({
    * formulario, y sin decirlo parecia un ajuste solo de ese modelo
    */
   providerWide?: boolean;
+  /** el campo del modelo esta vacio: todavia no hay nombre que buscar */
+  modelEmpty?: boolean;
 }): JSX.Element {
-  const host = hostOfBaseUrl(baseUrl);
-  const options = reasoningOptionsFor(model.trim(), host);
-  const note = reasoningNoteFor(model.trim(), host);
-  const huerfano = value !== '' && !options.includes(value);
-  const hint = reasoningFieldHint({ options, note, providerWide });
+  // el valor puesto que no esta entre las opciones. Se pinta SIEMPRE como una
+  // opcion mas: sin ella el desplegable enseñaria «Lo que traiga el modelo»
+  // mientras el valor guardado sigue siendo otro
+  const fuera = value !== '' && !choices.options.includes(value) ? value : null;
+  // mientras el catalogo se lee no es un huerfano: todavia no se sabe
+  const huerfano = fuera !== null && isReasoningOrphan(fuera, choices) ? fuera : null;
   return (
     <Field
       label="Razonamiento"
-      hint={hint}
+      hint={reasoningHintFor(choices, { providerWide, modelEmpty })}
       // el error SUSTITUYE a la pista: la nota del modelo va dentro, o se perdia
-      error={
-        huerfano
-          ? 'Este modelo no admite ese valor: elige otro o «Lo que traiga el modelo (no se envía ' +
-            `nada)». ${note ?? 'Luxy no sabe cómo pedírselo a este modelo.'}`
-          : null
-      }
+      error={huerfano === null ? null : reasoningOrphanNotice(huerfano, choices)}
     >
       <select
         value={value}
-        disabled={options.length === 0 && !huerfano}
+        // con un huerfano se deja abierto aunque no haya nada que ofrecer: tiene
+        // que poder vaciarse, o el formulario no se podria guardar nunca
+        disabled={choices.options.length === 0 && huerfano === null}
         onChange={(event) => onChange(reasoningModeDraft(event.target.value))}
       >
         <option value="">Lo que traiga el modelo (no se envía nada)</option>
-        {options.map((mode) => (
+        {choices.options.map((mode) => (
           <option key={mode} value={mode}>
             {REASONING_MODE_LABELS[mode]}
           </option>
         ))}
-        {huerfano && <option value={value}>{REASONING_MODE_LABELS[value]} (no admitido)</option>}
+        {fuera !== null && <option value={fuera}>{reasoningOrphanOption(fuera, choices)}</option>}
       </select>
     </Field>
   );
 }
 
-function ConnectionSamplingSection({
-  connection,
-  onSave,
-}: {
-  connection: ConnectionProfile;
-  onSave: (next: ConnectionProfile) => Promise<boolean>;
-}): JSX.Element {
-  const entries = Object.entries(connection.modelSampling ?? {});
-  const [editing, setEditing] = useState<{
-    apiModel: string;
-    isNew: boolean;
-    draft: SamplingDraft;
-  } | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const puestos = new Set(entries.map(([model]) => model));
-  // sugerencias, no una lista cerrada: el modelo de una conversacion puede
-  // salir del catalogo real de la pasarela y no del de fabrica
-  const sugerencias = buildDefaultCatalog(connection.id)
-    .map((model) => model.apiModel)
-    .filter((model) => !puestos.has(model));
-  const listId = `sampling-models-${connection.id}`;
+/** una fila de la lista de ajustes por modelo, ya dicha */
+interface ModelSettingsRow {
+  apiModel: string;
+  /** lo guardado para ese modelo, en una linea */
+  summary: string;
+  /** lo guardado, en el molde del formulario, para poder editarlo */
+  draft: ProviderModelDraft;
+  /** lo que conviene saber de lo guardado sin abrir el editor, o null */
+  mark: string | null;
+}
 
-  const aplicar = async (apiModel: string, draft: SamplingDraft): Promise<void> => {
-    const result = withModelSampling(connection, apiModel, draft);
-    if (result.connection === null) {
+/** lo que se esta editando: de que modelo y con que borrador */
+interface ModelSettingsEditing {
+  apiModel: string;
+  isNew: boolean;
+  draft: ProviderModelDraft;
+}
+
+/** como acabo un «Guardar» o un «Quitar». `error`: no se llego ni a intentar */
+interface ModelSettingsApplied {
+  saved: boolean;
+  error: string | null;
+}
+
+/**
+ * los ajustes POR MODELO de un origen: la lista de los modelos que tienen
+ * alguno y el editor de uno.
+ *
+ * Es por modelo y no por origen porque un mismo origen sirve varios —una
+ * conexion registra a la vez varias familias, y esas mismas ejecutan los
+ * trabajos con herramientas; un proveedor HTTP como NanoGPT, cientos—: una
+ * temperatura del origen se la llevarian todos. Aqui solo la recibe el modelo
+ * exacto que se elige.
+ *
+ * NO SABE DE QUIEN ES. Lo usan las conexiones y los proveedores HTTP, que
+ * guardan en sitios distintos y validan con esquemas distintos: el dueño le da
+ * las filas ya dichas y una funcion que aplica, y aqui solo queda lo que es
+ * igual para los dos —los cuatro campos de muestreo con sus reglas, el selector
+ * de razonamiento y el orden de la pantalla—. Los rotulos son parametros porque
+ * los de las conexiones estan citados letra por letra en `LOCAL-ACTIONS.md`.
+ *
+ * Lo que solo tiene un proveedor HTTP entra por tres puertas opcionales: su
+ * catalogo guardado (`stored`), que alimenta el selector; el tope de salida por
+ * modelo (`providerMaxOutputTokens`), que pinta su campo; y una barra propia
+ * (`toolbar`). Sin ellas la seccion es, letra por letra, la de una conexion.
+ */
+function ModelSettingsSection({
+  title,
+  listId,
+  emptyText,
+  modelPlaceholder,
+  baseUrl,
+  rows,
+  suggestions,
+  editing,
+  onEditing,
+  onApply,
+  notice,
+  toolbar,
+  stored,
+  providerMaxOutputTokens,
+}: {
+  title: string;
+  /** identificador del `<datalist>`: tiene que ser unico en la pagina */
+  listId: string;
+  /** lo que se dice cuando ningun modelo tiene ajustes */
+  emptyText: string;
+  modelPlaceholder: string;
+  /** la URL base del origen: de su host salen las opciones de razonamiento */
+  baseUrl: string;
+  rows: readonly ModelSettingsRow[];
+  /** nombres de modelo que se sugieren al añadir uno; no es una lista cerrada */
+  suggestions: readonly string[];
+  /**
+   * lo que se edita vive en el DUEÑO y no aqui: un proveedor HTTP necesita
+   * saber si el editor esta abierto para leer entonces su catalogo guardado
+   */
+  editing: ModelSettingsEditing | null;
+  onEditing: (next: ModelSettingsEditing | null) => void;
+  /** valida y guarda; un borrador vacio QUITA los ajustes de ese modelo */
+  onApply: (apiModel: string, draft: ProviderModelDraft) => Promise<ModelSettingsApplied>;
+  /** el aviso fijo del editor: lo que hay que saber antes de tocar nada */
+  notice: ReactNode;
+  toolbar?: ReactNode;
+  /** el catalogo guardado del origen; AUSENTE = no tiene ninguno que leer */
+  stored?: StoredCatalog;
+  /** solo un proveedor HTTP: su tope, y con el el campo del tope por modelo */
+  providerMaxOutputTokens?: number;
+}): JSX.Element {
+  const [error, setError] = useState<string | null>(null);
+  const setEditing = onEditing;
+
+  const aplicar = async (apiModel: string, draft: ProviderModelDraft): Promise<void> => {
+    const result = await onApply(apiModel, draft);
+    if (result.error !== null) {
       setError(result.error);
       return;
     }
-    if (await onSave(result.connection)) {
+    if (result.saved) {
       setEditing(null);
       setError(null);
     }
   };
 
-  const campo = (key: Exclude<keyof SamplingDraft, 'reasoningMode'>, value: string): void => {
+  const campo = (key: Exclude<keyof ProviderModelDraft, 'reasoningMode'>, value: string): void => {
     if (editing === null) return;
     setEditing({ ...editing, draft: { ...editing.draft, [key]: value } });
   };
 
+  // UNA sola cuenta de opciones para el aviso de DeepSeek, el selector y la
+  // pista del tope: los tres tienen que estar mirando lo mismo
+  const choices =
+    editing === null ? null : reasoningChoicesFor(editing.apiModel, baseUrl, { stored });
+
   return (
     <>
       <div className="row">
-        <strong style={{ flex: 1 }}>Muestreo por modelo</strong>
+        <strong style={{ flex: 1 }}>{title}</strong>
         <button
           className="btn"
           type="button"
           disabled={editing !== null}
           onClick={() => {
-            setEditing({ apiModel: '', isNew: true, draft: emptySamplingDraft() });
+            setEditing({ apiModel: '', isNew: true, draft: emptyProviderModelDraft() });
             setError(null);
           }}
         >
           Añadir modelo
         </button>
       </div>
+      {toolbar}
 
-      {entries.length === 0 && editing === null ? (
-        <p className="page__lede">
-          Ningún modelo de esta conexión lleva parámetros de muestreo: Luxy no envía ninguno.
-        </p>
+      {rows.length === 0 && editing === null ? (
+        <p className="page__lede">{emptyText}</p>
       ) : (
-        entries.map(([model, parameters]) => (
-          <div className="row" key={model}>
+        rows.map((row) => (
+          <div className="row" key={row.apiModel}>
             <span style={{ flex: 1 }}>
-              <strong>{model}</strong> · {describeSampling(parameters)}
+              <strong>{row.apiModel}</strong> · {row.summary}
+              {row.mark !== null && (
+                <span className="list__meta" style={{ display: 'block', color: 'var(--warn)' }}>
+                  {row.mark}
+                </span>
+              )}
             </span>
             <button
               className="btn btn--quiet"
               type="button"
               disabled={editing !== null}
               onClick={() => {
-                setEditing({ apiModel: model, isNew: false, draft: samplingToDraft(parameters) });
+                setEditing({ apiModel: row.apiModel, isNew: false, draft: row.draft });
                 setError(null);
               }}
             >
@@ -993,7 +1429,7 @@ function ConnectionSamplingSection({
               className="btn btn--danger btn--quiet"
               type="button"
               disabled={editing !== null}
-              onClick={() => void aplicar(model, emptySamplingDraft())}
+              onClick={() => void aplicar(row.apiModel, emptyProviderModelDraft())}
             >
               Quitar
             </button>
@@ -1001,29 +1437,11 @@ function ConnectionSamplingSection({
         ))
       )}
 
-      {editing !== null && (
+      {editing !== null && choices !== null && (
         <>
-          <Notice tone="idle">
-            Se aplican <strong>sólo a este modelo</strong>, en todo lo que haga por esta conexión:
-            conversaciones y trabajos. Si cambias de modelo, no le acompañan. Vacío significa que
-            Luxy <strong>no los envía</strong>: el cuerpo de la petición sale igual que si estos
-            campos no existieran. Las penalizaciones actúan sobre <strong>tokens</strong> que ya han
-            salido, no sobre temas ni sobre ideas, y valores altos degradan la prosa. Cada servidor
-            decide cuáles admite: puede ignorarlos o contestar con un error.
-          </Notice>
+          {notice}
           {/deepseek/i.test(editing.apiModel) && (
-            <Notice tone="idle">
-              DeepSeek documenta que, cuando el modelo razona, ni la temperatura ni las
-              penalizaciones de frecuencia y de presencia hacen efecto.{' '}
-              {/* «Con Sin razonar, si» solo donde Luxy sabe pedirlo: con otro
-                  nombre el selector de abajo sale apagado */}
-              {reasoningOptionsFor(editing.apiModel.trim(), hostOfBaseUrl(connection.baseUrl)).includes(
-                'off',
-              )
-                ? 'Con «Sin razonar» sí, si tu pasarela deja pasar el ajuste: el registro lo dirá.'
-                : 'Luxy sólo sabe apagarle el razonamiento a DeepSeek-V4-Flash, V4-Pro y V4.1-Flash; con este nombre no puede.'}{' '}
-              Para medir, cambia una sola cosa cada vez y mira en Registros si esa llamada razonó.
-            </Notice>
+            <Notice tone="idle">{deepseekSamplingNotice(choices)}</Notice>
           )}
           <Field
             label="Modelo"
@@ -1034,12 +1452,12 @@ function ConnectionSamplingSection({
               list={listId}
               value={editing.apiModel}
               readOnly={!editing.isNew}
-              placeholder="DeepSeek-V4-Flash"
+              placeholder={modelPlaceholder}
               onChange={(event) => setEditing({ ...editing, apiModel: event.target.value })}
             />
           </Field>
           <datalist id={listId}>
-            {sugerencias.map((model) => (
+            {suggestions.map((model) => (
               <option key={model} value={model} />
             ))}
           </datalist>
@@ -1069,13 +1487,45 @@ function ConnectionSamplingSection({
             </Field>
           </div>
           <ReasoningField
-            model={editing.apiModel}
-            baseUrl={connection.baseUrl}
+            choices={choices}
+            modelEmpty={editing.apiModel.trim().length === 0}
             value={editing.draft.reasoningMode}
             onChange={(next) =>
               setEditing({ ...editing, draft: { ...editing.draft, reasoningMode: next } })
             }
           />
+          {providerMaxOutputTokens !== undefined && (
+            <>
+              {/* de TEXTO, como los demas: lo que se escribe es lo que se ve, y
+                  un valor que no vale lo explica el error al guardar */}
+              <Field
+                label="Máximo de tokens de este modelo"
+                hint={outputCapFieldHint(providerMaxOutputTokens, choices)}
+                explica="maxTokensModelo"
+              >
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  placeholder="el del proveedor"
+                  value={editing.draft.outputCap}
+                  onChange={(event) => campo('outputCap', event.target.value)}
+                />
+              </Field>
+              {reasoningOutputCapIsShort(
+                editing.draft.reasoningMode,
+                editing.draft.outputCap,
+                providerMaxOutputTokens,
+              ) && (
+                <Notice tone="warn">
+                  {reasoningCapWarning({
+                    ownIsEmpty: editing.draft.outputCap.trim().length === 0,
+                    providerMax: providerMaxOutputTokens,
+                    choices,
+                  })}
+                </Notice>
+              )}
+            </>
+          )}
           <div className="row">
             <Field
               label="Penalización por presencia"
@@ -1128,6 +1578,354 @@ function ConnectionSamplingSection({
   );
 }
 
+/**
+ * el muestreo por modelo de una CONEXION.
+ *
+ * El titulo, el boton, la opcion vacia del selector y las etiquetas son los de
+ * siempre, letra por letra: los citan `LA-050`, `LA-055` y `LA-058`. Una
+ * conexion no tiene tope de salida por modelo ni catalogo que leer aqui: su
+ * razonamiento sigue saliendo de la tabla de `D-107`.
+ *
+ * Los cuatro campos son los mismos, con el mismo aviso y las mismas reglas, que
+ * los de un proveedor HTTP: vacio = no se envia.
+ */
+function ConnectionSamplingSection({
+  connection,
+  onSave,
+}: {
+  connection: ConnectionProfile;
+  onSave: (next: ConnectionProfile) => Promise<boolean>;
+}): JSX.Element {
+  const [editing, setEditing] = useState<ModelSettingsEditing | null>(null);
+  const entries = Object.entries(connection.modelSampling ?? {});
+  const puestos = new Set(entries.map(([model]) => model));
+  // sugerencias, no una lista cerrada: el modelo de una conversacion puede
+  // salir del catalogo real de la pasarela y no del de fabrica
+  const sugerencias = buildDefaultCatalog(connection.id)
+    .map((model) => model.apiModel)
+    .filter((model) => !puestos.has(model));
+
+  const aplicar = async (
+    apiModel: string,
+    draft: ProviderModelDraft,
+  ): Promise<ModelSettingsApplied> => {
+    const result = withModelSampling(connection, apiModel, draft);
+    if (result.connection === null) return { saved: false, error: result.error };
+    return { saved: await onSave(result.connection), error: null };
+  };
+
+  return (
+    <ModelSettingsSection
+      title="Muestreo por modelo"
+      listId={`sampling-models-${connection.id}`}
+      emptyText="Ningún modelo de esta conexión lleva parámetros de muestreo: Luxy no envía ninguno."
+      modelPlaceholder="DeepSeek-V4-Flash"
+      baseUrl={connection.baseUrl}
+      rows={entries.map(([apiModel, parameters]) => ({
+        apiModel,
+        summary: describeSampling(parameters),
+        draft: providerModelSettingsToDraft({ sampling: parameters, outputCap: undefined }),
+        mark: null,
+      }))}
+      suggestions={sugerencias}
+      editing={editing}
+      onEditing={setEditing}
+      onApply={aplicar}
+      notice={
+        <Notice tone="idle">
+          Se aplican <strong>sólo a este modelo</strong>, en todo lo que haga por esta conexión:
+          conversaciones y trabajos. Si cambias de modelo, no le acompañan. Vacío significa que Luxy{' '}
+          <strong>no los envía</strong>: el cuerpo de la petición sale igual que si estos campos no
+          existieran. Las penalizaciones actúan sobre <strong>tokens</strong> que ya han salido, no
+          sobre temas ni sobre ideas, y valores altos degradan la prosa. Cada servidor decide cuáles
+          admite: puede ignorarlos o contestar con un error.
+        </Notice>
+      }
+    />
+  );
+}
+
+/**
+ * el aviso fijo de «Ajustes por modelo» en un proveedor HTTP.
+ *
+ * Dice las tres cosas que aqui cuestan algo y que en una conexion no pasaban:
+ *
+ *  - un proveedor HTTP SI tiene muestreo propio, y la entrada de un modelo lo
+ *    sustituye ENTERO (`samplingForModel`): ponerle un nivel a un modelo le quita
+ *    la temperatura del proveedor sin que nadie lo decida. Y al reves: ponerle
+ *    solo una temperatura le quita el nivel de razonamiento del proveedor, que
+ *    en un host de la tabla SI viajaba con el. El tope va en otro mapa y no
+ *    cuenta como entrada;
+ *  - el razonamiento se cobra como salida, y un ajuste guardado se aplica a
+ *    todos los turnos hasta que se quita (`D-082` no persistia lo caro; `D-107`
+ *    si, y aqui es una pasarela de pago);
+ *  - el «Presupuesto diario» no ve el gasto de un proveedor HTTP.
+ *
+ * No dice «admite» de ningun servidor: es texto que tambien se lee en NanoGPT.
+ */
+export const PROVIDER_MODEL_SETTINGS_NOTICE =
+  'Se aplican sólo a este modelo, en todo lo que haga por este proveedor: conversaciones y ' +
+  'trabajos. Vacío significa que Luxy no lo envía. En cuanto el modelo tiene aquí temperatura, ' +
+  'alguna penalización o un nivel de razonamiento, deja de recibir la temperatura, las ' +
+  'penalizaciones y el nivel de razonamiento del proveedor: repite aquí lo que quieras ' +
+  'conservar. Poner sólo el máximo de tokens no cambia eso. Los tokens de razonamiento se cobran ' +
+  'como salida, y el ajuste vale para todos los turnos de ese modelo hasta que lo quites: el ' +
+  '«Presupuesto diario» de Luxy no lo frena en un proveedor HTTP. Cada servidor decide qué hace ' +
+  'con lo que recibe: puede ignorarlo o contestar con un error.';
+
+/** cuando se leyo un catalogo, con el formato de fecha y hora de esta pagina */
+function catalogReadWhen(fetchedAt: string): string {
+  return new Date(fetchedAt).toLocaleString();
+}
+
+/**
+ * como se leyo el catalogo guardado, en una linea.
+ *
+ * `detailed` y `basic` son las dos formas de leer el de un host con dialecto de
+ * catalogo, y hay que decir cual fue: en uno leido sin detalle, que un modelo
+ * no traiga niveles no significa que la pasarela no los declare. Sin la marca
+ * —un host sin dialecto, o un catalogo guardado antes de que existiera— la
+ * linea es la de siempre.
+ *
+ * `gateway` es el nombre de la pasarela si su host tiene dialecto, o null.
+ */
+export function catalogReadLine(
+  snapshot: Pick<CatalogSnapshot, 'fetchedAt' | 'detail'>,
+  gateway: string | null,
+): string {
+  const when = catalogReadWhen(snapshot.fetchedAt);
+  const who = gateway ?? 'la pasarela';
+  if (snapshot.detail === 'detailed') {
+    return (
+      `Leído con detalle el ${when}: trae lo que ${who} declara de cada modelo, que Luxy no ha ` +
+      'comprobado con ninguna llamada.'
+    );
+  }
+  if (snapshot.detail === 'basic') {
+    return (
+      `Leído sin detalle el ${when}: no trae los niveles de razonamiento que ${who} declara ` +
+      'de cada modelo.'
+    );
+  }
+  return `Leido el ${when}`;
+}
+
+/**
+ * el aviso de un catalogo guardado: lo que se dice de sus precios y de como se
+ * leyo.
+ *
+ * Antes era un texto FIJO de la pantalla —«Esta conexion no publica precios por
+ * API»—, que ignoraba el aviso guardado con el catalogo. En NanoGPT era falso:
+ * su lista con detalle trae precios, y lo unico cierto es que Luxy no los lee.
+ * El proceso principal ya guarda el aviso correcto de cada host, con el motivo
+ * cuando la lista con detalle fallo; aqui se enseña ese.
+ *
+ * Un catalogo de un host con dialecto guardado sin la marca `detail` es de antes
+ * de que Luxy pidiera la lista con detalle: su aviso es el texto viejo, y se
+ * cambia por uno que dice que hacer.
+ */
+export function catalogNoticeText(
+  snapshot: Pick<CatalogSnapshot, 'notice' | 'detail'>,
+  gateway: string | null,
+): string {
+  if (gateway === null) {
+    return snapshot.notice ?? 'Esta conexion no publica precios por API; Luxy no los consulta.';
+  }
+  if (snapshot.detail === undefined) {
+    return (
+      `Este catálogo de ${gateway} se guardó antes de que Luxy pidiera su lista con detalle: ` +
+      `pulsa «Actualizar modelos» para leerla. Luxy no lee los precios de ${gateway}.`
+    );
+  }
+  return snapshot.notice ?? `Luxy no lee los precios de ${gateway}.`;
+}
+
+/**
+ * lo que se dice del catalogo guardado junto al boton de actualizarlo.
+ *
+ * Tres estados que no se pueden confundir: todavia no se ha leido el disco, no
+ * hay nada guardado, o lo hay —y entonces cuantos modelos y como se leyo—.
+ *
+ * Un catalogo leido SIN detalle enseña el aviso que se guardo con el: es el
+ * unico sitio donde queda POR QUE fallo la lista con detalle —su codigo HTTP—,
+ * porque el respaldo salio bien y el boton no tuvo ningun error que enseñar.
+ */
+export function storedCatalogLine(stored: StoredCatalog, gateway: string | null): string {
+  if (stored.loading) return 'Leyendo el catálogo guardado…';
+  const snapshot = stored.snapshot;
+  if (snapshot === null) {
+    return 'No hay catálogo guardado de este proveedor: Luxy no sabe qué modelos sirve.';
+  }
+  const count = snapshot.models.length === 1 ? '1 modelo' : `${snapshot.models.length} modelos`;
+  if (snapshot.detail === 'basic' && snapshot.notice !== null) {
+    return `${count}. Leído el ${catalogReadWhen(snapshot.fetchedAt)}. ${snapshot.notice}`;
+  }
+  return `${count}. ${catalogReadLine(snapshot, gateway)}`;
+}
+
+/**
+ * la etiqueta de un modelo del catalogo con lo que la pasarela declara de su
+ * razonamiento, o null si no declara nada.
+ *
+ * UNA sola por fila, y con tres estados: la pasarela dice que si, dice que no,
+ * o no dice nada. Ausente no pinta nada: un silencio no es un «no» (`D-093`).
+ * Los niveles salen con SUS nombres y sin traducir, como las demas banderas de
+ * esa lista. El «no» lleva delante quien lo dice, porque es una afirmacion de
+ * un tercero y no algo que Luxy haya comprobado.
+ */
+export function declaredReasoningTag(
+  model: Pick<CatalogSnapshot['models'][number], 'reasoning' | 'reasoningEfforts'>,
+  gateway: string | null,
+): string | null {
+  const efforts = model.reasoningEfforts ?? [];
+  if (efforts.length > 0) {
+    // con niveles y `reasoning: false` a la vez, la pasarela se contradice: se
+    // enseñan los niveles sin afirmar ninguna de las dos cosas
+    return `${model.reasoning === false ? 'niveles' : 'razona'}: ${efforts.join(' · ')}`;
+  }
+  if (model.reasoning === true) return 'razona, sin niveles declarados';
+  if (model.reasoning === false) return `${gateway ?? 'la pasarela'} declara que no razona`;
+  return null;
+}
+
+/**
+ * el nombre de la pasarela de un origen del catalogo, si su host tiene dialecto
+ * de catalogo; null en los demas.
+ *
+ * Solo esos hosts se nombran: lo que un catalogo cualquiera declare se atribuye
+ * a «la pasarela», sin decir de quien es lo que Luxy no sabe de quien es.
+ */
+export function catalogGatewayLabel(
+  config: StoredAgentConfig | null,
+  origin: Pick<CatalogOrigin, 'id' | 'source'> | null,
+): string | null {
+  if (config === null || origin === null) return null;
+  const baseUrl =
+    origin.source === 'http'
+      ? config.providers.http.find((provider) => provider.id === origin.id)?.baseUrl
+      : config.connections.find((connection) => connection.id === origin.id)?.baseUrl;
+  return baseUrl === undefined ? null : (catalogDialectFor(hostOfBaseUrl(baseUrl))?.label ?? null);
+}
+
+/**
+ * los ajustes por modelo de un PROVEEDOR HTTP: el muestreo, el nivel de
+ * razonamiento con lo que declara su catalogo, y el tope de salida.
+ *
+ * Es lo que le faltaba a un proveedor que sirve muchos modelos: su formulario
+ * tiene UN nivel para todos, y en un agregador cada modelo declara los suyos.
+ *
+ * El catalogo guardado se lee SOLO cuando hay algo que decir con el —una fila
+ * que marcar o el editor abierto—: hay una tarjeta por proveedor, y leyendo al
+ * montar serian tantas lecturas de disco como proveedores para una seccion que
+ * casi siempre esta cerrada. Por eso el boton de actualizarlo y su fecha salen
+ * tambien solo entonces: sin leer no hay fecha que enseñar.
+ */
+function ProviderModelSection({
+  provider,
+  onSave,
+}: {
+  provider: HttpProviderConfig;
+  onSave: (next: HttpProviderConfig) => Promise<boolean>;
+}): JSX.Element {
+  const [editing, setEditing] = useState<ModelSettingsEditing | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
+  const settings = providerModelSettings(provider);
+  const active = settings.length > 0 || editing !== null;
+  const stored = useStoredCatalog(provider.id, 'http', active);
+  const gateway = catalogDialectFor(hostOfBaseUrl(provider.baseUrl))?.label ?? null;
+
+  const refrescar = async (): Promise<void> => {
+    setRefreshing(true);
+    setRefreshError(null);
+    // por `callBridge`: un rechazo del puente dejaria el boton en
+    // «Actualizando…» para siempre
+    const result = await callBridge(() =>
+      window.luxy.refreshCatalog({ connectionId: provider.id, source: 'http' }),
+    );
+    setRefreshing(false);
+    if (!result.ok) {
+      // el error ya trae el codigo HTTP, si se conserva el catalogo anterior y
+      // que hacer: se enseña entero
+      setRefreshError(result.hint === null ? result.error : `${result.error} ${result.hint}`);
+      return;
+    }
+    // es lo que hace que se enteren el selector de aqui al lado, que vuelve a
+    // leer el disco, y el de modelo de Privado
+    catalogChanged();
+  };
+
+  // al cerrarse el editor se va tambien el error de la ultima actualizacion: la
+  // tarjeta sigue montada, y sin esto reabrirlo volvia a pintar un fallo viejo
+  // como si acabara de pasar
+  const cambiarEdicion = (next: ModelSettingsEditing | null): void => {
+    setEditing(next);
+    if (next === null) setRefreshError(null);
+  };
+
+  const aplicar = async (
+    apiModel: string,
+    draft: ProviderModelDraft,
+  ): Promise<ModelSettingsApplied> => {
+    // con el MISMO catalogo que alimenta el selector: en un host con dialecto
+    // lo que se guarde aqui viaja sin que el agente lo vuelva a comprobar
+    const result = withProviderModelSampling(provider, apiModel, draft, stored);
+    if (result.provider === null) return { saved: false, error: result.error };
+    return { saved: await onSave(result.provider), error: null };
+  };
+
+  return (
+    <ModelSettingsSection
+      title="Ajustes por modelo"
+      listId={`provider-model-settings-${provider.id}`}
+      emptyText="Ningún modelo de este proveedor tiene ajustes propios: todos usan los del proveedor."
+      modelPlaceholder={provider.model}
+      baseUrl={provider.baseUrl}
+      rows={settings.map((row) => ({
+        apiModel: row.apiModel,
+        summary: describeProviderModelSettings(row),
+        draft: providerModelSettingsToDraft(row),
+        mark: providerModelRowMark(row, provider.baseUrl, stored),
+      }))}
+      // solo con el editor abierto: es donde existe la lista que las pinta
+      suggestions={
+        editing === null
+          ? []
+          : providerModelSuggestions(
+              stored.snapshot,
+              settings.map((row) => row.apiModel),
+            )
+      }
+      editing={editing}
+      onEditing={cambiarEdicion}
+      onApply={aplicar}
+      stored={stored}
+      providerMaxOutputTokens={provider.maxOutputTokens}
+      notice={<Notice tone="idle">{PROVIDER_MODEL_SETTINGS_NOTICE}</Notice>}
+      toolbar={
+        active ? (
+          <>
+            <div className="row">
+              <button
+                className="btn btn--quiet"
+                type="button"
+                disabled={refreshing}
+                onClick={() => void refrescar()}
+              >
+                {refreshing ? 'Actualizando…' : REFRESH_PROVIDER_MODELS}
+              </button>
+              <span className="list__meta" style={{ flex: 1 }}>
+                {storedCatalogLine(stored, gateway)}
+              </span>
+            </div>
+            {refreshError !== null && <Notice tone="fault">{refreshError}</Notice>}
+          </>
+        ) : undefined
+      }
+    />
+  );
+}
+
 export function ConnectionsPage({
   summary,
   onSave,
@@ -1167,6 +1965,20 @@ export function ConnectionsPage({
     return onSave({
       ...summary.config,
       connections: connections.map((item) => (item.id === next.id ? next : item)),
+    });
+  };
+
+  // lo mismo para UN proveedor HTTP, cuando cambian sus ajustes por modelo. No
+  // pasa por `guardarProveedor`: ese es el del formulario, que exige la clave
+  // al crear y cierra el formulario al terminar
+  const guardarAjustesProveedor = async (next: HttpProviderConfig): Promise<boolean> => {
+    if (summary.config === null) return false;
+    return onSave({
+      ...summary.config,
+      providers: {
+        ...summary.config.providers,
+        http: httpProviders.map((item) => (item.id === next.id ? next : item)),
+      },
     });
   };
 
@@ -1604,9 +2416,14 @@ export function ConnectionsPage({
               />
             </Field>
           </div>
+          {/* el del NIVEL DE PROVEEDOR. En un host con dialecto de catalogo sale
+              apagado y dice donde se elige: alli vale para cientos de modelos
+              que declaran niveles distintos, y el agente no lo envia */}
           <ReasoningField
-            model={providerDraft.model}
-            baseUrl={providerDraft.baseUrl}
+            choices={reasoningChoicesFor(providerDraft.model, providerDraft.baseUrl, {
+              providerWide: true,
+            })}
+            modelEmpty={providerDraft.model.trim().length === 0}
             value={providerDraft.reasoningMode}
             onChange={(next) => setProviderDraft({ ...providerDraft, reasoningMode: next })}
             providerWide
@@ -1729,6 +2546,8 @@ export function ConnectionsPage({
                   Eliminar
                 </button>
               </div>
+
+              <ProviderModelSection provider={provider} onSave={guardarAjustesProveedor} />
             </Panel>
           );
         })
@@ -1784,12 +2603,15 @@ function CatalogoReal({
   onOrigin,
   snapshot,
   onSnapshot,
+  gateway,
 }: {
   origin: CatalogOrigin | null;
   origins: CatalogOrigin[];
   onOrigin: (value: string) => void;
   snapshot: CatalogSnapshot | null;
   onSnapshot: (value: CatalogSnapshot) => void;
+  /** el nombre de la pasarela si su host tiene dialecto de catalogo, o null */
+  gateway: string | null;
 }): JSX.Element | null {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1861,10 +2683,11 @@ function CatalogoReal({
         </Empty>
       ) : (
         <>
-          <p className="list__meta">Leido el {new Date(snapshot.fetchedAt).toLocaleString()}</p>
-          <Notice tone="idle">
-            Esta conexion no publica precios por API; Luxy no los consulta.
-          </Notice>
+          <p className="list__meta">{catalogReadLine(snapshot, gateway)}</p>
+          {/* el aviso guardado CON el catalogo, no un texto fijo: de un host a
+              otro cambia lo que se puede decir de sus precios, y es donde queda
+              por que se leyo sin detalle */}
+          <Notice tone="idle">{catalogNoticeText(snapshot, gateway)}</Notice>
           {[...porFamiliaReal.entries()].map(([familia, modelos]) => (
             <section key={familia} className="model-catalog-family model-catalog-family--inline">
               <div className="silk">
@@ -1872,17 +2695,28 @@ function CatalogoReal({
               </div>
               <ul className="model-catalog-list">
                 {modelos.map((model) => {
-                  const declaradas = model.declaredCapabilities ?? [];
+                  // lo que declara de su razonamiento va en UNA etiqueta propia,
+                  // con sus tres estados y sus niveles; la bandera suelta
+                  // `reasoning` diria lo mismo a medias, asi que cede el sitio
+                  const razonamiento = declaredReasoningTag(model, gateway);
+                  const declaradas = (model.declaredCapabilities ?? []).filter(
+                    (capacidad) => razonamiento === null || capacidad !== 'reasoning',
+                  );
                   return (
                     <li key={model.apiModel}>
                       <div className="list__main">
                         <div className="list__name mono scroller">{model.apiModel}</div>
-                        {declaradas.length > 0 && (
+                        {(declaradas.length > 0 || razonamiento !== null) && (
                           /* lo que dice la pasarela, con SUS nombres y sin
                              traducir: es un dato suyo, no una deducción nuestra.
                              Sin esto había que adivinar por el nombre cuál sabe
                              mirar una imagen */
                           <div className="row row--tight">
+                            {razonamiento !== null && (
+                              <Tag tone={model.reasoning === false ? 'idle' : 'busy'}>
+                                {razonamiento}
+                              </Tag>
+                            )}
                             {declaradas.map((capacidad) => (
                               <Tag
                                 key={capacidad}
@@ -1942,6 +2776,7 @@ export function ModelsPage({ summary }: { summary: ConfigSummary }): JSX.Element
         onOrigin={setOriginKey}
         snapshot={snapshot}
         onSnapshot={setSnapshot}
+        gateway={catalogGatewayLabel(summary.config, origin)}
       />
 
       {descartados > 0 && (

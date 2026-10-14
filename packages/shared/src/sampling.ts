@@ -3,10 +3,11 @@
 //
 // POR QUE VIVEN EN UN ARCHIVO PROPIO: los usan dos esquemas que no pueden
 // importarse entre si. `httpProviderConfigSchema` (schemas.ts) los lleva en el
-// nivel superior de un proveedor HTTP, y `connectionProfileSchema`
-// (models/types.ts) los lleva POR MODELO dentro de una conexion. schemas.ts ya
-// importa models/types.ts, asi que ponerlos en cualquiera de los dos dejaria
-// una importacion circular. Aqui solo hay Zod y logica pura.
+// nivel superior de un proveedor HTTP y, desde F36, tambien POR MODELO; y
+// `connectionProfileSchema` (models/types.ts) los lleva POR MODELO dentro de
+// una conexion. schemas.ts ya importa models/types.ts, asi que ponerlos en
+// cualquiera de los dos dejaria una importacion circular. Aqui solo hay Zod y
+// logica pura.
 import { z } from 'zod';
 import { reasoningModeSchema } from './reasoning-control.js';
 
@@ -72,9 +73,10 @@ export const samplingParametersShape = {
    * llama `reasoningMode` y no `reasoning` ni `thinking`, que son nombres REALES
    * de campos del cuerpo: con el mismo nombre, alguien acabaria volcandola cruda.
    *
-   * Vive aqui para que llegue por los dos caminos: por modelo en una conexion
-   * (`modelSampling`) y en el nivel superior de un proveedor HTTP —Groq y
-   * compañia—, que no tiene `modelSampling` y sirve un solo modelo.
+   * Vive aqui para que llegue por los dos caminos: por modelo (`modelSampling`,
+   * en una conexion o en un proveedor HTTP) y en el nivel superior de un
+   * proveedor HTTP —Groq y compañia—. En un host con dialecto de catalogo el
+   * del nivel superior no viaja nunca: alli solo cuenta el del modelo.
    */
   reasoningMode: reasoningModeSchema.optional(),
 };
@@ -92,11 +94,17 @@ export const SAMPLING_PARAMETER_KEYS = [
 
 export type SamplingParameterKey = (typeof SAMPLING_PARAMETER_KEYS)[number];
 
-/** tope de modelos con muestreo propio en una conexion; el catalogo ronda la veintena */
+/**
+ * tope de modelos con ajuste propio en una conexion o en un proveedor HTTP.
+ *
+ * No sale del tamaño del catalogo —el de la pasarela ronda la veintena, el de
+ * NanoGPT pasa de seiscientos—, sino de lo que cabe en una lista que se revisa
+ * a ojo: cada entrada cambia lo que recibe un modelo en todos sus turnos.
+ */
 export const MAX_MODEL_SAMPLING_ENTRIES = 32;
 
 /**
- * muestreo POR MODELO dentro de una conexion.
+ * muestreo POR MODELO dentro de una conexion o de un proveedor HTTP.
  *
  * POR QUE POR MODELO Y NO PARA TODA LA CONEXION: una conexion registra a la vez
  * varias familias (deepseek, glm, kimi, qwen...), y cada familia sirve varios
@@ -124,10 +132,39 @@ export const modelSamplingSchema = z
   )
   .refine(
     (value) => Object.keys(value).length <= MAX_MODEL_SAMPLING_ENTRIES,
-    `como mucho ${MAX_MODEL_SAMPLING_ENTRIES} modelos con muestreo propio por conexion`,
+    `como mucho ${MAX_MODEL_SAMPLING_ENTRIES} modelos con muestreo propio por conexion o proveedor`,
   );
 
 export type ModelSampling = z.infer<typeof modelSamplingSchema>;
+
+/**
+ * tope de salida POR MODELO en un proveedor HTTP: `apiModel -> max_tokens`.
+ *
+ * POR QUE ES UN MAPA HERMANO Y NO UN CAMPO MAS DE LA ENTRADA DE MUESTREO: el
+ * razonamiento se cobra como salida y gasta del mismo `max_tokens`, asi que un
+ * modelo que razona necesita un tope distinto del de uno que no. Pero metido
+ * en `samplingParametersShape` pisaria el `maxOutputTokens` del proveedor —que
+ * extiende esa forma y tiene 8192 por defecto—, y metido en la entrada de
+ * `modelSamplingSchema` obligaria a que una entrada con solo el tope tapase la
+ * temperatura del proveedor, porque la entrada sustituye ENTERA al nivel
+ * superior. Aparte, el tope se puede poner sin tocar el muestreo de nadie.
+ *
+ * Mismo rango que `httpProviderConfigSchema.maxOutputTokens`, mismas claves que
+ * `modelSamplingSchema` y mismo tope de entradas: los dos mapas se editan
+ * juntos, en la misma lista. SIN valor por defecto: una entrada anterior no
+ * gana la clave al volver a guardarse. Las conexiones no lo tienen.
+ */
+export const modelOutputCapsSchema = z
+  .record(
+    z.string().regex(API_MODEL_NAME_PATTERN, 'modelo no valido'),
+    z.number().int().min(256).max(200_000),
+  )
+  .refine(
+    (value) => Object.keys(value).length <= MAX_MODEL_SAMPLING_ENTRIES,
+    `como mucho ${MAX_MODEL_SAMPLING_ENTRIES} modelos con tope de salida propio por proveedor`,
+  );
+
+export type ModelOutputCaps = z.infer<typeof modelOutputCapsSchema>;
 
 /**
  * el muestreo que corresponde a un modelo: su entrada propia si la tiene, o si
@@ -150,6 +187,44 @@ export function samplingForModel(
     return modelSampling[model] ?? {};
   }
   return fallback;
+}
+
+/**
+ * si el modelo tiene su entrada PROPIA, con la misma comprobacion que
+ * `samplingForModel`.
+ *
+ * POR QUE HACE FALTA SABERLO APARTE: `samplingForModel` devuelve la entrada o
+ * el nivel superior y no dice cual de los dos. En un host con dialecto de
+ * catalogo eso es justo lo que decide si el razonamiento viaja: el modo de la
+ * entrada del modelo si, el del nivel de proveedor no. Tiene que ser la MISMA
+ * pregunta —`Object.hasOwn`, distinguiendo mayusculas—: si las dos discrepan,
+ * viajaria un modo que no es el de la entrada que se uso.
+ */
+export function hasOwnModelSampling(
+  model: string,
+  modelSampling: Readonly<Record<string, SamplingParameters>> | undefined,
+): boolean {
+  return modelSampling !== undefined && Object.hasOwn(modelSampling, model);
+}
+
+/**
+ * el tope de salida propio de un modelo, o `undefined` si no lo tiene.
+ *
+ * `undefined` y no un numero de relleno: quien lo usa encadena con `??` hacia
+ * el tope del proveedor, y un 0 ahi mandaria `max_tokens: 0`.
+ *
+ * `Object.hasOwn` por lo mismo que en `samplingForModel`: un modelo llamado
+ * `toString` o `constructor` sacaria una funcion del prototipo, que acabaria en
+ * el cuerpo como `max_tokens`. Y se comprueba que sea un numero finito en vez
+ * de fiarse solo del tipo: lo que sale de aqui va derecho al cuerpo.
+ */
+export function outputCapForModel(
+  model: string,
+  caps: Readonly<Record<string, number>> | undefined,
+): number | undefined {
+  if (caps === undefined || !Object.hasOwn(caps, model)) return undefined;
+  const value: unknown = caps[model];
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
 
 /**

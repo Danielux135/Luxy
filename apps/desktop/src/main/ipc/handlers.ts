@@ -29,7 +29,6 @@ import {
   type ConversationMemoryStatus,
   storedAgentConfigSchema,
   secretRegistry,
-  buildCatalogSnapshot,
   buildCatalogPrompt,
   describeCatalogFailure,
   parseCatalogResponse,
@@ -228,6 +227,7 @@ import {
   submitImage,
 } from '@luxy/agent/dist/providers/horde.js';
 import { deleteMigratedFile, inspectEnvFile, readEnvSecrets } from '../migration.js';
+import { createCatalogRefresher } from '../catalog-refresh.js';
 import { readCatalogSnapshot, writeCatalogSnapshot } from '../catalog-store.js';
 import { resolveWorktreeDirectory } from '../worktree-directory.js';
 import {
@@ -966,6 +966,16 @@ export function registerIpcHandlers(context: HandlerContext): void {
     snapshot: readCatalogSnapshot(context.catalogDirectory, args.connectionId, args.source),
   }));
 
+  /**
+   * un solo refresco en curso por origen.
+   *
+   * La guarda va AQUI y no solo en la pantalla porque no es un doble clic: son
+   * dos botones distintos —el de «Ajustes por modelo» y el del catalogo real—,
+   * cada uno con su propio «Actualizando…», que actualizan el mismo proveedor.
+   * Dos refrescos a la vez se pisaban el archivo por orden de llegada.
+   */
+  const refreshCatalogOnce = createCatalogRefresher();
+
   handle(IPC_INVOKE.catalogRefresh, catalogRefreshArgsSchema, async (args) => {
     // misma regla que la prueba de conexion: la URL sale de la configuracion
     // guardada, nunca del renderer, y la clave no cruza el IPC
@@ -994,37 +1004,24 @@ export function registerIpcHandlers(context: HandlerContext): void {
     const apiKey = context.secretStore.get(secretName);
     if (apiKey === undefined) throw new Error('no hay clave guardada para esta conexion');
 
-    const base = stored.baseUrl.replace(/\/+$/, '');
-    const pedir = async (url: string): Promise<unknown | null> => {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 30_000);
-      try {
-        const response = await fetch(url, {
-          headers: { Authorization: `Bearer ${apiKey}` },
-          signal: controller.signal,
-        });
-        if (!response.ok) return null;
-        return (await response.json()) as unknown;
-      } catch {
-        return null;
-      } finally {
-        clearTimeout(timer);
-      }
-    };
-
-    const models = await pedir(`${base}/models`);
-    if (models === null) throw new Error('la conexion no devolvio la lista de modelos');
-
-    const snapshot = buildCatalogSnapshot({
-      connectionId: args.connectionId,
-      source: args.source,
-      fetchedAt: new Date().toISOString(),
-      modelsPayload: models,
-      pricingPayload: null,
-      notice: 'Esta conexion no publica precios por API; Luxy no los consulta.',
-    });
-    writeCatalogSnapshot(context.catalogDirectory, snapshot);
-    return snapshot;
+    // que lista se pide, cuando se cae a la simple y cuando NO se escribe lo
+    // que llego vive en `catalog-refresh.ts`, que si tiene pruebas. Aqui queda
+    // solo lo que sale del contexto: la URL guardada, la clave y el disco
+    return refreshCatalogOnce(
+      {
+        connectionId: args.connectionId,
+        source: args.source,
+        baseUrl: stored.baseUrl,
+        apiKey,
+      },
+      {
+        fetchImpl: fetch,
+        readSnapshot: (connectionId, source) =>
+          readCatalogSnapshot(context.catalogDirectory, connectionId, source),
+        writeSnapshot: (snapshot) => writeCatalogSnapshot(context.catalogDirectory, snapshot),
+        now: () => new Date(),
+      },
+    );
   });
 
   handle(IPC_INVOKE.connectionTest, connectionTestArgsSchema, async (args) => {

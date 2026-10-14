@@ -229,23 +229,36 @@ export interface HttpProviderConfig {
   presencePenalty?: number;
   repetitionPenalty?: number;
   /**
-   * cuanto razona el modelo (D-107), en el nivel superior: es el camino de
-   * `providers.http` —Groq y compañia—, que no tiene `modelSampling`. Vacio no
+   * cuanto razona el modelo (D-107), en el nivel superior: vale para cualquier
+   * modelo de la entrada que no tenga ajuste propio en `modelSampling`. Vacio no
    * manda nada. Lo que viaja lo decide `reasoningRequestFields` segun el
-   * modelo y el host; un modelo sin regla no recibe nada.
+   * modelo y el host; un modelo sin regla no recibe nada, y en un host con
+   * dialecto de catalogo este de arriba no viaja NUNCA: alli se elige por
+   * modelo.
    */
   reasoningMode?: ReasoningMode;
   /**
-   * muestreo POR MODELO, con el `model` que viaja en el cuerpo como clave.
+   * ajustes POR MODELO, con el `model` que viaja en el cuerpo como clave.
    *
-   * Lo rellena el agente con `ConnectionProfile.modelSampling` al construir los
-   * proveedores de familia; `providers.http` no lo usa.
+   * Llega por dos caminos: en un proveedor de familia lo rellena el agente con
+   * `ConnectionProfile.modelSampling`, y en una entrada de `providers.http`
+   * viene de su propia configuracion (F36).
    *
    * PRECEDENCIA: si el modelo de la peticion tiene entrada, se usa SOLO esa y
-   * sustituye entera a los cuatro de arriba, sin mezclarse. Si no la tiene, se
-   * usan los de arriba, como siempre.
+   * sustituye entera a los cuatro de arriba y a `reasoningMode`, sin mezclarse.
+   * Si no la tiene, se usan los de arriba, como siempre.
    */
   modelSampling?: Readonly<Record<string, SamplingParameters>>;
+  /**
+   * tope de salida POR MODELO: `model -> max_tokens`. Solo lo tienen las
+   * entradas de `providers.http`.
+   *
+   * Es un mapa aparte de `modelSampling` a proposito: un modelo puede tener
+   * tope propio sin perder el muestreo del proveedor (el porque, en
+   * `modelOutputCapsSchema`). Gana a `maxOutputTokens` y pierde ante el tope
+   * que traiga la peticion. Se lee con `outputCapForModel`, nunca por indice.
+   */
+  modelOutputCaps?: Readonly<Record<string, number>>;
 }
 
 /**

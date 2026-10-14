@@ -240,6 +240,16 @@ export const GLOSSARY = {
     ejemplo: '8192',
   },
 
+  maxTokensModelo: {
+    termino: 'Máximo de tokens de este modelo',
+    queEs:
+      'El tope de longitud de la respuesta cuando contesta ESTE modelo, en lugar del tope general del proveedor. Si el modelo razona antes de contestar, lo que piensa sale del mismo tope que lo que escribe.',
+    queRelleno:
+      'Déjalo vacío para usar el del proveedor. Si le pides un nivel de razonamiento, pon al menos 8192, sin puntos ni comas.',
+    ejemplo: '16384',
+    ojo: 'Con un tope corto el razonamiento puede gastarlo entero: la llamada se paga y la respuesta no llega.',
+  },
+
   streaming: {
     termino: 'Respuesta en streaming',
     queEs:

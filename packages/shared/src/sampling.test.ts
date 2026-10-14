@@ -1,11 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { connectionProfileSchema } from './models/types.js';
 import {
+  hasOwnModelSampling,
   MAX_MODEL_SAMPLING_ENTRIES,
+  modelOutputCapsSchema,
   modelSamplingSchema,
+  outputCapForModel,
   samplingForModel,
   samplingLogFields,
   samplingParametersSchema,
+  samplingParametersShape,
   samplingRequestFields,
 } from './sampling.js';
 import { httpProviderConfigSchema, storedAgentConfigSchema } from './schemas.js';
@@ -177,8 +181,17 @@ describe('muestreo por modelo en una conexion', () => {
       true,
     );
     expect(modelSamplingSchema.safeParse({ 'Qwen3.8-27B': {} }).success).toBe(false);
-    // solo los tres valores de la pantalla: ni los del cuerpo ni otros niveles
-    for (const valor of ['medium', 'none', 'max', 'disabled', '']) {
+    // solo los siete de la pantalla (F36), que son los niveles que declara el
+    // catalogo de una pasarela mas «off»
+    for (const valor of ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']) {
+      expect(
+        modelSamplingSchema.safeParse({ 'Qwen3.8-27B': { reasoningMode: valor } }).success,
+        valor,
+      ).toBe(true);
+    }
+    // ni los del CUERPO (`none`, `disabled`), ni niveles que no existen, ni
+    // vacio, ni los mismos con otra caja: la eleccion se guarda exacta
+    for (const valor of ['none', 'disabled', 'ultra', '', 'OFF', 'Off', 'Max', 'HIGH', ' low']) {
       expect(
         modelSamplingSchema.safeParse({ 'Qwen3.8-27B': { reasoningMode: valor } }).success,
         valor,
@@ -222,5 +235,186 @@ describe('muestreo por modelo en una conexion', () => {
     expect(modelSamplingSchema.safeParse({ ...lleno, 'uno-mas': { temperature: 1 } }).success).toBe(
       false,
     );
+  });
+});
+
+// F36: una entrada de `providers.http` apuntada a una pasarela sirve cientos de
+// modelos, y el que razona no es el predeterminado. El razonamiento y el tope
+// de salida se eligen POR MODELO. Lo que no puede pasar: que una entrada
+// guardada antes cambie sola, que el tope por modelo se coma el del proveedor,
+// y que un modelo llamado como algo del prototipo saque un valor de ahi.
+describe('ajustes por modelo en un proveedor HTTP', () => {
+  const proveedor = {
+    id: 'nanogpt',
+    displayName: 'NanoGPT',
+    baseUrl: 'https://api.nano-gpt.com/api/v1',
+    model: 'TheDrummer/Cydonia-24B-v4.3',
+    apiKeyEnv: 'LUXY_HTTP_NANOGPT_API_KEY',
+  };
+  const modelSampling = {
+    'deepseek/deepseek-v4-flash': { reasoningMode: 'max' as const },
+    'deepseek/deepseek-v4-pro:thinking': { temperature: 0.7, reasoningMode: 'off' as const },
+  };
+  const modelOutputCaps = { 'deepseek/deepseek-v4-flash': 16384 };
+
+  it('el proveedor admite los dos mapas, y una entrada anterior no gana las claves', () => {
+    const parsed = httpProviderConfigSchema.parse({ ...proveedor, modelSampling, modelOutputCaps });
+    expect(parsed.modelSampling).toEqual(modelSampling);
+    expect(parsed.modelOutputCaps).toEqual(modelOutputCaps);
+    // el tope del proveedor sigue siendo el suyo: el del modelo va aparte
+    expect(parsed.maxOutputTokens).toBe(8192);
+
+    // sin `.default({})` a proposito: config.json no puede cambiar solo
+    const anterior = httpProviderConfigSchema.parse(proveedor);
+    expect('modelSampling' in anterior).toBe(false);
+    expect('modelOutputCaps' in anterior).toBe(false);
+    expect(anterior.maxOutputTokens).toBe(8192);
+    // y con su tope puesto a mano tampoco se toca
+    expect(
+      httpProviderConfigSchema.parse({ ...proveedor, maxOutputTokens: 4096, modelOutputCaps })
+        .maxOutputTokens,
+    ).toBe(4096);
+  });
+
+  it('el tope por modelo va en su mapa: ni en la forma de muestreo ni en las conexiones', () => {
+    const parsed = httpProviderConfigSchema.parse({ ...proveedor, modelOutputCaps });
+    expect(outputCapForModel('deepseek/deepseek-v4-flash', parsed.modelOutputCaps)).toBe(16384);
+    // metido en la forma de muestreo pisaria el `maxOutputTokens` del proveedor
+    // —que extiende esa forma— y le quitaria el 8192 por defecto
+    expect('maxOutputTokens' in samplingParametersShape).toBe(false);
+    expect('modelOutputCaps' in samplingParametersShape).toBe(false);
+    // una entrada de muestreo no lo acepta como parametro: sola, esta vacia
+    expect(
+      modelSamplingSchema.safeParse({ 'deepseek/deepseek-v4-flash': { maxOutputTokens: 16384 } })
+        .success,
+    ).toBe(false);
+    // y las conexiones no lo ganan: alli el tope sigue siendo el de la familia
+    const conexion = connectionProfileSchema.parse({
+      id: 'hcnsec',
+      displayName: 'Pasarela',
+      baseUrl: 'https://api.example/v1',
+      modelOutputCaps,
+    });
+    expect('modelOutputCaps' in conexion).toBe(false);
+  });
+
+  it('se conservan en la ida y vuelta de la configuracion', () => {
+    const parsed = storedAgentConfigSchema.parse({
+      machineName: 'portatil',
+      gatewayUrl: 'https://gateway.example',
+      providers: { http: [{ ...proveedor, modelSampling, modelOutputCaps }] },
+    });
+    const again = storedAgentConfigSchema.parse(JSON.parse(JSON.stringify(parsed)));
+    expect(again.providers.http[0]?.modelSampling).toEqual(modelSampling);
+    expect(again.providers.http[0]?.modelOutputCaps).toEqual(modelOutputCaps);
+  });
+
+  it('el error dice que modelo y que campo', () => {
+    const fuera = httpProviderConfigSchema.safeParse({
+      ...proveedor,
+      modelSampling: { 'deepseek/deepseek-v4-flash': { reasoningMode: 'none' } },
+    });
+    expect(fuera.success).toBe(false);
+    expect(fuera.error?.issues[0]?.path).toEqual([
+      'modelSampling',
+      'deepseek/deepseek-v4-flash',
+      'reasoningMode',
+    ]);
+    const tope = httpProviderConfigSchema.safeParse({
+      ...proveedor,
+      modelOutputCaps: { 'deepseek/deepseek-v4-flash': 100 },
+    });
+    expect(tope.error?.issues[0]?.path).toEqual(['modelOutputCaps', 'deepseek/deepseek-v4-flash']);
+  });
+
+  it('el tope por modelo tiene el mismo rango que el del proveedor', () => {
+    const delModelo = (valor: unknown): boolean =>
+      modelOutputCapsSchema.safeParse({ 'un-modelo': valor }).success;
+    const delProveedor = (valor: unknown): boolean =>
+      httpProviderConfigSchema.safeParse({ ...proveedor, maxOutputTokens: valor }).success;
+    for (const valor of [255, 256, 4096, 200_000, 200_001, 1024.5, -1, 0, '4096', null]) {
+      expect(delModelo(valor), String(valor)).toBe(delProveedor(valor));
+    }
+    expect(delModelo(256)).toBe(true);
+    expect(delModelo(200_000)).toBe(true);
+    expect(delModelo(255)).toBe(false);
+    expect(delModelo(200_001)).toBe(false);
+    expect(delModelo(1024.5)).toBe(false);
+  });
+
+  it('el mapa de topes rechaza una clave que no puede ser un modelo y pone un tope de entradas', () => {
+    expect(modelOutputCapsSchema.safeParse({ 'modelo con espacios': 4096 }).success).toBe(false);
+    expect(modelOutputCapsSchema.safeParse({}).success).toBe(true);
+    const lleno = Object.fromEntries(
+      Array.from({ length: MAX_MODEL_SAMPLING_ENTRIES }, (_, i) => [`modelo-${i}`, 4096]),
+    );
+    expect(modelOutputCapsSchema.safeParse(lleno).success).toBe(true);
+    expect(modelOutputCapsSchema.safeParse({ ...lleno, 'uno-mas': 4096 }).success).toBe(false);
+  });
+
+  it('outputCapForModel da el tope del modelo, y nada si no lo tiene', () => {
+    expect(outputCapForModel('deepseek/deepseek-v4-flash', modelOutputCaps)).toBe(16384);
+    expect(outputCapForModel('TheDrummer/Cydonia-24B-v4.3', modelOutputCaps)).toBeUndefined();
+    expect(outputCapForModel('deepseek/deepseek-v4-flash', undefined)).toBeUndefined();
+    expect(outputCapForModel('deepseek/deepseek-v4-flash', {})).toBeUndefined();
+    // distingue mayusculas: el nombre tiene que ser el que viaja
+    expect(outputCapForModel('DeepSeek/DeepSeek-V4-Flash', modelOutputCaps)).toBeUndefined();
+    // `undefined` y no 0: quien lo usa encadena con `??` hacia el del proveedor
+    expect(outputCapForModel('otro', modelOutputCaps) ?? 4096).toBe(4096);
+  });
+
+  it('un modelo llamado como algo del prototipo no saca un tope de ahi', () => {
+    for (const model of ['toString', 'constructor', '__proto__', 'hasOwnProperty', 'valueOf']) {
+      expect(outputCapForModel(model, modelOutputCaps), model).toBeUndefined();
+      expect(outputCapForModel(model, {}), model).toBeUndefined();
+    }
+    // y un valor que no es un numero no llega nunca al cuerpo, venga de donde venga
+    const sucio = { raro: '4096', nulo: null, infinito: Infinity } as unknown as Record<
+      string,
+      number
+    >;
+    for (const model of ['raro', 'nulo', 'infinito']) {
+      expect(outputCapForModel(model, sucio), model).toBeUndefined();
+    }
+  });
+
+  it('hasOwnModelSampling contesta lo mismo que usa samplingForModel', () => {
+    const delProveedor = { temperature: 0.2 };
+    const casos = [
+      'deepseek/deepseek-v4-flash',
+      'deepseek/deepseek-v4-pro:thinking',
+      'TheDrummer/Cydonia-24B-v4.3',
+      'DeepSeek/DeepSeek-V4-Flash',
+      'toString',
+      'constructor',
+      '__proto__',
+      'hasOwnProperty',
+      '',
+    ];
+    for (const model of casos) {
+      const propia = samplingForModel(model, modelSampling, delProveedor) !== delProveedor;
+      expect(hasOwnModelSampling(model, modelSampling), model).toBe(propia);
+    }
+    expect(hasOwnModelSampling('deepseek/deepseek-v4-flash', modelSampling)).toBe(true);
+    expect(hasOwnModelSampling('TheDrummer/Cydonia-24B-v4.3', modelSampling)).toBe(false);
+    for (const model of ['toString', 'constructor', '__proto__', 'hasOwnProperty']) {
+      expect(hasOwnModelSampling(model, modelSampling), model).toBe(false);
+    }
+    expect(hasOwnModelSampling('deepseek/deepseek-v4-flash', undefined)).toBe(false);
+  });
+
+  it('un tope propio no le quita al modelo el muestreo del proveedor', () => {
+    // es por lo que el tope va en un mapa hermano: dentro de la entrada de
+    // muestreo, un modelo con solo tope taparia la temperatura del proveedor
+    const parsed = httpProviderConfigSchema.parse({
+      ...proveedor,
+      temperature: 1.1,
+      modelOutputCaps: { 'zai-org/glm-5.2': 32768 },
+    });
+    expect(hasOwnModelSampling('zai-org/glm-5.2', parsed.modelSampling)).toBe(false);
+    expect(samplingForModel('zai-org/glm-5.2', parsed.modelSampling, { temperature: 1.1 })).toEqual(
+      { temperature: 1.1 },
+    );
+    expect(outputCapForModel('zai-org/glm-5.2', parsed.modelOutputCaps)).toBe(32768);
   });
 });

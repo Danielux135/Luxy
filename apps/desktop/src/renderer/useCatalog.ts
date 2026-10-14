@@ -5,7 +5,7 @@
 // —escrito a mano como `connections[0]`—. Con eso, un proveedor HTTP no
 // aparecía nunca: añadir Mistral y pulsar «Actualizar modelos» volvía a
 // preguntarle a la pasarela de siempre, y su selector de modelo salía vacío.
-import { useEffect, useState, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import {
   buildCatalogForConnection,
   buildDefaultCatalog,
@@ -15,6 +15,7 @@ import {
   type ModelDefinition,
   type StoredAgentConfig,
 } from '@luxy/shared';
+import { callBridge } from './bridge-call.js';
 import type { ConfigSummary } from './useConfig.js';
 
 /** un sitio al que se le puede preguntar qué modelos sirve */
@@ -157,21 +158,62 @@ export function useDetectedCatalog(summary: ConfigSummary): {
     };
   }, [clave, catalogVersion]);
 
-  const todos = loading
-    ? []
-    : origins.flatMap((origin) => {
-        const snapshot = snapshots.get(catalogOriginKey(origin));
-        // sin catálogo leído se usa el de fábrica, y sólo para una conexión: de
-        // un proveedor HTTP no sabemos nada hasta preguntarle, y rellenarlo con
-        // modelos de otra pasarela ofrecería nombres que ese proveedor no sirve
-        if (snapshot == null) {
-          return origin.source === 'connection' ? buildDefaultCatalog(origin.id) : [];
-        }
-        // se pasan los registros enteros y no solo los nombres: llevan lo que
-        // la pasarela declara que sabe hacer cada uno, que es lo que marca
-        // cuáles aceptan imágenes sin tener que deducirlo del nombre
-        return buildCatalogForConnection(origin.id, snapshot.models, origin.family ?? undefined);
-      });
+  // mientras se lee no hay nada que ofrecer; después, lo construido para ESTA
+  // lectura, que `detectedModelsOf` recuerda en vez de rehacerlo en cada render
+  const models = loading ? [] : detectedModelsOf(origins, snapshots);
+
+  return { models, loading };
+}
+
+/** lo último construido para cada lectura; se va con ella cuando nadie la usa */
+const construidos = new WeakMap<
+  ReadonlyMap<string, CatalogSnapshot | null>,
+  { clave: string; models: ModelDefinition[] }
+>();
+
+/**
+ * los modelos de todos los orígenes, a partir de los catálogos leídos.
+ *
+ * RECUERDA LO CONSTRUIDO POR LECTURA. Antes esta cuenta vivía en el cuerpo del
+ * gancho y se repetía en cada render de quien lo usa, y cada modelo servido
+ * pasa por la validación de su esquema. El gancho se llama en la raíz de la
+ * aplicación, junto al estado de Privado, que cambia con cada tecla: con los
+ * 644 modelos de NanoGPT eso son 644 validaciones por tecla. Está leído en el
+ * código, no medido en la ventana. El resultado sólo puede cambiar cuando se
+ * lee otro catálogo —`snapshots` es entonces OTRO mapa— o cuando cambia la
+ * lista de orígenes, así que con el mismo mapa y los mismos orígenes se
+ * devuelve la MISMA lista, sin volver a construir nada.
+ *
+ * De cada origen sólo cuentan su identificador y de cuál de las dos listas
+ * sale: la familia se deriva de eso (`catalogOriginsOf`) y el nombre no entra
+ * en la cuenta. Por eso basta con la clave de los orígenes para saber si son
+ * los mismos.
+ *
+ * El mapa no se toca después de pasarlo —el gancho crea uno nuevo en cada
+ * lectura—, y quien recibe la lista no la modifica: es la misma para todos los
+ * renders.
+ */
+export function detectedModelsOf(
+  origins: readonly CatalogOrigin[],
+  snapshots: ReadonlyMap<string, CatalogSnapshot | null>,
+): ModelDefinition[] {
+  const clave = origins.map(catalogOriginKey).join(',');
+  const previo = construidos.get(snapshots);
+  if (previo !== undefined && previo.clave === clave) return previo.models;
+
+  const todos = origins.flatMap((origin) => {
+    const snapshot = snapshots.get(catalogOriginKey(origin));
+    // sin catálogo leído se usa el de fábrica, y sólo para una conexión: de
+    // un proveedor HTTP no sabemos nada hasta preguntarle, y rellenarlo con
+    // modelos de otra pasarela ofrecería nombres que ese proveedor no sirve
+    if (snapshot == null) {
+      return origin.source === 'connection' ? buildDefaultCatalog(origin.id) : [];
+    }
+    // se pasan los registros enteros y no solo los nombres: llevan lo que
+    // la pasarela declara que sabe hacer cada uno, que es lo que marca
+    // cuáles aceptan imágenes sin tener que deducirlo del nombre
+    return buildCatalogForConnection(origin.id, snapshot.models, origin.family ?? undefined);
+  });
 
   // dos orígenes pueden servir el mismo modelo, y su identificador se deriva
   // del nombre: sin esto saldría repetido en cada selector.
@@ -182,6 +224,103 @@ export function useDetectedCatalog(summary: ConfigSummary): {
   // modelo: `modelsForProvider` empareja por `connectionId`, así que sus
   // selectores salían vacíos sin ninguna explicación.
   const models = mergeCatalogs(todos);
+  construidos.set(snapshots, { clave, models });
+  return models;
+}
 
-  return { models, loading };
+// -----------------------------------------------------------------------------
+// el catálogo guardado de UN origen
+// -----------------------------------------------------------------------------
+
+/**
+ * el catálogo guardado de un origen, tal y como lo ve una pantalla.
+ *
+ * `loading` es «todavía no se ha leído», y mientras lo sea `snapshot` no dice
+ * nada: un `null` ahí NO significa que no haya catálogo. Hace falta la
+ * diferencia porque de «no hay catálogo» salen frases que se le enseñan al
+ * usuario —«pulsa Actualizar modelos»— y marcas sobre lo que tiene guardado.
+ */
+export interface StoredCatalog {
+  snapshot: CatalogSnapshot | null;
+  loading: boolean;
+}
+
+/** lo último leído, con el origen del que se leyó */
+interface StoredCatalogRead {
+  key: string;
+  snapshot: CatalogSnapshot | null;
+}
+
+/**
+ * lo que se enseña a partir de lo último leído.
+ *
+ * Una lectura de OTRO origen no vale: enseñarla pondría los niveles de una
+ * pasarela bajo el nombre de otra. Sin nada leído de éste, sigue «leyendo»,
+ * también si nadie lo ha pedido todavía: lo que no se puede hacer es dar por
+ * inexistente un catálogo que no se ha mirado.
+ */
+export function storedCatalogView(read: StoredCatalogRead | null, key: string): StoredCatalog {
+  if (read === null || read.key !== key) return { snapshot: null, loading: true };
+  return { snapshot: read.snapshot, loading: false };
+}
+
+/**
+ * lee el catálogo guardado de un origen. Sólo lee el disco: no pregunta a nadie.
+ *
+ * `null` es «no hay nada que enseñar»: no existe, no se pudo leer o el puente
+ * falló. En los tres casos la salida para el usuario es la misma —volver a
+ * actualizar los modelos—, y es ese botón el que dice el error si lo hay.
+ */
+export async function readStoredCatalog(
+  id: string,
+  source: CatalogSource,
+): Promise<CatalogSnapshot | null> {
+  // por `callBridge`: un rechazo del puente dejaría la pantalla «leyendo» para
+  // siempre, con el guardado bloqueado y sin decir por qué
+  const result = await callBridge(() => window.luxy.readCatalog({ connectionId: id, source }));
+  return result.ok ? result.value.snapshot : null;
+}
+
+/**
+ * el catálogo guardado de UN origen, leído sólo cuando hace falta.
+ *
+ * POR QUÉ NO SIRVEN LOS OTROS DOS: `useDetectedCatalog` convierte lo leído en
+ * modelos operativos y por el camino pierde lo que la pasarela DECLARA de cada
+ * uno —niveles de razonamiento, tope de salida—; y el de la página de Modelos
+ * es de un único origen elegido en un desplegable. La sección «Ajustes por
+ * modelo» de un proveedor necesita el catálogo de ESE proveedor, entero.
+ *
+ * `active` existe porque hay una tarjeta por proveedor: leyendo al montar
+ * serían tantas lecturas de disco como proveedores para una sección que casi
+ * siempre está cerrada. Con `active` a false no se lee nada, y lo que ya se
+ * hubiera leído se conserva.
+ *
+ * Vuelve a leer cuando alguien descarga un catálogo nuevo (`catalogChanged`):
+ * es lo que hace que el botón «Actualizar modelos de este proveedor» se note
+ * en el selector de al lado. Mientras llega la lectura nueva se sigue
+ * enseñando la anterior, que es lo que había en disco hasta ese momento.
+ */
+export function useStoredCatalog(
+  id: string,
+  source: CatalogSource,
+  active: boolean,
+): StoredCatalog {
+  const catalogVersion = useCatalogVersion();
+  const [read, setRead] = useState<StoredCatalogRead | null>(null);
+  const key = catalogOriginKey({ id, source });
+
+  useEffect(() => {
+    if (!active) return;
+    let alive = true;
+    void readStoredCatalog(id, source).then((snapshot) => {
+      if (alive) setRead({ key: catalogOriginKey({ id, source }), snapshot });
+    });
+    return () => {
+      alive = false;
+    };
+  }, [active, id, source, catalogVersion]);
+
+  // el MISMO objeto mientras no cambie lo leído: quien lo reciba puede pasarlo
+  // de dependencia sin que cada render parezca un catálogo nuevo
+  return useMemo(() => storedCatalogView(read, key), [read, key]);
 }

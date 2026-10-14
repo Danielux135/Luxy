@@ -18,7 +18,12 @@ import {
   MAX_ARTIFACT_BYTES,
 } from './constants.js';
 import { connectionProfileSchema } from './models/types.js';
-import { API_MODEL_NAME_PATTERN, samplingParametersShape } from './sampling.js';
+import {
+  API_MODEL_NAME_PATTERN,
+  modelOutputCapsSchema,
+  modelSamplingSchema,
+  samplingParametersShape,
+} from './sampling.js';
 import { modelEvaluationExecutionSchema } from './models/evaluations.js';
 import type { ProviderId } from './types.js';
 
@@ -1132,6 +1137,30 @@ export const httpProviderConfigSchema = z.object({
    * validar exactamente lo mismo. Ninguno tiene valor por defecto.
    */
   ...samplingParametersShape,
+  /**
+   * ajustes POR MODELO de este proveedor, con el `model` que viaja como clave.
+   *
+   * POR QUE AHORA TAMBIEN AQUI (F36): una entrada de `providers.http` apuntada
+   * a una pasarela sirve cientos de modelos con un solo identificador, y el
+   * que razona no es el predeterminado. El razonamiento y su tope de salida no
+   * se pueden elegir para toda la entrada: se eligen para el modelo.
+   *
+   * Es el MISMO esquema que en las conexiones, sin tocarlo, y la entrada del
+   * modelo sustituye ENTERA a los parametros de arriba (`samplingForModel`).
+   *
+   * Los dos son opcionales y SIN valor por defecto: una entrada guardada antes
+   * no gana ninguna clave al volver a guardarse, y sin ellos el cuerpo sale
+   * como siempre. Un agente con el esquema anterior los descarta en silencio:
+   * hay que reconstruirlo junto con Studio.
+   */
+  modelSampling: modelSamplingSchema.optional(),
+  /**
+   * tope de salida por modelo: `apiModel -> max_tokens`. Mapa HERMANO de
+   * `modelSampling` y no un campo de su entrada; el porque, en
+   * `modelOutputCapsSchema`. Gana al `maxOutputTokens` del proveedor y pierde
+   * ante el tope que traiga la propia peticion.
+   */
+  modelOutputCaps: modelOutputCapsSchema.optional(),
 });
 
 const httpProviderListSchema = z
