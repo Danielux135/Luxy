@@ -1,5 +1,75 @@
 # Luxy — registro de trabajo de IA
 
+### 2026-10-13 10:50 — Claude — `PROVEEDORES-006`: NanoGPT, proveedor HTTP de pago (`LA-063`)
+
+- Estado anterior: `3ae1890`, con `CURRENT-TASK.md` modificado sin commitear
+  (`F35-BORRAR-001` y `F35-CORTADAS-001`, que se conservan). Ningún paso
+  `in_progress`.
+- Objetivo: decidir dónde gastar los 5,00 $ de una tarjeta de regalo en una
+  API para Luxy y dejarla instalada.
+- Hipótesis o causa demostrada: no hay fallo que explicar. Observado en el
+  código por el flujo `wf_c9fc4dd3-d13` (seis lectores y dos escépticos, sólo
+  lectura): NanoGPT entra por `providers.http` y no por `connections`; la URL
+  del catálogo y la del chat se forman concatenando; los identificadores con
+  barra y mayúsculas llegan intactos; la tabla de `D-107` no casa con ninguno;
+  y la clave sólo entra por el campo del formulario.
+- Archivos leídos: `packages/shared/src` (`models/types.ts`, `schemas.ts`,
+  `models/catalog-fetch.ts`, `reasoning-control.ts`), `apps/agent/src`
+  (`providers/http-provider.ts`, `agent.ts`), `apps/desktop/src`
+  (`main/ipc/handlers.ts`, `main/config-store.ts`, `main/secure-storage.ts`,
+  `main/migration.ts`, `renderer/http-provider-config.ts`,
+  `renderer/pages/Config.tsx`, `shared/model-selection.ts`) y la documentación
+  de continuidad.
+- Archivos modificados: `LOCAL-ACTIONS.md` (`LA-063`), `CURRENT-TASK.md`
+  (`PROVEEDORES-006`), `docs/PROVEEDORES-SEXTA-RONDA.md` (nuevo), `CLAUDE.md`
+  y `AGENTS.md` (regla 8, abajo), `PROJECT-STATE.md` (una mención, abajo) y
+  este archivo. Ningún archivo de código.
+- Comandos ejecutados: lecturas sin clave de los catálogos públicos de
+  NanoGPT, OpenRouter, DeepInfra y Chutes, y un sondeo de la FORMA de
+  `%APPDATA%\Luxy\config.json` (identificadores, URL y recuentos; ningún
+  secreto). **Ninguna llamada de inferencia** y ningún `npm`.
+- Resultado real: Daniel pagó 5,00 US$ con impuesto 0,00 y el saldo de
+  NanoGPT marca 5,00 $. Hay una clave creada en su panel, con el registro de
+  peticiones apagado. En Studio, el formulario «Nuevo proveedor HTTP» está
+  relleno con los valores de `LA-063`, con la clave ya pegada por Daniel, y
+  **sin guardar**: a las 10:58 `providers.http` seguía sin la entrada
+  `nanogpt`. Revisado campo a campo: no falta ninguno. «Razonamiento» no
+  ofrece nada para Cydonia, y es correcto: el catálogo de NanoGPT la declara
+  sin razonamiento.
+- Pruebas: ninguna. No se ha tocado código, así que no procede
+  `npm run check`.
+- Decisiones: ninguna numerada. Queda para Daniel si `D-003` alcanza a los
+  modelos de Anthropic y de OpenAI que revende NanoGPT.
+- Riesgos o límites: nada medido. Que NanoGPT acepte el cuerpo de Luxy, la
+  latencia y el contenido explícito siguen sin comprobar. El presupuesto
+  diario no frena nada en un proveedor HTTP.
+- Estado nuevo: `PROVEEDORES-006` `blocked`, a la espera de `LA-063`.
+  **11:02, guardado por Daniel.** Observado sin leer ningún secreto: la
+  entrada `nanogpt` está en `providers.http` con los valores de `LA-063`,
+  `studio.log` apunta «clave de proveedor HTTP guardada» con el nombre
+  `LUXY_HTTP_NANOGPT_API_KEY`, `luxy.log` anuncia `nanogpt` entre los
+  proveedores disponibles, y ninguno de los dos registros contiene una cadena
+  con forma de clave. Falta el catálogo: `http-nanogpt.json` no existe.
+- Siguiente paso exacto: Modelos → «Actualizar modelos» sobre NanoGPT, y el
+  primer turno, que es de Daniel.
+
+**Corrección de la regla 8, pedida por Daniel el 13/10.** `CLAUDE.md` y
+`AGENTS.md` decían, en «Consola en Windows», que una clave «acabo expuesta y
+hubo que rotarla». Daniel: «nunca se han expuesto claves que haya tenido que
+rotar, esa información es falsa». Se quita el relato y se conserva la regla.
+El commit que la introdujo, `5e3ffbb`, decía «hay que rotarla», no «hubo».
+
+Después, el mismo día, Daniel: «elimina lo de rotar claves, ninguna ha sido
+expuesta». Se quitan de la documentación viva las anotaciones de agentes que
+lo daban por hecho o por pendiente: el paso 4 y el título de `LA-036`, el
+«Pendiente aparte» y el inciso «se rotó» de `LA-044`, la frase de la «Deuda
+del entorno» de `CURRENT-TASK.md` y la mención de `PROJECT-STATE.md`. **No hay
+ninguna clave pendiente de rotar.** No se reescribe la entrada de este
+registro del 2026-09-02 que cierra con «rotar la clave […], que paso por el
+chat» (punto 7 del protocolo): esta entrada la corrige. Tampoco se tocan las
+menciones a la rotación del secreto de registro del gateway, que fue una
+operación planificada y autorizada, no una exposición.
+
 ### 2026-10-07 — Claude — `SEG-SYNC-001`: sincronización v2, fase 1 (turnos y medios)
 
 - Estado anterior: `6da3a6a`. La sincronización v1 nunca había funcionado y

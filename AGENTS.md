@@ -438,6 +438,5 @@ ejemplo—, la alternativa es dejar el cuerpo en un archivo y usar
 
 **8. Nunca escribas un secreto dentro de un comando que le pasas a Daniel.**
 Queda en su historial de consola y, si lo pega para enseñar el resultado, queda
-tambien en la conversacion. Paso: se le dio un `curl` con la clave de API
-incrustada y acabo expuesta y hubo que rotarla. Se pide aparte
-(`$k = Read-Host`) o se deja fuera del comando.
+tambien en la conversacion. Se pide aparte (`$k = Read-Host`) o se deja fuera
+del comando.

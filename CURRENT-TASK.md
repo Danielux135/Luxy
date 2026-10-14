@@ -77,9 +77,49 @@
 >    índice está en `LOCAL-ACTIONS.md`, `LA-048`; el detalle, en cada bloque.
 > 4. Lo demás. `PROVEEDORES-005`, más abajo, tiene una prueba de diez minutos
 >    que no depende de nada de lo anterior.
+> 5. **`PROVEEDORES-006` (13/10): NanoGPT, la primera pasarela de pago.** No
+>    depende de nada de lo anterior. Lo que falta es de Daniel, y se hace
+>    dentro de `LA-064`.
 >
 > `KIMI-K3-EXPERIMENT-001`, al final del archivo, está **abandonado**, no en
 > curso. No lo retomes sin que Daniel lo pida.
+
+## PROVEEDORES-006 — NanoGPT, sexta ronda: la primera pasarela de pago (2026-10-13)
+
+Estado: **`blocked` — Claude, 2026-10-13. A la espera de `LA-063`.**
+
+Daniel cargó 5,00 $ en NanoGPT con una tarjeta de regalo y pidió dejarla
+instalada. Cambia el criterio de las cinco rondas anteriores: ya no es «gratis
+y sin tarjeta», es de pago con saldo prepagado. El informe está en
+`docs/PROVEEDORES-SEXTA-RONDA.md`; cítalo desde aquí, que `PROVEEDORES-005` ya
+dejó escrito que los dos anteriores casi se pierden por no citarlos nadie.
+
+Lo que decide la lectura del código (flujo `wf_c9fc4dd3-d13`, seis lectores y
+dos escépticos, sólo lectura y sin ninguna llamada de inferencia):
+
+- **va en `providers.http`, no en `connections`.** Cada proveedor HTTP se
+  registra con su identificador y sirve cualquier modelo de su endpoint; una
+  conexión sólo registra las familias del catálogo de fábrica (`agent.ts`
+  334-352 y 410-444), y ahí Cydonia cae en `other`, no ejecutable;
+- la URL del catálogo y la del chat salen de quitar barras finales y
+  concatenar (`handlers.ts` 997 y 1015, `http-provider.ts` 1569): no se añade
+  `/v1`;
+- los identificadores con barra, mayúsculas y dos puntos pasan todas las
+  validaciones y llegan intactos al cuerpo;
+- la tabla de razonamiento (`D-107`) casa nombres enteros y ninguno de los de
+  NanoGPT casa: no se manda nada, y razonar o no se elige con el sufijo
+  `:thinking` del modelo;
+- **no hay vía soportada para la clave que no sea el campo del formulario**:
+  `secrets.enc` sólo se escribe desde el proceso principal, y la migración
+  desde `.env.providers` no la llama ninguna pantalla.
+
+Sin comprobar: que NanoGPT acepte el cuerpo de Luxy (`stream_options`,
+`max_tokens`, dos mensajes), la latencia, y el contenido explícito.
+
+**Siguiente paso exacto:** el primer turno de Daniel, paso 4 de `LA-063`. Con
+su resultado, pasar `LA-063` a `informativa` y este bloque a `done`. Pendiente
+aparte, y de Daniel: si los modelos de Anthropic y de OpenAI que revende
+NanoGPT caen bajo `D-003`.
 
 ## INV-FONDO-001 e INV-LLAVE-001 — el trabajo de fondo parado y la llave en bucle (2026-10-05)
 
@@ -2552,10 +2592,8 @@ describe `D-071`— sigue sin poderse hacer: `nativeImage` no decodifica webp
 
 ### Deuda del entorno
 
-Tres claves de API quedaron expuestas en la conversacion (Mistral x2, Groq x1).
-Daniel dijo que las rotaria; **no consta que lo haya hecho** (2026-09-23). La
-rama `copia-antes-de-limpiar` sigue existiendo: es historial PRE-reescritura y
-se puede borrar cuando de por bueno el reescrito, cosa que **tampoco consta**.
+La rama `copia-antes-de-limpiar` sigue existiendo: es historial PRE-reescritura
+y se puede borrar cuando de por bueno el reescrito, cosa que **no consta**.
 
 **Hay 135 commits sin subir** (`git rev-list --count origin/main..main`, medido
 el 2026-09-23). La cifra que había escrita aquí, 41, era de una foto vieja y se

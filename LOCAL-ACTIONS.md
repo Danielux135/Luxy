@@ -8,6 +8,62 @@
 > esos cinco es ambigua** y hay que leer las dos. Renumerarlos tocaría citas en
 > varios documentos y no se ha hecho hoy. Los números nuevos se toman de LA-049.
 
+## LA-063 — NanoGPT: pasarela de pago, proveedor HTTP en Conexiones
+
+Estado: **`pending` — abierta el 2026-10-13. Pasos 1 y 2 hechos ese día a las
+11:02 (hora local); el 3 y el 4 se hacen dentro de `LA-064`** (pasos 1 y 7),
+con la versión reconstruida. Daniel cargó 5,00 $ de saldo en NanoGPT y pidió
+dejarla instalada en Luxy (`PROVEEDORES-006`).
+
+Motivo: es la primera pasarela de pago del expediente. Sirve DeepSeek y
+afinados de rol por token, con contrato `chat completions`, y entra por
+Proveedores HTTP sin tocar código. El detalle y lo que no está comprobado, en
+`docs/PROVEEDORES-SEXTA-RONDA.md`.
+
+1. Studio → Conexiones → Proveedores HTTP → «Añadir proveedor» →
+   «Configurarlo a mano»:
+
+   | Campo                 | Valor                             |
+   | --------------------- | --------------------------------- |
+   | Identificador         | `nanogpt`                         |
+   | Nombre visible        | `NanoGPT`                         |
+   | URL base              | `https://api.nano-gpt.com/api/v1` |
+   | Modelo predeterminado | `TheDrummer/Cydonia-24B-v4.3`     |
+   | Máximo de tokens      | `4096`                            |
+   | Presupuesto diario    | `0`                               |
+
+   Temperatura, penalizaciones y razonamiento, vacíos. «Proveedor activo» y
+   «Respuesta en streaming», marcados. **Va en Proveedores HTTP, no como
+   conexión**: una conexión sólo registra las familias del catálogo de fábrica
+   y Cydonia no sería ejecutable.
+2. La clave se crea en el panel de NanoGPT con el registro de peticiones
+   apagado, y **la pega Daniel** en «Clave de API». No va en ningún archivo ni
+   comando. Cambiar después la URL base borra la clave guardada.
+3. Modelos → «A quién se le pregunta» = NanoGPT (proveedor HTTP) →
+   «Actualizar modelos». Sólo trae el catálogo: **no valida la clave**, porque
+   `/models` contesta 200 sin ella.
+4. Primer turno, de Daniel: Privado → conversación desechable → Proveedor
+   `nanogpt` → Modelo `TheDrummer/Cydonia-24B-v4.3` → un mensaje corto. Es la
+   primera validación real de la clave, la URL y el cuerpo, y la primera
+   llamada que gasta saldo.
+
+Resultado esperado: una entrada `nanogpt` en `providers.http` de
+`%APPDATA%\Luxy\config.json`, con la clave cifrada en `secrets.enc` bajo
+`LUXY_HTTP_NANOGPT_API_KEY`, y el catálogo en
+`%LOCALAPPDATA%\Luxy\catalog\http-nanogpt.json`.
+
+Riesgo: el «Presupuesto diario» no frena nada en un proveedor HTTP (el coste
+estimado es siempre 0); el único tope es el saldo prepagado, sin recarga
+automática. Con ruta automática, los DeepSeek de NanoGPT pueden servirse por
+proveedores que retienen los prompts; el único proveedor de Cydonia declara
+que no. Y el catálogo incluye modelos de Anthropic y de OpenAI que Luxy no
+filtra (su veto es por host): si usarlos por aquí choca con `D-003` lo decide
+Daniel, y hasta entonces no se eligen.
+
+Evidencia a devolver: si el primer turno responde, y en cuántos segundos. Si
+falla, el código: 401 es la clave mal pegada, 402 el saldo, y con un 400 se
+copia el cuerpo que enseña Luxy y no se reintenta.
+
 ## LA-062 — confirmar que la contraseña de la bóveda y la clave de recuperación están apuntadas fuera del ordenador
 
 Estado: **`pending` — abierta el 2026-10-07. Va antes de estrenar el segundo
@@ -756,8 +812,8 @@ de Mistral, que para `mistral-medium-latest` publica 1,00 solicitudes/segundo y
 Descartado, con evidencia:
 
 - **no es Luxy** — el `curl` de arriba no la usa para nada;
-- **no es la clave** — se rotó y da igual; y un 422 anterior demuestra que la
-  autenticación pasa (una clave mala daría 401);
+- **no es la clave** — un 422 anterior demuestra que la autenticación pasa
+  (una clave mala daría 401);
 - **no es el modelo** — falla con `mistral-small-latest` y con
   `mistral-medium-latest`, que sí está en su tabla de límites;
 - **no es la imagen** — un mensaje de texto suelto falla igual;
@@ -767,9 +823,6 @@ Descartado, con evidencia:
 Qué hacer: escribirle al soporte de Mistral desde el botón de su panel, pegando
 el bloque de arriba y añadiendo que `GET /v1/models` responde 200 con 46 modelos
 con esa misma clave. La contradicción entre su panel y su API es el argumento.
-
-**Pendiente aparte:** la clave `94IS…` se pegó en una conversación y hay que
-darla por comprometida. Rotarla y borrar la anterior.
 
 ## LA-043 — probar de verdad si un modelo ve una foto
 
@@ -1027,7 +1080,7 @@ Y si prefieres que la descripcion refleje a la que te ha salido en vez de la que
 escribiste, cambiala: hoy dice «dulce, inocente, timida» y lo que juega es otra
 cosa. Manda lo que hace, no lo que pone.
 
-## LA-036 — recuperar el personaje y rotar la clave del proveedor
+## LA-036 — recuperar el personaje
 
 Estado: `pending` — abierta el 2026-09-02.
 
@@ -1046,10 +1099,7 @@ Studio, por este orden:
    conversacion se conserva entera.
 3. **Olvidar** el personaje falso (`4a1e227d-...`), para que no vuelva a
    colarse en ninguna conversacion.
-4. **Rotar la clave del proveedor**: revocar `xav_live_4uub...` en su pagina de
-   Profile, mintar otra y guardarla en Conexiones. La vieja paso por el chat y
-   por el historial de PowerShell de este equipo.
-5. Reconstruir y abrir Studio para ver el aviso nuevo: con un identificador que
+4. Reconstruir y abrir Studio para ver el aviso nuevo: con un identificador que
    no este en la boveda, el panel debe avisar **antes** de enviar y la
    conversacion no debe ofrecer imagenes.
 

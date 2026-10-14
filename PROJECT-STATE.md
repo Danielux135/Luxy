@@ -714,8 +714,8 @@ El personaje perdido se recuperó sin gastar créditos consultando
 `GET /v1/generations/{id}` del avatar, que devuelve el `character_id`.
 
 `npm run check` verde: **122 archivos, 2.116 pruebas superadas, 9 omitidas**.
-Sin commit. Pendiente `LA-036`: darlo de alta en Studio, rotar la clave del
-proveedor y ver el aviso nuevo en pantalla.
+Sin commit. Pendiente `LA-036`: darlo de alta en Studio y ver el aviso nuevo
+en pantalla.
 
 ---
 
